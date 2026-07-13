@@ -3,18 +3,21 @@ export class ControlBus {
   private readonly pending: ControlMessage[];
   private readonly observed: ControlMessage[] = [];
   constructor(input: readonly ControlMessage[] = []) { this.pending = input.map((message) => Object.freeze({ ...message })); }
-  /** Record a generated command, consuming its replay counterpart when present. */
+  /** Append the command at the point it happened. Supplied commands are never
+   * searched for or reordered: a generated decision is part of the log even
+   * when a later supplied rendezvous is still pending. */
   append(message: ControlMessage): number {
-    const match = this.pending.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(message));
-    if (match >= 0) { const [replayed] = this.pending.splice(match, 1); this.observed.push(replayed!); return this.observed.length - 1; }
-    this.observed.push(Object.freeze({ ...message })); return this.observed.length - 1;
+    const next = this.pending[0];
+    if (next && JSON.stringify(next) === JSON.stringify(message)) this.pending.shift();
+    this.observed.push(Object.freeze({ ...message }));
+    return this.observed.length - 1;
   }
   log(): readonly ControlMessage[] { return [...this.observed, ...this.pending]; }
   find<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, { readonly type: T }>[] { return [...this.observed, ...this.pending].filter((message) => message.type === type) as Extract<ControlMessage, { readonly type: T }>[]; }
   /** Consume a command at its actual rendezvous and retain it in the replay log. */
   take<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, { readonly type: T }> | undefined {
-    const index = this.pending.findIndex((message) => message.type === type);
-    if (index >= 0) { const [message] = this.pending.splice(index, 1); this.observed.push(message!); return message as Extract<ControlMessage, { readonly type: T }>; }
+    const message = this.pending[0];
+    if (message?.type === type) { this.pending.shift(); this.observed.push(message); return message as Extract<ControlMessage, { readonly type: T }>; }
     return undefined;
   }
   /** Consume only the next command. Runtime commands are ordered. */
@@ -24,11 +27,24 @@ export class ControlBus {
     this.pending.shift(); this.observed.push(message);
     return message as Extract<ControlMessage, { readonly type: T }>;
   }
+  /**
+   * A rendezvous control is ordered, but applicability is part of the
+   * rendezvous.  In particular, a pin for a step that is not ready must stay
+   * pending until that step becomes ready; consuming it and generating a
+   * replacement changes replay identity and can execute the wrong schedule.
+   */
+  takeApplicablePin(choices: readonly string[]): Extract<ControlMessage, { readonly type: "pin-interleaving" }> | undefined {
+    const message = this.pending[0];
+    if (message?.type !== "pin-interleaving" || !choices.includes(message.choice)) return undefined;
+    this.pending.shift();
+    this.observed.push(message);
+    return message;
+  }
   peek(): ControlMessage | undefined { return this.pending[0]; }
   takeResolve(effect: string): Extract<ControlMessage, { readonly type: "resolve-effect" }> | undefined {
-    const index = this.pending.findIndex((message) => message.type === "resolve-effect" && message.effect === effect);
-    if (index < 0) return undefined;
-    const [message] = this.pending.splice(index, 1); this.observed.push(message!); return message as Extract<ControlMessage, { readonly type: "resolve-effect" }>;
+    const message = this.pending[0];
+    if (message?.type !== "resolve-effect" || message.effect !== effect) return undefined;
+    this.pending.shift(); this.observed.push(message); return message as Extract<ControlMessage, { readonly type: "resolve-effect" }>;
   }
   consumed(): number { return this.observed.length; }
 }

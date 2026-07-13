@@ -10,12 +10,16 @@ export class CleanupScope {
     const deadline = Date.now() + timeoutMs;
     let count = 0;
     let error: unknown;
+    const failed: typeof this.entries = [];
     while (this.entries.length) {
       if (++count > budget || Date.now() >= deadline) {
         error ??= Object.assign(new Error("CLEANUP_FAILED: cleanup budget exhausted"), { code: "CLEANUP_FAILED" });
         break;
       }
-      const entry = this.entries[this.entries.length - 1]!;
+      // Remove the entry before invoking it. A failed disposer is restored
+      // after the pass so it remains visible to leak assertions, while an
+      // older resource can still be released in this same bounded cleanup.
+      const entry = this.entries.pop()!;
       let disposed = false;
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -33,10 +37,9 @@ export class CleanupScope {
       } catch (cause) {
         error ??= Object.assign(new Error(`CLEANUP_FAILED: ${entry.resource.kind}/${entry.resource.id}`), { code: "CLEANUP_FAILED", cause });
       }
-      // A broken disposer must not block older resources from being released.
-      // Remove it while preserving the first failure for the caller.
-      this.entries.pop();
+      if (!disposed) failed.push(entry);
     }
+    this.entries.push(...failed.reverse());
     if (error) throw error;
   }
 }

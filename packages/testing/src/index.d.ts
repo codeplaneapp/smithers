@@ -122,6 +122,9 @@ type ControlMessage = Readonly<{
     readonly type: "advance-clock";
     readonly ms: number;
 } | {
+    readonly type: "timer-fire";
+    readonly timer: string;
+} | {
     readonly type: "release-barrier";
     readonly barrier: string;
 } | {
@@ -191,7 +194,9 @@ declare class ControlBus {
     private readonly pending;
     private readonly observed;
     constructor(input?: readonly ControlMessage[]);
-    /** Record a generated command, consuming its replay counterpart when present. */
+    /** Append the command at the point it happened. Supplied commands are never
+     * searched for or reordered: a generated decision is part of the log even
+     * when a later supplied rendezvous is still pending. */
     append(message: ControlMessage): number;
     log(): readonly ControlMessage[];
     find<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
@@ -204,6 +209,15 @@ declare class ControlBus {
     /** Consume only the next command. Runtime commands are ordered. */
     takeNext<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
         readonly type: T;
+    }> | undefined;
+    /**
+     * A rendezvous control is ordered, but applicability is part of the
+     * rendezvous.  In particular, a pin for a step that is not ready must stay
+     * pending until that step becomes ready; consuming it and generating a
+     * replacement changes replay identity and can execute the wrong schedule.
+     */
+    takeApplicablePin(choices: readonly string[]): Extract<ControlMessage, {
+        readonly type: "pin-interleaving";
     }> | undefined;
     peek(): ControlMessage | undefined;
     takeResolve(effect: string): Extract<ControlMessage, {
@@ -539,6 +553,7 @@ declare const replayBundle: (bundle: ReplayBundle, options?: Omit<RunScenarioOpt
 type Divergence = Readonly<{
     readonly index: number;
     readonly sequence: number;
+    readonly controlIndex?: number;
     readonly field?: string;
     readonly left?: TraceEvent;
     readonly right?: TraceEvent;
@@ -574,16 +589,15 @@ type RealDbAdapterOptions = Readonly<{
 }>;
 declare const realDbAdapter: (options: RealDbAdapterOptions) => HarnessAdapter;
 
-/** The runner must implement this challenge through its production protocol.
- * A caller-supplied `productionIdentity` string is deliberately not proof. */
+/** A resource created by the repository's engineChildRunner protocol. */
 type RealProcessResource = Readonly<{
     readonly pid: number;
     readonly child: ChildProcess;
     readonly handshake: () => boolean | Promise<boolean>;
-    readonly verifyProductionIdentity: () => boolean | Promise<boolean>;
-    readonly productionIdentity: "runWorkflow";
     readonly kill: (signal?: string) => void | Promise<void>;
     readonly close: () => void | Promise<void>;
+    /** Production-owned fresh-process continuation used by the restart cut point. */
+    readonly resume?: () => RealProcessResource | Promise<RealProcessResource>;
     readonly healthy?: () => boolean | Promise<boolean>;
 }>;
 type RealProcessAdapterOptions = Readonly<{

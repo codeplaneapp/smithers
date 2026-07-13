@@ -27,13 +27,13 @@ describe("testing framework real-db admission", () => {
       insertRun: (input: Record<string, unknown>) => insertRun({ runId: String(input.runId), workflowName: "testing-framework", status: "running", createdAtMs: Date.now(), startedAtMs: Date.now(), heartbeatAtMs: null, runtimeOwnerId: "testing-framework" }),
       heartbeatRun: (id: string) => heartbeatRun(id, "testing-framework", Date.now()),
       operations: { observed: () => "executed" },
-      close: () => undefined,
+      close: () => { client.close(); },
     });
     const harness = integrationHarness({ adapter: realDbAdapter({ open: async () => productionResource }) });
     const result = await runScenario(scenario("real-db", { steps: [step("observed", { run: async (_runtime, input) => input ?? "executed" })] }), { harness });
     expect(result.status).toBe("finished"); expect(result.outputs.observed).toBe("executed");
-    const durableRows = await adapter.listRuns(20, "running", "testing-framework");
-    expect(durableRows.some((row) => row.runId.startsWith("testing-admission-"))).toBe(true);
+    const verify = new SmithersDb(new (await import("bun:sqlite")).Database(dbPath));
+    try { const durableRows = await verify.listRuns(20, "running", "testing-framework"); expect(durableRows.some((row) => row.runId.startsWith("testing-admission-"))).toBe(true); } finally { verify.db.close(); }
   });
 
   test("framework adapter drives production resume CAS and heartbeat fencing", async () => {
@@ -49,11 +49,10 @@ describe("testing framework real-db admission", () => {
         await adapter.heartbeatRun(runId, "old-owner", now + 2);
         return { first, second };
       },
-    }, close: () => undefined });
+    }, close: () => { client.close(); } });
     const result = await runScenario(scenario("real-db-lease", { steps: [step("lease", { run: () => "checked" })] }), { harness: integrationHarness({ adapter: realDbAdapter({ open: async () => resource }) }) });
     expect(result.status).toBe("finished");
-    const row = await adapter.getRun(runId);
-    expect(row?.runtimeOwnerId).toBe("new-owner");
-    expect(row?.heartbeatAtMs).toBe(now);
+    const verify = new SmithersDb(new (await import("bun:sqlite")).Database(dbPath));
+    try { const row = await verify.getRun(runId); expect(row?.runtimeOwnerId).toBe("new-owner"); expect(row?.heartbeatAtMs).toBe(now); } finally { verify.db.close(); }
   });
 });

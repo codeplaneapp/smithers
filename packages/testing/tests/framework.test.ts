@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { barrier, compareBoundaryShape, e2eDescriptor, fault, mediatedEffect, EffectLedger, runScenario, scenario, step, VirtualClock, firstDivergence, makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle, CleanupScope, contractProbe, unitSimHarness, integrationHarness, realDbAdapter, expectEffect } from "../src/index.ts";
+import { barrier, compareBoundaryShape, e2eDescriptor, fault, mediatedEffect, EffectLedger, runScenario, scenario, step, VirtualClock, firstDivergence, makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle, CleanupScope, assertNoLeaks, contractProbe, unitSimHarness, integrationHarness, realDbAdapter, expectEffect } from "../src/index.ts";
 
 describe("controlled scenario kernel", () => {
   test("admits scenario-declared capabilities and refuses fake real harnesses", async () => {
@@ -14,6 +14,31 @@ describe("controlled scenario kernel", () => {
     const result = await runScenario(ast, { seed: 1 });
     expect(result.status).toBe("failed");
     expect(result.error?.code).toBe("DURABILITY_FAULT_INJECTED");
+  });
+
+  test("schedules newly-ready transitions before an unrelated sleeping sibling", async () => {
+    const started: string[] = [];
+    const result = await runScenario(scenario("event-driven", { steps: [
+      step("a", { run: () => { started.push("a"); return "a"; } }),
+      step("b", { run: async (runtime) => { started.push("b"); await runtime.sleep(20); return "b"; } }),
+      step("c", { dependsOn: ["a"], run: () => { started.push("c"); return "c"; } }),
+    ] }), { controlLog: [{ type: "pin-interleaving", choice: "a" }, { type: "pin-interleaving", choice: "c" }] });
+    expect(result.status).toBe("finished");
+    const cStarted = result.trace.findIndex((event) => event.type === "task" && (event.data as { state?: string; step?: string }).state === "started" && (event.data as { step?: string }).step === "c");
+    const bFinished = result.trace.findIndex((event) => event.type === "task" && (event.data as { state?: string; step?: string }).state === "finished" && (event.data as { step?: string }).step === "b");
+    expect(cStarted).toBeGreaterThan(-1);
+    expect(bFinished).toBeGreaterThan(-1);
+    expect(cStarted).toBeLessThan(bFinished);
+    expect(result.controlLog.filter((control) => control.type === "pin-interleaving")).toEqual([
+      { type: "pin-interleaving", choice: "a" },
+      { type: "pin-interleaving", choice: "b" },
+      { type: "pin-interleaving", choice: "c" },
+    ]);
+  });
+
+  test("does not manufacture lease loss for a no-op task", async () => {
+    const result = await runScenario(scenario("lease-noop", { steps: [step("noop")], faults: [fault("lease", "during-task", "lease")] }));
+    expect(result.ambiguity).toEqual([]);
   });
 
   test("counts duplicate mediated delivery honestly", async () => {
@@ -69,6 +94,16 @@ describe("controlled scenario kernel", () => {
     expect(() => expectEffect("write").exactlyOnce()).toThrow("Exactly-once external effects are unsupported");
   });
 
+  test("cleanup releases older resources after a failed disposer and reports the failed resource", async () => {
+    const scope = new CleanupScope();
+    let olderReleased = false;
+    scope.register("db", "older", () => { olderReleased = true; });
+    scope.register("child", "fails", () => { throw new Error("still-live"); });
+    await expect(scope.close(3, 100)).rejects.toMatchObject({ code: "CLEANUP_FAILED" });
+    expect(olderReleased).toBe(true);
+    expect(() => assertNoLeaks(scope)).toThrow("child/fails");
+  });
+
   test("contract probes compare native serialization", async () => {
     const report = await contractProbe("serialized-error", () => { throw Object.assign(new Error("bad"), { code: "E_BAD", tag: "native" }); }, () => { throw Object.assign(new Error("bad"), { code: "E_BAD", tag: "native" }); }, { serializeProduction: (value) => ({ code: (value as { code?: string }).code }), serializeSimulation: (value) => ({ code: (value as { code?: string }).code }) });
     expect(report.passed).toBe(true);
@@ -77,7 +112,7 @@ describe("controlled scenario kernel", () => {
   test("ordered controls are consumed at their execution points and replay is runnable", async () => {
     const ast = scenario("ordered", { steps: [step("wait", { run: async (runtime) => { await runtime.sleep(2); return "done"; } })] });
     const first = await runScenario(ast, { seed: 7 });
-    const bundle = makeReplayBundle({ ast, seed: 7, controlLog: first.trace.filter((event) => event.type === "schedule").map((event) => ({ type: "pin-interleaving" as const, choice: String((event.data as { choice?: string }).choice) })), trace: first.trace });
+    const bundle = makeReplayBundle({ ast, seed: 7, controlLog: first.controlLog, trace: first.trace });
     const replay = await replayBundle(bundle);
     expect(replay.status).toBe("finished");
     expect(replay.replayIdentity).toBe(bundle.replayIdentity);
@@ -85,7 +120,7 @@ describe("controlled scenario kernel", () => {
 
   test("mixed rendezvous controls replay byte-for-byte without growing the log", async () => {
     const ast = scenario("mixed-controls", { steps: [step("a", { run: async (runtime) => { await runtime.effect("write", () => "ok"); return "a"; } }), step("b", { run: () => "b" })] });
-    const controls = [{ type: "resolve-effect" as const, effect: "a:write", outcome: "success" as const }, { type: "pin-interleaving" as const, choice: "b" }];
+    const controls = [{ type: "resolve-effect" as const, effect: "a:write", outcome: "succeed" as const }, { type: "pin-interleaving" as const, choice: "b" }];
     const first = await runScenario(ast, { seed: 9, controlLog: controls });
     const replay = await runScenario(ast, { seed: 9, controlLog: first.controlLog });
     expect(replay.controlLog).toEqual(first.controlLog);

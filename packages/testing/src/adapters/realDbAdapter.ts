@@ -1,12 +1,12 @@
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import type { HarnessAdapter } from "../harness/Harness.ts";
+import { registerTrustedAdapter, type HarnessAdapter } from "../harness/Harness.ts";
 
 export type RealDbResource = SmithersDb & Readonly<{ readonly path?: string; readonly productionIdentity?: "SmithersDb"; readonly close: () => void | Promise<void>; readonly operations?: Readonly<Record<string, (...args: readonly unknown[]) => unknown | Promise<unknown>>> }>;
 export type RealDbAdapterOptions = Readonly<{ readonly open: () => RealDbResource | Promise<RealDbResource>; readonly identity?: string }>;
 
 export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => {
   let resource: RealDbResource | undefined;
-  return {
+  return registerTrustedAdapter({
     identity: options.identity ?? "real-db:sqlite",
     verifiedProductionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
     supportedCutPoints: new Set([
@@ -22,7 +22,7 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
       await resource.insertRun({ runId: id, workflowName: "testing-framework", status: "running", createdAtMs: Date.now(), startedAtMs: Date.now(), heartbeatAtMs: null, runtimeOwnerId: "testing-framework" });
       await resource.heartbeatRun(id, "testing-framework", Date.now());
     },
-    cleanup: async () => { if (resource?.close) await resource.close(); resource = undefined; },
+    cleanup: async () => { if (resource?.close) await resource.close(); if (resource?.db) { try { resource.db.query("SELECT 1"); throw Object.assign(new Error("CLEANUP_LEAK: database handle remained open after adapter cleanup"), { code: "CLEANUP_LEAK" }); } catch (error) { if ((error as { code?: string }).code === "CLEANUP_LEAK") throw error; } } resource = undefined; },
     runStep: async (operation, ...args) => {
       if (!resource) throw new Error("REAL_DB_NOT_ADMITTED");
       const direct = (resource as unknown as Record<string, unknown>)[String(operation)];
@@ -37,5 +37,5 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
       if (!operation) throw Object.assign(new Error(`REAL_DB_FAULT_UNAVAILABLE:${fault.operation}:${fault.phase}`), { code: "ADMISSION_FAILED" });
       await operation(fault);
     },
-  };
+  }, "integration-real-db");
 };

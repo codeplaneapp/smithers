@@ -23,7 +23,7 @@ const faultFor = (faults: readonly ScenarioFault[], operation: ScenarioFault["op
 const faultAt = (faults: readonly ScenarioFault[], phase: ScenarioFault["phase"]): ScenarioFault | undefined => faults.find((fault) => fault.phase === phase);
 const faultError = (fault: ScenarioFault): Error => Object.assign(new Error(`fault injected at ${fault.id}`), { code: "DURABILITY_FAULT_INJECTED", details: fault, fidelity: "simulation" as const });
 const ambiguityFor = (fault: ScenarioFault, step: string, effect?: string, observed = true): AmbiguityResult | undefined => {
-  if (fault.operation === "event-append" && !observed) return undefined;
+  if ((fault.operation === "event-append" || fault.operation === "completion-cas") && !observed) return undefined;
   const outcome = fault.phase === "after-effect-before-journal" ? "effect-applied-journal-missing" : fault.phase === "after-journal-before-ack" ? "journal-applied-ack-missing" : fault.operation === "lease" || fault.operation === "heartbeat" ? "lease-lost" : fault.operation === "cancellation" ? "cancellation-race" : fault.operation === "resume" ? "restart-in-task" : fault.operation === "event-append" ? "lost-wakeup" : fault.operation === "completion-cas" ? "duplicate-delivery" : undefined;
   return outcome ? ambiguity(outcome, { step, effect, fault: fault.id }) : undefined;
 };
@@ -33,7 +33,10 @@ const settleKernel = async <T>(promise: Promise<T>, kernel: ReturnType<typeof ma
   let done = false; let value!: T; let error: unknown;
   void promise.then((v) => { done = true; value = v; }, (e) => { done = true; error = e; });
   for (let turn = 0; !done && turn < budget; turn++) {
-    await Promise.resolve();
+    // Let the Effect scheduler drain its ready queue before advancing virtual
+    // time; otherwise a timer in a sibling fiber can win merely because the
+    // host loop advanced the clock before a just-completed fiber resumed.
+    for (let microtask = 0; microtask < 4; microtask++) await Promise.resolve();
     if (!done && kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
   }
   if (!done) throw Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: kernel did not settle"), { code: "BOUNDED_WAIT_EXHAUSTED", details: { budget } });
@@ -46,7 +49,10 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
   const harness = options.harness ?? unitSimHarness();
   const kernel = makeKernel(seed, options.controlLog ?? []);
   const capabilityReport = harness.admitScenario(ast, options.capabilities ?? []);
-  const compiled = compileScenario(ast, harness.adapter?.extensions ?? new Set());
+  // An extension declaration is not an executor. Compile against the
+  // executable registry so a registered-name-without-implementation cannot
+  // become a silent no-op.
+  const compiled = compileScenario(ast, new Set(Object.keys(harness.adapter?.extensionExecutors ?? {})));
   const knownFaults = new Set(ast.faults.map((item) => item.id));
   const invalidControl = (options.controlLog ?? []).find((control) =>
     (control.type === "inject-fault" && !knownFaults.has(control.fault)) ||
@@ -78,8 +84,15 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
       cleanup.register("harness", harness.name, harness.adapter.cleanup ?? (() => undefined));
       try { yield* Effect.tryPromise({ try: () => Promise.resolve(harness.adapter!.admissionProbe()), catch: (cause) => Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), { code: "ADMISSION_FAILED", cause, details: { native: harness.adapter?.serializeError?.(cause) } }) }); }
       catch (cause) { throw cause; }
+      for (const extension of ast.extensions) {
+        const executor = harness.adapter.extensionExecutors?.[extension.name];
+        if (!executor) throw Object.assign(new Error(`UNREGISTERED_EXTENSION: ${extension.name}`), { code: "UNREGISTERED_EXTENSION", details: { extension: extension.name } });
+        yield* Effect.tryPromise({ try: () => Promise.resolve(executor(extension.name, extension.value)), catch: (cause) => cause });
+        kernel.trace.emit({ type: "adapter", id: extension.name, data: { identity: harness.adapter.identity, extension: extension.name, executed: true } });
+      }
     }
     const runtimeKernel = yield* KernelRuntimeService;
+    const activeTasks = new Map<string, Fiber.Fiber<unknown, unknown>>();
     let controlIndex = 0;
     const supplied = kernel.controls.log();
     while (controlIndex < supplied.length) {
@@ -97,18 +110,17 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
         if (released) releasedBarriers.add(barrier.id);
         if (partiesComplete && !released && !releasedBarriers.has(barrier.id)) throw Object.assign(new Error(`barrier ${barrier.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: barrier.id, budget: barrier.budget } });
       }
-      const ready = ast.steps.filter((s) => !completed.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
-      if (!ready.length) throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
+      const ready = ast.steps.filter((s) => !completed.has(s.id) && !activeTasks.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
+      if (!ready.length && !activeTasks.size) throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
       const ordered: typeof ready = []; const remaining = [...ready];
-      let pinIndex = 0;
-      while (remaining.length) { const pin = runtimeKernel.controls.takeNext("pin-interleaving"); const validPin = pin && remaining.some((s) => s.id === pin.choice) ? pin : undefined; const chosen = runtimeKernel.scheduler.choose(remaining, validPin ? remaining.findIndex((s) => s.id === validPin.choice) : undefined); ordered.push(chosen); remaining.splice(remaining.indexOf(chosen), 1); if (!validPin) runtimeKernel.controls.append({ type: "pin-interleaving", choice: chosen.id }); runtimeKernel.trace.emit({ type: "schedule", id: ids.next(chosen.id), data: { step: chosen.id, ready: ready.map((s) => s.id), choice: chosen.id } }); }
+      while (remaining.length) { const pin = runtimeKernel.controls.takeApplicablePin(remaining.map((s) => s.id)); const chosen = runtimeKernel.scheduler.choose(remaining, pin ? remaining.findIndex((s) => s.id === pin.choice) : undefined); ordered.push(chosen); remaining.splice(remaining.indexOf(chosen), 1); if (!pin) runtimeKernel.controls.append({ type: "pin-interleaving", choice: chosen.id }); runtimeKernel.trace.emit({ type: "schedule", id: ids.next(chosen.id), data: { step: chosen.id, ready: ready.map((s) => s.id), choice: chosen.id, controlIndex: runtimeKernel.controls.consumed() } }); }
       const tasks = ordered.map((selected) => Effect.gen(function* () {
         const id = ids.next(selected.id); let observedWait = false; kernel.trace.emit({ type: "task", id, data: { state: "started", step: selected.id } });
         const owner = `sim:${seed}`; journal.claimLease(selected.id, owner);
         let controlledFault: ScenarioFault | undefined;
         const runtime: TaskRuntime = {
           effect: <T>(name: string, operation: () => T | Promise<T>) => { const effectId = `${selected.id}:${name}`; const control = runtimeKernel.controls.takeResolve(effectId) ?? runtimeKernel.controls.takeResolve(name); if (control?.outcome === "fail") return Promise.reject(Object.assign(new Error(`effect ${name} failed by control`), { code: "CONTROLLED_EFFECT_FAILURE", details: control })); if (control?.outcome === "hang") return new Promise<T>(() => undefined); const beforeEffect = faultFor(ast.faults, "effect", "before-task"); if (beforeEffect) { const item = ambiguityFor(beforeEffect, selected.id, name); if (item) recordAmbiguity(item, id); return Promise.reject(faultError(beforeEffect)); } const invoke: () => Promise<T> = () => settleKernel(Promise.resolve().then(operation), kernel, options.waitBudget ?? 10_000); const run = control?.outcome === "duplicate" ? invoke().then(() => invoke()) : invoke(); return run.then((value) => { const effectId = `${selected.id}:${name}`; kernel.trace.emit({ type: "effect", id, data: { name, state: "requested" } }); const duringEffect = faultFor(ast.faults, "effect", "during-task"); if (duringEffect) { const item = ambiguityFor(duringEffect, selected.id, name); if (item) recordAmbiguity(item, id); throw faultError(duringEffect); } journal.assertLease(selected.id, owner); journal.effectApplied(effectId); const effectFault = (controlledFault?.operation === "effect" && controlledFault.phase === "after-effect-before-journal" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-effect-before-journal"); if (effectFault) { const item = ambiguityFor(effectFault, selected.id, name); if (item) recordAmbiguity(item, id); throw faultError(effectFault); } journal.journal(effectId); const ackFault = (controlledFault?.phase === "after-journal-before-ack" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-journal-before-ack") ?? faultFor(ast.faults, "attempt-write", "after-journal-before-ack") ?? faultFor(ast.faults, "completion-cas", "after-journal-before-ack"); if (ackFault) { const item = ambiguityFor(ackFault, selected.id, name); if (item) recordAmbiguity(item, id); throw faultError(ackFault); } journal.ack(effectId); const afterAck = (controlledFault?.phase === "after-ack" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-ack") ?? faultAt(ast.faults, "after-ack"); if (afterAck) { const item = ambiguityFor(afterAck, selected.id, name); if (item) recordAmbiguity(item, id); throw faultError(afterAck); } kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved" } }); return value; }); },
-          sleep: (ms: number) => new Promise<void>((resolve, reject) => { observedWait = true; const wakeup = `${selected.id}:timer:${ms}`; journal.registerWakeup(wakeup); const lost = ast.faults.some((candidate) => candidate.operation === "event-append" && (candidate.phase === "during-task" || candidate.phase === "after-task")); const timer = kernel.clock.sleep(ms, () => { if (lost) { journal.loseWakeup(wakeup); recordAmbiguity(ambiguity("lost-wakeup", { step: selected.id, wakeup, transition: "registered->lost" }), id); reject(Object.assign(new Error("lost wakeup"), { code: "LOST_WAKEUP" })); return; } journal.deliverWakeup(wakeup); kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms } }); resolve(); }); cleanup.register("virtual-timer", String(timer), () => kernel.clock.cancel(timer)); }),
+          sleep: (ms: number) => new Promise<void>((resolve, reject) => { observedWait = true; const wakeup = `${selected.id}:timer:${ms}`; journal.registerWakeup(wakeup); const lost = ast.faults.some((candidate) => candidate.operation === "event-append" && (candidate.phase === "during-task" || candidate.phase === "after-task")); const timer = kernel.clock.sleep(ms, () => { const suppliedFire = runtimeKernel.controls.take("timer-fire"); if (lost) { journal.loseWakeup(wakeup); if (observedWait) recordAmbiguity(ambiguity("lost-wakeup", { step: selected.id, wakeup, transition: "registered->lost" } ), id); reject(Object.assign(new Error("lost wakeup"), { code: "LOST_WAKEUP" })); return; } journal.deliverWakeup(wakeup); if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: String(timer) }); kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms } }); resolve(); }); cleanup.register("virtual-timer", String(timer), () => kernel.clock.cancel(timer)); }),
           log: (message: string, data?: ScenarioValue) => kernel.trace.emit({ type: "task", id, data: { state: "log", message, ...(data === undefined ? {} : { data }) } }),
           opaque: <T>(name: string, operation: () => T | Promise<T>) => { kernel.trace.emit({ type: "opaque-effect", id, data: { name, controllable: false } }); return Promise.resolve().then(operation); },
         };
@@ -123,11 +135,12 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
           kernel.trace.emit({ type: "fault", id: control.fault, data: control.payload });
         }
         const extensionExecutor = selected.extension ? harness.adapter?.extensionExecutors?.[selected.extension] : undefined;
+        if (selected.extension && !extensionExecutor) throw Object.assign(new Error(`UNREGISTERED_STEP_EXTENSION: ${selected.extension}`), { code: "UNREGISTERED_STEP_EXTENSION", details: { step: selected.id, extension: selected.extension } });
         if (selected.extension && extensionExecutor) yield* Effect.tryPromise({ try: () => Promise.resolve(extensionExecutor(selected.id, selected.input)), catch: (e) => e });
         // During-task controls rendezvous after user code has entered. This
         // keeps a declared ambiguity from becoming a pre-execution shortcut.
         const duringTransition = undefined;
-        const injectable = ast.faults.find((candidate) => candidate.phase === "before-task" && candidate.operation === "task");
+        const injectable = ast.faults.find((candidate) => candidate.phase === "before-task");
         const injectFault = harness.adapter?.injectFault;
         if (injectable && injectFault && harness.kind !== "unit-sim") yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(injectable)), catch: (e) => e });
         const before = (controlledFault?.phase === "before-task" ? controlledFault : undefined) ?? faultFor(ast.faults, "task", "before-task") ?? faultFor(ast.faults, "resume", "before-task") ?? faultAt(ast.faults, "before-task");
@@ -140,7 +153,7 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
           recordAmbiguity(ambiguity("cancellation-race", { step: selected.id, reason: cancel.reason ?? "cancelled", transition: "task-started->cancelled" }), id);
           throw Object.assign(new Error(cancel.reason ?? "scenario cancelled"), { code: "SCENARIO_CANCELLED" });
         }
-        if (controlledFault?.phase === "during-task") { if (controlledFault.operation === "lease" || controlledFault.operation === "heartbeat" || controlledFault.operation === "cancellation") journal.loseLease(selected.id); const item = ambiguityFor(controlledFault, selected.id); if (item) recordAmbiguity(item, id); throw faultError(controlledFault); }
+        if (controlledFault?.phase === "during-task" && !["lease", "heartbeat", "cancellation"].includes(controlledFault.operation)) { const item = ambiguityFor(controlledFault, selected.id); if (item) recordAmbiguity(item, id); throw faultError(controlledFault); }
         // Lease, heartbeat, cancellation, and resume faults rendezvous after
         // the callback below, where a real task transition has occurred.
         const runner = options.stepRunners?.[selected.id] ?? stepRunner(selected);
@@ -150,19 +163,20 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
         let value: unknown;
         const duringFault = ast.faults.find((candidate) => candidate.phase === "during-task");
         if (runner && duringFault) {
+          const child = yield* Effect.fork(Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e }));
+          // Let the child cross the callback boundary before interrupting it;
+          // an immediate interrupt is a cancellation-before-start, not a
+          // cancellation race during a running task.
+          yield* Effect.yieldNow();
           if (injectFault && harness.kind !== "unit-sim") yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(duringFault)), catch: (e) => e });
+          yield* Fiber.interrupt(child);
           if (duringFault.operation === "resume") {
-            // The first attempt reaches the cut point and its externally
-            // visible work may already have happened before the crash.
-            value = yield* Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
             const item = ambiguityFor(duringFault, selected.id); if (item) recordAmbiguity(item, id);
             value = yield* Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
           } else {
-          const child = yield* Effect.fork(Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e }));
-          yield* Fiber.interrupt(child);
-          if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation") journal.loseLease(selected.id);
-          const item = ambiguityFor(duringFault, selected.id); if (item) recordAmbiguity(item, id);
-          throw faultError(duringFault);
+            if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation") journal.loseLease(selected.id);
+            const item = ambiguityFor(duringFault, selected.id); if (item) recordAmbiguity(item, id);
+            throw faultError(duringFault);
           }
         }
         if (runner && !duringFault) value = yield* Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
@@ -179,33 +193,46 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
           recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, transition: "task-completed->restarted" }), id);
           if (runner) value = yield* Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
         }
-        const during = faultFor(ast.faults, "task", "during-task") ?? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "resume", "during-task") ?? faultAt(ast.faults, "during-task"); if (during && during.operation !== "resume") { const item = ambiguityFor(during, selected.id, undefined, observedWait); if (item) recordAmbiguity(item, id); throw faultError(during); }
-        const after = (controlledFault?.phase === "after-task" ? controlledFault : undefined) ?? faultFor(ast.faults, "task", "after-task") ?? faultFor(ast.faults, "completion-cas", "after-task") ?? faultFor(ast.faults, "event-append", "after-task") ?? faultAt(ast.faults, "after-task");
-        if (after) { const item = ambiguityFor(after, selected.id); if (item) recordAmbiguity(item, id); throw faultError(after); }
+        const during = controlledFault?.phase === "during-task" ? controlledFault : faultFor(ast.faults, "task", "during-task") ?? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "resume", "during-task") ?? faultAt(ast.faults, "during-task");
+        if (during && during.operation !== "resume" && ["lease", "heartbeat", "cancellation"].includes(during.operation) && (runner !== undefined || observedWait)) {
+          if (during.operation === "lease" || during.operation === "heartbeat") journal.loseLease(selected.id);
+          try { journal.assertLease(selected.id, owner); } catch (cause) {
+            const outcome = during.operation === "cancellation" ? "cancellation-race" : "lease-lost";
+            recordAmbiguity(ambiguity(outcome, { step: selected.id, transition: "owned->fenced", cause: String((cause as Error).message) }), id);
+            throw faultError(during);
+          }
+        } else if (during && during.operation !== "resume") { const item = ambiguityFor(during, selected.id, undefined, observedWait); if (item && !["lease", "heartbeat", "cancellation"].includes(during.operation)) recordAmbiguity(item, id); throw faultError(during); }
+        const after = (controlledFault?.phase === "after-task" ? controlledFault : undefined) ?? faultFor(ast.faults, "task", "after-task") ?? faultFor(ast.faults, "completion-cas", "after-task") ?? faultFor(ast.faults, "event-append", "after-task") ?? faultFor(ast.faults, "resume", "after-task") ?? faultAt(ast.faults, "after-task");
+        if (after) { if (injectFault && harness.kind !== "unit-sim" && after.operation !== "task") yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(after)), catch: (e) => e }); const item = ambiguityFor(after, selected.id, undefined, after.operation !== "event-append" && after.operation !== "completion-cas" || observedWait); if (item) recordAmbiguity(item, id); throw faultError(after); }
         kernel.trace.emit({ type: "task", id, data: { state: "finished", step: selected.id } }); return value;
       }));
-      // Settle one selected task at a time. This still exposes the complete
-      // ready set to the seeded scheduler, while making a newly-ready
-      // dependent runnable immediately after its predecessor settles.
-      for (let index = 0; index < tasks.length; index += 1) {
-        const value = yield* tasks[index]!;
-        const selected = ordered[index]!;
-        outputs[selected.id] = value;
-        completed.add(selected.id);
-      }
+      // Start the ready set as fibers and consume whichever fiber actually
+      // exits next. This is the transition point: newly-unblocked work is
+      // scheduled immediately, rather than waiting for an unrelated ready
+      // task (for example a sleeping sibling) to finish.
+      const fibers = [] as Array<Fiber.Fiber<unknown, unknown>>;
+      for (let index = 0; index < tasks.length; index += 1) { const fiber = yield* Effect.fork(tasks[index]!); fibers.push(fiber); activeTasks.set(ordered[index]!.id, fiber); }
+      const winner = yield* Effect.raceAll([...activeTasks.entries()].map(([stepId, fiber]) => Fiber.join(fiber).pipe(Effect.map((value) => ({ stepId, value })))));
+      activeTasks.delete(winner.stepId);
+      outputs[winner.stepId] = winner.value;
+      completed.add(winner.stepId);
     }
     for (const item of ast.barriers) { const pendingRelease = kernel.controls.peek(); const release = pendingRelease?.type === "release-barrier" && pendingRelease.barrier === item.id ? kernel.controls.takeNext("release-barrier") : undefined; const released = release?.barrier === item.id || releasedBarriers.has(item.id); if (!released) throw Object.assign(new Error(`barrier ${item.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: item.id, budget: item.budget } }); kernel.trace.emit({ type: "barrier", id: item.id, data: { state: "released", parties: item.parties } }); }
     return outputs;
   });
   const execution = runAtBoundaryFork(program.pipe(Effect.provide(kernelLayer(kernel))));
   let result: Awaited<typeof execution.promise>;
-  try { result = await settleKernel(execution.promise, kernel, options.waitBudget ?? 10_000); } catch (cause) { await execution.interrupt(); result = { ok: false, error: { name: "BoundedWaitError", code: "BOUNDED_WAIT_EXHAUSTED", message: String(cause) } }; }
+  try {
+    if (harness.kind === "unit-sim") result = await settleKernel(execution.promise, kernel, options.waitBudget ?? 10_000);
+    else result = await Promise.race([execution.promise, new Promise<never>((_, reject) => setTimeout(() => reject(Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: real harness did not settle"), { code: "BOUNDED_WAIT_EXHAUSTED" })), Math.max(1, options.waitBudget ?? 10_000)))]);
+  } catch (cause) { await execution.interrupt(); result = { ok: false, error: { name: "BoundedWaitError", code: (cause as { code?: string }).code ?? "BOUNDED_WAIT_EXHAUSTED", message: String(cause) } }; }
   let cleanupFailure: unknown;
   try { await cleanup.close(options.cleanupBudget ?? 100); } catch (cause) { cleanupFailure = cause; }
   try { assertNoLeaks(cleanup, kernel.clock.pending().map((timer) => ({ kind: "virtual-timer", id: String(timer.id) }))); } catch (cause) { cleanupFailure ??= cause; }
   if (cleanupFailure) {
     const primary = result.ok ? undefined : result.error;
-    result = { ok: false, error: { name: "CleanupError", code: "CLEANUP_FAILED", message: String((cleanupFailure as Error).message), details: { cleanup: cleanupFailure, ...(primary ? { primary } : {}) }, ...(primary ? { cause: primary } : {}) } };
+    const cleanupCode = (cleanupFailure as { code?: string }).code === "CLEANUP_LEAK" ? "CLEANUP_LEAK" : "CLEANUP_FAILED";
+    result = { ok: false, error: { name: cleanupCode === "CLEANUP_LEAK" ? "CleanupLeakError" : "CleanupError", code: cleanupCode, message: String((cleanupFailure as Error).message), details: { cleanup: cleanupFailure, ...(primary ? { primary } : {}) }, ...(primary ? { cause: primary } : {}) } };
   }
   if (kernel.trace.snapshot().some((event) => event.type === "opaque-effect")) residues.add("unmediated-opaque-effect");
   const finalControlLog = kernel.controls.log();

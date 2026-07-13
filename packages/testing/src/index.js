@@ -283,14 +283,12 @@ var init_ControlBus = __esm({
       constructor(input = []) {
         this.pending = input.map((message) => Object.freeze({ ...message }));
       }
-      /** Record a generated command, consuming its replay counterpart when present. */
+      /** Append the command at the point it happened. Supplied commands are never
+       * searched for or reordered: a generated decision is part of the log even
+       * when a later supplied rendezvous is still pending. */
       append(message) {
-        const match = this.pending.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(message));
-        if (match >= 0) {
-          const [replayed] = this.pending.splice(match, 1);
-          this.observed.push(replayed);
-          return this.observed.length - 1;
-        }
+        const next = this.pending[0];
+        if (next && JSON.stringify(next) === JSON.stringify(message)) this.pending.shift();
         this.observed.push(Object.freeze({ ...message }));
         return this.observed.length - 1;
       }
@@ -302,9 +300,9 @@ var init_ControlBus = __esm({
       }
       /** Consume a command at its actual rendezvous and retain it in the replay log. */
       take(type) {
-        const index = this.pending.findIndex((message) => message.type === type);
-        if (index >= 0) {
-          const [message] = this.pending.splice(index, 1);
+        const message = this.pending[0];
+        if (message?.type === type) {
+          this.pending.shift();
           this.observed.push(message);
           return message;
         }
@@ -318,13 +316,26 @@ var init_ControlBus = __esm({
         this.observed.push(message);
         return message;
       }
+      /**
+       * A rendezvous control is ordered, but applicability is part of the
+       * rendezvous.  In particular, a pin for a step that is not ready must stay
+       * pending until that step becomes ready; consuming it and generating a
+       * replacement changes replay identity and can execute the wrong schedule.
+       */
+      takeApplicablePin(choices) {
+        const message = this.pending[0];
+        if (message?.type !== "pin-interleaving" || !choices.includes(message.choice)) return void 0;
+        this.pending.shift();
+        this.observed.push(message);
+        return message;
+      }
       peek() {
         return this.pending[0];
       }
       takeResolve(effect) {
-        const index = this.pending.findIndex((message2) => message2.type === "resolve-effect" && message2.effect === effect);
-        if (index < 0) return void 0;
-        const [message] = this.pending.splice(index, 1);
+        const message = this.pending[0];
+        if (message?.type !== "resolve-effect" || message.effect !== effect) return void 0;
+        this.pending.shift();
         this.observed.push(message);
         return message;
       }
@@ -359,11 +370,17 @@ var init_TraceCollector = __esm({
 });
 
 // src/harness/Harness.ts
-var makeHarness, unitSimHarness, integrationHarness, e2eHarness;
+var trustedAdapters, registerTrustedAdapter, trustedAdapterKind, makeHarness, unitSimHarness, integrationHarness, e2eHarness;
 var init_Harness = __esm({
   "src/harness/Harness.ts"() {
     "use strict";
     init_capabilities();
+    trustedAdapters = /* @__PURE__ */ new WeakMap();
+    registerTrustedAdapter = (adapter, kind) => {
+      trustedAdapters.set(adapter, kind);
+      return adapter;
+    };
+    trustedAdapterKind = (adapter) => trustedAdapters.get(adapter);
     makeHarness = (kind, config = {}) => {
       const defaults = { "unit-sim": ["virtual-time", "seeded-interleaving", "explicit-interleaving", "barriers", "mediated-effects", "durability-faults"], "integration-real-db": ["virtual-time", "seeded-interleaving", "explicit-interleaving", "barriers", "mediated-effects", "real-db", "native-error-parity", "durability-faults"], "e2e-real-process": ["real-process", "native-error-parity", "durability-faults"] };
       const requestedCapabilities = config.capabilities ?? defaults[kind];
@@ -374,7 +391,8 @@ var init_Harness = __esm({
         const decisions = admitCapabilities({ name, capabilities }, requested, config.policy ?? "fail");
         const forbidden = requested.filter((capability) => forbiddenForUnit.has(capability));
         if (kind === "unit-sim" && forbidden.length) return [...decisions, ...forbidden.map((capability) => ({ kind: config.policy === "skip" ? "capability-skip" : "capability-failure", harness: name, capability, hint: "unit-sim cannot claim a real production capability" }))];
-        if (kind !== "unit-sim" && (!config.adapter || typeof config.adapter.admissionProbe !== "function" || typeof config.adapter.runStep !== "function" || !config.adapter.verifiedProductionIdentity)) {
+        const crossKind = requestedCapabilities.some((capability) => kind === "integration-real-db" && capability === "real-process" || kind === "e2e-real-process" && capability === "real-db");
+        if (kind !== "unit-sim" && (crossKind || !config.adapter || trustedAdapterKind(config.adapter) !== kind || typeof config.adapter.admissionProbe !== "function" || typeof config.adapter.runStep !== "function" || !config.adapter.verifiedProductionIdentity)) {
           const capability = kind === "e2e-real-process" ? "real-process" : "real-db";
           return [...decisions, { kind: config.policy === "skip" ? "capability-skip" : "capability-failure", harness: name, capability, hint: "declaration is not proof: a verified production adapter with admissionProbe, runStep, and identity is required" }];
         }
@@ -482,12 +500,13 @@ var init_CleanupScope = __esm({
         const deadline = Date.now() + timeoutMs;
         let count = 0;
         let error;
+        const failed = [];
         while (this.entries.length) {
           if (++count > budget || Date.now() >= deadline) {
             error ??= Object.assign(new Error("CLEANUP_FAILED: cleanup budget exhausted"), { code: "CLEANUP_FAILED" });
             break;
           }
-          const entry = this.entries[this.entries.length - 1];
+          const entry = this.entries.pop();
           let disposed = false;
           try {
             let timer;
@@ -505,8 +524,9 @@ var init_CleanupScope = __esm({
           } catch (cause) {
             error ??= Object.assign(new Error(`CLEANUP_FAILED: ${entry.resource.kind}/${entry.resource.id}`), { code: "CLEANUP_FAILED", cause });
           }
-          this.entries.pop();
+          if (!disposed) failed.push(entry);
         }
+        this.entries.push(...failed.reverse());
         if (error) throw error;
       }
     };
@@ -620,7 +640,7 @@ var init_runScenario = __esm({
     faultAt = (faults, phase) => faults.find((fault2) => fault2.phase === phase);
     faultError = (fault2) => Object.assign(new Error(`fault injected at ${fault2.id}`), { code: "DURABILITY_FAULT_INJECTED", details: fault2, fidelity: "simulation" });
     ambiguityFor = (fault2, step2, effect, observed = true) => {
-      if (fault2.operation === "event-append" && !observed) return void 0;
+      if ((fault2.operation === "event-append" || fault2.operation === "completion-cas") && !observed) return void 0;
       const outcome = fault2.phase === "after-effect-before-journal" ? "effect-applied-journal-missing" : fault2.phase === "after-journal-before-ack" ? "journal-applied-ack-missing" : fault2.operation === "lease" || fault2.operation === "heartbeat" ? "lease-lost" : fault2.operation === "cancellation" ? "cancellation-race" : fault2.operation === "resume" ? "restart-in-task" : fault2.operation === "event-append" ? "lost-wakeup" : fault2.operation === "completion-cas" ? "duplicate-delivery" : void 0;
       return outcome ? ambiguity(outcome, { step: step2, effect, fault: fault2.id }) : void 0;
     };
@@ -636,7 +656,7 @@ var init_runScenario = __esm({
         error = e;
       });
       for (let turn = 0; !done && turn < budget; turn++) {
-        await Promise.resolve();
+        for (let microtask = 0; microtask < 4; microtask++) await Promise.resolve();
         if (!done && kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
       }
       if (!done) throw Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: kernel did not settle"), { code: "BOUNDED_WAIT_EXHAUSTED", details: { budget } });
@@ -648,7 +668,7 @@ var init_runScenario = __esm({
       const harness = options.harness ?? unitSimHarness();
       const kernel = makeKernel(seed, options.controlLog ?? []);
       const capabilityReport = harness.admitScenario(ast, options.capabilities ?? []);
-      const compiled = compileScenario(ast, harness.adapter?.extensions ?? /* @__PURE__ */ new Set());
+      const compiled = compileScenario(ast, new Set(Object.keys(harness.adapter?.extensionExecutors ?? {})));
       const knownFaults = new Set(ast.faults.map((item) => item.id));
       const invalidControl = (options.controlLog ?? []).find(
         (control) => control.type === "inject-fault" && !knownFaults.has(control.fault) || control.type === "release-barrier" && !ast.barriers.some((item) => item.id === control.barrier) || control.type === "task-restart" && !ast.steps.some((item) => item.id === control.step)
@@ -689,8 +709,15 @@ var init_runScenario = __esm({
           } catch (cause) {
             throw cause;
           }
+          for (const extension2 of ast.extensions) {
+            const executor = harness.adapter.extensionExecutors?.[extension2.name];
+            if (!executor) throw Object.assign(new Error(`UNREGISTERED_EXTENSION: ${extension2.name}`), { code: "UNREGISTERED_EXTENSION", details: { extension: extension2.name } });
+            yield* Effect4.tryPromise({ try: () => Promise.resolve(executor(extension2.name, extension2.value)), catch: (cause) => cause });
+            kernel.trace.emit({ type: "adapter", id: extension2.name, data: { identity: harness.adapter.identity, extension: extension2.name, executed: true } });
+          }
         }
         const runtimeKernel = yield* KernelRuntimeService;
+        const activeTasks = /* @__PURE__ */ new Map();
         let controlIndex = 0;
         const supplied = kernel.controls.log();
         while (controlIndex < supplied.length) {
@@ -708,19 +735,17 @@ var init_runScenario = __esm({
             if (released) releasedBarriers.add(barrier2.id);
             if (partiesComplete && !released && !releasedBarriers.has(barrier2.id)) throw Object.assign(new Error(`barrier ${barrier2.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: barrier2.id, budget: barrier2.budget } });
           }
-          const ready = ast.steps.filter((s) => !completed.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
-          if (!ready.length) throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
+          const ready = ast.steps.filter((s) => !completed.has(s.id) && !activeTasks.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
+          if (!ready.length && !activeTasks.size) throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
           const ordered = [];
           const remaining = [...ready];
-          let pinIndex = 0;
           while (remaining.length) {
-            const pin = runtimeKernel.controls.takeNext("pin-interleaving");
-            const validPin = pin && remaining.some((s) => s.id === pin.choice) ? pin : void 0;
-            const chosen = runtimeKernel.scheduler.choose(remaining, validPin ? remaining.findIndex((s) => s.id === validPin.choice) : void 0);
+            const pin = runtimeKernel.controls.takeApplicablePin(remaining.map((s) => s.id));
+            const chosen = runtimeKernel.scheduler.choose(remaining, pin ? remaining.findIndex((s) => s.id === pin.choice) : void 0);
             ordered.push(chosen);
             remaining.splice(remaining.indexOf(chosen), 1);
-            if (!validPin) runtimeKernel.controls.append({ type: "pin-interleaving", choice: chosen.id });
-            runtimeKernel.trace.emit({ type: "schedule", id: ids.next(chosen.id), data: { step: chosen.id, ready: ready.map((s) => s.id), choice: chosen.id } });
+            if (!pin) runtimeKernel.controls.append({ type: "pin-interleaving", choice: chosen.id });
+            runtimeKernel.trace.emit({ type: "schedule", id: ids.next(chosen.id), data: { step: chosen.id, ready: ready.map((s) => s.id), choice: chosen.id, controlIndex: runtimeKernel.controls.consumed() } });
           }
           const tasks = ordered.map((selected) => Effect4.gen(function* () {
             const id = ids.next(selected.id);
@@ -784,13 +809,15 @@ var init_runScenario = __esm({
                 journal.registerWakeup(wakeup);
                 const lost = ast.faults.some((candidate) => candidate.operation === "event-append" && (candidate.phase === "during-task" || candidate.phase === "after-task"));
                 const timer = kernel.clock.sleep(ms, () => {
+                  const suppliedFire = runtimeKernel.controls.take("timer-fire");
                   if (lost) {
                     journal.loseWakeup(wakeup);
-                    recordAmbiguity(ambiguity("lost-wakeup", { step: selected.id, wakeup, transition: "registered->lost" }), id);
+                    if (observedWait) recordAmbiguity(ambiguity("lost-wakeup", { step: selected.id, wakeup, transition: "registered->lost" }), id);
                     reject(Object.assign(new Error("lost wakeup"), { code: "LOST_WAKEUP" }));
                     return;
                   }
                   journal.deliverWakeup(wakeup);
+                  if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: String(timer) });
                   kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms } });
                   resolve2();
                 });
@@ -813,9 +840,10 @@ var init_runScenario = __esm({
               kernel.trace.emit({ type: "fault", id: control.fault, data: control.payload });
             }
             const extensionExecutor = selected.extension ? harness.adapter?.extensionExecutors?.[selected.extension] : void 0;
+            if (selected.extension && !extensionExecutor) throw Object.assign(new Error(`UNREGISTERED_STEP_EXTENSION: ${selected.extension}`), { code: "UNREGISTERED_STEP_EXTENSION", details: { step: selected.id, extension: selected.extension } });
             if (selected.extension && extensionExecutor) yield* Effect4.tryPromise({ try: () => Promise.resolve(extensionExecutor(selected.id, selected.input)), catch: (e) => e });
             const duringTransition = void 0;
-            const injectable = ast.faults.find((candidate) => candidate.phase === "before-task" && candidate.operation === "task");
+            const injectable = ast.faults.find((candidate) => candidate.phase === "before-task");
             const injectFault = harness.adapter?.injectFault;
             if (injectable && injectFault && harness.kind !== "unit-sim") yield* Effect4.tryPromise({ try: () => Promise.resolve(injectFault(injectable)), catch: (e) => e });
             const before = (controlledFault?.phase === "before-task" ? controlledFault : void 0) ?? faultFor(ast.faults, "task", "before-task") ?? faultFor(ast.faults, "resume", "before-task") ?? faultAt(ast.faults, "before-task");
@@ -829,8 +857,7 @@ var init_runScenario = __esm({
               recordAmbiguity(ambiguity("cancellation-race", { step: selected.id, reason: cancel.reason ?? "cancelled", transition: "task-started->cancelled" }), id);
               throw Object.assign(new Error(cancel.reason ?? "scenario cancelled"), { code: "SCENARIO_CANCELLED" });
             }
-            if (controlledFault?.phase === "during-task") {
-              if (controlledFault.operation === "lease" || controlledFault.operation === "heartbeat" || controlledFault.operation === "cancellation") journal.loseLease(selected.id);
+            if (controlledFault?.phase === "during-task" && !["lease", "heartbeat", "cancellation"].includes(controlledFault.operation)) {
               const item = ambiguityFor(controlledFault, selected.id);
               if (item) recordAmbiguity(item, id);
               throw faultError(controlledFault);
@@ -840,15 +867,15 @@ var init_runScenario = __esm({
             let value;
             const duringFault = ast.faults.find((candidate) => candidate.phase === "during-task");
             if (runner && duringFault) {
+              const child = yield* Effect4.fork(Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e }));
+              yield* Effect4.yieldNow();
               if (injectFault && harness.kind !== "unit-sim") yield* Effect4.tryPromise({ try: () => Promise.resolve(injectFault(duringFault)), catch: (e) => e });
+              yield* Fiber2.interrupt(child);
               if (duringFault.operation === "resume") {
-                value = yield* Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
                 const item = ambiguityFor(duringFault, selected.id);
                 if (item) recordAmbiguity(item, id);
                 value = yield* Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
               } else {
-                const child = yield* Effect4.fork(Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e }));
-                yield* Fiber2.interrupt(child);
                 if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation") journal.loseLease(selected.id);
                 const item = ambiguityFor(duringFault, selected.id);
                 if (item) recordAmbiguity(item, id);
@@ -869,27 +896,41 @@ var init_runScenario = __esm({
               recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, transition: "task-completed->restarted" }), id);
               if (runner) value = yield* Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
             }
-            const during = faultFor(ast.faults, "task", "during-task") ?? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "resume", "during-task") ?? faultAt(ast.faults, "during-task");
-            if (during && during.operation !== "resume") {
+            const during = controlledFault?.phase === "during-task" ? controlledFault : faultFor(ast.faults, "task", "during-task") ?? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "resume", "during-task") ?? faultAt(ast.faults, "during-task");
+            if (during && during.operation !== "resume" && ["lease", "heartbeat", "cancellation"].includes(during.operation) && (runner !== void 0 || observedWait)) {
+              if (during.operation === "lease" || during.operation === "heartbeat") journal.loseLease(selected.id);
+              try {
+                journal.assertLease(selected.id, owner);
+              } catch (cause) {
+                const outcome = during.operation === "cancellation" ? "cancellation-race" : "lease-lost";
+                recordAmbiguity(ambiguity(outcome, { step: selected.id, transition: "owned->fenced", cause: String(cause.message) }), id);
+                throw faultError(during);
+              }
+            } else if (during && during.operation !== "resume") {
               const item = ambiguityFor(during, selected.id, void 0, observedWait);
-              if (item) recordAmbiguity(item, id);
+              if (item && !["lease", "heartbeat", "cancellation"].includes(during.operation)) recordAmbiguity(item, id);
               throw faultError(during);
             }
-            const after = (controlledFault?.phase === "after-task" ? controlledFault : void 0) ?? faultFor(ast.faults, "task", "after-task") ?? faultFor(ast.faults, "completion-cas", "after-task") ?? faultFor(ast.faults, "event-append", "after-task") ?? faultAt(ast.faults, "after-task");
+            const after = (controlledFault?.phase === "after-task" ? controlledFault : void 0) ?? faultFor(ast.faults, "task", "after-task") ?? faultFor(ast.faults, "completion-cas", "after-task") ?? faultFor(ast.faults, "event-append", "after-task") ?? faultFor(ast.faults, "resume", "after-task") ?? faultAt(ast.faults, "after-task");
             if (after) {
-              const item = ambiguityFor(after, selected.id);
+              if (injectFault && harness.kind !== "unit-sim" && after.operation !== "task") yield* Effect4.tryPromise({ try: () => Promise.resolve(injectFault(after)), catch: (e) => e });
+              const item = ambiguityFor(after, selected.id, void 0, after.operation !== "event-append" && after.operation !== "completion-cas" || observedWait);
               if (item) recordAmbiguity(item, id);
               throw faultError(after);
             }
             kernel.trace.emit({ type: "task", id, data: { state: "finished", step: selected.id } });
             return value;
           }));
+          const fibers = [];
           for (let index = 0; index < tasks.length; index += 1) {
-            const value = yield* tasks[index];
-            const selected = ordered[index];
-            outputs[selected.id] = value;
-            completed.add(selected.id);
+            const fiber = yield* Effect4.fork(tasks[index]);
+            fibers.push(fiber);
+            activeTasks.set(ordered[index].id, fiber);
           }
+          const winner = yield* Effect4.raceAll([...activeTasks.entries()].map(([stepId, fiber]) => Fiber2.join(fiber).pipe(Effect4.map((value) => ({ stepId, value })))));
+          activeTasks.delete(winner.stepId);
+          outputs[winner.stepId] = winner.value;
+          completed.add(winner.stepId);
         }
         for (const item of ast.barriers) {
           const pendingRelease = kernel.controls.peek();
@@ -903,10 +944,11 @@ var init_runScenario = __esm({
       const execution = runAtBoundaryFork(program.pipe(Effect4.provide(kernelLayer(kernel))));
       let result;
       try {
-        result = await settleKernel(execution.promise, kernel, options.waitBudget ?? 1e4);
+        if (harness.kind === "unit-sim") result = await settleKernel(execution.promise, kernel, options.waitBudget ?? 1e4);
+        else result = await Promise.race([execution.promise, new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: real harness did not settle"), { code: "BOUNDED_WAIT_EXHAUSTED" })), Math.max(1, options.waitBudget ?? 1e4)))]);
       } catch (cause) {
         await execution.interrupt();
-        result = { ok: false, error: { name: "BoundedWaitError", code: "BOUNDED_WAIT_EXHAUSTED", message: String(cause) } };
+        result = { ok: false, error: { name: "BoundedWaitError", code: cause.code ?? "BOUNDED_WAIT_EXHAUSTED", message: String(cause) } };
       }
       let cleanupFailure;
       try {
@@ -921,7 +963,8 @@ var init_runScenario = __esm({
       }
       if (cleanupFailure) {
         const primary = result.ok ? void 0 : result.error;
-        result = { ok: false, error: { name: "CleanupError", code: "CLEANUP_FAILED", message: String(cleanupFailure.message), details: { cleanup: cleanupFailure, ...primary ? { primary } : {} }, ...primary ? { cause: primary } : {} } };
+        const cleanupCode = cleanupFailure.code === "CLEANUP_LEAK" ? "CLEANUP_LEAK" : "CLEANUP_FAILED";
+        result = { ok: false, error: { name: cleanupCode === "CLEANUP_LEAK" ? "CleanupLeakError" : "CleanupError", code: cleanupCode, message: String(cleanupFailure.message), details: { cleanup: cleanupFailure, ...primary ? { primary } : {} }, ...primary ? { cause: primary } : {} } };
       }
       if (kernel.trace.snapshot().some((event) => event.type === "opaque-effect")) residues.add("unmediated-opaque-effect");
       const finalControlLog = kernel.controls.log();
@@ -1575,7 +1618,7 @@ var dryRun = (ast, options = {}) => {
   const seed = options.seed ?? ast.seed ?? 0;
   const controls = options.controlLog ?? [];
   const harness = options.harness;
-  const compiled = compileScenario(ast, harness?.adapter?.extensions ?? /* @__PURE__ */ new Set());
+  const compiled = compileScenario(ast, new Set(Object.keys(harness?.adapter?.extensionExecutors ?? {})));
   return { canonicalAst: canonicalize(ast), replayIdentity: replayIdentity({ ast, seed, controlLog: controls }), admissions: harness?.admitScenario(ast, options.capabilities ?? []) ?? [], diagnostics: compiled.ok ? [] : compiled.diagnostics, requiredCapabilities: compiled.requiredCapabilities, replayBundle: makeReplayBundle({ ast, seed, controlLog: controls, harness: harness?.name }), plannedSteps: ast.steps.map((step2) => step2.id), executesAgents: false, run: () => runScenario(ast, options) };
 };
 
@@ -1636,12 +1679,26 @@ var isOpaqueEffect = (value) => !!value && typeof value === "object" && value.ki
 
 // src/probes/compareBoundaryShape.ts
 var publicErrorFields = (value) => Object.fromEntries(["name", "message", "code", "tag", "summary", "details", "docsUrl", "cause"].filter((key) => value[key] !== void 0).map((key) => [key, value[key]]));
+var ownErrorField = (value, key) => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor?.get ? descriptor.get.call(value) : descriptor?.value;
+};
+var boundarySerializable = (value, seen = /* @__PURE__ */ new Set()) => {
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  const record = value;
+  return publicErrorFields({ name: ownErrorField(record, "name"), message: ownErrorField(record, "message"), code: ownErrorField(record, "code"), tag: ownErrorField(record, "tag"), summary: ownErrorField(record, "summary"), details: ownErrorField(record, "details"), docsUrl: ownErrorField(record, "docsUrl"), cause: ownErrorField(record, "cause") === void 0 ? void 0 : boundarySerializable(ownErrorField(record, "cause"), seen) });
+};
 var boundaryShape = (error, serialized) => {
   const value = error && typeof error === "object" ? error : {};
-  const details = value.details;
-  const cause = value.cause === void 0 ? void 0 : boundaryShape(value.cause);
-  const nativeSerialized = serialized ?? (error instanceof Error ? publicErrorFields(value) : void 0);
-  return { name: String(value.name ?? "Error"), className: error && typeof error === "object" ? String(error.constructor?.name ?? "Object") : "Error", ...value.tag === void 0 ? {} : { tag: String(value.tag) }, ...value.code === void 0 ? {} : { code: String(value.code) }, ...value.message === void 0 ? {} : { message: String(value.message) }, ...value.summary === void 0 ? {} : { summary: String(value.summary) }, hasCause: value.cause !== void 0, ...cause ? { cause } : {}, ...details === void 0 ? {} : { details }, detailsKeys: details && typeof details === "object" ? Object.keys(details).sort() : [], ...value.docsUrl === void 0 ? {} : { docsUrl: String(value.docsUrl) }, ...nativeSerialized === void 0 ? {} : { serialized: nativeSerialized } };
+  const name = ownErrorField(value, "name") ?? value.name;
+  const message = ownErrorField(value, "message") ?? value.message;
+  const causeValue = ownErrorField(value, "cause") ?? value.cause;
+  const details = ownErrorField(value, "details") ?? value.details;
+  const cause = causeValue === void 0 ? void 0 : boundaryShape(causeValue);
+  const nativeSerialized = serialized ?? (error instanceof Error ? boundarySerializable(error) : void 0);
+  return { name: String(name ?? "Error"), className: error && typeof error === "object" ? String(error.constructor?.name ?? "Object") : "Error", ...value.tag === void 0 ? {} : { tag: String(value.tag) }, ...value.code === void 0 ? {} : { code: String(value.code) }, ...message === void 0 ? {} : { message: String(message) }, ...value.summary === void 0 ? {} : { summary: String(value.summary) }, hasCause: causeValue !== void 0, ...cause ? { cause } : {}, ...details === void 0 ? {} : { details }, detailsKeys: details && typeof details === "object" ? Object.keys(details).sort() : [], ...value.docsUrl === void 0 ? {} : { docsUrl: String(value.docsUrl) }, ...nativeSerialized === void 0 ? {} : { serialized: nativeSerialized } };
 };
 var equal = (a, b) => {
   if (Object.is(a, b)) return true;
@@ -1719,7 +1776,12 @@ var firstDivergence = (left, right) => {
   const length = Math.max(left.length, right.length);
   for (let i = 0; i < length; i++) {
     const field = firstField(left[i], right[i]);
-    if (field !== void 0 || left[i] === void 0 !== (right[i] === void 0)) return { index: i, sequence: left[i]?.seq ?? right[i]?.seq ?? i, field, left: left[i], right: right[i], message: `trace divergence at event ${i}${field ? ` (${field})` : ""}` };
+    if (field !== void 0 || left[i] === void 0 !== (right[i] === void 0)) {
+      const leftIndex = left[i]?.data?.controlIndex;
+      const rightIndex = right[i]?.data?.controlIndex;
+      const controlIndex = typeof leftIndex === "number" ? leftIndex : typeof rightIndex === "number" ? rightIndex : void 0;
+      return { index: i, sequence: left[i]?.seq ?? right[i]?.seq ?? i, ...controlIndex === void 0 ? {} : { controlIndex }, field, left: left[i], right: right[i], message: `trace divergence at event ${i}${controlIndex === void 0 ? "" : ` (control ${controlIndex})`}${field ? ` (${field})` : ""}` };
+    }
   }
   return null;
 };
@@ -1730,7 +1792,12 @@ var controlsValid = (ast, controls) => {
   const steps = new Set(ast.steps.map((step2) => step2.id));
   const faults = new Set(ast.faults.map((fault2) => fault2.id));
   const barriers = new Set(ast.barriers.map((barrier2) => barrier2.id));
-  return controls.every((control) => (control.type !== "pin-interleaving" || steps.has(control.choice)) && (control.type !== "task-restart" || steps.has(control.step)) && (control.type !== "inject-fault" || faults.has(control.fault)) && (control.type !== "release-barrier" || barriers.has(control.barrier)));
+  return controls.every((control) => (control.type !== "pin-interleaving" || steps.has(control.choice)) && (control.type !== "task-restart" || steps.has(control.step)) && (control.type !== "inject-fault" || faults.has(control.fault)) && (control.type !== "release-barrier" || barriers.has(control.barrier)) && (control.type !== "resolve-effect" || steps.has(control.effect.split(":", 1)[0])));
+};
+var removeStep = (ast, id) => {
+  const referenced = new Set(ast.steps.flatMap((step2) => step2.dependsOn));
+  if (referenced.has(id) || ast.barriers.some((barrier2) => barrier2.parties.includes(id))) return ast;
+  return { ...ast, steps: ast.steps.filter((step2) => step2.id !== id) };
 };
 var shrink = async (ast, controls, failure, options = {}) => {
   const max = Math.max(0, options.maxCandidates ?? 100);
@@ -1742,8 +1809,8 @@ var shrink = async (ast, controls, failure, options = {}) => {
     changed = false;
     for (const step2 of [...current.steps]) {
       if (tried >= max || current.steps.length <= 1) break;
-      const candidate = { ...current, steps: current.steps.filter((x) => x.id !== step2.id), barriers: current.barriers.map((b) => ({ ...b, parties: b.parties.filter((p) => p !== step2.id) })).filter((b) => b.parties.length > 0), faults: current.faults.filter((f) => f.id !== step2.id) };
-      const candidateControls = currentControls.filter((control) => control.type !== "pin-interleaving" || control.choice !== step2.id);
+      const candidate = removeStep(current, step2.id);
+      const candidateControls = currentControls.filter((control) => (control.type !== "pin-interleaving" || control.choice !== step2.id) && (control.type !== "task-restart" || control.step !== step2.id));
       tried++;
       if (!compileScenario(candidate).ok || !controlsValid(candidate, candidateControls)) continue;
       if (await failure(candidate, candidateControls)) {
@@ -1757,6 +1824,7 @@ var shrink = async (ast, controls, failure, options = {}) => {
   for (let i = 0; i < currentControls.length && tried < max; i++) {
     const candidateControls = currentControls.filter((_, index) => index !== i);
     tried++;
+    if (!controlsValid(current, candidateControls)) continue;
     if (await failure(current, candidateControls)) {
       currentControls = candidateControls;
       i = -1;
@@ -1766,10 +1834,11 @@ var shrink = async (ast, controls, failure, options = {}) => {
 };
 
 // src/adapters/realDbAdapter.ts
+init_Harness();
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 var realDbAdapter = (options) => {
   let resource;
-  return {
+  return registerTrustedAdapter({
     identity: options.identity ?? "real-db:sqlite",
     verifiedProductionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
     supportedCutPoints: /* @__PURE__ */ new Set([
@@ -1791,6 +1860,14 @@ var realDbAdapter = (options) => {
     },
     cleanup: async () => {
       if (resource?.close) await resource.close();
+      if (resource?.db) {
+        try {
+          resource.db.query("SELECT 1");
+          throw Object.assign(new Error("CLEANUP_LEAK: database handle remained open after adapter cleanup"), { code: "CLEANUP_LEAK" });
+        } catch (error) {
+          if (error.code === "CLEANUP_LEAK") throw error;
+        }
+      }
       resource = void 0;
     },
     runStep: async (operation, ...args) => {
@@ -1807,42 +1884,61 @@ var realDbAdapter = (options) => {
       if (!operation) throw Object.assign(new Error(`REAL_DB_FAULT_UNAVAILABLE:${fault2.operation}:${fault2.phase}`), { code: "ADMISSION_FAILED" });
       await operation(fault2);
     }
-  };
+  }, "integration-real-db");
 };
 
 // src/adapters/realProcessAdapter.ts
+init_Harness();
+var exited = (child, budgetMs = 1e3) => new Promise((resolve2) => {
+  if (child.exitCode !== null || child.signalCode !== null) return resolve2();
+  let timer;
+  const done = () => {
+    if (timer) clearTimeout(timer);
+    resolve2();
+  };
+  child.once("exit", done);
+  timer = setTimeout(done, budgetMs);
+});
 var realProcessAdapter = (options) => {
   let resource;
-  return { identity: options.identity ?? "real-process:child", verifiedProductionIdentity: "smithers-engine:runWorkflow-child", supportedCutPoints: /* @__PURE__ */ new Set(["resume:during-task", "task:after-task"]), admissionProbe: async () => {
-    resource = await options.spawn();
-    if (!resource.child || resource.child.pid !== resource.pid || resource.pid === process.pid || !Number.isInteger(resource.pid) || resource.pid <= 0 || resource.productionIdentity !== "runWorkflow" || typeof resource.verifyProductionIdentity !== "function" || !await resource.verifyProductionIdentity() || !await resource.handshake() || resource.healthy && !await resource.healthy()) throw Object.assign(new Error("real process failed admission: the child did not prove the production runWorkflow protocol"), { code: "ADMISSION_FAILED" });
-    try {
-      process.kill(resource.pid, 0);
-    } catch (cause) {
-      throw Object.assign(new Error("real process is not a live production child"), { code: "ADMISSION_FAILED", cause });
-    }
-  }, cleanup: async () => {
-    if (resource) {
-      await resource.kill("SIGTERM");
-      await resource.close();
+  return registerTrustedAdapter({
+    identity: options.identity ?? "real-process:child",
+    verifiedProductionIdentity: "smithers-engine:runWorkflow-child",
+    supportedCutPoints: /* @__PURE__ */ new Set(["resume:during-task"]),
+    admissionProbe: async () => {
+      resource = await options.spawn();
+      const args = resource.child?.spawnargs ?? [];
+      const productionRunner = args.some((arg) => /(?:^|\/)engineChildRunner\.tsx?$/.test(arg));
+      if (!resource.child || resource.child.pid !== resource.pid || resource.pid === process.pid || !Number.isInteger(resource.pid) || resource.pid <= 0 || !productionRunner || !await resource.handshake() || resource.healthy && !await resource.healthy()) throw Object.assign(new Error("real process failed admission: the child did not prove the production runWorkflow protocol"), { code: "ADMISSION_FAILED" });
       try {
         process.kill(resource.pid, 0);
-        throw Object.assign(new Error(`CLEANUP_LEAK: child/${resource.pid}`), { code: "CLEANUP_LEAK" });
-      } catch (error) {
-        if (error.code === "CLEANUP_LEAK") throw error;
+      } catch (cause) {
+        throw Object.assign(new Error("real process is not a live production child"), { code: "ADMISSION_FAILED", cause });
       }
+    },
+    cleanup: async () => {
+      if (!resource) return;
+      await resource.kill("SIGKILL");
+      await exited(resource.child);
+      await resource.close();
+      if (resource.child.exitCode === null && resource.child.signalCode === null) throw Object.assign(new Error(`CLEANUP_LEAK: child/${resource.pid}`), { code: "CLEANUP_LEAK" });
       resource = void 0;
+    },
+    runStep: async (operation, ...args) => {
+      if (!resource) throw new Error("REAL_PROCESS_NOT_ADMITTED");
+      if (operation === "kill") return resource.kill(String(args[0] ?? "SIGKILL"));
+      if (operation !== "runWorkflow") throw Object.assign(new Error(`REAL_PROCESS_OPERATION_UNAVAILABLE:${String(operation)}`), { code: "ADMISSION_FAILED" });
+      return resource.pid;
+    },
+    injectFault: async (fault2) => {
+      if (!resource) throw new Error("REAL_PROCESS_NOT_ADMITTED");
+      if (fault2.operation !== "resume" || fault2.phase !== "during-task") throw Object.assign(new Error(`REAL_PROCESS_FAULT_UNAVAILABLE:${fault2.operation}:${fault2.phase}`), { code: "ADMISSION_FAILED" });
+      await resource.kill("SIGKILL");
+      await exited(resource.child);
+      if (!resource.resume) throw Object.assign(new Error("REAL_PROCESS_RESUME_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
+      resource = await resource.resume();
     }
-  }, runStep: async (operation, ...args) => {
-    if (!resource) throw new Error("REAL_PROCESS_NOT_ADMITTED");
-    if (operation === "kill") return resource.kill(String(args[0] ?? "SIGKILL"));
-    if (operation !== "runWorkflow") throw Object.assign(new Error(`REAL_PROCESS_OPERATION_UNAVAILABLE:${String(operation)}`), { code: "ADMISSION_FAILED" });
-    return resource.pid;
-  }, injectFault: async (fault2) => {
-    if (!resource) throw new Error("REAL_PROCESS_NOT_ADMITTED");
-    if (fault2.operation !== "resume" || fault2.phase !== "during-task") throw Object.assign(new Error(`REAL_PROCESS_FAULT_UNAVAILABLE:${fault2.operation}:${fault2.phase}`), { code: "ADMISSION_FAILED" });
-    await resource.kill("SIGKILL");
-  } };
+  }, "e2e-real-process");
 };
 export {
   BoundedWaitError,
