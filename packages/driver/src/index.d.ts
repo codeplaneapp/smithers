@@ -69,6 +69,7 @@ type RunOptions$2 = {
     pauseSignal?: AbortSignal;
     resume?: boolean;
     force?: boolean;
+    acceptWorkflowChange?: boolean;
     workflowPath?: string;
     rootDir?: string;
     logDir?: string | null;
