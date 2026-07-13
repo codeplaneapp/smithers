@@ -122,15 +122,17 @@ export function recoverPendingState(state, user, effective = user) {
   if (state.phase === "pending-install") {
     const target = targetValues(state);
     const prior = state.pending ? priorManagedValues(state) : previous;
-    if (FIELD_PATHS.every((path) => fieldsEqual(user[path], target[path]))
-      && FIELD_PATHS.every((path) => fieldsEqual(effective[path], target[path]))) {
-      return { state: { ...state, phase: "committed", managed: { ...target }, pending: undefined }, action: "commit" };
+    const userMatchesTarget = FIELD_PATHS.every((path) => fieldsEqual(user[path], target[path]));
+    const userMatchesPrior = FIELD_PATHS.every((path) => fieldsEqual(user[path], prior[path]));
+    const effectiveMatchesTarget = FIELD_PATHS.every((path) => fieldsEqual(effective[path], target[path]));
+    const effectiveMatchesPrior = FIELD_PATHS.every((path) => fieldsEqual(effective[path], prior[path]));
+    if (userMatchesTarget) {
+      return { state: { ...state, phase: "committed", managed: { ...target }, pending: undefined }, action: "commit", effectiveOverride: !effectiveMatchesTarget };
     }
-    if (FIELD_PATHS.every((path) => fieldsEqual(user[path], prior[path]))
-      && FIELD_PATHS.every((path) => fieldsEqual(effective[path], prior[path]))) {
+    if (userMatchesPrior) {
       return state.pending
-        ? { state: { ...state, phase: "committed", managed: { ...prior }, pending: undefined }, action: "rollback" }
-        : { state: null, action: "remove" };
+        ? { state: { ...state, phase: "committed", managed: { ...prior }, pending: undefined }, action: "rollback", effectiveOverride: !effectiveMatchesPrior }
+        : effectiveMatchesPrior ? { state: null, action: "remove" } : { state: null, action: "remove", effectiveOverride: true };
     }
     throw new Error("A previous routing write is pending recovery; user fields no longer match either the saved snapshot or the managed policy.");
   }
@@ -177,6 +179,14 @@ export function lockStatus(home, now = Date.now(), pidAlive = processIsAlive) {
   try { modifiedAt = statSync(path).mtimeMs; } catch {}
   const staleOwner = owner ? isStaleLock(owner, now, pidAlive) : now - modifiedAt > LOCK_MAX_AGE_MS;
   return { locked: true, path, owner, stale: staleOwner };
+}
+export function statusSnapshot(home) {
+  const path = statePath(home);
+  const before = existsSync(path) ? readFileSync(path, "utf8") : null;
+  const state = readState(home);
+  const lock = lockStatus(home);
+  const after = existsSync(path) ? readFileSync(path, "utf8") : null;
+  return { state, lock, journalBefore: before, journalAfter: after };
 }
 export function withLock(home) {
   const path = `${statePath(home)}.lock`;
@@ -273,7 +283,7 @@ export class AppServer {
   close() { if (this.closed) return; this.closed = true; this.fail(new Error("Codex App Server closed by client")); this.child.kill("SIGTERM"); setTimeout(() => { if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL"); }, 250); }
 }
 
-async function readConfig(app) {
+export async function readConfig(app) {
   const result = await app.request("config/read", { includeLayers: true, cwd: process.cwd() }); const layers = Array.isArray(result.layers) ? result.layers : [];
   const layer = layers.find((item) => item?.name?.type === "user" && item.name.profile == null);
   const effective = result.config ?? {};
@@ -286,6 +296,31 @@ function printEffectiveFields(data) { console.log("Effective values:"); for (con
 export function restoreValues(state) { return Object.fromEntries(FIELD_PATHS.map((path) => [path, state.previous[path].present ? state.previous[path].value : ABSENT])); }
 async function rollback(app, expectedVersion, values) { const result = await batchWrite(app, makeEdits(values), expectedVersion, { allowOverridden: true }); const verified = await readConfig(app); if (!restoreMatchesUser(verified.user, values)) throw new Error("Rollback validation failed; managed fields may remain."); return result; }
 export function restoreMatchesUser(userConfig, values) { return FIELD_PATHS.every((path) => fieldsEqual(currentFields(userConfig)[path], values[path])); }
+export async function executeInstallTransition({ nextState, target, createdState, version, writePending, writeCommitted, removePending, writeBatch, read, classify }) {
+  writePending({ ...nextState, phase: "pending-install" });
+  let written;
+  try {
+    written = await writeBatch(makeEdits(target), version);
+    const verified = await read();
+    const verifiedClass = classify(verified.user, verified.effective, { ...nextState, managed: target, pending: undefined });
+    if (verifiedClass !== "installed") throw new Error(`Effective installation validation failed: ${verifiedClass}`);
+    writeCommitted({ ...nextState, phase: "committed", managed: { ...target }, pending: undefined });
+    return { action: "commit", state: { ...nextState, phase: "committed", managed: { ...target }, pending: undefined } };
+  } catch (error) {
+    written ||= error.writeResult;
+    if (written?.version) {
+      try {
+        await writeBatch(makeEdits(createdState ? restoreValues(nextState) : priorManagedValues(nextState)), written.version, { allowOverridden: true });
+        const verified = await read();
+        if (!restoreMatchesUser(verified.user, createdState ? restoreValues(nextState) : priorManagedValues(nextState))) throw new Error("Rollback validation failed; managed fields may remain.");
+      } catch (rollbackError) { throw new Error(`${error.message}; rollback also failed: ${rollbackError.message}; managed fields may remain.`); }
+      const recovery = installFailureRecovery(nextState, createdState);
+      if (recovery.action === "remove") removePending();
+      else writeCommitted(recovery.state);
+    }
+    throw error;
+  }
+}
 
 async function main() {
   const args = parseArgs(process.argv.slice(2)); const fallbackHome = resolve(process.env.CODEX_HOME || join(homedir(), ".codex")); const fallbackConfig = join(fallbackHome, "config.toml");
@@ -311,7 +346,7 @@ async function main() {
     }
     const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
     if (args.action === "status") {
-      const lock = lockStatus(app.codexHome);
+      const status = statusSnapshot(app.codexHome); state = status.state; const lock = status.lock;
       const pending = state?.phase?.startsWith("pending-") ? `\nPending recovery: ${state.phase} (not modified by --status)` : "";
       const layer = data.effectiveLayer ? `\nEffective layer: ${data.effectiveLayer.type || "unknown"}${data.effectiveLayer.profile ? `/${data.effectiveLayer.profile}` : ""}` : "";
       const lockText = lock.locked ? `\nOperation lock: ${lock.path} (${lock.stale ? "stale; reclaimable" : "active"})` : "";
@@ -334,22 +369,21 @@ async function main() {
     const { nextState } = transition;
     printFields("Current values", current); printEffectiveFields(data); printFields("Proposed values", Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))); console.log(`Snapshot: ${JSON.stringify(nextState, null, 2)}`); if (!args.apply) { console.log("Dry run only. Re-run with --apply to install the policy."); return 0; }
     const { createdState, target } = transition;
-    writeState(app.codexHome, { ...nextState, phase: "pending-install" });
-    let written;
     try {
-      written = await batchWrite(app, makeEdits(target), data.version);
-      const verified = await readConfig(app); const verifiedClass = classifyState(verified.user, verified.effective, { ...nextState, managed: target, pending: undefined });
-      if (verifiedClass !== "installed") throw new Error(`Effective installation validation failed: ${verifiedClass}`);
-      writeState(app.codexHome, { ...nextState, phase: "committed", managed: { ...target }, pending: undefined });
+      await executeInstallTransition({
+        nextState,
+        target,
+        createdState,
+        version: data.version,
+        writePending: (pending) => writeState(app.codexHome, pending),
+        writeCommitted: (committed) => writeState(app.codexHome, committed),
+        removePending: () => removeState(app.codexHome),
+        writeBatch: (edits, expectedVersion, options) => batchWrite(app, edits, expectedVersion, options),
+        read: () => readConfig(app),
+        classify: classifyState,
+      });
       console.log("Native routing policy installed."); return 0;
     } catch (error) {
-      written ||= error.writeResult;
-      if (written?.version) { try { await rollback(app, written.version, createdState ? restoreValues(nextState) : Object.fromEntries(FIELD_PATHS.map((path) => [path, state.managed[path]]))); } catch (rollbackError) { throw new Error(`${error.message}; rollback also failed: ${rollbackError.message}; managed fields may remain.`); } }
-      if (written?.version) {
-        const recovery = installFailureRecovery(nextState, createdState);
-        if (recovery.action === "remove") removeState(app.codexHome);
-        else writeState(app.codexHome, recovery.state);
-      }
       throw error;
     }
   } catch (error) {

@@ -18,13 +18,15 @@ import {
   recoverPendingState,
   resolveExecutable,
   isStaleLock,
-  lockStatus,
   batchWrite,
   spawnSpec,
   withLock,
   installTransition,
   installFailureRecovery,
   disableTransition,
+  executeInstallTransition,
+  readConfig,
+  statusSnapshot,
 } from "./configure-codex-routing.mjs";
 
 const config = (mode, usage) => ({ features: { multi_agent_v2: { multi_agent_mode_hint_text: mode, usage_hint_text: usage } } });
@@ -49,6 +51,18 @@ describe("Codex routing pure logic", () => {
     expect(classifyState(config("changed", HINT_TEXT), config("changed", HINT_TEXT), installedState)).toBe("drifted");
     expect(classifyState({}, config("higher-layer", undefined), null)).toBe("effective-conflict");
     expect(classifyState(config("user", undefined), config("user", undefined), null)).toBe("user-conflict");
+  });
+
+  test("attributes each effective managed field to its winning layer", async () => {
+    const data = await readConfig({ request: async () => ({
+      config: config("project policy", "project usage"),
+      layers: [
+        { name: { type: "user" }, version: "v1", config: config(HINT_TEXT, HINT_TEXT) },
+        { name: { type: "project" }, config: config("project policy", "project usage") },
+      ],
+    }) });
+    expect(data.effectiveLayerByField[FIELD_PATHS[0]]).toEqual({ type: "project" });
+    expect(data.effectiveLayerByField[FIELD_PATHS[1]]).toEqual({ type: "project" });
   });
 
   test("snapshots absent values and creates replace edits that delete them", () => {
@@ -86,11 +100,11 @@ describe("Codex routing pure logic", () => {
     expect(recoverPendingState(state, currentFields({}))).toEqual({ state: null, action: "remove" });
   });
 
-  test("pending upgrade requires both user and effective layers to validate", () => {
+  test("pending upgrade is owned by the user layer and reports effective overrides", () => {
     const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
     const pending = { ...mergeSnapshot(old, old.configPath), phase: "pending-install" };
-    expect(() => recoverPendingState(pending, currentFields(config(HINT_TEXT, HINT_TEXT)), currentFields(config("higher layer", "higher layer")))).toThrow("pending recovery");
-    expect(recoverPendingState(pending, currentFields(config("old policy", "old policy")), currentFields(config("old policy", "old policy"))).action).toBe("rollback");
+    expect(recoverPendingState(pending, currentFields(config(HINT_TEXT, HINT_TEXT)), currentFields(config("higher layer", "higher layer")))).toMatchObject({ action: "commit", effectiveOverride: true });
+    expect(recoverPendingState(pending, currentFields(config("old policy", "old policy")), currentFields(config("higher layer", "higher layer")))).toMatchObject({ action: "rollback", effectiveOverride: true });
   });
 
   test("pending disable recovery is read-only until a mutation command handles it", () => {
@@ -105,15 +119,19 @@ describe("Codex routing pure logic", () => {
     expect(isStaleLock({ pid: 12, createdAt: 1_000 }, 1_000 + 10 * 60 * 1000 + 1, () => true)).toBe(true);
   });
 
-  test("status lock inspection does not mutate pending state", () => {
+  test("concurrent status does not mutate a pending journal", () => {
     const home = mkdtempSync(`${tmpdir()}/smithers-routing-lock-`);
     try {
       const lock = `${home}/.smithers-codex-routing.json.lock`;
+      const pending = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), phase: "pending-install" };
+      writeFileSync(`${home}/.smithers-codex-routing.json`, `${JSON.stringify(pending, null, 2)}\n`);
+      const before = readFileSync(`${home}/.smithers-codex-routing.json`, "utf8");
       mkdirSync(lock);
       writeFileSync(`${lock}/owner`, JSON.stringify({ pid: 99, createdAt: Date.now() }));
-      const before = readFileSync(`${lock}/owner`, "utf8");
-      expect(lockStatus(home, Date.now(), () => true).locked).toBe(true);
-      expect(readFileSync(`${lock}/owner`, "utf8")).toBe(before);
+      const status = statusSnapshot(home);
+      expect(status.lock.locked).toBe(true);
+      expect(status.journalAfter).toBe(before);
+      expect(readFileSync(`${home}/.smithers-codex-routing.json`, "utf8")).toBe(before);
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
@@ -155,12 +173,35 @@ describe("Codex routing pure logic", () => {
     await expect(batchWrite(app, [], "old-version")).rejects.toThrow("Unexpected config write status: error");
   });
 
-  test("failed readback can roll back to the prior managed text", () => {
+  test("failed readback runs the production rollback transition and persists prior state", async () => {
     const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
     const pending = { ...mergeSnapshot(old, old.configPath), phase: "pending-install" };
-    const afterRollback = recoverPendingState(pending, currentFields(config("old policy", "old policy")));
-    expect(afterRollback.action).toBe("rollback");
-    expect(afterRollback.state.managed[FIELD_PATHS[0]]).toBe("old policy");
+    let persisted = pending;
+    const writes = [];
+    const reads = [
+      { user: config("new policy", "new policy"), effective: config("higher layer", "higher layer") },
+      { user: config("old policy", "old policy"), effective: config("old policy", "old policy") },
+    ];
+    const writeBatch = async (edits, expectedVersion) => {
+      writes.push({ edits, expectedVersion });
+      if (writes.length === 1) return { status: "ok", version: "after-write" };
+      return { status: "ok", version: "rolled-back" };
+    };
+    await expect(executeInstallTransition({
+      nextState: pending,
+      target: pending.pending.to,
+      createdState: false,
+      version: "before-write",
+      writePending: (state) => { persisted = state; },
+      writeCommitted: (state) => { persisted = state; },
+      removePending: () => { persisted = null; },
+      writeBatch,
+      read: async () => reads.shift(),
+      classify: () => "drifted",
+    })).rejects.toThrow("Effective installation validation failed");
+    expect(writes).toHaveLength(2);
+    expect(persisted).toMatchObject({ phase: "committed", managed: pending.pending.from });
+    expect(recoverPendingState(persisted, currentFields(config("old policy", "old policy")), currentFields(config("old policy", "old policy"))).action).toBe("none");
   });
 
   test("pure install and disable transitions preserve the first snapshot", () => {
@@ -173,12 +214,24 @@ describe("Codex routing pure logic", () => {
     expect(disableTransition({ ...upgrade.nextState, managed: { ...upgrade.nextState.pending.from } }, currentFields(config("old policy", "old policy")))[FIELD_PATHS[0]]).toEqual({ present: false });
   });
 
-  test("version mismatch leaves an upgrade journal recoverable at the prior policy", async () => {
+  test("version mismatch leaves exactly the production journal written before the failed write", async () => {
     const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
-    const pending = { ...mergeSnapshot(old, old.configPath), phase: "pending-install" };
-    const app = { request: async () => ({ status: "error", message: "version mismatch" }) };
-    await expect(batchWrite(app, makeEdits(Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))), "stale-version")).rejects.toThrow("Unexpected config write status");
-    expect(recoverPendingState(pending, currentFields(config("old policy", "old policy")))).toMatchObject({ action: "rollback", state: { managed: old.managed } });
+    const transition = installTransition(old, currentFields(config("old policy", "old policy")), old.configPath, "new-version");
+    let persisted;
+    const writes = [];
+    await expect(executeInstallTransition({
+      ...transition,
+      version: "stale-version",
+      writePending: (state) => { persisted = state; },
+      writeCommitted: (state) => { persisted = state; },
+      removePending: () => { persisted = null; },
+      writeBatch: async (...args) => { writes.push(args); const error = new Error("Unexpected config write status: error"); throw error; },
+      read: async () => ({ user: config("old policy", "old policy"), effective: config("old policy", "old policy") }),
+      classify: classifyState,
+    })).rejects.toThrow("Unexpected config write status");
+    expect(writes).toHaveLength(1);
+    expect(writes[0][1]).toBe("stale-version");
+    expect(persisted).toMatchObject({ phase: "pending-install", pending: transition.nextState.pending });
   });
 
   test("completed disable recovery is idempotent", () => {
@@ -223,7 +276,15 @@ realTest("real Codex CLI lifecycle uses an isolated temporary home", async () =>
     process.env.CODEX_HOME = home;
     expect(run([]).exitCode).toBe(0);
     expect(run(["--apply"]).exitCode).toBe(0);
-    expect(run(["--status", "--require-effective"]).exitCode).toBe(0);
+    const status = run(["--status", "--require-effective"]);
+    expect(status.exitCode).toBe(0);
+    const statusText = output(status);
+    for (const path of FIELD_PATHS) expect(statusText).toContain(`${path}:`);
+    expect(statusText).toContain("(layer: user)");
+    const preview = run([]);
+    expect(preview.exitCode).toBe(0); // dry-run preserves the original snapshot
+    const previewText = output(preview);
+    for (const path of FIELD_PATHS) expect(previewText).toContain(`${path}:`);
     expect(run(["--apply"]).exitCode).toBe(0); // re-apply preserves the original snapshot
     const app = new AppServer(binary);
     await app.initialize();
