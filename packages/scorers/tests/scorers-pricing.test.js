@@ -2,12 +2,30 @@ import { describe, expect, test } from "bun:test";
 import { estimateCostUsd, modelTokenPrices } from "../src/index.js";
 
 describe("modelTokenPrices", () => {
-    test("exact id match returns its price table", () => {
+    test("returns current Anthropic prices and cache multipliers", () => {
+        expect(modelTokenPrices("claude-fable-5")).toEqual({
+            input: 10,
+            output: 50,
+            cacheWrite: 12.5,
+            cacheRead: 1,
+        });
         expect(modelTokenPrices("claude-opus-4-8")).toEqual({
-            input: 15,
-            output: 75,
-            cacheWrite: 18.75,
-            cacheRead: 1.5,
+            input: 5,
+            output: 25,
+            cacheWrite: 6.25,
+            cacheRead: 0.5,
+        });
+        expect(modelTokenPrices("claude-opus-4-7")).toEqual({
+            input: 5,
+            output: 25,
+            cacheWrite: 6.25,
+            cacheRead: 0.5,
+        });
+        expect(modelTokenPrices("claude-haiku-4-5")).toEqual({
+            input: 1,
+            output: 5,
+            cacheWrite: 1.25,
+            cacheRead: 0.1,
         });
     });
 
@@ -37,15 +55,15 @@ describe("modelTokenPrices", () => {
     });
 
     test("underscore-suffixed id matches the base id", () => {
-        expect(modelTokenPrices("claude-haiku-4-5_preview").output).toBe(4);
+        expect(modelTokenPrices("claude-haiku-4-5_preview").output).toBe(5);
     });
 
     test("bracketed context-window alias matches the base id", () => {
-        expect(modelTokenPrices("claude-opus-4-8[1m]").output).toBe(75);
+        expect(modelTokenPrices("claude-opus-4-8[1m]").output).toBe(25);
     });
 
     test("is case-insensitive", () => {
-        expect(modelTokenPrices("CLAUDE-FABLE-5").input).toBe(15);
+        expect(modelTokenPrices("CLAUDE-FABLE-5").input).toBe(10);
     });
 
     test("unknown id prices at all zeros", () => {
