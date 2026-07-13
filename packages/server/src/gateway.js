@@ -5990,6 +5990,11 @@ a { color: var(--brand); }</style>
             if (!body) {
                 return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "Electric write body must be a JSON object" });
             }
+            assertJsonPayloadWithinBounds("gateway frame", body, {
+                maxArrayLength: GATEWAY_RPC_MAX_ARRAY_LENGTH,
+                maxDepth: GATEWAY_RPC_MAX_DEPTH,
+                maxStringLength: GATEWAY_RPC_MAX_STRING_LENGTH,
+            });
             const method = validateGatewayMethodName(asString(body.method));
             const params = body.params ?? body.vars ?? {};
             if (!hasScope(context.scopes, method, this.extensions)) {
@@ -6056,7 +6061,10 @@ a { color: var(--brand); }</style>
                 ...gatewayErrorAnnotations(error),
             }, "gateway:electric-write");
             const message = error?.message ?? "Electric write failed";
-            const status = message.includes("valid JSON") ? 400 : message.includes("exceeds") ? 413 : 500;
+            const isPayloadBoundsError = isSmithersError(error) &&
+                error.code === "INVALID_INPUT" &&
+                (error.details?.maxDepth !== undefined || error.details?.maxLength !== undefined);
+            const status = message.includes("valid JSON") ? 400 : isPayloadBoundsError || message.includes("exceeds") ? 413 : 500;
             return sendJson(res, status, {
                 ok: false,
                 code: status === 413 ? "PAYLOAD_TOO_LARGE" : status === 400 ? "INVALID_JSON" : "SERVER_ERROR",

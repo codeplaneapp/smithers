@@ -10,7 +10,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { createSmithers } from "smithers-orchestrator";
-import { Gateway } from "../src/gateway.js";
+import {
+  Gateway,
+  GATEWAY_RPC_MAX_ARRAY_LENGTH,
+  GATEWAY_RPC_MAX_DEPTH,
+  GATEWAY_RPC_MAX_STRING_LENGTH,
+} from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 
 function getPort(server) {
@@ -128,6 +133,50 @@ describe("Gateway Electric write endpoint", () => {
     const body = await response.json();
     expect(body.ok).toBe(false);
     expect(body.requiredScope).toBe("run:write");
+  });
+
+  test("rejects structurally over-deep payloads before routing", async () => {
+    const dbPath = makeDbPath("bounds");
+    dbPaths.push(dbPath);
+    gateway = bootGateway(dbPath);
+    server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    let params = "leaf";
+    for (let i = 0; i < GATEWAY_RPC_MAX_DEPTH + 5; i += 1) {
+      params = { nested: params };
+    }
+    const response = await electricWrite(port, "writer-token", { method: "launchRun", params });
+    expect(response.status).toBe(413);
+    const body = await response.json();
+    expect(body.ok).toBe(false);
+    expect(body.message).toMatch(/maximum JSON depth/);
+  });
+
+  test("rejects payloads with oversized arrays and strings before routing", async () => {
+    const dbPath = makeDbPath("bounds-array-string");
+    dbPaths.push(dbPath);
+    gateway = bootGateway(dbPath);
+    server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const arrayResponse = await electricWrite(port, "writer-token", {
+      method: "launchRun",
+      params: { values: Array.from({ length: GATEWAY_RPC_MAX_ARRAY_LENGTH + 1 }, () => 1) },
+    });
+    expect(arrayResponse.status).toBe(413);
+    const arrayBody = await arrayResponse.json();
+    expect(arrayBody.ok).toBe(false);
+    expect(arrayBody.message).toMatch(/array exceeding/);
+
+    const stringResponse = await electricWrite(port, "writer-token", {
+      method: "launchRun",
+      params: { value: "a".repeat(GATEWAY_RPC_MAX_STRING_LENGTH + 1) },
+    });
+    expect(stringResponse.status).toBe(413);
+    const stringBody = await stringResponse.json();
+    expect(stringBody.ok).toBe(false);
+    expect(stringBody.message).toMatch(/string exceeding/);
   });
 
   test("does not take a global DB lock: a concurrent RPC interleaves cleanly with a write", async () => {
