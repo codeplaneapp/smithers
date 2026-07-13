@@ -307,11 +307,12 @@ describe("non-sqlite backends fail loud", () => {
     // A Postgres/PGlite connection descriptor (dialect: "postgres", no sync
     // drizzle surface) must produce a clear error, not an obscure TypeError
     // from a missing .run()/.all().
-    test("saveNote / enableNoteSearch / searchNotes reject with an explicit sqlite-required error", async () => {
+    test("synchronous operations reject with an explicit sqlite-required error", async () => {
         const store = createMemoryStore(/** @type {any} */ ({ dialect: "postgres" }));
         await expect(store.saveNote({ namespace: USER_NS, body: "x" })).rejects.toThrow(/sqlite/);
         await expect(store.enableNoteSearch("user")).rejects.toThrow(/sqlite/);
         await expect(store.searchNotes("user", "x")).rejects.toThrow(/sqlite/);
+        await expect(store.deleteThread("thread-1")).rejects.toThrow(/sqlite/);
     });
 });
 

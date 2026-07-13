@@ -262,7 +262,7 @@ function makeMemoryStore(db) {
     function deleteThreadEffect(threadId) {
         // Delete the messages and the thread row atomically so a failure on the
         // second write can't leave the thread without its messages (or vice versa).
-        return writeEffect("memory deleteThread", () => Promise.resolve(
+        return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory deleteThread").pipe(Effect.zipRight(writeEffect("memory deleteThread", () => Promise.resolve(
             db.transaction((tx) => {
                 tx.delete(smithersMemoryMessages)
                     .where(eq(smithersMemoryMessages.threadId, threadId))
@@ -271,7 +271,7 @@ function makeMemoryStore(db) {
                     .where(eq(smithersMemoryThreads.threadId, threadId))
                     .run();
             }),
-        ));
+        ))));
     }
     // --- Message Effects ---
     /**
