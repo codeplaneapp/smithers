@@ -318,31 +318,6 @@ async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat, 
 }
 
 /**
- * Sleep between poll attempts, rejecting with the signal's abort reason the
- * instant the signal fires so cancelled polls do not wait out the interval.
- *
- * @param {number} ms
- * @param {AbortSignal | undefined} abortSignal
- * @returns {Promise<void>}
- */
-function abortableDelay(ms, abortSignal) {
-  return new Promise((resolve, reject) => {
-    if (abortSignal?.aborted) {
-      reject(abortSignal.reason ?? new Error("This operation was aborted"));
-      return;
-    }
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(abortSignal?.reason ?? new Error("This operation was aborted"));
-    };
-    const timer = setTimeout(() => {
-      abortSignal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    abortSignal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-/**
  * Wait between poll attempts, rejecting as soon as the signal aborts instead
  * of sleeping through the rest of the interval.
  *
