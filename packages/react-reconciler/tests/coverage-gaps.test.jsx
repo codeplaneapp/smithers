@@ -12,6 +12,8 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import React from "react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SmithersRenderer } from "../src/dom/renderer.js";
 import { __testingHostConfig, __testingInjectedDevToolsConfig } from "../src/reconciler.js";
 import { createSmithersContext, SmithersContext } from "../src/context.js";
@@ -107,6 +109,12 @@ describe("devtools/preload", () => {
 // src/reconciler.js — element-parent mutation host ops
 // ---------------------------------------------------------------------------
 describe("host config element-parent mutations", () => {
+    test("registers the package identity and version with React DevTools", () => {
+        const packageManifest = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
+        expect(__testingInjectedDevToolsConfig.rendererPackageName).toBe(packageManifest.name);
+        expect(__testingInjectedDevToolsConfig.version).toBe(packageManifest.version);
+    });
+
     test("the injected DevTools config resolves no fiber by host instance (headless)", () => {
         // react-reconciler stores this config internally and only invokes
         // findFiberByHostInstance when the React DevTools frontend queries by a

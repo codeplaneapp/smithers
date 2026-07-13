@@ -456,8 +456,8 @@ if (!hookHost.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
 }
 const injectedDevToolsConfig = {
     bundleType: typeof process !== "undefined" && process.env.NODE_ENV === "production" ? 0 : 1,
-    version: "0.0.0",
-    rendererPackageName: "@smithers-orchestrator/core-react",
+    version: "0.28.0",
+    rendererPackageName: "@smithers-orchestrator/react-reconciler",
     findFiberByHostInstance: () => null,
 };
 reconciler.injectIntoDevTools(injectedDevToolsConfig);
