@@ -160,6 +160,36 @@ describe("@smithers-orchestrator/telegram", () => {
     await expect(client.getMe()).rejects.toBeInstanceOf(TelegramNetworkError);
   });
 
+  test("redacts bot tokens from network failure diagnostics", async () => {
+    const token = "123456:live_bot-token";
+    const client = createTelegramClient({
+      botToken: token,
+      apiRoot: "https://telegram.example",
+      maxRetries: 0,
+      fetch: async (url) => {
+        const error = new TypeError(`fetch failed for ${url}`);
+        error.code = `request-${token}`;
+        throw error;
+      },
+    });
+
+    const error = await client.getMe().catch((cause) => cause);
+    expect(error).toBeInstanceOf(TelegramNetworkError);
+    const diagnostics = JSON.stringify({
+      message: error.message,
+      cause: {
+        name: error.cause?.name,
+        message: error.cause?.message,
+        stack: error.cause?.stack,
+        code: error.cause?.code,
+      },
+      details: error.details,
+    });
+    expect(diagnostics).toContain("<redacted>");
+    expect(diagnostics).not.toContain(token);
+    expect(diagnostics).not.toContain(`https://telegram.example/bot${token}/getMe`);
+  });
+
   test("does not retry permanent Bot API errors", async () => {
     const client = createTelegramClient({
       botToken: "bad",

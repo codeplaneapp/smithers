@@ -94,6 +94,22 @@ export class TelegramNetworkError extends Error {
   }
 }
 
+function sanitizeTelegramNetworkCause(cause, botToken, requestUrl) {
+  const redact = (value) =>
+    String(value)
+      .split(requestUrl)
+      .join("<redacted>")
+      .split(botToken)
+      .join("<redacted>")
+      .replace(/\/bot\d+:[A-Za-z0-9_-]+/g, "/bot<redacted>");
+  const sanitized = new Error(redact(cause instanceof Error ? cause.message : cause));
+  sanitized.name = redact(cause instanceof Error ? cause.name : "Error");
+  if (isRecord(cause) && (typeof cause.code === "string" || typeof cause.code === "number")) {
+    sanitized.code = redact(cause.code);
+  }
+  return sanitized;
+}
+
 export function parseTelegramAllowedChats(value) {
   if (value == null) return { allowAll: true, chatIds: [], error: null };
 
@@ -259,9 +275,10 @@ export function createTelegramClient(options) {
     let lastError = null;
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       try {
+        const requestUrl = `${apiRoot}/bot${token}/${method}`;
         let response;
         try {
-          response = await fetchImpl(`${apiRoot}/bot${token}/${method}`, {
+          response = await fetchImpl(requestUrl, {
             method: "POST",
             headers: {
               "content-type": "application/json",
@@ -273,14 +290,14 @@ export function createTelegramClient(options) {
           });
         } catch (error) {
           if (init.signal?.aborted || error?.name === "AbortError") throw error;
-          throw new TelegramNetworkError(method, error);
+          throw new TelegramNetworkError(method, sanitizeTelegramNetworkCause(error, token, requestUrl));
         }
 
         let text;
         try {
           text = await response.text();
         } catch (error) {
-          throw new TelegramNetworkError(method, error);
+          throw new TelegramNetworkError(method, sanitizeTelegramNetworkCause(error, token, requestUrl));
         }
 
         let payload;
