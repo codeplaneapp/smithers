@@ -66,13 +66,18 @@ type SseEvent = { event: string; data: any };
 
 async function openStream(
   baseUrl: string,
-  { token = "operator-token", requestId }: { token?: string; requestId?: string } = {},
+  {
+    token = "operator-token",
+    requestId,
+    lastEventId,
+  }: { token?: string; requestId?: string; lastEventId?: number } = {},
 ) {
   const abort = new AbortController();
   const response = await fetch(`${baseUrl}/v1/api/stream`, {
     headers: {
       authorization: `Bearer ${token}`,
       ...(requestId ? { "x-request-id": requestId } : {}),
+      ...(lastEventId !== undefined ? { "last-event-id": String(lastEventId) } : {}),
     },
     signal: abort.signal,
   });
@@ -128,6 +133,54 @@ async function fetchRejection(baseUrl: string, requestId?: string, token = "oper
   const json = (await response.json()) as { ok: boolean; error: { code: string; details: unknown } };
   return { response, json };
 }
+
+describe("Gateway SSE cursor validation", () => {
+  test("invalid header and query cursors return JSON 400 responses without registering subscribers", async () => {
+    const { gateway, baseUrl } = await bootGateway();
+    const invalidRequests = [
+      { path: "/v1/api/stream", headers: { "last-event-id": "not-a-number" } },
+      { path: "/v1/api/stream?lastEventId=-1", headers: {} },
+    ];
+
+    for (const request of invalidRequests) {
+      const response = await fetch(`${baseUrl}${request.path}`, {
+        headers: {
+          authorization: "Bearer operator-token",
+          ...request.headers,
+        },
+      });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("content-type")).toStartWith("application/json");
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: {
+          code: "INVALID_INPUT",
+          message: "Last-Event-ID must be a non-negative integer.",
+        },
+      });
+    }
+
+    expect(gateway.apiStreamSubscribers.size).toBe(0);
+    expect(gateway.apiStreamSubscribersByUser.size).toBe(0);
+    expect(gateway.apiStreamSubscribersByConnection.size).toBe(0);
+    expect(gateway.apiStreamHeartbeatTimer).toBeNull();
+  });
+
+  test("a valid cursor replays only newer frames", async () => {
+    const { gateway, baseUrl } = await bootGateway();
+    const firstSeq = await gateway.queueApiInvalidation(["runs"]);
+    const secondSeq = await gateway.queueApiInvalidation(["cron"]);
+
+    const resumed = await openStream(baseUrl, { lastEventId: firstSeq });
+    expect(resumed.response.status).toBe(200);
+    const replayed = await resumed.waitForEvent(
+      (event) => event.event === "change" && event.data?.seq === secondSeq,
+      "replayed SSE frame",
+    );
+    expect(replayed.data.collections).toEqual(["cron"]);
+    expect(resumed.events.some((event) => event.event === "change" && event.data?.seq === firstSeq)).toBe(false);
+  });
+});
 
 describe("Gateway SSE subscriber caps", () => {
   test("per-connection cap rejects a third stream for one x-request-id and frees the slot on disconnect", async () => {

@@ -3579,6 +3579,22 @@ a { color: var(--brand); }</style>
                 error: forbidden.error,
             });
         }
+        const host = headerValue(req, "host") ?? "127.0.0.1";
+        const url = new URL(`http://${host}${req.url ?? "/"}`);
+        const lastEventIdRaw = headerValue(req, "last-event-id") ?? url.searchParams.get("lastEventId");
+        let lastEventId;
+        try {
+            lastEventId = asOptionalNonNegativeInt(lastEventIdRaw, "Last-Event-ID");
+        }
+        catch (error) {
+            if (!isSmithersError(error)) {
+                throw error;
+            }
+            return sendJson(res, statusForRpcError(error.code), {
+                ok: false,
+                error: { code: error.code, message: error.summary },
+            });
+        }
         const userKey = context.userId ?? context.tokenId ?? context.role ?? "anonymous";
         const connectionKey = context.connectionId;
         const violation = this.apiStreamCapViolation(userKey, connectionKey);
@@ -3634,10 +3650,6 @@ a { color: var(--brand); }</style>
         this.apiStreamSubscribersByUser.set(userKey, (this.apiStreamSubscribersByUser.get(userKey) ?? 0) + 1);
         this.apiStreamSubscribersByConnection.set(connectionKey, (this.apiStreamSubscribersByConnection.get(connectionKey) ?? 0) + 1);
         this.ensureApiStreamHeartbeat();
-        const host = headerValue(req, "host") ?? "127.0.0.1";
-        const url = new URL(`http://${host}${req.url ?? "/"}`);
-        const lastEventIdRaw = headerValue(req, "last-event-id") ?? url.searchParams.get("lastEventId");
-        const lastEventId = asOptionalNonNegativeInt(lastEventIdRaw, "Last-Event-ID");
         const firstSeq = this.apiStreamFrames.length > 0
             ? Number(this.apiStreamFrames[0].frame.seq)
             : this.apiStreamSeq + 1;
