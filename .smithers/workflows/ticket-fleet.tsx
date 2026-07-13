@@ -68,6 +68,7 @@ const inputSchema = z.object({
   // pinned to sol+fable (union) so exactly those issues run.
   solNumbers: z.array(z.number().int()).default([]),
   fableNumbers: z.array(z.number().int()).default([]),
+  lunaNumbers: z.array(z.number().int()).default([]),
   skipSync: z.boolean().default(false),
   skipCiLane: z.boolean().default(false),
   dryRun: z.boolean().default(false),
@@ -418,16 +419,20 @@ function implementerFor(difficulty: Triage["difficulty"]) {
   if (difficulty === "hard") return lunaAgent("high");
   return lunaAgent("medium");
 }
-// Explicit-split mode: Sol implements its assigned issues, Fable implements
-// its own, and the reviewer is always the opposite strong model so no agent
-// grades its own homework. Falls back to the difficulty-tiered luna
-// implementer / sol reviewer for any issue not in either list.
+// Explicit-split mode. Sol carries most of the strong work, Fable takes the
+// rest, and luna handles the simple/mechanical issues (lunaNumbers). The
+// reviewer is always a DIFFERENT model than the implementer so nothing grades
+// its own homework: luna's work is reviewed by Sol, and Sol/Fable review each
+// other. Falls back to the difficulty-tiered luna implementer for any issue in
+// no list.
 function assignedImplementer(input: Input, n: number, difficulty: Triage["difficulty"], cwd?: string) {
+  if (input.lunaNumbers.includes(n)) return lunaAgent("high", cwd);
   if (input.fableNumbers.includes(n)) return fableAgent(cwd);
   if (input.solNumbers.includes(n)) return solAgent(cwd);
   return implementerFor(difficulty);
 }
 function assignedReviewer(input: Input, n: number, cwd?: string) {
+  if (input.lunaNumbers.includes(n)) return solAgent(cwd);
   if (input.fableNumbers.includes(n)) return solAgent(cwd);
   if (input.solNumbers.includes(n)) return fableAgent(cwd);
   return solAgent(cwd);
@@ -677,7 +682,7 @@ function parseInput(raw: unknown): Input {
   for (const key of Object.keys(value)) {
     if (value[key] === null || value[key] === undefined) delete value[key];
   }
-  for (const key of ["issueNumbers", "excludeNumbers", "solNumbers", "fableNumbers"]) {
+  for (const key of ["issueNumbers", "excludeNumbers", "solNumbers", "fableNumbers", "lunaNumbers"]) {
     if (typeof value[key] === "string") value[key] = asStrArray(value[key]).map(Number);
   }
   for (const key of ["skipSync", "skipCiLane", "dryRun", "retriage"]) {
@@ -687,8 +692,8 @@ function parseInput(raw: unknown): Input {
   // In explicit-split mode, pin selection to the sol+fable union and make sure
   // the implement cap and triage scan cover all of them, so exactly the
   // assigned issues run regardless of difficulty ordering.
-  if (parsed.solNumbers.length || parsed.fableNumbers.length) {
-    const union = [...new Set([...parsed.solNumbers, ...parsed.fableNumbers])];
+  if (parsed.solNumbers.length || parsed.fableNumbers.length || parsed.lunaNumbers.length) {
+    const union = [...new Set([...parsed.solNumbers, ...parsed.fableNumbers, ...parsed.lunaNumbers])];
     if (!parsed.issueNumbers.length) parsed.issueNumbers = union;
     parsed.maxImplement = Math.max(parsed.maxImplement, union.length);
     parsed.maxTriage = Math.max(parsed.maxTriage, union.length);
@@ -1549,7 +1554,7 @@ export default smithers((ctx) => {
   // implement -> review-loop -> land. Every assigned issue gets a synthetic
   // "easy" verdict, which makes needsPlan / needsResearch / needsHumanApproval
   // all false so none of those phases render.
-  const splitMode = input.solNumbers.length > 0 || input.fableNumbers.length > 0;
+  const splitMode = input.solNumbers.length > 0 || input.fableNumbers.length > 0 || input.lunaNumbers.length > 0;
   const directTriage = (n: number): Triage => ({
     issueNumber: n, difficulty: "easy", needsHumanApproval: false, approvalReason: "",
     needsResearch: false, researchKind: "none", rationale: "direct split-mode fix (triage/research/plan skipped; reuse prior plan from issue comments)",
@@ -1558,7 +1563,7 @@ export default smithers((ctx) => {
     ? directTriage(n)
     : (latest<Triage>(ctx, outputs.tfTriage, "i" + n + ":triage") ?? memoTriageOf(n));
   const issuesToTriage = splitMode ? [] : triageIssues.filter((issue) => !memoTriageOf(issue.number));
-  const assignedNumbers = [...new Set([...input.solNumbers, ...input.fableNumbers])];
+  const assignedNumbers = [...new Set([...input.solNumbers, ...input.fableNumbers, ...input.lunaNumbers])];
   const selected = (splitMode ? assignedNumbers : selectedNumbers)
     .map((n) => ({ issue: issueByNumber.get(n), triage: triageOf(n) }))
     .filter((s): s is { issue: Issue; triage: Triage } => !!s.issue && !!s.triage);
@@ -1708,7 +1713,7 @@ export default smithers((ctx) => {
               // In explicit-split mode only the assigned issues are ever
               // implemented, so triage exactly those instead of the whole
               // backlog.
-              const assigned = new Set([...input.solNumbers, ...input.fableNumbers]);
+              const assigned = new Set([...input.solNumbers, ...input.fableNumbers, ...input.lunaNumbers]);
               const pool = assigned.size ? scan.issues.filter((i) => assigned.has(i.number)) : scan.issues;
               const issues = pool.filter((i) => !i.labels.includes("difficulty:beyond-xhard")).slice(0, input.maxTriage);
               return { issues, summary: "Triaging " + issues.length + " open issue(s)." };
