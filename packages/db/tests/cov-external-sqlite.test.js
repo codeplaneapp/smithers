@@ -121,6 +121,28 @@ describe("SqlMessageStorage external-sqlite connection", () => {
 });
 
 describe("SmithersDb over an external-sqlite descriptor", () => {
+    test("claimRunForResume updates the runtime owner and heartbeat", async () => {
+        const { descriptor } = makeExternalDb();
+        const storage = new SqlMessageStorage(descriptor);
+        await storage.ensureSchema();
+        const adapter = new SmithersDb(descriptor);
+
+        await adapter.insertRun({ runId: "stale", workflowName: "wf", status: "running", createdAtMs: 1, runtimeOwnerId: "old-owner", heartbeatAtMs: 100 });
+        const claimed = await adapter.claimRunForResume({
+            runId: "stale",
+            expectedRuntimeOwnerId: "old-owner",
+            expectedHeartbeatAtMs: 100,
+            staleBeforeMs: 200,
+            claimOwnerId: "supervisor",
+            claimHeartbeatAtMs: 300,
+        });
+
+        expect(claimed).toBe(true);
+        const run = await adapter.getRun("stale");
+        expect(run.runtimeOwnerId).toBe("supervisor");
+        expect(run.heartbeatAtMs).toBe(300);
+    });
+
     test("insert/read + getRawNodeOutput (async boolean-column lookup) + external transaction + signal fallback", async () => {
         const { raw, descriptor } = makeExternalDb();
         const storage = new SqlMessageStorage(descriptor);

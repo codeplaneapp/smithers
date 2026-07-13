@@ -1378,22 +1378,20 @@ export class SmithersDb {
             if (!isBunSqliteStorage(this.internalStorage)) {
                 return this.internalStorage
                     .queryAllRaw(`UPDATE _smithers_runs
-           SET claimed_at_ms = ?, claimed_by = ?
+           SET runtime_owner_id = ?, heartbeat_at_ms = ?
            WHERE run_id = ?
              AND status = ?
              AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
              AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
              AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
-             AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)
            RETURNING run_id`, [
-                        params.claimHeartbeatAtMs,
                         params.claimOwnerId,
+                        params.claimHeartbeatAtMs,
                         params.runId,
                         expectedStatus,
                         params.expectedRuntimeOwnerId,
                         params.expectedHeartbeatAtMs,
                         requireStale ? 1 : 0,
-                        params.staleBeforeMs,
                         params.staleBeforeMs,
                     ])
                     .then((rows) => rows.length > 0);
