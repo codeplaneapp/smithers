@@ -2,10 +2,13 @@ import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-o
 import { SmithersWorkflow as SmithersWorkflow$2 } from '@smithers-orchestrator/components/SmithersWorkflow';
 import * as _smithers_orchestrator_scheduler_SmithersWorkflowOptions from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
 import * as effect from 'effect';
-import { Schema, Effect, Layer, Context, Exit, Scope } from 'effect';
+import { Effect, Exit, Schema, Scope, Layer, Context } from 'effect';
 import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import * as _smithers_orchestrator_db_adapter_RunRow from '@smithers-orchestrator/db/adapter/RunRow';
 import * as _smithers_orchestrator_driver_RunResult from '@smithers-orchestrator/driver/RunResult';
+import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
+import { SmithersDb as SmithersDb$1 } from '@smithers-orchestrator/db/adapter';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
 import * as _smithers_orchestrator_observability_correlation from '@smithers-orchestrator/observability/correlation';
 import { EventEmitter } from 'node:events';
@@ -18,8 +21,6 @@ import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 import { SQLiteTable as SQLiteTable$1 } from 'drizzle-orm/sqlite-core';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import { BunSQLiteDatabase as BunSQLiteDatabase$2 } from 'drizzle-orm/bun-sqlite';
-import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
-import { SmithersDb as SmithersDb$1 } from '@smithers-orchestrator/db/adapter';
 import * as Activity from '@effect/workflow/Activity';
 import { TaskAborted } from '@smithers-orchestrator/errors/TaskAborted';
 import * as _smithers_orchestrator_scheduler_CachePolicy from '@smithers-orchestrator/scheduler/CachePolicy';
@@ -29,19 +30,42 @@ import { RetryPolicy as RetryPolicy$1 } from '@smithers-orchestrator/scheduler/R
 import * as _smithers_orchestrator_driver_RunOptions from '@smithers-orchestrator/driver/RunOptions';
 import * as _smithers_orchestrator_graph_GraphSnapshot from '@smithers-orchestrator/graph/GraphSnapshot';
 import { SmithersCtx } from '@smithers-orchestrator/driver/SmithersCtx';
-import { Database } from 'bun:sqlite';
 import React from 'react';
 import * as Rpc from '@effect/rpc/Rpc';
 import * as RpcGroup from '@effect/rpc/RpcGroup';
 import * as zod from 'zod';
 import { z } from 'zod';
+import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
 import * as _smithers_orchestrator_errors_toSmithersError from '@smithers-orchestrator/errors/toSmithersError';
 export { SqlMessageStorage, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getSqlMessageStorage } from '@smithers-orchestrator/db/sql-message-storage';
 import * as Entity from '@effect/cluster/Entity';
 import * as DurableDeferred from '@effect/workflow/DurableDeferred';
 import * as WorkflowEngine from '@effect/workflow/WorkflowEngine';
 
-type ChildWorkflowDefinition$2 = SmithersWorkflow$2<unknown> | (() => SmithersWorkflow$2<unknown> | unknown);
+/**
+ * Reference to a workflow module file produced at runtime (for example by an
+ * architect agent that authors a workflow mid-run). The file must default
+ * export a workflow built with `smithers(...)` and must live inside the
+ * approved root — paths that resolve (including through symlinks) outside the
+ * root are rejected before anything is imported.
+ *
+ * Structurally identical to the `WorkflowFileRef` accepted by the `<Subflow>`
+ * component in `@smithers-orchestrator/components`.
+ */
+type ChildWorkflowFileRef$2 = {
+    /**
+     * Path to the workflow module. Relative paths resolve against the approved
+     * root.
+     */
+    path: string;
+    /**
+     * Directory the workflow file must stay within. Defaults to the parent
+     * run's `rootDir`.
+     */
+    approvedRoot?: string;
+};
+
+type ChildWorkflowDefinition$2 = SmithersWorkflow$2<unknown> | (() => SmithersWorkflow$2<unknown> | unknown) | ChildWorkflowFileRef$2;
 
 type AlertHumanRequestOptions$1 = {
     runId: string;
@@ -148,6 +172,15 @@ type ChildWorkflowExecuteOptions$1 = {
 };
 
 /**
+ * Execute a child workflow with prefer-resume fan-out semantics.
+ *
+ * The child run id doubles as the fan-out idempotency key: an explicit
+ * `options.runId`, or the deterministic `parentRunId:child:stepId:iteration`
+ * identity. A parent resume or task retry recomputes the same key, so it
+ * rediscovers the child it already launched instead of fanning out a
+ * duplicate: a finished child returns its preserved output, a child still
+ * live in another process is attached to (polled until it settles), and any
+ * other existing child is resumed in place under a durable claim.
  * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any> | undefined} parentWorkflow
  * @param {ChildWorkflowExecuteOptions} options
  * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
@@ -159,14 +192,18 @@ declare function executeChildWorkflow(parentWorkflow: _smithers_orchestrator_com
 }>;
 declare namespace __childWorkflowInternals {
     export { buildChildWorkflowRunId };
+    export { isChildRunLiveElsewhere };
+    export { loadPreservedChildResult };
     export { normalizeChildInput };
     export { normalizeChildOutput };
     export { resolveChildWorkflow };
     export { stripSystemColumns };
+    export { waitForChildRunToSettle };
 }
 type ChildWorkflowDefinition$1 = ChildWorkflowDefinition$2;
 type ChildWorkflowExecuteOptions = ChildWorkflowExecuteOptions$1;
 type RunResult$2 = _smithers_orchestrator_driver_RunResult.RunResult;
+type RunRow = _smithers_orchestrator_db_adapter_RunRow.RunRow;
 /**
  * @param {string} parentRunId
  * @param {string} stepId
@@ -174,6 +211,32 @@ type RunResult$2 = _smithers_orchestrator_driver_RunResult.RunResult;
  * @returns {string}
  */
 declare function buildChildWorkflowRunId(parentRunId: string, stepId: string, iteration: number): string;
+/**
+ * A child run is "live elsewhere" when another engine process is actively
+ * executing it: its status is `running` and either its heartbeat is fresh or
+ * its runtime owner pid is alive. Mirrors the engine's resume guards
+ * (RUN_STILL_RUNNING / RUN_OWNER_ALIVE), but instead of failing the parent
+ * task, prefer-resume attaches to the in-flight child.
+ * @param {Pick<RunRow, "status" | "heartbeatAtMs" | "runtimeOwnerId"> | null | undefined} run
+ * @param {number} [now]
+ * @returns {boolean}
+ */
+declare function isChildRunLiveElsewhere(run: Pick<RunRow, "status" | "heartbeatAtMs" | "runtimeOwnerId"> | null | undefined, now?: number): boolean;
+/**
+ * Load the preserved result of a child run that already reached a terminal
+ * state straight from its database. Prefer-resume never re-executes a child
+ * that already settled, so its recorded outputs and terminal status survive
+ * parent crash/restart cycles unchanged.
+ * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} childWorkflow
+ * @param {string} childRunId
+ * @param {RunResult["status"]} status
+ * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
+ */
+declare function loadPreservedChildResult(childWorkflow: _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<any>, childRunId: string, status: RunResult$2["status"]): Promise<{
+    runId: string;
+    status: RunResult$2["status"];
+    output: unknown;
+}>;
 /**
  * @param {unknown} input
  * @returns {Record<string, unknown>}
@@ -195,6 +258,18 @@ declare function resolveChildWorkflow(definition: ChildWorkflowDefinition$1, par
  * @returns {unknown}
  */
 declare function stripSystemColumns(value: unknown): unknown;
+/**
+ * Attach to a child run another process is executing: poll its row until the
+ * other owner drives it to rest (terminal, waiting, paused) or abandons it
+ * (stale heartbeat and dead owner pid), so a parent resume never launches a
+ * duplicate of a child already in flight.
+ * @param {SmithersDb} adapter
+ * @param {string} childRunId
+ * @param {AbortSignal} [signal]
+ * @param {number} [pollIntervalMs]
+ * @returns {Promise<RunRow | undefined>}
+ */
+declare function waitForChildRunToSettle(adapter: SmithersDb$1, childRunId: string, signal?: AbortSignal, pollIntervalMs?: number): Promise<RunRow | undefined>;
 
 /** @typedef {import("@smithers-orchestrator/observability/correlation").CorrelationContext} CorrelationContext */
 /**
@@ -202,6 +277,15 @@ declare function stripSystemColumns(value: unknown): unknown;
  */
 /** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
+/**
+ * Run-scoped event bus with three emit flavors:
+ * - `emitEvent` — Effect: listener emit + metrics, plus a DB row when a db
+ *   handle exists (no ndjson log).
+ * - `emitEventWithPersist` — Effect: same, plus the ndjson stream log.
+ * - `emitEventQueued` — Promise: the listener emit is synchronous, but
+ *   persistence is serialized behind `persistTail`; a failed enqueued persist
+ *   is surfaced on the next `flush()` via `persistError`.
+ */
 declare class EventBus$1 extends EventEmitter<any> {
     /**
    * @param {{ db?: BunSQLiteDatabase; logDir?: string; startSeq?: number }} opts
@@ -285,6 +369,36 @@ type CorrelatedSmithersEvent = SmithersEvent & {
     correlation?: CorrelationContext;
 };
 type SmithersEvent = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
+
+/**
+ * True when a child workflow definition is a `{ path }` reference to a
+ * workflow module file, as opposed to a built workflow object (which carries
+ * a `build` function) or a factory function.
+ *
+ * @param {unknown} value
+ * @returns {value is ChildWorkflowFileRef}
+ */
+declare function isWorkflowFileRef(value: unknown): value is ChildWorkflowFileRef$1;
+/**
+ * Load a runtime-generated workflow module file, enforcing that it lives
+ * inside an approved root directory. Both the root and the file are
+ * realpath-resolved so a symlink inside the root cannot smuggle in a module
+ * from outside it. The module must default export a workflow built with
+ * `smithers(...)` — the same contract the CLI enforces for workflow entry
+ * files.
+ *
+ * @param {ChildWorkflowFileRef} ref
+ * @param {{ approvedRoot?: string }} [opts]
+ * @returns {Promise<{ workflow: AnySmithersWorkflow; path: string }>}
+ */
+declare function loadWorkflowFileRef(ref: ChildWorkflowFileRef$1, opts?: {
+    approvedRoot?: string;
+}): Promise<{
+    workflow: AnySmithersWorkflow;
+    path: string;
+}>;
+type ChildWorkflowFileRef$1 = ChildWorkflowFileRef$2;
+type AnySmithersWorkflow = _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<any>;
 
 /**
  * Watch markdown artifacts under `.smithers/{tickets,plans,specs,proposals}` and
@@ -828,7 +942,7 @@ declare class HotWorkflowController {
     /**
    * @param {string[]} changedFiles
    */
-    reloadEffect(changedFiles: string[]): Effect.Effect<{
+    reloadEffect(changedFiles: string[]): Effect.Effect<HotReloadEvent$2 | {
         type: string;
         generation: number;
         changedFiles: string[];
@@ -840,22 +954,11 @@ declare class HotWorkflowController {
         changedFiles: string[];
         newBuild: any;
         error?: undefined;
-    } | {
-        type: string;
-        generation: any;
-        changedFiles: any;
-        reason: string;
-        error?: undefined;
-    } | {
-        type: string;
-        generation: any;
-        changedFiles: any;
-        error: any;
-        reason?: undefined;
     }, never, never>;
     /** Stop watchers and clean up overlay directory. */
     close(): Promise<void>;
-    closeEffect(): Effect.Effect<any, any, any>;
+    closeSync(): void;
+    closeEffect(): Effect.Effect<void, never, never>;
 }
 type HotReloadEvent$1 = HotReloadEvent$2;
 type HotReloadOptions = _smithers_orchestrator_driver_RunOptions.HotReloadOptions;
@@ -946,7 +1049,7 @@ declare function bridgeApprovalResolve(adapter: _SmithersDb$4, runId: string, no
     decidedBy?: string | null;
     decisionJson?: string | null;
     autoApproved?: boolean;
-}): Promise<boolean>;
+}): Promise<void>;
 declare function bridgeWaitForEventResolve(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number, signal: WaitForEventSignalInput): Promise<void>;
 declare function bridgeSignalResolve(adapter: _SmithersDb$4, runId: string, signal: WaitForEventSignalInput): Promise<void>;
 type BridgeDeferredResult = {
@@ -981,9 +1084,11 @@ declare function isBridgeManagedWaitForEventTask(desc: _TaskDescriptor$5): boole
  * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @param {DeferredBridgeStateEmitter} [emitStateEvent]
+ * @param {Map<string, number>} [initialTimerStarts] Carried duration-timer start
+ *   anchors (see resolveTimerTaskStateBridge).
  * @returns {Promise<DeferredBridgeResolution>}
  */
-declare function resolveDeferredTaskStateBridge(adapter: _SmithersDb$3, db: BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$5, eventBus: EventBus, emitStateEvent?: DeferredBridgeStateEmitter): Promise<DeferredBridgeResolution>;
+declare function resolveDeferredTaskStateBridge(adapter: _SmithersDb$3, db: BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$5, eventBus: EventBus, emitStateEvent?: DeferredBridgeStateEmitter, initialTimerStarts?: Map<string, number>): Promise<DeferredBridgeResolution>;
 /**
  * @param {_SmithersDb} adapter
  * @param {string} runId
@@ -1011,7 +1116,7 @@ type BunSQLiteDatabase$1 = drizzle_orm_bun_sqlite.BunSQLiteDatabase<Record<strin
  */
 declare function withWorkflowMakeBridgeRuntime<T>(runtime: WorkflowMakeBridgeRuntime, execute: () => T): T;
 /**
- * @returns {| WorkflowMakeBridgeRuntime | undefined}
+ * @returns {WorkflowMakeBridgeRuntime | undefined}
  */
 declare function getWorkflowMakeBridgeRuntime(): WorkflowMakeBridgeRuntime | undefined;
 /**
@@ -1356,8 +1461,14 @@ declare function parseAttemptErrorCode(errorJson?: string | null): string | null
  * @returns {Promise<A>}
  */
 declare function runEffectOrPromise<A>(value: Effect.Effect<A, unknown, never> | PromiseLike<A> | A): Promise<A>;
-declare function taskBridgeResultForError(error: any): {
-    terminal: boolean;
+/**
+ * Converts a RetriableTaskFailure into a non-terminal bridge result; rethrows every other error.
+ *
+ * @param {unknown} error
+ * @returns {{ terminal: false }}
+ */
+declare function taskBridgeResultForError(error: unknown): {
+    terminal: false;
 };
 
 type TaskActivityRetryOptions$1 = {
@@ -1508,16 +1619,6 @@ declare function isRunHeartbeatFresh(run: {
     status?: string | null;
     heartbeatAtMs?: number | null;
 } | null | undefined, now?: number): boolean;
-declare function finalizeCancelledRun(adapter: SmithersDb$1, runId: string, options?: {
-    now?: number;
-    eventBus?: unknown;
-    errorJson?: string | null;
-}): Promise<{
-    won: boolean;
-    status: "cancelled" | "already-terminal" | "not-found";
-    terminalStatus?: string;
-    repaired: boolean;
-}>;
 /**
  * @param {{ _?: { fullSchema?: Record<string, unknown>; schema?: Record<string, unknown> }; schema?: Record<string, unknown> }} db
  * @returns {Record<string, unknown>}
@@ -1529,6 +1630,25 @@ declare function resolveSchema(db: {
     };
     schema?: Record<string, unknown>;
 }): Record<string, unknown>;
+/**
+ * Complete a cancellation that is being applied by a caller that does not
+ * have a live engine (CLI/Gateway waiting-run paths). Keeping this here makes
+ * the durable wait cleanup and the cancellation event/metric inseparable.
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {{ now?: number; eventBus?: EventBus; errorJson?: string | null }} [options]
+ */
+declare function finalizeCancelledRun(adapter: SmithersDb$1, runId: string, options?: {
+    now?: number;
+    eventBus?: EventBus$1;
+    errorJson?: string | null;
+}): Promise<{
+    runId: string;
+    won: boolean;
+    status: string;
+    terminalStatus: any;
+    repaired: boolean;
+}>;
 /**
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
@@ -1902,56 +2022,8 @@ declare function createBuilder(prefix?: string): BuilderApi;
  * @param {BuilderStepHandle[]} handles
  */
 declare function createBuilderDb(filename: string, handles: BuilderStepHandle[]): {
-    sqlite: Database;
-    db: drizzle_orm_bun_sqlite.BunSQLiteDatabase<{
-        input: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
-            name: "input";
-            schema: undefined;
-            columns: {
-                runId: drizzle_orm_sqlite_core.SQLiteColumn<{
-                    name: "run_id";
-                    tableName: "input";
-                    dataType: "string";
-                    columnType: "SQLiteText";
-                    data: string;
-                    driverParam: string;
-                    notNull: true;
-                    hasDefault: false;
-                    isPrimaryKey: true;
-                    isAutoincrement: false;
-                    hasRuntimeDefault: false;
-                    enumValues: [string, ...string[]];
-                    baseColumn: never;
-                    identity: undefined;
-                    generated: undefined;
-                }, {}, {
-                    length: number | undefined;
-                }>;
-                payload: drizzle_orm_sqlite_core.SQLiteColumn<{
-                    name: "payload";
-                    tableName: "input";
-                    dataType: "json";
-                    columnType: "SQLiteTextJson";
-                    data: any;
-                    driverParam: string;
-                    notNull: false;
-                    hasDefault: false;
-                    isPrimaryKey: false;
-                    isAutoincrement: false;
-                    hasRuntimeDefault: false;
-                    enumValues: undefined;
-                    baseColumn: never;
-                    identity: undefined;
-                    generated: undefined;
-                }, {}, {
-                    $type: any;
-                }>;
-            };
-            dialect: "sqlite";
-        }>;
-    }> & {
-        $client: Database;
-    };
+    sqlite: any;
+    db: any;
     inputTable: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
         name: "input";
         schema: undefined;
@@ -2551,7 +2623,7 @@ type SignalPayload$1 = {
     sentBy?: string;
 };
 
-type RunStatusSchema$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "finished" | "continued" | "failed" | "cancelled";
+type RunStatusSchema$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "paused" | "finished" | "continued" | "failed" | "cancelled";
 
 type RunSummary$1 = {
     runId: string;
@@ -2614,7 +2686,7 @@ type ApprovalPayload$1 = {
 };
 
 type RunStatusSchema = RunStatusSchema$1;
-declare const RunStatusSchema: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+declare const RunStatusSchema: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
 declare const ApprovalPayloadSchema: Schema.Struct<{
     runId: typeof Schema.String;
     nodeId: typeof Schema.String;
@@ -2653,7 +2725,7 @@ declare const SignalResultSchema: Schema.Struct<{
 }>;
 declare const ListRunsPayloadSchema: Schema.Struct<{
     limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
+    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>>;
 }>;
 declare const RunSummarySchema: Schema.Struct<{
     runId: typeof Schema.String;
@@ -2661,7 +2733,7 @@ declare const RunSummarySchema: Schema.Struct<{
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2685,7 +2757,7 @@ declare const GetRunResultSchema: Schema.NullOr<Schema.Struct<{
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2716,7 +2788,10 @@ declare const cancel: Rpc.Rpc<"cancel", Schema.Struct<{
     runId: typeof Schema.String;
 }>, Schema.Struct<{
     runId: typeof Schema.String;
-    status: Schema.Literal<["cancelling", "cancelled"]>;
+    status: Schema.Literal<["cancelling", "cancelled", "already-terminal", "not-found"]>;
+    won: typeof Schema.Boolean;
+    terminalStatus: Schema.optional<typeof Schema.String>;
+    repaired: typeof Schema.Boolean;
 }>, typeof Schema.Never, never>;
 declare const signal: Rpc.Rpc<"signal", Schema.Struct<{
     runId: typeof Schema.String;
@@ -2732,14 +2807,14 @@ declare const signal: Rpc.Rpc<"signal", Schema.Struct<{
 }>, typeof Schema.Never, never>;
 declare const listRuns: Rpc.Rpc<"listRuns", Schema.Struct<{
     limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
+    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>>;
 }>, Schema.Array$<Schema.Struct<{
     runId: typeof Schema.String;
     parentRunId: Schema.NullOr<typeof Schema.String>;
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2762,7 +2837,7 @@ declare const getRun: Rpc.Rpc<"getRun", Schema.Struct<{
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2792,7 +2867,10 @@ declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Stru
     runId: typeof Schema.String;
 }>, Schema.Struct<{
     runId: typeof Schema.String;
-    status: Schema.Literal<["cancelling", "cancelled"]>;
+    status: Schema.Literal<["cancelling", "cancelled", "already-terminal", "not-found"]>;
+    won: typeof Schema.Boolean;
+    terminalStatus: Schema.optional<typeof Schema.String>;
+    repaired: typeof Schema.Boolean;
 }>, typeof Schema.Never, never> | Rpc.Rpc<"signal", Schema.Struct<{
     runId: typeof Schema.String;
     signalName: typeof Schema.String;
@@ -2806,14 +2884,14 @@ declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Stru
     status: Schema.Literal<["signalled", "ignored"]>;
 }>, typeof Schema.Never, never> | Rpc.Rpc<"listRuns", Schema.Struct<{
     limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
+    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>>;
 }>, Schema.Array$<Schema.Struct<{
     runId: typeof Schema.String;
     parentRunId: Schema.NullOr<typeof Schema.String>;
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2835,7 +2913,7 @@ declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Stru
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2940,137 +3018,7 @@ declare function loadOptimizationArtifact(path?: string | null | undefined): any
  * @param {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor[]} tasks
  * @param {unknown} [artifact]
  */
-declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_graph_TaskDescriptor.TaskDescriptor[], artifact?: unknown): ({
-    nodeId: string;
-    ordinal: number;
-    iteration: number;
-    ralphId?: string;
-    dependsOn?: string[];
-    needs?: Record<string, string>;
-    forkSource?: string;
-    worktreeId?: string;
-    worktreePath?: string;
-    worktreeBranch?: string;
-    worktreeBaseBranch?: string;
-    outputTable: unknown | null;
-    outputTableName: string;
-    outputRef?: zod.ZodObject;
-    outputSchema?: zod.ZodObject;
-    parallelGroupId?: string;
-    parallelMaxConcurrency?: number;
-    needsApproval: boolean;
-    waitAsync?: boolean;
-    approvalMode?: "gate" | "decision" | "select" | "rank";
-    approvalOnDeny?: "fail" | "continue" | "skip";
-    approvalOptions?: {
-        key: string;
-        label: string;
-        summary?: string;
-        metadata?: Record<string, unknown>;
-    }[];
-    approvalAllowedScopes?: string[];
-    approvalAllowedUsers?: string[];
-    approvalAutoApprove?: {
-        after?: number;
-        audit?: boolean;
-        conditionMet?: boolean;
-        revertOnMet?: boolean;
-    };
-    skipIf: boolean;
-    retries: number;
-    retryPolicy?: {
-        backoff?: "fixed" | "linear" | "exponential";
-        initialDelayMs?: number;
-    };
-    timeoutMs: number | null;
-    heartbeatTimeoutMs: number | null;
-    continueOnFail: boolean;
-    cachePolicy?: {
-        [key: string]: unknown;
-        by?: ((ctx: unknown) => unknown) | undefined;
-        version?: string;
-        key?: string;
-        ttlMs?: number;
-        scope?: "run" | "workflow" | "global";
-    };
-    hijack?: boolean;
-    onHijackExit?: "complete" | "reopen";
-    agent?: {
-        id?: string;
-        tools?: Record<string, unknown>;
-        supportsNativeStructuredOutput?: boolean;
-        capabilities?: {
-            version: 1;
-            engine: string;
-            runtimeTools: Record<string, {
-                description?: string;
-                source?: string;
-            }>;
-            mcp: Record<string, unknown>;
-            skills: Record<string, unknown>;
-            humanInteraction: Record<string, unknown>;
-            builtIns: string[];
-        };
-        generate: (args: unknown) => Promise<unknown>;
-    } | {
-        id?: string;
-        tools?: Record<string, unknown>;
-        supportsNativeStructuredOutput?: boolean;
-        capabilities?: {
-            version: 1;
-            engine: string;
-            runtimeTools: Record<string, {
-                description?: string;
-                source?: string;
-            }>;
-            mcp: Record<string, unknown>;
-            skills: Record<string, unknown>;
-            humanInteraction: Record<string, unknown>;
-            builtIns: string[];
-        };
-        generate: (args: unknown) => Promise<unknown>;
-    }[];
-    prompt?: string;
-    staticPayload?: unknown;
-    computeFn?: () => unknown | Promise<unknown>;
-    label?: string;
-    meta?: Record<string, unknown>;
-    scorers?: {
-        [x: string]: unknown;
-    };
-    groundTruth?: unknown;
-    context?: unknown;
-    memoryConfig?: {
-        recall?: {
-            namespace?: {
-                kind: "agent" | "workflow" | "global" | "user";
-                id: string;
-            };
-            query?: string;
-            topK?: number;
-        };
-        remember?: {
-            namespace?: {
-                kind: "agent" | "workflow" | "global" | "user";
-                id: string;
-            };
-            key?: string;
-        };
-        threadId?: string;
-    };
-    aspects?: {
-        tokenBudget?: {
-            max: number;
-            perTask?: number;
-            onExceeded?: "fail" | "warn" | "skip-remaining";
-        };
-        latencySlo?: {
-            maxMs: number;
-            perTask?: number;
-            onExceeded?: "fail" | "warn";
-        };
-    };
-} | {
+declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_graph_TaskDescriptor.TaskDescriptor[], artifact?: unknown): (_smithers_orchestrator_graph_types.TaskDescriptor | {
     prompt: string;
     meta: {
         optimizationArtifactId: any;
@@ -3079,6 +3027,7 @@ declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_
     nodeId: string;
     ordinal: number;
     iteration: number;
+    kind?: "agent" | "compute" | "static" | "human";
     ralphId?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;
@@ -3093,16 +3042,16 @@ declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_
     outputSchema?: zod.ZodObject;
     parallelGroupId?: string;
     parallelMaxConcurrency?: number;
+    subtreeGroupId?: string;
+    subtreeChildKey?: string;
+    subtreeMax?: number;
+    priority?: number;
+    failurePolicy?: "halt" | "quarantine";
     needsApproval: boolean;
     waitAsync?: boolean;
     approvalMode?: "gate" | "decision" | "select" | "rank";
     approvalOnDeny?: "fail" | "continue" | "skip";
-    approvalOptions?: {
-        key: string;
-        label: string;
-        summary?: string;
-        metadata?: Record<string, unknown>;
-    }[];
+    approvalOptions?: _smithers_orchestrator_graph_types.ApprovalOption[];
     approvalAllowedScopes?: string[];
     approvalAllowedUsers?: string[];
     approvalAutoApprove?: {
@@ -3113,96 +3062,22 @@ declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_
     };
     skipIf: boolean;
     retries: number;
-    retryPolicy?: {
-        backoff?: "fixed" | "linear" | "exponential";
-        initialDelayMs?: number;
-    };
+    retryPolicy?: _smithers_orchestrator_graph_types.RetryPolicy;
     timeoutMs: number | null;
     heartbeatTimeoutMs: number | null;
     continueOnFail: boolean;
-    cachePolicy?: {
-        [key: string]: unknown;
-        by?: ((ctx: unknown) => unknown) | undefined;
-        version?: string;
-        key?: string;
-        ttlMs?: number;
-        scope?: "run" | "workflow" | "global";
-    };
+    cachePolicy?: _smithers_orchestrator_graph_types.CachePolicy;
     hijack?: boolean;
     onHijackExit?: "complete" | "reopen";
-    agent?: {
-        id?: string;
-        tools?: Record<string, unknown>;
-        supportsNativeStructuredOutput?: boolean;
-        capabilities?: {
-            version: 1;
-            engine: string;
-            runtimeTools: Record<string, {
-                description?: string;
-                source?: string;
-            }>;
-            mcp: Record<string, unknown>;
-            skills: Record<string, unknown>;
-            humanInteraction: Record<string, unknown>;
-            builtIns: string[];
-        };
-        generate: (args: unknown) => Promise<unknown>;
-    } | {
-        id?: string;
-        tools?: Record<string, unknown>;
-        supportsNativeStructuredOutput?: boolean;
-        capabilities?: {
-            version: 1;
-            engine: string;
-            runtimeTools: Record<string, {
-                description?: string;
-                source?: string;
-            }>;
-            mcp: Record<string, unknown>;
-            skills: Record<string, unknown>;
-            humanInteraction: Record<string, unknown>;
-            builtIns: string[];
-        };
-        generate: (args: unknown) => Promise<unknown>;
-    }[];
+    agent?: _smithers_orchestrator_graph_types.AgentLike | _smithers_orchestrator_graph_types.AgentLike[];
     staticPayload?: unknown;
     computeFn?: () => unknown | Promise<unknown>;
     label?: string;
-    scorers?: {
-        [x: string]: unknown;
-    };
+    scorers?: _smithers_orchestrator_graph_types.ScorersMap;
     groundTruth?: unknown;
     context?: unknown;
-    memoryConfig?: {
-        recall?: {
-            namespace?: {
-                kind: "agent" | "workflow" | "global" | "user";
-                id: string;
-            };
-            query?: string;
-            topK?: number;
-        };
-        remember?: {
-            namespace?: {
-                kind: "agent" | "workflow" | "global" | "user";
-                id: string;
-            };
-            key?: string;
-        };
-        threadId?: string;
-    };
-    aspects?: {
-        tokenBudget?: {
-            max: number;
-            perTask?: number;
-            onExceeded?: "fail" | "warn" | "skip-remaining";
-        };
-        latencySlo?: {
-            maxMs: number;
-            perTask?: number;
-            onExceeded?: "fail" | "warn";
-        };
-    };
+    memoryConfig?: _smithers_orchestrator_graph_types.TaskMemoryConfig;
+    aspects?: _smithers_orchestrator_graph_types.TaskAspects;
 })[];
 declare const OPTIMIZATION_ARTIFACT_ENV: "SMITHERS_OPTIMIZATION_ARTIFACT";
 
@@ -3216,9 +3091,19 @@ declare const OPTIMIZATION_ARTIFACT_ENV: "SMITHERS_OPTIMIZATION_ARTIFACT";
  * @returns {z.ZodObject<any>}
  */
 declare function jsonSchemaToZod(rootSchema: JsonSchema): z.ZodObject<any>;
+/**
+ * Convert a JSON Schema to a Zod schema without coercing the root to an
+ * object. Non-object roots (e.g. the string-enum schema a select-kind human
+ * request stores) keep their real validator instead of the catchall-object
+ * fallback, which would reject every non-object value.
+ *
+ * @param {JsonSchema} rootSchema
+ * @returns {z.ZodType}
+ */
+declare function jsonSchemaToZodType(rootSchema: JsonSchema): z.ZodType;
 type JsonSchema = Record<string, any>;
 
 type ChildWorkflowDefinition = ChildWorkflowDefinition$2;
-export { finalizeCancelledRun };
+type ChildWorkflowFileRef = ChildWorkflowFileRef$2;
 
-export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnyEffect, type AnySchema, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuildAgentAskRequestInput, type BuilderApi, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type BuiltSmithersWorkflow, COMPLETED_ACTIVITY_RESULTS_MAX, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, type ComponentDefinition, type ComponentDefinitionBuilder, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, DEFAULT_AGENT_ASK_NODE_ID, type DiffBundle, EventBus$1 as EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanAnswerOutcome, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, OPTIMIZATION_ARTIFACT_ENV, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunResult$2 as RunResult, RunStatusSchema, type RunSummary, RunSummarySchema, type SQLiteTable, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, Smithers, type SmithersAlertPolicy, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, type StaticTaskBridgeToolConfig, type StepOptions, type TaskActivityContext, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowDefinitionBuilder, type WorkflowGraph, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type XmlNode, type _TaskActivityContext, __approvalInternals, __builderInternals, __childWorkflowInternals, __computeTaskBridgeInternals, __diffBundleInternals, __humanRequestInternals, __staticTaskBridgeInternals, __workflowBridgeInternals, applyDiffBundle, applyOptimizationArtifactToTasks, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildAgentAskRequestId, buildAgentAskRequestRow, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cleanupGenerations, completedActivityResultsSize, computeDiffBundle, computeDiffBundleBetweenRefs, createDocWatcher, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, fragment, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isHumanRequestPastTimeout, isHumanTaskMeta, isPidAlive, isResolvedHumanRequestStatus, isRunHeartbeatFresh, isTaskResultFailure, jsonSchemaToZod, listRuns, loadOptimizationArtifact, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, parseRuntimeOwnerPid, renderFrame, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, startDocFileSync, subscribeTaskWorkerDispatches, syncDocsFromDisk, usePatched, validateHumanRequestValue, waitForHumanAnswer, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime, workflow };
+export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnyEffect, type AnySchema, type AnySmithersWorkflow, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuildAgentAskRequestInput, type BuilderApi, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type BuiltSmithersWorkflow, COMPLETED_ACTIVITY_RESULTS_MAX, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, type ChildWorkflowFileRef, type ComponentDefinition, type ComponentDefinitionBuilder, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, DEFAULT_AGENT_ASK_NODE_ID, type DiffBundle, EventBus$1 as EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanAnswerOutcome, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, OPTIMIZATION_ARTIFACT_ENV, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunResult$2 as RunResult, type RunRow, RunStatusSchema, type RunSummary, RunSummarySchema, type SQLiteTable, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, Smithers, type SmithersAlertPolicy, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, type StaticTaskBridgeToolConfig, type StepOptions, type TaskActivityContext, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowDefinitionBuilder, type WorkflowGraph, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type XmlNode, type _TaskActivityContext, __approvalInternals, __builderInternals, __childWorkflowInternals, __computeTaskBridgeInternals, __diffBundleInternals, __humanRequestInternals, __staticTaskBridgeInternals, __workflowBridgeInternals, applyDiffBundle, applyOptimizationArtifactToTasks, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildAgentAskRequestId, buildAgentAskRequestRow, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cleanupGenerations, completedActivityResultsSize, computeDiffBundle, computeDiffBundleBetweenRefs, createDocWatcher, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, finalizeCancelledRun, fragment, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isHumanRequestPastTimeout, isHumanTaskMeta, isPidAlive, isResolvedHumanRequestStatus, isRunHeartbeatFresh, isTaskResultFailure, isWorkflowFileRef, jsonSchemaToZod, jsonSchemaToZodType, listRuns, loadOptimizationArtifact, loadWorkflowFileRef, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, parseRuntimeOwnerPid, renderFrame, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, startDocFileSync, subscribeTaskWorkerDispatches, syncDocsFromDisk, usePatched, validateHumanRequestValue, waitForHumanAnswer, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime, workflow };
