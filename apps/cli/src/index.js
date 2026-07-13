@@ -49,6 +49,7 @@ import { colorizeEventText, formatAge, formatElapsedCompact, formatEventLine, fo
 import { EVENT_CATEGORY_VALUES, eventTypesForCategory, normalizeEventCategory, } from "./event-categories.js";
 import { aggregateNodeDetailEffect, renderNodeDetailHuman, } from "./node-detail.js";
 import { diagnoseRunEffect, diagnosisCtaCommands, renderWhyDiagnosisHuman, } from "./why-diagnosis.js";
+import { buildRunStatusSummary, renderRunStatusHuman, runStatusCtaCommands, } from "./run-status.js";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
 import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
@@ -85,7 +86,9 @@ import { resumeRunDetached } from "./resume-detached.js";
 import { launchPostFailureAutopsy } from "./launchPostFailureAutopsy.js";
 import { resolveLaunchRootDir, parsePersistedRootDir } from "./resolve-root.js";
 import { formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, } from "@smithers-orchestrator/agents/cli-capabilities";
-import { parseDurationMs, supervisorLoopEffect, } from "./supervisor.js";
+import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect, } from "./supervisor.js";
+import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
+import { buildDurabilityRunOptions } from "./up-engine-options.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs, } from "./watch.js";
 import { runMcpModeIfRequested } from "./mcp/mcp-mode.js";
 import { issueSmithersBrokerToken, parseTokenScopes, readSmithersTokenStore, resolveSmithersActionTokenFromStore, revokeSmithersToken, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
@@ -1425,7 +1428,7 @@ async function resolveApprovalCommandTarget(adapter, runId, options) {
  * @param {string} runId
  * @returns {Promise<InspectSnapshot>}
  */
-async function buildInspectSnapshot(adapter, runId) {
+async function buildInspectSnapshot(adapter, runId, options = {}) {
     const run = await adapter.getRun(runId);
     if (!run) {
         throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`);
@@ -1457,6 +1460,12 @@ async function buildInspectSnapshot(adapter, runId) {
     }
     const steps = nodes.map((n) => ({
         id: n.nodeId,
+        state: n.state,
+        attempt: n.lastAttempt ?? 0,
+        label: n.label ?? n.nodeId,
+    }));
+    const canonicalNodes = nodes.map((n) => ({
+        nodeId: n.nodeId,
         state: n.state,
         attempt: n.lastAttempt ?? 0,
         label: n.label ?? n.nodeId,
@@ -1516,7 +1525,15 @@ async function buildInspectSnapshot(adapter, runId) {
             ? { failedChildren: failedChildKeys.length, failedChildKeys }
             : {}),
         steps,
+        nodes: canonicalNodes,
     };
+    if (options.pool) {
+        const pool = tallyAttemptPool(await adapter.listAttemptsForRun(runId));
+        result.pool = {
+            attempts: pool,
+            summary: renderAttemptPool(pool),
+        };
+    }
     if (continuedFromVisible.length > 0) {
         result.run.continuedFrom = continuedFromVisible;
         result.run.continuedFromDisplay = [
@@ -1621,6 +1638,7 @@ const upOptions = z.object({
     annotations: z.string().optional().describe("Run annotations as a flat JSON object of string/number/boolean values"),
     resume: z.union([z.boolean(), z.string()]).default(false).describe("Resume a previous run. Pass true with --run-id, or pass the run ID directly (e.g. --resume <run-id>)"),
     force: z.boolean().default(false).describe("Resume even if still marked running"),
+    acceptWorkflowChange: z.boolean().default(false).describe("Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism"),
     resumeClaimOwner: z.string().optional().describe("Internal durable resume claim owner"),
     resumeClaimHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume claim heartbeat"),
     resumeRestoreOwner: z.string().optional().describe("Internal durable resume restore owner"),
@@ -1669,6 +1687,8 @@ const evalOptions = z.object({
     optimization: z.string().optional().describe("Apply a Smithers optimization artifact while running the eval suite"),
 });
 const superviseOptions = z.object({
+    run: z.string().optional().describe("Only supervise these run IDs (comma-separated)"),
+    all: z.boolean().default(false).describe("Explicitly supervise every eligible run in the workspace"),
     dryRun: z.boolean().default(false).describe("Show which stale runs would be resumed, without acting"),
     interval: z.string().default("10s").describe("Poll interval (e.g. 10s, 30s, 1m)"),
     staleThreshold: z.string().default("30s").describe("Heartbeat staleness threshold before resume"),
@@ -1727,6 +1747,7 @@ const eventsOptions = z.object({
     groupBy: z.string().optional().describe("Group output by \"node\" or \"attempt\""),
     watch: z.boolean().default(false).describe("Watch mode: append new events as they arrive"),
     interval: z.number().positive().default(2).describe("Watch poll interval in seconds"),
+    raw: z.boolean().default(false).describe("Include raw agent chunk/tool history instead of the default lifecycle-only view"),
 });
 const chatArgs = z.object({
     runId: z.string().optional().describe("Run ID to inspect (default: latest run)"),
@@ -1747,6 +1768,7 @@ const inspectArgs = z.object({
 const inspectOptions = z.object({
     watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
     interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
+    pool: z.boolean().default(false).describe("Tally attempts by agent engine/model"),
 });
 const nodeArgs = z.object({
     nodeId: z.string().describe("Node ID to inspect"),
@@ -1764,6 +1786,13 @@ const whyArgs = z.object({
 });
 const whyOptions = z.object({
     json: z.boolean().default(false).describe("Output structured JSON diagnosis"),
+});
+const statusArgs = z.object({
+    runId: z.string().describe("Run ID to summarize"),
+});
+const statusOptions = z.object({
+    json: z.boolean().default(false).describe("Output the structured summary as JSON"),
+    window: z.number().positive().optional().describe("Recent-activity window in minutes for the throughput/verdict checks (default 10)"),
 });
 const whatArgs = z.object({
     runId: z.string().optional().describe("Run ID to explain (default: latest run)"),
@@ -2031,10 +2060,10 @@ function resolveSupervisorOptions(intervalRaw, staleThresholdRaw, maxConcurrent,
  * @param {UpCommandOptions} options
  */
 function validateUpOptionConsistency(options) {
-    if (options.supervise && !options.serve) {
+    if (options.supervise && !options.serve && !options.detach) {
         return {
-            code: "SUPERVISE_REQUIRES_SERVE",
-            message: "--supervise on `smithers up` requires --serve. Use `smithers supervise` for standalone mode.",
+            code: "SUPERVISE_REQUIRES_DETACH_OR_SERVE",
+            message: "--supervise on `smithers up` requires --detach or --serve. Use `smithers supervise --run <id>` for standalone mode.",
             exitCode: 4,
         };
     }
@@ -2129,6 +2158,9 @@ function normalizeEventsQuery(options) {
         }
         typeName = category;
         eventTypes = eventTypesForCategory(category);
+    }
+    else if (!options.raw) {
+        eventTypes = DEFAULT_LIFECYCLE_EVENT_TYPES;
     }
     let sinceTimestampMs;
     if (options.since) {
@@ -2247,6 +2279,8 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 childArgs.push("--resume");
             if (options.force)
                 childArgs.push("--force");
+            if (options.acceptWorkflowChange)
+                childArgs.push("--accept-workflow-change");
             if (options.resumeClaimOwner)
                 childArgs.push("--resume-claim-owner", options.resumeClaimOwner);
             if (options.resumeClaimHeartbeat)
@@ -2257,7 +2291,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 childArgs.push("--resume-restore-heartbeat", String(options.resumeRestoreHeartbeat));
             if (options.serve)
                 childArgs.push("--serve");
-            if (options.supervise)
+            if (options.supervise && options.serve)
                 childArgs.push("--supervise");
             if (options.superviseDryRun)
                 childArgs.push("--supervise-dry-run");
@@ -2291,6 +2325,25 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 env: process.env,
             });
             child.unref();
+            let supervisorPid;
+            if (options.supervise && !options.serve) {
+                const supervisorArgs = [cliPath, "supervise", "--run", effectiveRunId];
+                if (options.superviseDryRun)
+                    supervisorArgs.push("--dry-run");
+                if (options.superviseInterval !== "10s")
+                    supervisorArgs.push("--interval", options.superviseInterval);
+                if (options.superviseStaleThreshold !== "30s")
+                    supervisorArgs.push("--stale-threshold", options.superviseStaleThreshold);
+                if (options.superviseMaxConcurrent !== 3)
+                    supervisorArgs.push("--max-concurrent", String(options.superviseMaxConcurrent));
+                const supervisor = spawn("bun", supervisorArgs, {
+                    detached: true,
+                    stdio: ["ignore", fd, fd],
+                    env: process.env,
+                });
+                supervisor.unref();
+                supervisorPid = supervisor.pid;
+            }
             // A run detached from inside a Claude Code session should notify
             // that session's background monitor (approvals, failures, stalls).
             subscribeClaudeSessionRun(effectiveRunId);
@@ -2319,7 +2372,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 { command: `ps`, description: "List all runs" },
                 { command: `inspect ${effectiveRunId}`, description: "Inspect run state" },
             ], `${monitoring.text}\n\nOperate the run:`);
-            return c.ok({ runId: effectiveRunId, logFile, pid: child.pid, monitoring }, {
+            return c.ok({ runId: effectiveRunId, logFile, pid: child.pid, ...(supervisorPid ? { supervisorPid } : {}), monitoring }, {
                 cta: backgroundCta,
             });
         }
@@ -2579,7 +2632,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 input,
                 runId: effectiveRunId,
                 parentRunId: options.parentRunId,
-                resume,
+                ...buildDurabilityRunOptions({ resume, force: options.force, acceptWorkflowChange: options.acceptWorkflowChange }),
                 resumeClaim,
                 workflowPath: resolvedWorkflowPath,
                 maxConcurrency: options.maxConcurrency,
@@ -2622,7 +2675,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             input,
             runId,
             parentRunId: options.parentRunId,
-            resume,
+            ...buildDurabilityRunOptions({ resume, force: options.force, acceptWorkflowChange: options.acceptWorkflowChange }),
             resumeClaim,
             workflowPath: resolvedWorkflowPath,
             maxConcurrency: options.maxConcurrency,
@@ -5303,11 +5356,20 @@ const cli = Cli.create({
     // smithers supervise
     // =========================================================================
     .command("supervise", {
-    description: "Watch for stale running runs and auto-resume them.",
+    description: "Watch explicitly named stale runs and auto-resume them; pass --all to opt into a workspace-wide sweep.",
     options: superviseOptions,
-    alias: { dryRun: "n", interval: "i", staleThreshold: "t", maxConcurrent: "c" },
+    alias: { run: "r", all: "a", dryRun: "n", interval: "i", staleThreshold: "t", maxConcurrent: "c" },
     async run(c) {
         const fail = makeFail(c);
+        const runIds = c.options.run
+            ? [...new Set(c.options.run.split(",").map((runId) => runId.trim()).filter(Boolean))]
+            : [];
+        if (runIds.length === 0 && !c.options.all) {
+            return fail({ code: "SUPERVISOR_SCOPE_REQUIRED", message: "Refusing a workspace-wide sweep without an explicit scope. Pass --run <id>[,<id>...] or --all.", exitCode: 4 });
+        }
+        if (runIds.length > 0 && c.options.all) {
+            return fail({ code: "INVALID_SUPERVISOR_SCOPE", message: "Choose either --run <id>[,<id>...] or --all, not both.", exitCode: 4 });
+        }
         let parsed;
         try {
             parsed = resolveSupervisorOptions(c.options.interval, c.options.staleThreshold, c.options.maxConcurrent, c.options.dryRun);
@@ -5321,17 +5383,24 @@ const cli = Cli.create({
                 exitCode: 4,
             });
         }
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenSupervisorDb(runIds);
         const abort = setupAbortSignal();
-        process.stderr.write(`[smithers] Supervisor started (interval=${parsed.pollIntervalMs}ms, staleThreshold=${parsed.staleThresholdMs}ms, maxConcurrent=${parsed.maxConcurrent}, dryRun=${parsed.dryRun})\n`);
+        const scope = c.options.all ? "all workspace runs" : runIds.join(",");
+        process.stderr.write(`[smithers] Supervisor started (scope=${scope}, interval=${parsed.pollIntervalMs}ms, staleThreshold=${parsed.staleThresholdMs}ms, maxConcurrent=${parsed.maxConcurrent}, dryRun=${parsed.dryRun})\n`);
         try {
-            await runPromise(supervisorLoopEffect({
+            const supervisorOptions = {
                 adapter,
+                ...(c.options.all ? {} : { runIds }),
                 dryRun: parsed.dryRun,
                 pollIntervalMs: parsed.pollIntervalMs,
                 staleThresholdMs: parsed.staleThresholdMs,
                 maxConcurrent: parsed.maxConcurrent,
-            }), { signal: abort.signal });
+            };
+            if (parsed.dryRun) {
+                const summary = await runPromise(supervisorPollEffect(supervisorOptions));
+                return c.ok({ status: "dry-run", scope: c.options.all ? "all" : runIds, wouldResume: summary.wouldResumeRunIds, ...summary });
+            }
+            await runPromise(supervisorLoopEffect(supervisorOptions), { signal: abort.signal });
             return c.ok({ status: "stopped" });
         }
         catch (error) {
@@ -5428,7 +5497,7 @@ const cli = Cli.create({
     // smithers events <run_id>
     // =========================================================================
     .command("events", {
-    description: "Query run event history with filters, grouping, and NDJSON output.",
+    description: "Query node/run lifecycle history by default; pass --raw for raw agent chunks and all event types.",
     args: z.object({ runId: z.string().describe("Run ID to query") }),
     options: eventsOptions,
     alias: { node: "n", type: "t", since: "s", limit: "l", json: "j", watch: "w", interval: "i" },
@@ -6115,7 +6184,7 @@ const cli = Cli.create({
     // smithers inspect <run_id>
     // =========================================================================
 .command("inspect", {
-    description: "Output detailed run state, including steps, agents, approvals, and outputs.",
+    description: "Output detailed run state. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
     args: inspectArgs,
     options: inspectOptions,
     alias: { watch: "w", interval: "i" },
@@ -6135,7 +6204,7 @@ const cli = Cli.create({
                     const watchResult = await runPromise(Effect.tryPromise(() => runWatchLoop({
                         intervalSeconds: c.options.interval,
                         clearScreen: true,
-                        fetch: () => buildInspectSnapshot(adapter, c.args.runId),
+                        fetch: () => buildInspectSnapshot(adapter, c.args.runId, { pool: c.options.pool }),
                         render: async (snapshot) => {
                             renderInspect(snapshot);
                         },
@@ -6151,7 +6220,7 @@ const cli = Cli.create({
                     }
                     return c.ok(undefined);
                 }
-                const snapshot = await buildInspectSnapshot(adapter, c.args.runId);
+                const snapshot = await buildInspectSnapshot(adapter, c.args.runId, { pool: c.options.pool });
                 return c.ok(snapshot.result, { cta: { description: snapshot.ctaDescription, commands: snapshot.ctaCommands } });
             }
             finally {
@@ -6312,6 +6381,49 @@ const cli = Cli.create({
                 });
             }
             return fail({ code: "WHY_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+    },
+})
+    // =========================================================================
+    // smithers status <run_id>
+    // =========================================================================
+    .command("status", {
+    description: "Concise run health at a glance: verdict, node counts, agent/model mix, throughput, and the nodes gating progress.",
+    args: statusArgs,
+    options: statusOptions,
+    async run(c) {
+        const fail = makeFail(c);
+        try {
+            const { adapter, cleanup } = await findAndOpenDb();
+            try {
+                const summary = await buildRunStatusSummary(adapter, c.args.runId, {
+                    ...(c.options.window
+                        ? { recentWindowMs: Math.floor(c.options.window * 60_000) }
+                        : {}),
+                });
+                if (c.options.json) {
+                    return c.ok(JSON.stringify(summary, null, 2));
+                }
+                if (c.format === "json") {
+                    return c.ok(summary);
+                }
+                return c.ok(renderRunStatusHuman(summary), {
+                    cta: withAgentNextSteps({ runId: c.args.runId }, runStatusCtaCommands(summary)),
+                });
+            }
+            finally {
+                cleanup();
+            }
+        }
+        catch (err) {
+            if (err instanceof SmithersError && err.code === "RUN_NOT_FOUND") {
+                return fail({
+                    code: "RUN_NOT_FOUND",
+                    message: err.message,
+                    exitCode: 4,
+                });
+            }
+            return fail({ code: "STATUS_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
 })

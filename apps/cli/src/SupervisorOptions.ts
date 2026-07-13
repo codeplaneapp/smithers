@@ -19,10 +19,16 @@ export type SupervisorDeps = {
         runId: string,
         claim?: SupervisorSpawnClaim,
     ) => number | null;
+    runsDueForQuotaResume: (
+        adapter: SmithersDb,
+        nowMs: number,
+    ) => Promise<any[]>;
 };
 
 export type SupervisorOptions = {
     adapter: SmithersDb;
+    /** When present, supervision is restricted to these exact run IDs. */
+    runIds?: readonly string[];
     pollIntervalMs?: number;
     staleThresholdMs?: number;
     maxConcurrent?: number;

@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { Effect, Schedule } from "effect";
+import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { trackEvent } from "@smithers-orchestrator/observability/metrics";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+import * as engineModule from "@smithers-orchestrator/engine/engine";
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
+import { findAndOpenDb } from "./find-db.js";
 import { resumeRunDetached } from "./resume-detached.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -16,6 +19,16 @@ export const DEFAULT_SUPERVISOR_INTERVAL_MS = 10_000;
 export const DEFAULT_SUPERVISOR_STALE_THRESHOLD_MS = 30_000;
 export const DEFAULT_SUPERVISOR_MAX_CONCURRENT = 3;
 export const SUPERVISOR_EVENT_RUN_ID = "__supervisor__";
+/**
+ * Scoped supervisors may start before `up --detach` creates the run store.
+ * Workspace-wide supervisors retain the existing fail-fast open behavior.
+ * @param {readonly string[]} runIds
+ */
+export function findAndOpenSupervisorDb(runIds) {
+    return findAndOpenDb(undefined, runIds.length > 0
+        ? { timeoutMs: 30_000, intervalMs: 100 }
+        : undefined);
+}
 const durationMultipliers = {
     ms: 1,
     s: 1_000,
@@ -55,10 +68,18 @@ function normalizeSupervisorOptions(options) {
         parseRuntimeOwnerPid,
         isPidAlive,
         spawnResumeDetached: resumeRunDetached,
+        runsDueForQuotaResume: (adapter, nowMs) => {
+            const helper = /** @type {any} */ (engineModule).runsDueForQuotaResume;
+            if (typeof helper !== "function") {
+                return Promise.reject(new Error("@smithers-orchestrator/engine does not export runsDueForQuotaResume"));
+            }
+            return helper(adapter, nowMs);
+        },
         ...options.deps,
     };
     return {
         adapter: options.adapter,
+        runIds: options.runIds ? new Set(options.runIds) : null,
         pollIntervalMs: options.pollIntervalMs ?? DEFAULT_SUPERVISOR_INTERVAL_MS,
         staleThresholdMs: options.staleThresholdMs ?? DEFAULT_SUPERVISOR_STALE_THRESHOLD_MS,
         maxConcurrent: options.maxConcurrent ?? DEFAULT_SUPERVISOR_MAX_CONCURRENT,
@@ -172,7 +193,7 @@ function emitSkipEventEffect(options, runId, reason) {
  * @param {NormalizedSupervisorOptions} options
  * @param {StaleRunRecord} staleRun
  * @param {number} staleBeforeMs
- * @returns {Effect.Effect<"resumed" | "skipped", never>}
+ * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
 function processCandidateEffect(options, staleRun, staleBeforeMs) {
     const workflowPath = resolveWorkflowPath(staleRun.workflowPath);
@@ -200,7 +221,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
         }
         if (options.dryRun) {
             yield* Effect.logInfo(`Dry-run: would resume stale run ${staleRun.runId} (last heartbeat ${staleDurationMs}ms ago)`);
-            return "skipped";
+            return "would-resume";
         }
         const claimHeartbeatAtMs = options.deps.now();
         const claimed = yield* options.adapter
@@ -257,7 +278,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
  * @param {NormalizedSupervisorOptions} options
  * @param {any} run
  * @param {number} staleBeforeMs
- * @returns {Effect.Effect<"resumed" | "skipped", never>}
+ * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
 function processTimerCandidateEffect(options, run, staleBeforeMs) {
     const workflowPath = resolveWorkflowPath(run.workflowPath ?? null);
@@ -280,7 +301,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
         }
         if (options.dryRun) {
             yield* Effect.logInfo(`Dry-run: would resume due timer run ${run.runId}`);
-            return "skipped";
+            return "would-resume";
         }
         const claimOwnerId = `supervisor:${options.supervisorId}`;
         const claimHeartbeatAtMs = options.deps.now();
@@ -346,7 +367,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
  * @param {NormalizedSupervisorOptions} options
  * @param {any} run
  * @param {number} staleBeforeMs
- * @returns {Effect.Effect<"resumed" | "skipped", never>}
+ * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
 function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
     const workflowPath = resolveWorkflowPath(run.workflowPath ?? null);
@@ -369,7 +390,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
         }
         if (options.dryRun) {
             yield* Effect.logInfo(`Dry-run: would resume approval-decided run ${run.runId}`);
-            return "skipped";
+            return "would-resume";
         }
         const claimOwnerId = `supervisor:${options.supervisorId}`;
         const claimHeartbeatAtMs = options.deps.now();
@@ -429,15 +450,89 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
 }
 /**
  * @param {NormalizedSupervisorOptions} options
+ * @param {any} run
+ * @param {number} staleBeforeMs
+ * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
+ */
+function processQuotaCandidateEffect(options, run, staleBeforeMs) {
+    const workflowPath = resolveWorkflowPath(run.workflowPath ?? null);
+    return Effect.withLogSpan("supervisor:quota-resume")(Effect.gen(function* () {
+        if (!workflowPath || !options.deps.workflowExists(workflowPath)) {
+            yield* emitSkipEventEffect(options, run.runId, "missing-workflow");
+            return "skipped";
+        }
+        const ownerPid = options.deps.parseRuntimeOwnerPid(run.runtimeOwnerId);
+        if (ownerPid !== null && options.deps.isPidAlive(ownerPid)) {
+            yield* emitSkipEventEffect(options, run.runId, "pid-alive");
+            return "skipped";
+        }
+        if (options.dryRun) {
+            yield* Effect.logInfo(`Dry-run: would resume quota-parked run ${run.runId}`);
+            return "would-resume";
+        }
+        const claimOwnerId = `supervisor:${options.supervisorId}`;
+        const claimHeartbeatAtMs = options.deps.now();
+        const claimed = yield* options.adapter
+            .claimRunForResumeEffect({
+            runId: run.runId,
+            expectedStatus: "waiting-quota",
+            expectedRuntimeOwnerId: run.runtimeOwnerId ?? null,
+            expectedHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            staleBeforeMs,
+            claimOwnerId,
+            claimHeartbeatAtMs,
+            requireStale: false,
+        })
+            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim quota run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as(false))));
+        if (!claimed) {
+            return "skipped";
+        }
+        const spawnResult = yield* Effect.try({
+            try: () => options.deps.spawnResumeDetached(workflowPath, run.runId, {
+                claimOwnerId,
+                claimHeartbeatAtMs,
+                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
+                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            }),
+            catch: (cause) => toSmithersError(cause, `resume quota run ${run.runId}`, {
+                code: "PROCESS_SPAWN_FAILED",
+                details: { runId: run.runId, workflowPath },
+            }),
+        }).pipe(Effect.either);
+        if (spawnResult._tag === "Left") {
+            yield* options.adapter.releaseRunResumeClaimEffect({
+                runId: run.runId,
+                claimOwnerId,
+                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
+                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            }).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to release quota claim for run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`)));
+            return "skipped";
+        }
+        yield* emitEventEffect(options.adapter, {
+            type: "RunAutoResumed",
+            runId: run.runId,
+            lastHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            staleDurationMs: typeof run.heartbeatAtMs === "number"
+                ? Math.max(0, options.deps.now() - run.heartbeatAtMs)
+                : 0,
+            timestampMs: options.deps.now(),
+        });
+        return "resumed";
+    }).pipe(Effect.annotateLogs({ runId: run.runId, status: run.status ?? null }))).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed while processing quota run ${run.runId}: ${String(error)}`).pipe(Effect.as("skipped"))));
+}
+/**
+ * @param {NormalizedSupervisorOptions} options
  * @returns {Effect.Effect<SupervisorPollSummary, never>}
  */
 function pollEffect(options) {
     return Effect.withLogSpan("supervisor:poll")(Effect.gen(function* () {
         const pollStartedAtMs = options.deps.now();
         const staleBeforeMs = pollStartedAtMs - options.staleThresholdMs;
-        const staleRuns = yield* options.adapter
+        const allStaleRuns = yield* options.adapter
             .listStaleRunningRunsEffect(staleBeforeMs)
             .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] stale-run query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
+        const inScope = (run) => options.runIds === null || options.runIds.has(run.runId);
+        const staleRuns = allStaleRuns.filter(inScope);
         if (staleRuns.length === 0) {
             yield* Effect.logDebug("Supervisor poll found no stale runs");
         }
@@ -452,10 +547,10 @@ function pollEffect(options) {
         const results = yield* Effect.all(resumable.map((run) => processCandidateEffect(options, run, staleBeforeMs)), { concurrency: options.maxConcurrent });
         const staleResumedCount = results.filter((result) => result === "resumed").length;
         const staleSkippedCount = rateLimited.length +
-            results.filter((result) => result === "skipped").length;
-        const waitingTimerRuns = yield* options.adapter
+            results.filter((result) => result !== "resumed").length;
+        const waitingTimerRuns = (yield* options.adapter
             .listRunsEffect(500, "waiting-timer")
-            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-timer query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
+            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-timer query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))))).filter(inScope);
         const claimableTimerRuns = waitingTimerRuns.filter((run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs);
         const timerDueChecks = yield* Effect.all(claimableTimerRuns.map((run) => runHasDueTimerEffect(options, run.runId, pollStartedAtMs)), { concurrency: options.maxConcurrent });
         const dueTimerRuns = claimableTimerRuns.filter((_run, index) => timerDueChecks[index]);
@@ -470,9 +565,9 @@ function pollEffect(options) {
         // --- approval-decided runs ---
         // waiting-event runs whose approval was recorded while detached: the node
         // is already "pending" in the DB but no engine is running to execute it.
-        const waitingEventRuns = yield* options.adapter
+        const waitingEventRuns = (yield* options.adapter
             .listRunsEffect(500, "waiting-event")
-            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-event query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
+            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-event query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))))).filter(inScope);
         const claimableEventRuns = waitingEventRuns.filter((run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs);
         const approvalDecidedChecks = yield* Effect.all(claimableEventRuns.map((run) => runHasDecidedApprovalEffect(options, run.runId)), { concurrency: options.maxConcurrent });
         const approvalDecidedRuns = claimableEventRuns.filter((_run, index) => approvalDecidedChecks[index]);
@@ -483,14 +578,35 @@ function pollEffect(options) {
             yield* emitSkipEventEffect(options, run.runId, "rate-limited");
         }
         const approvalResults = yield* Effect.all(approvalResumable.map((run) => processApprovalDecidedCandidateEffect(options, run, staleBeforeMs)), { concurrency: options.maxConcurrent });
+        const approvalResumedCount = approvalResults.filter((result) => result === "resumed").length;
+        const dueQuotaRuns = (yield* Effect.tryPromise({
+            try: () => options.deps.runsDueForQuotaResume(options.adapter, pollStartedAtMs),
+            catch: (cause) => toSmithersError(cause, "find quota runs due for resume"),
+        }).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-quota query failed: ${error.message}`).pipe(Effect.as([]))))).filter(inScope);
+        const quotaSlots = Math.max(0, options.maxConcurrent - staleResumedCount - timerResumedCount - approvalResumedCount);
+        const quotaResumable = dueQuotaRuns.slice(0, quotaSlots);
+        const quotaRateLimited = dueQuotaRuns.slice(quotaSlots);
+        for (const run of quotaRateLimited) {
+            yield* emitSkipEventEffect(options, run.runId, "rate-limited");
+        }
+        const quotaResults = yield* Effect.all(quotaResumable.map((run) => processQuotaCandidateEffect(options, run, staleBeforeMs)), { concurrency: options.maxConcurrent });
         const resumedCount = staleResumedCount +
             timerResumedCount +
-            approvalResults.filter((result) => result === "resumed").length;
+            approvalResumedCount +
+            quotaResults.filter((result) => result === "resumed").length;
         const skippedCount = staleSkippedCount +
             timerRateLimited.length +
-            timerResults.filter((result) => result === "skipped").length +
+            timerResults.filter((result) => result !== "resumed").length +
             approvalRateLimited.length +
-            approvalResults.filter((result) => result === "skipped").length;
+            approvalResults.filter((result) => result !== "resumed").length +
+            quotaRateLimited.length +
+            quotaResults.filter((result) => result !== "resumed").length;
+        const wouldResumeRunIds = [
+            ...resumable.filter((_run, index) => results[index] === "would-resume"),
+            ...timerResumable.filter((_run, index) => timerResults[index] === "would-resume"),
+            ...approvalResumable.filter((_run, index) => approvalResults[index] === "would-resume"),
+            ...quotaResumable.filter((_run, index) => quotaResults[index] === "would-resume"),
+        ].map((run) => run.runId);
         const durationMs = Math.max(0, options.deps.now() - pollStartedAtMs);
         yield* emitEventEffect(options.adapter, {
             type: "SupervisorPollCompleted",
@@ -506,6 +622,7 @@ function pollEffect(options) {
             resumedCount,
             skippedCount,
             durationMs,
+            wouldResumeRunIds,
         };
     }));
 }
@@ -531,7 +648,16 @@ export function supervisorLoopEffect(options) {
             staleThresholdMs: normalized.staleThresholdMs,
             timestampMs: normalized.deps.now(),
         });
-        yield* pollEffect(normalized).pipe(Effect.repeat(Schedule.spaced(`${normalized.pollIntervalMs} millis`)));
+        while (true) {
+            yield* pollEffect(normalized);
+            if (normalized.runIds !== null) {
+                const scopedRuns = yield* Effect.all([...normalized.runIds].map((runId) => normalized.adapter.getRunEffect(runId).pipe(Effect.catchAll(() => Effect.succeed(null)))));
+                if (scopedRuns.length > 0 && scopedRuns.every((run) => run !== null && isTerminalClaudeMirrorRunStatus(run.status))) {
+                    return;
+                }
+            }
+            yield* Effect.sleep(`${normalized.pollIntervalMs} millis`);
+        }
     }).pipe(Effect.annotateLogs({
         component: "supervisor",
         supervisorId: normalized.supervisorId,

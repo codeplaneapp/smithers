@@ -212,7 +212,7 @@ test("events --watch appends new events without clearing the screen", async () =
     let processRef;
     try {
         await insertRun(adapter, "watch-events-run", "running");
-        processRef = spawnSmithersLive(["events", "watch-events-run", "--watch", "--interval", "0.2", "--json"], { cwd: repo.dir });
+        processRef = spawnSmithersLive(["events", "watch-events-run", "--watch", "--interval", "0.2", "--json", "--raw"], { cwd: repo.dir });
         await waitForMatch(processRef.readStderr, "--interval clamped to 500ms", WATCH_STARTUP_TIMEOUT_MS);
         await sleep(600);
         const now = Date.now();

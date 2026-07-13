@@ -4,7 +4,8 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SUPERVISOR_EVENT_RUN_ID, supervisorPollEffect, } from "../src/supervisor.js";
+import { runsDueForQuotaResume } from "../../../packages/engine/src/engine.js";
+import { SUPERVISOR_EVENT_RUN_ID, supervisorLoopEffect, supervisorPollEffect, } from "../src/supervisor.js";
 const now = Date.now();
 function createTestDb() {
     const sqlite = new Database(":memory:");
@@ -103,6 +104,7 @@ describe("supervisor poll core", () => {
             resumedCount: 1,
             skippedCount: 0,
             durationMs: 0,
+            wouldResumeRunIds: [],
         });
         expect(resumed).toEqual(["run-stale"]);
         expect(await listEventTypes(adapter, "run-stale")).toContain("RunAutoResumed");
@@ -130,6 +132,87 @@ describe("supervisor poll core", () => {
         expect(summary.staleCount).toBe(0);
         expect(summary.resumedCount).toBe(0);
         expect(resumed.length).toBe(0);
+        sqlite.close();
+    });
+    test("resumes only due, in-scope quota parks whose owner is not alive", async () => {
+        const { adapter, sqlite } = createTestDb();
+        const resumed = [];
+        await adapter.insertRun(runRow("run-quota-due", {
+            status: "waiting-quota",
+            heartbeatAtMs: now - 1_000,
+            runtimeOwnerId: null,
+            errorJson: JSON.stringify({ resetAtMs: now - 1 }),
+        }));
+        await adapter.insertRun(runRow("run-quota-future", {
+            status: "waiting-quota",
+            runtimeOwnerId: null,
+            errorJson: JSON.stringify({ resetAtMs: now + 60_000 }),
+        }));
+        await adapter.insertRun(runRow("run-quota-other-scope", {
+            status: "waiting-quota",
+            runtimeOwnerId: null,
+            errorJson: JSON.stringify({ resetAtMs: now - 1 }),
+        }));
+        await adapter.insertRun(runRow("run-quota-owner-alive", {
+            status: "waiting-quota",
+            runtimeOwnerId: `pid:${process.pid}:owner`,
+            errorJson: JSON.stringify({ resetAtMs: now - 1 }),
+        }));
+        const summary = await Effect.runPromise(supervisorPollEffect({
+            adapter,
+            runIds: ["run-quota-due", "run-quota-future", "run-quota-owner-alive"],
+            deps: {
+                now: () => now,
+                workflowExists: () => true,
+                isPidAlive: (pid) => pid === process.pid,
+                runsDueForQuotaResume,
+                spawnResumeDetached: (_workflowPath, runId) => {
+                    resumed.push(runId);
+                    return 7777;
+                },
+            },
+        }));
+        expect(summary.resumedCount).toBe(1);
+        expect(resumed).toEqual(["run-quota-due"]);
+        expect((await adapter.getRun("run-quota-future"))?.runtimeOwnerId).toBeNull();
+        expect((await adapter.getRun("run-quota-other-scope"))?.runtimeOwnerId).toBeNull();
+        expect(await listEventTypes(adapter, "run-quota-owner-alive")).toContain("RunAutoResumeSkipped");
+        sqlite.close();
+    });
+    test("scoped supervisor exits after every bound run becomes terminal", async () => {
+        const { adapter, sqlite } = createTestDb();
+        await adapter.insertRun(runRow("run-scoped-loop", {
+            heartbeatAtMs: now - 1_000,
+            runtimeOwnerId: null,
+        }));
+        const loop = Effect.runPromise(supervisorLoopEffect({
+            adapter,
+            runIds: ["run-scoped-loop"],
+            pollIntervalMs: 10,
+            staleThresholdMs: 30_000,
+            deps: {
+                now: () => now,
+                workflowExists: () => true,
+                isPidAlive: () => false,
+                spawnResumeDetached: () => {
+                    throw new Error("fresh run must not resume");
+                },
+            },
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        await adapter.updateRun("run-scoped-loop", {
+            status: "finished",
+            finishedAtMs: now,
+        });
+        let timeout;
+        const result = await Promise.race([
+            loop.then(() => "exited"),
+            new Promise((resolve) => {
+                timeout = setTimeout(() => resolve("timed-out"), 10_000);
+            }),
+        ]);
+        clearTimeout(timeout);
+        expect(result).toBe("exited");
         sqlite.close();
     });
     test("resumes waiting-timer runs when timer is due", async () => {
@@ -213,11 +296,36 @@ describe("supervisor poll core", () => {
         expect(summary.staleCount).toBe(1);
         expect(summary.resumedCount).toBe(0);
         expect(summary.skippedCount).toBe(1);
+        expect(summary.wouldResumeRunIds).toEqual([]);
         const events = await adapter.listEvents("run-alive", -1, 20);
         const skip = events.find((event) => event.type === "RunAutoResumeSkipped");
         expect(skip).toBeDefined();
         const payload = JSON.parse(skip.payloadJson);
         expect(payload.reason).toBe("pid-alive");
+        sqlite.close();
+    });
+    test("scoped supervision only considers the named run", async () => {
+        const { adapter, sqlite } = createTestDb();
+        const resumed = [];
+        await adapter.insertRun(runRow("run-x"));
+        await adapter.insertRun(runRow("run-y"));
+        const summary = await Effect.runPromise(supervisorPollEffect({
+            adapter,
+            runIds: ["run-x"],
+            staleThresholdMs: 30_000,
+            deps: {
+                now: () => now,
+                workflowExists: () => true,
+                isPidAlive: () => false,
+                spawnResumeDetached: (_workflowPath, runId) => {
+                    resumed.push(runId);
+                    return 456;
+                },
+            },
+        }));
+        expect(summary.staleCount).toBe(1);
+        expect(resumed).toEqual(["run-x"]);
+        expect((await adapter.getRun("run-y")).runtimeOwnerId).toBe("pid:99999:owner");
         sqlite.close();
     });
     test("dry-run reports stale runs without resuming", async () => {
@@ -241,6 +349,7 @@ describe("supervisor poll core", () => {
         expect(summary.staleCount).toBe(1);
         expect(summary.resumedCount).toBe(0);
         expect(summary.skippedCount).toBe(1);
+        expect(summary.wouldResumeRunIds).toEqual(["run-dry"]);
         expect(resumed.length).toBe(0);
         expect(await listEventTypes(adapter, "run-dry")).not.toContain("RunAutoResumed");
         sqlite.close();

@@ -2343,7 +2343,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[91]:
+commands[92]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2365,7 +2365,7 @@ commands[91]:
     purpose: Build a new Smithers workflow from a plain-English description. Dispatches to the create-workflow builder.
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
-    flags[35]{name,short,type,default,desc}:
+    flags[37]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2380,6 +2380,8 @@ commands[91]:
       annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
+      parent-run-id,,string,,Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)
+      accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
       resume-claim-owner,,string,,Internal durable resume claim owner
       resume-claim-heartbeat,,number,,Internal durable resume claim heartbeat
       resume-restore-owner,,string,,Internal durable resume restore owner
@@ -2635,6 +2637,13 @@ commands[91]:
       runId,string,true,Run ID
     flags[1]{name,short,type,default,desc}:
       json,,boolean,false,Structured JSON diagnosis
+  - name: status
+    purpose: "Concise run health at a glance: verdict, node counts, agent/model mix, throughput, and the nodes gating progress."
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID to summarize
+    flags[2]{name,short,type,default,desc}:
+      json,,boolean,false,Output the structured summary as JSON
+      window,,number,,Recent-activity window in minutes for the throughput/verdict checks (default 10)
   - name: what
     purpose: Summarize what happened in a run or node with a cheap fast agent (deterministic recap without one)
     args[1]{name,type,required,desc}:
@@ -2940,7 +2949,7 @@ commands[91]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[35]{name,short,type,default,desc}:
+    flags[37]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2955,6 +2964,8 @@ commands[91]:
       annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
+      parent-run-id,,string,,Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)
+      accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
       resume-claim-owner,,string,,Internal durable resume claim owner
       resume-claim-heartbeat,,number,,Internal durable resume claim heartbeat
       resume-restore-owner,,string,,Internal durable resume restore owner
@@ -7076,6 +7087,7 @@ type RunOptions = {
   pauseSignal?: AbortSignal;        // graceful pause: stop scheduling, let in-flight finish, park `paused`
   resume?: boolean;
   force?: boolean;                  // resume even if marked running
+  acceptWorkflowChange?: boolean;   // resume same run id after workflow source changed, re-blessing hashes
   workflowPath?: string;
   rootDir?: string;
   logDir?: string | null;
@@ -7783,7 +7795,7 @@ type EscalationChainProps = {
   children?: React.ReactNode;
 };
 
-type MergeQueueProps = { id?: string; maxConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type MergeQueueProps = { id?: string; maxConcurrency?: number; priority?: number; failurePolicy?: "halt" | "quarantine"; skipIf?: boolean; children?: React.ReactNode };
 
 type OptimizerProps = {
   id?: string;

@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SUPERVISOR_EVENT_RUN_ID, supervisorPollEffect, } from "../src/supervisor.js";
+import { findAndOpenSupervisorDb, SUPERVISOR_EVENT_RUN_ID, supervisorPollEffect, } from "../src/supervisor.js";
 import { createTempRepo, pinSqliteBackend } from "../../../packages/smithers/tests/e2e-helpers.js";
 const now = 1_750_000_000_000;
 const CLI_ENTRY = join(import.meta.dir, "..", "src", "index.js");
@@ -315,13 +315,34 @@ function stoppedStatus(value) {
     return undefined;
 }
 describe("supervisor e2e", () => {
-    test("standalone supervise dry-run exits cleanly on SIGTERM and persists supervisor events", async () => {
+    test("scoped supervise database open waits for store creation", async () => {
+        const repo = createTempRepo();
+        pinSqliteBackend(repo.dir);
+        const previousCwd = process.cwd();
+        let opened;
+        try {
+            process.chdir(repo.dir);
+            const opening = findAndOpenSupervisorDb(["run-delayed-db"]);
+            await sleep(100);
+            const created = createRepoDb(repo);
+            created.sqlite.close();
+            opened = await opening;
+            expect(opened.dbPath).toBe(repo.path("smithers.db"));
+        }
+        finally {
+            await opened?.cleanup();
+            process.chdir(previousCwd);
+        }
+    }, 20_000);
+
+    test("standalone workspace-wide supervise dry-run exits after one poll and persists supervisor events", async () => {
         const repo = createTempRepo();
         const { sqlite } = createRepoDb(repo);
         sqlite.close();
         const dbPath = repo.path("smithers.db");
         const supervisor = spawnCli([
             "supervise",
+            "--all",
             "--dry-run",
             "--interval",
             "100ms",
@@ -334,22 +355,16 @@ describe("supervisor e2e", () => {
         ], { cwd: repo.dir });
         let eventTypes = [];
         try {
-            await waitForCondition("supervisor startup stderr", () => supervisor.stderr().includes("Supervisor started"));
-            await waitForCondition("persisted supervisor event", () => {
-                eventTypes = readSupervisorEventTypes(dbPath);
-                return eventTypes.includes("SupervisorStarted") || eventTypes.includes("SupervisorPollCompleted");
-            });
-            supervisor.child.kill("SIGTERM");
             const exit = await Promise.race([
                 supervisor.closePromise,
-                sleep(3_000).then(() => ({ timedOut: true })),
+                sleep(15_000).then(() => ({ timedOut: true })),
             ]);
             expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).not.toMatchObject({ timedOut: true });
             expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).toMatchObject({ code: 0 });
             const parsed = parseJsonStdout(supervisor.stdout());
-            expect(stoppedStatus(parsed)).toBe("stopped");
+            expect(stoppedStatus(parsed)).toBe("dry-run");
             eventTypes = readSupervisorEventTypes(dbPath);
-            expect(eventTypes.some((type) => type === "SupervisorStarted" || type === "SupervisorPollCompleted")).toBe(true);
+            expect(eventTypes).toContain("SupervisorPollCompleted");
         }
         finally {
             if (supervisor.child.exitCode === null && supervisor.child.signalCode === null) {
@@ -357,7 +372,7 @@ describe("supervisor e2e", () => {
                 await Promise.race([supervisor.closePromise, sleep(1_000)]);
             }
         }
-    }, 20_000);
+    }, 60_000);
 
     test("standalone supervise dry-run polls real stale rows without claiming them", async () => {
         const repo = createTempRepo();
@@ -387,6 +402,7 @@ describe("supervisor e2e", () => {
             sqlite.close();
             const supervisor = spawnCli([
                 "supervise",
+                "--all",
                 "--dry-run",
                 "--interval",
                 "100ms",
@@ -399,16 +415,19 @@ describe("supervisor e2e", () => {
             ], { cwd: repo.dir });
             try {
                 let pollPayload;
-                await waitForCondition("supervisor startup stderr", () => supervisor.stderr().includes("Supervisor started"));
-                await waitForCondition("dry-run stale poll event", () => {
-                    const pollEvents = readEventRows(dbPath, SUPERVISOR_EVENT_RUN_ID)
-                        .filter((event) => event.type === "SupervisorPollCompleted")
-                        .map((event) => event.payload);
-                    pollPayload = pollEvents.find((payload) => payload.staleCount === 2 &&
-                        payload.resumedCount === 0 &&
-                        payload.skippedCount === 2);
-                    return Boolean(pollPayload);
-                });
+                const exit = await Promise.race([
+                    supervisor.closePromise,
+                    sleep(15_000).then(() => ({ timedOut: true })),
+                ]);
+                expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).not.toMatchObject({ timedOut: true });
+                expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).toMatchObject({ code: 0 });
+                expect(stoppedStatus(parseJsonStdout(supervisor.stdout()))).toBe("dry-run");
+                const pollEvents = readEventRows(dbPath, SUPERVISOR_EVENT_RUN_ID)
+                    .filter((event) => event.type === "SupervisorPollCompleted")
+                    .map((event) => event.payload);
+                pollPayload = pollEvents.find((payload) => payload.staleCount === 2 &&
+                    payload.resumedCount === 0 &&
+                    payload.skippedCount === 2);
                 expect(pollPayload).toMatchObject({
                     type: "SupervisorPollCompleted",
                     runId: SUPERVISOR_EVENT_RUN_ID,
@@ -419,14 +438,6 @@ describe("supervisor e2e", () => {
                 const runEvents = runs.flatMap((run) => readEventRows(dbPath, run.runId));
                 expect(runEvents.some((event) => event.type === "RunAutoResumeSkipped" &&
                     event.payload.reason === "rate-limited")).toBe(true);
-                supervisor.child.kill("SIGTERM");
-                const exit = await Promise.race([
-                    supervisor.closePromise,
-                    sleep(3_000).then(() => ({ timedOut: true })),
-                ]);
-                expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).not.toMatchObject({ timedOut: true });
-                expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).toMatchObject({ code: 0 });
-                expect(stoppedStatus(parseJsonStdout(supervisor.stdout()))).toBe("stopped");
                 const rows = readRunRows(dbPath, runs.map((run) => run.runId));
                 for (const run of runs) {
                     expect(rows.get(run.runId)).toMatchObject({
@@ -449,7 +460,7 @@ describe("supervisor e2e", () => {
             }
             workflows.cleanup();
         }
-    }, 20_000);
+    }, 60_000);
 
     test("supervisor detects and resumes multiple stale runs in priority order", async () => {
         const { adapter, sqlite } = createTestDb();
@@ -502,6 +513,7 @@ describe("supervisor e2e", () => {
                 resumedCount: 3,
                 skippedCount: 2,
                 durationMs: 0,
+                wouldResumeRunIds: [],
             });
             expect(resumed.slice().sort()).toEqual([
                 "run-stale",
@@ -584,6 +596,7 @@ describe("supervisor e2e", () => {
                 resumedCount: 2,
                 skippedCount: 0,
                 durationMs: 0,
+                wouldResumeRunIds: [],
             });
             expect(resumed.slice().sort()).toEqual(["run-stale", "run-timer-due"]);
             expect(await eventPayloads(adapter, "run-stale", "RunAutoResumed")).toHaveLength(1);
@@ -626,12 +639,14 @@ describe("supervisor e2e", () => {
                 resumedCount: 1,
                 skippedCount: 0,
                 durationMs: 0,
+                wouldResumeRunIds: [],
             });
             expect(second).toEqual({
                 staleCount: 0,
                 resumedCount: 0,
                 skippedCount: 0,
                 durationMs: 0,
+                wouldResumeRunIds: [],
             });
             expect(resumed).toEqual(["run-idempotent"]);
             const run = await adapter.getRun("run-idempotent");
@@ -691,12 +706,14 @@ describe("supervisor e2e", () => {
                 resumedCount: 1,
                 skippedCount: 0,
                 durationMs: 0,
+                wouldResumeRunIds: [],
             });
             expect(second).toEqual({
                 staleCount: 0,
                 resumedCount: 0,
                 skippedCount: 0,
                 durationMs: 0,
+                wouldResumeRunIds: [],
             });
             expect(resumed).toEqual(["run-timer-idempotent"]);
             const run = await adapter.getRun("run-timer-idempotent");
@@ -752,6 +769,7 @@ describe("supervisor e2e", () => {
                 resumedCount: 2,
                 skippedCount: 2,
                 durationMs: 0,
+                wouldResumeRunIds: [],
             });
             expect(resumed.slice().sort()).toEqual(["run-dead-a", "run-dead-b"]);
             expect(await eventPayloads(adapter, "run-alive", "RunAutoResumeSkipped")).toEqual([
