@@ -14,3 +14,6 @@ Abort a run while it is waiting on a retry-backoff/timer deadline: instead of th
 Abort during a deadline or backoff wait resolves to `this.cancelRun()` like every other abort site.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 01a18a4b5dbd43d33352ae087a42d6b5b2aa8f6a.
