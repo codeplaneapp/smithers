@@ -327,7 +327,19 @@ describe("discoverWorkspaceGateway", () => {
         // must report "not discovered" WITHOUT deleting the file.
         const target = await serveHangingHealth();
         writeGatewayRuntimeState(workspace, stateFor(workspace, target), env);
-        expect(await discoverWorkspaceGateway(workspace, env, { healthTimeoutMs: 50, attempts: 2, backoffMs: 1 })).toBeNull();
+        let testDeadline;
+        try {
+            const discovery = Promise.race([
+                discoverWorkspaceGateway(workspace, env, { healthTimeoutMs: 50, attempts: 2, backoffMs: 1 }),
+                new Promise((resolve) => {
+                    testDeadline = setTimeout(() => resolve("test deadline exceeded"), 2_000);
+                }),
+            ]);
+            expect(await discovery).toBeNull();
+        }
+        finally {
+            clearTimeout(testDeadline);
+        }
         expect(readGatewayRuntimeState(workspace, env)?.pid).toBe(process.pid);
     });
 

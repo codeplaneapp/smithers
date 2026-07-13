@@ -301,6 +301,45 @@ function isConnectionRefused(error) {
 }
 
 /**
+ * Fetch and decode a health response with a deadline that settles independently
+ * of fetch's abort handling. Bun can occasionally leave a fetch promise pending
+ * after an AbortSignal timeout under heavy load; racing an ordinary timer keeps
+ * gateway discovery bounded. The controller still tears down the socket when
+ * the deadline wins.
+ *
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @returns {Promise<{ ok: boolean; health?: any }>}
+ */
+async function fetchGatewayHealth(url, timeoutMs) {
+    const controller = new AbortController();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let deadline;
+    const request = (async () => {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok)
+            return { ok: false };
+        return { ok: true, health: await response.json() };
+    })();
+    const timedOut = new Promise((_, reject) => {
+        deadline = setTimeout(() => {
+            controller.abort();
+            const error = new Error(`Gateway health probe timed out after ${timeoutMs}ms`);
+            error.name = "TimeoutError";
+            reject(error);
+        }, timeoutMs);
+    });
+    try {
+        return await Promise.race([request, timedOut]);
+    }
+    finally {
+        if (deadline !== undefined)
+            clearTimeout(deadline);
+        controller.abort();
+    }
+}
+
+/**
  * Probe /health once and CLASSIFY the outcome, so callers can tell a
  * definitive verdict from a transient blip:
  *
@@ -323,12 +362,10 @@ export async function probeGatewayHealthIdentity(url, workspace, opts = {}) {
     const timeoutMs = opts.timeoutMs ?? HEALTH_TIMEOUT_MS;
     let health;
     try {
-        const res = await fetch(`${url.replace(/\/+$/, "")}/health`, {
-            signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (!res.ok)
+        const response = await fetchGatewayHealth(`${url.replace(/\/+$/, "")}/health`, timeoutMs);
+        if (!response.ok)
             return { ok: false, reason: "transient" };
-        health = await res.json();
+        health = response.health;
     }
     catch (error) {
         return { ok: false, reason: isConnectionRefused(error) ? "refused" : "transient" };
