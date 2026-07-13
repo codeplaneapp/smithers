@@ -224,6 +224,7 @@ declare class ControlBus {
         readonly type: "resolve-effect";
     }> | undefined;
     consumed(): number;
+    pendingControls(): readonly ControlMessage[];
 }
 
 declare class TraceCollector {
@@ -589,21 +590,47 @@ type RealDbAdapterOptions = Readonly<{
 }>;
 declare const realDbAdapter: (options: RealDbAdapterOptions) => HarnessAdapter;
 
+/**
+ * Bind the framework's durability vocabulary to SmithersDb's production CAS
+ * methods.  These bindings are deliberately boring: a real-db proof must
+ * call the methods on the admitted SmithersDb instance, never a journal echo.
+ */
+declare const realDbCutPoints: (db: RealDbResource) => Readonly<{
+    claimAttemptCompletion: (runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, finishedAtMs: number) => Promise<boolean>;
+    claimRunForResume: (params: {
+        runId: string;
+        expectedStatus?: string;
+        expectedRuntimeOwnerId: string | null;
+        expectedHeartbeatAtMs: number | null;
+        staleBeforeMs: number;
+        claimOwnerId: string;
+        claimHeartbeatAtMs: number;
+        requireStale?: boolean;
+    }) => Promise<boolean>;
+    heartbeatRun: (runId: string, runtimeOwnerId: string, heartbeatAtMs: number) => Promise<void>;
+    completeRun: (runId: string, runtimeOwnerId: string, finishedAtMs: number) => Promise<boolean>;
+    requestRunCancel: (runId: string, cancelRequestedAtMs: number) => Promise<boolean>;
+    claimRunCancellation: (runId: string, cancelledAtMs: number, errorJson?: string | null | undefined) => Promise<boolean>;
+    heartbeatAttempt: (runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string | null) => Promise<boolean>;
+}>;
+
 /** A resource created by the repository's engineChildRunner protocol. */
 type RealProcessResource = Readonly<{
     readonly pid: number;
     readonly child: ChildProcess;
-    readonly handshake: () => boolean | Promise<boolean>;
+    /** The child must echo the adapter-owned nonce; a truthy caller boolean is
+     * deliberately not accepted as process identity evidence. */
+    readonly handshake: (nonce: string) => string | Promise<string>;
     readonly kill: (signal?: string) => void | Promise<void>;
     readonly close: () => void | Promise<void>;
     /** Production-owned fresh-process continuation used by the restart cut point. */
-    readonly resume?: () => RealProcessResource | Promise<RealProcessResource>;
+    readonly resume?: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
     readonly healthy?: () => boolean | Promise<boolean>;
 }>;
 type RealProcessAdapterOptions = Readonly<{
-    readonly spawn: () => RealProcessResource | Promise<RealProcessResource>;
+    readonly spawn: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
     readonly identity?: string;
 }>;
 declare const realProcessAdapter: (options: RealProcessAdapterOptions) => HarnessAdapter;
 
-export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbResource, type RealProcessAdapterOptions, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectEffect, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };
+export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbResource, type RealProcessAdapterOptions, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectEffect, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realDbCutPoints, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };

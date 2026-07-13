@@ -342,6 +342,9 @@ var init_ControlBus = __esm({
       consumed() {
         return this.observed.length;
       }
+      pendingControls() {
+        return [...this.pending];
+      }
     };
   }
 });
@@ -432,7 +435,7 @@ var init_boundary = __esm({
 });
 
 // src/kernel/KernelRuntime.ts
-import { Context, Effect as Effect3, Layer } from "effect";
+import { Context, Effect as Effect3, Fiber as Fiber2, Layer } from "effect";
 var KernelRuntimeService, kernelLayer, makeKernel;
 var init_KernelRuntime = __esm({
   "src/kernel/KernelRuntime.ts"() {
@@ -447,7 +450,20 @@ var init_KernelRuntime = __esm({
     makeKernel = (seed, controls = []) => {
       const clock = new VirtualClock();
       const bus = new ControlBus(controls);
-      return Object.freeze({ clock, scheduler: new SeededScheduler(seed), controls: bus, trace: new TraceCollector(clock) });
+      const runtime = { clock, scheduler: new SeededScheduler(seed), controls: bus, trace: new TraceCollector(clock) };
+      const active = /* @__PURE__ */ new Map();
+      const executor = Object.freeze({
+        // This is the kernel's scheduling boundary. Ready tasks are Effect values,
+        // forked and raced by the Effect runtime; the public runner never owns the
+        // task fibers or implements a Promise race itself.
+        runReadySet: (tasks) => Effect3.gen(function* () {
+          for (const { stepId, effect } of tasks) if (!active.has(stepId)) active.set(stepId, yield* Effect3.fork(effect));
+          const winner = yield* Effect3.raceAll([...active.entries()].map(([stepId, fiber]) => Fiber2.join(fiber).pipe(Effect3.map((value) => ({ stepId, value })))));
+          active.delete(winner.stepId);
+          return winner;
+        })
+      });
+      return Object.freeze({ ...runtime, executor });
     };
   }
 });
@@ -620,7 +636,7 @@ var runScenario_exports = {};
 __export(runScenario_exports, {
   runScenario: () => runScenario
 });
-import { Effect as Effect4, Fiber as Fiber2 } from "effect";
+import { Effect as Effect4, Fiber as Fiber3 } from "effect";
 var faultFor, faultAt, faultError, ambiguityFor, settleKernel, runScenario;
 var init_runScenario = __esm({
   "src/runScenario.ts"() {
@@ -717,7 +733,7 @@ var init_runScenario = __esm({
           }
         }
         const runtimeKernel = yield* KernelRuntimeService;
-        const activeTasks = /* @__PURE__ */ new Map();
+        const activeTaskIds = /* @__PURE__ */ new Set();
         let controlIndex = 0;
         const supplied = kernel.controls.log();
         while (controlIndex < supplied.length) {
@@ -735,8 +751,15 @@ var init_runScenario = __esm({
             if (released) releasedBarriers.add(barrier2.id);
             if (partiesComplete && !released && !releasedBarriers.has(barrier2.id)) throw Object.assign(new Error(`barrier ${barrier2.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: barrier2.id, budget: barrier2.budget } });
           }
-          const ready = ast.steps.filter((s) => !completed.has(s.id) && !activeTasks.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
-          if (!ready.length && !activeTasks.size) throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
+          const ready = ast.steps.filter((s) => !completed.has(s.id) && !activeTaskIds.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
+          if (!ready.length && !activeTaskIds.size) throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
+          if (!ready.length) {
+            const winner2 = yield* runtimeKernel.executor.runReadySet([]);
+            activeTaskIds.delete(winner2.stepId);
+            completed.add(winner2.stepId);
+            outputs[winner2.stepId] = winner2.value;
+            continue;
+          }
           const ordered = [];
           const remaining = [...ready];
           while (remaining.length) {
@@ -758,52 +781,41 @@ var init_runScenario = __esm({
               effect: (name, operation) => {
                 const effectId = `${selected.id}:${name}`;
                 const control = runtimeKernel.controls.takeResolve(effectId) ?? runtimeKernel.controls.takeResolve(name);
+                if (control?.outcome === "succeed") {
+                  kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved", controlled: true } });
+                  return Promise.resolve(control.value);
+                }
                 if (control?.outcome === "fail") return Promise.reject(Object.assign(new Error(`effect ${name} failed by control`), { code: "CONTROLLED_EFFECT_FAILURE", details: control }));
                 if (control?.outcome === "hang") return new Promise(() => void 0);
                 const beforeEffect = faultFor(ast.faults, "effect", "before-task");
-                if (beforeEffect) {
-                  const item = ambiguityFor(beforeEffect, selected.id, name);
-                  if (item) recordAmbiguity(item, id);
-                  return Promise.reject(faultError(beforeEffect));
-                }
+                if (beforeEffect) return Promise.reject(faultError(beforeEffect));
                 const invoke = () => settleKernel(Promise.resolve().then(operation), kernel, options.waitBudget ?? 1e4);
                 const run = control?.outcome === "duplicate" ? invoke().then(() => invoke()) : invoke();
                 return run.then((value2) => {
-                  const effectId2 = `${selected.id}:${name}`;
                   kernel.trace.emit({ type: "effect", id, data: { name, state: "requested" } });
                   const duringEffect = faultFor(ast.faults, "effect", "during-task");
-                  if (duringEffect) {
-                    const item = ambiguityFor(duringEffect, selected.id, name);
-                    if (item) recordAmbiguity(item, id);
-                    throw faultError(duringEffect);
-                  }
+                  if (duringEffect) throw faultError(duringEffect);
                   journal.assertLease(selected.id, owner);
-                  journal.effectApplied(effectId2);
+                  journal.effectApplied(effectId);
                   const effectFault = (controlledFault?.operation === "effect" && controlledFault.phase === "after-effect-before-journal" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-effect-before-journal");
                   if (effectFault) {
-                    const item = ambiguityFor(effectFault, selected.id, name);
-                    if (item) recordAmbiguity(item, id);
+                    recordAmbiguity(ambiguity("effect-applied-journal-missing", { step: selected.id, effect: effectId, transition: "effect-applied->journal-missing", fault: effectFault.id }), id);
                     throw faultError(effectFault);
                   }
-                  journal.journal(effectId2);
+                  journal.journal(effectId);
                   const ackFault = (controlledFault?.phase === "after-journal-before-ack" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-journal-before-ack") ?? faultFor(ast.faults, "attempt-write", "after-journal-before-ack") ?? faultFor(ast.faults, "completion-cas", "after-journal-before-ack");
                   if (ackFault) {
-                    const item = ambiguityFor(ackFault, selected.id, name);
-                    if (item) recordAmbiguity(item, id);
+                    recordAmbiguity(ambiguity("journal-applied-ack-missing", { step: selected.id, effect: effectId, transition: "journal-applied->ack-missing", fault: ackFault.id }), id);
                     throw faultError(ackFault);
                   }
-                  journal.ack(effectId2);
+                  journal.ack(effectId);
                   const afterAck = (controlledFault?.phase === "after-ack" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-ack") ?? faultAt(ast.faults, "after-ack");
-                  if (afterAck) {
-                    const item = ambiguityFor(afterAck, selected.id, name);
-                    if (item) recordAmbiguity(item, id);
-                    throw faultError(afterAck);
-                  }
+                  if (afterAck) throw faultError(afterAck);
                   kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved" } });
                   return value2;
                 });
               },
-              sleep: (ms) => new Promise((resolve2, reject) => {
+              sleep: (ms) => new Promise((resolve3, reject) => {
                 observedWait = true;
                 const wakeup = `${selected.id}:timer:${ms}`;
                 journal.registerWakeup(wakeup);
@@ -819,7 +831,7 @@ var init_runScenario = __esm({
                   journal.deliverWakeup(wakeup);
                   if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: String(timer) });
                   kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms } });
-                  resolve2();
+                  resolve3();
                 });
                 cleanup.register("virtual-timer", String(timer), () => kernel.clock.cancel(timer));
               }),
@@ -829,9 +841,10 @@ var init_runScenario = __esm({
                 return Promise.resolve().then(operation);
               }
             };
+            let productionValue;
             if (harness.adapter?.runStep && harness.kind !== "unit-sim") {
               const productionOperation = harness.kind === "e2e-real-process" ? "runWorkflow" : selected.id;
-              yield* Effect4.tryPromise({ try: () => Promise.resolve(harness.adapter.runStep(productionOperation, selected.id, selected.input)), catch: (e) => e });
+              productionValue = yield* Effect4.tryPromise({ try: () => Promise.resolve(harness.adapter.runStep(productionOperation, selected.id, selected.input)), catch: (e) => e });
               kernel.trace.emit({ type: "adapter", id, data: { identity: harness.adapter.identity, step: selected.id, executed: true } });
             }
             if (runtimeKernel.controls.peek()?.type === "inject-fault") {
@@ -870,7 +883,7 @@ var init_runScenario = __esm({
               const child = yield* Effect4.fork(Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e }));
               yield* Effect4.yieldNow();
               if (injectFault && harness.kind !== "unit-sim") yield* Effect4.tryPromise({ try: () => Promise.resolve(injectFault(duringFault)), catch: (e) => e });
-              yield* Fiber2.interrupt(child);
+              yield* Fiber3.interrupt(child);
               if (duringFault.operation === "resume") {
                 const item = ambiguityFor(duringFault, selected.id);
                 if (item) recordAmbiguity(item, id);
@@ -919,16 +932,11 @@ var init_runScenario = __esm({
               throw faultError(after);
             }
             kernel.trace.emit({ type: "task", id, data: { state: "finished", step: selected.id } });
-            return value;
+            return harness.kind === "unit-sim" ? value : productionValue;
           }));
-          const fibers = [];
-          for (let index = 0; index < tasks.length; index += 1) {
-            const fiber = yield* Effect4.fork(tasks[index]);
-            fibers.push(fiber);
-            activeTasks.set(ordered[index].id, fiber);
-          }
-          const winner = yield* Effect4.raceAll([...activeTasks.entries()].map(([stepId, fiber]) => Fiber2.join(fiber).pipe(Effect4.map((value) => ({ stepId, value })))));
-          activeTasks.delete(winner.stepId);
+          for (const selected of ordered) activeTaskIds.add(selected.id);
+          const winner = yield* runtimeKernel.executor.runReadySet(tasks.map((effect, index) => ({ stepId: ordered[index].id, effect })));
+          activeTaskIds.delete(winner.stepId);
           outputs[winner.stepId] = winner.value;
           completed.add(winner.stepId);
         }
@@ -939,6 +947,8 @@ var init_runScenario = __esm({
           if (!released) throw Object.assign(new Error(`barrier ${item.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: item.id, budget: item.budget } });
           kernel.trace.emit({ type: "barrier", id: item.id, data: { state: "released", parties: item.parties } });
         }
+        const leftover = runtimeKernel.controls.pendingControls();
+        if (leftover.length) throw Object.assign(new Error(`CONTROL_UNCONSUMED: ${leftover.map((control) => control.type).join(", ")}`), { code: "CONTROL_UNCONSUMED", details: { controls: leftover } });
         return outputs;
       });
       const execution = runAtBoundaryFork(program.pipe(Effect4.provide(kernelLayer(kernel))));
@@ -1836,8 +1846,15 @@ var shrink = async (ast, controls, failure, options = {}) => {
 // src/adapters/realDbAdapter.ts
 init_Harness();
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Effect as Effect5 } from "effect";
 var realDbAdapter = (options) => {
+  const productionOperations = /* @__PURE__ */ new Set(["claimAttemptCompletion", "claimRunForResume", "heartbeatRun", "completeRun", "requestRunCancel", "claimRunCancellation", "heartbeatAttempt"]);
   let resource;
+  const runDb = async (value) => {
+    if (value && typeof value.then === "function") return await value;
+    if (value && typeof value.pipe === "function") return Effect5.runPromise(value);
+    return value;
+  };
   return registerTrustedAdapter({
     identity: options.identity ?? "real-db:sqlite",
     verifiedProductionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
@@ -1854,9 +1871,17 @@ var realDbAdapter = (options) => {
       if (!(resource instanceof SmithersDb) || !resource.db || typeof resource.insertRun !== "function" || typeof resource.heartbeatRun !== "function" || typeof resource.close !== "function") {
         throw Object.assign(new Error("real-db adapter requires a live SmithersDb backed by Bun SQLite; declarations and echo objects are not proof"), { code: "ADMISSION_FAILED" });
       }
+      try {
+        const sqlite = resource.db.$client ?? resource.db;
+        sqlite.query("SELECT 1").get();
+      } catch (cause) {
+        throw Object.assign(new Error("real-db admission could not execute SQLite"), { code: "ADMISSION_FAILED", cause });
+      }
       const id = `testing-admission-${crypto.randomUUID()}`;
-      await resource.insertRun({ runId: id, workflowName: "testing-framework", status: "running", createdAtMs: Date.now(), startedAtMs: Date.now(), heartbeatAtMs: null, runtimeOwnerId: "testing-framework" });
-      await resource.heartbeatRun(id, "testing-framework", Date.now());
+      await runDb(resource.insertRun({ runId: id, workflowName: "testing-framework", status: "running", createdAtMs: Date.now(), startedAtMs: Date.now(), heartbeatAtMs: null, runtimeOwnerId: "testing-framework" }));
+      await runDb(resource.heartbeatRun(id, "testing-framework", Date.now()));
+      const rows = await runDb(resource.listRuns(100, void 0, "testing-framework"));
+      if (!rows.some((row) => row.runId === id)) throw Object.assign(new Error("real-db admission write was not durably readable"), { code: "ADMISSION_FAILED" });
     },
     cleanup: async () => {
       if (resource?.close) await resource.close();
@@ -1873,7 +1898,8 @@ var realDbAdapter = (options) => {
     runStep: async (operation, ...args) => {
       if (!resource) throw new Error("REAL_DB_NOT_ADMITTED");
       const direct = resource[String(operation)];
-      if (typeof direct === "function") return direct.apply(resource, args);
+      if (typeof direct === "function") return runDb(direct.apply(resource, args));
+      if (productionOperations.has(String(operation))) throw Object.assign(new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)} requires the admitted SmithersDb production method`), { code: "ADMISSION_FAILED" });
       const fn = resource.operations?.[String(operation)];
       if (!fn) throw new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)}`);
       return fn.apply(resource, args);
@@ -1887,29 +1913,55 @@ var realDbAdapter = (options) => {
   }, "integration-real-db");
 };
 
+// src/adapters/realDbCutPoints.ts
+import { Effect as Effect6 } from "effect";
+var resolve2 = async (value) => {
+  if (value && typeof value.pipe === "function") return Effect6.runPromise(value);
+  return await value;
+};
+var realDbCutPoints = (db) => Object.freeze({
+  claimAttemptCompletion: (...args) => resolve2(db.claimAttemptCompletion(...args)),
+  claimRunForResume: (...args) => resolve2(db.claimRunForResume(...args)),
+  heartbeatRun: (...args) => resolve2(db.heartbeatRun(...args)),
+  completeRun: (...args) => resolve2(db.completeRun(...args)),
+  requestRunCancel: (...args) => resolve2(db.requestRunCancel(...args)),
+  claimRunCancellation: (...args) => resolve2(db.claimRunCancellation(...args)),
+  heartbeatAttempt: (...args) => resolve2(db.heartbeatAttempt(...args))
+});
+
 // src/adapters/realProcessAdapter.ts
 init_Harness();
-var exited = (child, budgetMs = 1e3) => new Promise((resolve2) => {
-  if (child.exitCode !== null || child.signalCode !== null) return resolve2();
+var exited = (child, budgetMs = 1e3) => new Promise((resolve3) => {
+  if (child.exitCode !== null || child.signalCode !== null) return resolve3();
   let timer;
   const done = () => {
     if (timer) clearTimeout(timer);
-    resolve2();
+    resolve3();
   };
   child.once("exit", done);
   timer = setTimeout(done, budgetMs);
 });
 var realProcessAdapter = (options) => {
   let resource;
+  const tracked = /* @__PURE__ */ new Set();
+  const nonces = /* @__PURE__ */ new Set();
+  const challenge = () => {
+    const nonce = crypto.randomUUID();
+    nonces.add(nonce);
+    return nonce;
+  };
   return registerTrustedAdapter({
     identity: options.identity ?? "real-process:child",
     verifiedProductionIdentity: "smithers-engine:runWorkflow-child",
     supportedCutPoints: /* @__PURE__ */ new Set(["resume:during-task"]),
     admissionProbe: async () => {
-      resource = await options.spawn();
+      const nonce = challenge();
+      resource = await options.spawn(nonce);
+      tracked.add(resource);
       const args = resource.child?.spawnargs ?? [];
       const productionRunner = args.some((arg) => /(?:^|\/)engineChildRunner\.tsx?$/.test(arg));
-      if (!resource.child || resource.child.pid !== resource.pid || resource.pid === process.pid || !Number.isInteger(resource.pid) || resource.pid <= 0 || !productionRunner || !await resource.handshake() || resource.healthy && !await resource.healthy()) throw Object.assign(new Error("real process failed admission: the child did not prove the production runWorkflow protocol"), { code: "ADMISSION_FAILED" });
+      const response = await resource.handshake(nonce);
+      if (!resource.child || resource.child.pid !== resource.pid || resource.pid === process.pid || !Number.isInteger(resource.pid) || resource.pid <= 0 || !productionRunner || response !== nonce || resource.healthy && !await resource.healthy()) throw Object.assign(new Error("real process failed admission: the child did not prove the production runWorkflow protocol"), { code: "ADMISSION_FAILED" });
       try {
         process.kill(resource.pid, 0);
       } catch (cause) {
@@ -1917,11 +1969,13 @@ var realProcessAdapter = (options) => {
       }
     },
     cleanup: async () => {
-      if (!resource) return;
-      await resource.kill("SIGKILL");
-      await exited(resource.child);
-      await resource.close();
-      if (resource.child.exitCode === null && resource.child.signalCode === null) throw Object.assign(new Error(`CLEANUP_LEAK: child/${resource.pid}`), { code: "CLEANUP_LEAK" });
+      for (const childResource of tracked) {
+        if (childResource.child.exitCode === null && childResource.child.signalCode === null) await childResource.kill("SIGKILL");
+        await exited(childResource.child);
+        await childResource.close();
+        if (childResource.child.exitCode === null && childResource.child.signalCode === null) throw Object.assign(new Error(`CLEANUP_LEAK: child/${childResource.pid}`), { code: "CLEANUP_LEAK" });
+      }
+      tracked.clear();
       resource = void 0;
     },
     runStep: async (operation, ...args) => {
@@ -1935,8 +1989,14 @@ var realProcessAdapter = (options) => {
       if (fault2.operation !== "resume" || fault2.phase !== "during-task") throw Object.assign(new Error(`REAL_PROCESS_FAULT_UNAVAILABLE:${fault2.operation}:${fault2.phase}`), { code: "ADMISSION_FAILED" });
       await resource.kill("SIGKILL");
       await exited(resource.child);
+      if (resource.child.signalCode !== "SIGKILL") throw Object.assign(new Error("real process replacement requires observed SIGKILL terminal event"), { code: "ADMISSION_FAILED", details: { pid: resource.pid, signalCode: resource.child.signalCode } });
       if (!resource.resume) throw Object.assign(new Error("REAL_PROCESS_RESUME_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
-      resource = await resource.resume();
+      const nonce = challenge();
+      const resumed = await resource.resume(nonce);
+      if (resumed.pid === resource.pid) throw Object.assign(new Error("real process resume must create a distinct child"), { code: "ADMISSION_FAILED" });
+      if (await resumed.handshake(nonce) !== nonce) throw Object.assign(new Error("resumed process failed nonce challenge"), { code: "ADMISSION_FAILED" });
+      tracked.add(resumed);
+      resource = resumed;
     }
   }, "e2e-real-process");
 };
@@ -1980,6 +2040,7 @@ export {
   mediatedEffect,
   opaqueEffect,
   realDbAdapter,
+  realDbCutPoints,
   realProcessAdapter,
   renderPromptToText as renderPrompt,
   renderWorkflow,
