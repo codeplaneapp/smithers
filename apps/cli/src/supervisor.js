@@ -213,10 +213,24 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
             yield* emitSkipEventEffect(options, staleRun.runId, "missing-workflow");
             return "skipped";
         }
+        // Only resume a stale-heartbeat run whose owner is *verifiably gone* —
+        // this mirrors deriveRunState's "orphaned" classification (no owner
+        // recorded, or a recorded owner PID we can prove is dead on this host).
+        // A live owner PID is a busy engine whose heartbeat write was merely
+        // starved under load ("stale"), and an owner id with no locally
+        // verifiable PID is unproven ("stale/unproven"): resuming either races a
+        // SECOND engine against the still-alive driver's merge queue and corrupts
+        // the run's frames (land nodes marked finished with empty output rows,
+        // issues that landed but never closed). A stale heartbeat alone is NOT
+        // proof of death.
+        const hasOwner = staleRun.runtimeOwnerId != null && staleRun.runtimeOwnerId.length > 0;
         const ownerPid = options.deps.parseRuntimeOwnerPid(staleRun.runtimeOwnerId);
-        if (ownerPid !== null && options.deps.isPidAlive(ownerPid)) {
-            yield* Effect.logDebug(`Skipping run ${staleRun.runId}: runtime owner pid ${ownerPid} is still alive`);
-            yield* emitSkipEventEffect(options, staleRun.runId, "pid-alive");
+        const ownerPidAlive = ownerPid !== null && options.deps.isPidAlive(ownerPid);
+        const orphaned = !hasOwner || (ownerPid !== null && !ownerPidAlive);
+        if (!orphaned) {
+            const reason = ownerPidAlive ? "pid-alive" : "owner-unverified";
+            yield* Effect.logInfo(`Skipping run ${staleRun.runId}: heartbeat is stale but runtime owner ${staleRun.runtimeOwnerId} is not verifiably dead (${ownerPidAlive ? `pid ${ownerPid} is alive` : "no locally verifiable owner pid"}); not resuming to avoid a second engine racing the merge queue`);
+            yield* emitSkipEventEffect(options, staleRun.runId, reason);
             return "skipped";
         }
         if (options.dryRun) {
