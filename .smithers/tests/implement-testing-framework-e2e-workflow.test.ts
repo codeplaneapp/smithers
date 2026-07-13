@@ -80,6 +80,11 @@ describe("implement-testing-framework-e2e workflow", () => {
     expect(source).toContain('ctx.latest(outputs.consensus, "assess-consensus")');
     expect(source).toContain('ctx.latest(outputs.readiness, "assess-sol-readiness")');
     expect(source).toContain('ctx.latest(outputs.improvement, "sol-readiness-luna-improvement")');
+    expect(
+      source.match(/!targetChangedBetweenHeads\(expected\.currentGitHead, currentGitHead\)/g)?.length,
+    ).toBe(2);
+    expect(source).toContain("targetChangedBetweenHeads(finalEvidence.currentGitHead, currentGitHead)");
+    expect(source).toContain("Target-scoped committed files changed after consensus; final approval is stale.");
     expect(source).toContain('previousImprovement={promptJson(previousReadinessImprovement)}');
     expect(source).not.toContain('ctx.outputMaybe(outputs.consensus, { nodeId: "assess-consensus" })');
     expect(source).not.toContain('ctx.outputMaybe(outputs.readiness, { nodeId: "assess-sol-readiness" })');
@@ -130,6 +135,7 @@ describe("implement-testing-framework-e2e workflow", () => {
     expect(source).toContain("targetChangedBetweenHeads");
     expect(source).toContain('"packages/testing"');
     expect(source).toContain('"e2e/package.json"');
+    expect(source).toContain('"e2e/harness/engineChildRunner.ts"');
     expect(source).toContain('"e2e/testing-framework"');
     expect(source).toContain('"pnpm-lock.yaml"');
     expect(source).toContain('spawnChild("bash", ["-c", command]');

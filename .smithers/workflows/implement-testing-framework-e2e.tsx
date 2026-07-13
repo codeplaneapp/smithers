@@ -36,6 +36,7 @@ const SNAPSHOT_PATHS = [
   "packages/smithers/tests/barrels.test.js",
   "packages/smithers/tests/package-and-build-process-contract.test.js",
   "e2e/package.json",
+  "e2e/harness/engineChildRunner.ts",
   "e2e/testing-framework",
   "pnpm-lock.yaml",
   "docs/reference/testing-framework.mdx",
@@ -781,7 +782,12 @@ export default smithers((ctx) => {
               {() => {
                 const expected = ctx.latest(outputs.evidence, "capture-sol-readiness");
                 const current = snapshot();
-                const unchanged = Boolean(expected && expected.diffDigest === current.diffDigest);
+                const currentGitHead = gitHead();
+                const unchanged = Boolean(
+                  expected &&
+                  expected.diffDigest === current.diffDigest &&
+                  !targetChangedBetweenHeads(expected.currentGitHead, currentGitHead),
+                );
                 return {
                   iterationId: expected?.iterationId ?? "",
                   expectedDiffDigest: expected?.diffDigest ?? "",
@@ -889,7 +895,12 @@ export default smithers((ctx) => {
               {() => {
                 const expected = ctx.latest(outputs.evidence, "capture-consensus-iteration");
                 const current = snapshot();
-                const unchanged = Boolean(expected && expected.diffDigest === current.diffDigest);
+                const currentGitHead = gitHead();
+                const unchanged = Boolean(
+                  expected &&
+                  expected.diffDigest === current.diffDigest &&
+                  !targetChangedBetweenHeads(expected.currentGitHead, currentGitHead),
+                );
                 return {
                   iterationId: expected?.iterationId ?? "",
                   expectedDiffDigest: expected?.diffDigest ?? "",
@@ -990,6 +1001,10 @@ export default smithers((ctx) => {
             }
             if (assessment.diffDigest !== finalSnapshot.diffDigest || finalEvidence.diffDigest !== finalSnapshot.diffDigest) {
               throw new Error("The working-copy diff changed after consensus; final approval is stale.");
+            }
+            const currentGitHead = gitHead();
+            if (targetChangedBetweenHeads(finalEvidence.currentGitHead, currentGitHead)) {
+              throw new Error("Target-scoped committed files changed after consensus; final approval is stale.");
             }
             return {
               status: "succeeded" as const,
