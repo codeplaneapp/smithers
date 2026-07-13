@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   AppServer,
@@ -15,6 +15,11 @@ import {
   parentIsScalar,
   restoreValues,
   restoreMatchesUser,
+  recoverPendingState,
+  resolveExecutable,
+  isStaleLock,
+  lockStatus,
+  batchWrite,
 } from "./configure-codex-routing.mjs";
 
 const config = (mode, usage) => ({ features: { multi_agent_v2: { multi_agent_mode_hint_text: mode, usage_hint_text: usage } } });
@@ -37,6 +42,7 @@ describe("Codex routing pure logic", () => {
     expect(classifyState(config("user", HINT_TEXT), {}, null)).toBe("user-conflict");
     expect(classifyState(config(HINT_TEXT, HINT_TEXT), config(HINT_TEXT, HINT_TEXT), installedState)).toBe("installed");
     expect(classifyState(config("changed", HINT_TEXT), config("changed", HINT_TEXT), installedState)).toBe("drifted");
+    expect(classifyState({}, config("higher-layer", undefined), null)).toBe("effective-conflict");
   });
 
   test("snapshots absent values and creates replace edits that delete them", () => {
@@ -57,6 +63,67 @@ describe("Codex routing pure logic", () => {
     expect(restored[FIELD_PATHS[1]]).toEqual({ present: false });
     expect(fieldsEqual(undefined, undefined)).toBe(true);
     expect(restoreMatchesUser(original, restored)).toBe(true);
+  });
+
+  test("journals changed policy text as a from/to transition", () => {
+    const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
+    const next = mergeSnapshot(old, "/tmp/codex/config.toml");
+    expect(next.managed[FIELD_PATHS[0]]).toBe("old policy");
+    expect(next.pending.from[FIELD_PATHS[0]]).toBe("old policy");
+    expect(next.pending.to[FIELD_PATHS[0]]).toBe(HINT_TEXT);
+    expect(recoverPendingState({ ...next, phase: "pending-install" }, currentFields(config("old policy", "old policy")))).toMatchObject({ action: "rollback", state: { managed: next.managed } });
+    expect(recoverPendingState({ ...next, phase: "pending-install" }, currentFields(config(HINT_TEXT, HINT_TEXT)))).toMatchObject({ action: "commit", state: { managed: next.pending.to } });
+  });
+
+  test("pending initial install recovers by removing the journal when the snapshot remains", () => {
+    const state = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), phase: "pending-install" };
+    expect(recoverPendingState(state, currentFields({}))).toEqual({ state: null, action: "remove" });
+  });
+
+  test("pending disable recovery is read-only until a mutation command handles it", () => {
+    const state = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), phase: "pending-disable" };
+    expect(recoverPendingState(state, currentFields(config(undefined, undefined)))).toEqual({ state: null, action: "remove" });
+    expect(recoverPendingState(state, currentFields(config(HINT_TEXT, HINT_TEXT)))).toMatchObject({ state, action: "none" });
+  });
+
+  test("reclaims dead and old locks but preserves a live fresh owner", () => {
+    expect(isStaleLock({ pid: 12, createdAt: 1_000 }, 2_000, () => false)).toBe(true);
+    expect(isStaleLock({ pid: 12, createdAt: 1_000 }, 2_000, () => true)).toBe(false);
+    expect(isStaleLock({ pid: 12, createdAt: 1_000 }, 1_000 + 10 * 60 * 1000 + 1, () => true)).toBe(true);
+  });
+
+  test("status lock inspection does not mutate pending state", () => {
+    const home = mkdtempSync(`${tmpdir()}/smithers-routing-lock-`);
+    try {
+      const lock = `${home}/.smithers-codex-routing.json.lock`;
+      mkdirSync(lock);
+      writeFileSync(`${lock}/owner`, JSON.stringify({ pid: 99, createdAt: Date.now() }));
+      const before = readFileSync(`${lock}/owner`, "utf8");
+      expect(lockStatus(home, Date.now(), () => true).locked).toBe(true);
+      expect(readFileSync(`${lock}/owner`, "utf8")).toBe(before);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  test("resolves Windows PATHEXT entries from PATH", () => {
+    const seen = new Set(["C:\\bin\\codex.CMD"]);
+    expect(resolveExecutable("codex", { platform: "win32", path: "C:\\bin", pathext: ".EXE;.CMD", exists: (path) => seen.has(path) })).toBe("C:\\bin\\codex.CMD");
+  });
+
+  test("aborts on an optimistic expectedVersion mismatch", async () => {
+    const app = { request: async (method, params) => {
+      expect(method).toBe("config/batchWrite");
+      expect(params.expectedVersion).toBe("old-version");
+      return { status: "error", message: "version mismatch" };
+    } };
+    await expect(batchWrite(app, [], "old-version")).rejects.toThrow("Unexpected config write status: error");
+  });
+
+  test("failed readback can roll back to the prior managed text", () => {
+    const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
+    const pending = { ...mergeSnapshot(old, old.configPath), phase: "pending-install" };
+    const afterRollback = recoverPendingState(pending, currentFields(config("old policy", "old policy")));
+    expect(afterRollback.action).toBe("rollback");
+    expect(afterRollback.state.managed[FIELD_PATHS[0]]).toBe("old policy");
   });
 
   test("detects conflicts, post-install edits, and scalar parents", () => {
