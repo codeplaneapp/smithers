@@ -6,6 +6,7 @@
 /** @typedef {import("./devtools/DevToolsNode.ts").DevToolsAgentSummary} DevToolsAgentSummary */
 /** @typedef {import("./devtools/DevToolsNode.ts").DevToolsNode} DevToolsNode */
 /** @typedef {import("./devtools/DevToolsNodeType.ts").DevToolsNodeType} DevToolsNodeType */
+/** @typedef {import("./devtools/DevToolsSnapshot.ts").DevToolsRunState} DevToolsRunState */
 /** @typedef {import("./devtools/DevToolsSnapshot.ts").DevToolsSnapshot} DevToolsSnapshot */
 // @smithers-type-exports-end
 

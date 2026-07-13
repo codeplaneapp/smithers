@@ -68,12 +68,74 @@ type DevToolsNode = {
     depth: number;
 };
 
+type DevToolsBlockedReason = {
+    kind: "approval";
+    nodeId: string;
+    requestedAt: string;
+} | {
+    kind: "event";
+    nodeId: string;
+    correlationKey: string;
+} | {
+    kind: "timer";
+    nodeId: string;
+    wakeAt: string;
+} | {
+    kind: "approval-decided-resume-required";
+    nodeId: string;
+} | {
+    kind: "external-trigger";
+} | {
+    kind: "provider";
+    nodeId: string;
+    code: "rate-limit" | "auth" | "timeout";
+} | {
+    kind: "tool";
+    nodeId: string;
+    toolName: string;
+    code: string;
+} | {
+    kind: "quota";
+    quotaBlockedCount: number;
+    resetAtMs?: number;
+};
+type DevToolsUnhealthyReason = {
+    kind: "engine-heartbeat-stale";
+    lastHeartbeatAt: string;
+} | {
+    kind: "timer-overdue";
+    wakeAt: string;
+    overdueMs: number;
+} | {
+    kind: "ui-heartbeat-stale";
+    lastSeenAt: string;
+} | {
+    kind: "db-lock";
+} | {
+    kind: "sandbox-unreachable";
+} | {
+    kind: "supervisor-backoff";
+    attempt: number;
+    nextAt: string;
+};
+/**
+ * Derived run state carried on DevTools snapshots. This protocol-owned wire
+ * shape keeps consumers independent of the database package that computes it.
+ */
+type DevToolsRunState = {
+    runId: string;
+    state: "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
+    blocked?: DevToolsBlockedReason;
+    unhealthy?: DevToolsUnhealthyReason;
+    computedAt: string;
+};
 type DevToolsSnapshot = {
     version: 1;
     runId: string;
     frameNo: number;
     seq: number;
     root: DevToolsNode;
+    runState?: DevToolsRunState;
 };
 
 type DevToolsDeltaOp = {
@@ -121,6 +183,7 @@ type DevToolsEvent = {
 /** @typedef {import("./devtools/DevToolsNode.ts").DevToolsAgentSummary} DevToolsAgentSummary */
 /** @typedef {import("./devtools/DevToolsNode.ts").DevToolsNode} DevToolsNode */
 /** @typedef {import("./devtools/DevToolsNodeType.ts").DevToolsNodeType} DevToolsNodeType */
+/** @typedef {import("./devtools/DevToolsSnapshot.ts").DevToolsRunState} DevToolsRunState */
 /** @typedef {import("./devtools/DevToolsSnapshot.ts").DevToolsSnapshot} DevToolsSnapshot */
 declare const DEVTOOLS_PROTOCOL_VERSION: 1;
 
@@ -141,4 +204,4 @@ declare const NODE_OUTPUT_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId"
 declare const NODE_DIFF_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId", "InvalidIteration", "RunNotFound", "NodeNotFound", "AttemptNotFound", "AttemptNotFinished", "VcsError", "WorkingTreeDirty", "DiffTooLarge"];
 declare const JUMP_TO_FRAME_ERROR_CODES: readonly ["InvalidRunId", "InvalidFrameNo", "RunNotFound", "FrameOutOfRange", "ConfirmationRequired", "Busy", "UnsupportedSandbox", "VcsError", "RewindFailed", "RateLimited", "Unauthorized"];
 
-export { DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsSnapshot, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode };
+export { DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsRunState, type DevToolsSnapshot, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode };

@@ -12,6 +12,7 @@ import { createSmithers, runWorkflow } from "smithers-orchestrator";
 import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import type { DevToolsSnapshot } from "@smithers-orchestrator/protocol";
 import { Gateway } from "../src/gateway.js";
 import { getDevToolsSnapshotRoute } from "../src/gatewayRoutes/getDevToolsSnapshot.js";
 import { sleep } from "../../smithers/tests/helpers.js";
@@ -167,19 +168,21 @@ describe("getDevToolsSnapshotRoute", () => {
       taskIndexJson: "[]",
       note: "frame-1",
     });
-    const first = await getDevToolsSnapshotRoute({
+    const first: DevToolsSnapshot = await getDevToolsSnapshotRoute({
       adapter,
       runId,
       frameNo: 0,
     });
     expect(first.frameNo).toBe(0);
     expect(first.root.name).toBe("first");
-    const latest = await getDevToolsSnapshotRoute({
+    expect(first.runState?.runId).toBe(runId);
+    const latest: DevToolsSnapshot = await getDevToolsSnapshotRoute({
       adapter,
       runId,
     });
     expect(latest.frameNo).toBe(1);
     expect(latest.root.name).toBe("second");
+    expect(latest.runState?.runId).toBe(runId);
     sqlite.close();
   });
 
@@ -663,9 +666,13 @@ describe("getDevToolsSnapshotRoute", () => {
       status: "running",
       createdAtMs: now(),
     });
-    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId });
+    const snapshot: DevToolsSnapshot = await getDevToolsSnapshotRoute({
+      adapter,
+      runId,
+    });
     expect(snapshot.frameNo).toBe(0);
     expect(snapshot.root.name).toBe("(empty)");
+    expect(snapshot.runState?.runId).toBe(runId);
     sqlite.close();
   });
 

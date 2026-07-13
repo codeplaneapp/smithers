@@ -14,6 +14,7 @@ import {
 
 const protocolRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(protocolRoot, "../..");
+const tsc = resolve(repoRoot, "node_modules/.bin/tsc");
 
 // Each error code is spelled in three hand-maintained places that must stay in
 // sync, INCLUDING member order: the runtime tuple in src/errors/index.js, the
@@ -288,5 +289,30 @@ describe("protocol runtime constants", () => {
   test("diff and rewind VCS errors use consistent code spelling", () => {
     expect(NODE_DIFF_ERROR_CODES).toContain("VcsError");
     expect(JUMP_TO_FRAME_ERROR_CODES).toContain("VcsError");
+  });
+});
+
+describe("DevTools snapshot consumer types", () => {
+  test("published snapshots expose their optional derived run state", () => {
+    const result = spawnSync(
+      tsc,
+      [
+        "--ignoreConfig",
+        "--noEmit",
+        "--strict",
+        "--skipLibCheck",
+        "--target",
+        "ESNext",
+        "--module",
+        "ESNext",
+        "--moduleResolution",
+        "bundler",
+        "tests/fixtures/devtools-snapshot-consumer.ts",
+      ],
+      { cwd: protocolRoot, encoding: "utf8" },
+    );
+
+    expect(`${result.stdout}${result.stderr}`).toBe("");
+    expect(result.status).toBe(0);
   });
 });
