@@ -14,11 +14,12 @@
  * demand is at least twice the cap), so transient one-off waits stay quiet.
  *
  * Beyond demand, workflows also DECLARE width statically: the engine feeds
- * each extracted graph's widest `<Parallel maxConcurrency>` to
- * `onDeclaredWidth`. A declared width is author intent — unlike demand-driven
- * raises it is NOT clamped to the auto-raise ceiling (a workflow declaring
- * `maxConcurrency={64}` runs 64 wide by default), while demand-driven raises
- * past the declared width stay clamped to the ceiling. Explicit
+ * each extracted graph's widest `<Parallel maxConcurrency>` /
+ * `<Parallel subtreeConcurrency>` to `onDeclaredWidth`. A declared width is
+ * author intent — unlike demand-driven raises it is NOT clamped to the
+ * auto-raise ceiling (a workflow declaring `maxConcurrency={64}` or
+ * `subtreeConcurrency={64}` runs 64 wide by default), while demand-driven
+ * raises past the declared width stay clamped to the ceiling. Explicit
  * `--max-concurrency` pins beat both.
  *
  * @param {number} maxConcurrency
@@ -34,8 +35,9 @@ export function createSlotGovernor(maxConcurrency, options = {}) {
     let warned = false;
     return {
         /**
-         * Call with the widest DECLARED `<Parallel maxConcurrency>` width in a
-         * freshly extracted graph (undefined when no parallel declares one).
+         * Call with the widest DECLARED `<Parallel>` width (`maxConcurrency` or
+         * `subtreeConcurrency`) in a freshly extracted graph (undefined when no
+         * parallel declares one).
          * Declared widths bypass the auto-raise ceiling — the author asked for
          * that width — so this raises the cap to the declared width whenever
          * the run is not explicitly pinned and the width exceeds the current
