@@ -71,6 +71,7 @@ export { isKnownSmithersErrorCode } from '@smithers-orchestrator/errors/isKnownS
 export { isSmithersError } from '@smithers-orchestrator/errors/isSmithersError';
 export { knownSmithersErrorCodes } from '@smithers-orchestrator/errors/knownSmithersErrorCodes';
 export { signalRun } from '@smithers-orchestrator/engine/signals';
+export { executeChildWorkflow } from '@smithers-orchestrator/engine/child-workflow';
 export { usePatched } from '@smithers-orchestrator/engine/effect/versioning';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 export { SmithersDb } from '@smithers-orchestrator/db/adapter';
