@@ -4,7 +4,7 @@
 // smithers-description: Research, plan, implement, verify, and iterate on the testing framework until Sol and Fable approve the same tested diff.
 // smithers-tags: coding, testing, e2e, durability, review, consensus
 /** @jsxImportSource smithers-orchestrator */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   ClaudeCodeAgent,
@@ -33,7 +33,9 @@ const SNAPSHOT_PATHS = [
   "packages/smithers/src/testing.d.ts",
   "packages/smithers/tests/barrels.test.js",
   "packages/smithers/tests/package-and-build-process-contract.test.js",
+  "e2e/package.json",
   "e2e/testing-framework",
+  "pnpm-lock.yaml",
   "docs/reference/testing-framework.mdx",
   "scripts/check-dependency-boundaries.mjs",
 ] as const;
@@ -77,6 +79,11 @@ Required architecture and proof obligations:
 - Replay bundles, first-divergence diagnostics, validity-preserving bounded shrinking, scoped
   cleanup/leak assertions, and a runtime rejection of exactly-once external-effect assertions are
   required behavior, not roadmap-only types.
+- Current review blockers must be closed, not restated: the executor must be an actual Effect
+  service/layer program rather than a sequential Promise loop wrapped at the boundary; all seven
+  ambiguity classes must arise from wired state transitions; adapters must prove and execute their
+  real production identity; and e2e/testing-framework must contain real error-parity, durable DB
+  CAS/lease, replay, and SIGKILL-mid-task/fresh-process-resume tests.
 
 Inspect what already exists before choosing coherent vertical slices. No critical or major item may
 be accepted as deferred. Roadmap items are allowed only after the implemented framework satisfies
@@ -88,6 +95,7 @@ const input = z.object({
   maxRounds: z.number().int().min(1).max(8).nullable().default(null),
   verificationProfile: z.enum(["focused", "ci", "full"]).nullable().default(null),
   focusedTestCommands: z.array(z.string()).nullable().default(null),
+  reusePlanRunId: z.string().nullable().default(null),
 });
 
 const text = z.string().default("");
@@ -118,6 +126,7 @@ const validation = z.object({
   baselineChangedFiles: list,
   baselineGitHead: z.string(),
   snapshotPaths: list,
+  reusedPlanRunId: z.string().nullable(),
   acceptanceContract: list,
   agentConfiguration: z.record(z.string(), z.string()),
   validationSummary: text,
@@ -230,6 +239,19 @@ const consensus = z.object({
   unionIssues: z.array(issue).default([]),
   failureReasons: list,
 });
+const readiness = z.object({
+  summary: text,
+  iterationId: text,
+  diffDigest: text,
+  round: z.number(),
+  approved: z.boolean(),
+  solCurrent: z.boolean(),
+  checksPassed: z.boolean(),
+  snapshotUnchanged: z.boolean(),
+  artifactsComplete: z.boolean(),
+  issues: z.array(issue).default([]),
+  failureReasons: list,
+});
 const finalResult = z.object({
   status: z.literal("succeeded"),
   summary: text,
@@ -263,6 +285,7 @@ const {
   improvement,
   snapshotVerification,
   consensus,
+  readiness,
   finalResult,
 });
 
@@ -361,35 +384,114 @@ function requireExecutable(name: string): void {
   }
 }
 
+function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value !== "string") return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadPriorFablePlan(runId: string): z.infer<typeof plan> {
+  const raw = run(process.execPath, [
+    "apps/cli/src/index.js",
+    "output",
+    runId,
+    "plan",
+    "--iteration",
+    "0",
+    "--json",
+  ]);
+  const jsonLine = raw.split(/\r?\n/).reverse().find((line) => line.trim().startsWith("{"));
+  if (!jsonLine) throw new Error(`Prior Fable plan ${runId} did not return a JSON output row.`);
+  const row = JSON.parse(jsonLine) as Record<string, unknown>;
+  const strings = (key: string) => parseJsonColumn<string[]>(row[key], []);
+  const loaded = {
+    summary: String(row.summary ?? ""),
+    slices: parseJsonColumn<z.infer<typeof plan>["slices"]>(row.slices, []),
+    expectedFiles: strings("expected_files"),
+    publicApiContract: strings("public_api_contract"),
+    internalEffectKernel: strings("internal_effect_kernel"),
+    architectureInvariants: strings("architecture_invariants"),
+    harnessMatrix: strings("harness_matrix"),
+    durabilityMatrix: strings("durability_matrix"),
+    productionParityContracts: strings("production_parity_contracts"),
+    acceptanceCriteria: strings("acceptance_criteria"),
+    advisoryUnitCommands: strings("advisory_unit_commands"),
+    advisoryIntegrationCommands: strings("advisory_integration_commands"),
+    advisoryE2eCommands: strings("advisory_e2e_commands"),
+    deferredWork: strings("deferred_work"),
+    residualRisks: strings("residual_risks"),
+  };
+  if (!loaded.summary || loaded.slices.length === 0 || loaded.acceptanceCriteria.length === 0) {
+    throw new Error(`Prior Fable plan ${runId} is incomplete; refusing to substitute a synthetic plan.`);
+  }
+  return loaded;
+}
+
 async function runCheck(kind: CheckKind, command: string): Promise<CheckResult> {
   const startedAt = Date.now();
   let timedOut = false;
   try {
-    const process = Bun.spawn(["bash", "-c", command], {
+    const child = spawnChild("bash", ["-c", command], {
       cwd: ROOT,
       env: { ...globalThis.process.env },
-      stdout: "pipe",
-      stderr: "pipe",
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    let stdout = "";
+    let stderr = "";
+    let fatalWindow = "";
+    const fatalSignatures = [
+      /ELIFECYCLE\s+(?:Test|Command) failed\b/,
+      /# Unhandled error between tests/,
+      /\bBun has crashed\b/,
+      /panic\(main thread\)/,
+      /Trace\/BPT trap/,
+    ];
+    let fatalSignature: string | null = null;
+    const append = (stream: "stdout" | "stderr", chunk: Buffer | string) => {
+      const value = String(chunk);
+      if (stream === "stdout") stdout = tail(stdout + value);
+      else stderr = tail(stderr + value);
+      fatalWindow = (fatalWindow + value).slice(-32_000);
+      fatalSignature ??= fatalSignatures.find((pattern) => pattern.test(fatalWindow))?.source ?? null;
+    };
+    child.stdout?.on("data", (chunk) => append("stdout", chunk));
+    child.stderr?.on("data", (chunk) => append("stderr", chunk));
     const timer = setTimeout(() => {
       timedOut = true;
-      process.kill("SIGTERM");
+      if (child.pid) {
+        try {
+          globalThis.process.kill(-child.pid, "SIGTERM");
+        } catch {
+          child.kill("SIGTERM");
+        }
+      }
     }, CHECK_TIMEOUT_MS);
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(process.stdout).text(),
-      new Response(process.stderr).text(),
-      process.exited,
-    ]);
+    const { code, signal } = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
     clearTimeout(timer);
+    const exitCode = code ?? (signal ? -1 : 0);
+    const passed = exitCode === 0 && signal === null && !timedOut && fatalSignature === null;
+    const evidenceNote = fatalSignature
+      ? `\n[smithers evidence] rejected zero exit because output matched fatal signature: ${fatalSignature}`
+      : signal
+        ? `\n[smithers evidence] process terminated by ${signal}`
+        : "";
     return {
       kind,
       command,
       exitCode,
       durationMs: Date.now() - startedAt,
       timedOut,
-      passed: exitCode === 0 && !timedOut,
-      stdoutTail: tail(stdout),
-      stderrTail: tail(stderr),
+      passed,
+      stdoutTail: stdout,
+      stderrTail: tail(stderr + evidenceNote),
     };
   } catch (error) {
     return {
@@ -421,6 +523,8 @@ function verificationCommands(
   }
   if (profile === "full") {
     commands.push(
+      { kind: "typecheck", command: "pnpm -C e2e typecheck" },
+      { kind: "e2e", command: "bun test e2e/testing-framework" },
       { kind: "e2e", command: "pnpm -C e2e test:faults" },
       { kind: "e2e", command: "pnpm -C e2e test" },
     );
@@ -502,6 +606,10 @@ export default smithers((ctx) => {
   const focusedTestCommands = (ctx.input.focusedTestCommands ?? [])
     .map((command) => command.trim())
     .filter((command) => command.length > 0 && command.length <= 1_000 && !command.includes("\n") && !command.includes("\0"));
+  const reusePlanRunId = ctx.input.reusePlanRunId?.trim() || null;
+  if (reusePlanRunId && !/^run-[A-Za-z0-9._-]+$/.test(reusePlanRunId)) {
+    throw new Error("reusePlanRunId must be a Smithers run id.");
+  }
 
   const baseline = ctx.outputMaybe(outputs.validation, { nodeId: "validate-input-and-agents" });
   const research = ctx.outputMaybe(outputs.research, { nodeId: "research" });
@@ -529,6 +637,13 @@ export default smithers((ctx) => {
   const consensusNeedsImprovement = latestAssessment?.approved === false;
   const nextConsensusRound = (ctx.outputs.consensus?.length ?? 0) + 1;
 
+  const readinessEvidence = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-sol-readiness" });
+  const readinessSolReview = ctx.outputMaybe(outputs.review, { nodeId: "sol-readiness-review" });
+  const latestReadiness = ctx.outputMaybe(outputs.readiness, { nodeId: "assess-sol-readiness" });
+  const solReady = latestReadiness?.approved === true;
+  const solNeedsImprovement = latestReadiness?.approved === false;
+  const nextReadinessRound = (ctx.outputs.readiness?.length ?? 0) + 1;
+
   return (
     <Workflow name="implement-testing-framework-e2e">
       <Sequence>
@@ -546,10 +661,13 @@ export default smithers((ctx) => {
               baselineChangedFiles: starting.changedFiles,
               baselineGitHead: gitHead(),
               snapshotPaths: [...SNAPSHOT_PATHS],
+              reusedPlanRunId: reusePlanRunId,
               acceptanceContract: DEFAULT_OBJECTIVE.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("-")),
               agentConfiguration: {
                 research: "Codex Luna, medium, read-only",
-                planning: "Claude Fable 5 subscription, plan/read-only, API credentials cleared",
+                planning: reusePlanRunId
+                  ? `Exact durable Claude Fable 5 plan reused from ${reusePlanRunId}`
+                  : "Claude Fable 5 subscription, plan/read-only, API credentials cleared",
                 implementation: "Codex Luna, medium, workspace-write",
                 review: "Codex Sol, xhigh, read-only + Claude Fable 5, plan/read-only",
               },
@@ -562,9 +680,19 @@ export default smithers((ctx) => {
           <ResearchPrompt objective={objective} contract={DEFAULT_OBJECTIVE} baseline={promptJson(baseline)} />
         </Task>
 
-        <Task id="plan" output={outputs.plan} agent={fable} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
-          <PlanPrompt objective={objective} contract={DEFAULT_OBJECTIVE} research={promptJson(research)} />
-        </Task>
+        <Branch
+          if={Boolean(reusePlanRunId)}
+          then={
+            <Task id="plan" output={outputs.plan} noRetry>
+              {() => loadPriorFablePlan(reusePlanRunId!)}
+            </Task>
+          }
+          else={
+            <Task id="plan" output={outputs.plan} agent={fable} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <PlanPrompt objective={objective} contract={DEFAULT_OBJECTIVE} research={promptJson(research)} />
+            </Task>
+          }
+        />
 
         <Task id="implement" output={outputs.implementation} agent={lunaImplementation} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
           <ImplementPrompt
@@ -606,6 +734,103 @@ export default smithers((ctx) => {
           }
           else={null}
         />
+
+        <Loop id="sol-readiness" maxIterations={maxRounds} until={solReady} onMaxReached="fail">
+          <Sequence>
+            <Task id="capture-sol-readiness" output={outputs.evidence} noRetry>
+              {async () => captureEvidence({ runId: ctx.runId, phase: "sol-readiness", round: nextReadinessRound, baseline: baseline! })}
+            </Task>
+
+            <Task id="sol-readiness-review" output={outputs.review} agent={sol} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <ConsensusSolReviewPrompt
+                objective={objective}
+                contract={DEFAULT_OBJECTIVE}
+                evidence={promptJson(readinessEvidence)}
+                plan={promptJson(acceptedPlan)}
+              />
+            </Task>
+
+            <Task id="verify-sol-readiness-snapshot" output={outputs.snapshotVerification} noRetry>
+              {() => {
+                const expected = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-sol-readiness" });
+                const current = snapshot();
+                const unchanged = Boolean(expected && expected.diffDigest === current.diffDigest);
+                return {
+                  iterationId: expected?.iterationId ?? "",
+                  expectedDiffDigest: expected?.diffDigest ?? "",
+                  actualDiffDigest: current.diffDigest,
+                  unchanged,
+                  changedFiles: current.changedFiles,
+                  summary: unchanged
+                    ? "The working-copy snapshot stayed unchanged during the Sol readiness review."
+                    : "The working copy changed during the Sol readiness review; its findings are stale.",
+                };
+              }}
+            </Task>
+
+            <Task id="assess-sol-readiness" output={outputs.readiness} noRetry>
+              {() => {
+                const currentEvidence = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-sol-readiness" });
+                const currentSol = ctx.outputMaybe(outputs.review, { nodeId: "sol-readiness-review" });
+                const currentSnapshot = ctx.outputMaybe(outputs.snapshotVerification, { nodeId: "verify-sol-readiness-snapshot" });
+                const reasons: string[] = [];
+                const solCurrent = Boolean(
+                  currentEvidence &&
+                  currentSol?.reviewer === "sol" &&
+                  currentSol.iterationId === currentEvidence.iterationId &&
+                  currentSol.reviewedDiffDigest === currentEvidence.diffDigest,
+                );
+                const checksPassed = currentEvidence?.allRequiredChecksPassed === true;
+                const snapshotUnchanged = Boolean(
+                  currentEvidence &&
+                  currentSnapshot?.unchanged &&
+                  currentSnapshot.iterationId === currentEvidence.iterationId &&
+                  currentSnapshot.actualDiffDigest === currentEvidence.diffDigest,
+                );
+                const artifactsComplete = Boolean(currentEvidence && currentSol && currentSnapshot && currentEvidence.checks.length > 0);
+                if (!checksPassed) reasons.push("deterministic verification checks or scope checks failed");
+                if (!solCurrent) reasons.push("Sol review does not identify the current iteration and diff digest");
+                if (!currentSol?.lgtm) reasons.push("Sol requested changes");
+                if (!snapshotUnchanged) reasons.push("the working-copy diff changed during review");
+                if (!artifactsComplete) reasons.push("required readiness evidence or review artifacts are missing");
+                const approved = reasons.length === 0;
+                return {
+                  summary: approved
+                    ? "Sol approved an unchanged snapshot with every deterministic gate green; proceed to scarce dual review."
+                    : "Sol readiness rejected; Luna must repair the current findings before Fable is invoked.",
+                  iterationId: currentEvidence?.iterationId ?? "",
+                  diffDigest: currentEvidence?.diffDigest ?? "",
+                  round: currentEvidence?.round ?? nextReadinessRound,
+                  approved,
+                  solCurrent,
+                  checksPassed,
+                  snapshotUnchanged,
+                  artifactsComplete,
+                  issues: currentSol?.issues ?? [],
+                  failureReasons: reasons,
+                };
+              }}
+            </Task>
+
+            <Branch
+              if={solNeedsImprovement}
+              then={
+                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={lunaImplementation} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                  <ConsensusImprovementPrompt
+                    objective={objective}
+                    contract={DEFAULT_OBJECTIVE}
+                    evidence={promptJson(readinessEvidence)}
+                    solReview={promptJson(readinessSolReview)}
+                    fableReview={promptJson(null)}
+                    consensus={promptJson(latestReadiness)}
+                    plan={promptJson(acceptedPlan)}
+                  />
+                </Task>
+              }
+              else={null}
+            />
+          </Sequence>
+        </Loop>
 
         <Loop id="final-consensus" maxIterations={maxRounds} until={consensusApproved} onMaxReached="fail">
           <Sequence>

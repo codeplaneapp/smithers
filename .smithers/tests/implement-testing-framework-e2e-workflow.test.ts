@@ -35,6 +35,10 @@ describe("implement-testing-framework-e2e workflow", () => {
       "capture-initial-evidence",
       "initial-sol-review",
       "capture-consensus-iteration",
+      "capture-sol-readiness",
+      "sol-readiness-review",
+      "verify-sol-readiness-snapshot",
+      "assess-sol-readiness",
       "consensus-sol-review",
       "consensus-fable-review",
       "verify-review-snapshot",
@@ -44,6 +48,7 @@ describe("implement-testing-framework-e2e workflow", () => {
       expect(graph).toContain(`id: ${nodeId}`);
     }
     expect(graph).toContain("id: final-consensus");
+    expect(graph).toContain("id: sol-readiness");
     expect(graph).toContain("onMaxReached: fail");
     expect(graph).toContain('maxConcurrency: "2"');
   }, 30_000);
@@ -61,6 +66,9 @@ describe("implement-testing-framework-e2e workflow", () => {
     expect(source).toContain('permissionMode: "plan"');
     expect(source).toContain('ANTHROPIC_API_KEY: ""');
     expect(source).toContain('ANTHROPIC_AUTH_TOKEN: ""');
+    expect(source).toContain("loadPriorFablePlan");
+    expect(source).toContain("refusing to substitute a synthetic plan");
+    expect(source).toContain("Exact durable Claude Fable 5 plan reused from");
 
     expect(source).toContain('createHash("sha256")');
     expect(source).toContain("currentSol.iterationId === currentEvidence.iterationId");
@@ -68,7 +76,9 @@ describe("implement-testing-framework-e2e workflow", () => {
     expect(source).toContain("currentFable.iterationId === currentEvidence.iterationId");
     expect(source).toContain("currentFable.reviewedDiffDigest === currentEvidence.diffDigest");
     expect(source).toContain('nodeId: "verify-review-snapshot"');
+    expect(source).toContain('nodeId: "verify-sol-readiness-snapshot"');
     expect(source).toContain('onMaxReached="fail"');
+    expect(source.indexOf('<Loop id="sol-readiness"')).toBeLessThan(source.indexOf('<Loop id="final-consensus"'));
 
     expect(source).not.toContain("allRequiredChecksPassed: true");
     expect(source).not.toContain("reviews.at(-2)");
@@ -105,14 +115,21 @@ describe("implement-testing-framework-e2e workflow", () => {
     expect(source).toContain("pnpm -C packages/testing typecheck");
     expect(source).toContain("pnpm typecheck");
     expect(source).toContain("pnpm test");
+    expect(source).toContain("pnpm -C e2e typecheck");
+    expect(source).toContain("bun test e2e/testing-framework");
     expect(source).toContain("pnpm -C e2e test:faults");
     expect(source).toContain("pnpm -C e2e test");
     expect(source).toContain("checks.every((result) => result.passed)");
     expect(source).toContain("verification commands changed target-scoped tracked files");
     expect(source).toContain("targetChangedBetweenHeads");
     expect(source).toContain('"packages/testing"');
+    expect(source).toContain('"e2e/package.json"');
     expect(source).toContain('"e2e/testing-framework"');
-    expect(source).toContain('Bun.spawn(["bash", "-c", command]');
+    expect(source).toContain('"pnpm-lock.yaml"');
+    expect(source).toContain('spawnChild("bash", ["-c", command]');
+    expect(source).toContain("fatalSignatures");
+    expect(source).toContain("rejected zero exit because output matched fatal signature");
+    expect(source).toContain('fableReview={promptJson(null)}');
     expect(source).not.toContain('id="verify-initial-fix"');
     expect(source).not.toContain('id="verify-improvement"');
     expect(source).not.toContain("this workflow forbids commits");

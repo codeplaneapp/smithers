@@ -2,6 +2,8 @@ You are Codex Luna implementing Fable's accepted plan in the current shared main
 
 This is a continuation over an existing foundational implementation and Sol repair pass. Inspect and extend it. Do not stop at vocabulary, descriptors, rejection-only harnesses, or echo execution. The concrete real DB integration, real production error probe, real-process durability fault under `e2e/testing-framework`, replay/divergence/shrinking, cleanup/leak proof, and exactly-once rejection are required in this task. No critical or major acceptance item may be deferred.
 
+The latest Sol review specifically found the executor was still a sequential Promise loop wrapped by Effect, only two ambiguity outcomes were connected, real adapters could be caller-supplied echoes, and the production parity/SIGKILL suites were absent. Replace those behaviors and add their executable tests now. Reporting them as deferred is not an acceptable task result.
+
 OBJECTIVE: {props.objective}
 NON-NEGOTIABLE CONTRACT: {props.contract}
 RESEARCH: {props.research}
