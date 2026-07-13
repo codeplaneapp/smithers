@@ -353,6 +353,34 @@ describe("MemoryStore - Messages", () => {
         // Upsert semantics: the latest content wins (replay-safe overwrite).
         expect(JSON.parse(messages[0].contentJson)).toEqual({ text: "second" });
     });
+    test("saveMessage preserves createdAtMs when a replay omits it", async () => {
+        const thread = await store.createThread(WF_NS);
+        await store.saveMessage({
+            id: "replayed-old",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: JSON.stringify({ text: "old" }),
+            createdAtMs: 1,
+        });
+        await store.saveMessage({
+            id: "newer",
+            threadId: thread.threadId,
+            role: "assistant",
+            contentJson: JSON.stringify({ text: "newer" }),
+            createdAtMs: 2,
+        });
+
+        await store.saveMessage({
+            id: "replayed-old",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: JSON.stringify({ text: "replayed" }),
+        });
+
+        const messages = await store.listMessages(thread.threadId);
+        expect(messages.map((message) => message.id)).toEqual(["replayed-old", "newer"]);
+        expect(messages[0].createdAtMs).toBe(1);
+    });
 });
 describe("Memory namespace codec", () => {
     test("roundtrips percent-encoded ids for enumerated namespace kinds", () => {

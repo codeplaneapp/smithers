@@ -307,7 +307,6 @@ function makeMemoryStore(db) {
                     runId: msg.runId ?? null,
                     nodeId: msg.nodeId ?? null,
                     iteration: msg.iteration ?? null,
-                    createdAtMs,
                 },
             }));
         });
