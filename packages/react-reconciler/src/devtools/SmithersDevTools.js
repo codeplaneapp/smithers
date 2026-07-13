@@ -14,6 +14,25 @@ import { SmithersDevToolsCore, printTree, } from "@smithers-orchestrator/devtool
 /** @typedef {import("@smithers-orchestrator/devtools").SmithersDevToolsOptions} SmithersDevToolsOptions */
 /** @typedef {import("bippy").Fiber} Fiber */
 /** @typedef {import("bippy").FiberRoot} FiberRoot */
+/** @typedef {import("bippy").ReactDevToolsGlobalHook} ReactDevToolsGlobalHook */
+
+/**
+ * @typedef {object} HookSubscriber
+ * @property {(rendererID: number, root: FiberRoot) => void} onCommitFiberRoot
+ * @property {(rendererID: number, fiber: Fiber) => void} onCommitFiberUnmount
+ */
+
+/**
+ * @typedef {object} HookRegistration
+ * @property {Set<HookSubscriber>} subscribers
+ * @property {ReactDevToolsGlobalHook["onCommitFiberRoot"]} previousRootHandler
+ * @property {ReactDevToolsGlobalHook["onCommitFiberUnmount"]} previousUnmountHandler
+ * @property {ReactDevToolsGlobalHook["onCommitFiberRoot"]} installedRootHandler
+ * @property {ReactDevToolsGlobalHook["onCommitFiberUnmount"]} installedUnmountHandler
+ */
+
+/** @type {WeakMap<ReactDevToolsGlobalHook, HookRegistration>} */
+const activeHookRegistrations = new WeakMap();
 
 // ---------------------------------------------------------------------------
 // React host tag mapping
@@ -224,19 +243,19 @@ export class SmithersDevTools {
         if (!("__REACT_DEVTOOLS_GLOBAL_HOOK__" in globalThis)) {
             installRDTHook();
         }
-        const self = this;
-        const verbose = this.options.verbose ?? false;
         const hookHost = globalThis;
         const hook = hookHost.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-        const previousRootHandler = hook?.onCommitFiberRoot;
-        const previousUnmountHandler = hook?.onCommitFiberUnmount;
-        instrument(secure({
+        if (!hook)
+            return this;
+        const self = this;
+        const verbose = this.options.verbose ?? false;
+        const subscriber = {
             /**
-     * @param {number} rendererID
-     * @param {FiberRoot} root
-     * @returns {void}
-     */
-            onCommitFiberRoot(rendererID, root) {
+             * @param {number} _rendererID
+             * @param {FiberRoot} root
+             * @returns {void}
+             */
+            onCommitFiberRoot(_rendererID, root) {
                 const smithersRoot = findSmithersRoot(root);
                 if (!smithersRoot)
                     return;
@@ -250,10 +269,10 @@ export class SmithersDevTools {
                 self.core.emitCommit(snapshot);
             },
             /**
-     * @param {number} _rendererID
-     * @param {Fiber} fiber
-     * @returns {void}
-     */
+             * @param {number} _rendererID
+             * @param {Fiber} fiber
+             * @returns {void}
+             */
             onCommitFiberUnmount(_rendererID, fiber) {
                 const nodeType = resolveNodeType(fiber);
                 if (nodeType && verbose) {
@@ -262,23 +281,50 @@ export class SmithersDevTools {
                 }
                 self.core.emitUnmount();
             },
-        }));
-        const installedRootHandler = hook?.onCommitFiberRoot;
-        const installedUnmountHandler = hook?.onCommitFiberUnmount;
+        };
+        let registration = activeHookRegistrations.get(hook);
+        if (!registration) {
+            const subscribers = new Set();
+            const previousRootHandler = hook.onCommitFiberRoot;
+            const previousUnmountHandler = hook.onCommitFiberUnmount;
+            instrument(secure({
+                onCommitFiberRoot(rendererID, root) {
+                    for (const activeSubscriber of subscribers) {
+                        activeSubscriber.onCommitFiberRoot(rendererID, root);
+                    }
+                },
+                onCommitFiberUnmount(rendererID, fiber) {
+                    for (const activeSubscriber of subscribers) {
+                        activeSubscriber.onCommitFiberUnmount(rendererID, fiber);
+                    }
+                },
+            }));
+            registration = {
+                subscribers,
+                previousRootHandler,
+                previousUnmountHandler,
+                installedRootHandler: hook.onCommitFiberRoot,
+                installedUnmountHandler: hook.onCommitFiberUnmount,
+            };
+            activeHookRegistrations.set(hook, registration);
+        }
+        registration.subscribers.add(subscriber);
         this._cleanup = () => {
-            if (!hook)
+            registration.subscribers.delete(subscriber);
+            if (registration.subscribers.size > 0)
                 return;
-            if (hook.onCommitFiberRoot === installedRootHandler) {
-                if (previousRootHandler) {
-                    hook.onCommitFiberRoot = previousRootHandler;
+            activeHookRegistrations.delete(hook);
+            if (hook.onCommitFiberRoot === registration.installedRootHandler) {
+                if (registration.previousRootHandler) {
+                    hook.onCommitFiberRoot = registration.previousRootHandler;
                 }
                 else {
                     delete hook.onCommitFiberRoot;
                 }
             }
-            if (hook.onCommitFiberUnmount === installedUnmountHandler) {
-                if (previousUnmountHandler) {
-                    hook.onCommitFiberUnmount = previousUnmountHandler;
+            if (hook.onCommitFiberUnmount === registration.installedUnmountHandler) {
+                if (registration.previousUnmountHandler) {
+                    hook.onCommitFiberUnmount = registration.previousUnmountHandler;
                 }
                 else {
                     delete hook.onCommitFiberUnmount;

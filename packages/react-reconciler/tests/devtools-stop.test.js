@@ -7,9 +7,83 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SmithersDevTools } from "../src/devtools/SmithersDevTools.js";
 
 const HOOK_KEY = "__REACT_DEVTOOLS_GLOBAL_HOOK__";
+const HOST_COMPONENT_TAG = 5;
 
 /** @type {unknown} */
 let priorHook;
+
+/** @returns {any} */
+function workflowFiber() {
+    return {
+        tag: HOST_COMPONENT_TAG,
+        type: "smithers:workflow",
+        elementType: "smithers:workflow",
+        memoizedProps: { name: "teardown-test" },
+        child: null,
+        sibling: null,
+    };
+}
+
+/**
+ * @param {string[]} teardownOrder
+ * @returns {void}
+ */
+function verifyTeardownOrder(teardownOrder) {
+    const originalCalls = { root: 0, unmount: 0 };
+    const previousRoot = () => {
+        originalCalls.root += 1;
+    };
+    const previousUnmount = () => {
+        originalCalls.unmount += 1;
+    };
+    (/** @type {Record<string, unknown>} */ (globalThis))[HOOK_KEY] = {
+        renderers: new Map(),
+        supportsFiber: true,
+        inject() { return 1; },
+        onCommitFiberRoot: previousRoot,
+        onCommitFiberUnmount: previousUnmount,
+        on() {},
+        off() {},
+        emit() {},
+    };
+
+    /** @type {Map<string, string[]>} */
+    const receivedEvents = new Map();
+    /** @type {Map<string, SmithersDevTools>} */
+    const instances = new Map();
+    const startOrder = [...teardownOrder].sort();
+    for (const name of startOrder) {
+        const events = [];
+        receivedEvents.set(name, events);
+        const devtools = new SmithersDevTools({
+            onCommit: (event) => events.push(event),
+        });
+        instances.set(name, devtools);
+        devtools.start();
+    }
+
+    const hook = /** @type {any} */ (globalThis[HOOK_KEY]);
+    const root = { current: workflowFiber() };
+    const emitCommitAndUnmount = () => {
+        hook.onCommitFiberRoot(1, root);
+        hook.onCommitFiberUnmount(1, root.current);
+    };
+
+    emitCommitAndUnmount();
+    for (const name of teardownOrder) {
+        instances.get(name)?.stop();
+        emitCommitAndUnmount();
+    }
+    emitCommitAndUnmount();
+
+    expect(hook.onCommitFiberRoot).toBe(previousRoot);
+    expect(hook.onCommitFiberUnmount).toBe(previousUnmount);
+    expect(originalCalls.root).toBe(teardownOrder.length + 2);
+    expect(originalCalls.unmount).toBe(teardownOrder.length + 2);
+    teardownOrder.forEach((name, index) => {
+        expect(receivedEvents.get(name)).toHaveLength((index + 1) * 2);
+    });
+}
 
 describe("SmithersDevTools stop() cleanup", () => {
     beforeEach(() => {
@@ -84,4 +158,23 @@ describe("SmithersDevTools stop() cleanup", () => {
         expect(hook.onCommitFiberRoot).toBe(previousRoot);
         expect(hook.onCommitFiberUnmount).toBe(previousUnmount);
     });
+
+    for (const teardownOrder of [["A", "B"], ["B", "A"]]) {
+        test(`restores original handlers after two instances stop in ${teardownOrder.join("/")} order`, () => {
+            verifyTeardownOrder(teardownOrder);
+        });
+    }
+
+    for (const teardownOrder of [
+        ["A", "B", "C"],
+        ["A", "C", "B"],
+        ["B", "A", "C"],
+        ["B", "C", "A"],
+        ["C", "A", "B"],
+        ["C", "B", "A"],
+    ]) {
+        test(`restores original handlers after three instances stop in ${teardownOrder.join("/")} order`, () => {
+            verifyTeardownOrder(teardownOrder);
+        });
+    }
 });
