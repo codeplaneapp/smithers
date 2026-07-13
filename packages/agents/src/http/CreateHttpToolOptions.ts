@@ -8,9 +8,9 @@ export type CreateHttpToolOptions = {
    */
   defaultHeaders?: Record<string, string>;
   /**
-   * The API's base URL. Its host joins the allowlist that gates
-   * `defaultHeaders`, so configured secrets ride only to this host (and any
-   * `allowedHosts`).
+   * The API's absolute HTTP(S) base URL. Its host joins the allowlist that
+   * gates `defaultHeaders`, so configured secrets ride only to this host (and
+   * any `allowedHosts`). Invalid values are rejected when the tool is created.
    */
   baseUrl?: string;
   /**

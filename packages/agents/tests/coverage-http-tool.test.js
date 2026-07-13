@@ -107,10 +107,21 @@ describe("createHttpTool", () => {
     expect(calls[0].init.headers.get("x-secret")).toBe("s");
   });
 
-  test("tolerates an unparseable baseUrl when resolving the allowlist", async () => {
-    stub(() => Response.json({ ok: true }));
-    const tool = createHttpTool({ baseUrl: "::::not a url", defaultHeaders: { "x-secret": "s" } });
-    const result = await tool.execute({ url: "https://api.example.com/x" }, callOptions);
-    expect(result.ok).toBe(true);
+  test("rejects an invalid baseUrl before it can disable the default-header allowlist", () => {
+    const calls = stub(() => Response.json({ receivedSecret: true }));
+    expect(() =>
+      createHttpTool({ baseUrl: "::::not a url", defaultHeaders: { "x-secret": "s" } }),
+    ).toThrow("createHttpTool baseUrl must be a valid absolute HTTP(S) URL");
+    expect(calls).toHaveLength(0);
+  });
+
+  test("rejects an invalid baseUrl even when allowedHosts are configured", () => {
+    expect(() =>
+      createHttpTool({
+        baseUrl: "::::not a url",
+        allowedHosts: ["api.example.com"],
+        defaultHeaders: { "x-secret": "s" },
+      }),
+    ).toThrow("createHttpTool baseUrl must be a valid absolute HTTP(S) URL");
   });
 });

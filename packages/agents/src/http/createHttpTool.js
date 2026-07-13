@@ -29,6 +29,9 @@ const httpToolInputSchema = z.object({
  * @returns {Tool}
  */
 export function createHttpTool(options = {}) {
+  if (options.baseUrl !== undefined) {
+    hostOfBaseUrl(options.baseUrl);
+  }
   return dynamicTool({
     description:
       options.description ??
@@ -232,17 +235,32 @@ function applyDefaultHeaders(headers, options, url) {
  */
 function resolveAllowedHosts(options) {
   const hosts = new Set();
-  if (options.baseUrl) {
-    try {
-      hosts.add(new URL(options.baseUrl).host.toLowerCase());
-    } catch {
-      // Ignore an unparseable baseUrl; allowedHosts can still pin the allowlist.
-    }
+  if (options.baseUrl !== undefined) {
+    hosts.add(hostOfBaseUrl(options.baseUrl));
   }
   for (const entry of options.allowedHosts ?? []) {
     hosts.add(hostOf(entry));
   }
   return hosts.size ? hosts : null;
+}
+
+/**
+ * A configured base URL is a credential boundary, so reject invalid values
+ * instead of silently turning an empty host set into an unrestricted policy.
+ *
+ * @param {string} baseUrl
+ * @returns {string}
+ */
+function hostOfBaseUrl(baseUrl) {
+  try {
+    const url = new URL(baseUrl);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.host) {
+      throw new TypeError();
+    }
+    return url.host.toLowerCase();
+  } catch {
+    throw new TypeError("createHttpTool baseUrl must be a valid absolute HTTP(S) URL");
+  }
 }
 
 /**
