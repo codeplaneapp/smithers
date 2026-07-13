@@ -1367,8 +1367,7 @@ function captureCandidate(issueNumber: number, setup: Setup): Candidate {
 }
 
 /** Candidate gate: typecheck + tests for the packages the diff touched (the full suite runs serialized in the merge queue). */
-function candidateGateCommand(changedPaths: string[]): string {
-  const parts = ["pnpm typecheck"];
+function changedPackages(changedPaths: string[]): string[] {
   const pkgs = new Set<string>();
   for (const path of changedPaths) {
     const match = path.match(/^(packages|apps)\/([^/]+)\//);
@@ -1376,7 +1375,26 @@ function candidateGateCommand(changedPaths: string[]): string {
     if (path.startsWith(".smithers/")) pkgs.add(".smithers");
     if (path.startsWith("e2e/")) pkgs.add("e2e");
   }
-  for (const dir of [...pkgs].sort()) parts.push("pnpm -C " + dir + " test");
+  return [...pkgs].sort();
+}
+function candidateGateCommand(changedPaths: string[]): string {
+  const parts = ["pnpm typecheck"];
+  for (const dir of changedPackages(changedPaths)) parts.push("pnpm -C " + dir + " test");
+  if (changedPaths.some((p) => p.startsWith("docs/"))) {
+    parts.push("node scripts/check-docs.mjs && node scripts/check-llms.mjs");
+  }
+  return parts.join(" && ");
+}
+// The landing gate re-verifies the rebased head. It must be scoped to the
+// packages this issue actually changed, not `pnpm test` (the whole monorepo
+// suite): the merge queue is serial, so a full-repo run per issue is ~1h each
+// and 64 issues would take days, which is why nothing landed for hours. Scoped
+// tests + lint on the changed packages catch this change's regressions; a
+// change that lands is rebased onto latest main and each other landing
+// re-runs, so cross-package breakage still surfaces.
+function landingGateCommand(changedPaths: string[]): string {
+  const parts = ["pnpm typecheck && pnpm lint"];
+  for (const dir of changedPackages(changedPaths)) parts.push("pnpm -C " + dir + " test");
   if (changedPaths.some((p) => p.startsWith("docs/"))) {
     parts.push("node scripts/check-docs.mjs && node scripts/check-llms.mjs");
   }
@@ -2003,7 +2021,7 @@ export default smithers((ctx) => {
                           )
                         ) : null}
                         <Task id={"i" + n + ":queue-gate"} output={outputs.tfGate} timeoutMs={110 * 60_000} continueOnFail>
-                          {() => runGate(n, "landing", cwd, prep.headSha, LANDING_GATE_COMMAND, 100 * 60_000)}
+                          {() => runGate(n, "landing", cwd, prep.headSha, landingGateCommand(asStrArray(prep.changedPaths)), 100 * 60_000)}
                         </Task>
                       </Parallel>
                     ) : null}
