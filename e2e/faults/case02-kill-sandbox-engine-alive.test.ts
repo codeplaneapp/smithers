@@ -102,6 +102,9 @@ describe("case02 kill-sandbox-engine-alive", () => {
     try {
       const now = Date.now();
       await seedRunningRun(adapter, runId, now);
+      // "stale" requires a demonstrably LIVE owner (a dead pid reads
+      // "orphaned"); use this test process as the live engine owner.
+      await adapter.updateRun(runId, { runtimeOwnerId: `pid:${process.pid}:engine-alive` });
 
       await corruptHeartbeat(sqlite, runId, "stale");
 

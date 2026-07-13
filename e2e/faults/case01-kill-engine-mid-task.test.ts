@@ -98,7 +98,7 @@ describe("case 01: kill engine mid-task", () => {
     dbPaths.length = 0;
   });
 
-  test("killed engine -> stale within SLO; supervisor takeover is exclusive", async () => {
+  test("killed engine -> orphaned within SLO; supervisor takeover is exclusive", async () => {
     const { adapter, sqlite } = createRealDb();
     const runId = "case01-run";
     const originalOwnerId = "pid:99999:engine-victim";
@@ -126,7 +126,9 @@ describe("case 01: kill engine mid-task", () => {
       run: staleRun,
       staleThresholdMs: STALE_THRESHOLD_MS,
     });
-    expect(stale.state).toBe("stale");
+    // The dead engine pid is verified, so a killed engine reads "orphaned"
+    // (a live-but-lagging owner reads "stale").
+    expect(stale.state).toBe("orphaned");
     expect(stale.unhealthy?.kind).toBe("engine-heartbeat-stale");
 
     const claimHeartbeatAtMs = Date.now();
@@ -173,7 +175,7 @@ describe("case 01: kill engine mid-task", () => {
     expect(recovered.state).toBe("running");
   });
 
-  test("contract regression guard: missing-heartbeat path still flips state to stale", async () => {
+  test("contract regression guard: missing-heartbeat path with a dead owner flips state to orphaned", async () => {
     const { adapter, sqlite } = createRealDb();
     const runId = "case01-missing-heartbeat";
     const longAgoMs = Date.now() - 10 * STALE_THRESHOLD_MS;
@@ -186,7 +188,7 @@ describe("case 01: kill engine mid-task", () => {
       run: await getRun(adapter, runId),
       staleThresholdMs: STALE_THRESHOLD_MS,
     });
-    expect(view.state).toBe("stale");
+    expect(view.state).toBe("orphaned");
   });
 
   test("contract regression guard: orphaned (no owner) is distinct from stale", async () => {
