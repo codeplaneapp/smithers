@@ -1,6 +1,16 @@
 ---
 name: smithers
-description: Drive Smithers, a durable control plane for long-running coding agents. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work: "orchestrate agents", "run a workflow", "implement this and review it", "keep iterating until tests pass", "plan then build", or anything that needs retries, approvals, replay, or evals across multiple AI steps. YOU (the agent) run Smithers on the user's behalf; it is not a GUI the human clicks. You are an ORCHESTRATOR: run long-running, multi-step, or background work *through* Smithers, not through your own ad-hoc subagents; spend your time observing the run and reporting.
+description: >
+  Drive Smithers, a durable control plane for long-running coding agents.
+  Use when the user wants multi-step, long-running, crash-safe, or
+  human-in-the-loop agent work: "orchestrate agents", "run a workflow",
+  "implement this and review it", "keep iterating until tests pass",
+  "plan then build", or anything that needs retries, approvals, replay,
+  or evals across multiple AI steps. YOU (the agent) run Smithers on the
+  user's behalf; it is not a GUI the human clicks. You are an
+  ORCHESTRATOR: run long-running, multi-step, or background work
+  *through* Smithers, not through your own ad-hoc subagents; spend your
+  time observing the run and reporting.
 ---
 
 # Smithers
