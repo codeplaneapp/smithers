@@ -12,3 +12,6 @@ GitHub: https://github.com/smithersai/smithers/issues/576
 A distinct reason (e.g. `invalid-config`) added to the union, or a plain `SmithersError("INVALID_INPUT", ...)` since this is a construction-time config error, not an ingress error.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in b38a11f4a8fe216b7d1bc627e9a10e4073b67dc1.
