@@ -1872,6 +1872,24 @@ async function closeAfterLanding(input: Input, issue: Issue, merge: Merge, local
     // commit becoming an ancestor of origin/main counts as moved; retry the
     // commit+push cycle a few times to ride out landings.
     for (let attempt = 0; attempt < 3 && !ticketMoved; attempt++) {
+      // Rebuild on the CURRENT origin tip each attempt: commitPathsToMain
+      // commits the on-disk tickets tree onto local refs/heads/main, so a
+      // stale local ref (a concurrent train landing advanced origin) would
+      // otherwise reproduce the same rejected non-fast-forward push forever.
+      try {
+        git(["fetch", "origin", "main"]);
+        const originTip = git(["rev-parse", "refs/remotes/origin/main"]);
+        try {
+          // Origin contained in local: local is equal or strictly ahead with a
+          // fast-forwardable commit; keep it.
+          git(["merge-base", "--is-ancestor", originTip, "refs/heads/main"]);
+        } catch {
+          // Local is behind or DIVERGED (its unpushed commits are only ticket
+          // commits whose file state lives on disk and gets rebuilt below):
+          // reset to origin so the rebuilt commit fast-forwards.
+          git(["update-ref", "refs/heads/main", originTip]);
+        }
+      } catch { /* offline; try with what we have */ }
       const ticketCommit = commitPathsToMain([".smithers/tickets"],
         "🚚 chore(tickets): close " + basename(ticketPath) + " (#" + issue.number + ")\n\nCo-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>");
       await pushMain(input.dryRun);
