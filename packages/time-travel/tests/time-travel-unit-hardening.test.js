@@ -251,6 +251,26 @@ describe("timeTravel direct unit coverage", () => {
             { tableName: "out_target", key: { runId: "run-unit", nodeId: "target", iteration: 0 } },
         ]);
     });
+
+    test("truncates all frame history when the target has no prior frame", async () => {
+        const { adapter, state } = makeFakeTimeTravelAdapter({
+            frames: [makeFrame(0, 101), makeFrame(1, 201)],
+        });
+
+        const result = await timeTravel(adapter, {
+            runId: "run-unit",
+            nodeId: "target",
+            attempt: 1,
+            restoreVcs: false,
+            resetDependents: false,
+        });
+
+        expect(result.success).toBe(true);
+        expect(state.calls.deleteFramesAfter).toEqual([{ runId: "run-unit", frameNo: -1 }]);
+        expect(state.calls.deleteSnapshotsAfter).toEqual([{ runId: "run-unit", frameNo: -1 }]);
+        expect(state.calls.deleteVcsTagsAfter).toEqual([{ runId: "run-unit", frameNo: -1 }]);
+        expect(state.frames).toEqual([]);
+    });
 });
 
 describe("rewind validation and rate-limit boundaries", () => {

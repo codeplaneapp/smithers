@@ -67,6 +67,8 @@ function buildDb() {
 
 async function seedRun(adapter, runId, opts = {}) {
     const targetPointer = opts.targetPointer ?? "change-target";
+    const targetStartedAtMs = opts.targetStartedAtMs ?? 200;
+    const frameCreatedAtMs = opts.frameCreatedAtMs ?? [100, 200, 300];
     await adapter.insertRun({
         runId,
         workflowName: "wf",
@@ -101,7 +103,7 @@ async function seedRun(adapter, runId, opts = {}) {
         iteration: 0,
         attempt: 1,
         state: "finished",
-        startedAtMs: 200,
+        startedAtMs: targetStartedAtMs,
         finishedAtMs: 220,
         jjPointer: targetPointer,
         jjCwd: "/repo",
@@ -120,21 +122,21 @@ async function seedRun(adapter, runId, opts = {}) {
     await adapter.insertFrame({
         runId,
         frameNo: 0,
-        createdAtMs: 100,
+        createdAtMs: frameCreatedAtMs[0],
         xmlJson: JSON.stringify({ frame: 0 }),
         xmlHash: "h0",
     });
     await adapter.insertFrame({
         runId,
         frameNo: 1,
-        createdAtMs: 200,
+        createdAtMs: frameCreatedAtMs[1],
         xmlJson: JSON.stringify({ frame: 1 }),
         xmlHash: "h1",
     });
     await adapter.insertFrame({
         runId,
         frameNo: 2,
-        createdAtMs: 300,
+        createdAtMs: frameCreatedAtMs[2],
         xmlJson: JSON.stringify({ frame: 2 }),
         xmlHash: "h2",
     });
@@ -163,6 +165,31 @@ describe("VCS restore success paths", () => {
             expect(events.at(-1)).toMatchObject({ success: true, error: undefined });
             const frames = await adapter.listFrames("run-revert-success", 10);
             expect(frames.map((frame) => frame.frameNo).sort()).toEqual([0, 1]);
+        } finally {
+            sqlite.close();
+        }
+    });
+
+    test("revertToAttempt truncates all frames when the target has no prior frame", async () => {
+        restoreCalls.length = 0;
+        const { adapter, sqlite } = buildDb();
+        try {
+            const runId = "run-revert-all-frames";
+            await seedRun(adapter, runId, {
+                targetStartedAtMs: 100,
+                frameCreatedAtMs: [101, 200, 300],
+            });
+            const { revertToAttempt } = await import("../src/revert.js");
+
+            const result = await revertToAttempt(adapter, {
+                runId,
+                nodeId: "target",
+                iteration: 0,
+                attempt: 1,
+            });
+
+            expect(result).toEqual({ success: true, jjPointer: "change-target" });
+            expect((await adapter.listFrames(runId, 10))).toEqual([]);
         } finally {
             sqlite.close();
         }

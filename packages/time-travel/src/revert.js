@@ -102,36 +102,34 @@ export async function revertToAttempt(adapter, opts) {
             lastValidFrameNo = f.frameNo;
         }
     }
-    if (lastValidFrameNo >= 0) {
-        try {
-            await adapter.withTransaction(
-                `revert to attempt ${runId}:${nodeId}:${iteration}:${attempt}`,
-                Effect.gen(function* () {
-                    yield* adapter.deleteFramesAfter(runId, lastValidFrameNo);
-                    // Snapshots and vcs-tags are keyed (run_id, frame_no) and are
-                    // the fork/hydration source; truncate them atomically with the
-                    // frames or fork/replay/timeline can read discarded state.
-                    yield* adapter.deleteSnapshotsAfter(runId, lastValidFrameNo);
-                    yield* adapter.deleteVcsTagsAfter(runId, lastValidFrameNo);
-                }),
-            );
-        } catch (error) {
-            const message = `VCS restored to ${jjPointer}, but DB frame cleanup failed: ${formatError(error)}`;
-            const timestampMs = nowMs();
-            await markRunNeedsAttention(adapter, runId, timestampMs, message);
-            onProgress?.({
-                type: "RevertFinished",
-                runId,
-                nodeId,
-                iteration,
-                attempt,
-                jjPointer,
-                success: false,
-                error: message,
-                timestampMs,
-            });
-            return { success: false, error: message, jjPointer };
-        }
+    try {
+        await adapter.withTransaction(
+            `revert to attempt ${runId}:${nodeId}:${iteration}:${attempt}`,
+            Effect.gen(function* () {
+                yield* adapter.deleteFramesAfter(runId, lastValidFrameNo);
+                // Snapshots and vcs-tags are keyed (run_id, frame_no) and are
+                // the fork/hydration source; truncate them atomically with the
+                // frames or fork/replay/timeline can read discarded state.
+                yield* adapter.deleteSnapshotsAfter(runId, lastValidFrameNo);
+                yield* adapter.deleteVcsTagsAfter(runId, lastValidFrameNo);
+            }),
+        );
+    } catch (error) {
+        const message = `VCS restored to ${jjPointer}, but DB frame cleanup failed: ${formatError(error)}`;
+        const timestampMs = nowMs();
+        await markRunNeedsAttention(adapter, runId, timestampMs, message);
+        onProgress?.({
+            type: "RevertFinished",
+            runId,
+            nodeId,
+            iteration,
+            attempt,
+            jjPointer,
+            success: false,
+            error: message,
+            timestampMs,
+        });
+        return { success: false, error: message, jjPointer };
     }
     onProgress?.({
         type: "RevertFinished",
