@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { directBunTestSegments, mergeLcovReports } from "./coverage-utils.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const coverageRoot = resolve(repoRoot, process.env.SMITHERS_COVERAGE_DIR ?? "coverage/workspace");
@@ -133,43 +134,6 @@ const coverageArgsOverrides = new Map([
   ],
 ]);
 
-function shellWords(input) {
-  const words = [];
-  let current = "";
-  let quote = null;
-  let escaped = false;
-  for (const ch of input) {
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (quote) {
-      if (ch === quote) quote = null;
-      else current += ch;
-      continue;
-    }
-    if (ch === "\"" || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (current) {
-        words.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += ch;
-  }
-  if (current) words.push(current);
-  return words;
-}
-
 function workspacePackageDirs() {
   const dirs = [];
   for (const parent of ["packages", "apps"]) {
@@ -193,17 +157,6 @@ function selectedPackageDirs() {
       ? fromEnv.split(",").map((part) => part.trim()).filter(Boolean)
       : workspacePackageDirs();
   return selected.map((dir) => relative(repoRoot, resolve(repoRoot, dir)));
-}
-
-function bunTestArgs(script) {
-  const words = shellWords(script);
-  const bunIndex = words.indexOf("bun");
-  if (bunIndex < 0 || words[bunIndex + 1] !== "test") return null;
-  return words.slice(bunIndex + 2).filter((arg) => {
-    return arg !== "--coverage" &&
-      !arg.startsWith("--coverage-reporter") &&
-      !arg.startsWith("--coverage-dir");
-  });
 }
 
 function pct(hit, found) {
@@ -241,6 +194,16 @@ function readLcovSummary(lcovPath, relDir) {
   };
 }
 
+function bunTestSegments(pkg, relDir) {
+  const override = coverageArgsOverrides.get(relDir);
+  if (override) return [{ phase: "test", args: override }];
+  // Coverage invokes Bun directly instead of going through pnpm, so preserve
+  // safe `bun test ... && bun test ...` boundaries explicitly. Each segment
+  // gets its own process and LCOV report; mergeLcovReports unions counters.
+  const script = pkg.scripts?.test;
+  return typeof script === "string" ? directBunTestSegments(script) ?? [] : [];
+}
+
 function thresholdFor(relDir) {
   const profile = packageProfiles.get(relDir) ?? (relDir.startsWith("apps/") ? "app" : "default");
   return { profile, ...thresholdProfiles[profile], ...packageThresholdOverrides.get(relDir) };
@@ -266,40 +229,61 @@ for (const relDir of selected) {
     continue;
   }
   const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  const testScript = pkg.scripts?.test;
-  const testArgs = coverageArgsOverrides.get(relDir) ??
-    (typeof testScript === "string" ? bunTestArgs(testScript) : null);
-  if (!testArgs) {
+  const testSegments = bunTestSegments(pkg, relDir);
+  if (testSegments.length === 0) {
     console.log(`[coverage] skip ${relDir}: test script is not a direct bun test`);
     continue;
   }
 
   const outDir = join(coverageRoot, relDir);
   mkdirSync(outDir, { recursive: true });
-  const args = [
-    "test",
-    "--coverage",
-    "--coverage-reporter=lcov",
-    `--coverage-dir=${outDir}`,
-    ...testArgs,
-  ];
-  console.log(`\n[coverage] ${relDir}: bun ${args.join(" ")}`);
-  const run = spawnSync("bun", args, {
-    cwd: join(repoRoot, relDir),
-    env: process.env,
-    stdio: "inherit",
-  });
-  if (run.status !== 0) {
+  const lcovPaths = [];
+  let segmentFailure = null;
+  for (const [index, segment] of testSegments.entries()) {
+    const segmentOutDir = testSegments.length === 1
+      ? outDir
+      : join(outDir, `${index + 1}-${segment.phase}`);
+    mkdirSync(segmentOutDir, { recursive: true });
+    const args = [
+      "test",
+      "--coverage",
+      "--coverage-reporter=lcov",
+      `--coverage-dir=${segmentOutDir}`,
+      ...segment.args,
+    ];
+    console.log(`\n[coverage] ${relDir} (${segment.phase}): bun ${args.join(" ")}`);
+    const run = spawnSync("bun", args, {
+      cwd: join(repoRoot, relDir),
+      env: process.env,
+      stdio: "inherit",
+    });
+    if (run.status !== 0) {
+      segmentFailure = `${segment.phase} bun test exited ${run.status}`;
+      break;
+    }
+    const segmentLcovPath = join(segmentOutDir, "lcov.info");
+    if (!existsSync(segmentLcovPath)) {
+      segmentFailure = `${segment.phase} missing lcov.info`;
+      break;
+    }
+    lcovPaths.push(segmentLcovPath);
+  }
+  if (segmentFailure) {
     failed = true;
-    results.push({ package: relDir, error: `bun test exited ${run.status}` });
+    results.push({ package: relDir, error: segmentFailure });
     continue;
   }
-
   const lcovPath = join(outDir, "lcov.info");
-  if (!existsSync(lcovPath)) {
-    failed = true;
-    results.push({ package: relDir, error: "missing lcov.info" });
-    continue;
+  if (lcovPaths.length > 1) {
+    try {
+      mergeLcovReports(lcovPaths, lcovPath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[coverage] ${relDir}: LCOV merge failed: ${message}`);
+      failed = true;
+      results.push({ package: relDir, error: `LCOV merge failed: ${message}` });
+      continue;
+    }
   }
 
   const summary = readLcovSummary(lcovPath, relDir);
