@@ -136,6 +136,7 @@ export class AgentTraceCollector {
     currentRawEventId;
     /** @type {((event: SmithersEvent) => void) | undefined} */
     listener;
+    discarded = false;
 
     /** @param {AgentTraceCollectorOptions} opts */
     constructor(opts) {
@@ -178,6 +179,16 @@ export class AgentTraceCollector {
         this.listener = undefined;
     }
 
+    discard() {
+        this.discarded = true;
+        this.endListener();
+        this.events = [];
+        this.sessionEvents = [];
+        this.stdoutBuffer = "";
+        this.stderrBuffer = "";
+        this.assistantTextBuffer = "";
+    }
+
     /** @param {string} text */
     onStdout(text) {
         this.processChunk("stdout", text);
@@ -215,6 +226,7 @@ export class AgentTraceCollector {
     }
 
     async flush() {
+        if (this.discarded) return;
         this.endListener();
         const finishedAtMs = nowMs();
         this.flushStructuredBuffers();

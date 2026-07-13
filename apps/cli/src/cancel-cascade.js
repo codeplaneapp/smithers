@@ -322,16 +322,6 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
             outcome.action = "already-terminal";
             return;
         }
-        if (repairableTerminal) {
-            const pendingApprovals = await adapter.listPendingApprovals(runId);
-            const pendingHumans = (await adapter.listPendingHumanRequests()).some((request) => request.runId === runId && request.status === "pending");
-            const activeAttempts = (await adapter.listAttemptsForRun(runId)).some((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state));
-            const waitingNodes = (await adapter.listNodes(runId)).some((node) => ["in-progress", "waiting-approval", "waiting_approval", "waiting-event", "waiting-timer"].includes(node.state));
-            if (pendingApprovals.length === 0 && !pendingHumans && !activeAttempts && !waitingNodes) {
-                outcome.action = "already-terminal";
-                return;
-            }
-        }
         const wasFresh = run.status === "running" && heartbeatFresh(run);
         // Preserve the discovery probe used by launch-race tests and give a
         // live owner one last chance to publish an attempt before the durable

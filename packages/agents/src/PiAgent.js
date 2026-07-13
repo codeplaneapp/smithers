@@ -481,6 +481,7 @@ export class PiAgent extends BaseCliAgent {
                 maxOutputBytes: this.maxOutputBytes ?? options?.maxOutputBytes,
                 onStdout: options?.onStdout,
                 onStderr: options?.onStderr,
+                onProcess: options?.onProcess,
                 onJsonEvent: (event) => emitEvents(interpreter.onStdoutLine?.(JSON.stringify(event))),
                 onExtensionUiRequest: this.opts.onExtensionUiRequest,
             });

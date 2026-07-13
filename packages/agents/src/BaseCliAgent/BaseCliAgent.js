@@ -1027,6 +1027,7 @@ export class BaseCliAgent {
                         options?.onStderr?.(chunk);
                         handleInterpreterChunk("stderr", chunk);
                     },
+                    onProcess: options?.onProcess,
                 });
                 flushBufferedLines("stdout", true);
                 flushBufferedLines("stderr", true);

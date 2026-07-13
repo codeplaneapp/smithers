@@ -262,7 +262,10 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             return;
         }
         const now = nowMs();
-        const minNextWriteAt = heartbeatLastPersistedWriteAtMs + TASK_HEARTBEAT_THROTTLE_MS;
+        const heartbeatThrottleMs = desc.heartbeatTimeoutMs
+            ? Math.min(TASK_HEARTBEAT_THROTTLE_MS, Math.max(0, Math.floor(desc.heartbeatTimeoutMs / 3)))
+            : TASK_HEARTBEAT_THROTTLE_MS;
+        const minNextWriteAt = heartbeatLastPersistedWriteAtMs + heartbeatThrottleMs;
         if (!force && now < minNextWriteAt) {
             const waitMs = Math.max(0, minNextWriteAt - now);
             if (!heartbeatWriteTimer) {
@@ -289,7 +292,6 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                 heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
                 return;
             }
-            heartbeatPendingAtMs = heartbeatAtMs;
             heartbeatEvidenceAtMs = heartbeatAtMs;
             heartbeatLastPersistedWriteAtMs = nowMs();
             logDebug("bridge-managed compute task heartbeat recorded", {
@@ -345,7 +347,6 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             dataSizeBytes = serialized.dataSizeBytes;
         }
         heartbeatPendingAtMs = heartbeatAtMs;
-        heartbeatEvidenceAtMs = heartbeatAtMs;
         heartbeatPendingDataJson = nextHeartbeatDataJson;
         heartbeatPendingDataSizeBytes = dataSizeBytes;
         heartbeatHasPendingWrite = true;
@@ -664,14 +665,10 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             await flushHeartbeat(true);
             taskCompleted = true;
             const cancelledAtMs = nowMs();
-            await adapter.withTransaction("task-cancel", Effect.gen(function* () {
-                yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-                    state: "cancelled",
-                    finishedAtMs: cancelledAtMs,
-                    errorJson: JSON.stringify(errorToJson(effectiveError)),
-                    metaJson: JSON.stringify(attemptMeta),
-                    responseText: null,
-                });
+            const cancellationClaimed = await adapter.withTransaction("task-cancel", Effect.gen(function* () {
+                const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "cancelled", cancelledAtMs, JSON.stringify(errorToJson(effectiveError)));
+                if (!claimed) return false;
+                yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText: null });
                 yield* adapter.insertNode({
                     runId,
                     nodeId: desc.nodeId,
@@ -682,7 +679,9 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                     outputTable: desc.outputTableName,
                     label: desc.label ?? null,
                 });
+                return true;
             }));
+            if (!cancellationClaimed) return;
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "NodeCancelled",
                 runId,
@@ -719,14 +718,10 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                 : String(effectiveError),
         }, "engine:task");
         const failedAtMs = nowMs();
-        await adapter.withTransaction("task-fail", Effect.gen(function* () {
-            yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-                state: "failed",
-                finishedAtMs: failedAtMs,
-                errorJson: JSON.stringify(errorToJson(effectiveError)),
-                metaJson: JSON.stringify(attemptMeta),
-                responseText: null,
-            });
+        const failureClaimed = await adapter.withTransaction("task-fail", Effect.gen(function* () {
+            const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "failed", failedAtMs, JSON.stringify(errorToJson(effectiveError)));
+            if (!claimed) return false;
+            yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText: null });
             yield* adapter.insertNode({
                 runId,
                 nodeId: desc.nodeId,
@@ -737,7 +732,9 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                 outputTable: desc.outputTableName,
                 label: desc.label ?? null,
             });
+            return true;
         }));
+        if (!failureClaimed) return;
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFailed",
             runId,

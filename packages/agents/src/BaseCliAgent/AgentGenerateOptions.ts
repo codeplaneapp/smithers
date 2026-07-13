@@ -16,6 +16,7 @@ export type AgentGenerateOptions = {
   onStdout?: (text: string) => void;
   onStderr?: (text: string) => void;
   onEvent?: (event: AgentCliEvent) => unknown;
+  onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void;
   retry?: unknown;
   isRetry?: unknown;
   retryAttempt?: unknown;

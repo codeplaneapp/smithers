@@ -47,9 +47,10 @@ const FYI_KINDS = new Set(["run-finished", "run-cancelled", "run-continued"]);
  * pre-existing — run. Without `subscriptionsPath` it scans all local runs.
  *
  * A run counts as stalled only when its heartbeat is older than
- * `stalledAfterMs` AND no new events were persisted within that window: a
- * saturated engine keeps persisting events while its heartbeat timers starve,
- * and that durable activity is liveness a late heartbeat cannot veto.
+ * `stalledAfterMs` AND no new events or task-heartbeat rows were persisted
+ * within that window. Task-heartbeat rows are durable evidence from the
+ * fenced task owner, so they remain valid when the run-heartbeat timer is
+ * starved by a long-running child process.
  *
  * @param {any} adapter
  * @param {{ intervalMs?: number; stalledAfterMs?: number; ticks?: number; transitions?: "actionable" | "all"; subscriptionsPath?: string; sessionId?: string; write?: (line: string) => void; now?: () => number }} [options]
@@ -71,6 +72,8 @@ export async function runClaudeMonitor(adapter, options = {}) {
     const stalledRuns = new Set();
     /** @type {Map<string, number>} last time NEW persisted events were observed per run */
     const eventActivityAt = new Map();
+    /** @type {Map<string, number>} newest persisted active-task heartbeat observed per run */
+    const taskHeartbeatActivityAt = new Map();
     /** @type {Set<string>} terminal runs that already got their final scan */
     const finalScanned = new Set();
 
@@ -125,6 +128,8 @@ export async function runClaudeMonitor(adapter, options = {}) {
             let cursor = cursors.get(runId) ?? 0;
             const cursorAtScanStart = cursor;
             let sawTerminalEvent = false;
+            let eventReadFailed = false;
+            let newestPersistedEventAtMs;
             // Live runs read one page per tick (the cursor catches up next tick).
             // The final scan of a terminal run must drain every remaining page:
             // a failing run can flush a >EVENT_PAGE_SIZE burst of trailing events
@@ -132,8 +137,21 @@ export async function runClaudeMonitor(adapter, options = {}) {
             // of the only read this run will ever get again.
             for (;;) {
                 const pageStart = cursor;
-                const rows = await Promise.resolve(adapter.listEventHistory(runId, { afterSeq: cursor, limit: EVENT_PAGE_SIZE })).catch(() => []);
+                let rows = [];
+                try {
+                    rows = await Promise.resolve(adapter.listEventHistory(runId, { afterSeq: cursor, limit: EVENT_PAGE_SIZE }));
+                }
+                catch {
+                    // A failed evidence read is inconclusive. It must not be
+                    // converted into a false stalled verdict.
+                    eventReadFailed = true;
+                    break;
+                }
                 for (const row of rows) {
+                    const persistedAtMs = Number(row.timestampMs ?? row.createdAtMs);
+                    if (Number.isFinite(persistedAtMs)) {
+                        newestPersistedEventAtMs = Math.max(newestPersistedEventAtMs ?? 0, persistedAtMs);
+                    }
                     const seq = Number(row.seq ?? 0);
                     if (seq > cursor) {
                         cursor = seq;
@@ -175,12 +193,14 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 }
             }
             cursors.set(runId, cursor);
-            if (cursor > cursorAtScanStart) {
+            if (!eventReadFailed && cursor > cursorAtScanStart) {
                 // New rows landed since the last tick: the engine is durably
                 // making progress even if its heartbeat timer is starved.
-                eventActivityAt.set(runId, now());
+                // Use the row's persisted timestamp, not observation time, so
+                // an old paginated backlog cannot keep a dead run alive.
+                eventActivityAt.set(runId, newestPersistedEventAtMs ?? now());
             }
-            if (finalScan && !sawTerminalEvent) {
+            if (finalScan && !eventReadFailed && !sawTerminalEvent) {
                 // The engine commits the terminal run status BEFORE it persists the
                 // RunFailed/RunFinished event row, so this one-shot final scan can
                 // land inside that gap (or the event read can fail) and the line
@@ -201,7 +221,25 @@ export async function runClaudeMonitor(adapter, options = {}) {
             // approval-pending notification for a run that can no longer resume.
             if (!finalScan) {
                 await emitPendingGates(adapter, runId, emitOnce);
-                trackStall(run, stalledAfterMs, stalledRuns, emit, now, eventActivityAt.get(runId));
+                const taskHeartbeat = await readFreshTaskHeartbeat(adapter, runId);
+                if (taskHeartbeat.ok && taskHeartbeat.atMs !== undefined) {
+                    taskHeartbeatActivityAt.set(runId, Math.max(
+                        taskHeartbeatActivityAt.get(runId) ?? 0,
+                        taskHeartbeat.atMs,
+                    ));
+                }
+                if (eventReadFailed || !taskHeartbeat.ok) continue;
+                trackStall(
+                    run,
+                    stalledAfterMs,
+                    stalledRuns,
+                    emit,
+                    now,
+                    Math.max(
+                        eventActivityAt.get(runId) ?? 0,
+                        taskHeartbeatActivityAt.get(runId) ?? 0,
+                    ) || undefined,
+                );
             }
         }
         if (options.ticks !== undefined && tick >= options.ticks) {
@@ -209,6 +247,32 @@ export async function runClaudeMonitor(adapter, options = {}) {
         }
         await sleep(intervalMs);
     }
+}
+
+/**
+ * @param {any} adapter
+ * @param {string} runId
+ * @returns {Promise<{ ok: true; atMs?: number } | { ok: false }>}
+ */
+async function readFreshTaskHeartbeat(adapter, runId) {
+    if (typeof adapter.listAttemptsForRun !== "function") return { ok: true };
+    let attempts;
+    try {
+        attempts = await Promise.resolve(adapter.listAttemptsForRun(runId));
+    }
+    catch {
+        return { ok: false };
+    }
+    const activeStates = new Set(["in-progress", "waiting-approval", "waiting-event", "waiting-timer"]);
+    let newest;
+    for (const attempt of attempts) {
+        if (!activeStates.has(attempt?.state)) continue;
+        const heartbeatAtMs = Number(attempt?.heartbeatAtMs);
+        if (Number.isFinite(heartbeatAtMs) && (newest === undefined || heartbeatAtMs > newest)) {
+            newest = heartbeatAtMs;
+        }
+    }
+    return { ok: true, atMs: newest };
 }
 
 /**

@@ -2891,7 +2891,10 @@ export class SmithersDb {
              a.decision_json,
              a.auto_approved
            FROM _smithers_approvals a
+           INNER JOIN _smithers_runs r
+             ON a.run_id = r.run_id
            WHERE a.run_id = ? AND a.status = ?
+             AND r.status NOT IN ('finished', 'failed', 'cancelled', 'canceled', 'continued')
            UNION ALL
            SELECT
              n.run_id,
@@ -2969,12 +2972,13 @@ export class SmithersDb {
              r.status AS run_status,
              n.label AS node_label
            FROM _smithers_approvals a
-           LEFT JOIN _smithers_runs r ON a.run_id = r.run_id
+           INNER JOIN _smithers_runs r ON a.run_id = r.run_id
            LEFT JOIN _smithers_nodes n
              ON a.run_id = n.run_id
             AND a.node_id = n.node_id
             AND a.iteration = n.iteration
            WHERE a.status = ?
+             AND r.status NOT IN ('finished', 'failed', 'cancelled', 'canceled', 'continued')
            UNION ALL
            SELECT
              n.run_id,

@@ -498,6 +498,24 @@ describe("SmithersDb adapter", () => {
         await adapter.insertRun(runRow("cancelled-run", "cancelled", {
             workflowName: "workflow-c",
         }));
+        await adapter.insertRun(runRow("canceled-run", "cancelled", {
+            workflowName: "workflow-d",
+        }));
+        await adapter.internalStorage.updateWhere("_smithers_runs", { status: "canceled" }, "run_id = ?", ["canceled-run"]);
+        await adapter.insertOrUpdateApproval({
+            runId: "cancelled-run",
+            nodeId: "old-gate",
+            iteration: 0,
+            status: "requested",
+            requestedAtMs: now - 300,
+        });
+        await adapter.insertOrUpdateApproval({
+            runId: "canceled-run",
+            nodeId: "old-gate",
+            iteration: 0,
+            status: "requested",
+            requestedAtMs: now - 200,
+        });
         await adapter.insertNode(nodeRow("r1", "mounted-gate", "waiting-approval", {
             label: "Mounted gate",
             updatedAtMs: now - 500,
@@ -518,6 +536,8 @@ describe("SmithersDb adapter", () => {
             requestJson: null,
             autoApproved: false,
         });
+        expect(await adapter.listPendingApprovals("cancelled-run")).toHaveLength(0);
+        expect(await adapter.listPendingApprovals("canceled-run")).toHaveLength(0);
 
         const allApprovals = await adapter.listAllPendingApprovals();
         expect(allApprovals).toHaveLength(1);

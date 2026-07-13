@@ -732,18 +732,7 @@ describe("semantic MCP surface", () => {
             }));
             expect(pending.approvals.map((approval) => approval.nodeId).sort()).toEqual([
                 "approval-gate",
-                "legacy-gate",
             ]);
-
-            const ambiguous = await client.callTool({
-                name: "resolve_approval",
-                arguments: {
-                    action: "deny",
-                    workflowName: "deploy-flow",
-                },
-            });
-            const ambiguity = expectToolError(ambiguous, "INVALID_INPUT");
-            expect(ambiguity.message).toContain("Multiple pending approvals matched");
 
             const approved = expectToolOk(await client.callTool({
                 name: "resolve_approval",
@@ -768,7 +757,7 @@ describe("semantic MCP surface", () => {
                 name: "list_pending_approvals",
                 arguments: { workflowName: "deploy-flow" },
             }));
-            expect(remaining.approvals.map((approval) => approval.nodeId)).toEqual(["legacy-gate"]);
+            expect(remaining.approvals.map((approval) => approval.nodeId)).toEqual([]);
 
             const nodeDetail = expectToolOk(await client.callTool({
                 name: "get_node_detail",

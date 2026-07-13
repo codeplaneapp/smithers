@@ -59,6 +59,13 @@ function makeDesc(tables, overrides = {}) {
 async function runBridge({ descOverrides = {}, eventBus = makeEventBus(), signal } = {}) {
     const harness = makeHarness();
     const desc = makeDesc(harness.tables, descOverrides);
+    await Effect.runPromise(harness.adapter.insertRun({
+        runId: descOverrides.runId ?? "run",
+        workflowName: "compute-bridge-internals",
+        status: "running",
+        runtimeOwnerId: "compute-bridge-owner",
+        createdAtMs: Date.now(),
+    }));
     await executeComputeTaskBridge(
         harness.adapter,
         harness.db,
@@ -166,6 +173,9 @@ describe("compute task bridge pure helpers", () => {
 
 describe("compute task bridge execution branches", () => {
     test("cancels immediately when the external signal is already aborted", async () => {
+        const unhandled = [];
+        const onUnhandled = (reason) => unhandled.push(reason);
+        process.on("unhandledRejection", onUnhandled);
         const controller = new AbortController();
         controller.abort(new Error("operator stop"));
         const result = await runBridge({
@@ -173,11 +183,14 @@ describe("compute task bridge execution branches", () => {
             signal: controller.signal,
         });
         try {
-            const attempts = await result.adapter.listAttempts(result.runId, "pre-aborted", 0);
+            const attempts = await Effect.runPromise(result.adapter.listAttempts(result.runId, "pre-aborted", 0));
             expect(attempts[0]?.state).toBe("cancelled");
             expect(result.eventBus.events.map((event) => event.type)).toContain("NodeCancelled");
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            expect(unhandled).toHaveLength(0);
         }
         finally {
+            process.off("unhandledRejection", onUnhandled);
             result.cleanup();
         }
     });
@@ -193,7 +206,7 @@ describe("compute task bridge execution branches", () => {
             },
         });
         try {
-            const attempts = await result.adapter.listAttempts(result.runId, "bad-schema", 0);
+            const attempts = await Effect.runPromise(result.adapter.listAttempts(result.runId, "bad-schema", 0));
             expect(attempts[0]?.state).toBe("failed");
             expect(JSON.parse(attempts[0]?.metaJson ?? "{}").failureRetryable).toBe(false);
             expect(JSON.parse(attempts[0]?.errorJson ?? "{}").code).toBe("INVALID_OUTPUT");
@@ -214,7 +227,7 @@ describe("compute task bridge execution branches", () => {
             },
         });
         try {
-            const attempts = await result.adapter.listAttempts(result.runId, "flush-fails", 0);
+            const attempts = await Effect.runPromise(result.adapter.listAttempts(result.runId, "flush-fails", 0));
             expect(attempts[0]?.state).toBe("failed");
             expect(JSON.parse(attempts[0]?.errorJson ?? "{}").message).toContain("flush boom");
         }
@@ -252,7 +265,7 @@ describe("compute task bridge execution branches", () => {
                 { rootDir: process.cwd() },
                 "compute-bridge-internals",
             );
-            const attempts = await harness.adapter.listAttempts("heartbeat-write-fails-run", "heartbeat-write-fails", 0);
+            const attempts = await Effect.runPromise(harness.adapter.listAttempts("heartbeat-write-fails-run", "heartbeat-write-fails", 0));
             expect(attempts[0]?.state).toBe("finished");
             expect(eventBus.events.map((event) => event.type)).toContain("NodeFinished");
         }
@@ -274,7 +287,7 @@ describe("compute task bridge execution branches", () => {
             },
         });
         try {
-            const attempts = await result.adapter.listAttempts(result.runId, "heartbeat-task-fails", 0);
+            const attempts = await Effect.runPromise(result.adapter.listAttempts(result.runId, "heartbeat-task-fails", 0));
             expect(attempts[0]?.state).toBe("failed");
             expect(JSON.parse(attempts[0]?.errorJson ?? "{}").message).toContain("failed before stale");
         }

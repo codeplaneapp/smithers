@@ -866,7 +866,8 @@ declare class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     updateAttemptEffect(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
-    claimAttemptCompletion(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string, finishedAtMs: number): RunnableEffect<boolean, SmithersError$1>;
+    claimAttemptCompletion(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, finishedAtMs: number): RunnableEffect<boolean, SmithersError$1>;
+    claimAttemptTerminal(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, state: string, finishedAtMs: number, errorJson?: string): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -876,7 +877,7 @@ declare class SmithersDb {
    * @param {string | null} heartbeatDataJson
      * @returns {RunnableEffect<boolean, SmithersError>}
      */
-    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string): RunnableEffect<boolean, SmithersError$1>;
+    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string | null): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId

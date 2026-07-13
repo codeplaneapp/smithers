@@ -16,4 +16,5 @@ export type SpawnCaptureOptions = {
   detached?: boolean;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+  onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void;
 };

@@ -133,13 +133,11 @@ describe("MAX_SCHEMA_RETRIES (3) - schema-retry mechanism", () => {
             tools: {},
             generate: async (args) => {
                 totalCalls.value += 1;
-                // The engine's main generate() call passes outputSchema/onStepEnd/
-                // onEvent. The schema-retry generate() omits all of those.
+                // The initial generate() carries the task callbacks and prompt;
+                // schema-repair generations carry the resumed messages and the
+                // same callbacks so repair activity remains observable.
                 const isFreshAttempt =
-                    "outputSchema" in (args ?? {}) ||
-                    "onStepEnd" in (args ?? {}) ||
-                    "onStepFinish" in (args ?? {}) ||
-                    "onEvent" in (args ?? {});
+                    typeof args?.prompt === "string" && !Array.isArray(args?.messages);
                 if (isFreshAttempt) {
                     taskAttempts += 1;
                     schemaRetriesThisAttempt = 0;

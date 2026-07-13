@@ -315,14 +315,14 @@ export function createServeApp(opts) {
         if (run.status === "waiting-approval" || run.status === "waiting-timer") {
             const cancelledAtMs = nowMs();
             const result = await finalizeCancelledRun(adapter, runId, { now: cancelledAtMs });
-            return c.json({ runId, status: result.status, won: result.won, repaired: result.repaired });
+            return c.json(result);
         }
         if (run.status !== "running" || !isRunHeartbeatFresh(run)) {
             throw new HttpError(409, "RUN_NOT_ACTIVE", "Run is not currently active");
         }
         const result = await finalizeCancelledRun(adapter, runId, { now: nowMs() });
         if (result.won) abort.abort();
-        return c.json({ runId });
+        return c.json(result);
     });
     // GET /metrics
     if (metricsEnabled) {

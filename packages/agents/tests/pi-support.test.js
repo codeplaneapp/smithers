@@ -352,8 +352,10 @@ process.stdout.write(lines.join("\\n") + "\\n");
                 model: "gpt-5.4-mini",
                 env: { PATH: process.env.PATH },
             });
+            const lifecycle = [];
             const result = await agent.generate({
                 messages: [{ role: "user", content: "Ping?" }],
+                onProcess: (event) => lifecycle.push(event),
             });
             expect(result.text).toBe("Hello");
             const promptPayload = JSON.parse(await readFile(argsFile, "utf8"));
@@ -363,6 +365,9 @@ process.stdout.write(lines.join("\\n") + "\\n");
             expect(capturedArgs).toContain("--mode");
             expect(capturedArgs).toContain("rpc");
             expect(capturedArgs).not.toContain("--print");
+            expect(lifecycle).toHaveLength(2);
+            expect(lifecycle[0].phase).toBe("started");
+            expect(lifecycle[1].phase).toBe("exited");
         }
         finally {
             await rm(fake.dir, { recursive: true, force: true });

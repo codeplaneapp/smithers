@@ -124,6 +124,136 @@ describe("runClaudeMonitor stall notification", () => {
         expect(stalls, JSON.stringify(lines)).toHaveLength(0);
     });
 
+    test("fresh persisted active-task heartbeat does not emit run-stalled", async () => {
+        const LIVE_ID = "live-heartbeat-run";
+        const stalledAfterMs = 120_000;
+        const start = 1_700_000_000_000;
+        let nowMs = start;
+        let scans = 0;
+        const adapter = {
+            async listRuns() {
+                scans += 1;
+                if (scans > 1) nowMs += stalledAfterMs + 1_000;
+                return [{ runId: LIVE_ID, status: "running", heartbeatAtMs: start }];
+            },
+            async getLastEventSeq() {
+                return 0;
+            },
+            async listEventHistory() {
+                return [];
+            },
+            async listAttemptsForRun() {
+                return [{ state: "in-progress", heartbeatAtMs: nowMs }];
+            },
+            async listPendingApprovals() {
+                return [];
+            },
+            async listPendingHumanRequests() {
+                return [];
+            },
+        };
+        const lines = [];
+        await runClaudeMonitor(adapter, {
+            ticks: 3,
+            intervalMs: 250,
+            stalledAfterMs,
+            now: () => nowMs,
+            write: (line) => lines.push(JSON.parse(line)),
+        });
+
+        expect(lines.filter((line) => line.kind === "run-stalled"), JSON.stringify(lines)).toHaveLength(0);
+    });
+
+    test("an old paginated event backlog still stalls using persisted timestamps", async () => {
+        const start = 1_700_000_000_000;
+        const stalledAfterMs = 120_000;
+        let nowMs = start;
+        let scans = 0;
+        const oldRows = Array.from({ length: 401 }, (_, index) => ({
+            seq: index + 1,
+            type: "TaskCompleted",
+            timestampMs: start - stalledAfterMs - 1,
+            payloadJson: "{}",
+        }));
+        const adapter = {
+            async listRuns() {
+                scans += 1;
+                if (scans > 1) nowMs += stalledAfterMs + 1;
+                return [{ runId: "old-backlog", status: "running", heartbeatAtMs: start }];
+            },
+            async getLastEventSeq() { return 0; },
+            async listEventHistory(_runId, { afterSeq, limit }) {
+                return oldRows.filter((row) => row.seq > afterSeq).slice(0, limit);
+            },
+            async listPendingApprovals() { return []; },
+            async listPendingHumanRequests() { return []; },
+        };
+        const lines = [];
+        await runClaudeMonitor(adapter, {
+            ticks: 3,
+            intervalMs: 250,
+            stalledAfterMs,
+            now: () => nowMs,
+            write: (line) => lines.push(JSON.parse(line)),
+        });
+        expect(lines.filter((line) => line.kind === "run-stalled")).toHaveLength(1);
+    });
+
+    test("event-read failure makes a monitor tick inconclusive", async () => {
+        const start = 1_700_000_000_000;
+        let scans = 0;
+        const adapter = {
+            async listRuns() {
+                scans += 1;
+                return [{ runId: "event-read-failure", status: "running", heartbeatAtMs: start - 1_000_000 }];
+            },
+            async getLastEventSeq() { return 0; },
+            async listEventHistory() {
+                if (scans > 1) throw new Error("event store unavailable");
+                return [];
+            },
+            async listPendingApprovals() { return []; },
+            async listPendingHumanRequests() { return []; },
+        };
+        const lines = [];
+        await runClaudeMonitor(adapter, {
+            ticks: 2,
+            intervalMs: 250,
+            stalledAfterMs: 120_000,
+            now: () => start + 1_000_000,
+            write: (line) => lines.push(JSON.parse(line)),
+        });
+        expect(lines.filter((line) => line.kind === "run-stalled")).toHaveLength(0);
+    });
+
+    test("attempt-heartbeat read failure makes a monitor tick inconclusive", async () => {
+        const start = 1_700_000_000_000;
+        let scans = 0;
+        const adapter = {
+            async listRuns() {
+                scans += 1;
+                return [{ runId: "attempt-read-failure", status: "running", heartbeatAtMs: start - 1_000_000 }];
+            },
+            async getLastEventSeq() { return 0; },
+            async listEventHistory() { return []; },
+            async listAttemptsForRun() {
+                if (scans > 1) throw new Error("attempt store unavailable");
+                return [];
+            },
+            async listPendingApprovals() { return []; },
+            async listPendingHumanRequests() { return []; },
+        };
+        const lines = [];
+        await runClaudeMonitor(adapter, {
+            ticks: 2,
+            intervalMs: 250,
+            stalledAfterMs: 120_000,
+            now: () => start + 1_000_000,
+            write: (line) => lines.push(JSON.parse(line)),
+        });
+        expect(lines.filter((line) => line.kind === "run-stalled")).toHaveLength(0);
+    });
+
     test("run-stalled still fires once event persistence stops alongside the late heartbeat", async () => {
         const QUIET_ID = "quieted-run";
         const stalledAfterMs = 120_000;

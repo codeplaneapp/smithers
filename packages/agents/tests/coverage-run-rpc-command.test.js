@@ -55,12 +55,14 @@ describe("runRpcCommandEffect branches", () => {
     const controller = new AbortController();
     /** @type {string[]} */
     const streamed = [];
+    const lifecycle = [];
     const promise = start(child, {
       signal: controller.signal,
       timeoutMs: 1_000_000,
       idleTimeoutMs: 1_000_000,
       onStdout: (t) => streamed.push(t),
       onJsonEvent: () => {},
+      onProcess: (event) => lifecycle.push(event),
     });
     await tick();
     // top-level usage event (extractedUsage assignment)
@@ -86,6 +88,9 @@ describe("runRpcCommandEffect branches", () => {
     expect(result.text).toBe("final answer");
     expect(result.usage).toEqual({ output_tokens: 7 });
     expect(streamed.join("")).toBe("final answer");
+    expect(lifecycle).toHaveLength(2);
+    expect(lifecycle[0]).toMatchObject({ phase: "started", pid: 4242 });
+    expect(lifecycle[1]).toMatchObject({ phase: "exited", pid: 4242 });
   });
 
   test("aborts immediately when the signal is already aborted", async () => {

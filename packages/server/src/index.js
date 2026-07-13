@@ -1148,7 +1148,7 @@ function startServerInternal(opts = {}) {
                 }, "server:cancel");
                 const claimed = await finalizeCancelledRun(adapter, runId, { now: nowMs() });
                 if (claimed.won) record?.abort.abort();
-                return sendJson(res, 200, { runId, status: claimed.status });
+                return sendJson(res, 200, claimed);
             }
             const runEventsMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/events$/);
             if (method === "GET" && runEventsMatch) {

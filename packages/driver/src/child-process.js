@@ -104,7 +104,7 @@ export function killChildTree(child, detached) {
  * @returns {Effect.Effect<SpawnCaptureResult, SmithersError>}
  */
 export function spawnCaptureEffect(command, args, options) {
-    const { cwd, env, input, signal, timeoutMs, idleTimeoutMs, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES, truncateKeep = "head", detached = false, onStdout, onStderr, } = options;
+    const { cwd, env, input, signal, timeoutMs, idleTimeoutMs, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES, truncateKeep = "head", detached = false, onStdout, onStderr, onProcess, } = options;
     const errorDetails = {
         command,
         args,
@@ -133,6 +133,7 @@ export function spawnCaptureEffect(command, args, options) {
             detached,
             stdio: ["pipe", "pipe", "pipe"],
         });
+        onProcess?.({ phase: "started", pid: child.pid });
         /**
      * @param {string} reason
      * @param {"PROCESS_ABORTED" | "PROCESS_TIMEOUT" | "PROCESS_IDLE_TIMEOUT"} code
@@ -156,6 +157,7 @@ export function spawnCaptureEffect(command, args, options) {
             }
             if (!settled) {
                 settled = true;
+                onProcess?.({ phase: "exited", pid: child.pid });
                 resume(Effect.fail(new SmithersError(code, reason, errorDetails)));
             }
         };
@@ -192,6 +194,7 @@ export function spawnCaptureEffect(command, args, options) {
             if (settled)
                 return;
             settled = true;
+            onProcess?.({ phase: "exited", pid: child.pid });
             if (totalTimer)
                 clearTimeout(totalTimer);
             if (idleTimer)

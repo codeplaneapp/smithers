@@ -69,6 +69,7 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
     const removeAbortForwarder = wireAbortSignal(taskAbortController, signal);
     const taskSignal = taskAbortController.signal;
     const startedAtMs = nowMs();
+    const executionOwnerId = (await Effect.runPromise(adapter.getRun(runId)))?.runtimeOwnerId ?? null;
     const attemptMeta = {
         kind: "static",
         prompt: desc.prompt ?? null,
@@ -161,7 +162,12 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
         payload = validation.data;
         const completedAtMs = nowMs();
         const jjPointer = await Effect.runPromise(getJjPointer(toolConfig.rootDir).pipe(Effect.provide(getPlatformLayer())));
-        await adapter.withTransaction("task-completion", Effect.gen(function* () {
+        if (taskSignal.aborted) {
+            throw taskSignal.reason ?? makeAbortError();
+        }
+        const completionClaimed = await adapter.withTransaction("task-completion", Effect.gen(function* () {
+            const claimed = yield* adapter.claimAttemptCompletion(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, completedAtMs);
+            if (!claimed) return false;
             yield* adapter.upsertOutputRow(desc.outputTable, { runId, nodeId: desc.nodeId, iteration: desc.iteration }, payload);
             yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
                 state: "finished",
@@ -181,7 +187,9 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
                 outputTable: desc.outputTableName,
                 label: desc.label ?? null,
             });
+            return true;
         }));
+        if (!completionClaimed) return;
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFinished",
             runId,
@@ -213,14 +221,10 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
                 : err;
         if (aborted) {
             const cancelledAtMs = nowMs();
-            await adapter.withTransaction("task-cancel", Effect.gen(function* () {
-                yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-                    state: "cancelled",
-                    finishedAtMs: cancelledAtMs,
-                    errorJson: JSON.stringify(errorToJson(effectiveError)),
-                    metaJson: JSON.stringify(attemptMeta),
-                    responseText: null,
-                });
+            const cancellationClaimed = await adapter.withTransaction("task-cancel", Effect.gen(function* () {
+                const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "cancelled", cancelledAtMs, JSON.stringify(errorToJson(effectiveError)));
+                if (!claimed) return false;
+                yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText: null });
                 yield* adapter.insertNode({
                     runId,
                     nodeId: desc.nodeId,
@@ -231,7 +235,9 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
                     outputTable: desc.outputTableName,
                     label: desc.label ?? null,
                 });
+                return true;
             }));
+            if (!cancellationClaimed) return;
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "NodeCancelled",
                 runId,
@@ -263,14 +269,10 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
                 : String(effectiveError),
         }, "engine:task");
         const failedAtMs = nowMs();
-        await adapter.withTransaction("task-fail", Effect.gen(function* () {
-            yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-                state: "failed",
-                finishedAtMs: failedAtMs,
-                errorJson: JSON.stringify(errorToJson(effectiveError)),
-                metaJson: JSON.stringify(attemptMeta),
-                responseText: null,
-            });
+        const failureClaimed = await adapter.withTransaction("task-fail", Effect.gen(function* () {
+            const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "failed", failedAtMs, JSON.stringify(errorToJson(effectiveError)));
+            if (!claimed) return false;
+            yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText: null });
             yield* adapter.insertNode({
                 runId,
                 nodeId: desc.nodeId,
@@ -281,7 +283,9 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
                 outputTable: desc.outputTableName,
                 label: desc.label ?? null,
             });
+            return true;
         }));
+        if (!failureClaimed) return;
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFailed",
             runId,

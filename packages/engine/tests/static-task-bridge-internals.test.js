@@ -50,6 +50,10 @@ function makeDesc(table, schema, overrides = {}) {
     };
 }
 
+async function insertRun(adapter, runId) {
+    await adapter.insertRun({ runId, workflowName: "static-test", workflowHash: "static-test", status: "running", createdAtMs: Date.now() });
+}
+
 describe("static task bridge helpers", () => {
     test("classifies aborts and bridge-managed static task eligibility", () => {
         expect(I.isAbortError(null)).toBe(false);
@@ -76,6 +80,7 @@ describe("static task bridge execution branches", () => {
         try {
             const eventBus = makeEventBus();
             const desc = makeDesc(tables.out, schema, { nodeId: "static-abort" });
+            await insertRun(adapter, "static-abort-run");
             const controller = new AbortController();
             controller.abort(new Error("operator stop"));
             await executeStaticTaskBridge(adapter, "static-abort-run", desc, eventBus, { rootDir: process.cwd() }, "static-abort", controller.signal);
@@ -96,6 +101,7 @@ describe("static task bridge execution branches", () => {
                 retries: 3,
                 staticPayload: { value: 2 },
             });
+            await insertRun(adapter, "static-zod-invalid-run");
             await executeStaticTaskBridge(adapter, "static-zod-invalid-run", invalidDesc, makeEventBus(), { rootDir: process.cwd() }, "static-zod-invalid");
             const invalidAttempts = await adapter.listAttempts("static-zod-invalid-run", "static-zod-invalid", 0);
             expect(invalidAttempts[0]?.state).toBe("failed");
@@ -106,6 +112,7 @@ describe("static task bridge execution branches", () => {
                 retries: 1,
                 staticPayload: { value: 3 },
             });
+            await insertRun(adapter, "static-retryable-run");
             const retryBus = makeEventBus();
             const originalInsertNode = adapter.insertNode.bind(adapter);
             adapter.insertNode = (row) => {

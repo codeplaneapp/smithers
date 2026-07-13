@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
 /**
- * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; }} RunCommandOptions
+ * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; }} RunCommandOptions
  */
 /** @typedef {import("./RunCommandResult.ts").RunCommandResult} RunCommandResult */
 /** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
@@ -13,7 +13,7 @@ import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process"
  * @returns {Effect.Effect<RunCommandResult, SmithersError>}
  */
 export function runCommandEffect(command, args, options) {
-    const { cwd, env, input, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, truncateKeep, onStdout, onStderr, } = options;
+    const { cwd, env, input, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, truncateKeep, onStdout, onStderr, onProcess, } = options;
     return spawnCaptureEffect(command, args, {
         cwd,
         env,
@@ -25,6 +25,7 @@ export function runCommandEffect(command, args, options) {
         truncateKeep,
         onStdout,
         onStderr,
+        onProcess,
     }).pipe(Effect.annotateLogs({
         agentCommand: command,
         agentArgs: args.join(" "),

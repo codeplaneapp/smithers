@@ -283,7 +283,6 @@ function isTransientSessionFailure(error) {
         : normalized.code;
     return code === "SESSION_ERROR" ||
         code === "TASK_TIMEOUT" ||
-        code === "TASK_HEARTBEAT_TIMEOUT" ||
         code === "TASK_ABORTED" ||
         normalized.details?.failureRetryable === true;
 }

@@ -291,6 +291,7 @@ type RunRpcCommandOptions = {
     maxOutputBytes?: number;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void;
     onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void;
     onExtensionUiRequest?: (request: PiExtensionUiRequest$1) => Promise<PiExtensionUiResponse$1 | null> | PiExtensionUiResponse$1 | null;
     spawnFn?: typeof spawn;

@@ -12,7 +12,7 @@ import { truncateToBytes } from "./truncateToBytes.js";
 
 /** @typedef {import("./PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /**
- * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; spawnFn?: typeof spawn; }} RunRpcCommandOptions
+ * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; spawnFn?: typeof spawn; }} RunRpcCommandOptions
  */
 
 /**
@@ -60,7 +60,7 @@ function createInactivityTimer(timeoutMs, onTimeout) {
  * @returns {Effect.Effect<{ text: string; output: unknown; stderr: string; exitCode: number | null; usage?: any; }, SmithersError>}
  */
 export function runRpcCommandEffect(command, args, options) {
-    const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStdout, onStderr, onJsonEvent, onExtensionUiRequest, spawnFn = spawn, } = options;
+    const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStdout, onStderr, onProcess, onJsonEvent, onExtensionUiRequest, spawnFn = spawn, } = options;
     const span = `agent:${command}:rpc`;
     const logAnnotations = {
         agentCommand: command,
@@ -87,6 +87,13 @@ export function runRpcCommandEffect(command, args, options) {
             detached: true,
             stdio: ["pipe", "pipe", "pipe"],
         });
+        onProcess?.({ phase: "started", pid: child.pid });
+        let processExited = false;
+        const notifyProcessExited = () => {
+            if (processExited) return;
+            processExited = true;
+            onProcess?.({ phase: "exited", pid: child.pid });
+        };
         child.unref();
         // A fast-exiting or early-closing child can make writes to stdin emit an
         // async EPIPE/ECONNRESET. Without a listener Node escalates it to an
@@ -116,6 +123,7 @@ export function runRpcCommandEffect(command, args, options) {
             if (signal) {
                 signal.removeEventListener("abort", onAbort);
             }
+            notifyProcessExited();
             logWarning(message, {
                 ...logAnnotations,
                 error: err.message,
@@ -141,6 +149,7 @@ export function runRpcCommandEffect(command, args, options) {
             if (signal) {
                 signal.removeEventListener("abort", onAbort);
             }
+            notifyProcessExited();
             logDebug("agent RPC command completed", {
                 ...logAnnotations,
                 exitCode: child.exitCode ?? exitCode,
@@ -341,6 +350,7 @@ export function runRpcCommandEffect(command, args, options) {
             }));
         });
         child.on("close", (code) => {
+            notifyProcessExited();
             exitCode = code ?? null;
             inactivity.clear();
             totalTimeout.clear();

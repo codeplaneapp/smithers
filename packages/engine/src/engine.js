@@ -2196,7 +2196,7 @@ async function markTimerWakeResumeFailed(adapter, eventBus, runId, error) {
     const errorInfo = errorToJson(error);
     await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
     const failedAtMs = nowMs();
-    await Effect.runPromise(adapter.updateRun(runId, {
+    const failed = await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, {
         status: "failed",
         finishedAtMs: failedAtMs,
         heartbeatAtMs: null,
@@ -2206,6 +2206,13 @@ async function markTimerWakeResumeFailed(adapter, eventBus, runId, error) {
         hijackTarget: null,
         errorJson: JSON.stringify(errorInfo),
     }));
+    if (!failed) {
+        const authoritative = await Effect.runPromise(adapter.getRun(runId));
+        if (authoritative?.status === "cancelled" || authoritative?.status === "canceled" || authoritative?.cancelRequestedAtMs) {
+            await finalizeCancelledRun(adapter, runId, { eventBus });
+            return;
+        }
+    }
     await Effect.runPromise(eventBus.emitEventWithPersist({
         type: "RunFailed",
         runId,
@@ -2256,16 +2263,19 @@ function startRunSupervisor(adapter, runId, runtimeOwnerId, controller, hijackSt
                 if (run?.hijackRequestedAtMs &&
                     (!hijackState.request ||
                         run.hijackRequestedAtMs > hijackState.request.requestedAtMs)) {
-                    hijackState.request = {
-                        requestedAtMs: run.hijackRequestedAtMs,
-                        target: run.hijackTarget ?? null,
-                    };
-                    logInfo("detected durable run hijack request", {
-                        runId,
-                        runtimeOwnerId,
-                        hijackRequestedAtMs: run.hijackRequestedAtMs,
-                        hijackTarget: run.hijackTarget ?? null,
-                    }, "engine:hijack-watch");
+                    const owned = await Effect.runPromise(adapter.heartbeatRun(runId, runtimeOwnerId, nowMs()));
+                    if (owned) {
+                        hijackState.request = {
+                            requestedAtMs: run.hijackRequestedAtMs,
+                            target: run.hijackTarget ?? null,
+                        };
+                        logInfo("detected durable run hijack request", {
+                            runId,
+                            runtimeOwnerId,
+                            hijackRequestedAtMs: run.hijackRequestedAtMs,
+                            hijackTarget: run.hijackTarget ?? null,
+                        }, "engine:hijack-watch");
+                    }
                 }
                 if (run?.pauseRequestedAtMs && pauseController && !pauseController.signal.aborted) {
                     logInfo("detected durable run pause request", {
@@ -2964,6 +2974,9 @@ async function cancelStaleAttempts(adapter, runId) {
  */
 async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(), eventBus, resolveWaiters = true, onPersisted) {
     const deferredWaiters = [];
+    let changed = false;
+    const approvalWaitDurations = [];
+    let asyncApprovalDecrements = 0;
     const existingEventRows = await Promise.all([
         "NodeCancelled", "TimerCancelled", "ApprovalDenied",
     ].map((type) => Effect.runPromise(adapter.listEventsByType(runId, type))));
@@ -2977,6 +2990,7 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
         const key = `${event.type}:${event.nodeId ?? ""}:${event.iteration ?? ""}:${event.attempt ?? ""}:${event.timerId ?? ""}`;
         if (emittedKeys.has(key)) return;
         emittedKeys.add(key);
+        changed = true;
         if (eventBus) {
             await Effect.runPromise(eventBus.emitEventWithPersist(event));
         }
@@ -3028,7 +3042,27 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
         }
     }
     const approvals = await Effect.runPromise(adapter.listPendingApprovals(runId));
-    for (const approval of approvals) {
+    // The public pending read intentionally hides requested rows on terminal
+    // runs. Cancellation still has to settle those legacy rows after the
+    // status claim, so read the explicit rows inside this transaction as well.
+    const explicitApprovals = adapter.internalStorage
+        ? await adapter.internalStorage.queryAll(`SELECT * FROM _smithers_approvals WHERE run_id = ? AND status = ?`, [runId, "requested"], { booleanColumns: ["autoApproved"] })
+        : [];
+    const approvalsByKey = new Map(approvals.map((approval) => [`${approval.nodeId}:${approval.iteration}`, approval]));
+    for (const approval of explicitApprovals) {
+        const normalized = {
+            runId: approval.runId,
+            nodeId: approval.nodeId,
+            iteration: approval.iteration,
+            status: approval.status,
+            requestedAtMs: approval.requestedAtMs,
+            requestJson: approval.requestJson,
+            autoApproved: approval.autoApproved,
+        };
+        approvalsByKey.set(`${normalized.nodeId}:${normalized.iteration}`, normalized);
+    }
+    const approvalsToCancel = [...approvalsByKey.values()];
+    for (const approval of approvalsToCancel) {
         const existingApproval = await Effect.runPromise(adapter.getApproval(runId, approval.nodeId, approval.iteration));
         await Effect.runPromise(adapter.insertOrUpdateApproval({
             runId,
@@ -3043,8 +3077,9 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
             decisionJson: JSON.stringify({ cancelled: true }),
             autoApproved: false,
         }));
+        changed = true;
         if (existingApproval?.requestedAtMs) {
-            await Effect.runPromise(Effect.ignore(Metric.update(approvalWaitDuration, Math.max(0, cancelledAtMs - existingApproval.requestedAtMs))));
+            approvalWaitDurations.push(Math.max(0, cancelledAtMs - existingApproval.requestedAtMs));
         }
         const approvalResolution = {
             approved: false,
@@ -3063,13 +3098,14 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
         let asyncApproval = false;
         try { asyncApproval = JSON.parse(existingApproval?.requestJson ?? approval.requestJson ?? "{}").waitAsync === true; } catch { /* malformed request is not async */ }
         if (existingApproval?.status === "requested" && asyncApproval) {
-            await Effect.runPromise(updateAsyncExternalWaitPending("approval", -1));
+            asyncApprovalDecrements += 1;
         }
     }
     const humanRequests = await Effect.runPromise(adapter.listPendingHumanRequests());
     for (const request of humanRequests) {
         if (request.runId === runId) {
             await Effect.runPromise(adapter.cancelHumanRequest(request.requestId));
+            changed = true;
         }
     }
     // The approval/request rows are separate from node state. A crash or a
@@ -3089,6 +3125,7 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
             state: "cancelled",
             updatedAtMs: cancelledAtMs,
         }));
+        changed = true;
         if (!cancelledAttemptKeys.has(`${node.nodeId}:${node.iteration ?? 0}`)) {
             await emitCancellationEvent({
                 type: "NodeCancelled",
@@ -3101,7 +3138,7 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
             });
         }
     }
-    return deferredWaiters;
+    return { deferredWaiters, changed, approvalWaitDurations, asyncApprovalDecrements };
 }
 
 /**
@@ -3116,6 +3153,9 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
     let cancelledAtMs = options.now ?? nowMs();
     let claimed = false;
     let insertedCancellationEvent = false;
+    let cleanupChanged = false;
+    let approvalWaitDurations = [];
+    let asyncApprovalDecrements = 0;
     const persistedEvents = [];
     let deferredWaiters = [];
     let current;
@@ -3127,7 +3167,11 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
             // finalization marker. Any caller can safely replay this entire
             // transaction after a crash, including legacy terminal rows.
             if (typeof current.finishedAtMs === "number") cancelledAtMs = current.finishedAtMs;
-            deferredWaiters = await cancelPendingExternalWaits(adapter, runId, cancelledAtMs, undefined, false, (event) => persistedEvents.push(event));
+            const cleanup = await cancelPendingExternalWaits(adapter, runId, cancelledAtMs, undefined, false, (event) => persistedEvents.push(event));
+            deferredWaiters = cleanup.deferredWaiters;
+            cleanupChanged = cleanup.changed;
+            approvalWaitDurations = cleanup.approvalWaitDurations;
+            asyncApprovalDecrements = cleanup.asyncApprovalDecrements;
             const cancelEvent = { type: "RunCancelled", runId, timestampMs: cancelledAtMs };
             const existing = await Effect.runPromise(adapter.listEventsByType(runId, "RunCancelled"));
             const legacy = await Effect.runPromise(adapter.listEventsByType(runId, "RunCanceled"));
@@ -3148,8 +3192,15 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
         return { runId, won: false, status: "already-terminal", terminalStatus: current.status, repaired: false };
     }
     const cancelEvent = { type: "RunCancelled", runId, timestampMs: cancelledAtMs };
-    if (!options.eventBus) {
-        for (const event of persistedEvents) await Effect.runPromise(trackEvent(event));
+    for (const event of persistedEvents) {
+        if (options.eventBus) await Effect.runPromise(options.eventBus.emitAndTrack(event));
+        else await Effect.runPromise(trackEvent(event));
+    }
+    for (const duration of approvalWaitDurations) {
+        await Effect.runPromise(Effect.ignore(Metric.update(approvalWaitDuration, duration)));
+    }
+    for (let index = 0; index < asyncApprovalDecrements; index += 1) {
+        await Effect.runPromise(updateAsyncExternalWaitPending("approval", -1));
     }
     for (const waiter of deferredWaiters) {
         if (waiter.kind === "event") {
@@ -3159,16 +3210,13 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
             await bridgeApprovalResolve(adapter, runId, waiter.nodeId, waiter.iteration, waiter.resolution).catch(() => undefined);
         }
     }
-    if (options.eventBus && insertedCancellationEvent) {
-        // The durable row was inserted above; notify in-process subscribers
-        // without persisting a second row.
-        await Effect.runPromise(options.eventBus.emitAndTrack(cancelEvent));
-    }
+    // The durable row was inserted above; notify in-process subscribers
+    // without persisting a second row.
     return {
         won: claimed,
         status: claimed ? "cancelled" : "already-terminal",
         terminalStatus: "cancelled",
-        repaired: true,
+        repaired: cleanupChanged || insertedCancellationEvent,
         runId,
         // `won` is the claim result; repaired tells callers that a legacy or
         // crash-interrupted terminal run was made fully quiescent.
@@ -3198,6 +3246,14 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const parsed = parseAttemptHeartbeatData(attempt.heartbeatDataJson);
             if (parsed !== null)
                 return parsed;
+        }
+        return null;
+    })();
+    const previousHeartbeatJson = (() => {
+        for (const attempt of attempts) {
+            if (typeof attempt.heartbeatDataJson === "string" && attempt.heartbeatDataJson.length > 0) {
+                return attempt.heartbeatDataJson;
+            }
         }
         return null;
     })();
@@ -3231,15 +3287,40 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let taskExecutionReturned = false;
     let heartbeatClosed = false;
     let heartbeatWriteInFlight = false;
-    let heartbeatPendingDataJson = previousHeartbeat === null ? null : JSON.stringify(previousHeartbeat);
+    // Keep the durable checkpoint's exact bytes across activity-only pulses.
+    // Parsing is for runtime.lastHeartbeat; it must not become a reserialization
+    // of the value persisted by a previous attempt.
+    let heartbeatPendingDataJson = previousHeartbeatJson;
     let heartbeatPendingDataSizeBytes = heartbeatPendingDataJson === null ? 0 : Buffer.byteLength(heartbeatPendingDataJson, "utf8");
     let heartbeatPendingAtMs = startedAtMs;
     let heartbeatEvidenceAtMs = startedAtMs;
+    let heartbeatOwnerLost = false;
     let heartbeatTimeoutWon = false;
     let heartbeatHasPendingWrite = false;
     let heartbeatLastPersistedWriteAtMs = 0;
+    let heartbeatLastWriteSucceeded = false;
     let heartbeatLastReceivedAtMs = null;
     let heartbeatWriteTimer;
+    let traceCollector;
+    const liveOwnedPids = new Set();
+    // Construct the abort race only for an agent call that consumes it. A
+    // static/compute attempt may never observe the promise; constructing it
+    // eagerly would leave a rejected promise behind when the watchdog fires.
+    let taskAbortPromise;
+    const getTaskAbortPromise = () => {
+        if (!taskAbortPromise) {
+            taskAbortPromise = new Promise((_, reject) => {
+                const rejectAbort = () => reject(taskSignal.reason ?? makeAbortError());
+                if (taskSignal.aborted)
+                    rejectAbort();
+                else
+                    taskSignal.addEventListener("abort", rejectAbort, { once: true });
+            });
+            taskAbortPromise.catch(() => undefined);
+        }
+        return taskAbortPromise;
+    };
+    const raceTaskAbort = (promise) => Promise.race([promise, getTaskAbortPromise()]);
     /**
    * @returns {Promise<void>}
    */
@@ -3248,7 +3329,10 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             return;
         }
         const now = nowMs();
-        const minNextWriteAt = heartbeatLastPersistedWriteAtMs + TASK_HEARTBEAT_THROTTLE_MS;
+        const heartbeatThrottleMs = desc.heartbeatTimeoutMs
+            ? Math.min(TASK_HEARTBEAT_THROTTLE_MS, Math.max(0, Math.floor(desc.heartbeatTimeoutMs / 3)))
+            : TASK_HEARTBEAT_THROTTLE_MS;
+        const minNextWriteAt = heartbeatLastPersistedWriteAtMs + heartbeatThrottleMs;
         if (!force && now < minNextWriteAt) {
             const waitMs = Math.max(0, minNextWriteAt - now);
             if (!heartbeatWriteTimer) {
@@ -3275,12 +3359,18 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // do not let a callback from a previous execution keep the local
                 // watchdog alive or emit a misleading heartbeat event.
                 heartbeatHasPendingWrite = false;
+                heartbeatOwnerLost = true;
+                liveOwnedPids.clear();
+                traceCollector?.discard();
                 heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
+                if (!taskSignal.aborted) {
+                    taskAbortController.abort(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat ownership was lost."));
+                }
                 return;
             }
-            heartbeatPendingAtMs = heartbeatAtMs;
             heartbeatEvidenceAtMs = heartbeatAtMs;
             heartbeatLastPersistedWriteAtMs = nowMs();
+            heartbeatLastWriteSucceeded = true;
             logDebug("task heartbeat recorded", {
                 runId,
                 nodeId: desc.nodeId,
@@ -3301,6 +3391,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             });
         }
         catch (error) {
+            heartbeatLastWriteSucceeded = false;
             logWarning("failed to persist task heartbeat", {
                 runId,
                 nodeId: desc.nodeId,
@@ -3327,6 +3418,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     const queueHeartbeat = (data, opts) => {
         if (taskCompleted ||
             heartbeatClosed ||
+            heartbeatOwnerLost ||
             (!opts?.internal && taskExecutionReturned)) {
             return;
         }
@@ -3334,7 +3426,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         let heartbeatDataJson = heartbeatPendingDataJson;
         let dataSizeBytes = heartbeatPendingDataSizeBytes;
         try {
-            if (data !== undefined) {
+            // Internal activity is liveness only. It must never alter (or try
+            // to serialize) the application checkpoint, including scalar and
+            // array data. In particular, serializing its deliberately ignored
+            // metadata as `undefined` used to reject the pulse before it could
+            // prove ownership.
+            if (!opts?.internal && data !== undefined) {
                 const serialized = serializeHeartbeatPayload(data);
                 heartbeatDataJson = serialized.heartbeatDataJson;
                 dataSizeBytes = serialized.dataSizeBytes;
@@ -3354,7 +3451,6 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             return;
         }
         heartbeatPendingAtMs = heartbeatAtMs;
-        heartbeatEvidenceAtMs = heartbeatAtMs;
         heartbeatPendingDataJson = heartbeatDataJson;
         heartbeatPendingDataSizeBytes = dataSizeBytes;
         heartbeatHasPendingWrite = true;
@@ -3372,6 +3468,24 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         while (heartbeatWriteInFlight) {
             await sleep(5);
         }
+    };
+    const confirmHeartbeatOwnership = async () => {
+        heartbeatLastWriteSucceeded = false;
+        if (!heartbeatHasPendingWrite && !heartbeatWriteInFlight && !heartbeatClosed && !heartbeatOwnerLost) {
+            recordInternalHeartbeat();
+        }
+        await flushHeartbeat(true);
+        await waitForHeartbeatWriteDrain();
+        if (heartbeatHasPendingWrite || heartbeatWriteInFlight) {
+            await flushHeartbeat(true);
+            await waitForHeartbeatWriteDrain();
+        }
+        if (!heartbeatLastWriteSucceeded && !heartbeatClosed && !heartbeatOwnerLost) {
+            recordInternalHeartbeat();
+            await flushHeartbeat(true);
+            await waitForHeartbeatWriteDrain();
+        }
+        return heartbeatLastWriteSucceeded && !heartbeatOwnerLost && !taskSignal.aborted;
     };
     const attemptMeta = {
         kind: desc.kind ?? (desc.agent ? "agent" : desc.computeFn ? "compute" : "static"),
@@ -3437,6 +3551,23 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let effectiveAgent = null;
     let supportsNativeStructuredOutput = false;
     let structuredOutputAccessError;
+    // These callbacks are also used by schema-repair generations, which run
+    // after the main agent-selection block has closed.
+    let handleAgentEvent;
+    let handleSdkStepFinish;
+    let handleProcess;
+    // Callback output is only durable evidence after the same fenced heartbeat
+    // has proved this executor still owns the attempt. Keep this shared by the
+    // primary generation and every schema-repair generation.
+    const pendingOwnershipChecks = new Set();
+    const afterHeartbeatOwnership = (callback) => {
+        const check = confirmHeartbeatOwnership().then((owned) => {
+            if (owned) callback();
+        }).catch(() => { }).finally(() => {
+            pendingOwnershipChecks.delete(check);
+        });
+        pendingOwnershipChecks.add(check);
+    };
     // Resolve effective root once so both caching and execution share it.
     const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
     const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
@@ -3461,9 +3592,21 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             cacheEnabled: stepCacheEnabled,
         }, "engine:task");
         await annotateTaskSpan({ status: "running" });
-        if (desc.heartbeatTimeoutMs) {
-            heartbeatWatchdogFiber = Effect.runFork(Effect.repeat(Effect.suspend(() => {
+        // This poll is an evidence probe, not a liveness pulse: it only writes
+        // when an adapter-owned child PID is demonstrably alive, and every
+        // write remains owner/attempt fenced by heartbeatAttempt.
+        heartbeatWatchdogFiber = Effect.runFork(Effect.repeat(Effect.suspend(() => {
+                if (heartbeatTimeoutWon || heartbeatClosed) {
+                    return Effect.void;
+                }
                 const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
+                if ([...liveOwnedPids].some((pid) => isPidAlive(pid))) {
+                    recordInternalHeartbeat();
+                    return Effect.void;
+                }
+                if (!desc.heartbeatTimeoutMs) {
+                    return Effect.void;
+                }
                 const staleForMs = nowMs() - lastHeartbeatAtMs;
                 if (staleForMs <= desc.heartbeatTimeoutMs) {
                     return Effect.void;
@@ -3497,9 +3640,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 });
                 heartbeatTimeoutWon = true;
                 taskAbortController.abort(timeoutError);
-                return Effect.fail(timeoutError);
+                // Abort is the shared terminal signal. Do not fail a detached
+                // watchdog fiber or reject an unobserved promise (legacy
+                // compute/static tasks do not race that promise).
+                return Effect.void;
             }), Schedule.spaced(Duration.millis(TASK_HEARTBEAT_TIMEOUT_CHECK_MS))).pipe(Effect.flatMap(() => Effect.never)));
-        }
         if (desc.worktreePath) {
             await ensureWorktree(toolConfig.rootDir, desc.worktreePath, desc.worktreeBranch, desc.worktreeBaseBranch);
             // Safety net for a silent, expensive footgun: a worker's working dir resolves as
@@ -3775,16 +3920,20 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const toolResumeWarnings = collectToolResumeWarnings(priorToolCalls, allAgents, attemptNo);
             const toolResumeWarningMessage = buildToolResumeWarningMessage(toolResumeWarnings);
             emitOutput = (text, stream) => {
+                if (heartbeatOwnerLost) return;
                 recordInternalHeartbeat();
-                void eventBus.emitEventQueued({
-                    type: "NodeOutput",
-                    runId,
-                    nodeId: desc.nodeId,
-                    iteration: desc.iteration,
-                    attempt: attemptNo,
-                    text,
-                    stream,
-                    timestampMs: nowMs(),
+                void confirmHeartbeatOwnership().then((owned) => {
+                    if (!owned) return;
+                    return eventBus.emitEventQueued({
+                        type: "NodeOutput",
+                        runId,
+                        nodeId: desc.nodeId,
+                        iteration: desc.iteration,
+                        attempt: attemptNo,
+                        text,
+                        stream,
+                        timestampMs: nowMs(),
+                    });
                 });
             };
             // Capture the agent result at this scope so schema-retry can build
@@ -3898,6 +4047,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         });
                     }
                     if (shouldAutoHijack && !hijackState.request && !hijackState.completion) {
+                        if (!(await confirmHeartbeatOwnership())) {
+                            throw makeAbortError();
+                        }
                         const requestedAtMs = nowMs();
                         hijackState.request = {
                             requestedAtMs,
@@ -3986,10 +4138,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 /**
          * @param {unknown[] | undefined} messages
          */
-                const updateConversation = (messages) => {
+                const updateConversation = async (messages) => {
+                    if (!(await confirmHeartbeatOwnership())) {
+                        return false;
+                    }
                     const cloned = cloneJsonValue(messages);
                     if (!cloned?.length) {
-                        return;
+                        return true;
                     }
                     conversationMessages = cloned;
                     attemptMeta.agentConversation = cloned;
@@ -3999,7 +4154,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             : null,
                         agentConversation: cloned,
                     });
-                    maybeCompleteHijack();
+                    void maybeCompleteHijack().catch(() => { });
+                    return true;
                 };
                 let effectivePrompt = desc.prompt ?? "";
                 // A blank prompt with no resume/fork context would reach the
@@ -4063,10 +4219,16 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 const forkConversationBase = forkSeedMessages?.length
                     ? [...forkSeedMessages, { role: "user", content: effectivePrompt }]
                     : null;
-                const maybeCompleteHijack = () => {
+                let hijackCompletionCheckInFlight = false;
+                const maybeCompleteHijack = async () => {
                     if (!hijackState?.request || hijackState.completion || !runAbortController) {
                         return;
                     }
+                    if (hijackCompletionCheckInFlight) return;
+                    hijackCompletionCheckInFlight = true;
+                    try {
+                        if (!(await confirmHeartbeatOwnership())) return;
+                        if (!hijackState.request || hijackState.completion || !runAbortController || heartbeatOwnerLost) return;
                     const target = hijackState.request.target ?? null;
                     const engine = typeof attemptMeta.agentEngine === "string" ? attemptMeta.agentEngine : null;
                     const resume = typeof attemptMeta.agentResume === "string" ? attemptMeta.agentResume : undefined;
@@ -4119,76 +4281,83 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         timestampMs: nowMs(),
                     });
                     runAbortController.abort();
+                    }
+                    finally {
+                        hijackCompletionCheckInFlight = false;
+                    }
                 };
                 /**
          * @param {AgentCliEvent} event
          */
-                const handleAgentEvent = (event) => {
-                    attemptMeta.agentEngine = event.engine ?? attemptMeta.agentEngine;
-                    if ("resume" in event && typeof event.resume === "string") {
-                        attemptMeta.agentResume = event.resume;
+                handleAgentEvent = (event) => {
+                    if (heartbeatOwnerLost) return;
+                    recordInternalHeartbeat();
+                    afterHeartbeatOwnership(() => {
+                        attemptMeta.agentEngine = event.engine ?? attemptMeta.agentEngine;
+                        if ("resume" in event && typeof event.resume === "string") {
+                            attemptMeta.agentResume = event.resume;
+                        }
                         recordInternalHeartbeat({
                             agentEngine: event.engine,
-                            agentResume: event.resume,
+                            ...(typeof event.resume === "string" ? { agentResume: event.resume } : {}),
                         });
-                    }
-                    else {
-                        recordInternalHeartbeat();
-                    }
-                    if (event.type === "completed" && !responseText && event.answer) {
-                        responseText = event.answer;
-                    }
-                    if (event.type === "action" &&
-                        isBlockingAgentActionKind(event.action.kind)) {
-                        if (event.phase === "started") {
-                            activeCliActions.add(event.action.id);
+                        if (event.type === "completed" && !responseText && event.answer) {
+                            responseText = event.answer;
                         }
-                        else if (event.phase === "completed") {
-                            activeCliActions.delete(event.action.id);
+                        if (event.type === "action" && isBlockingAgentActionKind(event.action.kind)) {
+                            if (event.phase === "started") activeCliActions.add(event.action.id);
+                            else if (event.phase === "completed") activeCliActions.delete(event.action.id);
                         }
-                    }
-                    void eventBus.emitEventQueued({
-                        type: "AgentEvent",
-                        runId,
-                        nodeId: desc.nodeId,
-                        iteration: desc.iteration,
-                        attempt: attemptNo,
-                        engine: event.engine,
-                        event,
-                        timestampMs: nowMs(),
+                        void eventBus.emitEventQueued({
+                            type: "AgentEvent",
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            attempt: attemptNo,
+                            engine: event.engine,
+                            event,
+                            timestampMs: nowMs(),
+                        });
+                        void maybeCompleteHijack(true).catch(() => { });
                     });
-                    maybeCompleteHijack();
                 };
                 /**
          * @param {unknown} stepResult
          */
-                const handleSdkStepFinish = (stepResult) => {
+                handleSdkStepFinish = (stepResult) => {
+                    if (heartbeatOwnerLost) return;
                     recordInternalHeartbeat();
-                    if (!conversationMessages) {
-                        conversationMessages = forkConversationBase
-                            ? [...forkConversationBase]
-                            : [
-                                { role: "user", content: effectivePrompt },
-                            ];
-                    }
-                    const stepMessages = Array.isArray(stepResult?.response?.messages)
-                        ? (cloneJsonValue(stepResult.response.messages) ?? stepResult.response.messages)
-                        : [];
-                    if (!stepMessages.length) {
-                        maybeCompleteHijack();
-                        return;
-                    }
-                    conversationMessages = [
-                        ...conversationMessages,
-                        ...stepMessages,
-                    ];
-                    attemptMeta.agentConversation = conversationMessages;
-                    maybeCompleteHijack();
+                    void confirmHeartbeatOwnership().then((owned) => {
+                        if (!owned || heartbeatOwnerLost) return;
+                        if (!conversationMessages) {
+                            conversationMessages = forkConversationBase
+                                ? [...forkConversationBase]
+                                : [{ role: "user", content: effectivePrompt }];
+                        }
+                        const stepMessages = Array.isArray(stepResult?.response?.messages)
+                            ? (cloneJsonValue(stepResult.response.messages) ?? stepResult.response.messages)
+                            : [];
+                        if (stepMessages.length) {
+                            conversationMessages = [...conversationMessages, ...stepMessages];
+                            attemptMeta.agentConversation = conversationMessages;
+                        }
+                        void maybeCompleteHijack().catch(() => { });
+                    }).catch(() => { });
+                };
+                handleProcess = ({ phase, pid }) => {
+                    if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
+                    // A process callback is evidence only after the same fenced
+                    // heartbeat used by stdout/stderr has proved ownership.
+                    recordInternalHeartbeat();
+                    afterHeartbeatOwnership(() => {
+                        if (phase === "started") liveOwnedPids.add(pid);
+                        else liveOwnedPids.delete(pid);
+                    });
                 };
                 const hijackPollingInterval = hijackState
                     ? setInterval(() => {
                         try {
-                            maybeCompleteHijack();
+                            void maybeCompleteHijack().catch(() => { });
                         }
                         catch {
                             // Best-effort only; the normal event hooks still drive hijack.
@@ -4196,7 +4365,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }, HIJACK_COMPLETION_POLL_MS)
                     : undefined;
                 // Use fallback agent on retry attempts when available
-                const traceCollector = toolConfig.traceContext && effectiveAgent
+                traceCollector = toolConfig.traceContext && effectiveAgent
                     ? new AgentTraceCollector({
                         eventBus,
                         runId,
@@ -4299,7 +4468,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 let result;
                 try {
                     try {
-                        result = await runPromisePreservingFailure(withSmithersSpan(smithersSpanNames.agent, Effect.tryPromise({
+                        result = await Promise.race([runPromisePreservingFailure(withSmithersSpan(smithersSpanNames.agent, Effect.tryPromise({
                             try: () => {
                                 const agentCall = guidedResumeMessages?.length
                                     ? {
@@ -4332,15 +4501,22 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                                         ? { totalMs: desc.timeoutMs }
                                         : undefined,
                                     onStdout: (text) => {
+                                        if (heartbeatOwnerLost) return;
                                         recordInternalHeartbeat();
-                                        emitOutput(text, "stdout");
-                                        traceCollector?.onStdout(text);
+                                        afterHeartbeatOwnership(() => {
+                                            emitOutput(text, "stdout");
+                                            traceCollector?.onStdout(text);
+                                        });
                                     },
                                     onStderr: (text) => {
+                                        if (heartbeatOwnerLost) return;
                                         recordInternalHeartbeat();
-                                        emitOutput(text, "stderr");
-                                        traceCollector?.onStderr(text);
+                                        afterHeartbeatOwnership(() => {
+                                            emitOutput(text, "stderr");
+                                            traceCollector?.onStderr(text);
+                                        });
                                     },
+                                    onProcess: handleProcess,
                                     onEvent: handleAgentEvent,
                                     onStepFinish: handleSdkStepFinish,
                                     onStepEnd: handleSdkStepFinish,
@@ -4355,7 +4531,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                                 attemptMeta.agentEngine ??
                                 "unknown",
                             model: attemptMeta.agentModel,
-                        }));
+                    })), getTaskAbortPromise()]);
                     }
                     finally {
                         if (hijackPollingInterval) {
@@ -4386,6 +4562,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }
                     throw effectiveError;
                 }
+                await Promise.all([...pendingOwnershipChecks]);
                 if (traceCollector) {
                     traceCollector.observeResult(result);
                     await traceCollector.flush();
@@ -4407,16 +4584,20 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             : forkConversationBase
                                 ? forkConversationBase
                                 : [{ role: "user", content: effectivePrompt }];
-                        updateConversation([
+                        if (!(await updateConversation([
                             ...conversationBase,
                             ...responseMessages,
-                        ]);
+                        ]))) {
+                            throw taskSignal.reason ?? makeAbortError();
+                        }
                     }
                 }
                 else {
-                    updateConversation(conversationMessages);
+                    if (!(await updateConversation(conversationMessages))) {
+                        throw taskSignal.reason ?? makeAbortError();
+                    }
                 }
-                maybeCompleteHijack();
+                await maybeCompleteHijack();
                 // --- Track prompt/response sizes ---
                 const promptBytes = Buffer.byteLength(desc.prompt ?? "", "utf8");
                 void Effect.runPromise(Metric.update(promptSizeBytes, promptBytes));
@@ -4615,20 +4796,30 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             ``,
                             `Output ONLY the raw JSON object, with no markdown fences or prose.`,
                         ].join("\n");
-                        const retryResult = await effectiveAgent.generate({
+                        const retryResult = await raceTaskAbort(effectiveAgent.generate({
                             options: undefined,
                             abortSignal: taskSignal,
                             prompt: jsonPrompt,
                             timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                             onStdout: (text) => {
+                                if (heartbeatOwnerLost) return;
                                 recordInternalHeartbeat();
-                                emitOutput(text, "stdout");
+                                afterHeartbeatOwnership(() => {
+                                    emitOutput(text, "stdout");
+                                });
                             },
                             onStderr: (text) => {
+                                if (heartbeatOwnerLost) return;
                                 recordInternalHeartbeat();
-                                emitOutput(text, "stderr");
+                                afterHeartbeatOwnership(() => {
+                                    emitOutput(text, "stderr");
+                                });
                             },
-                        });
+                            onProcess: handleProcess,
+                            onEvent: handleAgentEvent,
+                            onStepFinish: handleSdkStepFinish,
+                            onStepEnd: handleSdkStepFinish,
+                        }));
                         const retryText = retryResult.text ?? "";
                         responseText = retryText || responseText;
                         try {
@@ -4871,7 +5062,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 ...schemaRetryMessages,
                 { role: "user", content: schemaRetryPrompt },
             ];
-            const schemaRetryResult = await effectiveAgent.generate({
+            const schemaRetryResult = await raceTaskAbort(effectiveAgent.generate({
                 options: undefined,
                 abortSignal: taskSignal,
                 messages: retryMessages,
@@ -4879,19 +5070,32 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 maxOutputBytes: toolConfig.maxOutputBytes,
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 onStdout: (text) => {
+                    if (heartbeatOwnerLost) return;
                     recordInternalHeartbeat();
-                    emitOutput(text, "stdout");
+                    afterHeartbeatOwnership(() => {
+                        emitOutput(text, "stdout");
+                    });
                 },
                 onStderr: (text) => {
+                    if (heartbeatOwnerLost) return;
                     recordInternalHeartbeat();
-                    emitOutput(text, "stderr");
+                    afterHeartbeatOwnership(() => {
+                        emitOutput(text, "stderr");
+                    });
                 },
+                onProcess: handleProcess,
+                onEvent: handleAgentEvent,
+                onStepFinish: handleSdkStepFinish,
+                onStepEnd: handleSdkStepFinish,
                 ...(supportsNativeStructuredOutput
                     ? { outputSchema: desc.outputSchema }
                     : {}),
-            });
+            }));
             const retryText = (schemaRetryResult.text ?? "").trim();
             responseText = retryText || responseText;
+            if (!(await confirmHeartbeatOwnership())) {
+                throw taskSignal.reason ?? makeAbortError();
+            }
             // Update conversation history for the next iteration
             const retryResponseMessages = schemaRetryResult?.response?.messages;
             if (Array.isArray(retryResponseMessages) && retryResponseMessages.length > 0) {
@@ -5155,14 +5359,10 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             await flushHeartbeat(true);
             taskCompleted = true;
             const cancelledAtMs = nowMs();
-            await adapter.withTransaction("task-cancel", Effect.gen(function* () {
-                yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-                    state: "cancelled",
-                    finishedAtMs: cancelledAtMs,
-                    errorJson: JSON.stringify(errorToJson(effectiveError)),
-                    metaJson: JSON.stringify(attemptMeta),
-                    responseText,
-                });
+            const cancellationClaimed = await adapter.withTransaction("task-cancel", Effect.gen(function* () {
+                const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "cancelled", cancelledAtMs, JSON.stringify(errorToJson(effectiveError)));
+                if (!claimed) return false;
+                yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText });
                 yield* adapter.insertNode({
                     runId,
                     nodeId: desc.nodeId,
@@ -5173,7 +5373,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     outputTable: desc.outputTableName,
                     label: desc.label ?? null,
                 });
+                return true;
             }));
+            if (!cancellationClaimed) return;
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "NodeCancelled",
                 runId,
@@ -5216,13 +5418,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 : String(effectiveError),
         }, "engine:task");
         const failedAtMs = nowMs();
-        await adapter.withTransaction("task-fail", Effect.gen(function* () {
+        const failureClaimed = await adapter.withTransaction("task-fail", Effect.gen(function* () {
+            const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "failed", failedAtMs, JSON.stringify(errorToJson(effectiveError)));
+            if (!claimed) return false;
             yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-                state: "failed",
-                finishedAtMs: failedAtMs,
-                errorJson: JSON.stringify(errorToJson(effectiveError)),
-                metaJson: JSON.stringify(attemptMeta),
-                responseText,
+                metaJson: JSON.stringify(attemptMeta), responseText,
             });
             yield* adapter.insertNode({
                 runId,
@@ -5234,7 +5434,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 outputTable: desc.outputTableName,
                 label: desc.label ?? null,
             });
+            return true;
         }));
+        if (!failureClaimed) return;
         // Circuit-breaker: disable agents that fail with auth errors
         if (disabledAgents && effectiveAgent) {
             const errStr = String(effectiveError?.message ??
@@ -6065,7 +6267,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
         if (opts.quotaMetadataJson != null) {
             patch.errorJson = opts.quotaMetadataJson;
         }
-        await Effect.runPromise(adapter.updateRun(runId, patch));
+        const parked = await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, patch));
+        if (!parked) {
+            const authoritative = await Effect.runPromise(adapter.getRun(runId));
+            if (authoritative?.status === "cancelled" || authoritative?.status === "canceled" || authoritative?.cancelRequestedAtMs) {
+                const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+                return { runId, status: cancellation.terminalStatus ?? cancellation.status };
+            }
+            return { runId, status: authoritative?.status ?? "failed" };
+        }
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "RunStatusChanged",
             runId,
@@ -6615,7 +6825,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             const errorInfo = errorToJson(result.error ?? driverTaskError);
             if (runOwnedByCurrentProcess) {
                 await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
-                await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, {
+                const failed = await Effect.runPromise(adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
                     status: "failed",
                     finishedAtMs: nowMs(),
                     heartbeatAtMs: null,
@@ -6625,6 +6835,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     hijackTarget: null,
                     errorJson: JSON.stringify(errorInfo),
                 }));
+                if (!failed) {
+                    const authoritative = await Effect.runPromise(adapter.getRun(runId));
+                    if (authoritative?.status === "cancelled" || authoritative?.status === "canceled" || authoritative?.cancelRequestedAtMs) {
+                        const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+                        return { runId, status: cancellation.terminalStatus ?? cancellation.status };
+                    }
+                    return { runId, status: authoritative?.status ?? "failed" };
+                }
                 await Effect.runPromise(eventBus.emitEventWithPersist({
                     type: "RunFailed",
                     runId,
@@ -7205,7 +7423,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         const errorInfo = errorToJson(err);
         if (runOwnedByCurrentProcess) {
             await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
-            await Effect.runPromise(adapter.updateRun(runId, {
+            const failed = await Effect.runPromise(adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
                 status: "failed",
                 finishedAtMs: nowMs(),
                 heartbeatAtMs: null,
@@ -7215,6 +7433,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 hijackTarget: null,
                 errorJson: JSON.stringify(errorInfo),
             }));
+            if (!failed) {
+                const authoritative = await Effect.runPromise(adapter.getRun(runId));
+                if (authoritative?.status === "cancelled" || authoritative?.status === "canceled" || authoritative?.cancelRequestedAtMs) {
+                    const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+                    await annotateRunSpan({ status: cancellation.terminalStatus ?? authoritative.status });
+                    return { runId, status: cancellation.terminalStatus ?? cancellation.status };
+                }
+                return { runId, status: authoritative?.status ?? "failed", error: errorInfo };
+            }
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "RunFailed",
                 runId,
