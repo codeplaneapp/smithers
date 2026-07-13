@@ -47,4 +47,5 @@ export class ControlBus {
     this.pending.shift(); this.observed.push(message); return message as Extract<ControlMessage, { readonly type: "resolve-effect" }>;
   }
   consumed(): number { return this.observed.length; }
+  pendingControls(): readonly ControlMessage[] { return [...this.pending]; }
 }

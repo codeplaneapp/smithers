@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { barrier, compareBoundaryShape, e2eDescriptor, fault, mediatedEffect, EffectLedger, runScenario, scenario, step, VirtualClock, firstDivergence, makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle, CleanupScope, assertNoLeaks, contractProbe, unitSimHarness, integrationHarness, realDbAdapter, expectEffect } from "../src/index.ts";
+import { barrier, compareBoundaryShape, e2eDescriptor, e2eHarness, fault, mediatedEffect, EffectLedger, runScenario, scenario, step, VirtualClock, firstDivergence, makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle, CleanupScope, assertNoLeaks, contractProbe, unitSimHarness, integrationHarness, realDbAdapter, realProcessAdapter, expectEffect } from "../src/index.ts";
+import { spawn } from "node:child_process";
 
 describe("controlled scenario kernel", () => {
   test("admits scenario-declared capabilities and refuses fake real harnesses", async () => {
@@ -179,5 +180,33 @@ describe("controlled scenario kernel", () => {
     const one = scenario("binding", { steps: [step("task", { run: () => "one" })] });
     const two = scenario("binding", { steps: [step("task", { run: () => "two" })] });
     expect(one.steps[0]?.runnerBinding).not.toBe(two.steps[0]?.runnerBinding);
+  });
+
+  test("controlled effect values are authoritative and do not invoke the caller operation", async () => {
+    let calls = 0;
+    const result = await runScenario(scenario("controlled-value", { steps: [step("write", { run: (runtime) => runtime.effect("write", () => { calls++; return "real"; }) })] }), { controlLog: [{ type: "resolve-effect", effect: "write:write", outcome: "succeed", value: "controlled" }] });
+    expect(result.status).toBe("finished");
+    expect(result.outputs.write).toBe("controlled");
+    expect(calls).toBe(0);
+  });
+
+  test("leftover controls fail instead of becoming replay observations", async () => {
+    const result = await runScenario(scenario("leftover-control", { steps: [step("a")] }), { controlLog: [{ type: "pin-interleaving", choice: "a" }, { type: "advance-clock", ms: 99 }] });
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("CONTROL_UNCONSUMED");
+  });
+
+  test("caller-forged process identity is rejected even with a static marker and truthy handshake", async () => {
+    const child = spawn("sh", ["-c", "sleep 30"], { stdio: "ignore" });
+    const adapter = realProcessAdapter({ spawn: async () => ({
+      pid: child.pid!, child,
+      handshake: async () => "caller-forged" as unknown as string,
+      kill: (signal?: string) => { child.kill(signal as NodeJS.Signals | undefined); },
+      close: () => undefined,
+    }) });
+    const result = await runScenario(scenario("forged-process", { steps: [step("run")] }), { harness: e2eHarness({ adapter }) });
+    expect(result.status).toBe("capability-failure");
+    expect(result.error?.code).toBe("ADMISSION_FAILED");
+    if (child.exitCode === null) child.kill("SIGKILL");
   });
 });
