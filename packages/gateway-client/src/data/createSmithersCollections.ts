@@ -87,6 +87,25 @@ function boundedRunEventRows(rows: GatewayRunEventRow[], maxRows: number): Gatew
     .slice(Math.max(0, rows.length - maxRows));
 }
 
+function createRunEventTailQuery(client: SmithersDataClient, runId: string, maxRows: number) {
+  let rows: GatewayRunEventRow[] = [];
+  let afterSeq: number | undefined;
+
+  return async (): Promise<GatewayRunEventRow[]> => {
+    while (true) {
+      const page = await client.api.listRunEvents({ runId, afterSeq, limit: RUN_EVENT_API_FETCH_LIMIT });
+      if (page.length === 0) return rows;
+
+      const nextAfterSeq = page.reduce((latest, row) => Math.max(latest, row.seq), afterSeq ?? -1);
+      if (afterSeq !== undefined && nextAfterSeq <= afterSeq) return rows;
+
+      rows = boundedRunEventRows([...rows, ...page], maxRows);
+      afterSeq = nextAfterSeq;
+      if (page.length < RUN_EVENT_API_FETCH_LIMIT) return rows;
+    }
+  };
+}
+
 function keyFromDeleteMessage<TRow extends object, TKey extends string | number>(
   message: ChangeMessageOrDeleteKeyMessage<TRow, TKey>,
   getKey: (row: TRow) => TKey,
@@ -687,11 +706,12 @@ function createSmithersCollectionsWithClient(
     nodes: runTreeCollection,
     runEvents: (runId: string, maxRows = RUN_EVENT_COLLECTION_MAX_ROWS) => {
       const limit = runEventMaxRows(maxRows);
+      const query = runId ? createRunEventTailQuery(client, runId, limit) : async () => [];
       return getOrCreate<GatewayRunEventRow, string>(
         smithersCollectionKeys.events(runId, limit),
         "events",
         resultKey,
-        async () => runId ? boundedRunEventRows(await client.api.listRunEvents({ runId, limit: RUN_EVENT_API_FETCH_LIMIT }), limit) : [],
+        query,
         (row) => mapSmithersElectricRow("events", row),
         runId ? runWhere(runId) : undefined,
         {},

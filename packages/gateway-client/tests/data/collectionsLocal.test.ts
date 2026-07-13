@@ -138,7 +138,7 @@ describe("createSmithersCollections local factories", () => {
     expect(events.size).toBe(2);
   });
 
-  test("runEvents bounds the fetched rows to the requested cap and truncates on refetch", async () => {
+  test("runEvents bounds the fetched rows to the requested cap and advances on refetch", async () => {
     // Return more events than the requested cap so boundedRunEventRows sorts and
     // slices down to the newest rows.
     let events = [
@@ -153,11 +153,41 @@ describe("createSmithersCollections local factories", () => {
     // Only the two newest seqs (3 and 4) survive the cap.
     expect([...runEvents.values()].map((row: { seq: number }) => row.seq).sort()).toEqual([3, 4]);
 
-    // A refetch with a smaller result set drives the bounded sync's truncate path.
+    // Refetches continue after the last observed sequence while retaining the
+    // bounded tail.
     events = [{ runId: "run-1", seq: 9, type: "e", payloadJson: "{}" }];
     await queryClient.refetchQueries({ queryKey: ["smithers", "events", "run-1", 2] });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(runEvents.get("run-1:9")).toBeDefined();
+    expect([...runEvents.values()].map((row: { seq: number }) => row.seq).sort()).toEqual([4, 9]);
+  });
+
+  test("runEvents pages past the first API window and keeps advancing after invalidation", async () => {
+    let events = Array.from({ length: 10_001 }, (_, seq) => ({
+      runId: "run-1",
+      seq,
+      type: "e",
+      payloadJson: "{}",
+    }));
+    const { collections, queryClient } = makeCollections({
+      "GET /v1/api/events": (_init, url) => {
+        const afterSeq = Number(url.searchParams.get("afterSeq") ?? -1);
+        const limit = Number(url.searchParams.get("limit") ?? 100);
+        return events.filter((event) => event.seq > afterSeq).slice(0, limit);
+      },
+    });
+    const runEvents = collections.runEvents("run-1");
+    await runEvents.preload();
+
+    expect(runEvents.size).toBe(1_024);
+    expect(Math.max(...[...runEvents.values()].map((event) => event.seq))).toBe(10_000);
+
+    events = [...events, { runId: "run-1", seq: 10_001, type: "e", payloadJson: "{}" }];
+    await queryClient.invalidateQueries({ queryKey: ["smithers", "events", "run-1", 1_024] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(runEvents.size).toBe(1_024);
+    expect(Math.max(...[...runEvents.values()].map((event) => event.seq))).toBe(10_001);
   });
 
   test("empty runId factories resolve to empty collections without hitting the API", async () => {
