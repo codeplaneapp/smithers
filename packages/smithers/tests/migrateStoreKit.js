@@ -43,7 +43,15 @@ export async function closeApi(api) {
   Bun.gc(true);
 }
 
-afterEach(() => {
+registerCleanup();
+function registerCleanup() {
+  try {
+    afterEach(cleanupTempDirs);
+  } catch {
+    // Imported outside `bun test` (e.g. a repro script): callers clean up themselves.
+  }
+}
+function cleanupTempDirs() {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -51,7 +59,7 @@ afterEach(() => {
   // collection between tests the mapped WASM memories accumulate until bun
   // dies with a Bus error near the 2GB mark (reproducible from ~3 tests in).
   Bun.gc(true);
-});
+}
 
 export function seedSqliteStore(cwd, dbPath = join(cwd, "smithers.db")) {
   const api = createSmithers({

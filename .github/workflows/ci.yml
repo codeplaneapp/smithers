@@ -234,26 +234,16 @@ jobs:
       - name: Run Postgres-gated tests
         env:
           SMITHERS_TEST_PG_URL: postgresql://smithers:smithers_pw@127.0.0.1:54329/smithers
-        # One bun process per small chunk on purpose: each PGlite instance
-        # holds >1GB of WASM memory that bun cannot reliably reclaim
-        # in-process, so more than ~2 pglite-heavy tests in one process cross
-        # the ~2GB WASM ceiling and die with a Bus error (exit 132). The
-        # chunking is index-based via SMITHERS_MIGRATE_CHUNKS in
-        # migrateStoreKit.js; out-of-chunk tests report as skipped.
+        # Two bun invocations: the CLI postgres tests and the migrate-store
+        # suites each get their own process, keeping headroom under bun's
+        # ~2GB WASM plateau (PGlite instances are >1GB live and closed ones
+        # reclaim only lazily). If the migrate suites ever need finer
+        # process isolation again, migrateStoreKit.js's chunkedTest honors
+        # SMITHERS_MIGRATE_CHUNKS/SMITHERS_MIGRATE_CHUNK (out-of-chunk tests
+        # report as skipped, never silently lost).
         run: |
           bun test apps/cli/tests/*postgres*
-          run_chunked() {
-            file="$1"; chunks="$2"
-            c=0
-            while [ "$c" -lt "$chunks" ]; do
-              SMITHERS_MIGRATE_CHUNKS="$chunks" SMITHERS_MIGRATE_CHUNK="$c" bun test "$file"
-              c=$((c + 1))
-            done
-          }
-          run_chunked packages/smithers/tests/migrateSmithersStore.test.js 7
-          run_chunked packages/smithers/tests/migrateSmithersStoreReverse.test.js 11
-          run_chunked packages/smithers/tests/migrateSmithersStoreReceipts.test.js 9
-          run_chunked packages/smithers/tests/migrateSmithersStorePostgres.test.js 3
+          bun test packages/smithers/tests/migrateSmithersStore.test.js packages/smithers/tests/migrateSmithersStoreReverse.test.js packages/smithers/tests/migrateSmithersStoreReceipts.test.js packages/smithers/tests/migrateSmithersStorePostgres.test.js
 
       - name: Stop Postgres
         if: always()
