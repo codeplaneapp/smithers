@@ -32,3 +32,6 @@ Redact the exact token and token-bearing URL before creating public errors. Pres
 ## Dedupe notes
 
 The Effect-native Telegram integration has a redaction path; this standalone package does not. #739 is unrelated.
+
+
+> Closed by ticket-fleet: landed on main in c796d66cbc2f4f54c4c8860d3b1c876b1de619d1.
