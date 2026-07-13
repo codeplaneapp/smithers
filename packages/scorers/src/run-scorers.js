@@ -71,7 +71,7 @@ function shouldRun(binding, ctx) {
 function emitScorerEvent(bus, event) {
     return Effect.ignore(typeof bus.emitEventWithPersist === "function"
         ? bus.emitEventWithPersist(event)
-        : Effect.sync(() => bus.emit("event", event)));
+        : Effect.try(() => bus.emit("event", event)));
 }
 // ---------------------------------------------------------------------------
 // Score validation

@@ -299,6 +299,52 @@ describe("runScorersBatch", () => {
             scorerId: "async-one",
         });
     });
+    it("ignores throwing bare event buses without aborting batch or async scoring", async () => {
+        const batchResults = await runScorersBatch(
+            {
+                batch: {
+                    scorer: createScorer({
+                        id: "throwing-batch-bus",
+                        name: "Throwing Batch Bus",
+                        description: "d",
+                        score: async () => ({ score: 0.8 }),
+                    }),
+                },
+            },
+            makeContext(),
+            null,
+            { emit: () => { throw new Error("bus unavailable"); } },
+        );
+        expect(batchResults.batch?.score).toBe(0.8);
+
+        const asyncEvents = [];
+        let firstEmit = true;
+        runScorersAsync(
+            {
+                async: {
+                    scorer: createScorer({
+                        id: "throwing-async-bus",
+                        name: "Throwing Async Bus",
+                        description: "d",
+                        score: async () => ({ score: 0.6 }),
+                    }),
+                },
+            },
+            makeContext(),
+            null,
+            {
+                emit: (_name, event) => {
+                    if (firstEmit) {
+                        firstEmit = false;
+                        throw new Error("bus unavailable");
+                    }
+                    asyncEvents.push(event);
+                },
+            },
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(asyncEvents.map((event) => event.type)).toEqual(["ScorerFinished"]);
+    });
     it("runScorersAsync persists live rows through the adapter", async () => {
         let resolvePersisted;
         const persisted = new Promise((resolve) => {
