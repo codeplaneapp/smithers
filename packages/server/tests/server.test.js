@@ -681,6 +681,22 @@ const fakeAgent = {
                 controller.abort();
             }
         });
+        test("returns 400 for an invalid afterSeq before opening the SSE stream", async () => {
+            const dbPath = resolve(testDir, "events-invalid-seq.db");
+            const workflowPath = writeTestWorkflow("events-invalid-seq", dbPath, { slow: true });
+            startTestServer();
+            const { data: startData } = await request("/v1/runs", {
+                method: "POST",
+                body: { workflowPath },
+            });
+            await waitForPersistedRun(dbPath, startData.runId);
+
+            const res = await fetch(`http://localhost:${port}/v1/runs/${startData.runId}/events?afterSeq=abc`);
+            expect(res.status).toBe(400);
+            expect(res.headers.get("content-type")).toContain("application/json");
+            const data = await res.json();
+            expect(data.error.code).toBe("INVALID_REQUEST");
+        });
         test("returns 404 for non-existent run", async () => {
             startTestServer();
             const res = await fetch(`http://localhost:${port}/v1/runs/non-existent-run-id/events`);

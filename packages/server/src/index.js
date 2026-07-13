@@ -1165,6 +1165,7 @@ function startServerInternal(opts = {}) {
                         error: { code: "NOT_FOUND", message: "Run not found" },
                     });
                 }
+                let lastSeq = parseOptionalInt(url.searchParams.get("afterSeq"), -1);
                 res.writeHead(200, {
                     "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
@@ -1174,7 +1175,6 @@ function startServerInternal(opts = {}) {
                 });
                 res.write(`retry: 1000\n\n`);
                 let closed = false;
-                let lastSeq = parseOptionalInt(url.searchParams.get("afterSeq"), -1);
                 logInfo("opened run event stream", {
                     runId,
                     afterSeq: lastSeq,
