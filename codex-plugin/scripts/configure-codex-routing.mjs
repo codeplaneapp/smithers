@@ -136,7 +136,10 @@ export function recoverPendingState(state, user, effective = user) {
     }
     throw new Error("A previous routing write is pending recovery; user fields no longer match either the saved snapshot or the managed policy.");
   }
-  if (FIELD_PATHS.every((path) => fieldsEqual(user[path], previous[path]))) return { state: null, action: "remove" };
+  if (FIELD_PATHS.every((path) => fieldsEqual(user[path], previous[path]))) {
+    const effectiveMatchesPrior = FIELD_PATHS.every((path) => fieldsEqual(effective[path], previous[path]));
+    return { state: null, action: "remove", ...(effectiveMatchesPrior ? {} : { effectiveOverride: true }) };
+  }
   if (!FIELD_PATHS.every((path) => fieldsEqual(user[path], state.managed[path]))) throw new Error("A previous disable is pending recovery and managed fields were edited; refusing to clobber them.");
   return { state, action: "none" };
 }
@@ -187,6 +190,16 @@ export function statusSnapshot(home) {
   const lock = lockStatus(home);
   const after = existsSync(path) ? readFileSync(path, "utf8") : null;
   return { state, lock, journalBefore: before, journalAfter: after };
+}
+
+export async function readStatus(home, read) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = statusSnapshot(home);
+    const data = await read();
+    const after = statusSnapshot(home);
+    if (before.journalAfter === after.journalBefore) return { ...data, state: before.state, lock: after.lock, journalBefore: before.journalBefore, journalAfter: after.journalAfter };
+  }
+  throw new Error("Routing journal changed while reading status; please retry.");
 }
 export function withLock(home) {
   const path = `${statePath(home)}.lock`;
@@ -339,14 +352,16 @@ async function main() {
     if (args.action !== "status" && state?.phase?.startsWith("pending-")) {
       const recovered = recoverPendingState(state, currentFields(data.user), currentFields(data.effective));
       completedDisableRecovery = state.phase === "pending-disable" && recovered.action === "remove";
+      if (recovered.effectiveOverride) console.log("Recovered routing state, but the effective configuration is overridden by a higher-priority layer.");
       if (recovered.action === "remove") removeState(app.codexHome);
       else if (recovered.action !== "none") writeState(app.codexHome, recovered.state);
       state = recovered.state;
       if (recovered.action !== "none") data = await readConfig(app);
     }
-    const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
     if (args.action === "status") {
-      const status = statusSnapshot(app.codexHome); state = status.state; const lock = status.lock;
+      const status = await readStatus(app.codexHome, () => readConfig(app));
+      data = status; state = status.state; const lock = status.lock;
+      const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
       const pending = state?.phase?.startsWith("pending-") ? `\nPending recovery: ${state.phase} (not modified by --status)` : "";
       const layer = data.effectiveLayer ? `\nEffective layer: ${data.effectiveLayer.type || "unknown"}${data.effectiveLayer.profile ? `/${data.effectiveLayer.profile}` : ""}` : "";
       const lockText = lock.locked ? `\nOperation lock: ${lock.path} (${lock.stale ? "stale; reclaimable" : "active"})` : "";
@@ -354,6 +369,7 @@ async function main() {
       console.log(`Codex: ${version}\nConfig: ${app.configPath}\nNative policy: ${stateClass}${layer}${pending}${lockText}\nClient compatibility: ${compatible ? "compatible" : "incompatible (requires Codex >= 0.144)"}`);
       return args.requireEffective && (stateClass !== "installed" || !compatible) ? 1 : 0;
     }
+    const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
     if (args.action !== "disable" && !compatible) throw new Error(`Codex ${version} is incompatible; requires Codex >= 0.144`);
     if (parentIsScalar(data.user) || parentIsScalar(data.effective)) throw new Error("features.multi_agent_v2 is a scalar; refusing to write fields beneath it because the change is not safely restorable.");
     if (existsSync(app.configPath) && typeof data.version !== "string") throw new Error("Codex config/read did not provide a user-layer version; refusing an unprotected write.");

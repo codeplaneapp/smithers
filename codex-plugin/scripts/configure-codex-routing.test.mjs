@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   AppServer,
@@ -26,6 +26,7 @@ import {
   disableTransition,
   executeInstallTransition,
   readConfig,
+  readStatus,
   statusSnapshot,
 } from "./configure-codex-routing.mjs";
 
@@ -119,7 +120,7 @@ describe("Codex routing pure logic", () => {
     expect(isStaleLock({ pid: 12, createdAt: 1_000 }, 1_000 + 10 * 60 * 1000 + 1, () => true)).toBe(true);
   });
 
-  test("concurrent status does not mutate a pending journal", () => {
+  test("concurrent status reads a live pending journal without mutating it", async () => {
     const home = mkdtempSync(`${tmpdir()}/smithers-routing-lock-`);
     try {
       const lock = `${home}/.smithers-codex-routing.json.lock`;
@@ -127,9 +128,22 @@ describe("Codex routing pure logic", () => {
       writeFileSync(`${home}/.smithers-codex-routing.json`, `${JSON.stringify(pending, null, 2)}\n`);
       const before = readFileSync(`${home}/.smithers-codex-routing.json`, "utf8");
       mkdirSync(lock);
-      writeFileSync(`${lock}/owner`, JSON.stringify({ pid: 99, createdAt: Date.now() }));
-      const status = statusSnapshot(home);
+      writeFileSync(`${lock}/owner`, JSON.stringify({ pid: process.pid, createdAt: Date.now(), nonce: "live-owner" }));
+      let readStarted;
+      const started = new Promise((resolve) => { readStarted = resolve; });
+      const statusPromise = readStatus(home, async () => {
+        readStarted();
+        await Promise.resolve();
+        return { user: {}, effective: {}, effectiveLayerByField: {} };
+      });
+      await started;
+      const interleaved = statusSnapshot(home);
+      const status = await statusPromise;
       expect(status.lock.locked).toBe(true);
+      expect(status.lock.stale).toBe(false);
+      expect(status.state).toEqual(pending);
+      expect(classifyState(status.user, status.effective, status.state)).toBe("drifted");
+      expect(interleaved.journalBefore).toBe(before);
       expect(status.journalAfter).toBe(before);
       expect(readFileSync(`${home}/.smithers-codex-routing.json`, "utf8")).toBe(before);
     } finally { rmSync(home, { recursive: true, force: true }); }
@@ -177,13 +191,11 @@ describe("Codex routing pure logic", () => {
     const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
     const pending = { ...mergeSnapshot(old, old.configPath), phase: "pending-install" };
     let persisted = pending;
+    let userConfig = config("old policy", "old policy");
     const writes = [];
-    const reads = [
-      { user: config("new policy", "new policy"), effective: config("higher layer", "higher layer") },
-      { user: config("old policy", "old policy"), effective: config("old policy", "old policy") },
-    ];
     const writeBatch = async (edits, expectedVersion) => {
       writes.push({ edits, expectedVersion });
+      userConfig = config(edits[0].value, edits[1].value);
       if (writes.length === 1) return { status: "ok", version: "after-write" };
       return { status: "ok", version: "rolled-back" };
     };
@@ -192,16 +204,19 @@ describe("Codex routing pure logic", () => {
       target: pending.pending.to,
       createdState: false,
       version: "before-write",
-      writePending: (state) => { persisted = state; },
-      writeCommitted: (state) => { persisted = state; },
+      writePending: (state) => { persisted = JSON.parse(JSON.stringify(state)); },
+      writeCommitted: (state) => { persisted = JSON.parse(JSON.stringify(state)); },
       removePending: () => { persisted = null; },
       writeBatch,
-      read: async () => reads.shift(),
-      classify: () => "drifted",
+      read: async () => ({ user: userConfig, effective: writes.length === 1 ? config("higher layer", "higher layer") : userConfig }),
+      classify: classifyState,
     })).rejects.toThrow("Effective installation validation failed");
     expect(writes).toHaveLength(2);
-    expect(persisted).toMatchObject({ phase: "committed", managed: pending.pending.from });
-    expect(recoverPendingState(persisted, currentFields(config("old policy", "old policy")), currentFields(config("old policy", "old policy"))).action).toBe("none");
+    expect(writes[0]).toEqual({ edits: makeEdits(pending.pending.to), expectedVersion: "before-write" });
+    expect(writes[1]).toEqual({ edits: makeEdits(pending.pending.from), expectedVersion: "after-write" });
+    expect(userConfig).toEqual(config("old policy", "old policy"));
+    expect(persisted).toEqual(JSON.parse(JSON.stringify({ ...pending, phase: "committed", managed: { ...pending.pending.from }, pending: undefined })));
+    expect(recoverPendingState(persisted, currentFields(userConfig), currentFields(userConfig)).action).toBe("none");
   });
 
   test("pure install and disable transitions preserve the first snapshot", () => {
@@ -218,20 +233,22 @@ describe("Codex routing pure logic", () => {
     const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
     const transition = installTransition(old, currentFields(config("old policy", "old policy")), old.configPath, "new-version");
     let persisted;
-    const writes = [];
+    const events = [];
     await expect(executeInstallTransition({
       ...transition,
       version: "stale-version",
-      writePending: (state) => { persisted = state; },
-      writeCommitted: (state) => { persisted = state; },
+      writePending: (state) => { events.push("journal"); persisted = JSON.parse(JSON.stringify(state)); },
+      writeCommitted: (state) => { persisted = JSON.parse(JSON.stringify(state)); },
       removePending: () => { persisted = null; },
-      writeBatch: async (...args) => { writes.push(args); const error = new Error("Unexpected config write status: error"); throw error; },
+      writeBatch: async (...args) => { events.push(["write", persisted]); const error = new Error("Unexpected config write status: error"); throw error; },
       read: async () => ({ user: config("old policy", "old policy"), effective: config("old policy", "old policy") }),
       classify: classifyState,
     })).rejects.toThrow("Unexpected config write status");
-    expect(writes).toHaveLength(1);
-    expect(writes[0][1]).toBe("stale-version");
-    expect(persisted).toMatchObject({ phase: "pending-install", pending: transition.nextState.pending });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toBe("journal");
+    expect(events[1][0]).toBe("write");
+    expect(events[1][1]).toEqual({ ...transition.nextState, phase: "pending-install" });
+    expect(persisted).toEqual(JSON.parse(JSON.stringify({ ...transition.nextState, phase: "pending-install" })));
   });
 
   test("completed disable recovery is idempotent", () => {
@@ -307,6 +324,35 @@ realTest("real Codex CLI lifecycle uses an isolated temporary home", async () =>
   } finally {
     if (oldHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = oldHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 30_000);
+
+realTest("real Codex status and dry-run attribute each effective field to its winning layer", async () => {
+  const binary = Bun.which("codex");
+  const home = mkdtempSync(`${tmpdir()}/smithers-codex-routing-layer-test-`);
+  const project = mkdtempSync(`${tmpdir()}/smithers-codex-routing-project-`);
+  mkdirSync(`${project}/.codex`);
+  writeFileSync(`${project}/.codex/config.toml`, "[features.multi_agent_v2]\n");
+  writeFileSync(`${home}/config.toml`, `[projects."${realpathSync(project)}"]\ntrust_level = "trusted"\n`);
+  const script = new URL("./configure-codex-routing.mjs", import.meta.url).pathname;
+  const run = (args) => Bun.spawnSync({ cmd: ["node", script, "--codex-bin", binary, ...args], cwd: project, env: { ...process.env, CODEX_HOME: home }, stdout: "pipe", stderr: "pipe" });
+  const output = (result) => `${result.stdout.toString()}${result.stderr.toString()}`;
+  try {
+    expect(run(["--apply"]).exitCode).toBe(0);
+    writeFileSync(`${project}/.codex/config.toml`, "[features.multi_agent_v2]\nmulti_agent_mode_hint_text = \"project mode\"\n");
+    const status = run(["--status"]);
+    expect(status.exitCode).toBe(0);
+    const statusText = output(status);
+    expect(statusText).toContain(`${FIELD_PATHS[0]}: "project mode" (layer: project)`);
+    expect(statusText).toContain(`${FIELD_PATHS[1]}: ${JSON.stringify(HINT_TEXT)} (layer: user)`);
+    const preview = run([]);
+    expect(preview.exitCode).toBe(0);
+    const previewText = output(preview);
+    expect(previewText).toContain(`${FIELD_PATHS[0]}: "project mode" (layer: project)`);
+    expect(previewText).toContain(`${FIELD_PATHS[1]}: ${JSON.stringify(HINT_TEXT)} (layer: user)`);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
 }, 30_000);
