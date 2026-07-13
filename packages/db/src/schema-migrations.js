@@ -897,12 +897,29 @@ function buildMigrations(context) {
                 const columns = tableColumnNames(sqlite, "_smithers_scorers");
                 return columns.has("ground_truth_json") && columns.has("context_json");
             },
+            isAppliedPostgres: async (pgConn) => {
+                const columns = await tableColumnNamesPostgres(pgConn, "_smithers_scorers");
+                return columns.has("ground_truth_json") && columns.has("context_json");
+            },
             up: (sqlite) => {
                 const addedColumns = [];
                 if (addColumnIfMissing(sqlite, "_smithers_scorers", "ground_truth_json", "ground_truth_json TEXT")) {
                     addedColumns.push("ground_truth_json");
                 }
                 if (addColumnIfMissing(sqlite, "_smithers_scorers", "context_json", "context_json TEXT")) {
+                    addedColumns.push("context_json");
+                }
+                return { table: "_smithers_scorers", addedColumns };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_scorers"))) {
+                    return { table: "_smithers_scorers", addedColumns: [], skipped: "missing_table" };
+                }
+                const addedColumns = [];
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_scorers", "ground_truth_json", "ground_truth_json TEXT")) {
+                    addedColumns.push("ground_truth_json");
+                }
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_scorers", "context_json", "context_json TEXT")) {
                     addedColumns.push("context_json");
                 }
                 return { table: "_smithers_scorers", addedColumns };

@@ -75,6 +75,25 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(storage.dialect).toBe("postgres");
     });
 
+    test("reapplies scorer context columns when a legacy Postgres schema lacks them", async () => {
+        await client.query("ALTER TABLE _smithers_scorers DROP COLUMN ground_truth_json, DROP COLUMN context_json");
+        await client.query("DELETE FROM _smithers_schema_migrations WHERE id = '0017_add_scorer_context_columns'");
+
+        await storage.ensureSchema();
+
+        const result = await client.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = '_smithers_scorers'
+              AND column_name IN ('ground_truth_json', 'context_json')
+            ORDER BY column_name
+        `);
+        expect(result.rows.map((row) => row.column_name)).toEqual([
+            "context_json",
+            "ground_truth_json",
+        ]);
+    });
+
     test("ensureSchema created the internal tables", async () => {
         const rows = await storage.queryAll(
             "SELECT table_name FROM information_schema.tables WHERE table_name LIKE '_smithers_%' AND table_schema = current_schema()",
