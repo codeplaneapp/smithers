@@ -1,5 +1,5 @@
 // smithers-display-name: Ticket fleet: sync → triage → research → plan → implement → merge queue
-// smithers-source: two-way ticket/GitHub sync + difficulty-tiered backlog burndown; lands on main via a serialized local merge queue with per-landing pushes.
+// smithers-source: two-way ticket/GitHub sync + difficulty-tiered backlog burndown; lands on main via a serialized local merge queue with per-landing pushes. Landing runs concurrently with the lanes (land-as-you-go), and triage verdicts are memoized across runs in .smithers/executions/ticket-fleet/triage-ledger.json.
 /** @jsxImportSource smithers-orchestrator */
 import {
   ApprovalGate,
@@ -64,6 +64,7 @@ const inputSchema = z.object({
   skipSync: z.boolean().default(false),
   skipCiLane: z.boolean().default(false),
   dryRun: z.boolean().default(false),
+  retriage: z.boolean().default(false),
 });
 type Input = z.infer<typeof inputSchema>;
 
@@ -652,7 +653,7 @@ function parseInput(raw: unknown): Input {
   for (const key of ["issueNumbers", "excludeNumbers"]) {
     if (typeof value[key] === "string") value[key] = asStrArray(value[key]).map(Number);
   }
-  for (const key of ["skipSync", "skipCiLane", "dryRun"]) {
+  for (const key of ["skipSync", "skipCiLane", "dryRun", "retriage"]) {
     if (typeof value[key] === "number") value[key] = value[key] !== 0;
   }
   return inputSchema.parse(value);
@@ -1006,6 +1007,50 @@ function difficultyRank(d: Triage["difficulty"]): number {
   const index = DIFFICULTY_ORDER.indexOf(d as (typeof DIFFICULTY_ORDER)[number]);
   return index === -1 ? 99 : index;
 }
+
+// Cross-run triage memoization. Verdicts persist in a workspace-local ledger
+// (.smithers/executions/ is gitignored) keyed by issue number; a verdict is
+// reused as long as the issue's title+body hash still matches, so a fresh run
+// only triages new or edited issues instead of re-triaging the whole backlog.
+// input.retriage forces a full re-triage.
+const triageLedgerDir = join(repoRoot, ".smithers", "executions", "ticket-fleet");
+const triageLedgerPath = join(triageLedgerDir, "triage-ledger.json");
+type TriageLedgerEntry = { hash: string; triage: Triage };
+function issueTriageHash(issue: Issue): string {
+  return createHash("sha256").update(issue.title + "\n" + issue.body).digest("hex").slice(0, 16);
+}
+function loadTriageLedger(): Record<string, TriageLedgerEntry> {
+  try {
+    const parsed = JSON.parse(readFileSync(triageLedgerPath, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function memoizedTriage(ledger: Record<string, TriageLedgerEntry>, issue: Issue): Triage | undefined {
+  const entry = ledger[String(issue.number)];
+  if (!entry || entry.hash !== issueTriageHash(issue)) return undefined;
+  const parsed = triageSchema.safeParse(entry.triage);
+  return parsed.success && parsed.data.issueNumber === issue.number ? parsed.data : undefined;
+}
+function saveTriageLedger(issues: Issue[], triages: Triage[]): number {
+  const ledger = loadTriageLedger();
+  const issueByNumber = new Map(issues.map((i) => [i.number, i]));
+  let saved = 0;
+  for (const triage of triages) {
+    const issue = issueByNumber.get(triage.issueNumber);
+    if (!issue) continue;
+    const parsed = triageSchema.safeParse(triage);
+    if (!parsed.success) continue;
+    ledger[String(triage.issueNumber)] = { hash: issueTriageHash(issue), triage: parsed.data };
+    saved++;
+  }
+  mkdirSync(triageLedgerDir, { recursive: true });
+  const tmp = triageLedgerPath + ".tmp";
+  writeFileSync(tmp, JSON.stringify(ledger, null, 2) + "\n", "utf8");
+  renameSync(tmp, triageLedgerPath);
+  return saved;
+}
 function applyTriage(input: Input, issues: Issue[], triages: Triage[]): TriageApply {
   let labeled = 0, skippedBeyond = 0;
   if (!input.dryRun) {
@@ -1020,16 +1065,24 @@ function applyTriage(input: Input, issues: Issue[], triages: Triage[]): TriageAp
     if (!input.dryRun) {
       try {
         const remove = [...DIFFICULTY_LABELS, "difficulty:beyond-xhard"].filter((l) => issue.labels.includes(l) && l !== "difficulty:" + triage.difficulty);
-        const args = ["issue", "edit", String(triage.issueNumber), "--repo", input.repo, "--add-label", "difficulty:" + triage.difficulty];
-        for (const label of remove) args.push("--remove-label", label);
-        if (triage.needsHumanApproval) args.push("--add-label", "needs-human-approval");
-        gh(args);
-        labeled++;
+        const addApproval = triage.needsHumanApproval && !issue.labels.includes("needs-human-approval");
+        if (issue.labels.includes("difficulty:" + triage.difficulty) && !remove.length && !addApproval) {
+          // Labels already match this verdict (memoized re-run); skip the gh call.
+          labeled++;
+        } else {
+          const args = ["issue", "edit", String(triage.issueNumber), "--repo", input.repo, "--add-label", "difficulty:" + triage.difficulty];
+          for (const label of remove) args.push("--remove-label", label);
+          if (triage.needsHumanApproval) args.push("--add-label", "needs-human-approval");
+          gh(args);
+          labeled++;
+        }
       } catch { /* labeling is best-effort */ }
     }
     if (triage.difficulty === "beyond-xhard") {
       skippedBeyond++;
-      if (!input.dryRun) {
+      // Only comment on the first classification; a memoized re-run (label
+      // already present) must not re-post the same skip notice.
+      if (!input.dryRun && !issue.labels.includes("difficulty:beyond-xhard")) {
         try {
           ghCommentIssue(input.repo, triage.issueNumber,
             "ticket-fleet triage: marked **beyond-xhard** and skipped by the automated pipeline. Rationale:\n\n" + triage.rationale.slice(0, 4_000));
@@ -1421,7 +1474,13 @@ export default smithers((ctx) => {
   const triageApplied = latest<TriageApply>(ctx, outputs.tfTriageApply, "triage-apply");
   const selectedNumbers = asStrArray(triageApplied?.selectedNumbers).map(Number).filter(Number.isFinite);
   const issueByNumber = new Map(triageIssues.map((i) => [i.number, i]));
-  const triageOf = (n: number) => latest<Triage>(ctx, outputs.tfTriage, "i" + n + ":triage");
+  const triageLedger = input.retriage ? {} : loadTriageLedger();
+  const memoTriageOf = (n: number) => {
+    const issue = issueByNumber.get(n);
+    return issue ? memoizedTriage(triageLedger, issue) : undefined;
+  };
+  const triageOf = (n: number) => latest<Triage>(ctx, outputs.tfTriage, "i" + n + ":triage") ?? memoTriageOf(n);
+  const issuesToTriage = triageIssues.filter((issue) => !memoTriageOf(issue.number));
   const selected = selectedNumbers
     .map((n) => ({ issue: issueByNumber.get(n), triage: triageOf(n) }))
     .filter((s): s is { issue: Issue; triage: Triage } => !!s.issue && !!s.triage);
@@ -1573,9 +1632,9 @@ export default smithers((ctx) => {
             }}
           </Task>
         ) : null}
-        {triageIssues.length ? (
+        {issuesToTriage.length ? (
           <Parallel id="triage-fanout" maxConcurrency={SWEEP_CONCURRENCY}>
-            {triageIssues.map((issue) => (
+            {issuesToTriage.map((issue) => (
               <Task key={"triage-" + issue.number} id={"i" + issue.number + ":triage"} output={outputs.tfTriage}
                 agent={lunaAgent("high")} {...agentTaskProps}>
                 {triagePrompt(issue)}
@@ -1585,8 +1644,11 @@ export default smithers((ctx) => {
         ) : null}
         {triageIssues.length ? (
           <Task id="triage-apply" output={outputs.tfTriageApply} timeoutMs={30 * 60_000}>
-            {() => applyTriage(input, triageIssues,
-              triageIssues.map((i) => triageOf(i.number)).filter((t): t is Triage => !!t))}
+            {() => {
+              const triages = triageIssues.map((i) => triageOf(i.number)).filter((t): t is Triage => !!t);
+              saveTriageLedger(triageIssues, triages);
+              return applyTriage(input, triageIssues, triages);
+            }}
           </Task>
         ) : null}
         <Task id="guard:post-triage" output={outputs.tfGuard}>
@@ -1641,8 +1703,14 @@ export default smithers((ctx) => {
           {() => runGuard(ctx, "post-research")}
         </Task>
 
-        {/* ---- Phases D+E: plan, approve, implement, review — one worktree lane per issue ---- */}
+        {/* ---- Phases D+E+F: worktree lanes and the landing queue run
+             concurrently (land-as-you-go). Each issue's landing sequence
+             mounts as soon as that issue reaches LGTM + green gate, so
+             finished work lands on main while other lanes are still
+             implementing; a cancel or quota park mid-run only loses
+             in-flight lanes, never already-ready work. ---- */}
         {selected.length ? (
+          <Parallel id="lanes-and-landing">
           <Parallel id="issue-lanes" subtreeConcurrency={input.laneConcurrency}>
             {selected.map(({ issue, triage }) => {
               const n = issue.number;
@@ -1768,10 +1836,9 @@ export default smithers((ctx) => {
               );
             })}
           </Parallel>
-        ) : null}
 
-        {/* ---- Phase F: serialized merge queue; each landing pushes main immediately ---- */}
-        {ready.length ? (
+          {/* Serialized merge queue; each landing pushes main immediately. */}
+          {ready.length ? (
           <MergeQueue id="merge-queue" maxConcurrency={1}>
             <Parallel id="merge-queue-serial" subtreeConcurrency={1}>
               {ready.map(({ issue, triage }) => {
@@ -1846,6 +1913,8 @@ export default smithers((ctx) => {
               })}
             </Parallel>
           </MergeQueue>
+          ) : null}
+          </Parallel>
         ) : null}
 
         <Task id="guard:end" output={outputs.tfGuard}>
