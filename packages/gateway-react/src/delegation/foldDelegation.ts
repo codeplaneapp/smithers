@@ -445,23 +445,40 @@ function cascadeStage(state: FoldState): FoldState {
     (currentPlanOf(parent)?.children ?? []).some((child) => child.logicalId === childId);
   for (const source of nodes.values()) {
     for (const invalidation of source.invalidations) {
-      const seen = new Set<string>([source.logicalId]);
-      const queue: Array<{ id: string; via: string }> = [...(dependents.get(source.logicalId) ?? [])].map(
-        (id) => ({ id, via: source.logicalId }),
+      type CascadeRule = "cascade" | "reaffirm";
+      const seenByRule: Record<CascadeRule, Set<string>> = {
+        cascade: new Set([source.logicalId]),
+        reaffirm: new Set([source.logicalId]),
+      };
+      const cascadeTargets = new Set<string>();
+      const queue: Array<{ id: string; via: string; rule: CascadeRule }> = [...(dependents.get(source.logicalId) ?? [])].map(
+        (id) => ({ id, via: source.logicalId, rule: "cascade" }),
       );
       while (queue.length) {
-        const { id, via } = queue.shift()!;
-        if (seen.has(id)) continue;
-        seen.add(id);
+        const { id, via, rule: incomingRule } = queue.shift()!;
         const target = nodes.get(id);
         if (!target) continue;
         // Reached as a child of an invalidated-and-replanned ancestor whose
         // current plan kept this node: the new plan row IS the reaffirm, for it
         // and its subtree.
-        if (target.parentId === via && nodes.has(via) && redeclaredByReplannedParent(nodes.get(via)!, id)) continue;
-        for (const next of dependents.get(id) ?? []) queue.push({ id: next, via: id });
+        const rule =
+          incomingRule === "reaffirm" ||
+          (target.parentId === via && nodes.has(via) && redeclaredByReplannedParent(nodes.get(via)!, id))
+            ? "reaffirm"
+            : "cascade";
+        if (seenByRule[rule].has(id)) continue;
+        seenByRule[rule].add(id);
+        for (const next of dependents.get(id) ?? []) queue.push({ id: next, via: id, rule });
+        if (rule === "reaffirm") continue;
         if (target.probeRow || target.isGoal) continue;
         if (cascadeResolved(target, invalidation.round)) continue;
+        cascadeTargets.add(id);
+      }
+      // A redeclaration is an explicit reaffirmation, so it wins when another
+      // path reaches the same node through the ordinary dependency cascade.
+      for (const id of cascadeTargets) {
+        if (seenByRule.reaffirm.has(id)) continue;
+        const target = nodes.get(id)!;
         target.cascadeRound = Math.max(target.cascadeRound ?? 0, invalidation.round);
       }
     }

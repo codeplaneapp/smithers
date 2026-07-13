@@ -1,7 +1,7 @@
 // Targeted coverage for the pure reducer's remaining branches: the
 // deterministic `stableStringify` tiebreak, the reaffirm-by-replanned-parent
-// cascade shortcut, the two-invalidation ordering, and the multi-root-candidate
-// ordering. All real data — no mocks.
+// cascade shortcut and precedence, the two-invalidation ordering, and the
+// multi-root-candidate ordering. All real data — no mocks.
 import { describe, expect, test } from "bun:test";
 import { foldDelegation } from "../../src/delegation/foldDelegation.ts";
 import type { DelegationRecord, DcPlanChild, DcPlanRow, Estimate, Tier } from "../../src/delegation/types.ts";
@@ -70,6 +70,53 @@ describe("foldDelegation — cascade reaffirm by a replanned parent", () => {
     expect(graph.nodes["root/a/x"]).toBeDefined();
     expect(graph.nodes["root/a/x"]!.status).not.toBe("derisking");
     expect(graph.nodes["root/a"]!.version).toBe(2);
+  });
+
+  test("a parent redeclaration wins when a dependency cascade also reaches the child", () => {
+    const records: DelegationRecord[] = [
+      rec("dcGoal", "dc:goal:goal", 0, { logicalId: "goal", refinedPrompt: "x", assumptions: [], questionsAsked: 0 }),
+      rec(
+        "dcPlan",
+        "dc:root:plan",
+        0,
+        plan(
+          "root",
+          "fable",
+          [
+            child("root/source", "opus", est(10, 1, 5)),
+            // Declaring B before A makes the dependency-cascade path reach X
+            // first, reproducing the old Set-order-dependent outcome.
+            child("root/b", "opus", est(10, 1, 5)),
+            child("root/z", "opus", est(10, 1, 5)),
+          ],
+          est(30, 3, 15),
+        ),
+      ),
+      rec("dcPlan", "dc:root:z:plan", 0, plan("root/z", "opus", [child("root/z/x", "sonnet", est(5, 1, 2))], est(10, 1, 5))),
+      rec("dcGates", "dc:root:z:gates", 0, { logicalId: "root/z", gates: [], depsLogical: ["root/source"] }),
+      rec("dcGates", "dc:root/b:gates", 0, { logicalId: "root/b", gates: [], depsLogical: ["root/source"] }),
+      rec("dcGates", "dc:root:z:x:gates", 0, { logicalId: "root/z/x", gates: [], depsLogical: ["root/b"] }),
+      rec("dcReplan", "dc:root/source:replan-1", 0, {
+        round: 1,
+        logicalId: "root/source",
+        decision: "invalidated",
+        reason: "source changed",
+        trigger: { type: "probe", ref: "h1" },
+      }),
+      rec("dcReplan", "dc:root:z:replan-1", 0, {
+        round: 1,
+        logicalId: "root/z",
+        decision: "invalidated",
+        reason: "dependent plan changed",
+        trigger: { type: "probe", ref: "h1" },
+      }),
+      rec("dcPlan", "dc:root:z:plan", 1, plan("root/z", "opus", [child("root/z/x", "sonnet", est(5, 1, 2))], est(12, 1, 6))),
+    ];
+
+    const graph = foldDelegation(records);
+
+    expect(graph.nodes["root/b"]!.status).toBe("derisking");
+    expect(graph.nodes["root/z/x"]!.status).not.toBe("derisking");
   });
 });
 
