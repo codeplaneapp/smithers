@@ -53,6 +53,7 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
     .sort();
   expect(files).toEqual([
     "create-skill.tsx",
+    "create-ui.tsx",
     "create-workflow.tsx",
     "docs-driven-development.tsx",
     "eval-suite-run.tsx",

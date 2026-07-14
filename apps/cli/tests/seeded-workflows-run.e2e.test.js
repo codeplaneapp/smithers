@@ -40,6 +40,9 @@ const AGENT_RESPONSE = JSON.stringify({
   name: "mock",
   skillName: "mock-skill",
   targetRunId: "missing-run",
+  targetWorkflow: "hello",
+  uiPath: ".smithers/ui/hello.tsx",
+  verified: false,
   mode: "single_task",
   modes: ["implementation"],
   durable: false,
@@ -151,6 +154,7 @@ const AGENT_RESPONSE = JSON.stringify({
 
 const WORKFLOW_INPUTS = {
   "create-skill": { prompt: "Create a tiny test skill.", review: false, name: "mock-skill" },
+  "create-ui": { targetWorkflow: "hello" },
   "create-workflow": { prompt: "Create a tiny test workflow.", review: false, name: "mock-workflow" },
   "context-engineer": { prompt: "Plan a tiny safe change.", review: false },
   "post-failure": { targetRunId: "missing-run" },

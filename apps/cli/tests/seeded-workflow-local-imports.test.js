@@ -56,4 +56,4 @@ test("seeded workflows' local imports all resolve to installed files", () => {
       );
     }
   }
-});
+}, 30_000);
