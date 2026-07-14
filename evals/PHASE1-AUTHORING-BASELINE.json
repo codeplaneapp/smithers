@@ -1,0 +1,22 @@
+{
+  "suiteId": "phase1-authoring",
+  "runLabel": "20260714213606-f8baf63a",
+  "workflowPath": "evals/phase1-authoring-benchmark.tsx",
+  "casesPath": "evals/suites/phase1-authoring/cases.jsonl",
+  "summary": { "total": 1, "passed": 1, "failed": 0, "byStatus": { "finished": 1 } },
+  "results": [{
+    "caseId": "phase1-authoring-haiku",
+    "builder": "claude-haiku-4-5-20251001",
+    "status": "finished",
+    "passed": true,
+    "deterministicGates": {
+      "graph": true,
+      "noReservedColumns": true,
+      "noNestedLoop": true,
+      "oneMergeQueue": true,
+      "bindings": true,
+      "typecheck": true,
+      "testRegisteredAndGreen": true
+    }
+  }]
+}

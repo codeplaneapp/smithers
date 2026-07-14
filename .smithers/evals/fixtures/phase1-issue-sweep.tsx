@@ -1,153 +1,164 @@
-// Deterministic fixture workflow for phase1 issue sweep eval. Demonstrates
-// parallel per-item lanes with correction loops, then serial merge queue landing.
+// Deterministic fixture workflow for phase1 issue-sweep eval suite. Demonstrates
+// parallel per-item correction loops, ctx.latest in loop conditions, and global
+// MergeQueue for landing. Compute nodes only: all lanes run locally without agent calls.
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
-const issueSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-});
-
 const inputSchema = z.object({
-  issues: z.array(issueSchema).default([
-    { id: "i1", title: "Fix type error" },
-    { id: "i2", title: "Add missing test" },
+  items: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    needsFix: z.boolean().default(true),
+  })).default([
+    { id: "item-1", title: "Auth flow", needsFix: true },
+    { id: "item-2", title: "Rate limit", needsFix: false },
+    { id: "item-3", title: "Error handler", needsFix: true },
   ]),
+  maxCorrections: z.number().int().min(1).max(10).default(3),
 });
 
-const triageSchema = z.object({
-  issueId: z.string(),
-  priority: z.enum(["p0", "p1", "p2"]).default("p1"),
+const scanSchema = z.object({
+  itemId: z.string(),
+  title: z.string(),
+  issues: z.array(z.string()),
+  ready: z.boolean(),
 });
 
-const fixSchema = z.object({
-  issueId: z.string(),
-  attempt: z.number().int().default(0),
-  status: z.enum(["done", "partial"]).default("partial"),
-  summary: z.string().default(""),
+const correctSchema = z.object({
+  itemId: z.string(),
+  attempt: z.number().int(),
+  fixed: z.boolean(),
+  evidence: z.string(),
 });
 
 const verifySchema = z.object({
-  issueId: z.string(),
-  attempt: z.number().int().default(0),
-  approved: z.boolean().default(false),
+  itemId: z.string(),
+  headSha: z.string(),
+  approved: z.boolean(),
   feedback: z.string().default(""),
 });
 
-const mergeSchema = z.object({
-  issueId: z.string(),
-  status: z.enum(["merged", "conflict"]).default("merged"),
+const landSchema = z.object({
+  itemId: z.string(),
+  merged: z.boolean(),
+  summary: z.string(),
 });
 
 const { Workflow, Task, Sequence, Parallel, Loop, MergeQueue, smithers, outputs } = createSmithers({
   input: inputSchema,
-  triage: triageSchema,
-  fix: fixSchema,
+  scan: scanSchema,
+  correct: correctSchema,
   verify: verifySchema,
-  merge: mergeSchema,
+  land: landSchema,
 });
 
+function needsCorrection(ctx: any, itemId: string): boolean {
+  const latest = ctx.latest(outputs.correct, `${itemId}:correct`) as z.infer<typeof correctSchema> | undefined;
+  return !latest || !latest.fixed;
+}
+
 export default smithers((ctx) => {
-  const issues = ctx.input.issues ?? [];
+  const items = (ctx.input?.items ?? [
+    { id: "item-1", title: "Auth flow", needsFix: true },
+    { id: "item-2", title: "Rate limit", needsFix: false },
+  ]).filter((item) => item.needsFix);
+  const maxCorrections = ctx.input?.maxCorrections ?? 3;
 
   return (
-    <Workflow name="issue-sweep">
-      <Sequence>
-        {/* Triage each issue once. */}
-        <Parallel maxConcurrency={10}>
-          {issues.map((issue) => (
-            <Task
-              key={`${issue.id}:triage`}
-              id={`${issue.id}:triage`}
-              output={outputs.triage}
-            >
-              {() => ({
-                issueId: issue.id,
-                priority: issue.id === "i1" ? "p0" : "p1",
-              })}
-            </Task>
-          ))}
-        </Parallel>
-
-        {/* Fix → verify loop for each issue, in parallel. */}
-        <Parallel maxConcurrency={2}>
-          {issues.map((issue) => {
-            const key = issue.id;
-            // Loop until the latest verification is approved.
-            // ctx.latest reads the most recent output across ALL iterations.
-            const latestVerify = ctx.latest(outputs.verify, `${key}:verify`);
-            const isDone = latestVerify?.approved === true;
-
-            return (
-              <Loop
-                key={`${key}:loop`}
-                id={`${key}:loop`}
-                until={isDone}
-                maxIterations={2}
-                onMaxReached="return-last"
-              >
-                <Sequence>
-                    <Task
-                      id={`${key}:fix`}
-                      output={outputs.fix}
-                    >
-                      {() => {
-                        // outputMaybe reads a specific output from the prior iteration.
-                        const priorFix = ctx.outputMaybe(outputs.fix, {
-                          nodeId: `${key}:fix`,
-                          iteration: ctx.iteration,
-                        });
-                        return {
-                          issueId: key,
-                          attempt: ctx.iteration,
-                          status: ctx.iteration > 0 ? "done" : "partial",
-                          summary: priorFix ? "Improved from feedback" : "Initial fix",
-                        };
-                      }}
-                    </Task>
-                    <Task
-                      id={`${key}:verify`}
-                      output={outputs.verify}
-                    >
-                      {() => {
-                        // Use ctx.latest to check the current iteration's fix.
-                        const currentFix = ctx.latest(outputs.fix, `${key}:fix`);
-                        return {
-                          issueId: key,
-                          attempt: ctx.iteration,
-                          approved: currentFix?.status === "done",
-                          feedback: currentFix?.status === "partial" ? "Needs more work" : "",
-                        };
-                      }}
-                    </Task>
-                </Sequence>
-              </Loop>
-            );
-          })}
-        </Parallel>
-
-        {/* Serial merge queue: land approved issues one at a time. */}
-        <MergeQueue id="merge-queue" maxConcurrency={1}>
-          {issues.map((issue) => {
-            const latestVerify = ctx.latest(outputs.verify, `${issue.id}:verify`);
-            const shouldMerge = latestVerify?.approved === true;
-
-            return shouldMerge ? (
-              <Task
-                key={`${issue.id}:merge`}
-                id={`${issue.id}:merge`}
-                output={outputs.merge}
-              >
+    <Workflow name="phase1-issue-sweep">
+      {items.length > 0 ? (
+        <Sequence>
+          <Parallel id="parallel-scan" maxConcurrency={4}>
+            {items.map((item) => (
+              <Task key={item.id} id={`${item.id}:scan`} output={outputs.scan}>
                 {() => ({
-                  issueId: issue.id,
-                  status: "merged" as const,
+                  itemId: item.id,
+                  title: item.title,
+                  issues: ["issue1", "issue2"],
+                  ready: true,
                 })}
               </Task>
-            ) : null;
+            ))}
+          </Parallel>
+
+          <Parallel id="parallel-correction-loops" maxConcurrency={3}>
+            {items.map((item) => {
+              const latest = ctx.latest(outputs.correct, `${item.id}:correct`) as z.infer<typeof correctSchema> | undefined;
+              const isFixed = latest?.fixed ?? false;
+
+              return (
+                <Loop
+                  key={item.id}
+                  id={`${item.id}:correction-loop`}
+                  maxIterations={maxCorrections}
+                  until={isFixed}
+                  onMaxReached="return-last"
+                >
+                  <Sequence>
+                    <Task
+                      id={`${item.id}:correct`}
+                      output={outputs.correct}
+                      continueOnFail
+                    >
+                      {() => {
+                        const iterationCount = ctx.iteration;
+                        return {
+                          itemId: item.id,
+                          attempt: iterationCount,
+                          fixed: iterationCount === maxCorrections - 1,
+                          evidence: `Fixed after iteration ${iterationCount}`,
+                        };
+                      }}
+                    </Task>
+
+                    <Task
+                      id={`${item.id}:verify`}
+                      output={outputs.verify}
+                      continueOnFail
+                    >
+                      {() => {
+                        const iterationCount = ctx.iteration;
+                        const previousIteration = Math.max(0, iterationCount - 1);
+                        const previous = ctx.outputMaybe(outputs.verify, { nodeId: `${item.id}:verify`, iteration: previousIteration });
+                        return {
+                          itemId: item.id,
+                          headSha: `sha-${item.id}-${iterationCount}`,
+                          approved: iterationCount > 0,
+                          feedback: previous && !previous.approved ? "Reviewer rejected: " + previous.feedback : "Verification passed",
+                        };
+                      }}
+                    </Task>
+                  </Sequence>
+                </Loop>
+              );
+            })}
+          </Parallel>
+
+          <MergeQueue id="landing-queue" maxConcurrency={1}>
+            <Parallel id="landing-prep" subtreeConcurrency={1}>
+              {items.map((item) => (
+                <Task key={item.id} id={`${item.id}:land`} output={outputs.land}>
+                  {() => ({
+                    itemId: item.id,
+                    merged: true,
+                    summary: `Landed fix for ${item.title}`,
+                  })}
+                </Task>
+              ))}
+            </Parallel>
+          </MergeQueue>
+        </Sequence>
+      ) : (
+        <Task id="no-items" output={outputs.scan}>
+          {() => ({
+            itemId: "none",
+            title: "No items to fix",
+            issues: [],
+            ready: false,
           })}
-        </MergeQueue>
-      </Sequence>
+        </Task>
+      )}
     </Workflow>
   );
 });

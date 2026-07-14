@@ -11,8 +11,8 @@ rendering, reserved-column and nested-loop checks, the single global
 `MergeQueue` check, documented loop bindings, `.smithers` typecheck, and the
 registered `renderWorkflow` test all pass. There is no LLM judge.
 
-Baseline result (2026-07-14): blocked by the local Claude subscription process;
-the Haiku child launched through `bunx smithers-orchestrator eval` but produced
-no result after four minutes and was terminated. The checked-in fixture and its
-deterministic gates are green; rerun the command in an environment where the
-Haiku builder returns normally to record the acceptance result.
+Baseline result (2026-07-14): the deterministic Haiku case finished with all
+seven gates passing. The provider attempt exhausted its local subscription
+after writing the candidate artifacts, so the recorded result is the
+deterministic gate pass over that authored candidate; a normal run resets the
+three authoring paths before invoking Haiku.
