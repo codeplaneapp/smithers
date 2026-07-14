@@ -25,15 +25,22 @@ const port = Number(process.env.PORT ?? "7331");
 const host = process.env.HOST ?? "127.0.0.1";
 
 // Hermetic: start from a fresh DB each run so old runs/approvals never bleed in.
-for (const name of ["smithers.db", "smithers.db-shm", "smithers.db-wal"]) {
-  const p = resolve(here, name);
-  if (existsSync(p)) rmSync(p);
+if (process.env.SMITHERS_E2E_RESET_DB !== "0") {
+  for (const name of ["smithers.db", "smithers.db-shm", "smithers.db-wal"]) {
+    const p = resolve(here, name);
+    if (existsSync(p)) rmSync(p);
+  }
 }
 
-const gateway = new Gateway({ heartbeatMs: 15_000, workspaceRoot: here });
+const monitorUiEntry = resolve(here, "..", "..", "..", "cli", "src", "monitor-ui", "monitor.tsx");
+const gateway = new Gateway({
+  heartbeatMs: 1_000,
+  workspaceRoot: here,
+  ui: { entry: monitorUiEntry, path: "/monitor", title: "Smithers Monitor E2E" },
+});
 let seedDb: Parameters<typeof ensureSmithersTables>[0] | null = null;
 
-for (const key of ["e2e-task", "e2e-approval"]) {
+for (const key of ["e2e-task", "e2e-approval", "e2e-monitor", "e2e-monitor-failure", "e2e-monitor-live"]) {
   const mod = await import(`./workflows/${key}.tsx`);
   if (key === "e2e-task") seedDb = mod.default.db;
   // e2e-task gets a custom UI (built from the shared gateway-ui components) so
@@ -57,10 +64,25 @@ for (const fact of [
   ["agent:codex-main", "specialty", JSON.stringify("Rendered browser coverage for local UI surfaces."), null],
 ] as const) {
   rawDb.run(
-    "INSERT INTO _smithers_memory_facts (namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR IGNORE INTO _smithers_memory_facts (namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
     [fact[0], fact[1], fact[2], "e2e-memory-v1", factTime, factTime + 1_000, fact[3]],
   );
 }
+
+// A real persisted run with no task rows gives the Monitor a stable empty-tree
+// state without intercepting or fabricating any browser transport.
+rawDb.run(
+  "INSERT OR IGNORE INTO _smithers_runs (run_id, workflow_name, status, created_at_ms, started_at_ms, finished_at_ms, config_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  [
+    "e2e-empty-tree",
+    "e2e-task",
+    "finished",
+    factTime + 10_000,
+    factTime + 10_100,
+    factTime + 10_200,
+    JSON.stringify({ gatewayWorkflowKey: "e2e-task" }),
+  ],
+);
 
 // Register a few REAL default-pack workflows so the concierge has genuine work
 // to background — including `create-workflow`, the meta-workflow that builds a
@@ -91,6 +113,7 @@ console.log(`[seed-gateway] listening on http://${host}:${port}`);
 // the Scores surface can switch between genuinely persisted run results.
 const adapter = new SmithersDb(seedDb);
 const scoredRunIds = new Set<string>();
+let monitorHijackSeeded = false;
 void (async () => {
   for (;;) {
     try {
@@ -130,6 +153,22 @@ void (async () => {
           durationMs: 95,
         });
         scoredRunIds.add(run.runId);
+      }
+      if (!monitorHijackSeeded) {
+        const monitorRuns = await adapter.listRuns(10, undefined, "e2e-monitor");
+        const monitorRun = monitorRuns.find((run) => run.status === "finished");
+        if (monitorRun) {
+          rawDb.run(
+            "UPDATE _smithers_attempts SET meta_json = ? WHERE run_id = ? AND node_id = ? AND attempt = ?",
+            [
+              JSON.stringify({ agentEngine: "codex", agentResume: "e2e-resumable-session" }),
+              monitorRun.runId,
+              "intake",
+              1,
+            ],
+          );
+          monitorHijackSeeded = true;
+        }
       }
     } catch (error) {
       console.warn(`[seed-gateway] score seeding retry: ${(error as Error).message}`);

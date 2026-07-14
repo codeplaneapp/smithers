@@ -110,6 +110,47 @@ async function renderSurface() {
       });
       return <TicketsCanvas />;
     }
+    case "store-empty": {
+      const { WorkflowStoreContent } = await import("../../src/store/WorkflowStore");
+      return <WorkflowStoreContent installed={[]} loading={false} includeGatewaySection={false} />;
+    }
+    case "store-loading": {
+      const { WorkflowStoreContent } = await import("../../src/store/WorkflowStore");
+      return <WorkflowStoreContent installed={[]} loading includeGatewaySection={false} />;
+    }
+    case "vcs-loading":
+    case "vcs-no-repo":
+    case "vcs-error": {
+      const [{ VcsCanvas }, { useVcsStore }] = await Promise.all([
+        import("../../src/vcs/VcsCanvas"),
+        import("../../src/vcs/vcsStore"),
+      ]);
+      const load = async () => {};
+      if (surface === "vcs-loading") {
+        useVcsStore.setState({ snapshot: null, loading: false, error: null, load });
+      } else if (surface === "vcs-no-repo") {
+        useVcsStore.setState({
+          snapshot: {
+            workspacePath: "/tmp/no-repository",
+            primary: null,
+            detected: { jj: false, git: false },
+            jj: null,
+            git: null,
+          },
+          loading: false,
+          error: null,
+          load,
+        });
+      } else {
+        useVcsStore.setState({
+          snapshot: null,
+          loading: false,
+          error: "Local VCS status failed (500)",
+          load,
+        });
+      }
+      return <VcsCanvas />;
+    }
     default:
       return <div data-testid="harness-error">Unknown surface: {surface}</div>;
   }

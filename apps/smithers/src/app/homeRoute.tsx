@@ -17,13 +17,13 @@ function LandingPage() {
   const fill = useChatStore((state) => state.fill);
 
   return (
-    <div className="landing-page">
+    <div className="landing-page" aria-labelledby="landing-title">
       <div className="landing-hero">
         <div className="landing-mark" aria-hidden="true">
           <SmithersMark part="landing-mark" />
         </div>
         <p className="landing-eyebrow">How can I help you?</p>
-        <h1>
+        <h1 id="landing-title">
           Turn ideas into <span>momentum.</span>
         </h1>
         <p className="landing-intro">

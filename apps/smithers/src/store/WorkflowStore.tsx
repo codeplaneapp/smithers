@@ -39,6 +39,24 @@ export function WorkflowStore() {
   useLocalModeRefetch(refetch);
   const installed = mapToStoreWorkflows(data ?? []);
 
+  return <WorkflowStoreContent installed={installed} loading={loading} />;
+}
+
+/**
+ * Render the store once its live registry query has been resolved. Keeping the
+ * query boundary separate gives browser coverage a repeatable way to exercise
+ * the loading and empty presentations while the routed surface continues to
+ * use the real Gateway collection above.
+ */
+export function WorkflowStoreContent({
+  installed,
+  loading,
+  includeGatewaySection = true,
+}: {
+  installed: StoreWorkflow[];
+  loading: boolean;
+  includeGatewaySection?: boolean;
+}) {
   return (
     <div className="store">
       <div className="store-inner">
@@ -108,7 +126,7 @@ export function WorkflowStore() {
           )}
         />
 
-        <GatewayWorkflowsSection />
+        {includeGatewaySection ? <GatewayWorkflowsSection /> : null}
       </div>
     </div>
   );

@@ -27,8 +27,12 @@ const { createRoot } = await import("react-dom/client");
 type ReactElement = import("react").ReactElement;
 type Root = import("react-dom/client").Root;
 const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smithers-orchestrator/ui");
+const { workflowUiThemeCss } = await import("smithers-orchestrator/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } = await import(
   "../src/monitor-ui/monitorShell.tsx"
+);
+const { monitorCss, RunProgressCell, RunsRail, RunsTable, StatCard, StatusTag } = await import(
+  "../src/monitor-ui/monitor.tsx"
 );
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -138,6 +142,101 @@ describe("shared control styling contract", () => {
     ]) {
       expect(smithersUiCss).toContain(rule);
     }
+  });
+});
+
+describe("migrated monitor surfaces", () => {
+  const run = {
+    runId: "run-surface-42",
+    workflowKey: "rendered-coverage",
+    status: "failed",
+    createdAtMs: Date.now() - 1_000,
+    startedAtMs: Date.now() - 900,
+    finishedAtMs: Date.now() - 100,
+    summary: { finished: 3, failed: 1, pending: 1 },
+  };
+
+  test("preserves status tones, data-status, stat-card testids, and failed progress", async () => {
+    await render(
+      <div>
+        <StatusTag status="running" />
+        <StatusTag status="waiting_approval" />
+        <StatusTag status="finished" />
+        <StatusTag status="failed" />
+        <StatCard value="7" label="active runs" sub="1 needs attention" tone="waiting" testId="monitor-stat-test" />
+        <RunProgressCell run={run} />
+      </div>,
+    );
+    expect(document.querySelector('[data-status="running"]')?.className).toContain("tone-running");
+    expect(document.querySelector('[data-status="waiting-approval"]')?.className).toContain("tone-waiting");
+    expect(document.querySelector('[data-status="finished"]')?.className).toContain("tone-ok");
+    expect(document.querySelector('[data-status="failed"]')?.className).toContain("tone-failed");
+    expect(byTestId("monitor-stat-test").className).toContain("tone-waiting");
+    expect(byTestId("monitor-stat-test").textContent).toContain("active runs");
+    expect(byTestId("monitor-run-progress").textContent).toContain("4/5");
+    expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
+  });
+
+  test("renders populated, loading, empty, offline, and unauthorized run-rail states", async () => {
+    await render(
+      <RunsRail runs={[run]} loading={false} connStatus="online" selectedRunId={run.runId} onSelect={() => {}} />,
+    );
+    expect(byTestId("monitor-runs")).toBeDefined();
+    expect(byTestId("monitor-run-row").getAttribute("data-active")).toBe("true");
+    expect(byTestId("monitor-run-row").textContent).toContain("rendered-coverage");
+
+    await rerender(<RunsRail runs={[]} loading connStatus="connecting" selectedRunId={undefined} onSelect={() => {}} />);
+    expect(byTestId("monitor-runs").textContent).toContain("Loading runs");
+    await rerender(<RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />);
+    expect(byTestId("monitor-empty").textContent).toContain("No runs match");
+    await rerender(<RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />);
+    expect(byTestId("monitor-runs-offline").textContent?.toLowerCase()).toContain("gateway");
+    await rerender(<RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />);
+    expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
+  });
+
+  test("renders loading and empty table heroes plus a populated shared table panel", async () => {
+    await render(<RunsTable runs={[]} loading page={1} onPageChange={() => {}} onSelect={() => {}} />);
+    expect(byTestId("monitor-empty-detail").textContent).toContain("Loading runs");
+    await rerender(<RunsTable runs={[]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
+    expect(byTestId("monitor-empty-detail").textContent).toContain("No runs match");
+    await rerender(<RunsTable runs={[run]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
+    expect(byTestId("monitor-runs-table")).toBeDefined();
+    expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
+    expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
+  });
+});
+
+describe("monitor theme contract", () => {
+  test("inherits explicit light/dark and OS-fallback tokens from the shared theme", () => {
+    expect(workflowUiThemeCss).toContain(":root:not([data-theme='light'])");
+    expect(workflowUiThemeCss).toContain(":root[data-theme='dark']");
+    expect(workflowUiThemeCss).toContain("prefers-color-scheme: dark");
+    for (const token of ["--bg", "--surface", "--text", "--border", "--brand", "--ok", "--warn", "--err"]) {
+      expect(workflowUiThemeCss).toContain(token);
+      expect(monitorCss).toContain(`var(${token})`);
+    }
+  });
+
+  test("shell, controls, statuses, cards, alerts, progress, dialogs, empty states, and terminal mounts use tokens", () => {
+    const rules = [
+      [".mon-shell", "overflow: hidden"],
+      [".mon-filter-input", "min-width"],
+      [".mon-pill", "var(--tone)"],
+      [".mon-stat", "var(--surface)"],
+      [".mon-banner", "var(--tone)"],
+      [".mon-progress-fill", "var(--brand)"],
+      [".mon-modal", "var(--surface)"],
+      [".mon-empty", "var(--muted)"],
+      [".mon-hijack-terminal", "var(--sp-2)"],
+    ];
+    for (const [selector, declaration] of rules) {
+      const start = monitorCss.indexOf(selector);
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(monitorCss.slice(start, start + 500)).toContain(declaration);
+    }
+    expect(monitorCss).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(monitorCss).not.toContain("background: white");
   });
 });
 

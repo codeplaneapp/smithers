@@ -205,7 +205,7 @@ function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) 
 // Shared atoms.
 // ---------------------------------------------------------------------------
 
-function StatusTag({ status, label }: { status: string | undefined; label?: string }) {
+export function StatusTag({ status, label }: { status: string | undefined; label?: string }) {
   const tone = toneForStatus(status);
   return (
     <span className={`mon-pill tone-${tone}`} data-status={labelForStatus(status)}>
@@ -405,7 +405,7 @@ function RunListRow({
   );
 }
 
-function RunsRail({
+export function RunsRail({
   runs,
   loading,
   connStatus,
@@ -533,7 +533,7 @@ function useMetricsScrape(enabled: boolean): { scrape: PromScrape | null; failed
 // dim; every value is real gateway state or an honest placeholder.
 // ---------------------------------------------------------------------------
 
-function StatCard({
+export function StatCard({
   value,
   label,
   sub,
@@ -972,18 +972,22 @@ function MetricsPanel() {
 
 /** Compact `done+failed/total` from a run row's node-state summary (getRun
  * attaches it; plain listRuns rows without one render an em dash). */
-function RunProgressCell({ run }: { run: RunRow }) {
+export function RunProgressCell({ run }: { run: RunRow }) {
   const progress = isRecord(run) ? runProgress(run.summary) : null;
   if (!progress) return <span className="mon-dim">—</span>;
   return (
-    <span className="mon-mono" title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}>
+    <span
+      className="mon-mono"
+      data-testid="monitor-run-progress"
+      title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}
+    >
       {progress.done + progress.failed}/{progress.total}
       {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
     </span>
   );
 }
 
-function RunsTable({
+export function RunsTable({
   runs,
   loading,
   page,
@@ -2376,20 +2380,6 @@ function NodeWhatHappened({ runId, nodeId, iteration, status }: { runId: string;
 
 type HijackStatus = "connecting" | "connected" | "exited" | "closed" | "error";
 
-const HIJACK_TERM_DARK = {
-  background: "#07090d",
-  foreground: "#f0f2f5",
-  cursor: "#9ba1ad",
-  selectionBackground: "rgba(123, 147, 217, 0.3)",
-};
-
-const HIJACK_TERM_LIGHT = {
-  background: "#fbfcfd",
-  foreground: "#17202a",
-  cursor: "#315d98",
-  selectionBackground: "rgba(49, 93, 152, 0.22)",
-};
-
 function isDarkTheme(): boolean {
   const attr = document.documentElement.dataset.theme;
   if (attr === "dark") return true;
@@ -2459,8 +2449,14 @@ function HijackTerminal({
       // The mount div persists across effect re-runs — never stack a second
       // terminal into it.
       host.replaceChildren();
+      const terminalStyle = getComputedStyle(host);
       term = new Terminal({
-        theme: dark ? HIJACK_TERM_DARK : HIJACK_TERM_LIGHT,
+        theme: {
+          background: terminalStyle.backgroundColor,
+          foreground: terminalStyle.color,
+          cursor: terminalStyle.borderTopColor,
+          selectionBackground: terminalStyle.outlineColor,
+        },
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
         fontSize: 13,
         cursorBlink: true,
@@ -2540,12 +2536,7 @@ function HijackTerminal({
     };
   }, [runId, nodeId, dark]);
   return (
-    <div
-      className="mon-hijack-terminal"
-      ref={mountRef}
-      data-testid="monitor-hijack-terminal"
-      style={{ background: dark ? HIJACK_TERM_DARK.background : HIJACK_TERM_LIGHT.background }}
-    />
+    <div className="mon-hijack-terminal" ref={mountRef} data-testid="monitor-hijack-terminal" />
   );
 }
 
@@ -2572,9 +2563,31 @@ function HijackModal({
 }) {
   const [status, setStatus] = useState<HijackStatus>("connecting");
   const dark = isDarkTheme();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      queueMicrotask(() => returnFocusRef.current?.focus());
+    };
+  }, [onClose]);
   return (
     <div className="mon-modal-backdrop" onClick={onClose} data-testid="monitor-hijack-modal">
-      <div className="mon-modal mon-hijack-modal" onClick={(event) => event.stopPropagation()}>
+      <div
+        className="mon-modal mon-hijack-modal"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${label} terminal for ${nodeId}`}
+        tabIndex={-1}
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="mon-modal-head">
           <span className="mon-kicker">
             {label}: <span className="mon-mono">{nodeId}</span> <span className="mon-dim">· {engine}</span>
@@ -2899,7 +2912,22 @@ function RunDetail({
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);
+  const customUiDialogRef = useRef<HTMLDivElement | null>(null);
+  const customUiReturnFocusRef = useRef<HTMLElement | null>(null);
   const workflowsRefetch = workflowsQuery.refetch;
+  const closeCustomUi = () => {
+    setShowCustomUi(false);
+    queueMicrotask(() => customUiReturnFocusRef.current?.focus());
+  };
+  useEffect(() => {
+    if (!showCustomUi) return;
+    customUiDialogRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeCustomUi();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showCustomUi]);
   // While a create-ui run is authoring this workflow's UI, poll the workflow
   // list so the Open UI button appears the moment the file lands (the gateway
   // resolves .smithers/ui/<key>.tsx by convention with no restart).
@@ -3000,7 +3028,14 @@ function RunDetail({
         ) : null}
         <div className="mon-detail-actions">
           {customUiUrl ? (
-            <Button variant="outline" onClick={() => setShowCustomUi(true)} title={`Open this workflow's custom UI (${customUiPath})`}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                customUiReturnFocusRef.current = document.activeElement as HTMLElement | null;
+                setShowCustomUi(true);
+              }}
+              title={`Open this workflow's custom UI (${customUiPath})`}
+            >
               Open UI
             </Button>
           ) : workflowRow && workflowKey !== "create-ui" ? (
@@ -3043,8 +3078,16 @@ function RunDetail({
       <ScoresPanel scores={scores} />
 
       {showCustomUi && customUiUrl ? (
-        <div className="mon-modal-backdrop" onClick={() => setShowCustomUi(false)} data-testid="monitor-ui-modal">
-          <div className="mon-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="mon-modal-backdrop" onClick={closeCustomUi} data-testid="monitor-ui-modal">
+          <div
+            className="mon-modal"
+            ref={customUiDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${workflowKey} custom UI`}
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
             <header className="mon-modal-head">
               <span className="mon-kicker">{workflowKey} UI</span>
               <Chip asChild>
@@ -3052,7 +3095,7 @@ function RunDetail({
                   Open in new tab
                 </a>
               </Chip>
-              <Chip onClick={() => setShowCustomUi(false)}>Close</Chip>
+              <Chip onClick={closeCustomUi}>Close</Chip>
             </header>
             <iframe className="mon-modal-frame" src={customUiUrl} title={`${workflowKey} custom UI`} />
           </div>
@@ -3237,7 +3280,7 @@ function App() {
 // font-size rules.
 // ---------------------------------------------------------------------------
 
-const monitorCss = `
+export const monitorCss = `
 :root {
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
   --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 15px;
@@ -3318,7 +3361,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-inspector { border-left: 1px solid var(--border); overflow-y: auto; padding: var(--panel-pad); animation: mon-in 140ms ease-out; }
 @media (max-width: 1160px) {
   .mon-body { grid-template-columns: 300px 1fr; }
-  .mon-inspector { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 90vw); background: var(--bg); box-shadow: -12px 0 36px rgb(0 0 0 / 0.14); z-index: 10; }
+  .mon-inspector { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 90vw); background: var(--bg); box-shadow: -12px 0 36px rgb(var(--shadow-rgb) / 0.14); z-index: 10; }
 }
 
 .mon-inbox { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); border-radius: var(--r-3); padding: var(--panel-pad); background: color-mix(in srgb, var(--warn) 5%, var(--surface)); animation: mon-in 140ms ease-out; }
@@ -3443,7 +3486,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-output-key { color: var(--dim); font-size: var(--fs-1); flex: none; }
 .mon-output-scalar { min-width: 0; overflow-wrap: anywhere; }
 .mon-output-val { margin: 0; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--bg); font-size: var(--fs-1); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
-.mon-failure { border-color: color-mix(in srgb, var(--failed, #f87171) 45%, var(--border)); }
+.mon-failure { border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
 .mon-live-output { max-height: 32vh; }
 .mon-live-line { border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); overflow-wrap: anywhere; }
 .mon-live-cmd { font-family: ui-monospace, monospace; color: color-mix(in srgb, var(--text) 82%, transparent); }
@@ -3460,16 +3503,16 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-health-fix { font-weight: 400; font-size: var(--fs-1); }
 .mon-quota-list { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); font-weight: 400; font-size: var(--fs-1); }
 .mon-quota-list li { overflow-wrap: anywhere; }
-.mon-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: var(--sp-6); }
-.mon-modal { width: min(1280px, 96vw); height: min(860px, 92vh); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; box-shadow: 0 18px 60px rgba(0,0,0,0.45); }
+.mon-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgb(var(--shadow-rgb) / 0.55); display: flex; align-items: center; justify-content: center; padding: var(--sp-6); }
+.mon-modal { width: min(1280px, 96vw); height: min(860px, 92vh); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; box-shadow: 0 18px 60px rgb(var(--shadow-rgb) / 0.45); }
 .mon-modal-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
 .mon-modal-head .mon-kicker { flex: 1; }
-.mon-modal-frame { flex: 1; border: 0; width: 100%; background: white; }
+.mon-modal-frame { flex: 1; border: 0; width: 100%; background: var(--bg); }
 
 /* PTY hijack terminal: the modal hosts one xterm.js instance; the mount fills
    the modal body and the terminal's own theme paints the surface. */
 .mon-hijack-modal { width: min(1080px, 96vw); height: min(720px, 88vh); }
-.mon-hijack-terminal { flex: 1; min-height: 0; padding: var(--sp-2) var(--sp-3); }
+.mon-hijack-terminal { flex: 1; min-height: 0; padding: var(--sp-2) var(--sp-3); background: var(--code-bg); color: var(--code-text); border: 0 solid var(--brand); outline-color: color-mix(in srgb, var(--brand) 30%, transparent); }
 .mon-hijack-terminal .xterm { height: 100%; }
 
 .mon-empty { color: var(--muted); text-align: center; padding: var(--sp-6) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
@@ -3529,4 +3572,6 @@ if (typeof document !== "undefined" && monitorMode.theme) {
   document.documentElement.dataset.theme = monitorMode.theme;
 }
 
-createGatewayReactRoot(<App />);
+if (typeof document !== "undefined" && document.getElementById("root")) {
+  createGatewayReactRoot(<App />);
+}

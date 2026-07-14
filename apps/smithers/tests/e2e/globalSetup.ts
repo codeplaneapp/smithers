@@ -110,11 +110,13 @@ export default async function globalSetup(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await rpc("launchRun", { workflow: "e2e-approval" });
   }
+  await rpc("launchRun", { workflow: "e2e-monitor" });
+  await rpc("launchRun", { workflow: "e2e-monitor-failure" });
 
   // 3. Block until the seeded data is queryable, so specs never race the seed.
-  await waitFor("seeded runs (>=6)", async () => {
+  await waitFor("seeded runs (>=9)", async () => {
     const runs = (await rpc("listRuns", {})) as unknown[];
-    return Array.isArray(runs) && runs.length >= 6;
+    return Array.isArray(runs) && runs.length >= 9;
   });
   await waitFor("pending approvals (>=4)", async () => {
     const approvals = (await rpc("listApprovals", {})) as unknown[];
@@ -146,5 +148,21 @@ export default async function globalSetup(): Promise<void> {
     return Array.isArray(rows) && rows.length >= 2;
   });
 
-  console.log("[e2e] gateway seeded: 6 runs, 4 pending approvals, scores, memory, accounts, prompts, tickets");
+  await waitFor("terminal monitor fixtures", async () => {
+    const runs = (await rpc("listRuns", {})) as Array<{ workflowKey?: string; status?: string }>;
+    const rich = runs.find((run) => run.workflowKey === "e2e-monitor");
+    const failed = runs.find((run) => run.workflowKey === "e2e-monitor-failure");
+    return rich?.status === "finished" && failed?.status === "failed";
+  });
+  await waitFor("monitor PTY candidate", async () => {
+    const runs = (await rpc("listRuns", {})) as Array<{ runId?: string; workflowKey?: string }>;
+    const runId = runs.find((run) => run.workflowKey === "e2e-monitor")?.runId;
+    if (!runId) return false;
+    const response = await fetch(`${GW}/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`);
+    if (!response.ok) return false;
+    const body = (await response.json()) as { data?: { candidates?: unknown[] } };
+    return Array.isArray(body.data?.candidates) && body.data.candidates.length > 0;
+  });
+
+  console.log("[e2e] gateway seeded: 9 runs, 4 pending approvals, monitor trees, scores, memory, accounts, prompts, tickets");
 }
