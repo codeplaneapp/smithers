@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { Effect, Fiber } from "effect";
 import { Cli, SyncSkills, z } from "incur";
-import { finalizeCancelledRun, isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
+import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smithers-orchestrator/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
@@ -38,7 +38,7 @@ import { CronExpressionParser } from "cron-parser";
 import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanRequestValue, waitForHumanAnswer, } from "@smithers-orchestrator/engine/human-requests";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
-import { cascadeCancelRun, isCancellableRunStatus, listCascadeLineage } from "./cancel-cascade.js";
+import { cascadeCancelRun, finalizeCancelledOwnedRun, isCancellableRunStatus, listCascadeLineage } from "./cancel-cascade.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
 import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
@@ -7368,26 +7368,10 @@ const cli = Cli.create({
                         skipped++;
                         continue;
                     }
-                    // A live run reached here only via --force. Request a durable
-                    // cancel so the engine aborts itself, rather than a bare status
-                    // flip it would overwrite with "finished" on completion. Stale
-                    // (dead-engine) and suspended waiting-* runs fall through to the
-                    // direct flip below, which is correct as no engine is polling.
-                    if (run.status === "running" && isRunHeartbeatFresh(run)) {
-                        const requested = await adapter.requestRunCancel(run.runId, now);
-                        if (requested) {
-                            process.stderr.write(`⊘ Cancel requested (live): ${run.runId}\n`);
-                            cancelled++;
-                        }
-                        else {
-                            skipped++;
-                        }
-                        continue;
-                    }
-                    // Keep direct cancellation on the same terminal path as the
-                    // engine and gateway. A status-only flip leaves external
-                    // approvals/human requests and their waiting nodes alive.
-                    const result = await finalizeCancelledRun(adapter, run.runId, { now });
+                    // Atomically claim terminal cancellation before terminating
+                    // any surviving owner group. The claim fences a healthy or
+                    // hung engine from racing this shutdown with a completion.
+                    const { cancellation: result } = await finalizeCancelledOwnedRun(adapter, run, { now });
                     if (result.won || result.repaired) {
                         process.stderr.write(`⊘ Cancelled: ${run.runId}\n`);
                         cancelled++;

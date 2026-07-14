@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -10,6 +12,51 @@ const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
 const CLI_COMMAND_TIMEOUT_MS = 120_000;
 const STALE_LOG_EXIT_TIMEOUT_MS = 5_000;
 const FRESH_HEARTBEAT_LEEWAY_MS = 120_000;
+
+const spawnedPids = [];
+afterEach(() => {
+    for (const pid of spawnedPids.splice(0)) {
+        try { process.kill(-pid, "SIGKILL"); }
+        catch { }
+        try { process.kill(pid, "SIGKILL"); }
+        catch { }
+    }
+});
+
+function pidAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch (error) {
+        return error?.code === "EPERM";
+    }
+}
+
+async function waitForPidExit(pid, timeoutMs = 10_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (pidAlive(pid) && Date.now() < deadline) await Bun.sleep(50);
+    return !pidAlive(pid);
+}
+
+async function spawnOwnerGroup(pidFile) {
+    const launcher = spawn(process.execPath, [
+        "-e",
+        `const { spawn } = require("node:child_process");
+         const { writeFileSync } = require("node:fs");
+         const owner = spawn(process.execPath, ["-e", ${JSON.stringify(`const { spawn } = require("node:child_process"); const { writeFileSync } = require("node:fs"); const agent = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); writeFileSync(process.env.SMITHERS_TEST_PID_FILE, process.pid + ":" + agent.pid); setInterval(() => {}, 1000);`)}], { detached: true, stdio: "ignore", env: process.env });
+         owner.unref();`,
+    ], {
+        stdio: "ignore",
+        env: { ...process.env, SMITHERS_TEST_PID_FILE: pidFile },
+    });
+    await new Promise((resolvePromise) => launcher.on("exit", resolvePromise));
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(pidFile) && Date.now() < deadline) await Bun.sleep(50);
+    const [ownerPid, agentPid] = readFileSync(pidFile, "utf8").trim().split(":").map(Number);
+    spawnedPids.push(ownerPid, agentPid);
+    return { ownerPid, agentPid };
+}
 
 function freshHeartbeatMs() {
     return Date.now() + FRESH_HEARTBEAT_LEEWAY_MS;
@@ -79,15 +126,17 @@ describe("smithers down --force staleness check", () => {
         }
     }, CLI_COMMAND_TIMEOUT_MS);
 
-    test("with --force, a LIVE run is asked to cancel durably (not bare-flipped)", async () => {
-        // Regression: a bare `status:"cancelled"` flip on a live run is invisible
-        // to the engine in the owning process, which polls cancel_requested_at_ms
-        // and overwrites status with "finished" on completion. --force on a fresh
-        // run must set the durable cancel request so the engine aborts itself.
+    test.skipIf(process.platform === "win32")("with --force, a LIVE run's owner group is terminated and the run finalized", async () => {
         const repo = createTempRepo();
         const { sqlite, adapter } = openRepoDb(repo);
         try {
-            await insertRunningRun(adapter, "fresh-run", { heartbeatAtMs: freshHeartbeatMs() });
+            const { ownerPid, agentPid } = await spawnOwnerGroup(repo.path("owner-group.pid"));
+            await insertRunningRun(adapter, "fresh-run", {
+                heartbeatAtMs: freshHeartbeatMs(),
+                runtimeOwnerId: `pid:${ownerPid}:down-test`,
+            });
+            expect(pidAlive(ownerPid)).toBe(true);
+            expect(pidAlive(agentPid)).toBe(true);
 
             const result = runSmithers(["down", "--force"], {
                 cwd: repo.dir,
@@ -97,14 +146,13 @@ describe("smithers down --force staleness check", () => {
 
             expect(result.exitCode).toBe(0);
             expect(result.json).toMatchObject({ cancelled: 1, skipped: 0 });
-            expect(result.stderr).toContain("Cancel requested (live): fresh-run");
+            expect(result.stderr).toContain("Cancelled: fresh-run");
 
             const after = await adapter.getRun("fresh-run");
-            // The durable cancel flag is set; the engine (absent in this fixture)
-            // would observe it and write the terminal cancelled status itself, so
-            // the row stays "running" rather than being prematurely bare-flipped.
             expect(after?.cancelRequestedAtMs ?? 0).toBeGreaterThan(0);
-            expect(after?.status).toBe("running");
+            expect(after?.status).toBe("cancelled");
+            expect(await waitForPidExit(ownerPid)).toBe(true);
+            expect(await waitForPidExit(agentPid)).toBe(true);
         }
         finally {
             sqlite.close();
@@ -129,6 +177,32 @@ describe("smithers down --force staleness check", () => {
 
             const after = await adapter.getRun("stale-run");
             expect(after?.status).toBe("cancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    }, CLI_COMMAND_TIMEOUT_MS);
+
+    test("stale runs with no owner or a dead owner both finalize cleanly", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            await insertRunningRun(adapter, "no-owner", { heartbeatAtMs: Date.now() - 120_000 });
+            await insertRunningRun(adapter, "dead-owner", {
+                heartbeatAtMs: Date.now() - 120_000,
+                runtimeOwnerId: "pid:2147483647:down-test",
+            });
+
+            const result = runSmithers(["down"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
+
+            expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+            expect(result.json).toMatchObject({ cancelled: 2, skipped: 0 });
+            expect((await adapter.getRun("no-owner"))?.status).toBe("cancelled");
+            expect((await adapter.getRun("dead-owner"))?.status).toBe("cancelled");
         }
         finally {
             sqlite.close();

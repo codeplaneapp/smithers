@@ -124,6 +124,29 @@ export async function terminateRunOwner(pid, options = {}) {
 }
 
 /**
+ * Atomically fence an active run from further owner writes, complete all
+ * cancellation cleanup, and then terminate any surviving owner process group.
+ * Both `cancel` and `down` use this composition so owner liveness races have a
+ * single claim/termination policy.
+ *
+ * @param {SmithersDb} adapter
+ * @param {Pick<RunRow, "runId" | "runtimeOwnerId">} run
+ * @param {{ now?: number; terminateOwner?: typeof terminateRunOwner; ownerKillGraceMs?: number }} [options]
+ */
+export async function finalizeCancelledOwnedRun(adapter, run, options = {}) {
+    const cancellation = await finalizeCancelledRun(adapter, run.runId, { now: options.now });
+    const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+    let ownerTerminated = false;
+    if (cancellation.won && ownerPid !== null && isPidAlive(ownerPid)) {
+        const termination = await (options.terminateOwner ?? terminateRunOwner)(ownerPid, {
+            graceMs: options.ownerKillGraceMs,
+        });
+        ownerTerminated = termination.terminated;
+    }
+    return { cancellation, ownerPid, ownerTerminated };
+}
+
+/**
  * Collapse an error (and its cause chain) into searchable text so
  * missing-table detection sees the driver's message wherever a wrapper
  * buried it.
@@ -314,20 +337,23 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
                 return;
             }
         }
-        const result = await finalizeCancelledRun(adapter, runId, { now: now() });
+        const ownedResult = await finalizeCancelledOwnedRun(adapter, run, {
+            now: now(),
+            terminateOwner,
+            ownerKillGraceMs: options.ownerKillGraceMs,
+        });
+        const result = ownedResult.cancellation;
         if (result.won || result.repaired) summary.cancelledAttempts += activeCount;
         outcome.action = result.won || result.repaired ? "cancelled" : "already-terminal";
         // No live engine should own this run any more; an alive owner pid is a
         // hung engine or a parked detached owner — terminate its process group
         // so its agent processes stop burning tokens.
-        const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
-        if (result.won && ownerPid !== null && isPidAlive(ownerPid)) {
-            outcome.ownerPid = ownerPid;
-            const result = await terminateOwner(ownerPid, { graceMs: options.ownerKillGraceMs });
-            outcome.ownerTerminated = result.terminated;
-            if (result.terminated) {
-                summary.terminatedOwners.push({ runId, pid: ownerPid });
-            }
+        if (ownedResult.ownerPid !== null) {
+            outcome.ownerPid = ownedResult.ownerPid;
+        }
+        outcome.ownerTerminated = ownedResult.ownerTerminated;
+        if (ownedResult.ownerTerminated && ownedResult.ownerPid !== null) {
+            summary.terminatedOwners.push({ runId, pid: ownedResult.ownerPid });
         }
     };
     for (let pass = 0; pass < MAX_CASCADE_DISCOVERY_PASSES; pass++) {
