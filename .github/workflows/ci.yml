@@ -234,8 +234,8 @@ jobs:
       - name: Run Postgres-gated tests
         env:
           SMITHERS_TEST_PG_URL: postgresql://smithers:smithers_pw@127.0.0.1:54329/smithers
-        # Two bun invocations: the CLI postgres tests and the migrate-store
-        # suites each get their own process, keeping headroom under bun's
+        # Three bun invocations: the CLI postgres tests, migrate-store suites,
+        # and engine time-travel tests each get their own process, keeping headroom under bun's
         # ~2GB WASM plateau (PGlite instances are >1GB live and closed ones
         # reclaim only lazily). If the migrate suites ever need finer
         # process isolation again, migrateStoreKit.js's chunkedTest honors
@@ -244,6 +244,7 @@ jobs:
         run: |
           bun test apps/cli/tests/*postgres*
           bun test packages/smithers/tests/migrateSmithersStore.test.js packages/smithers/tests/migrateSmithersStoreReverse.test.js packages/smithers/tests/migrateSmithersStoreReceipts.test.js packages/smithers/tests/migrateSmithersStorePostgres.test.js
+          bun test packages/engine/tests/time-travel-postgres.test.js
 
       - name: Stop Postgres
         if: always()
