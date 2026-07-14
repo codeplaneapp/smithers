@@ -21,3 +21,6 @@ which keeps autocomplete/narrowing for the known literals while still admitting 
 No runtime effect; it is a public-type change, so treat as a deliberate API tweak.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in a38c4a8940c56477284d48041369d92ab7e6eb4f.
