@@ -1,7 +1,6 @@
 import { getTableName } from "drizzle-orm";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { validateForkSources } from "./validateForkSources.js";
-import { resolveWorktreePath } from "./worktree-path.js";
 import { resolveStableId } from "./utils/tree-ids.js";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
@@ -467,11 +466,24 @@ export function extractGraph(root, opts) {
             if (!pathVal) {
                 throw new SmithersError("WORKTREE_EMPTY_PATH", WORKTREE_EMPTY_PATH_ERROR);
             }
+            // extractGraph never statically imports the Node-only
+            // resolveWorktreePath itself (that would pull `node:path` into any
+            // browser bundle that imports this module, whether or not a
+            // <Worktree> is actually rendered) — the caller must inject a
+            // resolver via opts.resolveWorktreePath (WorkflowDriver sources
+            // this from runtimeAdapter.worktree.resolve). Fails closed with a
+            // typed, precise error when a <Worktree> is actually encountered
+            // and no resolver was configured, rather than silently producing
+            // an unresolved/incorrect path.
+            if (typeof opts?.resolveWorktreePath !== "function") {
+                throw new SmithersError("RUNTIME_CAPABILITY_UNAVAILABLE", `<Worktree path="${pathVal}"> requires a worktree path resolver, but extractGraph was not given one ` +
+                    `(opts.resolveWorktreePath). Configure a runtimeAdapter with a worktree.resolve implementation.`, { capability: "worktree", operation: "resolve", path: pathVal });
+            }
             nextWorktreeStack = [
                 ...ctx.worktreeStack,
                 {
                     id,
-                    path: resolveWorktreePath(pathVal, opts),
+                    path: opts.resolveWorktreePath(pathVal, opts),
                     ...(raw.branch ? { branch: String(raw.branch) } : {}),
                     ...(raw.baseBranch ? { baseBranch: String(raw.baseBranch) } : {}),
                 },

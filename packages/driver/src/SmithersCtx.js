@@ -1,10 +1,9 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { stripAutoColumns } from "@smithers-orchestrator/db/output";
 import { buildCurrentScopes } from "./buildCurrentScopes.js";
 import { filterRowsByNodeId } from "./filterRowsByNodeId.js";
 import { normalizeInputRow } from "./normalizeInputRow.js";
 import { withLogicalIterationShortcuts } from "./withLogicalIterationShortcuts.js";
-import { resolveWorktreePath } from "@smithers-orchestrator/graph";
+import { RuntimeCapabilityError } from "./RuntimeCapabilityError.js";
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./SafeParser.ts").SafeParser} SafeParser */
 /** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
@@ -22,6 +21,23 @@ import { resolveWorktreePath } from "@smithers-orchestrator/graph";
  * @typedef {import("./OutputAccessor.ts").OutputAccessor<Schema>} OutputAccessor
  */
 
+/**
+ * Strip harness metadata columns (runId/nodeId/iteration) from an output row
+ * before handing it to user code. Mirrors `@smithers-orchestrator/db/output`'s
+ * `stripAutoColumns` exactly (array values pass through unchanged; only plain
+ * objects get the three keys omitted) — duplicated locally, rather than
+ * imported, because `@smithers-orchestrator/db` pulls in sqlite/postgres
+ * modules this portable driver core must stay free of.
+ * @param {unknown} row
+ * @returns {unknown}
+ */
+function stripAutoColumns(row) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+        return row;
+    }
+    const { runId: _runId, nodeId: _nodeId, iteration: _iteration, ...rest } = /** @type {Record<string, unknown>} */ (row);
+    return rest;
+}
 /**
  * @param {TableRef} table
  * @returns {string | undefined}
@@ -113,14 +129,24 @@ export class SmithersCtx {
     }
     /**
      * Resolve a <Worktree path> prop against the active workflow root using
-     * the same resolver graph extraction uses.
+     * the same resolver graph extraction uses. Delegates to the runtime's
+     * injected `resolveWorktreePath` resolver (sourced from
+     * `runtimeAdapter.worktree.resolve` — see `WorkflowDriver.renderAndSubmit`)
+     * so this class never statically imports a Node-only path resolver
+     * itself; that keeps `SmithersCtx` safe to bundle for non-Node runtimes.
+     * Throws a typed `RuntimeCapabilityError` if no resolver was configured.
      *
      * @param {string} path
      * @returns {string}
      */
     resolveWorktreePath(path) {
-        return resolveWorktreePath(path, {
+        const resolver = this.__smithersRuntime?.resolveWorktreePath;
+        if (typeof resolver !== "function") {
+            throw new RuntimeCapabilityError(this.__smithersRuntime?.runtimeName ?? "unconfigured", "worktree", "resolve");
+        }
+        return resolver(path, {
             baseRootDir: this.__smithersRuntime?.baseRootDir,
+            workflowPath: this.__smithersRuntime?.workflowPath,
         });
     }
     /**

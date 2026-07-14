@@ -2,6 +2,8 @@ import { makeWorkflowSession, } from "@smithers-orchestrator/scheduler";
 import { ReactWorkflowDriver } from "@smithers-orchestrator/react-reconciler/driver";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
 import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { resolveWorktreePath } from "@smithers-orchestrator/graph";
+import { createNodeRuntime } from "./node-runtime.js";
 import { coerceOutputRowForSnapshot, loadInput, loadOutputs, loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
 import { FRAME_KEYFRAME_INTERVAL } from "@smithers-orchestrator/db/frame-codec";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -5777,6 +5779,12 @@ async function renderFrameAsync(workflow, ctx, opts) {
         baseRootDir: opts?.baseRootDir,
         workflowPath: opts?.workflowPath,
         defaultIteration: ctx?.iteration,
+        // extractGraph no longer imports resolveWorktreePath itself (that
+        // module is Node-only and this driver core is meant to stay
+        // bundle-portable) — the Node engine, which is never bundled for a
+        // browser, supplies the real resolver directly so <Worktree>
+        // resolution behaves exactly as it did before.
+        resolveWorktreePath,
     });
     let tasks = result.tasks;
     // Resolve output tasks: ZodObject references via zodToKeyName, string keys via schemaRegistry
@@ -7568,6 +7576,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
             runId,
             rootDir,
             workflowPath: resolvedWorkflowPath,
+            // Supplies (among other things) `worktree.resolve` — wired here so
+            // <Worktree> resolution inside WorkflowDriver.renderAndSubmit keeps
+            // using the real, unmodified resolveWorktreePath now that
+            // SmithersCtx/extractGraph no longer import it themselves.
+            runtimeAdapter: createNodeRuntime(),
             executeTask: (task) => executeDriverTask(task),
             onSchedulerWait: (durationMs) => Effect.runPromise(Metric.update(schedulerWaitDuration, durationMs)),
             onWait: (reason) => handleDriverWait(reason),

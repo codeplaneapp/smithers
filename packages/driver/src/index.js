@@ -29,7 +29,21 @@
  */
 /** @typedef {import("./WorkflowRuntime.ts").WorkflowRuntime} WorkflowRuntime */
 /** @typedef {import("./WorkflowSession.ts").WorkflowSession} WorkflowSession */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeAdapter} RuntimeAdapter */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeClock} RuntimeClock */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeStorage} RuntimeStorage */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeFilesystem} RuntimeFilesystem */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeSubprocess} RuntimeSubprocess */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeSubprocessResult} RuntimeSubprocessResult */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeWorktree} RuntimeWorktree */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeSandbox} RuntimeSandbox */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeSandboxResult} RuntimeSandboxResult */
+/** @typedef {import("./RuntimeAdapter.ts").StoredRunState} StoredRunState */
+/** @typedef {import("./RuntimeCapabilityError.js").RuntimeCapability} RuntimeCapability */
+/** @typedef {import("./RuntimeCapabilityError.js").RuntimeCapabilityErrorDetails} RuntimeCapabilityErrorDetails */
+/** @typedef {import("./browser-runtime.js").BrowserRuntimeOptions} BrowserRuntimeOptions */
 // @smithers-type-exports-end
 
 export { WorkflowDriver } from "./WorkflowDriver.js";
 export { SmithersCtx } from "./SmithersCtx.js";
+export { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "./RuntimeCapabilityError.js";

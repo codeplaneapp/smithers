@@ -10,6 +10,11 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./browser": {
+      "types": "./src/browser.d.ts",
+      "import": "./src/browser.js",
+      "default": "./src/browser.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",

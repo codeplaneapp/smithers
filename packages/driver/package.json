@@ -51,6 +51,29 @@
       "import": "./src/child-process.js",
       "default": "./src/child-process.js"
     },
+    "./WorkflowDriver": {
+      "types": "./src/index.d.ts",
+      "import": "./src/WorkflowDriver.js",
+      "default": "./src/WorkflowDriver.js"
+    },
+    "./RuntimeAdapter": {
+      "types": "./src/RuntimeAdapter.ts"
+    },
+    "./RuntimeCapabilityError": {
+      "types": "./src/index.d.ts",
+      "import": "./src/RuntimeCapabilityError.js",
+      "default": "./src/RuntimeCapabilityError.js"
+    },
+    "./browser-runtime": {
+      "types": "./src/index.d.ts",
+      "import": "./src/browser-runtime.js",
+      "default": "./src/browser-runtime.js"
+    },
+    "./unsupportedCapability": {
+      "types": "./src/index.d.ts",
+      "import": "./src/unsupportedCapability.js",
+      "default": "./src/unsupportedCapability.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",

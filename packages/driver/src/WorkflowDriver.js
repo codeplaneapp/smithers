@@ -20,7 +20,14 @@ import { withAbort } from "./withAbort.js";
 /** @typedef {import("@smithers-orchestrator/graph/types").TaskDescriptor} TaskDescriptor */
 
 const SCHEDULER_SPECIFIER = "@smithers-orchestrator/scheduler";
-function createRunId() {
+/**
+ * @param {import("./RuntimeAdapter.ts").RuntimeAdapter} [adapter]
+ * @returns {string}
+ */
+function createRunId(adapter) {
+    if (typeof adapter?.uuid === "function") {
+        return `run_${adapter.uuid()}`;
+    }
     return `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 /**
@@ -277,6 +284,12 @@ export class WorkflowDriver {
     inflightTaskDescriptors = new Map();
     /** @type {Array<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>} */
     settledTasks = [];
+    /** @type {import("./RuntimeAdapter.ts").RuntimeAdapter | undefined} */
+    runtimeAdapter;
+    /** @type {OutputSnapshot} Output rows persisted to runtimeAdapter.storage this run, kept in sync so each save is a full, monotonically-growing snapshot. */
+    persistedOutputs = {};
+    /** @type {import("./RuntimeAdapter.ts").StoredRunState | undefined} */
+    storedRun;
     /**
      * @param {import("./WorkflowDriverOptions.ts").WorkflowDriverOptions<Schema>} options
      */
@@ -289,21 +302,93 @@ export class WorkflowDriver {
         this.workflowPath = options.workflowPath;
         this.session = options.session;
         this.createSession = options.createSession;
-        this.executeTask = options.executeTask ?? defaultTaskExecutor;
+        this.runtimeAdapter = options.runtimeAdapter;
+        this.executeTask = options.executeTask ?? this.runtimeAdapter?.executeTask ?? defaultTaskExecutor;
         this.onSchedulerWait = options.onSchedulerWait;
         this.onWait = options.onWait;
         this.continueAsNewHandler = options.continueAsNew;
         this.renderer = options.renderer;
     }
     /**
+     * Persist a partial run-state patch through `runtimeAdapter.storage`, if
+     * configured. A no-op when no runtimeAdapter (or no storage) was supplied,
+     * so existing callers that never wired a RuntimeAdapter see no behavior
+     * change.
+     * @param {Partial<import("./RuntimeAdapter.ts").StoredRunState>} patch
+     * @returns {Promise<void>}
+     */
+    async persistRunState(patch) {
+        if (!this.runtimeAdapter?.storage)
+            return;
+        this.storedRun = /** @type {import("./RuntimeAdapter.ts").StoredRunState} */ ({
+            ...this.storedRun,
+            runId: this.activeRunId,
+            ...patch,
+        });
+        await this.runtimeAdapter.storage.saveRun(this.activeRunId, this.storedRun);
+    }
+    /**
+     * Persist a single completed task's output row through
+     * `runtimeAdapter.storage`, merging it into the full per-run output
+     * snapshot so `storage.loadOutputs(runId)` always reflects every
+     * completed task's output table — not just the terminal result.
+     * @param {TaskDescriptor} task
+     * @param {unknown} output
+     * @returns {Promise<void>}
+     */
+    async persistTaskOutput(task, output) {
+        if (!this.runtimeAdapter?.storage)
+            return;
+        const tableName = this.outputTablesByNodeId.get(task.nodeId);
+        if (!tableName)
+            return;
+        const row = output && typeof output === "object" && !Array.isArray(output)
+            ? { ...output, nodeId: task.nodeId, iteration: task.iteration }
+            : { nodeId: task.nodeId, iteration: task.iteration, payload: output };
+        this.persistedOutputs = mergeOutputSnapshots(this.persistedOutputs, { [tableName]: [row] });
+        await this.runtimeAdapter.storage.saveOutputs(this.activeRunId, this.persistedOutputs);
+    }
+    /**
    * @param {RunOptions} options
    * @returns {Promise<RunResult>}
    */
     async run(options) {
-        const runId = options.runId ?? this.configuredRunId ?? createRunId();
+        const runId = options.runId ?? this.configuredRunId ?? createRunId(this.runtimeAdapter);
         this.activeRunId = runId;
         this.activeOptions = options;
         this.baseOutputs = normalizeOutputSnapshot(options.initialOutputs ?? options.outputs);
+        if (this.runtimeAdapter?.storage) {
+            // Resume support: seed already-persisted per-task outputs (and the
+            // last stored run record) so a resumed run's render sees every prior
+            // task's output row, not just whatever the caller passed in.
+            const [storedRun, storedOutputs] = await Promise.all([
+                this.runtimeAdapter.storage.loadRun(runId),
+                this.runtimeAdapter.storage.loadOutputs(runId),
+            ]);
+            this.storedRun = storedRun;
+            if (storedOutputs) {
+                this.persistedOutputs = storedOutputs;
+                this.baseOutputs = mergeOutputSnapshots(this.baseOutputs, storedOutputs);
+            }
+            await this.persistRunState({ status: "running", input: options.input });
+        }
+        const result = await this.runUntilTerminal(runId, options);
+        await this.persistRunState({
+            status: result.status,
+            ...("error" in result && result.error !== undefined ? { error: result.error } : {}),
+            ...("output" in result && result.output !== undefined ? { output: result.output } : {}),
+        });
+        return result;
+    }
+    /**
+   * The body of `run()` up to (but not including) durable run-state
+   * persistence — split out so every exit path (including the early
+   * signal-abort return) is persisted uniformly by `run()`.
+   * @param {string} runId
+   * @param {RunOptions} options
+   * @returns {Promise<RunResult>}
+   */
+    async runUntilTerminal(runId, options) {
         this.session = this.session ?? (await this.initializeSession(runId, options));
         if (options.signal?.aborted) {
             return this.cancelRun();
@@ -420,6 +505,11 @@ export class WorkflowDriver {
         const iterations = recordFromIterations(context.iterations ?? context.ralphIterations);
         const baseRootDir = this.activeOptions?.rootDir ?? this.rootDir;
         const workflowPath = this.activeOptions?.workflowPath ?? this.workflowPath ?? null;
+        // Sourced from the runtimeAdapter (Node: wraps the real, unmodified
+        // resolveWorktreePath; browser: fails closed with a typed
+        // RuntimeCapabilityError) rather than imported here directly, so this
+        // portable driver never statically pulls in a Node-only path resolver.
+        const resolveWorktreePathFn = this.runtimeAdapter?.worktree?.resolve;
         const ctx = new SmithersCtx({
             runId: context.runId,
             iteration,
@@ -435,6 +525,9 @@ export class WorkflowDriver {
                 baseRootDir,
                 workflowPath,
                 worktreePaths: this.worktreePathsById,
+                ...(resolveWorktreePathFn
+                    ? { resolveWorktreePath: resolveWorktreePathFn, runtimeName: this.runtimeAdapter?.name }
+                    : {}),
             },
         });
         let graph;
@@ -445,6 +538,7 @@ export class WorkflowDriver {
                 baseRootDir,
                 workflowPath,
                 trigger: context.trigger,
+                ...(resolveWorktreePathFn ? { resolveWorktreePath: resolveWorktreePathFn } : {}),
             });
         }
         catch (renderError) {
@@ -588,6 +682,13 @@ export class WorkflowDriver {
         }
         if (settled.kind === "cancelled") {
             return this.cancelRun();
+        }
+        if (settled.kind === "completed") {
+            // Persist this task's output row as it lands — not just a
+            // save-at-the-end wrapper — so `storage.loadOutputs(runId)`
+            // reflects every completed task, including ones a downstream task
+            // in the same run already consumed via ctx.outputs/SmithersCtx.
+            await this.persistTaskOutput(settled.task, settled.output);
         }
         const report = settled.kind === "completed"
             ? await this.runEffect(this.session.taskCompleted({

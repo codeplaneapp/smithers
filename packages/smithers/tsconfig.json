@@ -25,7 +25,8 @@
     "noUnusedParameters": false,
     "allowJs": true,
     "allowImportingTsExtensions": true,
-    "rootDir": "src"
+    "rootDir": "src",
+    "ignoreDeprecations": "6.0"
   },
   "include": [
     "src/**/*"

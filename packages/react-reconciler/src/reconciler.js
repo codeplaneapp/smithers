@@ -1,6 +1,6 @@
 import Reconciler from "react-reconciler";
 import { installRDTHook } from "bippy";
-import { resolveExtractGraph } from "./core-peer.js";
+import { resolveDefaultWorktreePathResolver, resolveExtractGraph } from "./core-peer.js";
 /** @typedef {import("@smithers-orchestrator/graph/types").ExtractGraph} ExtractGraph */
 /** @typedef {import("@smithers-orchestrator/graph/types").ExtractOptions} ExtractOptions */
 /** @typedef {import("./HostContainer.ts").HostContainer} HostContainer */
@@ -514,7 +514,8 @@ export class SmithersRenderer {
             throw error;
         }
         const extractGraph = this.extractGraph ?? (await resolveExtractGraph());
-        return extractGraph(this.container.root, opts);
+        const resolveWorktreePath = opts?.resolveWorktreePath ?? (await resolveDefaultWorktreePathResolver());
+        return extractGraph(this.container.root, resolveWorktreePath ? { ...opts, resolveWorktreePath } : opts);
     }
     /**
    * @returns {HostNode | null}

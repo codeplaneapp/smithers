@@ -327,14 +327,20 @@ describe("SmithersCtx output access", () => {
     expect(ctx.input).toEqual({ ok: true });
   });
 
-  test("resolves Worktree path props against the runtime root", () => {
+  test("resolves Worktree path props against the runtime root via the injected resolver", () => {
     const ctx = makeCtx({
       runtimeConfig: {
         baseRootDir: "/repo/.smithers/workflows",
+        resolveWorktreePath: (path, opts) => resolve(opts?.baseRootDir ?? "", path),
       },
     });
 
     expect(ctx.resolveWorktreePath(".smithers/wt/t1")).toBe(resolve("/repo/.smithers/workflows", ".smithers/wt/t1"));
+  });
+
+  test("resolveWorktreePath throws a typed RuntimeCapabilityError when no resolver is configured", () => {
+    const ctx = makeCtx();
+    expect(() => ctx.resolveWorktreePath(".smithers/wt/t1")).toThrow(/RUNTIME_CAPABILITY_UNAVAILABLE|worktree/);
   });
 
   test("looks up resolved Worktree paths by task or worktree id", () => {

@@ -40,6 +40,9 @@
       "smithers-orchestrator/cloudflare": [
         "./packages/smithers/src/cloudflare.js"
       ],
+      "smithers-orchestrator/browser": [
+        "./packages/smithers/src/browser.js"
+      ],
       "smithers-orchestrator/*": [
         "./packages/smithers/src/*.js",
         "./packages/smithers/src/*/index.js"

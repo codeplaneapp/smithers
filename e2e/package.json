@@ -8,6 +8,10 @@
     "test": "bun test",
     "test:faults": "node ../scripts/check-fault-skips.mjs && bun test faults",
     "test:soak": "node ../scripts/check-fault-skips.mjs && SMITHERS_E2E_SOAK=1 bun test faults",
+    "test:browser:install": "pnpm exec playwright install chromium",
+    "test:browser:types": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --moduleResolution bundler --module esnext --target es2022 --jsx react-jsx browser/consumer.ts",
+    "test:browser": "node browser/run-browser.mjs",
+    "test:browser:package": "node browser/packed-consumer.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -25,6 +29,8 @@
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "effect": "3.21.4",
+    "esbuild": "^0.28.1",
+    "playwright": "^1.61.1",
     "react": "^19.2.7",
     "smithers-orchestrator": "workspace:*",
     "ws": "^8.21.0",

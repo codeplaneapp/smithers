@@ -859,6 +859,12 @@ importers:
       effect:
         specifier: 3.21.4
         version: 3.21.4
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      playwright:
+        specifier: ^1.61.1
+        version: 1.61.1
       react:
         specifier: ^19.2.7
         version: 19.2.7

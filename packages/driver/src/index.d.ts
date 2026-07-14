@@ -1,37 +1,57 @@
+import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
-import { WorkflowGraph as WorkflowGraph$1, TaskDescriptor as TaskDescriptor$1 } from '@smithers-orchestrator/graph/types';
+import { TaskDescriptor as TaskDescriptor$1, WorkflowGraph as WorkflowGraph$1 } from '@smithers-orchestrator/graph/types';
 import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEvent';
+import { Layer } from 'effect';
 import * as _smithers_orchestrator_scheduler from '@smithers-orchestrator/scheduler';
 import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smithers-orchestrator/scheduler';
 import { z } from 'zod';
-import { Layer } from 'effect';
 import { SmithersWorkflowOptions } from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
 import { SchemaRegistryEntry } from '@smithers-orchestrator/db/SchemaRegistryEntry';
 import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
 import { ExtractOptions, WorkflowGraph } from '@smithers-orchestrator/graph';
 
-type TaskCompletedEvent = {
-    nodeId: string;
-    iteration: number;
-    output: unknown;
-};
-
-type TaskFailedEvent = {
-    nodeId: string;
-    iteration: number;
-    error: unknown;
-};
-
-type WorkflowSession$2 = {
-    submitGraph(graph: WorkflowGraph$1): unknown;
-    taskCompleted(event: TaskCompletedEvent): unknown;
-    taskFailed(event: TaskFailedEvent): unknown;
-    getNextDecision?(): unknown;
-    cancelRequested?(): unknown;
-};
-
-type WorkflowRuntime$2 = {
-    runPromise<A>(effect: unknown): Promise<A>;
+/** @typedef {"filesystem" | "subprocess" | "worktree" | "sandbox"} RuntimeCapability */
+/** @typedef {{ runtime: string; capability: RuntimeCapability | string; operation: string }} RuntimeCapabilityErrorDetails */
+/**
+ * Stable, registered `SmithersError` code every `RuntimeCapabilityError`
+ * carries. Exported so callers can match on it without importing the class
+ * itself (e.g. `error.code === RUNTIME_CAPABILITY_UNAVAILABLE`).
+ */
+declare const RUNTIME_CAPABILITY_UNAVAILABLE: "RUNTIME_CAPABILITY_UNAVAILABLE";
+/**
+ * Thrown by a {@link import("./RuntimeAdapter.ts").RuntimeAdapter} capability
+ * namespace (`filesystem`/`subprocess`/`worktree`/`sandbox`) when the current
+ * runtime does not implement the requested operation.
+ *
+ * Every capability namespace on a `RuntimeAdapter` is always present and
+ * callable — an adapter never leaves a capability `undefined`. An environment
+ * that cannot support an operation (e.g. a browser has no real filesystem)
+ * fails CLOSED by throwing this typed error instead of silently no-op'ing or
+ * reaching for a Node/Bun global that does not exist there.
+ */
+declare class RuntimeCapabilityError extends SmithersError {
+    /**
+     * @param {string} runtime Name of the active runtime (e.g. "browser", "node").
+     * @param {string} capability Capability namespace (e.g. "filesystem", "subprocess", "worktree", "sandbox").
+     * @param {string} operation Method name that was called (e.g. "readFile", "spawn", "resolve", "run").
+     * @param {{ cause?: unknown }} [opts]
+     */
+    constructor(runtime: string, capability: string, operation: string, opts?: {
+        cause?: unknown;
+    });
+    /** @type {string} */
+    runtime: string;
+    /** @type {string} */
+    capability: string;
+    /** @type {string} */
+    operation: string;
+}
+type RuntimeCapability$1 = "filesystem" | "subprocess" | "worktree" | "sandbox";
+type RuntimeCapabilityErrorDetails$1 = {
+    runtime: string;
+    capability: RuntimeCapability$1 | string;
+    operation: string;
 };
 
 type RunAuthContext$2 = {
@@ -45,6 +65,7 @@ type OutputSnapshot$2<TFallback = unknown> = {
     [tableName: string]: Array<TFallback>;
 };
 
+type EffectPlatformRuntime$1 = "bun" | "node" | "worker";
 type HotReloadOptions$1 = {
     /** Root directory to watch for changes (default: auto-detect from workflow entry) */
     rootDir?: string;
@@ -57,7 +78,6 @@ type HotReloadOptions$1 = {
     /** Debounce interval in ms for file change events (default: 100) */
     debounceMs?: number;
 };
-type EffectPlatformRuntime$1 = "bun" | "node" | "worker";
 type RunOptions$2 = {
     runId?: string;
     parentRunId?: string | null;
@@ -66,9 +86,21 @@ type RunOptions$2 = {
     requireRerenderOnOutputChange?: boolean;
     onProgress?: (e: SmithersEvent) => void;
     signal?: AbortSignal;
+    /**
+     * Separate from {@link signal}: aborting this asks the driver to stop
+     * scheduling new tasks and park the run `paused` once in-flight tasks settle,
+     * WITHOUT aborting those tasks. Used by graceful pause.
+     */
     pauseSignal?: AbortSignal;
     resume?: boolean;
     force?: boolean;
+    /**
+     * Resume this run after its workflow source changed, re-blessing the stored
+     * durability metadata (workflow hashes) in place instead of forking to a new
+     * run id. Skips ONLY the two workflow-hash mismatches; workflow-path and
+     * VCS-root mismatches still reject. Replay determinism becomes the caller's
+     * responsibility. Only meaningful together with {@link resume}.
+     */
     acceptWorkflowChange?: boolean;
     workflowPath?: string;
     rootDir?: string;
@@ -109,6 +141,128 @@ type RunOptions$2 = {
         restoreRuntimeOwnerId?: string | null;
         restoreHeartbeatAtMs?: number | null;
     };
+};
+
+type TaskExecutorContext = {
+    runId: string;
+    options: RunOptions$2;
+    signal?: AbortSignal;
+};
+
+type TaskExecutor$1 = (task: TaskDescriptor$1, context: TaskExecutorContext) => Promise<unknown> | unknown;
+
+/**
+ * Wall-clock and monotonic timing, abstracted so the portable driver never
+ * touches `Date`/`performance`/`setTimeout` directly — a runtime supplies the
+ * concrete primitives (real globals in Node and in a browser; fakes in tests).
+ */
+type RuntimeClock$1 = {
+    /** Wall-clock time in epoch milliseconds (`Date.now()` in Node/browser). */
+    now(): number;
+    /** Monotonic time in milliseconds (`performance.now()` in Node/browser). */
+    monotonicNow(): number;
+    /** Abortable delay; rejects with an `AbortError`-named error if `signal` fires first. */
+    sleep(ms: number, signal?: AbortSignal): Promise<void>;
+};
+/** Minimal durable run record a `RuntimeStorage` persists across the run lifecycle. */
+type StoredRunState$1 = {
+    runId: string;
+    status: string;
+    input?: unknown;
+    output?: unknown;
+    error?: unknown;
+    [key: string]: unknown;
+};
+/**
+ * Persistence seam for the portable driver. A Node engine typically has its
+ * own durable database and can treat this as a no-op; a browser (or any host
+ * without a bespoke DB) backs it with real storage (e.g. an in-memory `Map`,
+ * `IndexedDB`, etc.) so a run's per-task outputs and terminal state survive
+ * across the whole lifecycle, not just a save-at-the-end wrapper.
+ */
+type RuntimeStorage$1 = {
+    loadRun(runId: string): Promise<StoredRunState$1 | undefined>;
+    saveRun(runId: string, run: StoredRunState$1): Promise<void>;
+    loadOutputs(runId: string): Promise<OutputSnapshot$2 | undefined>;
+    saveOutputs(runId: string, outputs: OutputSnapshot$2): Promise<void>;
+};
+/** Filesystem capability namespace. Every environment exposes this object; unsupported ops throw `RuntimeCapabilityError`. */
+type RuntimeFilesystem$1 = {
+    readFile(path: string): Promise<string>;
+    writeFile(path: string, contents: string): Promise<void>;
+    exists(path: string): Promise<boolean>;
+    mkdir(path: string, opts?: {
+        recursive?: boolean;
+    }): Promise<void>;
+};
+type RuntimeSubprocessResult$1 = {
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+};
+/** Subprocess capability namespace. Unsupported in any environment without real process spawning (e.g. a browser). */
+type RuntimeSubprocess$1 = {
+    spawn(command: string, args?: readonly string[], opts?: Record<string, unknown>): Promise<RuntimeSubprocessResult$1>;
+};
+/** Worktree path-resolution capability, mirroring `@smithers-orchestrator/graph`'s `resolveWorktreePath` contract. */
+type RuntimeWorktree$1 = {
+    resolve(path: string, opts?: {
+        baseRootDir?: string;
+        workflowPath?: string | null;
+    }): string;
+};
+type RuntimeSandboxResult$1 = {
+    output: unknown;
+};
+/** Sandbox-execution capability namespace. Unsupported outside a Node/container host. */
+type RuntimeSandbox$1 = {
+    run(config: Record<string, unknown>): Promise<RuntimeSandboxResult$1>;
+};
+/**
+ * The full runtime contract the portable Smithers workflow core (driver +
+ * scheduler + graph + renderer) depends on instead of reaching for
+ * environment globals directly. A concrete adapter (Node, browser, ...) must
+ * be a complete, immediately-usable implementation of this type on its own —
+ * every field always present and callable, with unsupported operations
+ * failing closed via `RuntimeCapabilityError` rather than being `undefined`.
+ */
+type RuntimeAdapter$1 = {
+    /** Identifies the runtime for diagnostics and `RuntimeCapabilityError` messages (e.g. "node", "browser"). */
+    readonly name: string;
+    readonly clock: RuntimeClock$1;
+    readonly storage: RuntimeStorage$1;
+    /** Generates a new unique identifier (`crypto.randomUUID()` in Node/browser). */
+    uuid(): string;
+    /** Executes a single task descriptor to completion (or throws/rejects on failure). */
+    executeTask: TaskExecutor$1;
+    readonly filesystem: RuntimeFilesystem$1;
+    readonly subprocess: RuntimeSubprocess$1;
+    readonly worktree: RuntimeWorktree$1;
+    readonly sandbox: RuntimeSandbox$1;
+};
+
+type TaskCompletedEvent = {
+    nodeId: string;
+    iteration: number;
+    output: unknown;
+};
+
+type TaskFailedEvent = {
+    nodeId: string;
+    iteration: number;
+    error: unknown;
+};
+
+type WorkflowSession$2 = {
+    submitGraph(graph: WorkflowGraph$1): unknown;
+    taskCompleted(event: TaskCompletedEvent): unknown;
+    taskFailed(event: TaskFailedEvent): unknown;
+    getNextDecision?(): unknown;
+    cancelRequested?(): unknown;
+};
+
+type WorkflowRuntime$2 = {
+    runPromise<A>(effect: unknown): Promise<A>;
 };
 
 type RunStatus$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "finished" | "continued" | "failed" | "cancelled";
@@ -154,14 +308,6 @@ type SchedulerWaitHandler$1 = (durationMs: number, context: {
     tasks: readonly TaskDescriptor$1[];
 }) => Promise<void> | void;
 
-type TaskExecutorContext = {
-    runId: string;
-    options: RunOptions$2;
-    signal?: AbortSignal;
-};
-
-type TaskExecutor$1 = (task: TaskDescriptor$1, context: TaskExecutorContext) => Promise<unknown> | unknown;
-
 type WaitHandler$1 = (reason: WaitReason$1, context: {
     runId: string;
     options: RunOptions$2;
@@ -200,581 +346,23 @@ type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends 
     $inferSelect: infer R;
 } ? R : Record<string, unknown>;
 
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
-/**
- * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
- * from the `table` argument it was given:
- *
- * - a string table name (a key of the workflow Schema) → the inferred row for
- *   that registered schema (`outputs.X` keyed by name);
- * - a Zod schema object (e.g. `outputs.research`) → `z.infer` of that schema;
- * - a Drizzle table (carries `$inferSelect`) → its select row;
- * - anything else (a widened `string`, `unknown`) → an untyped output row.
- *
- * This is what makes `ctx.outputMaybe(outputs.research, ...)` carry the research
- * fields instead of an untyped `Record<string, unknown>`.
- */
-type ResolveOutputRow$1<Schema, T> = T extends keyof Schema ? Schema[T] extends z.ZodTypeAny ? z.infer<Schema[T]> : Schema[T] extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown> : T extends z.ZodTypeAny ? z.infer<T> : T extends {
-    $inferSelect: infer R;
-} ? R : Record<string, unknown>;
-
 type SmithersRuntimeConfig$1 = {
     cliAgentToolsDefault?: "all" | "explicit-only";
     baseRootDir?: string;
     workflowPath?: string | null;
     worktreePaths?: Record<string, string>;
+    /** Name of the active RuntimeAdapter (e.g. "node", "browser"), used only for diagnostics. */
+    runtimeName?: string;
+    /**
+     * Resolves a `<Worktree path>` prop the same way graph extraction does.
+     * Sourced from `runtimeAdapter.worktree.resolve` by `WorkflowDriver`; when
+     * absent, `SmithersCtx.resolveWorktreePath()` throws a typed
+     * `RuntimeCapabilityError` instead of falling back to a Node-only import.
+     */
+    resolveWorktreePath?: (path: string, opts?: {
+        baseRootDir?: string;
+        workflowPath?: string | null;
+    }) => string;
 };
 
 type SmithersCtxOptions$2 = {
@@ -859,7 +447,12 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     worktreePath(id: string): string | undefined;
     /**
      * Resolve a <Worktree path> prop against the active workflow root using
-     * the same resolver graph extraction uses.
+     * the same resolver graph extraction uses. Delegates to the runtime's
+     * injected `resolveWorktreePath` resolver (sourced from
+     * `runtimeAdapter.worktree.resolve` — see `WorkflowDriver.renderAndSubmit`)
+     * so this class never statically imports a Node-only path resolver
+     * itself; that keeps `SmithersCtx` safe to bundle for non-Node runtimes.
+     * Throws a typed `RuntimeCapabilityError` if no resolver was configured.
      *
      * @param {string} path
      * @returns {string}
@@ -979,10 +572,29 @@ type WorkflowElement = {
     key: string | number | null;
 };
 
+type WorkflowViewKind$1 = "ui" | "tui";
+type WorkflowLiteralViewNode$1 = string | number | null | WorkflowLiteralViewNode$1[] | {
+    type: string;
+    props?: Record<string, unknown>;
+    children?: WorkflowLiteralViewNode$1[];
+};
+type WorkflowViewDefinition$1 = {
+    kind: WorkflowViewKind$1;
+    title?: string;
+    props?: Record<string, unknown>;
+    entry?: string;
+    path?: string;
+    source?: string;
+    exportName?: string;
+    literal?: WorkflowLiteralViewNode$1;
+};
+
 type WorkflowSmithersCtx<Schema = unknown> = SmithersCtx<Schema>;
 type WorkflowDefinition$1<Schema = unknown> = {
     readableName?: string;
     description?: string;
+    ui?: WorkflowViewDefinition$1;
+    tui?: WorkflowViewDefinition$1;
     db?: unknown;
     build: (ctx: WorkflowSmithersCtx<Schema>) => WorkflowElement;
     opts: SmithersWorkflowOptions;
@@ -1008,6 +620,16 @@ type WorkflowDriverOptions$1<Schema = unknown> = {
     onSchedulerWait?: SchedulerWaitHandler$1;
     onWait?: WaitHandler$1;
     continueAsNew?: ContinueAsNewHandler$1;
+    /**
+     * Environment seam for the portable driver: supplies clock/storage/uuid,
+     * a default `executeTask`, and OS-capability namespaces
+     * (filesystem/subprocess/worktree/sandbox) that fail closed with
+     * `RuntimeCapabilityError` when unimplemented. Optional — when absent, the
+     * driver behaves exactly as it did before `RuntimeAdapter` existed (no
+     * storage threading, no worktree resolver, `defaultTaskExecutor` as the
+     * final `executeTask` fallback).
+     */
+    runtimeAdapter?: RuntimeAdapter$1;
 };
 
 /**
@@ -1079,11 +701,45 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
         output?: unknown;
         error?: unknown;
     }>;
+    /** @type {import("./RuntimeAdapter.ts").RuntimeAdapter | undefined} */
+    runtimeAdapter: RuntimeAdapter$1 | undefined;
+    /** @type {OutputSnapshot} Output rows persisted to runtimeAdapter.storage this run, kept in sync so each save is a full, monotonically-growing snapshot. */
+    persistedOutputs: OutputSnapshot$1;
+    /** @type {import("./RuntimeAdapter.ts").StoredRunState | undefined} */
+    storedRun: StoredRunState$1 | undefined;
+    /**
+     * Persist a partial run-state patch through `runtimeAdapter.storage`, if
+     * configured. A no-op when no runtimeAdapter (or no storage) was supplied,
+     * so existing callers that never wired a RuntimeAdapter see no behavior
+     * change.
+     * @param {Partial<import("./RuntimeAdapter.ts").StoredRunState>} patch
+     * @returns {Promise<void>}
+     */
+    persistRunState(patch: Partial<StoredRunState$1>): Promise<void>;
+    /**
+     * Persist a single completed task's output row through
+     * `runtimeAdapter.storage`, merging it into the full per-run output
+     * snapshot so `storage.loadOutputs(runId)` always reflects every
+     * completed task's output table — not just the terminal result.
+     * @param {TaskDescriptor} task
+     * @param {unknown} output
+     * @returns {Promise<void>}
+     */
+    persistTaskOutput(task: TaskDescriptor, output: unknown): Promise<void>;
     /**
    * @param {RunOptions} options
    * @returns {Promise<RunResult>}
    */
     run(options: RunOptions$1): Promise<RunResult$1>;
+    /**
+   * The body of `run()` up to (but not including) durable run-state
+   * persistence — split out so every exit path (including the early
+   * signal-abort return) is persisted uniformly by `run()`.
+   * @param {string} runId
+   * @param {RunOptions} options
+   * @returns {Promise<RunResult>}
+   */
+    runUntilTerminal(runId: string, options: RunOptions$1): Promise<RunResult$1>;
     /**
    * @param {string} runId
    * @param {RunOptions} options
@@ -1170,19 +826,35 @@ type WaitReason = _smithers_orchestrator_scheduler.WaitReason;
 type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
 
 type HotReloadOptions = HotReloadOptions$1;
-type EffectPlatformRuntime = EffectPlatformRuntime$1;
 type OutputAccessor<Schema = any> = OutputAccessor$2<Schema>;
 type InferOutputEntry<T> = InferOutputEntry$1<T>;
 type OutputKey = OutputKey$2;
 type OutputSnapshot = OutputSnapshot$2;
 type RunAuthContext = RunAuthContext$2;
+type EffectPlatformRuntime = EffectPlatformRuntime$1;
 type RunOptions = RunOptions$2;
 type RunResult = RunResult$2;
 type RunStatus = RunStatus$1;
 type SmithersCtxOptions = SmithersCtxOptions$2;
 type WorkflowDefinition<Schema = unknown> = WorkflowDefinition$1<Schema>;
+type WorkflowLiteralViewNode = WorkflowLiteralViewNode$1;
+type WorkflowViewDefinition = WorkflowViewDefinition$1;
+type WorkflowViewKind = WorkflowViewKind$1;
 type WorkflowDriverOptions<Schema = unknown> = WorkflowDriverOptions$1<Schema>;
 type WorkflowRuntime = WorkflowRuntime$2;
 type WorkflowSession = WorkflowSession$2;
+type RuntimeAdapter = RuntimeAdapter$1;
+type RuntimeClock = RuntimeClock$1;
+type RuntimeStorage = RuntimeStorage$1;
+type RuntimeTaskExecutor = undefined;
+type RuntimeFilesystem = RuntimeFilesystem$1;
+type RuntimeSubprocess = RuntimeSubprocess$1;
+type RuntimeSubprocessResult = RuntimeSubprocessResult$1;
+type RuntimeWorktree = RuntimeWorktree$1;
+type RuntimeSandbox = RuntimeSandbox$1;
+type RuntimeSandboxResult = RuntimeSandboxResult$1;
+type StoredRunState = StoredRunState$1;
+type RuntimeCapability = RuntimeCapability$1;
+type RuntimeCapabilityErrorDetails = RuntimeCapabilityErrorDetails$1;
 
-export { type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type OutputAccessor, type OutputKey, type OutputSnapshot, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, SmithersCtx, type SmithersCtxOptions, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowRuntime, type WorkflowSession };
+export { type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type OutputAccessor, type OutputKey, type OutputSnapshot, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeTaskExecutor, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };

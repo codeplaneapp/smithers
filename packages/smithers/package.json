@@ -45,6 +45,11 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./browser": {
+      "types": "./src/browser.d.ts",
+      "import": "./src/browser.js",
+      "default": "./src/browser.js"
+    },
     "./tools": {
       "types": "./src/tools.d.ts",
       "import": "./src/tools.js",

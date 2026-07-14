@@ -38,7 +38,7 @@ describe("migrateSmithersStore", () => {
     expect(result.backend).toBe("pglite");
     expect(result.dbPath).toBe(dbPath);
     expect(result.runCount).toBe(1);
-    expect(result.schemaVersion).toBe("0026");
+    expect(result.schemaVersion).toBe("0027");
     expect(existsSync(result.markerPath)).toBe(true);
     expect(existsSync(dbPath)).toBe(true);
     expect(progress.some((event) => event.type === "table-copied" && event.table === "result")).toBe(true);

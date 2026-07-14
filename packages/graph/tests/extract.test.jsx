@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { extractGraph } from "../src/extract.js";
+import { resolveWorktreePath } from "../src/worktree-path.js";
 
 /**
  * @param {string} tag
@@ -613,7 +614,7 @@ describe("extractGraph", () => {
 				{ id: "wt1", path: "workspace", branch: "feature", baseBranch: "main" },
 				[hostEl("smithers:task", { id: "t1", output: "t" })],
 			);
-			const result = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root" }));
+			const result = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root", resolveWorktreePath }));
 			expect(result.tasks[0].worktreeId).toBe("wt1");
 			expect(result.tasks[0].worktreePath).toBe(resolve("/tmp/root", "workspace"));
 			expect(result.tasks[0].worktreeBranch).toBe("feature");
@@ -629,7 +630,7 @@ describe("extractGraph", () => {
 					hostEl("smithers:task", { id: "t2", output: "t" }),
 				]),
 			]);
-			expect(() => extractGraph(root)).toThrow("Duplicate Worktree id");
+			expect(() => extractGraph(root, { resolveWorktreePath })).toThrow("Duplicate Worktree id");
 		});
 
 		test("throws on empty worktree path", () => {
@@ -637,6 +638,17 @@ describe("extractGraph", () => {
 				hostEl("smithers:task", { id: "t1", output: "t" }),
 			]);
 			expect(() => extractGraph(root)).toThrow("non-empty path");
+		});
+
+		test("throws a typed RUNTIME_CAPABILITY_UNAVAILABLE error when a <Worktree> is rendered without a resolveWorktreePath resolver in opts", () => {
+			const root = hostEl(
+				"smithers:worktree",
+				{ id: "wt1", path: "workspace" },
+				[hostEl("smithers:task", { id: "t1", output: "t" })],
+			);
+			expect(() => extractGraph(root, { baseRootDir: "/tmp/root" })).toThrow(
+				/resolveWorktreePath|RUNTIME_CAPABILITY_UNAVAILABLE/,
+			);
 		});
 	});
 
@@ -668,7 +680,7 @@ describe("extractGraph", () => {
 					],
 				),
 			]);
-			const task = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root" })).tasks[0];
+			const task = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root", resolveWorktreePath })).tasks[0];
 			expect(task.nodeId).toBe("sf");
 			expect(task.outputRef).toBe(output);
 			expect(task.retries).toBe(2);

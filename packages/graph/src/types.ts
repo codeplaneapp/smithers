@@ -234,6 +234,21 @@ export type ExtractOptions = {
   readonly defaultIteration?: number;
   readonly baseRootDir?: string;
   readonly workflowPath?: string | null;
+  readonly trigger?: unknown;
+  /**
+   * Resolves a `<Worktree path>` prop. `extractGraph` never imports a
+   * concrete resolver itself (that would statically pull a Node-only path
+   * resolver into any bundle importing this module) — callers that may
+   * render a `<Worktree>` must supply one (Node: the real
+   * `resolveWorktreePath` from `./worktree-path.js`; other runtimes: their
+   * `RuntimeAdapter`'s `worktree.resolve`). Extraction throws a typed
+   * `RUNTIME_CAPABILITY_UNAVAILABLE` error if a `<Worktree>` is encountered
+   * and no resolver was provided.
+   */
+  readonly resolveWorktreePath?: (
+    path: string,
+    opts?: { baseRootDir?: string; workflowPath?: string | null },
+  ) => string;
 };
 
 export type ExtractGraph = (
