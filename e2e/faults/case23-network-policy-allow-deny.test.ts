@@ -20,12 +20,13 @@ function createDb(): { adapter: SmithersDb; db: ReturnType<typeof drizzle>; sqli
   return { adapter: new SmithersDb(db), db, sqlite };
 }
 
-function createRuntime(db: SmithersDb) {
+function createRuntime(db: SmithersDb, rootDir: string) {
   return {
     runId: "case23-parent-run",
     stepId: "case23-sandbox",
     attempt: 1,
     iteration: 0,
+    rootDir,
     signal: new AbortController().signal,
     db: db as unknown as Record<string, unknown>,
     heartbeat: () => undefined,
@@ -57,7 +58,7 @@ describe("case 23: sandbox-owned egress proxy config", () => {
 
     try {
       const output = await withHarnessProxyEnv(() =>
-        withTaskRuntime(createRuntime(adapter), () =>
+        withTaskRuntime(createRuntime(adapter, rootDir), () =>
           executeSandbox({
             sandboxId: "case23-iron-proxy",
             provider: {

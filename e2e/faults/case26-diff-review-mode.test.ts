@@ -59,6 +59,7 @@ async function runSandboxWithPatch(
       stepId: NODE_ID,
       attempt: 1,
       iteration: ITERATION,
+      rootDir,
       signal: new AbortController().signal,
       db: db as unknown as Parameters<typeof withTaskRuntime>[0]["db"],
       heartbeat: () => undefined,
