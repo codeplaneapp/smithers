@@ -15,3 +15,6 @@ _via ultracode (Opus multi-agent) review_
 **Failure scenario:** At the DIGEST_CRON minute, Telegram `getUpdates` transiently returns HTTP 429/5xx (or the fetch rejects). `telegramCall` throws, the throw bubbles out of `scheduledHandler` before line 75, and `runDailyDigest` is never called. No digest is generated or posted that day.
 
 **Why it matters:** The core daily deliverable is coupled to an optional best-effort refresh. `runDailyDigest` (service.ts:572-635) already reads previously-ingested D1 rows and is fully guarded (own try/catch; `postDigest` swallows send errors), and the 15-min ingest cron has already stored the day's messages — so the digest does not need this fresh ingest to succeed. Wrap the pre-digest ingest in try/catch (log/warn on failure) so `runDailyDigest` still runs against already-ingested data.
+
+
+> Closed by ticket-fleet: landed on main in dd4d04aff27a2292404f36dffa763471a3159bc2.
