@@ -12,6 +12,9 @@ test("pack specs parse GitHub shorthand, refs/subdirs, npm forms, and file fixtu
   expect(parsePackSpec("github:user/repo/workflows#v1")).toMatchObject({ kind: "github", subdir: "workflows", ref: "v1" });
   expect(parsePackSpec("npm:pkg@1.2.0")).toMatchObject({ kind: "npm", package: "pkg", version: "1.2.0" });
   expect(parsePackSpec("pkg@1.2.0")).toMatchObject({ kind: "npm", package: "pkg", version: "1.2.0" });
+  expect(parsePackSpec("npm:pkg")).toMatchObject({ kind: "npm", package: "pkg", version: "latest" });
+  expect(parsePackSpec("@scope/pkg")).toMatchObject({ kind: "npm", package: "@scope/pkg", version: "latest" });
+  expect(parsePackSpec("npm:@scope/pkg")).toMatchObject({ kind: "npm", package: "@scope/pkg", version: "latest" });
   expect(parsePackSpec("file:/tmp/pack")).toMatchObject({ kind: "file", path: "/tmp/pack" });
   expect(parsePackSpec("github:user/repo/subdir#main")).toMatchObject({ kind: "github", subdir: "subdir", ref: "main" });
   expect(parsePackSpec("npm:@scope/pkg@2.0.0")).toMatchObject({ kind: "npm", package: "@scope/pkg", version: "2.0.0" });

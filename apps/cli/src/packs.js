@@ -15,14 +15,14 @@ export function parsePackSpec(spec) {
   if (raw.startsWith("github:")) {
     const match = raw.slice(7).match(/^([^/]+)\/([^/#]+)(?:\/([^#]+))?(?:#(.+))?$/);
     if (!match) throw new Error(`Invalid GitHub pack spec: ${raw}`);
-    return { kind: "github", owner: match[1], repo: match[2], subdir: match[3] ?? "", ref: match[4] ?? "HEAD", name: match[2] };
+    return { kind: "github", owner: match[1], repo: match[2], subdir: match[3] ?? "", ref: match[4] ?? "HEAD", name: `${match[1]}-${match[2]}` };
   }
   if (/^[^/@]+\/[^/]+$/.test(raw)) {
     const [owner, repo] = raw.split("/");
-    return { kind: "github", owner, repo, subdir: "", ref: "HEAD", name: repo };
+    return { kind: "github", owner, repo, subdir: "", ref: "HEAD", name: `${owner}-${repo}` };
   }
   const npm = raw.startsWith("npm:") ? raw.slice(4) : raw;
-  if (!raw.startsWith("file:") && (raw.startsWith("npm:") || !raw.includes("/") || /^@[^/]+\/[^@]+@/.test(raw))) {
+  if (!raw.startsWith("file:") && (raw.startsWith("npm:") || /^[^/@][^/]*(?:@[^/]+)?$/.test(npm) || /^@[^/]+\/[^@]+(?:@[^/]+)?$/.test(npm))) {
     const at = npm.lastIndexOf("@");
     const name = at > 0 ? npm.slice(0, at) : npm;
     return { kind: "npm", package: name, version: at > 0 ? npm.slice(at + 1) : "latest", name: name.replace(/^@/, "").replaceAll("/", "-") };
@@ -75,8 +75,23 @@ export function scanPackImports(root) {
   }
 }
 
-function copyOrExtract(source, target) {
+function validateArchiveManifest(archive, fallbackName, subdir = "") {
+  const entries = execFileSync("tar", ["-tzf", archive], { encoding: "utf8" }).split("\n").filter(Boolean);
+  const suffix = subdir ? `${subdir.replace(/\/+$/, "")}/smithers.toon` : "smithers.toon";
+  const manifestEntry = entries.find((entry) => entry === suffix || entry.endsWith(`/${suffix}`));
+  if (!manifestEntry) throw new Error("Invalid smithers pack: archive does not contain smithers.toon");
+  const source = execFileSync("tar", ["-xOf", archive, manifestEntry], { encoding: "utf8" });
+  try {
+    return parseManifest(source);
+  } catch (error) {
+    if (!String(error?.message ?? error).includes("missing required name")) throw error;
+    return parseManifest(`name: ${fallbackName}\n${source}`);
+  }
+}
+
+function copyOrExtract(source, target, fallbackName, subdir = "") {
   if (existsSync(join(source, "smithers.toon"))) { cpSync(source, target, { recursive: true }); return; }
+  validateArchiveManifest(source, fallbackName, subdir);
   mkdirSync(target, { recursive: true });
   execFileSync("tar", ["-xzf", source, "-C", target]);
   const child = readdirSync(target, { withFileTypes: true }).find((entry) => entry.isDirectory());
@@ -86,7 +101,7 @@ function copyOrExtract(source, target) {
 }
 
 async function fetchPack(parsed, staging) {
-  if (parsed.kind === "file") { copyOrExtract(parsed.path, staging); return { resolved: parsed.path, integrity: "file" }; }
+  if (parsed.kind === "file") { copyOrExtract(parsed.path, staging, parsed.name, parsed.subdir); return { resolved: parsed.path, integrity: "file" }; }
   let url = parsed.kind === "github"
     ? `https://codeload.github.com/${parsed.owner}/${parsed.repo}/tar.gz/${encodeURIComponent(parsed.ref)}`
     : `https://registry.npmjs.org/${encodeURIComponent(parsed.package).replace("%2F", "/")}`;
@@ -105,7 +120,8 @@ async function fetchPack(parsed, staging) {
     bytes = Buffer.from(await response.arrayBuffer());
   } else bytes = Buffer.from(await response.arrayBuffer());
   const archive = `${staging}.tgz`; writeFileSync(archive, bytes);
-  copyOrExtract(archive, staging); rmSync(archive, { force: true });
+  validateArchiveManifest(archive, parsed.name, parsed.subdir);
+  copyOrExtract(archive, staging, parsed.name, parsed.subdir); rmSync(archive, { force: true });
   return { resolved: parsed.ref ?? parsed.version, integrity: `sha256-${createHash("sha256").update(bytes).digest("hex")}` };
 }
 
@@ -121,6 +137,7 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
       const source = readFileSync(join(sourceRoot, "smithers.toon"), "utf8");
       manifest = parseManifest(`name: ${parsed.name}\n${source}`);
     }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(manifest.name)) throw new Error(`Invalid smithers pack name: ${manifest.name}`);
     scanPackImports(sourceRoot);
     const workflowTrust = [];
     const workflowDir = join(sourceRoot, "workflows");
@@ -135,7 +152,7 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
             const parseList = (key) => {
               const value = frontmatter[key] ?? source.match(new RegExp(`^//\\s*smithers-${key}:\\s*(.+)$`, "m"))?.[1];
               if (Array.isArray(value)) return value;
-              return typeof value === "string" ? value.replace(/^\\[(.*)\\]$/, "$1").split(",").map((item) => item.trim()).filter(Boolean) : [];
+              return typeof value === "string" ? value.replace(/^\[(.*)\]$/, "$1").split(",").map((item) => item.trim()).filter(Boolean) : [];
             };
             const requiredOs = parseList("required-os");
             const requiredBins = parseList("required-bins");

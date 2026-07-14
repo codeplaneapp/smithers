@@ -2315,7 +2315,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 - Boolean flags accept either bare form (`--watch`) or explicit `--watch true|false`.
 - Global options: `--format toon|json|yaml|md|jsonl`, `--filter-output <key.path>`, `--full-output`, `--token-count`, `--token-limit N`, `--token-offset N`, `--schema`, `--llms`, `--llms-full`, `--mcp`, `--help`, `--version`.
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface. Add `--allowed-tools name,name` and/or `--read-only` to scope the semantic toolset exposed to outbound MCP clients.
-- Workflow resolution: `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `up`, `graph`, `eval`, and `optimize` accept either a workflow path or a discovered workflow ID (an existing file is used as-is; otherwise the argument is resolved as an ID, the same way `workflow run` does). `workflow run <name>` resolves IDs from the nearest local `.smithers/workflows/<name>.tsx` (walking up from the working directory) and from the global `~/.smithers/workflows/` pack. Local workflows take precedence: on an id collision the local file wins. The global pack honors `SMITHERS_HOME`. So global workflows run from any directory, while a repo's own pack can override them by name.
+- Workflow resolution: `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `up`, `graph`, `eval`, and `optimize` accept either a workflow path or a discovered workflow ID (an existing file is used as-is; otherwise the argument is resolved as an ID, the same way `workflow run` does). `workflow run <name>` resolves IDs from the nearest local `.smithers/workflows/<name>.tsx`, local `.smithers/packs/*/workflows/`, global `~/.smithers/workflows/`, and global `~/.smithers/packs/*/workflows/`. Local workflows take precedence: on an id collision the local file wins. Run `workflow run <pack>:<id>` to select a pack explicitly. The global pack honors `SMITHERS_HOME`. So global workflows run from any directory, while a repo's own pack can override them by name.
 - Rewrites: `bunx smithers-orchestrator workflow WORKFLOW_ID` runs a discovered workflow when `<id>` resolves; `bunx smithers-orchestrator workflow.tsx` behaves like `bunx smithers-orchestrator up workflow.tsx`; `bunx smithers-orchestrator chat create` behaves like `bunx smithers-orchestrator chat-create`.
 - JSON arguments are preflighted before workflow modules load. `--input` and `--annotations` accept an inline JSON value or `-` to read JSON from stdin, capped at 1 MiB.
 
@@ -2411,7 +2411,14 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[94]:
+commands[97]:
+  - name: add
+    purpose: Install a workflow pack from GitHub, npm, or a local file
+    args[1]{name,type,required,desc}:
+      spec,string,true,GitHub npm or file pack spec
+    flags[2]{name,short,type,default,desc}:
+      global,,boolean,false,Install in ~/.smithers/packs instead of the local project
+      yes,,boolean,false,Skip trust confirmation
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2907,6 +2914,14 @@ commands[94]:
       iteration,,number,,Loop iteration; latest if omitted
       json,j,boolean,true,Emit raw row as JSON
       pretty,,boolean,false,Schema-ordered render
+  - name: packs
+    purpose: List installed workflow packs.
+  - name: remove
+    purpose: Remove an installed workflow pack.
+    args[1]{name,type,required,desc}:
+      name,string,true,Installed pack name
+    flags[1]{name,short,type,default,desc}:
+      global,,boolean,false,Remove from ~/.smithers/packs
   - name: rewind
     purpose: Rewind a run to a previous frame
     args[2]{name,type,required,desc}:

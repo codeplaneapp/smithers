@@ -78,7 +78,6 @@ export function resolvePackDirs(from = process.cwd(), env = process.env) {
     /** @type {{ scope: "local" | "global"; packDir: string }[]} */
     const dirs = [];
     const local = findLocalPackDir(from);
-    if (local) dirs.push({ scope: "local", dir: workflowsDirForPack(local), packDir: local });
     if (local && resolve(local) !== globalAbs) {
         dirs.push({ scope: "local", packDir: local });
     }
