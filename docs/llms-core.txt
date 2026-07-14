@@ -2411,7 +2411,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[97]:
+commands[100]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -2915,13 +2915,23 @@ commands[97]:
       json,j,boolean,true,Emit raw row as JSON
       pretty,,boolean,false,Schema-ordered render
   - name: packs
-    purpose: List installed workflow packs.
+    purpose: List and update installed workflow packs.
+  - name: packs.list
+    purpose: List local and global workflow packs.
+  - name: packs.update
+    purpose: Re-resolve installed packs from their locked specs (all packs when no name is given).
+    args[1]{name,type,required,desc}:
+      name,string,false,Pack name to update (default: every locked pack)
   - name: remove
     purpose: Remove an installed workflow pack.
     args[1]{name,type,required,desc}:
       name,string,true,Installed pack name
     flags[1]{name,short,type,default,desc}:
       global,,boolean,false,Remove from ~/.smithers/packs
+  - name: eject
+    purpose: Copy a pack workflow and its UI, prompts, and libraries into the local .smithers pack.
+    args[1]{name,type,required,desc}:
+      spec,string,true,Pack workflow in the form <pack>:<workflow>
   - name: rewind
     purpose: Rewind a run to a previous frame
     args[2]{name,type,required,desc}:
@@ -2994,7 +3004,7 @@ commands[97]:
       latest,,boolean,false,Fetch the latest docs from smithers.sh instead of docs for this CLI version
       docs-version,,string,,Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0
   - name: update
-    purpose: Check for a newer Smithers release and upgrade the install (or print how)
+    purpose: Check for a newer Smithers release and upgrade the install (or print how). Workflow packs update via `packs update`.
     flags[2]{name,short,type,default,desc}:
       check,,boolean,false,Only report current vs latest version; never upgrade
       dry-run,,boolean,false,Print the upgrade command without running it
@@ -3414,6 +3424,7 @@ type TaskProps = {
   async?: boolean; // with needsApproval: let unrelated flow continue
   timeoutMs?: number;
   retries?: number; // default Infinity with exponential backoff
+  maxSchemaRetries?: number; // output-format/schema corrections; default 3, 0 disables
   noRetry?: boolean;
   retryPolicy?: { backoff?: "fixed" | "linear" | "exponential"; initialDelayMs?: number };
   continueOnFail?: boolean;
@@ -3626,7 +3637,11 @@ const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reas
 
 - Three modes by `children` shape: agent (with `agent`), compute (function, no agent), static (value, no agent).
 - `fork` requires an agent task; the source must be an agent task with a session snapshot. Forking copies the conversation into a new session and never reuses a native session id.
-- When `outputSchema` is set, JSON is extracted from agent text; schema-validation retries don't consume `retries`.
+- When `outputSchema` is set, JSON is extracted from agent text. `maxSchemaRetries`
+  bounds all extra agent calls used to correct malformed JSON or schema-invalid
+  output; it defaults to `3` and is separate from execution `retries`. Set it to
+  `0` when another protocol owns repair or when a second call could repeat tools
+  or side effects.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.
 
 ---
@@ -6259,6 +6274,10 @@ phase is reactive: it re-derives its slice of the delegation tree from the
 rows land, and user edits or probe findings replan the affected subtree
 without restarting anything.
 
+For recursive model-selected topology, see the experimental
+[`<Trellis>`](/components/trellis). `DelegationChain` remains the fixed,
+phase-oriented v1 contract.
+
 ```ts
 // Props
 import { DelegationChain } from "smithers-orchestrator";
@@ -7339,6 +7358,7 @@ type RunOptions = {
   parentRunId?: string | null;
   input: Record<string, unknown>;
   maxConcurrency?: number;          // default 4
+  maxConcurrencyPinned?: boolean;   // internal proof that maxConcurrency was explicitly persisted
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
   signal?: AbortSignal;
