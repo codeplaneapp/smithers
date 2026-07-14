@@ -33,6 +33,7 @@ The Monitor is no longer a read-only dashboard. It opens automatically when a ru
 
 ## Engine and scheduler
 
+- **Owned worktree lifecycle:** `smithers worktree list|prune` exposes the worktrees attached to runs and safely reclaims them. Completed-run worktrees are now reaped automatically by default; dirty worktrees and branches with unpushed commits are always preserved.
 - **Demand-driven `maxConcurrency` auto-raise:** the scheduler raises the ceiling when runnable tasks would otherwise starve, and warns once when tasks sit on the cap.
 - **Numeric node `priority`** orders concurrency-limited scheduling.
 - **`failurePolicy="quarantine"`** on containers isolates a failing child instead of failing the run.
@@ -63,18 +64,51 @@ The Monitor is no longer a read-only dashboard. It opens automatically when a ru
 - **Cross-provider agent failover** chains route around a failed provider preflight run-wide.
 - **Vercel joins the sandbox providers** as a first-class package, with a shared provider-kit extracted for all sandbox adapters.
 
+## Deterministic testing and coverage
+
+- **Deterministic scenario kernel in `@smithers-orchestrator/testing`:** seeded ready-set scheduling, replay bundles, strict control rendezvous, and real-database/real-process adapters make concurrency failures reproducible without replacing the systems under test. The kernel owns ready-set races and fails runs that leave scenario controls unused.
+- **Multi-segment LCOV coverage:** package test scripts such as `bun test && bun test` run as separate coverage segments whose LCOV output is merged into one report.
+
 ## Security hardening
 
 - **Cross-origin credential defense across every integration:** redirects can no longer leak API keys or auth headers in the generic HTTP tool, OpenAPI tools, Exa and API-key search providers, ElevenLabs TTS, or the Anthropic review proxy.
 - **Abort-signal propagation end to end:** AI SDK abort signals now flow through HTTP tools, OpenAPI tools, MCP tool calls, document parsing (LlamaParse, Firecrawl, Mistral OCR), transcription, and the Telegram, Linear, and GitHub integrations, so cancelled tasks stop their network work immediately.
 - **Gateway websocket hardening:** a server-side authentication deadline, isolated unauthenticated connection capacity, capped run-event subscriptions, and one shared heartbeat scheduler per socket.
 - **Bounded response bodies** on HTTP, OpenAPI, and transcription tools.
+- **Credential-safe diagnostics:** observability recursively redacts structured credential fields, and Telegram network errors remove bot tokens before they reach durable error output.
+- **Trusted network destinations:** GitHub integrations reject foreign API URLs, while agents reject malformed or unsafe HTTP-tool base URLs.
+- **Authoritative request policy:** Electric proxy template-only shapes cannot override `whereTemplate`, and OpenAPI protected headers merge case-insensitively so alternate casing cannot replace credentials or policy headers.
+- **Hardened real-adapter admission:** the testing package binds database cut points to `SmithersDb` compare-and-set methods and challenges real-process adapters with adapter-owned nonces.
 
 ## Reliability
 
 - Hundreds of fixes across the engine, time travel, the DB layer, and the CLI, including: replay re-blesses workflow hashes so an edited replay resumes, `bunx smithers-orchestrator cancel` no longer cascade-cancels time-travel forks, PGlite upgraded to 0.5.4 with eager WASM memory reclamation, camelCase output keys resolve to snake_case physical tables in deletes, and stale schema-prototype triggers are dropped by migration.
+- **Gateway:** validates SSE cursors before streaming, accepts approval notes promised by its schema, preserves document-kind literals, and matches custom approval scopes literally.
+- **Gateway client:** bounds unread websocket events, pages local event tails, keeps approvals on the RPC path, represents paused runs as waiting, and preserves deny-shaped approval updates.
+- **Gateway React:** scopes collection invalidation, surfaces load failures, stabilizes run-event filtering, and gives cascade reaffirmations deterministic priority.
+- **Time travel:** serializes rewinds behind durable leases and correctly truncates frames and snapshots when every retained frame postdates the target attempt.
+- **Migration:** rolls back incomplete target copies instead of leaving partial destinations.
+- **React reconciler:** makes DevTools teardown order-safe, preserves the last good tree when a render returns null, and fixes fiber identity and package attribution sent to DevTools.
+- **Protocol and errors:** DevTools snapshots expose run state; durable error serialization retains top-level array values plus `Error.cause` and custom properties.
+- **Memory:** note effects run only after a successful insert, message re-saves preserve original ordering timestamps, backend guards protect thread deletion, and summarizer failures retain structured Smithers errors.
+- **Driver:** deadline waits respond to cancellation, only exact abort errors become cancellations, and idle-timeout errors report the effective timeout.
+- **Server:** isolates run registries, validates event cursors before opening SSE, bounds Electric write payloads, and de-duplicates crons shared across workflows.
+- **AWS:** aborts pending sandbox requests, avoids redundant build stops after natural completion, and retains failed S3 cleanup keys for retry.
+- **Engine:** rate limits fail over before parking, subtree concurrency participates in automatic slot-cap raises, compute timers are cleared, and JSON-repair retries retain task limits and context.
+- **Database:** external runs acquire runtime ownership and the scorer-context migration now applies on Postgres and PGlite.
+- **CLI:** supervision resumes only runs whose owner process is verifiably dead, and gateway health probes have an independent deadline.
+- **Review:** corrects Anthropic token prices, keeps overview chart segments on-track, returns a clean 503 when R2 is unavailable, and gives quiz generation the walkthrough story it tests.
+- **Scorers:** replay sampling is stable, empty delegation event payloads fall back to context, and event-bus failures no longer abort scoring.
+- **DevTools:** rejects null task updates rather than corrupting the current snapshot.
+- **Usage:** caches reports per account, reports Codex weekly quota when its five-hour window is absent, and surfaces failed Anthropic probes.
+- **Components and graph:** empty Git commit ranges no longer produce empty review gates, and legacy DOM-extracted subflows and sandboxes retain their node kinds.
+- **TUI:** the returned-session dialog no longer clips its dismiss action.
+- **Vercel, Cloudflare, and Daytona:** command deadlines use the provider SDK's real timeout field, malformed Cloudflare results produce guarded errors, and Daytona enforces per-tool client-side timeouts.
+- **Agent Eliza:** malformed frontmatter tags and aliases are validated before workflow formatting.
+- **Smithers:** hot schema validators refresh correctly, and grep tools safely accept dash-prefixed patterns.
 
 ## Behavior changes
 
+- **Completed-run worktrees are reaped by default.** Set `RunOptions.keepWorktrees` or `SMITHERS_KEEP_WORKTREES=1` to opt out. Worktrees with uncommitted changes or unpushed commits are always kept, regardless of this setting.
 - **`up --dry-run`** prints the graph via `bunx smithers-orchestrator graph` instead of partially booting a run.
 - **The init pack is curated:** fresh installs get the focused authoring workflows plus hidden system workflows (`eval-suite-run`, `init`, `post-failure`, `upgrade`); the old starter workflows live on as `examples/`.
