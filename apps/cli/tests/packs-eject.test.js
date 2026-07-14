@@ -61,8 +61,12 @@ function writeCliPack(root, marker = "pack") {
   writeFileSync(join(root, "workflows", "demo.tsx"), [
     'import marker from "../lib/marker";',
     'import { createSmithers } from "smithers-orchestrator";',
-    'const { Workflow, Task, smithers } = createSmithers({});',
-    'export default smithers(() => <Workflow name="demo"><Task id="done">{() => ({ marker })}</Task></Workflow>);',
+    'import { z } from "zod/v4";',
+    "const { Workflow, Task, smithers, outputs } = createSmithers({",
+    "    input: z.object({}),",
+    "    result: z.object({ marker: z.string() }),",
+    "});",
+    'export default smithers(() => <Workflow name="demo"><Task id="done" output={outputs.result}>{async () => ({ marker })}</Task></Workflow>);',
   ].join("\n"));
 }
 
@@ -188,6 +192,57 @@ describe("pack eject", () => {
     }
   });
 
+  test("convention-based ui/<workflow>.tsx is ejected even without a <UI entry>", async () => {
+    const workspace = tempWorkspace();
+    const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
+    writeCliPack(source);
+    try {
+      await addPack(`file:${source}`, { from: workspace, yes: true });
+      // writeCliPack's workflow has NO <UI entry> — the Gateway resolves
+      // ui/demo.tsx purely by convention, so eject must carry it.
+      const result = ejectPack("cli-pack:demo", { from: workspace });
+      expect(result.files).toContain(join(workspace, ".smithers", "ui", "demo.tsx"));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(source, { recursive: true, force: true });
+    }
+  });
+
+  test("binary and xml-declared assets are copied as leaves, never parsed", async () => {
+    const workspace = tempWorkspace();
+    const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
+    writePack(source);
+    // An SVG with an XML declaration and a binary PNG — both crash a TSX lexer.
+    writeFileSync(join(source, "ui", "demo.css"), 'body { background: url("./logo.svg"); border-image: url("./logo.png"); }\n');
+    writeFileSync(join(source, "ui", "logo.svg"), '<?xml version="1.0" encoding="UTF-8"?><svg/>\n');
+    writeFileSync(join(source, "ui", "logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]));
+    try {
+      await addPack(`file:${source}`, { from: workspace, yes: true });
+      const result = ejectPack("demo-pack:demo", { from: workspace });
+      expect(result.files).toContain(join(workspace, ".smithers", "ui", "logo.svg"));
+      expect(result.files).toContain(join(workspace, ".smithers", "ui", "logo.png"));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(source, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses when the same workflow id exists locally in the alternate layout", async () => {
+    const workspace = tempWorkspace();
+    const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
+    writePack(source);
+    try {
+      await addPack(`file:${source}`, { from: workspace, yes: true });
+      // Pack ships flat workflows/demo.tsx; local has dir-form demo/workflow.tsx.
+      mkdirSync(join(workspace, ".smithers", "workflows", "demo"), { recursive: true });
+      writeFileSync(join(workspace, ".smithers", "workflows", "demo", "workflow.tsx"), "export default null;\n");
+      expect(() => ejectPack("demo-pack:demo", { from: workspace })).toThrow(/already exists/);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(source, { recursive: true, force: true });
+    }
+  });
+
   test("real CLI list, eject, and workflow run use the ejected shadow", { timeout: 180_000 }, async () => {
     const workspace = createTempRepo().dir;
     mkdirSync(join(workspace, ".smithers"), { recursive: true });
@@ -203,11 +258,21 @@ describe("pack eject", () => {
       expect(listBefore.stdout).toContain("pack:cli-pack");
       const eject = runSmithers(["eject", "cli-pack:demo", "--json"], { cwd: workspace, format: "json", env, timeoutMs: 60_000 });
       expect(eject.exitCode, `${eject.stdout}\n${eject.stderr}`).toBe(0);
+      // Convention UI must ride along through the CLI path too.
+      expect(readFileSync(join(workspace, ".smithers", "ui", "demo.tsx"), "utf8")).toContain("Demo");
       const listAfter = runSmithers(["workflow", "list", "--json"], { cwd: workspace, format: "json", env, timeoutMs: 60_000 });
       expect(listAfter.exitCode, `${listAfter.stdout}\n${listAfter.stderr}`).toBe(0);
       expect(listAfter.stdout).toContain('"source": "local"');
-      const run = runSmithers(["workflow", "run", "demo", "--run-id", "eject-shadow", "--detach"], { cwd: workspace, format: "json", env, timeoutMs: 120_000 });
+      // Make the ejected copy observably different from the pack's, so the
+      // completed run PROVES the local shadow executed (exit 0 alone would
+      // pass even if the pack copy ran).
+      writeFileSync(join(workspace, ".smithers", "lib", "marker.ts"), 'export default "ejected-local";\n');
+      const run = runSmithers(["workflow", "run", "demo", "--run-id", "eject-shadow"], { cwd: workspace, format: "json", env, timeoutMs: 120_000 });
       expect(run.exitCode, `${run.stdout}\n${run.stderr}`).toBe(0);
+      const output = runSmithers(["output", "eject-shadow", "done"], { cwd: workspace, format: "json", env, timeoutMs: 60_000 });
+      expect(output.exitCode, `${output.stdout}\n${output.stderr}`).toBe(0);
+      expect(output.stdout).toContain("ejected-local");
+      expect(output.stdout).not.toContain('"marker": "pack"');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
       rmSync(source, { recursive: true, force: true });

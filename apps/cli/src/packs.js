@@ -377,14 +377,40 @@ function uiEntries(source) {
   return entries.filter((entry) => typeof entry === "string");
 }
 
+// Script modules lex strictly; markdown/MDX lexes tolerantly (its imports are
+// real under the MDX plugin, but plain prose need not parse as TSX); CSS is
+// scanned for url()/@import references; anything else (images, json, svg,
+// fonts, …) is a closure LEAF: copied verbatim, never parsed.
+const LEXABLE_MODULE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+const MARKDOWN_MODULE = /\.(?:md|mdx)$/;
+const CSS_MODULE = /\.css$/;
+
+function cssReferences(source) {
+  const names = [];
+  for (const match of source.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)|@import\s+["']([^"']+)["']/g)) {
+    const name = match[1] ?? match[2];
+    if (name && !/^(?:https?:)?\/\//.test(name) && !name.startsWith("data:")) names.push(name);
+  }
+  return names;
+}
+
+function fileReferences(file, source) {
+  if (LEXABLE_MODULE.test(file)) return [...moduleImports(file, source).filter((name) => name.startsWith(".")), ...uiEntries(source)];
+  if (MARKDOWN_MODULE.test(file)) {
+    try { return moduleImports(file, source).filter((name) => name.startsWith(".")); }
+    catch { return []; }
+  }
+  if (CSS_MODULE.test(file)) return cssReferences(source).filter((name) => name.startsWith("."));
+  return [];
+}
+
 function referencedFiles(packDir, workflowFile) {
   const files = new Set([workflowFile]);
   const queue = [workflowFile];
   while (queue.length) {
     const file = queue.shift();
-    const source = readFileSync(file, "utf8");
-    const imports = moduleImports(file, source).filter((name) => name.startsWith("."));
-    for (const name of [...imports, ...uiEntries(source)]) {
+    const references = fileReferences(file, readFileSync(file, "utf8"));
+    for (const name of references) {
       const cleanName = name.split(/[?#]/, 1)[0];
       const resolved = resolveModuleFile(resolve(dirname(file), cleanName));
       if (!resolved) {
@@ -414,11 +440,26 @@ export function ejectPack(spec, { from = process.cwd() } = {}) {
   const packDir = findInstalledPack(packName, from);
   const workflow = workflowEntries(packDir).find((entry) => entry.id === workflowId);
   if (!workflow) throw new Error(`Workflow not found in pack ${packName}: ${workflowId}`);
-  const files = [...referencedFiles(packDir, workflow.file)];
+  const files = new Set(referencedFiles(packDir, workflow.file));
+  // The Gateway also resolves ui/<workflow>.tsx BY CONVENTION (no <UI entry>
+  // needed) — an ejected shadow must not silently lose that UI.
+  const conventionUi = join(packDir, "ui", `${workflowId}.tsx`);
+  if (existsSync(conventionUi) && !files.has(conventionUi)) {
+    for (const file of referencedFiles(packDir, conventionUi)) files.add(file);
+  }
   const targetRoot = localPackDir(from);
-  const copies = files.map((source) => ({ source, target: join(targetRoot, relative(packDir, source)) }));
+  const copies = [...files].map((source) => ({ source, target: join(targetRoot, relative(packDir, source)) }));
   const collision = copies.find(({ target }) => existsSync(target));
   if (collision) throw new Error(`Cannot eject ${spec}: local target already exists: ${relative(targetRoot, collision.target)}`);
+  // Both on-disk workflow forms define the same id — refuse when the OTHER
+  // form already exists locally, or discovery becomes ambiguous.
+  const flatForm = join(targetRoot, "workflows", `${workflowId}.tsx`);
+  const dirForm = join(targetRoot, "workflows", workflowId, "workflow.tsx");
+  for (const alternate of [flatForm, dirForm]) {
+    if (existsSync(alternate)) {
+      throw new Error(`Cannot eject ${spec}: a local workflow with id '${workflowId}' already exists at ${relative(targetRoot, alternate)}`);
+    }
+  }
   for (const { source, target } of copies) {
     mkdirSync(dirname(target), { recursive: true });
     cpSync(source, target);
