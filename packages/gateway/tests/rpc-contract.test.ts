@@ -260,6 +260,12 @@ describe("Gateway RPC contract", () => {
     expect(getGatewayScopeValues()).toEqual(GATEWAY_SCOPE_VALUES);
   });
 
+  test("returns undefined for inherited Object.prototype method names", () => {
+    for (const method of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      expect(canonicalGatewayRpcMethod(method)).toBeUndefined();
+    }
+  });
+
   test("publishes the exact cross-run score and detail contract", () => {
     const list = getGatewayRpcDefinition("listScoresForRuns")!;
     expect(list.transport).toBe("http+websocket");

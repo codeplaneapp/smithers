@@ -994,7 +994,9 @@ export function canonicalGatewayRpcMethod(method) {
   if (definitionByMethod.has(method)) {
     return /** @type {GatewayRpcMethod} */ (method);
   }
-  return GATEWAY_RPC_LEGACY_METHOD_ALIASES[method];
+  return Object.hasOwn(GATEWAY_RPC_LEGACY_METHOD_ALIASES, method)
+    ? GATEWAY_RPC_LEGACY_METHOD_ALIASES[method]
+    : undefined;
 }
 
 /**
