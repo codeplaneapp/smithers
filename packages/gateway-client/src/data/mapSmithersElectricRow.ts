@@ -17,6 +17,7 @@ import type { GatewayRunRow } from "../sync/GatewayRunRow.ts";
 import type { GatewayRunSummaryRow } from "../sync/GatewayRunSummaryRow.ts";
 import type { GatewayScoreRow } from "../sync/GatewayScoreRow.ts";
 import type { GatewayTicketRow } from "../sync/GatewayTicketRow.ts";
+import { toRunStatus } from "../sync/snapshotToGatewayRunNode.ts";
 import type { GatewayDocRow } from "./GatewayDocRow.ts";
 
 function valueAt(row: Record<string, unknown>, camel: string, snake: string): unknown {
@@ -97,8 +98,12 @@ export function mapSmithersElectricRow(collection: string, row: Record<string, u
       return serializeCronRow(row);
     // Unlike the cases above there is no shared gateway serializer for node
     // rows, so the Electric row is shaped here into the minimal GatewayRunNode
-    // the tree UI needs. `childIds: []` is intentional: flat Electric rows
-    // carry no tree links — links are rebuilt from parent/child keys downstream.
+    // the tree UI needs. `childIds: []` is intentional: `_smithers_nodes` rows
+    // persist no parent/child linkage, so every row is a root — the tree
+    // builder preserves the whole forest beneath a synthetic run root rather
+    // than dropping siblings. The persisted `state` vocabulary (`in-progress`,
+    // `finished`, `pending`, `waiting-*`, …) is normalized onto the UI's
+    // NodeStatus tones so the rows match the local snapshot path.
     case "nodes": {
       const runId = stringAt(row, "runId", "run_id") ?? "";
       const nodeId = stringAt(row, "nodeId", "node_id") ?? "";
@@ -112,7 +117,7 @@ export function mapSmithersElectricRow(collection: string, row: Record<string, u
         name: label,
         cardLabel: label,
         kind: outputTable,
-        status: state,
+        status: toRunStatus(state),
         iteration,
         childIds: [],
       } satisfies GatewayRunNode;

@@ -125,8 +125,12 @@ function nodeKind(node: DevToolsSnapshotNode): string {
  * neutral `queued`. `cancelled` is preserved as its OWN tone (not collapsed to
  * `failed`) so a deliberate cancel renders dim/grey rather than as a red error —
  * matching `runStatusFromFrame` and the header's cancelled status dot.
+ *
+ * Also normalizes multiplayer `_smithers_nodes` rows (`mapSmithersElectricRow`),
+ * whose persisted vocabulary (`in-progress`, `finished`, `pending`, …) must land
+ * on the same tones as this local snapshot path.
  */
-function toRunStatus(state: string | undefined): string {
+export function toRunStatus(state: string | undefined): string {
   switch (state) {
     case "running":
     case "in-progress":

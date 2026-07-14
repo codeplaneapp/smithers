@@ -159,7 +159,8 @@ describe("Electric row-shape parity", () => {
       name: "Task one",
       cardLabel: "Task one",
       kind: "result",
-      status: "completed",
+      // The persisted state is normalized onto the UI's NodeStatus tones.
+      status: "ok",
       iteration: 0,
       childIds: [],
     });

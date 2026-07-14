@@ -105,6 +105,56 @@ describe("createSmithersDataClient change stream", () => {
     client.close();
   });
 
+  test("a parked unauthorized stream reopens and resets after a successful REST call", async () => {
+    let tokenValid = false;
+    let streamRequests = 0;
+    const client = createSmithersDataClient({
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test/", token: "granted-later" },
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        if (href.includes("/v1/api/stream")) {
+          streamRequests += 1;
+          if (!tokenValid) return new Response(null, { status: 401 });
+          const body = new ReadableStream<Uint8Array>({ start() {} });
+          init?.signal?.addEventListener("abort", () => {});
+          return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }
+        if (!tokenValid) {
+          return new Response(JSON.stringify({ ok: false, error: { code: "UNAUTHORIZED", message: "Invalid token" } }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true, data: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    const events: SmithersStreamEvent[] = [];
+    const unsubscribe = client.stream.subscribe((event) => events.push(event));
+    await waitFor(() => client.stream.status().status === "unauthorized");
+    expect(streamRequests).toBe(1);
+
+    // A failing REST call must NOT unpark the stream: the token is still bad.
+    await expect(client.api.listRuns()).rejects.toThrow("Invalid token");
+    expect(streamRequests).toBe(1);
+    expect(client.stream.status().status).toBe("unauthorized");
+
+    // Once the gateway accepts the token, the next successful REST call
+    // reopens the stream and the recovery open announces a reset so
+    // subscribers resync everything missed while parked.
+    tokenValid = true;
+    await client.api.listRuns();
+    await waitFor(() => client.stream.status().status === "online");
+    expect(streamRequests).toBe(2);
+    await waitFor(() => events.some((event) => event.type === "reset"));
+
+    unsubscribe();
+    client.close();
+  });
+
   test("mutate() blocks on the returned seq until the SSE stream delivers it", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const client = createSmithersDataClient({

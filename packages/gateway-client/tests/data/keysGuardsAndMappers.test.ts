@@ -184,6 +184,32 @@ describe("mapSmithersElectricRow node mapping", () => {
     })).toMatchObject({ key: "run-c:task3:9", iteration: 9 });
   });
 
+  test("normalizes the persisted node-state vocabulary onto NodeStatus tones", () => {
+    // `_smithers_nodes.state` stores the engine lifecycle words, not the UI's
+    // NodeStatus values; `useGatewayRunTree` narrows anything unknown to
+    // `queued`, so an unmapped `finished` row would render as never-started.
+    const cases: Array<[state: string, status: string]> = [
+      ["pending", "queued"],
+      ["in-progress", "running"],
+      ["finished", "ok"],
+      ["failed", "failed"],
+      ["cancelled", "cancelled"],
+      ["waiting-approval", "waiting"],
+      ["waiting-event", "waiting"],
+      ["waiting-timer", "waiting"],
+      ["skipped", "queued"],
+    ];
+    for (const [state, status] of cases) {
+      expect(mapSmithersElectricRow("nodes", {
+        run_id: "run",
+        node_id: "task",
+        iteration: 0,
+        state,
+        output_table: "task",
+      }).status).toBe(status);
+    }
+  });
+
   test("applies the fallbacks when node fields are missing", () => {
     expect(mapSmithersElectricRow("nodes", {})).toEqual({
       key: "::0",

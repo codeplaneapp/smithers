@@ -305,6 +305,11 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       if (closed || (streamListeners.size === 0 && waiters.size === 0)) return;
       const status = streamHttpStatus(streamCause);
       if (status !== undefined && isUnauthorizedStatus(status)) {
+        // Park instead of retrying: a rejected token keeps failing, so looping
+        // just hammers the gateway. Count the drop as a reconnect attempt so
+        // the recovery reopen (a later authorized REST call) emits a reset and
+        // subscribers resync what they missed while parked.
+        reconnectAttempt += 1;
         setStatus({ status: "unauthorized" });
         return;
       }
@@ -355,6 +360,10 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         requiredScope: json?.error?.requiredScope,
       });
     }
+    // A successful envelope proves the token is accepted again; un-park a
+    // stream that gave up after an unauthorized failure (no-op while a source
+    // is live or nobody is subscribed).
+    if (state.status === "unauthorized") openStream();
     return json;
   };
 
