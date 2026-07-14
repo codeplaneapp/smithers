@@ -59,6 +59,30 @@ describe("loadWorkflowsFromDir — non-object export", () => {
   });
 });
 
+describe("workflow paths with URL-significant characters", () => {
+  test("loads files containing '#' through directory and explicit-path APIs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-url-path-"));
+    const filePath = join(dir, "workflow#query.js");
+    writeFileSync(
+      filePath,
+      `export default { workflow: {}, name: "url-safe", description: "URL-safe" };`,
+      "utf8",
+    );
+
+    const fromDir = await loadWorkflowsFromDir({ dir, source: "test" });
+    expect(fromDir.diagnostics).toHaveLength(0);
+    expect(fromDir.workflows.map((workflow) => workflow.name)).toEqual(["url-safe"]);
+
+    const explicit = await loadWorkflows({
+      cwd: dir,
+      workflowPaths: ["workflow#query.js"],
+      includeDefaults: false,
+    });
+    expect(explicit.diagnostics).toHaveLength(0);
+    expect(explicit.workflows.map((workflow) => workflow.name)).toEqual(["url-safe"]);
+  });
+});
+
 describe("loadWorkflows — explicit workflowPaths edge cases", () => {
   test("emits an import error and read-failure fallback for a non-existent workflowPath", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));

@@ -20,6 +20,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { parseWorkflowFrontmatter } from "./frontmatter.js";
 
 /** @typedef {import("./types.js").WorkflowDefinition} WorkflowDefinition */
@@ -75,7 +76,7 @@ async function readSourceForFrontmatter(filePath, execSource) {
  */
 async function importWorkflowFile(filePath) {
   try {
-    const mod = await import(filePath);
+    const mod = await import(pathToFileURL(filePath).href);
     return mod.default ?? mod;
   } catch {
     return null;
