@@ -29,11 +29,13 @@ const OUTPUT_FILE = resolve(REPO_ROOT, "apps/cli/src/seeded-workflow-pack.genera
 
 /**
  * Workflows whose canonical `.smithers/workflows/<id>.tsx` ships in `smithers
- * init`. The seven entries are the curated contract, not an à-la-carte catalog.
+ * init`. The entries are the curated contract, not an à-la-carte catalog.
  */
 const SEEDED_WORKFLOW_IDS = [
   "create-workflow",
   "create-skill",
+  // Auto-launched by the monitor's "Create UI" action (system workflow).
+  "create-ui",
   "docs-driven-development",
   // Durable `smithers init` (system workflow — hidden from default listings).
   "init",

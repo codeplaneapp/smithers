@@ -311,7 +311,7 @@ function initWorkflowPack() {
 
 test("every generated init-pack workflow starts and reaches a valid smoke state with fake agents", () => {
   expect(SEEDED_WORKFLOW_IDS).toEqual([
-    "create-skill", "create-workflow", "docs-driven-development", "eval-suite-run", "init", "post-failure", "upgrade",
+    "create-skill", "create-ui", "create-workflow", "docs-driven-development", "eval-suite-run", "init", "post-failure", "upgrade",
   ]);
 });
 
