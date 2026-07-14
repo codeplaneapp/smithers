@@ -2,7 +2,13 @@ export { gatewayBackoffDelay, type GatewayBackoffOptions } from "./gatewayBackof
 export { GatewayRpcError } from "./GatewayRpcError.ts";
 export { SmithersGatewayClient } from "./SmithersGatewayClient.ts";
 export type { GatewayStreamReconnectEvent } from "./SmithersGatewayClient.ts";
-export { SmithersGatewayConnection } from "./SmithersGatewayConnection.ts";
+export {
+  DEFAULT_MAX_QUEUED_EVENTS,
+  DEFAULT_MAX_QUEUED_EVENT_BYTES,
+  GATEWAY_EVENT_BACKPRESSURE_CODE,
+  SmithersGatewayConnection,
+} from "./SmithersGatewayConnection.ts";
+export type { SmithersGatewayConnectionOptions } from "./SmithersGatewayConnection.ts";
 export type { GatewayEventFrame } from "./GatewayEventFrame.ts";
 export type { GatewayResponseFrame } from "./GatewayResponseFrame.ts";
 export type { GatewayRpcParams, GatewayRpcPayload, GatewayRpcRequestMap, GatewayRpcResponseMap } from "./GatewayRpcTypeMap.ts";

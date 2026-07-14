@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { listGatewayRpcMethods, type GatewayRpcMethod } from "@smithers-orchestrator/gateway/rpc";
-import { GatewayRpcError, SmithersGatewayClient, SmithersGatewayConnection } from "../src/index.ts";
+import {
+  GATEWAY_EVENT_BACKPRESSURE_CODE,
+  GatewayRpcError,
+  SmithersGatewayClient,
+  SmithersGatewayConnection,
+} from "../src/index.ts";
 import type { GatewayRpcRequestMap, GatewayRpcResponseMap } from "../src/GatewayRpcTypeMap.ts";
 
 type SentRequest = {
@@ -342,6 +347,106 @@ describe("SmithersGatewayConnection WebSocket RPC", () => {
 
     await expect(next).rejects.toThrow("Gateway WebSocket error");
     connection.close();
+  });
+
+  test("delivers queued events in order below the configured limits", async () => {
+    const ws = new FakeWebSocket("ws://gateway.local");
+    const connection = new SmithersGatewayConnection(ws as unknown as WebSocket, {
+      maxQueuedEvents: 3,
+      maxQueuedEventBytes: 10_000,
+    });
+    const frames = [1, 2, 3].map((seq) => ({
+      type: "event",
+      event: "run.event",
+      seq,
+      stateVersion: 1,
+      payload: { runId: "run-1", streamId: "stream-1" },
+    }));
+
+    for (const frame of frames) {
+      ws.receive(frame);
+    }
+
+    const iterator = connection.events();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { seq: 1 } });
+    await expect(iterator.next()).resolves.toMatchObject({ value: { seq: 2 } });
+    await expect(iterator.next()).resolves.toMatchObject({ value: { seq: 3 } });
+    connection.close();
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+  });
+
+  test("closes with a typed error when the queued event count exceeds its limit", async () => {
+    const ws = new FakeWebSocket("ws://gateway.local");
+    const connection = new SmithersGatewayConnection(ws as unknown as WebSocket, {
+      maxQueuedEvents: 2,
+      maxQueuedEventBytes: 10_000,
+    });
+
+    for (let seq = 1; seq <= 3; seq += 1) {
+      ws.receive({
+        type: "event",
+        event: "run.event",
+        seq,
+        stateVersion: 1,
+        payload: { runId: "run-1", streamId: "stream-1" },
+      });
+    }
+
+    expect(connection.closed).toBe(true);
+    expect(connection.queue).toHaveLength(1);
+    expect(ws.closeCalls).toBe(1);
+    await expect(connection.events().next()).rejects.toMatchObject({
+      name: "GatewayRpcError",
+      method: "websocket",
+      code: GATEWAY_EVENT_BACKPRESSURE_CODE,
+    });
+    expect(connection.queue).toHaveLength(0);
+  });
+
+  test("closes when queued serialized event bytes exceed their limit", async () => {
+    const ws = new FakeWebSocket("ws://gateway.local");
+    const frame = {
+      type: "event",
+      event: "run.event",
+      seq: 1,
+      stateVersion: 1,
+      payload: { value: "🚀" },
+    };
+    const frameBytes = new TextEncoder().encode(JSON.stringify(frame)).byteLength;
+    const connection = new SmithersGatewayConnection(ws as unknown as WebSocket, {
+      maxQueuedEvents: 10,
+      maxQueuedEventBytes: frameBytes,
+    });
+
+    ws.receive(frame);
+    ws.receive({ ...frame, seq: 2 });
+
+    expect(connection.closed).toBe(true);
+    expect(connection.queue).toHaveLength(1);
+    await expect(connection.events().next()).rejects.toMatchObject({
+      code: GATEWAY_EVENT_BACKPRESSURE_CODE,
+      details: { maxQueuedEventBytes: frameBytes },
+    });
+    expect(ws.closeCalls).toBe(1);
+  });
+
+  test("clears queued frames after an unobserved WebSocket close", async () => {
+    const ws = new FakeWebSocket("ws://gateway.local");
+    const connection = new SmithersGatewayConnection(ws as unknown as WebSocket);
+    ws.receive({
+      type: "event",
+      event: "run.event",
+      seq: 1,
+      stateVersion: 1,
+      payload: { runId: "run-1" },
+    });
+
+    expect(connection.queue).toHaveLength(1);
+    ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(connection.closed).toBe(true);
+    expect(connection.queue).toHaveLength(0);
   });
 
   test("abort stops the event stream without draining queued frames", async () => {
