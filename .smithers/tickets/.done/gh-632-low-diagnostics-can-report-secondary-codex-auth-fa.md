@@ -22,3 +22,6 @@ Later Codex invocations worked in the same environment, so the auth diagnostic l
 
 Expected: diagnostics should distinguish the primary failure from follow-up probe failures, especially when a probe result may not explain the task failure.
 
+
+
+> Closed by ticket-fleet: landed on main in dc1628b2549663c42990990d83c8229b779d55d1.
