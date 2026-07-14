@@ -1,0 +1,44 @@
+---
+title: Workflow packs
+description: Install, update, inspect, and eject shared Smithers workflows.
+---
+
+Workflow packs install read-only workflows and their UIs under
+`.smithers/packs/<name>`. Pack workflows are visible to `workflow list` and can
+be run with either their unqualified id or an explicit `<pack>:<workflow>` id.
+
+## Eject a workflow
+
+Copy a pack workflow into the local `.smithers/` tree when you want to edit it:
+
+```bash
+bunx smithers-orchestrator eject kanban-suite:kanban
+```
+
+Smithers copies the workflow and its relative UI, prompt, library, stylesheet,
+and other imported assets. It refuses if any destination already exists. The
+local copy then shadows the pack copy automatically, so
+`workflow run kanban` uses the ejected workflow while
+`workflow run kanban-suite:kanban` still addresses the pack version.
+
+## Update packs
+
+Pack updates are separate from the Smithers installation update command:
+
+```bash
+bunx smithers-orchestrator packs update kanban-suite
+bunx smithers-orchestrator packs update
+```
+
+The first form refreshes one locked pack; the bare form refreshes every locked
+pack. Updates replace pack contents only. Ejected files live in the local
+`.smithers/workflows`, `.smithers/ui`, `.smithers/prompts`, and `.smithers/lib`
+directories and are left unchanged.
+
+Use these commands for the rest of the lifecycle:
+
+```bash
+bunx smithers-orchestrator add user/repository --yes
+bunx smithers-orchestrator packs list
+bunx smithers-orchestrator remove kanban-suite
+```

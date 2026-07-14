@@ -188,6 +188,12 @@
               "workflows/upgrade",
               "workflows/eval-suite-run"
             ]
+          },
+          {
+            "group": "Experimental",
+            "pages": [
+              "workflows/trellis"
+            ]
           }
         ]
       },
@@ -248,6 +254,7 @@
           {
             "group": "Delegation",
             "pages": [
+              "components/trellis",
               "components/delegation-chain"
             ]
           },
@@ -389,6 +396,7 @@
               "reference/gateway-client",
               "reference/gateway-react",
               "reference/gateway-ui",
+              "reference/packs",
               "reference/db",
               "reference/time-travel"
             ]
