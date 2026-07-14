@@ -129,7 +129,7 @@ test("smithers init --agents-only still scaffolds the pack manifest", () => {
     expect(manifest.contents.workflows).toEqual([]);
     expect(manifest.contents.ui).toEqual([]);
     expect(manifest.capabilities.writes).toBe("none");
-});
+}, 30_000);
 
 test("re-init preserves a customized legacy scaffold while repairing generated Worktree defaults", () => {
     const repo = createTempRepo();

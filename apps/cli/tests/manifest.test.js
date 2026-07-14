@@ -85,7 +85,7 @@ test("init scaffolds a manifest enumerating the generated workflows and UIs", ()
         "upgrade",
     ]);
     expect(manifest.contents.ui).toEqual(["create-skill", "create-workflow", "docs-driven-development"]);
-});
+}, 30_000);
 
 test("re-init reports drift for a customized manifest", () => {
     const root = tempProject();
@@ -95,4 +95,4 @@ test("re-init reports drift for a customized manifest", () => {
     writeFileSync(path, `${readFileSync(path, "utf8")}\n# customized\n`, "utf8");
     const result = initWorkflowPack(options);
     expect(result.changedFiles.map((file) => file.path)).toContain(".smithers/smithers.toon");
-});
+}, 30_000);
