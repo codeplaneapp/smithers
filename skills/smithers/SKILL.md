@@ -303,7 +303,8 @@ workflow by its **id**, resolved from `.smithers/workflows/`.
 
 For the compact static contracts that every new workflow must satisfy, read the
 [workflow authoring rules](/workflows/authoring-rules) before writing JSX. It
-covers reserved output columns, same-lane nested-loop rejection and the
+covers reserved output columns, unsupported direct/forked nested-loop rejection
+(while preserving the supported `Loop` → `Sequence` → `Loop` topology) and the
 queue-based backfill pattern, `ctx.latest`/`outputMaybe` loop bindings, the
 `renderWorkflow` production-test contract, and `.smithers/package.json` test
 registration.
