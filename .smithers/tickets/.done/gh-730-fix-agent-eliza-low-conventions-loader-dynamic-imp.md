@@ -15,3 +15,6 @@ _via ultracode (Opus multi-agent) review_
 **Why it matters:** `loadWorkflows`/`loadWorkflowsFromDir` are the public conventions API for discovering user workflow files. The Windows breakage is total and masked as a vague diagnostic rather than a clear error, and it diverges from the repo-wide `pathToFileURL` convention.
 
 **Fix:** `import(pathToFileURL(filePath).href)` in `importWorkflowFile`.
+
+
+> Closed by ticket-fleet: landed on main in 3ea966353e3b3588c3f54394d8fc10de6a8434d9.
