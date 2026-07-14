@@ -2783,8 +2783,7 @@ paths:
                               additionalProperties: true
                             -
                               type: array
-                              items:
-                                nullable: true
+                              items: {}
                             -
                               type: string
                             -
@@ -3303,8 +3302,7 @@ paths:
                           additionalProperties: true
                         -
                           type: array
-                          items:
-                            nullable: true
+                          items: {}
                         -
                           type: string
                         -
@@ -12488,8 +12486,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -12506,8 +12503,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -12524,8 +12520,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -12542,8 +12537,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -12560,8 +12554,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -19075,8 +19068,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -19093,8 +19085,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -19111,8 +19102,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -19129,8 +19119,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -
@@ -19147,8 +19136,7 @@ paths:
                             additionalProperties: true
                           -
                             type: array
-                            items:
-                              nullable: true
+                            items: {}
                           -
                             type: string
                           -

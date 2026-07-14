@@ -149,7 +149,7 @@ export const anyJsonSchema = {
   description: "Any JSON value.",
   oneOf: [
     { type: "object", additionalProperties: true },
-    { type: "array", items: { nullable: true } },
+    { type: "array", items: {} },
     { type: "string" },
     { type: "number" },
     { type: "boolean" },
