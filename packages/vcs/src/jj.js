@@ -230,19 +230,31 @@ export function workspaceAdd(name, path, opts = {}) {
         if (listRes.code === 0 && listRes.stdout.includes(`${name}:`)) {
             yield* runJj(["workspace", "forget", name], { cwd: opts.cwd });
         }
+        let backupRoot;
+        let backupPath;
         try {
-            if (fs.existsSync(path)) {
-                fs.rmSync(path, { recursive: true, force: true });
-            }
             const parentDir = nodePath.dirname(path);
             if (!fs.existsSync(parentDir)) {
                 fs.mkdirSync(parentDir, { recursive: true });
             }
+            if (fs.existsSync(path)) {
+                // Keep prior contents until jj confirms that workspace creation succeeded.
+                backupRoot = fs.mkdtempSync(nodePath.join(parentDir, `.${nodePath.basename(path)}.smithers-backup-`));
+                backupPath = nodePath.join(backupRoot, "workspace");
+                fs.renameSync(path, backupPath);
+            }
         }
         catch (error) {
-            // Best-effort cleanup: do not abort workspace creation if it fails,
-            // but log a warning so cleanup failures are diagnosable rather than silent.
-            yield* Effect.logWarning(`jj workspace pre-create cleanup failed at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+            if (backupRoot && (!backupPath || !fs.existsSync(backupPath))) {
+                try {
+                    fs.rmSync(backupRoot, { recursive: true, force: true });
+                }
+                catch { }
+            }
+            return {
+                success: false,
+                error: `jj workspace could not preserve the existing target at ${path}: ${error instanceof Error ? error.message : String(error)}`,
+            };
         }
         const errors = [];
         // Shared .git lock contention (index.lock, packed-refs.lock) is always
@@ -257,9 +269,28 @@ export function workspaceAdd(name, path, opts = {}) {
                 res = yield* runJj(args, { cwd: opts.cwd });
             }
             if (res.code === 0) {
+                if (backupRoot) {
+                    try {
+                        fs.rmSync(backupRoot, { recursive: true, force: true });
+                    }
+                    catch (error) {
+                        yield* Effect.logWarning(`jj workspace backup cleanup failed at ${backupRoot}: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                }
                 return { success: true };
             }
             errors.push(`\`jj ${args.join(" ")}\`: ${jjError(res)}`);
+        }
+        let restoreError = "";
+        if (backupPath && backupRoot) {
+            try {
+                fs.rmSync(path, { recursive: true, force: true });
+                fs.renameSync(backupPath, path);
+                fs.rmSync(backupRoot, { recursive: true, force: true });
+            }
+            catch (error) {
+                restoreError = `; failed to restore the existing target from ${backupPath}: ${error instanceof Error ? error.message : String(error)}`;
+            }
         }
         // Report every attempt: the first uses the current jj syntax, so its error
         // is the real cause; later ones are legacy-syntax fallbacks whose noise
@@ -277,8 +308,10 @@ export function workspaceAdd(name, path, opts = {}) {
                     ? `, clear macOS quarantine with \`xattr -d com.apple.quarantine ${jjBinary.path}\`,`
                     : ",") +
                 ` or point SMITHERS_JJ_PATH at a working jj)`
-            : ` (partial state may exist at ${path}; consider removing it before retrying)`;
-        return { success: false, error: joined + hint };
+            : backupPath && !restoreError
+                ? ` (previous contents at ${path} were restored)`
+                : ` (partial state may exist at ${path}; consider removing it before retrying)`;
+        return { success: false, error: joined + hint + restoreError };
     }).pipe(Effect.annotateLogs({
         cwd: opts.cwd ?? "",
         workspaceName: name,
