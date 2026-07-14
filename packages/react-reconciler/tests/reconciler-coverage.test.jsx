@@ -13,15 +13,35 @@ afterEach(() => {
 });
 
 describe("core peer resolution", () => {
+    test("stops after the package graph module resolves", async () => {
+        const packageExtractGraph = () => ({ ok: true });
+        const specifiers = [];
+        const extractGraph = await resolveExtractGraph(async (specifier) => {
+            specifiers.push(specifier);
+            if (specifier === "@smithers-orchestrator/graph")
+                return { extractGraph: packageExtractGraph };
+            throw new Error(`Unexpected import: ${specifier}`);
+        });
+
+        expect(extractGraph).toBe(packageExtractGraph);
+        expect(specifiers).toEqual(["@smithers-orchestrator/graph"]);
+    });
+
     test("falls back to the local graph module when the package import is unavailable", async () => {
         const fallback = () => ({ ok: true });
+        const specifiers = [];
         const extractGraph = await resolveExtractGraph(async (specifier) => {
+            specifiers.push(specifier);
             if (specifier === "@smithers-orchestrator/graph")
                 return null;
             return { extractGraph: fallback };
         });
 
         expect(extractGraph).toBe(fallback);
+        expect(specifiers).toEqual([
+            "@smithers-orchestrator/graph",
+            "../../graph/src/index.js",
+        ]);
     });
 
     test("throws when neither core module exports extractGraph", async () => {

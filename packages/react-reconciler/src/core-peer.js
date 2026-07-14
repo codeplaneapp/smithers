@@ -20,15 +20,13 @@ export async function importCoreModule(specifier) {
  * @returns {Promise<ExtractGraph>}
  */
 export async function resolveExtractGraph(importModule = importCoreModule) {
-    const modules = [
-        await importModule(GRAPH_SPECIFIER),
-        await importModule(LOCAL_GRAPH_SPECIFIER),
-    ];
-    for (const mod of modules) {
-        const fn = mod?.extractGraph;
-        if (typeof fn === "function") {
-            return fn;
-        }
+    const packageExtractGraph = (await importModule(GRAPH_SPECIFIER))?.extractGraph;
+    if (typeof packageExtractGraph === "function") {
+        return packageExtractGraph;
+    }
+    const localExtractGraph = (await importModule(LOCAL_GRAPH_SPECIFIER))?.extractGraph;
+    if (typeof localExtractGraph === "function") {
+        return localExtractGraph;
     }
     throw new Error("Unable to load extractGraph from @smithers-orchestrator/graph. " +
         "Install @smithers-orchestrator/graph and ensure it exports extractGraph.");
