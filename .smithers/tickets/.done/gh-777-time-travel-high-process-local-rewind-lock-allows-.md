@@ -35,3 +35,6 @@ Use a durable compare-and-set lease keyed by run ID with owner token and expiry,
 ## Dedupe notes
 
 #678 tracks startup recovery clobbering a rewind, not concurrent rewind exclusion. #679 is a different compensation gap.
+
+
+> Closed by ticket-fleet: landed on main in 2121c9b2b25c29a211106a52f60643798f773f17.
