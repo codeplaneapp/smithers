@@ -1,7 +1,7 @@
 // smithers-display-name: Implement Packs
 // smithers-description: Implement the "Share workflows like skills" packs feature end-to-end from research/packs-share-workflows-like-skills.md — five gated phases (manifest, add, eject, workflows+share, messaging), each a Luna-implement / Terra-validate / Sol-review loop, then a final Sol polish pass.
 /** @jsxImportSource smithers-orchestrator */
-import { UI, ClaudeCodeAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
+import { UI, ClaudeCodeAgent, CodexAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { implementer, validator, panelists, polishReviewer } from "../components/roles";
 import {
@@ -182,13 +182,15 @@ export default smithers((ctx) => {
               prompt={phase.prompt}
               implementAgents={implementer}
               validateAgents={validator}
-              // PACKS_REVIEW_FORCE_FABLE: recovery hatch when the codex-first
-              // failover ladder is saturated (quota) — pins review to a fresh
-              // single-agent Fable chain so a retry can't land on a dead rung.
-              reviewAgents={process.env.PACKS_REVIEW_FORCE_FABLE === "1"
-                ? [new ClaudeCodeAgent({ model: "claude-fable-5" })]
-                : [panelists[0]!]}
-              reviewWhen={gate.validated}
+              // Recovery hatches when the codex-first failover ladder is
+              // saturated (quota): pin review to a fresh single-agent chain so
+              // a retry can't land on a dead rung.
+              reviewAgents={process.env.PACKS_REVIEW_FORCE_SOL === "1"
+                ? [new CodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true })]
+                : process.env.PACKS_REVIEW_FORCE_FABLE === "1"
+                  ? [new ClaudeCodeAgent({ model: "claude-fable-5" })]
+                  : [panelists[0]!]}
+              reviewWhen={gate.validated && !gate.approved}
               feedback={gate.feedback}
               done={gate.done}
               maxIterations={3}
