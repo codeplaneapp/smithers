@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addPack, ejectPack, updatePack } from "../src/packs.js";
@@ -237,6 +237,66 @@ describe("pack eject", () => {
       mkdirSync(join(workspace, ".smithers", "workflows", "demo"), { recursive: true });
       writeFileSync(join(workspace, ".smithers", "workflows", "demo", "workflow.tsx"), "export default null;\n");
       expect(() => ejectPack("demo-pack:demo", { from: workspace })).toThrow(/already exists/);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(source, { recursive: true, force: true });
+    }
+  });
+
+  test("sass closures follow @use/@forward and unprefixed url() assets", async () => {
+    const workspace = tempWorkspace();
+    const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
+    writePack(source);
+    writeFileSync(join(source, "ui", "demo.tsx"), 'import "./demo.scss";\nexport const uiMarker = "scss";\n');
+    writeFileSync(join(source, "ui", "demo.scss"), '@use "./tokens";\n@forward "./mixins";\nbody { background: url("logo.svg"); }\n');
+    writeFileSync(join(source, "ui", "tokens.scss"), "$accent: #5e6ad2;\n");
+    writeFileSync(join(source, "ui", "mixins.scss"), "@mixin pad { padding: 1px; }\n");
+    try {
+      await addPack(`file:${source}`, { from: workspace, yes: true });
+      const files = ejectPack("demo-pack:demo", { from: workspace }).files;
+      expect(files).toContain(join(workspace, ".smithers", "ui", "tokens.scss"));
+      expect(files).toContain(join(workspace, ".smithers", "ui", "mixins.scss"));
+      expect(files).toContain(join(workspace, ".smithers", "ui", "logo.svg"));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(source, { recursive: true, force: true });
+    }
+  });
+
+  test("convention UI is not dragged in when the workflow declares an explicit UI", async () => {
+    const workspace = tempWorkspace();
+    const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
+    writePack(source);
+    // writePack's demo.tsx declares <UI entry="../ui/demo.tsx">. Point the
+    // explicit entry elsewhere and leave ui/demo.tsx as an unrelated file.
+    writeFileSync(join(source, "workflows", "demo.tsx"), [
+      'import { UI, Workflow, createSmithers } from "smithers-orchestrator";',
+      "const { smithers } = createSmithers({});",
+      'export default smithers(() => <Workflow name="demo"><UI entry="../ui/explicit.tsx" /></Workflow>);',
+    ].join("\n"));
+    writeFileSync(join(source, "ui", "explicit.tsx"), "export const explicit = true;\n");
+    try {
+      await addPack(`file:${source}`, { from: workspace, yes: true });
+      const files = ejectPack("demo-pack:demo", { from: workspace }).files;
+      expect(files).toContain(join(workspace, ".smithers", "ui", "explicit.tsx"));
+      expect(files).not.toContain(join(workspace, ".smithers", "ui", "demo.tsx"));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(source, { recursive: true, force: true });
+    }
+  });
+
+  test("a failed eject rolls back instead of stranding a partial shadow", async () => {
+    const workspace = tempWorkspace();
+    const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
+    writePack(source);
+    try {
+      await addPack(`file:${source}`, { from: workspace, yes: true });
+      // .smithers/ui exists as a FILE: the parent-path validation must refuse
+      // up front, leaving no partial workflow copy to shadow the pack.
+      writeFileSync(join(workspace, ".smithers", "ui"), "not a directory");
+      expect(() => ejectPack("demo-pack:demo", { from: workspace })).toThrow(/is not a directory/);
+      expect(existsSync(join(workspace, ".smithers", "workflows", "demo.tsx"))).toBe(false);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
       rmSync(source, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { constants as fsConstants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync, lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
@@ -383,11 +383,12 @@ function uiEntries(source) {
 // fonts, …) is a closure LEAF: copied verbatim, never parsed.
 const LEXABLE_MODULE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
 const MARKDOWN_MODULE = /\.(?:md|mdx)$/;
-const CSS_MODULE = /\.css$/;
+const CSS_MODULE = /\.(?:css|scss|sass|less)$/;
 
 function cssReferences(source) {
   const names = [];
-  for (const match of source.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)|@import\s+["']([^"']+)["']/g)) {
+  // @use/@forward are the Sass module system; @import covers CSS and Less.
+  for (const match of source.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)|@(?:import|use|forward)\s+["']([^"']+)["']/g)) {
     const name = match[1] ?? match[2];
     if (name && !/^(?:https?:)?\/\//.test(name) && !name.startsWith("data:")) names.push(name);
   }
@@ -400,7 +401,13 @@ function fileReferences(file, source) {
     try { return moduleImports(file, source).filter((name) => name.startsWith(".")); }
     catch { return []; }
   }
-  if (CSS_MODULE.test(file)) return cssReferences(source).filter((name) => name.startsWith("."));
+  if (CSS_MODULE.test(file)) {
+    // In stylesheets, url("logo.png") and @use "util" are relative to the
+    // sheet even without a leading "./".
+    return cssReferences(source)
+      .filter((name) => !isAbsolute(name))
+      .map((name) => (name.startsWith(".") ? name : `./${name}`));
+  }
   return [];
 }
 
@@ -441,10 +448,16 @@ export function ejectPack(spec, { from = process.cwd() } = {}) {
   const workflow = workflowEntries(packDir).find((entry) => entry.id === workflowId);
   if (!workflow) throw new Error(`Workflow not found in pack ${packName}: ${workflowId}`);
   const files = new Set(referencedFiles(packDir, workflow.file));
-  // The Gateway also resolves ui/<workflow>.tsx BY CONVENTION (no <UI entry>
-  // needed) — an ejected shadow must not silently lose that UI.
+  // The Gateway resolves ui/<workflow>.tsx BY CONVENTION, but only for a
+  // flat-form workflow that declares no explicit UI — the same eligibility
+  // gates the eject closure so an unrelated same-named file is never dragged
+  // in (or worse, made a spurious collision).
+  const isFlatForm = workflow.file === join(packDir, "workflows", `${workflowId}.tsx`);
   const conventionUi = join(packDir, "ui", `${workflowId}.tsx`);
-  if (existsSync(conventionUi) && !files.has(conventionUi)) {
+  if (isFlatForm
+    && uiEntries(readFileSync(workflow.file, "utf8")).length === 0
+    && existsSync(conventionUi)
+    && !files.has(conventionUi)) {
     for (const file of referencedFiles(packDir, conventionUi)) files.add(file);
   }
   const targetRoot = localPackDir(from);
@@ -460,9 +473,29 @@ export function ejectPack(spec, { from = process.cwd() } = {}) {
       throw new Error(`Cannot eject ${spec}: a local workflow with id '${workflowId}' already exists at ${relative(targetRoot, alternate)}`);
     }
   }
-  for (const { source, target } of copies) {
-    mkdirSync(dirname(target), { recursive: true });
-    cpSync(source, target);
+  // A parent that exists as a FILE (e.g. a stray .smithers/ui file) would fail
+  // mid-copy and strand a partial shadow — refuse before writing anything.
+  for (const { target } of copies) {
+    for (let dir = dirname(target); dir.length > targetRoot.length; dir = dirname(dir)) {
+      if (existsSync(dir) && !statSync(dir).isDirectory()) {
+        throw new Error(`Cannot eject ${spec}: ${relative(targetRoot, dir)} exists and is not a directory`);
+      }
+    }
+  }
+  // Exclusive writes + rollback: a target that appears after the precheck
+  // (concurrent eject) throws EEXIST instead of being overwritten, and any
+  // failure removes everything this eject already copied so no partial
+  // workflow shadow is left behind.
+  const written = [];
+  try {
+    for (const { source, target } of copies) {
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(source, target, fsConstants.COPYFILE_EXCL);
+      written.push(target);
+    }
+  } catch (error) {
+    for (const target of written.reverse()) rmSync(target, { force: true });
+    throw new Error(`Cannot eject ${spec}: ${error?.message ?? error} (rolled back ${written.length} copied file(s))`);
   }
   return { pack: packName, workflow: workflowId, files: copies.map(({ target }) => target), path: join(targetRoot, relative(packDir, workflow.file)) };
 }
