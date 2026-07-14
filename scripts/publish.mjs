@@ -16,6 +16,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertReleaseTagMatchesHead } from "./release-tag-guard.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = Object.fromEntries(
@@ -136,6 +137,9 @@ for (const packageArtifact of ["llms.txt", "llms-full.txt"]) {
 }
 
 if (!SKIP_GIT) {
+  log("git", `checking release tag v${version} matches HEAD`);
+  assertReleaseTagMatchesHead({ cwd: root, version });
+
   log("git", "checking clean working tree");
   // Ignore *.d.ts drift for the same reason the post-build guard does below:
   // rollup-plugin-dts is non-deterministic, so a prior build (e.g. a test run)
