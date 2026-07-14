@@ -46,13 +46,11 @@ describe("_traceRedaction", () => {
         expect(result.applied).toBe(false);
         expect(result.ruleIds).toEqual([]);
     });
-    test("falls back to the redacted string when the redaction breaks JSON re-parsing", () => {
-        // Redacting the authorization value consumes an unbalanced quote, so
-        // JSON.parse of the redacted text throws and the catch returns the raw string.
+    test("redacts sensitive fields before serializing structured values", () => {
         const result = redactValue({ authorization: 'sk-aaaaaaaaaaaa"' });
         expect(result.applied).toBe(true);
-        expect(typeof result.value).toBe("string");
-        expect(result.value).toContain("[REDACTED]");
+        expect(result.ruleIds).toContain("sensitive-field");
+        expect(result.value).toEqual({ authorization: "[REDACTED]" });
     });
 });
 

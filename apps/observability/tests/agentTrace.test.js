@@ -251,6 +251,48 @@ describe("redactValue", () => {
         expect(r.applied).toBe(true);
         expect(JSON.stringify(r.value)).not.toContain("sk_demo_supersecret");
     });
+    test("redacts nested structured credentials by canonicalized key", () => {
+        const credentials = {
+            headers: {
+                "x-api-key": "opaque-provider-key",
+                Authorization: "Basic dXNlcjpwYXNz",
+                cookie: "session=plaintext",
+            },
+            providers: [
+                { github_token: "ghp_NOTAREAL0123456789", repository: "smithers" },
+                { TELEGRAM_BOT_TOKEN: "123456789:NOTAREALBOTTOKEN", enabled: true },
+                { clientSecret: "vendor-secret-value", password: "plaintext-password" },
+            ],
+            metadata: {
+                token_count: 42,
+                secret_rotation: "weekly",
+                model: "test-model",
+            },
+        };
+
+        const r = redactValue(credentials);
+
+        expect(r.applied).toBe(true);
+        expect(r.ruleIds).toContain("sensitive-field");
+        expect(r.value).toEqual({
+            headers: {
+                "x-api-key": "[REDACTED]",
+                Authorization: "[REDACTED]",
+                cookie: "[REDACTED]",
+            },
+            providers: [
+                { github_token: "[REDACTED]", repository: "smithers" },
+                { TELEGRAM_BOT_TOKEN: "[REDACTED]", enabled: true },
+                { clientSecret: "[REDACTED]", password: "[REDACTED]" },
+            ],
+            metadata: {
+                token_count: 42,
+                secret_rotation: "weekly",
+                model: "test-model",
+            },
+        });
+        expect(credentials.headers["x-api-key"]).toBe("opaque-provider-key");
+    });
     // Regression: the api-key rule previously required an underscore after
     // sk/pk (Stripe-style) and so missed the hyphenated provider keys Smithers
     // actually drives (OpenAI sk-/sk-proj-, Anthropic sk-ant-), and the
