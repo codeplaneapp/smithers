@@ -33,3 +33,6 @@ Include provider and a non-secret configuration identity in the key, or validate
 ## Dedupe notes
 
 #722 concerns cached failed Claude probes, not identity collisions.
+
+
+> Closed by ticket-fleet: landed on main in 4d36a590cc43d569014f8fc2476a8c2189cfba8a.
