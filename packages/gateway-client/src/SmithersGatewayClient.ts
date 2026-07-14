@@ -414,7 +414,7 @@ export class SmithersGatewayClient {
             ? frame.payload.seq
             : undefined;
           if (typeof seq === "number") {
-            lastSeq = seq;
+            lastSeq = typeof lastSeq === "number" ? Math.max(lastSeq, seq) : seq;
           }
           if (isObject(frame.payload) && frame.payload.event === "run.completed") {
             reachedTerminal = true;

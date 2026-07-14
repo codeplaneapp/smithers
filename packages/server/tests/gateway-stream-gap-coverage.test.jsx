@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { createSmithers } from "smithers-orchestrator";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { Gateway } from "../src/gateway.js";
 
 /**
@@ -148,6 +150,76 @@ describe("streamRunEvents gap resync", () => {
     expect(gap.payload.snapshot).toBeTruthy();
     expect(gap.payload.snapshot.summary).toBeDefined();
   });
+
+  test("buffers live frames until gap replay drains", async () => {
+    const { gateway, workflow } = bootGateway("ordered");
+    ensureSmithersTables(workflow.db);
+    const runId = "run-ordered-replay";
+    await new SmithersDb(workflow.db).insertRun({
+      runId,
+      workflowName: "gap",
+      status: "running",
+      createdAtMs: Date.now(),
+    });
+    seedWindowGap(gateway, runId);
+
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    cleanups.push(() => gateway.close());
+    const port = getPort(server);
+
+    const client = await connect(port);
+    cleanups.push(() => client.close());
+
+    const buildSnapshot = gateway.buildRunSnapshot.bind(gateway);
+    let releaseReplay;
+    const replayBarrier = new Promise((resolve) => {
+      releaseReplay = resolve;
+    });
+    let markReplayStarted;
+    const replayStarted = new Promise((resolve) => {
+      markReplayStarted = resolve;
+    });
+    gateway.buildRunSnapshot = async (snapshotRunId) => {
+      markReplayStarted();
+      await replayBarrier;
+      return buildSnapshot(snapshotRunId);
+    };
+
+    const res = await client.request("streamRunEvents", { runId, afterSeq: 0 });
+    expect(res.ok).toBe(true);
+    await replayStarted;
+
+    gateway.broadcastEvent("node.started", { runId, nodeId: "live" });
+    await sleep(20);
+    expect(
+      client.messages.filter(
+        (message) =>
+          message.type === "event" &&
+          message.payload?.streamId === res.payload.streamId &&
+          ["run.gap_resync", "run.event"].includes(message.event),
+      ),
+    ).toHaveLength(0);
+
+    releaseReplay();
+    const deadline = Date.now() + 5_000;
+    let streamFrames = [];
+    while (Date.now() < deadline) {
+      streamFrames = client.messages.filter(
+        (message) =>
+          message.type === "event" &&
+          message.payload?.streamId === res.payload.streamId &&
+          ["run.gap_resync", "run.event"].includes(message.event),
+      );
+      if (streamFrames.length === 4) break;
+      await sleep(10);
+    }
+
+    expect(
+      streamFrames.map((message) =>
+        message.event === "run.gap_resync" ? "gap_resync" : message.payload.seq,
+      ),
+    ).toEqual(["gap_resync", 5, 6, 7]);
+  }, 15_000);
 
   test("broadcasts run.completed failed when a launched run rejects", async () => {
     const { gateway } = bootGateway("fail");

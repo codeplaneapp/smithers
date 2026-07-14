@@ -985,9 +985,10 @@ declare class Gateway {
    * @param {ConnectionState} connection
    * @param {string} streamId
    * @param {string} runId
+   * @param {boolean} [replayPending]
    * @returns {() => void}
    */
-    registerRunEventSubscriber(connection: ConnectionState, streamId: string, runId: string): () => void;
+    registerRunEventSubscriber(connection: ConnectionState, streamId: string, runId: string, replayPending?: boolean): () => void;
     /**
    * @param {ConnectionState} connection
    * @param {string} streamId
@@ -1001,8 +1002,9 @@ declare class Gateway {
    * @param {ConnectionState} connection
    * @param {string} streamId
    * @param {Record<string, unknown>} frame
+   * @param {boolean} [replay]
    */
-    sendRunEventStreamFrame(connection: ConnectionState, streamId: string, frame: Record<string, unknown>): void;
+    sendRunEventStreamFrame(connection: ConnectionState, streamId: string, frame: Record<string, unknown>, replay?: boolean): void;
     /**
    * Drain a run event stream's outbound queue against the socket's buffered
    * bytes. If the socket is congested past the high-water mark we re-arm a
@@ -1826,6 +1828,7 @@ type RunEventStreamState = {
     outboundQueue: Record<string, unknown>[];
     flushPending: boolean;
     backpressureDisconnected: boolean;
+    replayPending: boolean;
 };
 type GatewayAuthConfig = GatewayAuthConfig$1;
 type GatewayOperatorUiConfig = GatewayOperatorUiConfig$1;

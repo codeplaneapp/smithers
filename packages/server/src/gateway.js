@@ -59,8 +59,7 @@ import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
-/** @typedef {{ streamId: string, runId: string, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean }} RunEventStreamState */
-/** @typedef {{ streamId: string, runId: string, heartbeat: unknown, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean }} RunEventStreamState */
+/** @typedef {{ streamId: string, runId: string, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean, replayPending: boolean }} RunEventStreamState */
 /** @typedef {{ queue: Array<{ data: string, bytes: number, event: string }>, queuedBytes: number, flushPending: boolean, disconnected: boolean }} ConnectionEventWriterState */
 /** @typedef {import("./GatewayAuthConfig.js").GatewayAuthConfig} GatewayAuthConfig */
 /** @typedef {import("./GatewayOperatorUiConfig.js").GatewayOperatorUiConfig} GatewayOperatorUiConfig */
@@ -2960,9 +2959,10 @@ a { color: var(--brand); }</style>
    * @param {ConnectionState} connection
    * @param {string} streamId
    * @param {string} runId
+   * @param {boolean} [replayPending]
    * @returns {() => void}
    */
-    registerRunEventSubscriber(connection, streamId, runId) {
+    registerRunEventSubscriber(connection, streamId, runId, replayPending = false) {
         if (!connection.runEventStreams) {
             connection.runEventStreams = new Map();
         }
@@ -2972,6 +2972,7 @@ a { color: var(--brand); }</style>
             outboundQueue: [],
             flushPending: false,
             backpressureDisconnected: false,
+            replayPending,
         });
         this.startRunEventHeartbeat(connection);
         const previous = this.runEventSubscriberCounts.get(runId) ?? 0;
@@ -3057,16 +3058,23 @@ a { color: var(--brand); }</style>
    * @param {ConnectionState} connection
    * @param {string} streamId
    * @param {Record<string, unknown>} frame
+   * @param {boolean} [replay]
    */
-    sendRunEventStreamFrame(connection, streamId, frame) {
+    sendRunEventStreamFrame(connection, streamId, frame, replay = false) {
         const stream = connection.runEventStreams?.get(streamId);
         if (!stream) {
             // Stream is not (or no longer) registered; deliver directly so any
             // legacy/out-of-band caller still works, then bail out of the queue.
-            this.sendEvent(connection, "run.event", { streamId, ...frame });
+            if (!replay) {
+                this.sendEvent(connection, "run.event", { streamId, ...frame });
+            }
             return;
         }
         if (stream.backpressureDisconnected) {
+            return;
+        }
+        if (replay) {
+            this.sendEvent(connection, "run.event", { streamId, ...frame });
             return;
         }
         if (stream.outboundQueue.length >= RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT) {
@@ -3074,7 +3082,9 @@ a { color: var(--brand); }</style>
             return;
         }
         stream.outboundQueue.push(frame);
-        this.drainRunEventStream(connection, stream);
+        if (!stream.replayPending) {
+            this.drainRunEventStream(connection, stream);
+        }
     }
     /**
    * Drain a run event stream's outbound queue against the socket's buffered
@@ -7768,27 +7778,38 @@ a { color: var(--brand); }</style>
                 if (!resolved) {
                     return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
                 }
-                const currentSeq = this.getRunEventCurrentSeq(runId);
+                // Capture a replay cutoff and retained window before registering
+                // the live subscriber. Live events emitted after this point are
+                // buffered on the replay-pending stream until the captured replay
+                // has drained, so they cannot overtake older frames.
+                const state = this.runEventWindows.get(runId);
+                const currentSeq = state?.nextSeq ?? 0;
+                const window = [...(state?.window ?? [])];
                 if (typeof afterSeq === "number" && afterSeq > currentSeq) {
                     return responseError(frame.id, "SeqOutOfRange", `afterSeq ${afterSeq} is newer than current seq ${currentSeq}`);
                 }
                 const streamId = randomUUID();
-                this.registerRunEventSubscriber(connection, streamId, runId);
+                this.registerRunEventSubscriber(connection, streamId, runId, typeof afterSeq === "number");
                 queueMicrotask(() => {
                     void (async () => {
-                        const state = this.runEventWindows.get(runId);
-                        const window = [...(state?.window ?? [])];
-                        const nextSeq = state?.nextSeq ?? currentSeq;
                         if (typeof afterSeq === "number") {
-                            const firstSeq = window.length > 0 ? Number(window[0].seq) : nextSeq + 1;
+                            const firstSeq = window.length > 0 ? Number(window[0].seq) : currentSeq + 1;
                             if (window.length > 0 && afterSeq < firstSeq - 1) {
                                 const snapshot = await this.buildRunSnapshot(runId);
+                                if (!connection.runEventStreams?.has(streamId)) {
+                                    return;
+                                }
                                 this.sendRunGapResync(connection, streamId, runId, afterSeq + 1, firstSeq - 1, snapshot);
                             }
                             for (const eventFrame of window) {
                                 if (Number(eventFrame.seq) > afterSeq) {
-                                    this.sendRunEventStreamFrame(connection, streamId, eventFrame);
+                                    this.sendRunEventStreamFrame(connection, streamId, eventFrame, true);
                                 }
+                            }
+                            const stream = connection.runEventStreams?.get(streamId);
+                            if (stream) {
+                                stream.replayPending = false;
+                                this.drainRunEventStream(connection, stream);
                             }
                         }
                     })().catch((error) => {
@@ -7801,6 +7822,7 @@ a { color: var(--brand); }</style>
                                 message: error?.message ?? "streamRunEvents replay failed",
                             },
                         });
+                        this.unregisterRunEventSubscriber(connection, streamId);
                     });
                 });
                 return responseOk(frame.id, {

@@ -411,6 +411,44 @@ describe("streamRunEventsResilient reconnect-resume (real WS server)", () => {
     expect(seen).toEqual([8]);
     expect(running.afterSeqLog).toEqual([7]);
   });
+
+  test("never moves the resume cursor backward after out-of-order replay frames", async () => {
+    running = startRealGatewayServer({
+      onSubscribed: (ws, { afterSeq, connectionIndex }) => {
+        const streamId = `stream-${connectionIndex}`;
+        if (connectionIndex === 0) {
+          sendRunEvent(ws, streamId, 4, "task.progress");
+          sendGapResync(ws, streamId, 1);
+          sendRunEvent(ws, streamId, 2, "task.progress");
+          sendRunEvent(ws, streamId, 3, "task.progress");
+          setTimeout(() => ws.close(), 5);
+        } else {
+          expect(afterSeq).toBe(4);
+          sendRunEvent(ws, streamId, 5, "task.completed");
+        }
+      },
+    });
+
+    const client = new SmithersGatewayClient({ baseUrl: running.baseUrl });
+    const controller = new AbortController();
+    const seen: number[] = [];
+
+    await (async () => {
+      for await (const frame of client.streamRunEventsResilient(
+        { runId: "run-1" },
+        { signal: controller.signal, backoff: { baseMs: 1, maxMs: 5, random: () => 0.5 } },
+      )) {
+        if (frame.event !== "run.event") continue;
+        const seq = (frame.payload as { seq: number }).seq;
+        seen.push(seq);
+        if (seq === 5) controller.abort();
+      }
+    })();
+
+    expect(seen).toEqual([4, 2, 3, 5]);
+    expect(seen.filter((seq) => seq === 4)).toHaveLength(1);
+    expect(running.afterSeqLog).toEqual([-1, 4]);
+  });
 });
 
 describe("streamRunEvents subscribe-streamId validation (real WS server)", () => {
