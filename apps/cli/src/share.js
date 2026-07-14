@@ -117,15 +117,21 @@ export function sharePack({ from = process.cwd(), repo = REGISTRY_REPO, dryRun =
   mkdirSync(temp, { recursive: true });
   try {
     const registry = repo ?? REGISTRY_REPO;
+    const branch = `smithers/share-${manifest.name.replace(/[^A-Za-z0-9._-]+/g, "-")}-${Date.now()}`;
     execFileSync("gh", ["repo", "fork", registry, "--clone"], { cwd: temp, stdio: "inherit" });
     const checkout = join(temp, basename(registry));
+    execFileSync("git", ["switch", "--create", branch], { cwd: checkout, stdio: "inherit" });
     const registryReadme = join(checkout, "README.md");
     const registryOriginal = readFileSync(registryReadme, "utf8");
-    writeFileSync(registryReadme, updatePacksSection(registryOriginal, pack.entry));
+    const registryUpdated = updatePacksSection(registryOriginal, pack.entry);
+    if (registryOriginal === registryUpdated) {
+      return { ...pack, repository: registry, unchanged: true };
+    }
+    writeFileSync(registryReadme, registryUpdated);
     execFileSync("git", ["add", "README.md"], { cwd: checkout, stdio: "inherit" });
     execFileSync("git", ["commit", "-m", `docs: add ${manifest.name} pack`], { cwd: checkout, stdio: "inherit" });
     execFileSync("git", ["push", "-u", "origin", "HEAD"], { cwd: checkout, stdio: "inherit" });
-    const pr = execFileSync("gh", ["pr", "create", "--repo", registry, "--title", `docs: add ${manifest.name} pack`, "--body", `Add the ${manifest.name} workflow pack to the registry.`], { cwd: checkout, encoding: "utf8" }).trim();
+    const pr = execFileSync("gh", ["pr", "create", "--repo", registry, "--head", branch, "--title", `docs: add ${manifest.name} pack`, "--body", `Add the ${manifest.name} workflow pack to the registry.`], { cwd: checkout, encoding: "utf8" }).trim();
     return { ...pack, repository: registry, pullRequest: pr };
   } finally { rmSync(temp, { recursive: true, force: true }); }
 }

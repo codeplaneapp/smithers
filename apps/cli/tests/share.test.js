@@ -38,3 +38,14 @@ test("share entry includes every workflow described by frontmatter", () => {
   writeFileSync(join(root, "workflows", "one.tsx"), "// smithers-description: First flow\nexport default null;\n");
   expect(buildPackEntry(root).entry).toContain("`one`: First flow");
 });
+
+test("share dry-run returns the entry and a preview without requiring gh", () => {
+  const project = temp();
+  mkdirSync(join(project, ".smithers", "workflows"), { recursive: true });
+  writeFileSync(join(project, ".smithers", "smithers.toon"), "name: demo\nrepository: acme/demo\n");
+  writeFileSync(join(project, ".smithers", "workflows", "demo.tsx"), "// smithers-description: Demo workflow\n");
+  const result = sharePack({ from: project, dryRun: true });
+  expect(result.dryRun).toBe(true);
+  expect(result.entry).toContain("| [demo]");
+  expect(result.diff).toContain("README.md");
+});

@@ -1,6 +1,5 @@
 /** @jsxImportSource react */
-import React from "react";
-import { useGatewayRun } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
 
 function runIdFromUrl() {
   if (typeof location === "undefined") return undefined;
@@ -15,3 +14,5 @@ export default function SharePack() {
     <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(run.data ?? (run.loading ? "Loading…" : "Waiting for a run…"), null, 2)}</pre>
   </main>;
 }
+
+createGatewayReactRoot(<SharePack />);

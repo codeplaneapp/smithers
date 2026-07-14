@@ -8,6 +8,7 @@ import {
   CURATED_SYSTEM_WORKFLOW_IDS,
   initWorkflowPack,
 } from "../src/workflow-pack.js";
+import { discoverWorkflows, resolveWorkflow } from "../src/workflows.js";
 
 function seededAgentEnv() {
   const binDir = createExecutableDir();
@@ -113,4 +114,13 @@ test("fresh pack includes real UI closures rather than generated render shims", 
   }
   expect(readFileSync(join(pack, "ui", "create-workflow.tsx"), "utf8")).toContain("useGatewayApprovals");
   expect(readFileSync(join(pack, "ui", "docs-driven-development.tsx"), "utf8")).toContain("useGatewayRunTree");
+}, 30_000);
+
+test("add remains runnable while hidden from the default workflow listing", () => {
+  const { root } = freshPack();
+  const discovered = discoverWorkflows(root);
+  expect(discovered.some((workflow) => workflow.id === "add")).toBe(true);
+  expect(discovered.filter((workflow) => !workflow.system).some((workflow) => workflow.id === "add")).toBe(false);
+  expect(resolveWorkflow("add", root).id).toBe("add");
+  expect(resolveWorkflow("add", root).system).toBe(true);
 }, 30_000);
