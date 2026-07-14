@@ -20,3 +20,6 @@ export function canonicalGatewayRpcMethod(method) {
 **Why it matters:** No active scope bypass today — the only in-repo caller (`getGatewayRpcDefinition`, `:870`) funnels the result through `definitionByMethod.get()` (a `Map`, safe for a function key → `undefined`). But this is a latent contract violation in a publicly-exported, auth-adjacent lookup: any consumer treating a truthy return as valid (`canonicalGatewayRpcMethod(m) ?? fallback`, string interpolation, object-key use) mis-handles it. It is also inconsistent with the sibling `getRequiredScopeForGatewayMethod` (`:881`), which already guards the identical pattern with `Object.hasOwn` and a comment naming this exact `"toString"` hazard.
 
 **Fix:** Guard the alias lookup with `Object.hasOwn(GATEWAY_RPC_LEGACY_METHOD_ALIASES, method)` (or make it a `Map` like `definitionByMethod`) so the two lookups are consistent and prototype-safe.
+
+
+> Closed by ticket-fleet: landed on main in f37c1c9a681ed7b6885e3def2996d946633e7421.
