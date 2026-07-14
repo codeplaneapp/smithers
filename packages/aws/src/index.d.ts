@@ -174,6 +174,7 @@ export function createAwsSandboxS3Transport(config: {
 	};
 	bucket: string;
 	prefix: string;
+	workdir?: string;
 	secrets?: string[];
 }): {
 	bucket: string;
