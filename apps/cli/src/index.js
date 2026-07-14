@@ -67,7 +67,7 @@ import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
-import { addPack, removePack, listPacks, listLockedPacks, updatePack } from "./packs.js";
+import { addPack, removePack, listPacks, listLockedPacks, updatePack, ejectPack } from "./packs.js";
 import { createEvalsExtension } from "./evals-extension.js";
 import {
     assertEvalRunIdsAvailable,
@@ -1907,6 +1907,7 @@ const workflowRunOptions = upOptions.extend({
 });
 const packSpecArgs = z.object({ spec: z.string().describe("GitHub, npm, or file pack spec") });
 const packNameArgs = z.object({ name: z.string().describe("Installed pack name") });
+const packWorkflowArgs = z.object({ spec: z.string().describe("Pack workflow in the form <pack>:<workflow>") });
 const packOptions = z.object({ global: z.boolean().default(false).describe("Install in ~/.smithers/packs instead of the local project"), yes: z.boolean().default(false).describe("Skip trust confirmation") });
 const upgradeOptions = z.object({
     interactive: z.boolean().default(false).describe("Force the full-screen interactive TUI monitor (TTY only)."),
@@ -5089,6 +5090,14 @@ const cli = Cli.create({
     run(c) {
         try { return c.ok(removePack(c.args.name, { from: process.cwd(), global: c.options.global })); }
         catch (error) { return c.error({ code: "PACK_REMOVE_FAILED", message: error?.message ?? String(error) }); }
+    },
+})
+    .command("eject", {
+    description: "Copy a pack workflow and its UI, prompts, and libraries into the local .smithers pack.",
+    args: packWorkflowArgs,
+    run(c) {
+        try { return c.ok(ejectPack(c.args.spec, { from: process.cwd() })); }
+        catch (error) { return c.error({ code: "PACK_EJECT_FAILED", message: error?.message ?? String(error) }); }
     },
 })
     .command("packs", Cli.create({

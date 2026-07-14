@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
 import { loadManifest, parseManifest, renderManifest } from "./manifest.js";
 import { evaluateEligibility, parseWorkflowFrontmatter } from "./workflows.js";
@@ -267,6 +267,90 @@ export function removePack(name, { from = process.cwd(), global = false } = {}) 
 
 export function listPacks(from = process.cwd()) {
   return [false, true].flatMap((global) => { const root = packRoot(from, global); if (!existsSync(root)) return []; return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(join(root, e.name, "smithers.toon"))).map((e) => ({ name: e.name, scope: global ? "global" : "local", path: join(root, e.name), manifest: loadManifest(join(root, e.name, "smithers.toon")) })); });
+}
+
+function isWithin(root, path) {
+  const rel = relative(root, path);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function resolveModuleFile(file) {
+  const candidates = [
+    file,
+    `${file}.ts`, `${file}.tsx`, `${file}.js`, `${file}.jsx`, `${file}.json`, `${file}.md`, `${file}.mdx`,
+    join(file, "index.ts"), join(file, "index.tsx"), join(file, "index.js"), join(file, "index.jsx"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function localPackDir(from) {
+  return dirname(packRoot(from, false));
+}
+
+function findInstalledPack(name, from) {
+  for (const global of [false, true]) {
+    const candidate = join(packRoot(from, global), name);
+    if (existsSync(join(candidate, "smithers.toon"))) return candidate;
+  }
+  throw new Error(`Pack not found: ${name}`);
+}
+
+function workflowEntries(root) {
+  const workflows = join(root, "workflows");
+  if (!existsSync(workflows)) return [];
+  const entries = [];
+  for (const entry of readdirSync(workflows, { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "curated") continue;
+    const file = join(workflows, entry.name);
+    if (entry.isFile() && entry.name.endsWith(".tsx")) entries.push({ id: entry.name.slice(0, -4), file });
+    else if (entry.isDirectory() && existsSync(join(file, "workflow.tsx"))) entries.push({ id: entry.name, file: join(file, "workflow.tsx") });
+  }
+  return entries;
+}
+
+function referencedFiles(packDir, workflowFile) {
+  const files = new Set([workflowFile]);
+  const queue = [workflowFile];
+  while (queue.length) {
+    const file = queue.shift();
+    const source = readFileSync(file, "utf8");
+    const imports = /\.(?:[cm]?[jt]sx?)$/.test(file)
+      ? moduleImports(file, source).filter((name) => name.startsWith("."))
+      : [];
+    const uiEntries = [...source.matchAll(/<UI\s+entry=["']([^"']+)["']/g)].map((match) => match[1]);
+    for (const name of [...imports, ...uiEntries]) {
+      const resolved = resolveModuleFile(resolve(dirname(file), name));
+      if (!resolved || !isWithin(packDir, resolved)) {
+        throw new Error(`Pack workflow references a missing or out-of-pack file: ${file} -> ${name}`);
+      }
+      if (!files.has(resolved)) {
+        files.add(resolved);
+        queue.push(resolved);
+      }
+    }
+  }
+  return files;
+}
+
+/** Copy a pack workflow and its relative UI/prompt/lib closure into the local pack. */
+export function ejectPack(spec, { from = process.cwd() } = {}) {
+  if (typeof spec !== "string" || !spec.trim()) throw new Error("Pack workflow is required (expected <pack>:<workflow>)");
+  const match = spec.trim().match(/^([^:]+):(.+)$/);
+  if (!match) throw new Error(`Invalid pack workflow: ${spec}. Expected <pack>:<workflow>`);
+  const [, packName, workflowId] = match;
+  const packDir = findInstalledPack(packName, from);
+  const workflow = workflowEntries(packDir).find((entry) => entry.id === workflowId);
+  if (!workflow) throw new Error(`Workflow not found in pack ${packName}: ${workflowId}`);
+  const files = [...referencedFiles(packDir, workflow.file)];
+  const targetRoot = localPackDir(from);
+  const copies = files.map((source) => ({ source, target: join(targetRoot, relative(packDir, source)) }));
+  const collision = copies.find(({ target }) => existsSync(target));
+  if (collision) throw new Error(`Cannot eject ${spec}: local target already exists: ${relative(targetRoot, collision.target)}`);
+  for (const { source, target } of copies) {
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(source, target);
+  }
+  return { pack: packName, workflow: workflowId, files: copies.map(({ target }) => target), path: join(targetRoot, relative(packDir, workflow.file)) };
 }
 
 export async function updatePack(name, { from = process.cwd(), global = false } = {}) {
