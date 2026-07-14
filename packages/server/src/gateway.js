@@ -1531,9 +1531,27 @@ function parseJwtScopes(value) {
  *   options: Array<{ key: string; label: string; summary?: string }>;
  *   allowedScopes: string[];
  *   allowedUsers: string[];
+ *   restrictionError: string | null;
  *   autoApprove: Record<string, unknown> | null;
  * }} ApprovalRequestRecord
  */
+/**
+ * @param {unknown} value
+ * @param {"allowedScopes" | "allowedUsers"} field
+ * @returns {{ values: string[]; error: string | null }}
+ */
+function parseApprovalRestriction(value, field) {
+    if (value === undefined) {
+        return { values: [], error: null };
+    }
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
+        return {
+            values: [],
+            error: `${field} must be an array of non-empty strings`,
+        };
+    }
+    return { values: value, error: null };
+}
 /**
  * @param {unknown} value
  * @param {string | null} fallbackTitle
@@ -1541,6 +1559,8 @@ function parseJwtScopes(value) {
  */
 function parseApprovalRequest(value, fallbackTitle) {
     const record = asObject(value);
+    const allowedScopes = parseApprovalRestriction(record?.allowedScopes, "allowedScopes");
+    const allowedUsers = parseApprovalRestriction(record?.allowedUsers, "allowedUsers");
     const options = Array.isArray(record?.options)
         ? record.options
             .filter((entry) => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
@@ -1561,8 +1581,9 @@ function parseApprovalRequest(value, fallbackTitle) {
         title: asString(record?.title) ?? fallbackTitle,
         summary: asString(record?.summary) ?? null,
         options,
-        allowedScopes: parseStringArray(record?.allowedScopes),
-        allowedUsers: parseStringArray(record?.allowedUsers),
+        allowedScopes: allowedScopes.values,
+        allowedUsers: allowedUsers.values,
+        restrictionError: allowedScopes.error ?? allowedUsers.error,
         autoApprove,
     };
 }
@@ -8212,6 +8233,9 @@ a { color: var(--brand); }</style>
                     });
                 }
                 const request = parseApprovalRequest(parseJson(typeof approval?.requestJson === "string" ? approval.requestJson : null), nodeId);
+                if (request.restrictionError) {
+                    return responseError(frame.id, "INVALID_REQUEST", `Malformed approval request: ${request.restrictionError}`);
+                }
                 if (request.allowedUsers.length > 0 &&
                     (!connection.userId || !request.allowedUsers.includes(connection.userId))) {
                     return responseError(frame.id, "FORBIDDEN", "User is not allowed to decide this approval");

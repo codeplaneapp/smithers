@@ -71,6 +71,34 @@ describe("<Approval>", () => {
         });
         cleanup();
     });
+    test("rejects malformed approval restrictions", async () => {
+        const cases = [
+            { field: "allowedUsers", value: "user:will" },
+            { field: "allowedScopes", value: ["run:admin", 42] },
+            { field: "allowedUsers", value: ["user:will", ""] },
+            { field: "allowedScopes", value: new Array(1) },
+        ];
+        for (const { field, value } of cases) {
+            const { smithers, outputs, cleanup } = createTestSmithers({
+                approval: approvalDecisionSchema,
+            });
+            const restrictions = { [field]: value };
+            const workflow = smithers(() => (<Workflow name={`approval-invalid-${field}`}>
+          <Approval id="publish-gate" output={outputs.approval} request={{ title: "Publish release?" }} {...restrictions}/>
+        </Workflow>));
+            try {
+                await expect(Effect.runPromise(renderFrame(workflow, {
+                    runId: `approval-invalid-${field}`,
+                    iteration: 0,
+                    input: {},
+                    outputs: {},
+                }))).rejects.toThrow(`${field} must be an array of non-empty strings`);
+            }
+            finally {
+                cleanup();
+            }
+        }
+    });
     test("renders a rank-mode approval task descriptor with auto-approval metadata", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers({
             ranking: approvalRankingSchema,
