@@ -418,6 +418,33 @@ describe("deferred state bridge state transitions", () => {
         }
     });
 
+    test("uses the attempt start time when waiting timer metadata is corrupt", async () => {
+        const { adapter, tables, cleanup } = makeHarness();
+        try {
+            const eventBus = makeEventBus();
+            const desc = makeDesc(tables, {
+                nodeId: "timer-corrupt-meta",
+                meta: { __timer: true, __timerDuration: "1h" },
+            });
+            await insertAttempt(adapter, "run-corrupt-meta", desc, "waiting-timer", {
+                startedAtMs: Date.now() - 2 * 60 * 60 * 1_000,
+                metaJson: "legacy timer metadata",
+            });
+
+            expect(await I.resolveTimerTaskStateBridge(adapter, "run-corrupt-meta", desc, eventBus)).toEqual({
+                handled: true,
+                state: "finished",
+            });
+            expect(eventBus.events.map((event) => event.type)).toEqual(["TimerFired", "NodeFinished"]);
+
+            const attempts = await Effect.runPromise(adapter.listAttempts("run-corrupt-meta", desc.nodeId, 0));
+            expect(attempts[0]?.state).toBe("finished");
+        }
+        finally {
+            cleanup();
+        }
+    });
+
     test("fails, finishes and times out wait-for-event attempts", async () => {
         const { adapter, db, tables, cleanup } = makeHarness();
         try {

@@ -671,7 +671,7 @@ async function resolveTimerTaskStateBridge(adapter, runId, desc, eventBus, initi
         return { handled: true, state: nodeState };
     }
     if (latest.state === "waiting-timer") {
-        const snapshot = latestTimerSnapshot ?? buildTimerSnapshot(desc, now);
+        const snapshot = latestTimerSnapshot ?? buildTimerSnapshot(desc, latest.startedAtMs ?? now);
         if (snapshot.firesAtMs > now) {
             await Effect.runPromise(adapter.insertNode({
                 runId,
