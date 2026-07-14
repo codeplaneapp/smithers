@@ -86,3 +86,6 @@ export async function runConformanceWorkflow(
   const [stored, outputs] = await Promise.all([smithers.getRun(result.runId), smithers.getOutputs(result.runId)]);
   return { result, stored, outputs };
 }
+
+export { assertRuntimeConformance, isRuntimeCapabilityError } from "./runtimeConformance.js";
+export type { RuntimeConformanceLane, RuntimeConformanceResult } from "./runtimeConformance.js";

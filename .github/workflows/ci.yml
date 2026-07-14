@@ -7,6 +7,45 @@ on:
       - main
 
 jobs:
+  runtime-conformance:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: Browser
+            script: test:runtime:browser
+          - lane: Cloudflare Workers
+            script: test:runtime:cloudflare
+          - lane: Vercel
+            script: test:runtime:vercel
+          - lane: Node.js
+            script: test:runtime:node
+          - lane: Bun
+            script: test:runtime:bun
+    name: Runtime conformance -- ${{ matrix.lane }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v6.0.8
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install Bun (Bun lane)
+        if: matrix.lane == 'Bun'
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.3.13
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium (Browser lane)
+        if: matrix.lane == 'Browser'
+        run: pnpm -C e2e run test:browser:install
+      - name: Run ${{ matrix.lane }}
+        run: pnpm -C e2e run ${{ matrix.script }}
+
   typecheck:
     strategy:
       fail-fast: false

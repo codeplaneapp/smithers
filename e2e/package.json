@@ -12,6 +12,11 @@
     "test:browser:types": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --moduleResolution bundler --module esnext --target es2022 --jsx react-jsx browser/consumer.ts",
     "test:browser": "node browser/run-browser.mjs",
     "test:browser:package": "node browser/packed-consumer.mjs",
+    "test:runtime:browser": "pnpm run test:browser",
+    "test:runtime:node": "node runtime/run-node.mjs",
+    "test:runtime:bun": "bun runtime/run-bun.mjs",
+    "test:runtime:cloudflare": "node runtime/run-cloudflare.mjs",
+    "test:runtime:vercel": "node runtime/run-vercel.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -40,6 +45,8 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/bun": "latest",
     "@types/ws": "^8.18.1",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vercel": "48.10.2",
+    "wrangler": "4.106.0"
   }
 }
