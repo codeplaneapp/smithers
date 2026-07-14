@@ -228,20 +228,28 @@ describe("time-travel + resume (postgres)", () => {
     test("deduplicates shared snapshot content and cleans it through real database triggers", async () => {
         const { adapter, close } = await bootPg([]);
         try {
+            const marker = uniqueRunId("shared-pg-content");
             const data = {
                 nodes: [{ nodeId: "shared", iteration: 0, state: "finished", lastAttempt: 1, outputTable: "out", label: null }],
-                outputs: { out: [{ text: "shared-pglite-content" }] },
+                outputs: { out: [{ text: marker }] },
                 ralph: [],
                 input: { prompt: "same" },
             };
             const runA = uniqueRunId("pg-content-a");
             const runB = uniqueRunId("pg-content-b");
-            await captureSnapshot(adapter, runA, 0, data);
-            await captureSnapshot(adapter, runB, 0, data);
-            const shared = await adapter.internalStorage.queryOne("SELECT COUNT(*) AS count, MAX(ref_count) AS ref_count FROM _smithers_snapshot_contents");
+            const snapshotA = await captureSnapshot(adapter, runA, 0, data);
+            const snapshotB = await captureSnapshot(adapter, runB, 0, data);
+            expect(snapshotB.contentHash).toBe(snapshotA.contentHash);
+            const shared = await adapter.internalStorage.queryOne(
+                "SELECT COUNT(*) AS count, MAX(ref_count) AS ref_count FROM _smithers_snapshot_contents WHERE content_hash = ?",
+                [snapshotA.contentHash],
+            );
             expect(Number(shared.count)).toBe(1);
             expect(Number(shared.refCount)).toBe(2);
-            expect(Number((await adapter.internalStorage.queryOne("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs")).count)).toBe(2);
+            expect(Number((await adapter.internalStorage.queryOne(
+                "SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs WHERE content_hash = ?",
+                [snapshotA.contentHash],
+            )).count)).toBe(2);
             await adapter.internalStorage.updateWhere("_smithers_snapshots", {
                 nodesJson: "[]",
                 outputsJson: '{"inline":true}',
@@ -249,11 +257,20 @@ describe("time-travel + resume (postgres)", () => {
                 inputJson: '{"prompt":"inline-pglite"}',
                 contentHash: "inline-pglite",
             }, "run_id = ? AND frame_no = ?", [runA, 0]);
-            expect(Number((await adapter.internalStorage.queryOne("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs")).count)).toBe(1);
-            expect(Number((await adapter.internalStorage.queryOne("SELECT ref_count FROM _smithers_snapshot_contents")).refCount)).toBe(1);
+            expect(Number((await adapter.internalStorage.queryOne(
+                "SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs WHERE content_hash = ?",
+                [snapshotA.contentHash],
+            )).count)).toBe(1);
+            expect(Number((await adapter.internalStorage.queryOne(
+                "SELECT ref_count FROM _smithers_snapshot_contents WHERE content_hash = ?",
+                [snapshotA.contentHash],
+            )).refCount)).toBe(1);
             expect(JSON.parse((await loadSnapshot(adapter, runA, 0)).inputJson)).toEqual({ prompt: "inline-pglite" });
             await adapter.internalStorage.deleteWhere("_smithers_snapshots", "run_id = ?", [runB]);
-            expect(Number((await adapter.internalStorage.queryOne("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents")).count)).toBe(0);
+            expect(Number((await adapter.internalStorage.queryOne(
+                "SELECT COUNT(*) AS count FROM _smithers_snapshot_contents WHERE content_hash = ?",
+                [snapshotA.contentHash],
+            )).count)).toBe(0);
         }
         finally {
             await close();
