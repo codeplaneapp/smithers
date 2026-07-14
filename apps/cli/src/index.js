@@ -214,7 +214,8 @@ function formatStatusExitCode(status) {
         return 0;
     if (status === "waiting-approval" ||
         status === "waiting-event" ||
-        status === "waiting-timer") {
+        status === "waiting-timer" ||
+        status === "paused") {
         return 3;
     }
     if (status === "cancelled")
@@ -290,15 +291,18 @@ function summarizeRunResult(result) {
 function isWaitingStatus(status) {
     return (status === "waiting-approval" ||
         status === "waiting-event" ||
-        status === "waiting-timer");
+        status === "waiting-timer" ||
+        status === "paused");
 }
 /**
- * CTAs shown when `up` ends in a paused (waiting-*) state, so exit code 3 reads
+ * CTAs shown when `up` ends in a paused (waiting-* or paused) state, so exit code 3 reads
  * as "awaiting a decision" rather than a failure.
  * @param {string | null | undefined} status
  * @param {string} runId
  */
 function pauseCtas(status, runId) {
+    if (status === "paused")
+        return [{ command: `up --resume ${runId}`, description: "Resume the paused run" }];
     if (status === "waiting-approval")
         return [
             { command: `approve ${runId}`, description: "Approve the paused gate" },
@@ -9293,7 +9297,7 @@ function reportFatalCliError(err) {
     }
     process.exit(1);
 }
-export { cli };
+export { cli, formatStatusExitCode, isWaitingStatus, pauseCtas };
 
 if (process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN !== "1") {
     process.on("unhandledRejection", (reason) => {
