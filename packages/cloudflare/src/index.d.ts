@@ -44,6 +44,7 @@ export type CloudflareSandboxProviderOptions = {
 	sandboxId?: (request: SandboxProviderRequest) => string;
 	sandboxOptions?: Record<string, unknown>;
 	keepAlive?: boolean;
+	sleepAfter?: string | number;
 	workdir?: string;
 	command?: string;
 	env?: Record<string, string>;
