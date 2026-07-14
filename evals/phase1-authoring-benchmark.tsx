@@ -70,12 +70,11 @@ function gateCandidate() {
 
 export default smithers((ctx) => {
   const artifact = ctx.outputMaybe(outputs.artifact, { nodeId: "author" });
-  const reuse = process.env.PHASE1_BENCHMARK_REUSE === "1";
-  if (!artifact && !reuse) resetCandidate();
+  if (!artifact) resetCandidate();
   return (
     <Workflow name="phase1-authoring-benchmark">
       <Sequence>
-        {!artifact && !reuse ? <Task id="author" output={outputs.artifact} agent={models.haiku} retries={0} continueOnFail timeoutMs={30 * 60_000}>
+        {!artifact ? <Task id="author" output={outputs.artifact} agent={models.haiku} retries={0} continueOnFail timeoutMs={30 * 60_000}>
           {`Author a miniature issue-sweep Smithers workflow in ${candidate} and a production test in ${productionTest}. Use typed Zod outputs. Render parallel per-item lanes, each with a correction <Loop>; use exactly ONE global <MergeQueue maxConcurrency={1}> for landing; use ctx.latest in the loop until condition and outputMaybe({nodeId, iteration}) for a cross-iteration read. The test MUST import the real workflow and call renderWorkflow, then be registered in ${packageJson}. Do not hand-build a graph copy. Make the files compile and pass their test. You may edit only those three paths.`}
         </Task> : null}
         {!artifact ? <Task id="gates" output={outputs.verdict} retries={0}>{() => gateCandidate()}</Task> : null}
