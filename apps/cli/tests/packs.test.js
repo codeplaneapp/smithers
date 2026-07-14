@@ -73,6 +73,54 @@ test("github-style tarballs with a wrapper dir and subdir manifest install and u
   expect(listPacks(project).map((pack) => pack.name)).toEqual(["demo-pack"]);
 });
 
+test("a pack shipping a canonical gateway-react UI passes the import scan", async () => {
+  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
+  const fixture = temp();
+  mkdirSync(join(fixture, "workflows"), { recursive: true });
+  mkdirSync(join(fixture, "ui"), { recursive: true });
+  writeFileSync(join(fixture, "smithers.toon"), "name: ui-pack\nversion: 1.0.0\n");
+  writeFileSync(join(fixture, "workflows", "board.tsx"), [
+    "/** @jsxImportSource smithers-orchestrator */",
+    'import { UI } from "smithers-orchestrator";',
+    'export default <UI entry="../ui/board.tsx" />;',
+  ].join("\n"));
+  // The canonical UI contract: react + smithers-orchestrator/gateway-react.
+  writeFileSync(join(fixture, "ui", "board.tsx"), [
+    '/** @jsxImportSource react */',
+    'import { useState } from "react";',
+    'import { createGatewayReactRoot, useGatewayRuns } from "smithers-orchestrator/gateway-react";',
+    "export default function App() { const [n] = useState(0); useGatewayRuns; return n; }",
+    "createGatewayReactRoot;",
+  ].join("\n"));
+  const installed = await addPack(`file:${fixture}`, { from: project, yes: true });
+  expect(installed.name).toBe("ui-pack");
+});
+
+test("bare user/repo#ref shorthand keeps the ref out of the repo name", () => {
+  expect(parsePackSpec("user/repo#v1")).toMatchObject({ kind: "github", owner: "user", repo: "repo", ref: "v1" });
+});
+
+test("global installs land under SMITHERS_HOME/packs and non-TTY installs require --yes", async () => {
+  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
+  const home = temp();
+  const fixture = temp(); mkdirSync(join(fixture, "workflows"), { recursive: true });
+  writeFileSync(join(fixture, "smithers.toon"), "name: global-pack\nversion: 1.0.0\n");
+  writeFileSync(join(fixture, "workflows", "g.tsx"), "export default null;\n");
+  const previousHome = process.env.SMITHERS_HOME;
+  process.env.SMITHERS_HOME = home;
+  try {
+    // bun test's stdin is not a TTY: without --yes the trust gate must refuse.
+    await expect(addPack(`file:${fixture}`, { from: project, global: true })).rejects.toThrow(/Confirmation required; pass --yes/);
+    const installed = await addPack(`file:${fixture}`, { from: project, global: true, yes: true });
+    expect(installed.scope).toBe("global");
+    expect(installed.path).toBe(join(home, "packs", "global-pack"));
+    expect(readFileSync(join(home, "packs.lock.toon"), "utf8")).toContain("global-pack");
+    expect(listPacks(project).map((pack) => `${pack.scope}:${pack.name}`)).toContain("global:global-pack");
+  } finally {
+    if (previousHome === undefined) delete process.env.SMITHERS_HOME; else process.env.SMITHERS_HOME = previousHome;
+  }
+});
+
 test("the lock lives beside the packs dir and drives updates even when a pack dir is damaged", async () => {
   const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
   const fixture = temp();

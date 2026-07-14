@@ -17,9 +17,12 @@ export function parsePackSpec(spec) {
     if (!match) throw new Error(`Invalid GitHub pack spec: ${raw}`);
     return { kind: "github", owner: match[1], repo: match[2], subdir: match[3] ?? "", ref: match[4] ?? "HEAD", name: `${match[1]}-${match[2]}` };
   }
-  if (/^[^/@]+\/[^/]+$/.test(raw)) {
-    const [owner, repo] = raw.split("/");
-    return { kind: "github", owner, repo, subdir: "", ref: "HEAD", name: `${owner}-${repo}` };
+  {
+    // Bare GitHub shorthand, npm-style: user/repo with an optional #ref.
+    const bare = raw.match(/^([^/@#]+)\/([^/#]+?)(?:#(.+))?$/);
+    if (bare) {
+      return { kind: "github", owner: bare[1], repo: bare[2], subdir: "", ref: bare[3] ?? "HEAD", name: `${bare[1]}-${bare[2]}` };
+    }
   }
   const npm = raw.startsWith("npm:") ? raw.slice(4) : raw;
   if (!raw.startsWith("file:") && (raw.startsWith("npm:") || /^[^/@][^/]*(?:@[^/]+)?$/.test(npm) || /^@[^/]+\/[^@]+(?:@[^/]+)?$/.test(npm))) {
@@ -67,7 +70,13 @@ export function listLockedPacks(from = process.cwd()) {
 }
 
 function importAllowed(name) {
-  return name.startsWith(".") || ALLOWED.has(name) || name.startsWith("@smithers-orchestrator/") || name.startsWith("react/") || name.startsWith("zod/");
+  // smithers-orchestrator subpaths matter: every canonical pack UI imports
+  // "smithers-orchestrator/gateway-react" (and JSX emits ".../jsx-runtime").
+  return name.startsWith(".") || ALLOWED.has(name)
+    || name.startsWith("smithers-orchestrator/")
+    || name.startsWith("@smithers-orchestrator/")
+    || name.startsWith("react/")
+    || name.startsWith("zod/");
 }
 
 /** Lex one module's import specifiers. Prefers Bun's transpiler (a real lexer:
