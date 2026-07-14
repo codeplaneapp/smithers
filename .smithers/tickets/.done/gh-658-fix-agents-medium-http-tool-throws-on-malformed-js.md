@@ -38,3 +38,6 @@ The generic HTTP tool is the escape hatch for arbitrary REST APIs. Invalid or mi
 
 A safer behavior would catch JSON parse failures and return the raw text (or a structured parse-error wrapper) while preserving the HTTP status and headers.
 
+
+
+> Closed by ticket-fleet: landed on main in e52896cc5ada33d3175f66cc5ff7c50e15cad758.
