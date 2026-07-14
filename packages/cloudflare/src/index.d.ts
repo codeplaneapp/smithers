@@ -1,8 +1,8 @@
-import type { SandboxProvider, SandboxProviderRequest, SandboxProviderResult } from "@smithers-orchestrator/sandbox";
+import { SandboxProviderRequest, SandboxProvider, SandboxProviderResult } from '@smithers-orchestrator/sandbox';
 
-export const CLOUDFLARE_SANDBOX_PROVIDER_ID: "cloudflare-sandbox";
+declare const CLOUDFLARE_SANDBOX_PROVIDER_ID: "cloudflare-sandbox";
 
-export type CloudflareSqliteDescriptor = {
+type CloudflareSqliteDescriptor = {
 	dialect: "sqlite";
 	driver: "cloudflare-sqlite";
 	queryAllRaw(statement: string, params?: ReadonlyArray<unknown>): ReadonlyArray<Record<string, unknown>> | Promise<ReadonlyArray<Record<string, unknown>>>;
@@ -12,20 +12,20 @@ export type CloudflareSqliteDescriptor = {
 	transaction?<T>(operation: () => T | Promise<T>): T | Promise<T>;
 };
 
-export type CloudflareDurableObjectSqlStorage = {
+type CloudflareDurableObjectSqlStorage = {
 	exec(statement: string, ...params: unknown[]): unknown;
 };
 
-export type CloudflareDurableObjectStorage = {
+type CloudflareDurableObjectStorage = {
 	sql: CloudflareDurableObjectSqlStorage;
 	transaction?<T>(operation: () => T | Promise<T>): T | Promise<T>;
 };
 
-export function createCloudflareDurableObjectSqliteDescriptor(
+declare function createCloudflareDurableObjectSqliteDescriptor(
 	storage: CloudflareDurableObjectStorage | CloudflareDurableObjectSqlStorage,
 ): CloudflareSqliteDescriptor;
 
-export type CloudflareD1Database = {
+type CloudflareD1Database = {
 	prepare(statement: string): {
 		bind(...params: unknown[]): {
 			all(): Promise<{ results?: Record<string, unknown>[] }>;
@@ -35,9 +35,9 @@ export type CloudflareD1Database = {
 	};
 };
 
-export function createCloudflareD1SqliteDescriptor(database: CloudflareD1Database): CloudflareSqliteDescriptor;
+declare function createCloudflareD1SqliteDescriptor(database: CloudflareD1Database): CloudflareSqliteDescriptor;
 
-export type CloudflareSandboxProviderOptions = {
+type CloudflareSandboxProviderOptions = {
 	binding?: unknown | ((request: SandboxProviderRequest) => unknown);
 	getSandbox?: (binding: unknown, sandboxId: string, options?: Record<string, unknown>) => any;
 	id?: string;
@@ -54,9 +54,9 @@ export type CloudflareSandboxProviderOptions = {
 	importCloudflareSandbox?: () => Promise<{ getSandbox?: unknown }>;
 };
 
-export function createCloudflareSandboxProvider(options?: CloudflareSandboxProviderOptions): SandboxProvider;
+declare function createCloudflareSandboxProvider(options?: CloudflareSandboxProviderOptions): SandboxProvider;
 
-export function createMockCloudflareSandboxEnvironment(
+declare function createMockCloudflareSandboxEnvironment(
 	handler: (args: {
 		command: string;
 		request: { runId: string; sandboxId: string; input?: unknown; config?: unknown };
@@ -67,3 +67,5 @@ export function createMockCloudflareSandboxEnvironment(
 	getSandbox: (binding: unknown, sandboxId: string, options?: Record<string, unknown>) => any;
 	sandboxes: Map<string, any>;
 };
+
+export { CLOUDFLARE_SANDBOX_PROVIDER_ID, type CloudflareD1Database, type CloudflareDurableObjectSqlStorage, type CloudflareDurableObjectStorage, type CloudflareSandboxProviderOptions, type CloudflareSqliteDescriptor, createCloudflareD1SqliteDescriptor, createCloudflareDurableObjectSqliteDescriptor, createCloudflareSandboxProvider, createMockCloudflareSandboxEnvironment };
