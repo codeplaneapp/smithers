@@ -224,8 +224,9 @@ export const CURATED_PUBLIC_WORKFLOW_IDS = [
     "create-workflow",
     "create-skill",
     "docs-driven-development",
+    "share-pack",
 ];
-export const CURATED_SYSTEM_WORKFLOW_IDS = ["add", "eval-suite-run", "init", "post-failure", "share-pack", "upgrade"];
+export const CURATED_SYSTEM_WORKFLOW_IDS = ["add", "eval-suite-run", "init", "post-failure", "upgrade"];
 /**
  * @param {{ scaffoldCustomAgent?: boolean }} [options]
  * @returns {TemplateFile[]}
@@ -372,6 +373,7 @@ const UI_WORKFLOWS = [
     { key: "create-workflow", title: "Create Workflow" },
     { key: "create-skill", title: "Create Skill" },
     { key: "docs-driven-development", title: "Docs Driven Development" },
+    { key: "share-pack", title: "Share Pack" },
 ];
 function renderGatewayFile() {
     const mounts = UI_WORKFLOWS.map(

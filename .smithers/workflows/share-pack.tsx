@@ -25,7 +25,8 @@ export default smithers((ctx) => {
   return <Workflow name="share-pack"><Sequence>
     <Task id="validate-manifest" output={outputs.validate} retries={0}>{async () => {
       const { loadManifest } = await import(cliModule("manifest"));
-      loadManifest(`${process.cwd()}/.smithers/smithers.toon`);
+      const { findPackRoot } = await import(cliModule("share"));
+      loadManifest(`${findPackRoot(process.cwd())}/smithers.toon`);
       return { ok: true, detail: "smithers.toon is valid" };
     }}</Task>
     {validate ? <Task id="prepare-pack" output={outputs.prepare} retries={0}>{async () => {

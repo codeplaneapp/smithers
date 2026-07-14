@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { loadManifest } from "./manifest.js";
@@ -7,17 +7,21 @@ import { parseWorkflowFrontmatter } from "./workflows.js";
 
 const REGISTRY_REPO = "smithersai/awesome-smithers";
 const PRIVATE_NAMES = new Set(["runs", "logs", "node_modules", "state", "executions"]);
+const PUBLISHABLE_ROOT_NAMES = new Set(["smithers.toon", "README.md", "workflows", "ui", "prompts", "lib"]);
 
-function findSmithersRoot(from = process.cwd()) {
+function findPackRoot(from = process.cwd()) {
   let dir = resolve(from);
   while (true) {
+    if (existsSync(join(dir, "smithers.toon"))) return dir;
     const candidate = join(dir, ".smithers");
     if (existsSync(join(candidate, "smithers.toon"))) return candidate;
     const parent = dirname(dir);
-    if (parent === dir) throw new Error("No .smithers/smithers.toon found in this project or its parents");
+    if (parent === dir) throw new Error("No smithers.toon found in this pack or its parent project");
     dir = parent;
   }
 }
+
+export { findPackRoot };
 
 function githubRepo(repository) {
   const value = String(repository ?? "").trim().replace(/^https?:\/\//, "").replace(/^git@github\.com:/, "").replace(/^github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, "");
@@ -86,12 +90,20 @@ export function updatePacksSection(readme, entry) {
 
 export function stripPrivateFiles(root) {
   const removed = [];
-  for (const name of readdirSyncSafe(root)) {
-    if (name.startsWith("smithers.db") || PRIVATE_NAMES.has(name)) {
-      rmSync(join(root, name), { recursive: true, force: true });
-      removed.push(name);
+  const visit = (current, relativeRoot = "") => {
+    for (const name of readdirSyncSafe(current)) {
+      const relativePath = relativeRoot ? join(relativeRoot, name) : name;
+      if (name.startsWith("smithers.db") || PRIVATE_NAMES.has(name) ||
+          name === "agents.ts" || name === "CLAUDE.md" || name === "AGENTS.md" ||
+          name === ".claude" || name === ".codex" || name === ".env" || name.startsWith(".env.")) {
+        rmSync(join(current, name), { recursive: true, force: true });
+        removed.push(relativePath);
+      } else if (statSync(join(current, name)).isDirectory()) {
+        visit(join(current, name), relativePath);
+      }
     }
-  }
+  };
+  visit(root);
   return removed;
 }
 
@@ -101,22 +113,30 @@ function readdirSyncSafe(root) {
 
 function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-export function sharePack({ from = process.cwd(), repo = REGISTRY_REPO, dryRun = false } = {}) {
-  const root = findSmithersRoot(from);
+function unifiedDiff(before, after) {
+  if (before === after) return "";
+  const lines = ["--- a/README.md", "+++ b/README.md"];
+  for (const line of before.split("\n")) lines.push(`-${line}`);
+  for (const line of after.split("\n")) lines.push(`+${line}`);
+  return lines.join("\n");
+}
+
+export function sharePack({ from = process.cwd(), repo = REGISTRY_REPO, dryRun = false, registryReadme } = {}) {
+  const root = findPackRoot(from);
   const manifest = loadManifest(join(root, "smithers.toon"));
   const pack = buildPackEntry(root, { manifest });
-  const readmePath = join(root, "..", "README.md");
-  const original = existsSync(readmePath) ? readFileSync(readmePath, "utf8") : "";
-  const updated = updatePacksSection(original, pack.entry);
-  const diff = original === updated ? "" : `--- README.md\n+++ README.md\n${updated.split("\n").map((line, i) => `${original.split("\n")[i] === line ? " " : "+"}${line}`).join("\n")}`;
-  if (dryRun) return { dryRun: true, entry: pack.entry, diff, manifest: pack, repository: repo ?? REGISTRY_REPO };
+  const registry = repo ?? REGISTRY_REPO;
+  if (dryRun) {
+    const original = registryReadme ?? "";
+    const updated = updatePacksSection(original, pack.entry);
+    return { dryRun: true, entry: pack.entry, diff: unifiedDiff(original, updated), manifest: pack, repository: registry };
+  }
 
   try { execFileSync("gh", ["auth", "status"], { stdio: "ignore" }); }
   catch { throw new Error("The `gh` CLI is required and must be authenticated (`gh auth login`) to share a pack"); }
   const temp = join(homedir(), `.smithers-share-${Date.now()}`);
   mkdirSync(temp, { recursive: true });
   try {
-    const registry = repo ?? REGISTRY_REPO;
     const branch = `smithers/share-${manifest.name.replace(/[^A-Za-z0-9._-]+/g, "-")}-${Date.now()}`;
     execFileSync("gh", ["repo", "fork", registry, "--clone"], { cwd: temp, stdio: "inherit" });
     const checkout = join(temp, basename(registry));
@@ -137,10 +157,16 @@ export function sharePack({ from = process.cwd(), repo = REGISTRY_REPO, dryRun =
 }
 
 export function preparePackForShare({ from = process.cwd(), repository } = {}) {
-  const root = findSmithersRoot(from);
+  const root = findPackRoot(from);
   const manifest = loadManifest(join(root, "smithers.toon"));
   const removed = stripPrivateFiles(root);
-  const readmePath = join(root, "..", "README.md");
+  for (const name of readdirSyncSafe(root)) {
+    if (!PUBLISHABLE_ROOT_NAMES.has(name)) {
+      rmSync(join(root, name), { recursive: true, force: true });
+      removed.push(name);
+    }
+  }
+  const readmePath = join(root, "README.md");
   if (!existsSync(readmePath)) {
     const install = githubRepo(repository || manifest.repository) || "owner/repo";
     writeFileSync(readmePath, `# ${manifest.name}\n\n${manifest.description || "A Smithers workflow pack."}\n\nInstall with ${install}.\n`);
@@ -150,8 +176,9 @@ export function preparePackForShare({ from = process.cwd(), repository } = {}) {
 
 export function publishPackRepository({ from = process.cwd(), repository } = {}) {
   if (!repository) throw new Error("A GitHub repository name is required to publish the pack");
+  const root = findPackRoot(from);
   try { execFileSync("gh", ["auth", "status"], { stdio: "ignore" }); }
   catch { throw new Error("The `gh` CLI is required and must be authenticated (`gh auth login`) to publish a pack"); }
-  execFileSync("gh", ["repo", "create", repository, "--public", "--source", from, "--remote", "origin", "--push"], { cwd: from, stdio: "inherit" });
+  execFileSync("gh", ["repo", "create", repository, "--public", "--source", root, "--remote", "origin", "--push"], { cwd: root, stdio: "inherit" });
   return `published ${repository}`;
 }
