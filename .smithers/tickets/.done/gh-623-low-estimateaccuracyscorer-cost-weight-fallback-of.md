@@ -21,3 +21,6 @@ Arithmetic reproduced on current code: `weight = predicted.costUsd` when `>0` el
 
 ---
 *Found in the pre-0.28.0 review of `v0.27.0..HEAD` (@0ed2c28710), adversarially verified against the code. Part of the `pre-0.28-review` batch.*
+
+
+> Closed by ticket-fleet: landed on main in 0fa4926cb5662042b4b79b4e0ef82d54a747610f.
