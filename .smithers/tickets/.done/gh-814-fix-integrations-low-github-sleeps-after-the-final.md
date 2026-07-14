@@ -33,3 +33,6 @@ Move server-directed delay into the retry schedule so it applies only between at
 ## Dedupe notes
 
 No matching issue or open PR.
+
+
+> Closed by ticket-fleet: landed on main in b58ef7c6eaf43242bd91ad4f44f4c0208874f7ac.
