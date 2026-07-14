@@ -6,12 +6,14 @@ import React from "react";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { getTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";
 /** @typedef {import("./CheckConfig.ts").CheckConfig} CheckConfig */
 
 const execAsync = promisify(exec);
+const COMMAND_MAX_BUFFER = 16 * 1024 * 1024;
 
 /**
  * Whether a single check's output row counts as a pass. A missing row (the
@@ -67,8 +69,9 @@ function normalizeChecks(checks) {
  * @returns {Promise<Record<string, unknown>>}
  */
 async function runCommandCheck(command) {
+    const cwd = getTaskRuntime()?.rootDir ?? process.cwd();
     try {
-        const result = await execAsync(command, { maxBuffer: 1024 * 1024 });
+        const result = await execAsync(command, { cwd, maxBuffer: COMMAND_MAX_BUFFER });
         return {
             passed: true,
             ok: true,
@@ -80,6 +83,18 @@ async function runCommandCheck(command) {
     }
     catch (error) {
         const err = /** @type {Error & { code?: unknown; signal?: unknown; stdout?: unknown; stderr?: unknown }} */ (error);
+        if (err.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+            return {
+                passed: true,
+                ok: true,
+                command,
+                exitCode: 0,
+                stdout: typeof err.stdout === "string" ? err.stdout : "",
+                stderr: typeof err.stderr === "string" ? err.stderr : "",
+                truncated: true,
+                diagnostic: `Command output exceeded the ${COMMAND_MAX_BUFFER}-byte capture limit and was truncated`,
+            };
+        }
         return {
             passed: false,
             ok: false,

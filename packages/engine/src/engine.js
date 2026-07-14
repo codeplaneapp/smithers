@@ -5138,6 +5138,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     stepId: desc.nodeId,
                     attempt: attemptNo,
                     iteration: desc.iteration,
+                    rootDir: taskRoot,
                     signal: taskSignal,
                     db,
                     heartbeat: (data) => {

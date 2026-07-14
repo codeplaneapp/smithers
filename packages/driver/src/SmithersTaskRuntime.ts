@@ -15,6 +15,8 @@ export type SmithersTaskRuntime = {
   stepId: string;
   attempt: number;
   iteration: number;
+  /** Absolute working directory for this task, including any Worktree lane. */
+  rootDir: string;
   signal: AbortSignal;
   db: SmithersDb;
   heartbeat: (data?: unknown) => void;

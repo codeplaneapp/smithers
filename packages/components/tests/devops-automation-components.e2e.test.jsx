@@ -1,6 +1,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { dirname } from "node:path";
+import { writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { Effect } from "effect";
 import {
@@ -37,6 +38,8 @@ const checkResultSchema = z.object({
     total: z.number().optional(),
     strategy: z.string().optional(),
     results: z.record(z.string(), z.boolean()).optional(),
+    truncated: z.boolean().optional(),
+    diagnostic: z.string().optional(),
 });
 
 function tableRows(db, table) {
@@ -78,6 +81,42 @@ function scriptedAgent(id, script, extra = {}) {
 }
 
 describe("devops automation components across the real workflow engine", () => {
+    test("CheckSuite command checks run from the workflow rootDir", async () => {
+        const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
+            checkResult: checkResultSchema,
+        });
+        const rootDir = dirname(dbPath);
+        writeFileSync(join(rootDir, "run-root-marker.txt"), "root-only-marker");
+        try {
+            const workflow = smithers(() => (
+                <Workflow name="checksuite-root-dir-e2e">
+                    <CheckSuite
+                        id="cwd"
+                        verdictOutput={outputs.checkResult}
+                        checks={[{
+                            id: "marker",
+                            command: command("if (require('node:fs').readFileSync('run-root-marker.txt', 'utf8') !== 'root-only-marker') process.exit(9); console.log('root-only-marker')"),
+                        }]}
+                    />
+                </Workflow>
+            ));
+
+            expect(rootDir).not.toBe(process.cwd());
+            const result = await runInTestRoot(workflow, dbPath, { input: {} });
+
+            expect(result.status).toBe("finished");
+            const commandRow = tableRows(db, tables.checkResult).find((row) => row.nodeId === "cwd-marker");
+            expect(commandRow).toMatchObject({
+                passed: true,
+                ok: true,
+            });
+            expect(commandRow?.stdout).toContain("root-only-marker");
+        }
+        finally {
+            cleanup();
+        }
+    });
+
     test("CheckSuite runs shell and agent checks and persists all-pass, majority, and any-pass verdicts", async () => {
         const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
             checkResult: checkResultSchema,

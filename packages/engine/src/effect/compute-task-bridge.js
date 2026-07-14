@@ -505,6 +505,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                     stepId: desc.nodeId,
                     attempt: attemptNo,
                     iteration: desc.iteration,
+                    rootDir: toolConfig.rootDir,
                     signal: computeAbortController.signal,
                     db,
                     heartbeat: (data) => {

@@ -90,6 +90,26 @@ describe("devops automation gap hardening", () => {
         expect(row.error.length).toBeGreaterThan(0);
     });
 
+    test("CheckSuite command check passes when successful stdout exceeds the capture limit", async () => {
+        const largeCommand = `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(17 * 1024 * 1024))"`;
+        const { graph } = await render(
+            <CheckSuite
+                id="gate"
+                verdictOutput="verdict_out"
+                checks={[{ id: "large", command: largeCommand }]}
+            />,
+        );
+
+        const row = await byId(graph, "gate-large").computeFn();
+        expect(row).toMatchObject({
+            passed: true,
+            ok: true,
+            command: largeCommand,
+            truncated: true,
+        });
+        expect(row.stdout.length).toBeGreaterThan(1024 * 1024);
+    });
+
     test("CheckSuite verdict passes primitive rows, fails passed:false markers, and any-pass with zero passes fails", async () => {
         const { graph } = await render(
             <CheckSuite
