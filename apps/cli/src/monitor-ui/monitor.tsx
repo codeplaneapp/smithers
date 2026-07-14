@@ -724,8 +724,10 @@ function CronsPanel() {
 
 const SCORES_COLLAPSE_THRESHOLD = 5;
 
-function useRunScores(runId: string, live: boolean): { rows: ScoreRow[]; loaded: boolean } {
-  const api = useJsonApi(`/v1/api/scores?runId=${encodeURIComponent(runId)}`, live ? 15_000 : null);
+type RunScores = { rows: ScoreRow[]; loaded: boolean };
+
+function useRunScores(runId: string | undefined, live: boolean): RunScores {
+  const api = useJsonApi(runId ? `/v1/api/scores?runId=${encodeURIComponent(runId)}` : null, live ? 15_000 : null);
   const rows = useMemo(() => scoreRowsOf(api.body), [api.body]);
   return { rows, loaded: api.loaded };
 }
@@ -751,8 +753,7 @@ function ScoreRowLine({ row }: { row: ScoreRow }) {
   );
 }
 
-function ScoresPanel({ runId, live }: { runId: string; live: boolean }) {
-  const { rows, loaded } = useRunScores(runId, live);
+function ScoresPanel({ scores: { rows, loaded } }: { scores: RunScores }) {
   // No scores → no panel. Most runs never run a scorer; an empty-state panel
   // on every run detail would be pure noise.
   if (!loaded || rows.length === 0) return null;
@@ -790,8 +791,7 @@ function ScoresPanel({ runId, live }: { runId: string; live: boolean }) {
 }
 
 /** Score chips under the inspector's What-happened section — only when this node was scored. */
-function NodeScoreChips({ runId, nodeId, live }: { runId: string; nodeId: string; live: boolean }) {
-  const { rows, loaded } = useRunScores(runId, live);
+function NodeScoreChips({ nodeId, scores: { rows, loaded } }: { nodeId: string; scores: RunScores }) {
   const nodeScores = useMemo(() => scoresForNode(rows, nodeId), [rows, nodeId]);
   if (!loaded || nodeScores.length === 0) return null;
   return (
@@ -2594,10 +2594,12 @@ function HijackModal({
 function NodeInspector({
   runId,
   node,
+  scores,
   onResult,
 }: {
   runId: string;
   node: TreeNode;
+  scores: RunScores;
   onResult: (kind: "ok" | "err", text: string) => void;
 }) {
   const nodeId = node.id ?? treeNodeKey(node);
@@ -2727,7 +2729,7 @@ function NodeInspector({
       ) : null}
       <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
       <NodeWhatHappened runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} status={node.status} />
-      <NodeScoreChips runId={runId} nodeId={nodeId} live={isLive} />
+      <NodeScoreChips nodeId={nodeId} scores={scores} />
       <dl className="mon-meta-grid">
         <dt>id</dt>
         <dd className="mon-mono">{nodeId}</dd>
@@ -2874,6 +2876,7 @@ function NodeInspector({
 
 function RunDetail({
   runId,
+  scores,
   onResult,
   selectedNode,
   onSelectNode,
@@ -2881,6 +2884,7 @@ function RunDetail({
   onAutoSelected,
 }: {
   runId: string;
+  scores: RunScores;
   onResult: (kind: "ok" | "err", text: string) => void;
   selectedNode: TreeNode | undefined;
   onSelectNode: (node: TreeNode | undefined) => void;
@@ -3036,7 +3040,7 @@ function RunDetail({
 
       <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} />
 
-      <ScoresPanel runId={runId} live={!isTerminalStatus(status)} />
+      <ScoresPanel scores={scores} />
 
       {showCustomUi && customUiUrl ? (
         <div className="mon-modal-backdrop" onClick={() => setShowCustomUi(false)} data-testid="monitor-ui-modal">
@@ -3089,6 +3093,8 @@ function App() {
   const runsQuery = useGatewayRuns({ filter: { limit: 1000 } });
   const allRuns = (runsQuery.data ?? []) as RunRow[];
   const [runsPage, setRunsPage] = useState(1);
+  const selectedRun = allRuns.find((run) => run.runId === selectedRunId);
+  const scores = useRunScores(selectedRunId, !isTerminalStatus(selectedRun?.status));
 
   // Resolve ?runId=&nodeId= once, when runs first arrive. An unknown id still
   // selects (RunDetail renders an honest "Run not found" state).
@@ -3184,6 +3190,7 @@ function App() {
           ) : selectedRunId ? (
             <RunDetail
               runId={selectedRunId}
+              scores={scores}
               onResult={showResult}
               selectedNode={selectedNode}
               onSelectNode={selectNode}
@@ -3208,7 +3215,7 @@ function App() {
         </div>
 
         {!monitorMode.embed && selectedRunId && selectedNode ? (
-          <NodeInspector runId={selectedRunId} node={selectedNode} onResult={showResult} />
+          <NodeInspector runId={selectedRunId} node={selectedNode} scores={scores} onResult={showResult} />
         ) : null}
       </div>
     </main>
