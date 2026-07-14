@@ -35,3 +35,6 @@ Persist or derive a durable parent/ordered-child key, or reconstruct from durabl
 ## Dedupe notes
 
 #626 and #737 concern different rendering/snapshot behavior.
+
+
+> Closed by ticket-fleet: landed on main in 7f6c4ab6e3fd0bd828d6787999dd0f6fecbd21ca.
