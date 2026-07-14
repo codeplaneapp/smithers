@@ -205,6 +205,7 @@ export function createAwsEcsSandboxRunner(options: {
 	captureLogs?: boolean;
 	logs?: unknown;
 	logGroupName?: string;
+	awslogsStreamPrefix?: string;
 	maxOutputBytes?: number;
 	secrets?: string[];
 }): Promise<{
