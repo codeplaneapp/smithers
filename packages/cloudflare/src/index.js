@@ -281,7 +281,7 @@ export function createCloudflareSandboxProvider(options = {}) {
 				const exit = typeof proc.waitForExit === "function"
 					? await proc.waitForExit(request.toolTimeoutMs)
 					: undefined;
-				const exitCode = Number(exit?.exitCode ?? proc.exitCode ?? 0);
+				const exitCode = Number(exit?.exitCode ?? proc.exitCode ?? 1);
 				if (exitCode !== 0) {
 					throw new Error(`Cloudflare sandbox process "${command}" exited with code ${exitCode} for sandbox "${remoteSandboxId}".`);
 				}

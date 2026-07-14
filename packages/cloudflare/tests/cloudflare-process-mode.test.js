@@ -76,6 +76,34 @@ describe("createCloudflareSandboxProvider process mode failures", () => {
 			'exited with code 5',
 		);
 	});
+
+	test("defaults an unknown exit status to failure", async () => {
+		const sandbox = {
+			async mkdir() {},
+			writeFile() {},
+			async readFile() {
+				return { content: JSON.stringify({ status: "finished", output: {} }) };
+			},
+			async startProcess(command) {
+				return {
+					pid: 9,
+					command,
+					async waitForExit() {
+						return { exitCode: null };
+					},
+				};
+			},
+		};
+		const provider = createCloudflareSandboxProvider({
+			binding: {},
+			getSandbox: () => sandbox,
+			command: "node run.js",
+			execution: "process",
+		});
+		await expect(provider.run(makeRequest())).rejects.toThrow(
+			'exited with code 1',
+		);
+	});
 });
 
 describe("createMockCloudflareSandboxEnvironment process handle", () => {
