@@ -15,6 +15,7 @@ const GROUPS_WITH_DOTTED_DOCS = new Set([
     "cron",
     "memory",
     "openapi",
+    "packs",
     "token",
     "workflow",
     "skills",
@@ -76,7 +77,8 @@ test("CLI overview documents every current CLI command", () => {
     expect(documented.has("tui")).toBe(false);
     expect(documented.has("memory.recall")).toBe(false);
     expect(readFileSync(DOCS_MEMORY_CONCEPT, "utf8")).not.toContain("smithers-orchestrator memory recall");
-}, 30_000);
+    // ~9 full CLI boots (top-level + each dotted group); 30s flakes under load.
+}, 90_000);
 
 /** Extract the flag names documented for a command in the TOON catalog. */
 function documentedFlags(markdown, command) {

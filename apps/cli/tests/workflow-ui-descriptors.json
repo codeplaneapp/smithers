@@ -401,6 +401,17 @@
     "verifyOutput": false
   },
   {
+    "key": "share-pack",
+    "title": "Share Pack",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "publishes to GitHub via the gh CLI (network + auth); UI is asserted to mount + boot",
+    "verifyOutput": false
+  },
+  {
     "key": "docs-driven-development",
     "title": "Docs Driven Development",
     "runnable": false,

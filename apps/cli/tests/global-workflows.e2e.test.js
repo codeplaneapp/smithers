@@ -121,6 +121,7 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
         expect(existsSync(join(smithersHome, rel))).toBe(true);
     }
     expect(readdirSync(join(smithersHome, "workflows")).filter((name) => name.endsWith(".tsx")).sort()).toEqual([
+        "add.tsx",
         "create-skill.tsx",
         "create-ui.tsx",
         "create-workflow.tsx",
@@ -128,6 +129,7 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
         "eval-suite-run.tsx",
         "init.tsx",
         "post-failure.tsx",
+        "share-pack.tsx",
         "upgrade.tsx",
     ]);
     expect(existsSync(join(smithersHome, "components"))).toBe(false);
