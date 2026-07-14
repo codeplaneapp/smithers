@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
 import type { ListApprovalsRequest, ListApprovalsResponse } from "@smithers-orchestrator/gateway/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live pending-approval list over the `approvals` collection (initial
@@ -20,10 +20,11 @@ export function useGatewayApprovals(params: ListApprovalsRequest = {}): GatewayA
   }, [collections, params]);
 
   const data = (live.data ?? []) as GatewayApprovalRow[] as ListApprovalsResponse;
-  return {
+  return gatewayCollectionAsyncState({
+    collection,
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    hasData: data.length > 0,
+    live,
     refetch,
-  };
+  });
 }

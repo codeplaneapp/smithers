@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayRpcPayload, GatewayRunRow } from "@smithers-orchestrator/gateway-client";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live single-run record over the `run` collection (initial `getRun` +
@@ -21,10 +21,11 @@ export function useGatewayRun(runId: string | undefined): GatewayAsyncState<Gate
   }, [collections, runId]);
 
   const data = ((live.data ?? []) as GatewayRunRow[]).find((row) => row.runId === runId) as GatewayRpcPayload<"getRun"> | undefined;
-  return {
+  return gatewayCollectionAsyncState({
+    collection: collection ?? {},
     data,
-    error: undefined,
-    loading: Boolean(runId) && !live.isReady && data === undefined,
+    hasData: !runId || data !== undefined,
+    live,
     refetch,
-  };
+  });
 }

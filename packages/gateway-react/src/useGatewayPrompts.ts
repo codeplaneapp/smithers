@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayPromptRow } from "@smithers-orchestrator/gateway-client";
 import type { ListPromptsRequest } from "@smithers-orchestrator/gateway/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live registered-prompt list over the `prompts` collection (initial
@@ -22,10 +22,11 @@ export function useGatewayPrompts(): GatewayAsyncState<GatewayPromptRow[]> {
   }, [collections]);
 
   const data = (live.data ?? []) as GatewayPromptRow[];
-  return {
+  return gatewayCollectionAsyncState({
+    collection,
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    hasData: data.length > 0,
+    live,
     refetch,
-  };
+  });
 }

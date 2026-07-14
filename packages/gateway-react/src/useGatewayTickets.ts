@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayTicketRow } from "@smithers-orchestrator/gateway-client";
 import type { ListTicketsRequest } from "@smithers-orchestrator/gateway/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live work docs (tickets/plans/specs/proposals) over the `tickets` collection
@@ -23,10 +23,11 @@ export function useGatewayTickets(params: ListTicketsRequest = {}): GatewayAsync
   }, [collections, params]);
 
   const data = (live.data ?? []) as GatewayTicketRow[];
-  return {
+  return gatewayCollectionAsyncState({
+    collection,
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    hasData: data.length > 0,
+    live,
     refetch,
-  };
+  });
 }

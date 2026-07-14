@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import React, { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { z } from "zod";
-import { Gateway } from "@smithers-orchestrator/server";
+import { Gateway, type GatewayTokenGrant } from "@smithers-orchestrator/server";
 import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
 import { createSmithers } from "smithers-orchestrator";
 import {
@@ -95,10 +95,13 @@ async function bootGateway() {
       rmSync(dirname(dbPath), { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
     } catch {}
   });
+  const tokens: Record<string, GatewayTokenGrant> = {
+    "operator-token": { role: "admin", scopes: ["*"], userId: "user:operator" },
+  };
   const gateway = new Gateway({
     auth: {
       mode: "token",
-      tokens: { "operator-token": { role: "admin", scopes: ["*"], userId: "user:operator" } },
+      tokens,
     },
   });
   gateway.register("value", api.smithers((ctx: any) =>
@@ -110,11 +113,16 @@ async function bootGateway() {
   ));
   const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => gateway.close());
-  return { baseUrl: `http://127.0.0.1:${getPort(server)}` };
+  return {
+    baseUrl: `http://127.0.0.1:${getPort(server)}`,
+    grantToken(token: string) {
+      tokens[token] = { role: "admin", scopes: ["*"], userId: `user:${token}` };
+    },
+  };
 }
 
-function makeClient(baseUrl: string) {
-  return new SmithersGatewayClient({ baseUrl, token: "operator-token", fetch: Bun.fetch });
+function makeClient(baseUrl: string, token = "operator-token") {
+  return new SmithersGatewayClient({ baseUrl, token, fetch: Bun.fetch });
 }
 
 async function launchRun(baseUrl: string, value: number) {
@@ -303,6 +311,58 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     await swallow(actions.createTicket({ kind: "ticket", title: "t", body: "b" } as any));
     await swallow(actions.updateTicket({ id: "missing", patch: {} } as any));
     await swallow(actions.deleteTicket({ id: "missing" } as any));
+
+    await harness.unmount();
+  });
+
+  test("collection async states surface real endpoint failures and refetch recovers", async () => {
+    const { baseUrl, grantToken } = await bootGateway();
+    const runId = await launchRun(baseUrl, 11);
+    const captured: Record<string, any> = {};
+
+    function Probe() {
+      captured.runs = useGatewayRuns();
+      captured.run = useGatewayRun(runId);
+      captured.approvals = useGatewayApprovals({ filter: { runId } });
+      captured.crons = useGatewayCrons();
+      captured.memoryFacts = useGatewayMemoryFacts();
+      captured.prompts = useGatewayPrompts();
+      captured.scores = useGatewayScores(runId);
+      captured.tickets = useGatewayTickets();
+      captured.workflows = useGatewayWorkflows();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(createElement(
+      SmithersGatewayProvider,
+      { client: makeClient(baseUrl, "recover-token") },
+      createElement(Probe),
+    ));
+
+    const keys = ["runs", "run", "approvals", "crons", "memoryFacts", "prompts", "scores", "tickets", "workflows"];
+    await waitFor(
+      () => keys.every((key) => captured[key]?.loading === false && captured[key]?.error instanceof Error),
+      "collection load errors",
+    );
+    for (const key of keys) {
+      expect(captured[key].error).toBeInstanceOf(Error);
+    }
+    expect(captured.runs.data).toEqual([]);
+    expect(captured.run.data).toBeUndefined();
+
+    grantToken("recover-token");
+    await act(async () => {
+      await Promise.all(keys.map((key) => captured[key].refetch()));
+    });
+
+    await waitFor(
+      () => keys.every((key) => captured[key]?.loading === false && captured[key]?.error === undefined),
+      "collection refetch recovery",
+    );
+    expect(captured.run.data?.runId).toBe(runId);
+    expect((captured.runs.data as any[]).some((row) => row.runId === runId)).toBe(true);
+    expect((captured.workflows.data as any[]).some((row) => row.key === "value")).toBe(true);
 
     await harness.unmount();
   });

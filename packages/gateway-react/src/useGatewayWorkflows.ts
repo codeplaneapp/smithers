@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayWorkflowRow } from "@smithers-orchestrator/gateway-client";
 import type { ListWorkflowsRequest, ListWorkflowsResponse } from "@smithers-orchestrator/gateway/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live workflow list over the `workflows` collection (initial `listWorkflows`,
@@ -19,10 +19,11 @@ export function useGatewayWorkflows(params: ListWorkflowsRequest = {}): GatewayA
   }, [collections, params]);
 
   const data = (live.data ?? []) as GatewayWorkflowRow[] as ListWorkflowsResponse;
-  return {
+  return gatewayCollectionAsyncState({
+    collection,
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    hasData: data.length > 0,
+    live,
     refetch,
-  };
+  });
 }

@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayScoreRow } from "@smithers-orchestrator/gateway-client";
 import type { ListScoresRequest } from "@smithers-orchestrator/gateway/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live scorer/eval results for one run over the `scores` collection (initial
@@ -26,10 +26,11 @@ export function useGatewayScores(runId: string, nodeId?: string): GatewayAsyncSt
   }, [collections, runId, nodeId]);
 
   const data = (live.data ?? []) as GatewayScoreRow[];
-  return {
+  return gatewayCollectionAsyncState({
+    collection,
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    hasData: data.length > 0,
+    live,
     refetch,
-  };
+  });
 }

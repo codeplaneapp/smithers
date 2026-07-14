@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayCronRow } from "@smithers-orchestrator/gateway-client";
 import type { CronListRequest } from "@smithers-orchestrator/gateway/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live cron-schedule list over the `crons` collection (initial `cronList`,
@@ -21,10 +21,11 @@ export function useGatewayCrons(params: CronListRequest = {}): GatewayAsyncState
   }, [collections, params]);
 
   const data = (live.data ?? []) as GatewayCronRow[];
-  return {
+  return gatewayCollectionAsyncState({
+    collection,
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    hasData: data.length > 0,
+    live,
     refetch,
-  };
+  });
 }

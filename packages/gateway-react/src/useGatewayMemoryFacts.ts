@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayMemoryFactRow } from "@smithers-orchestrator/gateway-client";
 import type { ListMemoryFactsRequest } from "@smithers-orchestrator/gateway/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
-import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
+import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
  * Live cross-run memory facts over the `memoryFacts` collection (initial
@@ -23,10 +23,11 @@ export function useGatewayMemoryFacts(namespace?: string): GatewayAsyncState<Gat
   }, [collections, namespace]);
 
   const data = (live.data ?? []) as GatewayMemoryFactRow[];
-  return {
+  return gatewayCollectionAsyncState({
+    collection,
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    hasData: data.length > 0,
+    live,
     refetch,
-  };
+  });
 }
