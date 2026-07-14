@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Context Engineer
 // smithers-description: Turn a vague user script into a context contract, route it to skills/workflows, add backpressure, execute, and report — the concierge proxy.

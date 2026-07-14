@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Events probe
 // smithers-description: Agent-free liveness probe — emits a steady stream of node lifecycle events so gateway/monitor streaming can be verified end to end.

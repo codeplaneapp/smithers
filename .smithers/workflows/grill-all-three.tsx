@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-display-name: Grill All Three
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Loop, Sequence } from "smithers-orchestrator";

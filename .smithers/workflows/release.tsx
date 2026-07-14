@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-display-name: Release
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence } from "smithers-orchestrator";

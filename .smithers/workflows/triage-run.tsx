@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Triage Run
 // smithers-description: Diagnose one failed or stuck Smithers run: pull events/logs, find the root cause, propose a fix/rewind/retry.

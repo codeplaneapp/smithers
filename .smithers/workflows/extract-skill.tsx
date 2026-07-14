@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Extract Skill
 // smithers-description: After a run, harvest a reusable skill or workflow and durable memory from the pattern.

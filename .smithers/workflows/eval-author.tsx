@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Eval Author
 // smithers-description: Turn acceptance criteria into eval fixtures (JSONL cases + rubric) wired to smithers eval.

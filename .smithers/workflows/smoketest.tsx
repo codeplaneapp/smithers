@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Smoke Test
 // smithers-description: Comprehensive release smoke test. Four parallel agents prove the published smithers-orchestrator works for a brand-new user: the human onboarding flow, the agent onboarding flow, every user-facing change across the last 4 releases, and a real workflow UI served over the gateway — then a deterministic report aggregates the verdict.

@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Report Slideshow
 // smithers-description: Generate a concise HTML slideshow report from a Smithers run state and artifacts.

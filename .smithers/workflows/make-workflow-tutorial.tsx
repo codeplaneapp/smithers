@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Make Workflow Tutorial
 // smithers-description: First-time tutorial — scans your repo + coding-agent chat history, recommends a ranked list of Smithers workflows to build for your situation, lets you pick one, builds it with a custom UI via create-workflow, then launches + monitors + self-improves it. Ends with a "dive deeper" feature preview so you know what else to ask your agent.

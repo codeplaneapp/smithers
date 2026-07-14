@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Smithering
 // smithers-description: Codex 5.6 routes work by size — Luna handles research and implementation, Sol handles planning/review/orchestration, and Terra verifies routine work across the full durable build pipeline.

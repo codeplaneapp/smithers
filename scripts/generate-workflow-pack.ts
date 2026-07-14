@@ -19,7 +19,7 @@
  * `create-workflow`'s own scaffold step can run this for you so authoring a
  * workflow ships it to init automatically.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -189,6 +189,21 @@ function dddStarterUiContents(relPath: string, canonical: string): string {
 function build(): TemplateFile[] {
   const files: TemplateFile[] = [];
   const byPath = new Map<string, TemplateFile>();
+
+  const seededIds = new Set(SEEDED_WORKFLOW_IDS);
+  for (const entry of readdirSync(resolve(SMITHERS_DIR, "workflows"), { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".tsx")) continue;
+    const source = readFileSync(resolve(SMITHERS_DIR, "workflows", entry.name), "utf8");
+    if (/^\/\/\s*smithers-source:\s*seeded\b/m.test(source)) {
+      const id = entry.name.slice(0, -".tsx".length);
+      if (!seededIds.has(id)) {
+        throw new Error(
+          `${entry.name} carries the "// smithers-source: seeded" header but is missing from SEEDED_WORKFLOW_IDS. ` +
+            "Add it to the curated seed inventory or relabel the workflow source.",
+        );
+      }
+    }
+  }
 
   const push = (path: string, contents: string) => {
     const existing = byPath.get(path);

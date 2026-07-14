@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-display-name: Tickets Create
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";

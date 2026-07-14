@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Hello World
 // smithers-description: The smallest possible workflow: one agent task that runs the prompt in .smithers/prompts/hello.mdx. Your starting point for authoring your own.

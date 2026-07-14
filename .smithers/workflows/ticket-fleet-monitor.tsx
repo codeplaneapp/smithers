@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Ticket fleet monitor
 // smithers-description: Cron health monitor for ticket-fleet runs — a cheap agent inspects the latest run and reports whether it is progressing.

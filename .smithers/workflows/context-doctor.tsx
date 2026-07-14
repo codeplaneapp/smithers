@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Context Doctor
 // smithers-description: Run deterministic checks over a context contract and report missing goals, inputs, verification, approvals, and report specs.

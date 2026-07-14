@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Delegation Chain
 // smithers-description: Recursive multi-tier delegation — strong models refine the goal, decompose into tiered chunks, de-risk with research/POC probes, then execute with per-node backpressure (reviews over jj commit ranges, checks, developer previews), live-editable outputs, cost forecasts, and full scoring.
