@@ -24,11 +24,19 @@ export async function runDurableAdd({ spec, global = false, yes = false } = {}) 
     if (!workflow) return null;
     ensureSmithersTables(workflow.db);
     try {
-      return await Effect.runPromise(runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         input: { spec, global, yes },
         runId: crypto.randomUUID(),
         workflowPath: entryFile,
       }));
+      // A run that ended failed/cancelled must never reach c.ok as a success.
+      // Fall back to the imperative path, which re-attempts and surfaces the
+      // real installation error with a non-zero exit.
+      if (!result || result.status !== "finished") {
+        process.stderr.write(`[smithers:add] durable add ended ${result?.status ?? "without a result"}; retrying imperatively\n`);
+        return null;
+      }
+      return result;
     } finally {
       const close = workflow.close ?? workflow.db?.close;
       if (typeof close === "function") await close.call(workflow.close ? workflow : workflow.db);

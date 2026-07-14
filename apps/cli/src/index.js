@@ -5114,7 +5114,13 @@ const cli = Cli.create({
     }),
     alias: { dryRun: "n" },
     run(c) {
-        try { return c.ok(sharePack({ from: process.cwd(), repo: c.options.repo, dryRun: c.options.dryRun })); }
+        try {
+            // Tests exercise the public dry-run path against a real Packs
+            // section by pointing this env var at a README fixture.
+            const readmeOverride = process.env.SMITHERS_SHARE_REGISTRY_README;
+            const registryReadme = readmeOverride ? readFileSync(readmeOverride, "utf8") : undefined;
+            return c.ok(sharePack({ from: process.cwd(), repo: c.options.repo, dryRun: c.options.dryRun, registryReadme }));
+        }
         catch (error) { return c.error({ code: "PACK_SHARE_FAILED", message: error?.message ?? String(error) }); }
     },
 })

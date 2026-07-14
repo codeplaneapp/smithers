@@ -52,6 +52,7 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
     .filter((f) => f.endsWith(".tsx"))
     .sort();
   expect(files).toEqual([
+    "add.tsx",
     "create-skill.tsx",
     "create-ui.tsx",
     "create-workflow.tsx",
@@ -59,6 +60,7 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
     "eval-suite-run.tsx",
     "init.tsx",
     "post-failure.tsx",
+    "share-pack.tsx",
     "upgrade.tsx",
   ]);
 

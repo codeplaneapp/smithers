@@ -22,27 +22,40 @@ export default smithers((ctx) => {
   const prepare = ctx.outputMaybe("prepare", { nodeId: "prepare-pack" });
   const publish = ctx.outputMaybe("publish", { nodeId: "publish-pack" });
   const shared = ctx.outputMaybe("share", { nodeId: "share-registry" });
+  const canPrepare = validate?.ok === true;
+  const canPublish = prepare?.ok === true && !ctx.input.dryRun;
+  const canShare = prepare?.ok === true && (ctx.input.dryRun || publish?.ok === true);
+  const terminalFailure = [validate, prepare, publish, shared].some((row) => row && !row.ok);
   return <Workflow name="share-pack"><Sequence>
     <Task id="validate-manifest" output={outputs.validate} retries={0}>{async () => {
-      const { loadManifest } = await import(cliModule("manifest"));
-      const { findPackRoot } = await import(cliModule("share"));
-      loadManifest(`${findPackRoot(process.cwd())}/smithers.toon`);
-      return { ok: true, detail: "smithers.toon is valid" };
+      try {
+        const { loadManifest } = await import(cliModule("manifest"));
+        const { findPackRoot, resolveShareRepositories } = await import(cliModule("share"));
+        const manifest = loadManifest(`${findPackRoot(process.cwd())}/smithers.toon`);
+        resolveShareRepositories({ repository: ctx.input.repo, manifestRepository: manifest.repository, registry: ctx.input.registry });
+        return { ok: true, detail: "smithers.toon is valid" };
+      } catch (error) { return { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
     }}</Task>
-    {validate ? <Task id="prepare-pack" output={outputs.prepare} retries={0}>{async () => {
-      const { preparePackForShare } = await import(cliModule("share"));
-      return { ok: true, detail: preparePackForShare({ from: process.cwd(), repository: ctx.input.repo }) };
+    {canPrepare ? <Task id="prepare-pack" output={outputs.prepare} retries={0}>{async () => {
+      try {
+        const { preparePackForShare } = await import(cliModule("share"));
+        // Staging-copy flow: the live .smithers is never mutated.
+        return { ok: true, detail: preparePackForShare({ from: process.cwd(), repository: ctx.input.repo }).detail };
+      } catch (error) { return { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
     }}</Task> : null}
-    {prepare ? <Task id="publish-pack" output={outputs.publish} retries={0}>{async () => {
-      if (!ctx.input.repo) return { ok: false, detail: "Set repo to create and push the pack repository." };
-      const { publishPackRepository } = await import(cliModule("share"));
-      return { ok: true, detail: publishPackRepository({ from: process.cwd(), repository: ctx.input.repo }) };
+    {canPublish ? <Task id="publish-pack" output={outputs.publish} retries={0}>{async () => {
+      try {
+        const { publishPackRepository } = await import(cliModule("share"));
+        return { ok: true, detail: publishPackRepository({ from: process.cwd(), repository: ctx.input.repo }) };
+      } catch (error) { return { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
     }}</Task> : null}
-    {publish ? <Task id="share-registry" output={outputs.share} retries={0}>{async () => {
-      const { sharePack } = await import(cliModule("share"));
-      const result = sharePack({ from: process.cwd(), repo: ctx.input.registry, dryRun: ctx.input.dryRun });
-      return { ok: true, detail: result.pullRequest ?? result.entry };
+    {canShare ? <Task id="share-registry" output={outputs.share} retries={0}>{async () => {
+      try {
+        const { sharePack } = await import(cliModule("share"));
+        const result = sharePack({ from: process.cwd(), repository: ctx.input.repo, repo: ctx.input.registry, dryRun: ctx.input.dryRun });
+        return { ok: true, detail: result.pullRequest ?? result.entry };
+      } catch (error) { return { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
     }}</Task> : null}
-    {shared ? <Task id="output" output={outputs.output}>{() => ({ validated: validate.ok, prepared: prepare.ok, published: publish.ok, shared: shared.ok, detail: shared.detail })}</Task> : null}
+    {(shared?.ok === true || terminalFailure) ? <Task id="output" output={outputs.output}>{() => ({ validated: validate?.ok === true, prepared: prepare?.ok === true, published: publish?.ok === true, shared: shared?.ok === true, detail: [validate, prepare, publish, shared].find((row) => row && !row.ok)?.detail ?? shared?.detail ?? "Share did not complete" })}</Task> : null}
   </Sequence><UI entry="../ui/share-pack.tsx" /></Workflow>;
 });
