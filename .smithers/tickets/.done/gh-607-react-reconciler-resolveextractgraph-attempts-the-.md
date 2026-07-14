@@ -14,3 +14,6 @@ Try the package specifier first and return early on success; only attempt the lo
 Note: reordering changes the observable sequence of import attempts, so land it with a test touch rather than as a drive-by.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in c7cc5bad2f19e6770323c83acad774f132c7950a.
