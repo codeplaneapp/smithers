@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync, lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
@@ -84,6 +84,15 @@ function importAllowed(name) {
  * export-from, require, and `import x = require(...)`); falls back to a
  * comment-stripped regex scan when Bun is unavailable. */
 function moduleImports(file, source) {
+  if (/\.(?:md|mdx)$/.test(file)) {
+    return [...source.matchAll(/^\s*(?:import|export)\s+(?:[^"'\n]+?\s+from\s+)?["']([^"']+)["']/gm)].map((match) => match[1]);
+  }
+  if (/\.(?:css|scss|sass|less)$/.test(file)) {
+    return [
+      ...[...source.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/g)].map((match) => match[1]),
+      ...[...source.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)].map((match) => match[1]),
+    ];
+  }
   if (typeof Bun !== "undefined" && Bun.Transpiler) {
     try {
       return new Bun.Transpiler({ loader: "tsx" }).scanImports(source).map((record) => record.path);
@@ -97,6 +106,19 @@ function moduleImports(file, source) {
     names.push(match[1] ?? match[2] ?? match[3]);
   }
   return names;
+}
+
+function assertNoSymlinks(root) {
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const file = join(dir, entry.name);
+      if (lstatSync(file).isSymbolicLink()) {
+        throw new Error(`Pack contains an unsupported symlink: ${file}`);
+      }
+      if (entry.isDirectory()) visit(file);
+    }
+  };
+  visit(root);
 }
 
 export function scanPackImports(root) {
@@ -210,6 +232,7 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
       manifest = parseManifest(`name: ${parsed.name}\n${source}`);
     }
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(manifest.name)) throw new Error(`Invalid smithers pack name: ${manifest.name}`);
+    assertNoSymlinks(sourceRoot);
     scanPackImports(sourceRoot);
     const workflowTrust = [];
     const workflowDir = join(sourceRoot, "workflows");
@@ -278,9 +301,10 @@ function resolveModuleFile(file) {
   const candidates = [
     file,
     `${file}.ts`, `${file}.tsx`, `${file}.js`, `${file}.jsx`, `${file}.json`, `${file}.md`, `${file}.mdx`,
+    `${file}.css`, `${file}.scss`, `${file}.sass`, `${file}.less`, `${file}.svg`, `${file}.png`, `${file}.jpg`, `${file}.jpeg`, `${file}.gif`,
     join(file, "index.ts"), join(file, "index.tsx"), join(file, "index.js"), join(file, "index.jsx"),
   ];
-  return candidates.find((candidate) => existsSync(candidate) && statSync(candidate).isFile()) ?? null;
+  return candidates.find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile()) ?? null;
 }
 
 function localPackDir(from) {
@@ -308,19 +332,61 @@ function workflowEntries(root) {
   return entries;
 }
 
+function uiEntries(source) {
+  const bindings = new Map([...source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(["'])([^"']+)\2/g)].map((match) => [match[1], match[3]]));
+  const entries = [];
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index];
+    if (character === "/" && source[index + 1] === "/") { index = source.indexOf("\n", index + 2); if (index < 0) break; continue; }
+    if (character === "/" && source[index + 1] === "*") { const end = source.indexOf("*/", index + 2); index = end < 0 ? source.length : end + 2; continue; }
+    if (character === "\"" || character === "'" || character === "`") {
+      const quote = character; index++;
+      while (index < source.length) { if (source[index] === "\\") index += 2; else if (source[index++] === quote) break; }
+      continue;
+    }
+    if (character === "<" && /[A-Za-z_$]/.test(source[index + 1] ?? "")) {
+      const tag = source.slice(index + 1).match(/^([A-Za-z_$][\w$]*)/);
+      if (tag?.[1] === "UI") {
+        const start = index + 1 + tag[0].length;
+        let cursor = start, braces = 0, quote = null;
+        for (; cursor < source.length; cursor++) {
+          const current = source[cursor];
+          if (quote) { if (current === "\\") cursor++; else if (current === quote) quote = null; continue; }
+          if (current === "\"" || current === "'") { quote = current; continue; }
+          if (current === "{") braces++;
+          else if (current === "}") braces--;
+          else if (current === ">" && braces === 0) break;
+        }
+        const attributes = source.slice(start, cursor);
+        const entry = attributes.match(/\bentry\s*=\s*(?:(["'])([^"']+)\1|\{\s*(?:(["'])([^"']+)\3|([A-Za-z_$][\w$]*))\s*\})/s);
+        if (entry) entries.push(entry[2] ?? entry[4] ?? bindings.get(entry[5]));
+        index = cursor + 1;
+        continue;
+      }
+    }
+    index++;
+  }
+  return entries.filter((entry) => typeof entry === "string");
+}
+
 function referencedFiles(packDir, workflowFile) {
   const files = new Set([workflowFile]);
   const queue = [workflowFile];
   while (queue.length) {
     const file = queue.shift();
     const source = readFileSync(file, "utf8");
-    const imports = /\.(?:[cm]?[jt]sx?)$/.test(file)
-      ? moduleImports(file, source).filter((name) => name.startsWith("."))
-      : [];
-    const uiEntries = [...source.matchAll(/<UI\s+entry=["']([^"']+)["']/g)].map((match) => match[1]);
-    for (const name of [...imports, ...uiEntries]) {
-      const resolved = resolveModuleFile(resolve(dirname(file), name));
-      if (!resolved || !isWithin(packDir, resolved)) {
+    const imports = moduleImports(file, source).filter((name) => name.startsWith("."));
+    for (const name of [...imports, ...uiEntries(source)]) {
+      const cleanName = name.split(/[?#]/, 1)[0];
+      const resolved = resolveModuleFile(resolve(dirname(file), cleanName));
+      if (!resolved) {
+        throw new Error(`Pack workflow references a missing or out-of-pack file: ${file} -> ${name}`);
+      }
+      if (lstatSync(resolved).isSymbolicLink()) {
+        throw new Error(`Pack workflow references an unsupported symlink: ${file} -> ${name}`);
+      }
+      if (!isWithin(realpathSync(packDir), realpathSync(resolved))) {
         throw new Error(`Pack workflow references a missing or out-of-pack file: ${file} -> ${name}`);
       }
       if (!files.has(resolved)) {
