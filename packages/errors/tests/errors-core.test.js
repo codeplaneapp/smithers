@@ -174,6 +174,30 @@ describe("SmithersError", () => {
     expect(error.cause).toBe(cause);
   });
 
+  test("preserves a serialized error record as a legacy cause", () => {
+    const cause = errorToJson(new TypeError("boom"));
+    const error = new SmithersError("INTERNAL_ERROR", "Wrapped", undefined, cause);
+
+    expect(error.name).toBe("SmithersError");
+    expect(error.cause).toBe(cause);
+    expect(errorToJson(error).cause).toEqual(cause);
+  });
+
+  test("preserves a plain-object legacy cause with a name field", () => {
+    const cause = { name: "upstream", value: 1 };
+    const error = new SmithersError("INTERNAL_ERROR", "Wrapped", undefined, cause);
+
+    expect(error.name).toBe("SmithersError");
+    expect(error.cause).toBe(cause);
+  });
+
+  test("preserves a plain-object legacy cause with a cause field", () => {
+    const cause = { cause: "nested", value: 2 };
+    const error = new SmithersError("INTERNAL_ERROR", "Wrapped", undefined, cause);
+
+    expect(error.cause).toBe(cause);
+  });
+
   test("supports options object cause and custom name", () => {
     const cause = { why: "test" };
     const error = new SmithersError("RUN_NOT_FOUND", "Missing", undefined, {

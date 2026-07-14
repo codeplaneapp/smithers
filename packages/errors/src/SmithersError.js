@@ -24,15 +24,14 @@ export class SmithersError extends Error {
     constructor(code, summary, details, causeOrOptions) {
         const docsUrl = getSmithersErrorDocsUrl(code);
         // The 4th arg historically took a bare `cause`. An object counts as an
-        // options bag only when it owns at least one known option key
-        // (cause/includeDocsUrl/name), so most plain-object causes still
-        // round-trip as the cause.
-        const isOptionsObject = causeOrOptions &&
-            typeof causeOrOptions === "object" &&
+        // options bag only when all of its own keys are known options. Any extra
+        // data means the whole object is a legacy cause and must round-trip.
+        const ownKeys = causeOrOptions && typeof causeOrOptions === "object"
+            ? Reflect.ownKeys(causeOrOptions)
+            : [];
+        const isOptionsObject = ownKeys.length > 0 &&
             !(causeOrOptions instanceof Error) &&
-            (Object.prototype.hasOwnProperty.call(causeOrOptions, "cause") ||
-                Object.prototype.hasOwnProperty.call(causeOrOptions, "includeDocsUrl") ||
-                Object.prototype.hasOwnProperty.call(causeOrOptions, "name"));
+            ownKeys.every((key) => key === "cause" || key === "includeDocsUrl" || key === "name");
         const options = /** @type {SmithersErrorOptions} */ (isOptionsObject
             ? causeOrOptions
             : { cause: causeOrOptions });
