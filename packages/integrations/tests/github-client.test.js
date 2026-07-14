@@ -64,6 +64,10 @@ function startFixture() {
                 }
                 return json({ ok: true, path: "403" });
             }
+            if (url.pathname === "/foreign-paged") {
+                const next = url.searchParams.get("next");
+                return json([1], { headers: next ? { link: `<${next}>; rel="next"` } : {} });
+            }
             if (url.pathname === "/paged") {
                 const page = Number(url.searchParams.get("page") ?? "1");
                 const items = page === 1 ? [1, 2] : page === 2 ? [3] : [];
@@ -78,7 +82,33 @@ function startFixture() {
     return { server, requests, url: `http://127.0.0.1:${server.port}` };
 }
 
+/**
+ * A second real server on a different origin: any request landing here from
+ * the client under test would mean the repository token escaped its API
+ * origin.
+ */
+function startForeignFixture() {
+    /** @type {{ path: string; headers: Record<string, string> }[]} */
+    const requests = [];
+    const server = Bun.serve({
+        port: 0,
+        fetch: (request) => {
+            /** @type {Record<string, string>} */
+            const headers = {};
+            request.headers.forEach((value, key) => {
+                headers[key] = value;
+            });
+            requests.push({ path: new URL(request.url).pathname, headers });
+            return new Response(JSON.stringify([99]), {
+                headers: { "content-type": "application/json" },
+            });
+        },
+    });
+    return { server, requests, url: `http://127.0.0.1:${server.port}` };
+}
+
 const fixture = startFixture();
+const foreign = startForeignFixture();
 const client = makeGitHubClient({
     token: "test-token-shhh",
     apiBaseUrl: fixture.url,
@@ -86,6 +116,7 @@ const client = makeGitHubClient({
 
 afterAll(() => {
     fixture.server.stop(true);
+    foreign.server.stop(true);
     configureGitHub(null);
 });
 
@@ -131,6 +162,23 @@ describe("GitHubClient", () => {
     });
     test("paginate follows Link rel=next headers", async () => {
         const items = await Effect.runPromise(client.paginate("/paged", { perPage: 2 }));
+        expect(items).toEqual([1, 2, 3]);
+    });
+    test("rejects direct foreign absolute URLs without contacting them", async () => {
+        const error = await Effect.runPromise(client.request("GET", `${foreign.url}/steal`).pipe(Effect.flip));
+        expect(error.message).toContain("not the configured GitHub API origin");
+        expect(error.details?.retryable).toBe(false);
+        expect(foreign.requests).toHaveLength(0);
+    });
+    test("rejects foreign pagination links without leaking the token", async () => {
+        const error = await Effect.runPromise(client
+            .paginate(`/foreign-paged?next=${encodeURIComponent(`${foreign.url}/paged`)}`)
+            .pipe(Effect.flip));
+        expect(error.message).toContain("not the configured GitHub API origin");
+        expect(foreign.requests).toHaveLength(0);
+    });
+    test("accepts same-origin absolute URLs and pagination links", async () => {
+        const items = await Effect.runPromise(client.paginate(`${fixture.url}/paged`, { perPage: 2 }));
         expect(items).toEqual([1, 2, 3]);
     });
 });

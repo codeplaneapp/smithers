@@ -116,6 +116,21 @@ export function nextPageUrl(linkHeader) {
 export function makeGitHubClient(config) {
     const resolved = resolveGitHubConfig(config);
     const baseUrl = resolved.apiBaseUrl.replace(/\/+$/, "");
+    const apiOrigin = new URL(baseUrl).origin;
+    /**
+   * Every request carries the bearer token, so absolute request URLs and
+   * Link rel=next pagination targets must stay on the configured HTTP(S)
+   * API origin — a foreign destination would receive the token.
+   * @param {string} url
+   * @returns {void}
+   */
+    const assertApiOrigin = (url) => {
+        const parsed = new URL(url);
+        if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+            parsed.origin !== apiOrigin) {
+            throw new IntegrationError("delivery-failed", `GitHub request refused: ${parsed.origin} is not the configured GitHub API origin.`, { origin: parsed.origin, apiOrigin, retryable: false });
+        }
+    };
     /**
    * @param {string} path
    * @param {Record<string, string | number | boolean | undefined>} [query]
@@ -142,6 +157,7 @@ export function makeGitHubClient(config) {
    */
     const attemptOnce = (method, url, body) => Effect.tryPromise({
         try: async (signal) => {
+            assertApiOrigin(url);
             /** @type {Record<string, string>} */
             const headers = {
                 accept: "application/vnd.github+json",
