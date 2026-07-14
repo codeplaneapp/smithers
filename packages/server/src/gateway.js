@@ -2322,6 +2322,7 @@ export class Gateway {
     idleFired = false;
     hasActiveCrons = false;
     hasPendingTimers = false;
+    cronSweepInFlight = false;
     /**
    * @param {GatewayOptions} [options]
    */
@@ -5027,66 +5028,75 @@ a { color: var(--brand); }</style>
         }
     }
     async processDueCrons() {
-        const now = nowMs();
-        // Refresh the idle-spin-down keep-alive signal every tick (decision 14):
-        // a daemon that owns any cron must not idle-exit and stop firing it.
-        this.hasActiveCrons = false;
-        emitGatewayLog("debug", "Gateway cron evaluation tick", {
-            workflowCount: this.workflows.size,
-        }, "gateway:cron");
-        for (const entry of this.workflows.values()) {
-            const adapter = this.adapterForWorkflow(entry.workflow);
-            const crons = await adapter.listCrons(true);
-            if (crons.length > 0) {
-                this.hasActiveCrons = true;
+        if (this.cronSweepInFlight) {
+            return;
+        }
+        this.cronSweepInFlight = true;
+        try {
+            const now = nowMs();
+            // Refresh the idle-spin-down keep-alive signal every tick (decision 14):
+            // a daemon that owns any cron must not idle-exit and stop firing it.
+            this.hasActiveCrons = false;
+            emitGatewayLog("debug", "Gateway cron evaluation tick", {
+                workflowCount: this.workflows.size,
+            }, "gateway:cron");
+            for (const entry of this.workflows.values()) {
+                const adapter = this.adapterForWorkflow(entry.workflow);
+                const crons = await adapter.listCrons(true);
+                if (crons.length > 0) {
+                    this.hasActiveCrons = true;
+                }
+                for (const cron of crons) {
+                    const workflowKey = workflowKeyFromCronPath(cron.workflowPath);
+                    if (!workflowKey || workflowKey !== entry.key) {
+                        continue;
+                    }
+                    if (typeof cron.nextRunAtMs === "number" && cron.nextRunAtMs > now) {
+                        emitGatewayLog("debug", "Gateway cron skipped", {
+                            cronId: cron.cronId,
+                            workflow: workflowKey,
+                            nextRunAtMs: cron.nextRunAtMs,
+                        }, "gateway:cron");
+                        continue;
+                    }
+                    try {
+                        const run = await this.startRun(workflowKey, {}, {
+                            triggeredBy: "cron:gateway",
+                            scopes: ["*"],
+                            role: "system",
+                        });
+                        await adapter.updateCronRunTime(cron.cronId, now, nextCronRunAtMs(cron.pattern), null);
+                        emitGatewayEffect(incrementMetric(gatewayCronTriggersTotal, {
+                            source: "scheduled",
+                        }));
+                        emitGatewayLog("info", "Gateway cron triggered", {
+                            cronId: cron.cronId,
+                            workflow: workflowKey,
+                            runId: run.runId,
+                        }, "gateway:cron");
+                        this.broadcastEvent("cron.triggered", {
+                            cronId: cron.cronId,
+                            workflow: workflowKey,
+                            runId: run.runId,
+                        });
+                    }
+                    catch (error) {
+                        emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
+                            kind: "cron",
+                            code: gatewayErrorCode(error),
+                        }));
+                        emitGatewayLog("error", "Gateway cron trigger failed", {
+                            cronId: cron.cronId,
+                            workflow: workflowKey,
+                            ...gatewayErrorAnnotations(error),
+                        }, "gateway:cron");
+                        await adapter.updateCronRunTime(cron.cronId, now, cron.nextRunAtMs ?? now + 60_000, error?.message ?? "cron trigger failed");
+                    }
+                }
             }
-            for (const cron of crons) {
-                const workflowKey = workflowKeyFromCronPath(cron.workflowPath);
-                if (!workflowKey || workflowKey !== entry.key) {
-                    continue;
-                }
-                if (typeof cron.nextRunAtMs === "number" && cron.nextRunAtMs > now) {
-                    emitGatewayLog("debug", "Gateway cron skipped", {
-                        cronId: cron.cronId,
-                        workflow: workflowKey,
-                        nextRunAtMs: cron.nextRunAtMs,
-                    }, "gateway:cron");
-                    continue;
-                }
-                try {
-                    const run = await this.startRun(workflowKey, {}, {
-                        triggeredBy: "cron:gateway",
-                        scopes: ["*"],
-                        role: "system",
-                    });
-                    await adapter.updateCronRunTime(cron.cronId, now, nextCronRunAtMs(cron.pattern), null);
-                    emitGatewayEffect(incrementMetric(gatewayCronTriggersTotal, {
-                        source: "scheduled",
-                    }));
-                    emitGatewayLog("info", "Gateway cron triggered", {
-                        cronId: cron.cronId,
-                        workflow: workflowKey,
-                        runId: run.runId,
-                    }, "gateway:cron");
-                    this.broadcastEvent("cron.triggered", {
-                        cronId: cron.cronId,
-                        workflow: workflowKey,
-                        runId: run.runId,
-                    });
-                }
-                catch (error) {
-                    emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
-                        kind: "cron",
-                        code: gatewayErrorCode(error),
-                    }));
-                    emitGatewayLog("error", "Gateway cron trigger failed", {
-                        cronId: cron.cronId,
-                        workflow: workflowKey,
-                        ...gatewayErrorAnnotations(error),
-                    }, "gateway:cron");
-                    await adapter.updateCronRunTime(cron.cronId, now, cron.nextRunAtMs ?? now + 60_000, error?.message ?? "cron trigger failed");
-                }
-            }
+        }
+        finally {
+            this.cronSweepInFlight = false;
         }
     }
     /**

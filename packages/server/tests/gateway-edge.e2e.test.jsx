@@ -98,6 +98,49 @@ describe("Gateway edge cases", () => {
         const [cron] = await adapter.listCrons(true);
         expect(cron?.lastRunAtMs).toBeGreaterThan(0);
     }, 10_000);
+    test("processDueCrons does not double-fire a due cron when a tick overlaps a slow startRun", async () => {
+        const dbPath = makeDbPath("cron-reentrant");
+        dbPaths.push(dbPath);
+        const valueWorkflow = createValueWorkflow(dbPath);
+        const adapter = new SmithersDb(valueWorkflow.db);
+        gateway = new Gateway({
+            auth: {
+                mode: "token",
+                tokens: {
+                    "op-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:will",
+                    },
+                },
+            },
+            heartbeatMs: 100,
+        });
+        gateway.register("basic", valueWorkflow.workflow, { schedule: "* * * * *" });
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        await adapter.updateCronRunTime("gateway:basic", Date.now() - 60_000, Date.now() - 1, null);
+        const originalStartRun = gateway.startRun.bind(gateway);
+        let startRunCalls = 0;
+        let releaseFirstCall;
+        const firstCallGate = new Promise((resolve) => {
+            releaseFirstCall = resolve;
+        });
+        gateway.startRun = async (...args) => {
+            startRunCalls += 1;
+            if (startRunCalls === 1) {
+                await firstCallGate;
+            }
+            return originalStartRun(...args);
+        };
+        const tick1 = gateway.processDueCrons();
+        // Let tick1 reach the still-in-flight startRun call before tick2 starts,
+        // simulating a second scheduler interval firing while the first is stuck.
+        await sleep(10);
+        const tick2 = gateway.processDueCrons();
+        releaseFirstCall();
+        await Promise.all([tick1, tick2]);
+        expect(startRunCalls).toBe(1);
+    }, 10_000);
     test("returns RUN_NOT_ACTIVE when cancelling an already-finished run", async () => {
         const dbPath = makeDbPath("cancel-finished");
         dbPaths.push(dbPath);
