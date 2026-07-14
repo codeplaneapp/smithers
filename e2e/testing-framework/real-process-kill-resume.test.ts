@@ -21,9 +21,9 @@ describe("testing framework real-process durability", () => {
     try {
       const adapter = realProcessAdapter({ runnerPath: runner, spawn: async (nonce: string) => {
         child = spawnChild("initial", nonce);
-        const waitFor = async (predicate: () => boolean) => { const deadline = Date.now() + 5_000; while (!predicate() && Date.now() < deadline) await Bun.sleep(10); return predicate(); };
-        await waitFor(() => existsSync(started));
-        return { pid: child.pid!, child, handshake: async (expected: string) => { await waitFor(() => initialOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${expected}`)); return expected; }, kill: (signal?: string) => { child!.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined, resume: async (resumeNonce: string) => {
+        const waitFor = async (predicate: () => boolean, description: string) => { const deadline = Date.now() + 30_000; while (!predicate() && Date.now() < deadline) await Bun.sleep(10); if (!predicate()) throw new Error(`timed out waiting for ${description}`); };
+        await waitFor(() => existsSync(started), "B.started");
+        return { pid: child.pid!, child, handshake: async (expected: string) => { await waitFor(() => initialOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${expected}`), "initial engine handshake"); return expected; }, kill: (signal?: string) => { child!.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined, resume: async (resumeNonce: string) => {
           resumed = spawnChild("resume", resumeNonce);
           const resumedChild = resumed;
           let resumedOutput = "";
