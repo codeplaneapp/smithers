@@ -11,7 +11,7 @@ Do not declare output fields named `runId`, `nodeId`, or `iteration`; Smithers w
 
 ## Loops and queue-based backfill
 
-Do not put a same-lane `<Loop>` (or `<Ralph>`) inside another loop. The engine cannot assign a single iteration and dependency frontier to that topology, so graph extraction rejects it as `NESTED_LOOP` and names both loop ids. When per-item correction is needed, fan items into independent `<Parallel>`/`<Worktree>` lanes and put one global serialized `<MergeQueue maxConcurrency={1}>` around the landing work. Re-enter the outer loop on its next iteration to process queue failures or backfill items; do not render another loop in the outer loop's same lane.
+Do not put a `<Loop>` (or `<Ralph>`) inside another loop, including through `<Sequence>`, `<Parallel>`, `<MergeQueue>`, or `<Worktree>`. The engine cannot assign a single iteration and dependency frontier to that topology, so graph extraction rejects it as `NESTED_LOOP` and names both loop ids. When per-item correction is needed, fan items into independent `<Parallel>`/`<Worktree>` lanes and put one global serialized `<MergeQueue maxConcurrency={1}>` around the landing work. Re-enter the outer loop on its next iteration to process queue failures or backfill items; do not render another loop beneath it.
 
 ## Reading loop outputs
 

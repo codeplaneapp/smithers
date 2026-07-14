@@ -301,6 +301,13 @@ runs a workflow **file by path** (use this to start a run from a `.tsx` file).
 `smithers workflow run <id>` (step 3 above) runs a **discovered/seeded**
 workflow by its **id**, resolved from `.smithers/workflows/`.
 
+For the compact static contracts that every new workflow must satisfy, read the
+[workflow authoring rules](/workflows/authoring-rules) before writing JSX. It
+covers reserved output columns, same-lane nested-loop rejection and the
+queue-based backfill pattern, `ctx.latest`/`outputMaybe` loop bindings, the
+`renderWorkflow` production-test contract, and `.smithers/package.json` test
+registration.
+
 ## The mental model
 
 Smithers renders the workflow JSX tree every "frame." Each render answers one
