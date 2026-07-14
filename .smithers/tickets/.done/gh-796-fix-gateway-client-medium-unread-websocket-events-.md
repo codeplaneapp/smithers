@@ -34,3 +34,6 @@ Add byte and count bounds. On overflow, close with a typed backpressure error or
 ## Dedupe notes
 
 #702 concerns recovery from server backpressure; #711 concerns DevTools retention.
+
+
+> Closed by ticket-fleet: landed on main in 81df8a587df3188b700fc5f24f06ace150e33846.
