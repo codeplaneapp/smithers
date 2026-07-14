@@ -67,6 +67,7 @@ import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
+import { addPack, removePack, listPacks, updatePack } from "./packs.js";
 import { createEvalsExtension } from "./evals-extension.js";
 import {
     assertEvalRunIdsAvailable,
@@ -1904,6 +1905,9 @@ const workflowRunOptions = upOptions.extend({
     prompt: z.string().optional().describe("Prompt text mapped to input.prompt when --input is omitted"),
     interactive: interactiveRunOption,
 });
+const packSpecArgs = z.object({ spec: z.string().describe("GitHub, npm, or file pack spec") });
+const packNameArgs = z.object({ name: z.string().describe("Installed pack name") });
+const packOptions = z.object({ global: z.boolean().default(false).describe("Install in ~/.smithers/packs instead of the local project"), yes: z.boolean().default(false).describe("Skip trust confirmation") });
 const upgradeOptions = z.object({
     interactive: z.boolean().default(false).describe("Force the full-screen interactive TUI monitor (TTY only)."),
     detach: z.boolean().default(false).describe("Launch the upgrade workflow in the background and print the run ID."),
@@ -5066,6 +5070,32 @@ const cli = Cli.create({
         return runInitCommand(c, fail);
     },
 })
+    .command("add", {
+    description: "Install a workflow pack from GitHub, npm, or a local file.",
+    alias: "install",
+    args: packSpecArgs,
+    options: packOptions,
+    async run(c) {
+        try { return c.ok(await addPack(c.args.spec, { from: process.cwd(), global: c.options.global, yes: c.options.yes })); }
+        catch (error) { return c.error({ code: "PACK_ADD_FAILED", message: error?.message ?? String(error) }); }
+    },
+})
+    .command("remove", {
+    description: "Remove an installed workflow pack.",
+    args: packNameArgs,
+    options: z.object({ global: z.boolean().default(false).describe("Remove from ~/.smithers/packs") }),
+    run(c) {
+        try { return c.ok(removePack(c.args.name, { from: process.cwd(), global: c.options.global })); }
+        catch (error) { return c.error({ code: "PACK_REMOVE_FAILED", message: error?.message ?? String(error) }); }
+    },
+})
+    .command("packs", Cli.create({
+    name: "packs",
+    description: "List installed workflow packs.",
+}).command("list", {
+    description: "List local and global workflow packs.",
+    run(c) { return c.ok({ packs: listPacks(process.cwd()) }); },
+}))
     // =========================================================================
     // smithers make-workflow [task]
     // =========================================================================
@@ -8390,11 +8420,21 @@ const cli = Cli.create({
     // =========================================================================
     .command("update", {
     description: "Check for a newer Smithers release and upgrade the install (or print how).",
+    args: z.object({ name: z.string().optional().describe("Pack name to update") }),
     options: z.object({
         check: z.boolean().default(false).describe("Only report current vs latest version; never upgrade"),
         dryRun: z.boolean().default(false).describe("Print the upgrade command without running it"),
     }),
     async run(c) {
+        if (c.args.name) {
+            try {
+                const packs = listPacks(process.cwd()).filter((pack) => pack.name === c.args.name);
+                if (packs.length === 0) return c.error({ code: "PACK_NOT_FOUND", message: `Pack not found: ${c.args.name}` });
+                const results = [];
+                for (const pack of packs) results.push(await updatePack(pack.name, { from: process.cwd(), global: pack.scope === "global" }));
+                return c.ok({ updated: results });
+            } catch (error) { return c.error({ code: "PACK_UPDATE_FAILED", message: error?.message ?? String(error) }); }
+        }
         const current = readPackageVersion();
         const [latest, remoteSota] = await Promise.all([fetchLatestVersion({}), fetchRemoteSotaVersion({})]);
         const install = detectInstallMethod();

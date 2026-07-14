@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, } from "node:fs";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 
@@ -21,6 +21,13 @@ const WORKFLOW_METADATA_VERSION = 1;
  */
 function workflowsDirForPack(packDir) {
     return join(packDir, "workflows");
+}
+function installedPackDirs(packRoot) {
+    if (!existsSync(packRoot) || !statSync(packRoot).isDirectory()) return [];
+    return readdirSync(packRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && existsSync(join(packRoot, entry.name, "smithers.toon")))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((entry) => join(packRoot, entry.name));
 }
 /**
  * The global (user-level) pack directory: `~/.smithers`, or `$SMITHERS_HOME`.
@@ -71,6 +78,7 @@ export function resolvePackDirs(from = process.cwd(), env = process.env) {
     /** @type {{ scope: "local" | "global"; packDir: string }[]} */
     const dirs = [];
     const local = findLocalPackDir(from);
+    if (local) dirs.push({ scope: "local", dir: workflowsDirForPack(local), packDir: local });
     if (local && resolve(local) !== globalAbs) {
         dirs.push({ scope: "local", packDir: local });
     }
@@ -556,8 +564,15 @@ export function resolveWorkflowDirs(from = process.cwd(), env = process.env) {
     for (const { packDir } of resolvePackDirs(from, env)) {
         dirs.push({ scope: "curated", dir: join(workflowsDirForPack(packDir), CURATED_SUBDIR), packDir });
     }
-    for (const { scope, packDir } of resolvePackDirs(from, env)) {
-        dirs.push({ scope, dir: workflowsDirForPack(packDir), packDir });
+    const local = findLocalPackDir(from);
+    if (local) {
+        dirs.push({ scope: "local", dir: workflowsDirForPack(local), packDir: local });
+        for (const packDir of installedPackDirs(join(local, "packs"))) dirs.push({ scope: "local", dir: workflowsDirForPack(packDir), packDir });
+    }
+    const global = globalPackDir(env);
+    if (existsSync(global)) dirs.push({ scope: "global", dir: workflowsDirForPack(global), packDir: global });
+    for (const packDir of installedPackDirs(join(global, "packs"))) {
+        dirs.push({ scope: "global", dir: workflowsDirForPack(packDir), packDir });
     }
     return dirs;
 }
@@ -625,7 +640,8 @@ export function discoverWorkflows(from = process.cwd(), env = process.env) {
                 continue;
             }
             seen.add(id);
-            discovered.push(entry);
+            const isInstalledPack = packDir && basename(dirname(packDir)) === "packs";
+            discovered.push({ ...entry, ...(isInstalledPack ? { source: `pack:${basename(packDir)}` } : { source: scope }) });
         }
     }
     return discovered.sort((a, b) => a.id.localeCompare(b.id));
@@ -648,7 +664,8 @@ export function validateWorkflowName(name) {
  * @returns {DiscoveredWorkflow}
  */
 export function resolveWorkflow(id, from = process.cwd(), env = process.env) {
-    const workflow = discoverWorkflows(from, env).find((candidate) => candidate.id === id);
+    const [packName, workflowId] = id.includes(":") ? id.split(/:(.*)/s) : [undefined, id];
+    const workflow = discoverWorkflows(from, env).find((candidate) => candidate.id === workflowId && (!packName || candidate.source === `pack:${packName}`));
     if (!workflow) {
         throw new SmithersError("RUN_NOT_FOUND", `Workflow not found: ${id}`, {
             id,
