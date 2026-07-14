@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import * as coreTracing from "@smithers-orchestrator/observability/_coreTracing";
 import {
-    getCurrentSmithersTraceAnnotations,
     withSmithersSpan,
     TracingService,
     TracingServiceLive,
 } from "../src/_coreTracing.js";
-import { runWithCorrelationContext } from "@smithers-orchestrator/observability/correlation";
 import { getCurrentSmithersTraceAnnotations as spanAnnotations } from "../src/getCurrentSmithersTraceAnnotations.js";
 import { smithersTraceSpanStorage } from "../src/_smithersTraceSpanStorage.js";
 import { makeSmithersSpanAttributes } from "../src/makeSmithersSpanAttributes.js";
@@ -24,23 +23,9 @@ async function spanNameFor(name, attributes) {
     return Effect.runPromise(program);
 }
 
-describe("_coreTracing getCurrentSmithersTraceAnnotations (correlation-backed)", () => {
-    test("returns undefined when there is no correlation context", () => {
-        expect(getCurrentSmithersTraceAnnotations()).toBeUndefined();
-    });
-    test("returns traceId/spanId when the context carries both", () => {
-        const annotations = runWithCorrelationContext(
-            { runId: "r", traceId: "trace-x", spanId: "span-x" },
-            () => getCurrentSmithersTraceAnnotations(),
-        );
-        expect(annotations).toEqual({ traceId: "trace-x", spanId: "span-x" });
-    });
-    test("returns undefined when the context is missing a spanId", () => {
-        const annotations = runWithCorrelationContext(
-            { runId: "r", traceId: "trace-x" },
-            () => getCurrentSmithersTraceAnnotations(),
-        );
-        expect(annotations).toBeUndefined();
+describe("_coreTracing exports", () => {
+    test("does not shadow the public trace annotation helper", () => {
+        expect("getCurrentSmithersTraceAnnotations" in coreTracing).toBe(false);
     });
 });
 

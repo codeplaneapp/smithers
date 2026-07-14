@@ -18,15 +18,6 @@ const _TracingServiceBase = /** @type {Context.TagClass<TracingService, "Tracing
 export class TracingService extends _TracingServiceBase {
 }
 /**
- * @returns {| Readonly<Record<string, string>> | undefined}
- */
-export function getCurrentSmithersTraceAnnotations() {
-    const context = getCurrentCorrelationContext();
-    if (!context?.traceId || !context.spanId)
-        return undefined;
-    return { traceId: context.traceId, spanId: context.spanId };
-}
-/**
  * @param {SmithersSpanAttributesInput} [attributes]
  * @returns {Record<string, unknown>}
  */
