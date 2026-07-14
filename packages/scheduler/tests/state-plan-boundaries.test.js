@@ -228,16 +228,15 @@ describe("buildPlanTree", () => {
     ).toThrow(/Nested <Loop>\/<Ralph>/);
   });
 
-  test("nested ralph reached through a non-loop wrapper (e.g. Sequence) throws", () => {
-    expect(() =>
-      buildPlanTree(
+  test("nested ralph through Sequence preserves scoped runtime topology", () => {
+    const { plan } = buildPlanTree(
         el("smithers:ralph", { id: "outer" }, [
           el("smithers:sequence", {}, [
             el("smithers:ralph", { id: "inner" }),
           ]),
         ]),
-      ),
-    ).toThrow(/Nested <Loop>\/<Ralph>/);
+      );
+    expect(plan.children[0].kind).toBe("sequence");
   });
 
   test("saga partitions actions and compensations", () => {

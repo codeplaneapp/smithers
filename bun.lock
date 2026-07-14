@@ -93,6 +93,7 @@
         "@smithers-orchestrator/components": "workspace:*",
         "@smithers-orchestrator/review": "workspace:*",
         "@smithers-orchestrator/scorers": "workspace:*",
+        "@smithers-orchestrator/vcs": "workspace:*",
         "@xyflow/react": "^12.10.2",
         "dagre": "^0.8.5",
         "effect": "3.21.4",
@@ -105,7 +106,9 @@
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "^20.10.6",
+        "@smithers-orchestrator/driver": "workspace:*",
         "@smithers-orchestrator/gateway-client": "workspace:*",
+        "@smithers-orchestrator/graph": "workspace:*",
         "@types/mdx": "2.0.14",
         "@types/node": "26.1.0",
         "@types/react": "19.2.17",
@@ -174,6 +177,7 @@
         "@smithers-orchestrator/tui": "workspace:*",
         "@smithers-orchestrator/usage": "workspace:*",
         "@smithers-orchestrator/vcs": "workspace:*",
+        "@toon-format/toon": "2.3.0",
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/xterm": "^6.0.0",
         "cron-parser": "^5.6.1",
@@ -2475,7 +2479,7 @@
 
     "@tokenizer/token": ["@tokenizer/token@0.3.0", "", {}, "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="],
 
-    "@toon-format/toon": ["@toon-format/toon@2.1.0", "", {}, "sha512-JwWptdF5eOA0HaQxbKAzkpQtR4wSWTEfDlEy/y3/4okmOAX1qwnpLZMmtEWr+ncAhTTY1raCKH0kteHhSXnQqg=="],
+    "@toon-format/toon": ["@toon-format/toon@2.3.0", "", {}, "sha512-/Ew9etdRQKVMnm9fDaCG0JjyAOK/O7T0M97oum1aW4W+UR8ZhVVPBanIV7oWgHBiGlnVxV9M55PWQCHofDV07w=="],
 
     "@tootallnate/once": ["@tootallnate/once@2.0.1", "", {}, "sha512-HqmEUIGRJ5fSXchkVgR5F7qn48bDBzv0kWj/Kfu5e6uci4UlEeng4331LnBkWffb++Ei3FOVLxo8JJWMFBDMeQ=="],
 
@@ -4696,6 +4700,8 @@
     "handlebars/source-map": ["source-map@0.6.1", "", {}, "sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g=="],
 
     "happy-dom/@types/node": ["@types/node@25.6.0", "", { "dependencies": { "undici-types": "~7.19.0" } }, "sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ=="],
+
+    "incur/@toon-format/toon": ["@toon-format/toon@2.1.0", "", {}, "sha512-JwWptdF5eOA0HaQxbKAzkpQtR4wSWTEfDlEy/y3/4okmOAX1qwnpLZMmtEWr+ncAhTTY1raCKH0kteHhSXnQqg=="],
 
     "katex/commander": ["commander@8.3.0", "", {}, "sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww=="],
 

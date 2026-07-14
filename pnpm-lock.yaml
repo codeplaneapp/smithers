@@ -258,6 +258,9 @@ importers:
       '@smithers-orchestrator/scorers':
         specifier: workspace:*
         version: link:../packages/scorers
+      '@smithers-orchestrator/vcs':
+        specifier: workspace:*
+        version: link:../packages/vcs
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.11.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -289,9 +292,15 @@ importers:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
         version: 20.10.6
+      '@smithers-orchestrator/driver':
+        specifier: workspace:*
+        version: link:../packages/driver
       '@smithers-orchestrator/gateway-client':
         specifier: workspace:*
         version: link:../packages/gateway-client
+      '@smithers-orchestrator/graph':
+        specifier: workspace:*
+        version: link:../packages/graph
       '@types/mdx':
         specifier: 2.0.14
         version: 2.0.14
