@@ -33,3 +33,6 @@ Use a shared adapter that maps live-query readiness and error state into Gateway
 ## Dedupe notes
 
 No existing issue covers collection-hook load error suppression.
+
+
+> Closed by ticket-fleet: landed on main in 402da7862c26a9ab53669243eac292db6e5ba120.
