@@ -34,3 +34,6 @@ Traverse structured values before serialization, canonicalize keys case-insensit
 ## Dedupe notes
 
 #457 fixed specific value formats; this is the remaining structured-key gap.
+
+
+> Closed by ticket-fleet: landed on main in 56af962ec3791a929eabf9cc00c1e7262f18c67f.
