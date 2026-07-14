@@ -12,6 +12,7 @@ import {
 } from "../src/metrics.js";
 
 const originalFetch = globalThis.fetch;
+const originalDateNow = Date.now;
 
 /** Minimal parsed operation for testing */
 const operation = {
@@ -37,6 +38,12 @@ async function readHistogramCount(metric) {
     return state.count;
 }
 
+/** Read the sum of all histogram observations */
+async function readHistogramSum(metric) {
+    const state = await Effect.runPromise(Metric.value(metric));
+    return state.sum;
+}
+
 /** Run the effect, swallowing any Effect failure (mirrors execute wrapper) */
 async function runEffect(effect) {
     return Effect.runPromise(effect).catch(() => null);
@@ -45,6 +52,7 @@ async function runEffect(effect) {
 describe("executeToolEffect metric increments", () => {
     afterEach(() => {
         globalThis.fetch = originalFetch;
+        Date.now = originalDateNow;
     });
 
     test("openApiToolCallsTotal increments on a successful call", async () => {
@@ -114,5 +122,30 @@ describe("executeToolEffect metric increments", () => {
         await runEffect(executeToolEffect(operation, {}, baseUrl, options));
         const after = await readHistogramCount(openApiToolDuration);
         expect(after - before).toBe(1);
+    });
+
+    test("openApiToolDuration starts when each effect execution begins", async () => {
+        let currentTime = 1_000;
+        Date.now = () => currentTime;
+        globalThis.fetch = mock(() => {
+            currentTime += 7;
+            return Promise.resolve(
+                new Response(JSON.stringify({ ok: true }), {
+                    status: 200,
+                    headers: { "content-type": "application/json" },
+                }),
+            );
+        });
+
+        const effect = executeToolEffect(operation, {}, baseUrl, options);
+        const before = await readHistogramSum(openApiToolDuration);
+
+        currentTime += 5_000;
+        await runEffect(effect);
+        currentTime += 10_000;
+        await runEffect(effect);
+
+        const after = await readHistogramSum(openApiToolDuration);
+        expect(after - before).toBe(14);
     });
 });

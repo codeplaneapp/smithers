@@ -406,17 +406,18 @@ export async function executeRequest(operation, args, baseUrl, options, signal) 
  * @returns {Effect.Effect<unknown, unknown, never>}
  */
 export function executeToolEffect(operation, args, baseUrl, options, abortSignal) {
-    const started = nowMs();
-    return Effect.gen(function* () {
-        yield* Metric.increment(openApiToolCallsTotal);
-        return yield* Effect.tryPromise({
-            // The `(fiberSignal)` form makes fiber interruption abort the
-            // in-flight request instead of orphaning it.
-            try: (fiberSignal) => executeRequest(operation, args, baseUrl, options, abortSignal === undefined ? fiberSignal : AbortSignal.any([abortSignal, fiberSignal])),
-            catch: (err) => err,
-        });
+    return Effect.suspend(() => {
+        const started = nowMs();
+        return Effect.gen(function* () {
+            yield* Metric.increment(openApiToolCallsTotal);
+            return yield* Effect.tryPromise({
+                // The `(fiberSignal)` form makes fiber interruption abort the
+                // in-flight request instead of orphaning it.
+                try: (fiberSignal) => executeRequest(operation, args, baseUrl, options, abortSignal === undefined ? fiberSignal : AbortSignal.any([abortSignal, fiberSignal])),
+                catch: (err) => err,
+            });
+        }).pipe(Effect.ensuring(Effect.suspend(() => Metric.update(openApiToolDuration, nowMs() - started))));
     }).pipe(
-        Effect.ensuring(Effect.suspend(() => Metric.update(openApiToolDuration, nowMs() - started))),
         Effect.tapError(() => Metric.increment(openApiToolCallErrorsTotal)),
         Effect.annotateLogs({
             toolName: `openapi:${operation.operationId}`,
