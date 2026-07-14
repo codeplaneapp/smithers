@@ -146,7 +146,8 @@ CREATE TABLE IF NOT EXISTS _smithers_cp_usage_limits (
   limit_quantity REAL NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   PRIMARY KEY (org_id, project_key, metric, unit, period),
-  FOREIGN KEY (org_id) REFERENCES _smithers_cp_orgs(org_id) ON DELETE CASCADE
+  FOREIGN KEY (org_id) REFERENCES _smithers_cp_orgs(org_id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id, project_id) REFERENCES _smithers_cp_projects(org_id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS _smithers_cp_usage_limits_org_idx

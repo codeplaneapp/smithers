@@ -355,6 +355,27 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
     }
   });
 
+  test("project deletion cascades project-scoped usage limits", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_limit_delete", slug: "limit-delete", name: "Limit Delete", createdAtMs: 1 });
+      store.createProject({ orgId: "org_limit_delete", projectId: "project_delete", slug: "delete", name: "Delete", createdAtMs: 2 });
+      store.setUsageLimit({ orgId: "org_limit_delete", metric: "runs", limitQuantity: 10, updatedAtMs: 3 });
+      store.setUsageLimit({ orgId: "org_limit_delete", projectId: "project_delete", metric: "runs", limitQuantity: 5, updatedAtMs: 4 });
+
+      sqlite.query("DELETE FROM _smithers_cp_projects WHERE org_id = ? AND project_id = ?").run("org_limit_delete", "project_delete");
+
+      expect(sqlite.query(`
+SELECT project_id AS projectId, limit_quantity AS limitQuantity
+FROM _smithers_cp_usage_limits
+WHERE org_id = ?
+`).all("org_limit_delete")).toEqual([{ projectId: null, limitQuantity: 10 }]);
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
   test("usage and audit events reject missing projects with typed errors", () => {
     const { sqlite, store } = makeStore();
     try {
