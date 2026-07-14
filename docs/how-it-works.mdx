@@ -216,8 +216,11 @@ Same rule as React keys. A changed task ID looks like a new task to the runtime,
 The supervisor auto-resumes runs whose owner process died:
 
 ```bash
-bunx smithers-orchestrator supervise --interval 30s --stale-threshold 1m
+bunx smithers-orchestrator supervise --all --interval 30s --stale-threshold 1m
 ```
+
+Standalone supervision requires an explicit scope: pass one or more run IDs with
+`--run`, or opt into the workspace-wide sweep with `--all`.
 
 ## Session snapshots & fork
 

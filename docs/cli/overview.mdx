@@ -269,8 +269,10 @@ commands[94]:
       max-output-bytes,,number,,Max bytes a single tool call can return
       tool-timeout-ms,,number,,Max wall-clock time per tool call in ms
   - name: supervise
-    purpose: Watch for stale running runs and auto-resume them
-    flags[4]{name,short,type,default,desc}:
+    purpose: Watch explicitly named stale runs and auto-resume them; --all opts into a workspace-wide sweep
+    flags[6]{name,short,type,default,desc}:
+      run,r,string,,Only supervise these run IDs (comma-separated)
+      all,a,boolean,false,Explicitly supervise every eligible run in the workspace
       dry-run,n,boolean,false,Detect stale runs without resuming
       interval,i,string,10s,Poll interval
       stale-threshold,t,string,30s,Heartbeat staleness threshold before resume

@@ -614,7 +614,7 @@ function checkTimerDocsMatchWakeRuntime() {
   const required = [
     [TIMER_COMPONENT_DOC, "The host wakes the run on its own when the fire time arrives."],
     [TIMER_COMPONENT_DOC, "A Gateway sweeps due timers on its scheduler tick"],
-    [TIMER_COMPONENT_DOC, "`bunx smithers-orchestrator supervise` also scans `waiting-timer` runs"],
+    [TIMER_COMPONENT_DOC, "`bunx smithers-orchestrator supervise --run RUN_ID` also scans the explicitly scoped `waiting-timer` run"],
     [TIMER_COMPONENT_DOC, "Wake resolution is bounded by the Gateway tick or supervisor interval"],
     [SERVER_GATEWAY_SOURCE, "async processDueTimers()"],
     [SERVER_GATEWAY_SOURCE, 'adapter.listRuns(1_000, "waiting-timer")'],
