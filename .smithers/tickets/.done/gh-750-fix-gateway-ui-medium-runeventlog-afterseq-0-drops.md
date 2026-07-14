@@ -22,3 +22,6 @@ Omit `afterSeq` (let it default to `undefined`) — or pass `-1` — in RunEvent
 
 **Why it matters**
 This is the lowest-level "one line per frame" run view; on every real run it silently loses the first, often most informative, event.
+
+
+> Closed by ticket-fleet: landed on main in 6cf02eec1c174e9cfa8c4fa0317eb26762e5f090.
