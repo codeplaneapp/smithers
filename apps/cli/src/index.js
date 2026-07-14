@@ -5091,10 +5091,25 @@ const cli = Cli.create({
 })
     .command("packs", Cli.create({
     name: "packs",
-    description: "List installed workflow packs.",
+    description: "List and update installed workflow packs.",
 }).command("list", {
     description: "List local and global workflow packs.",
     run(c) { return c.ok({ packs: listPacks(process.cwd()) }); },
+}).command("update", {
+    description: "Re-resolve installed packs from their locked specs (all packs when no name is given).",
+    args: z.object({ name: z.string().optional().describe("Pack name to update (default: every locked pack)") }),
+    async run(c) {
+        try {
+            const packs = listPacks(process.cwd()).filter((pack) => !c.args.name || pack.name === c.args.name);
+            if (packs.length === 0) {
+                return c.error({ code: "PACK_NOT_FOUND", message: c.args.name ? `Pack not found: ${c.args.name}` : "No packs installed" });
+            }
+            const results = [];
+            for (const pack of packs) results.push(await updatePack(pack.name, { from: process.cwd(), global: pack.scope === "global" }));
+            return c.ok({ updated: results });
+        }
+        catch (error) { return c.error({ code: "PACK_UPDATE_FAILED", message: error?.message ?? String(error) }); }
+    },
 }))
     // =========================================================================
     // smithers make-workflow [task]
@@ -8419,22 +8434,12 @@ const cli = Cli.create({
     // Detect how Smithers was installed and either run the upgrade or print it.
     // =========================================================================
     .command("update", {
-    description: "Check for a newer Smithers release and upgrade the install (or print how).",
-    args: z.object({ name: z.string().optional().describe("Pack name to update") }),
+    description: "Check for a newer Smithers release and upgrade the install (or print how). Workflow packs update via `packs update`.",
     options: z.object({
         check: z.boolean().default(false).describe("Only report current vs latest version; never upgrade"),
         dryRun: z.boolean().default(false).describe("Print the upgrade command without running it"),
     }),
     async run(c) {
-        if (c.args.name) {
-            try {
-                const packs = listPacks(process.cwd()).filter((pack) => pack.name === c.args.name);
-                if (packs.length === 0) return c.error({ code: "PACK_NOT_FOUND", message: `Pack not found: ${c.args.name}` });
-                const results = [];
-                for (const pack of packs) results.push(await updatePack(pack.name, { from: process.cwd(), global: pack.scope === "global" }));
-                return c.ok({ updated: results });
-            } catch (error) { return c.error({ code: "PACK_UPDATE_FAILED", message: error?.message ?? String(error) }); }
-        }
         const current = readPackageVersion();
         const [latest, remoteSota] = await Promise.all([fetchLatestVersion({}), fetchRemoteSotaVersion({})]);
         const install = detectInstallMethod();

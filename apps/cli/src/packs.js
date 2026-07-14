@@ -66,7 +66,7 @@ export function scanPackImports(root) {
   visit(root);
   for (const file of files) {
     const source = readFileSync(file, "utf8");
-    for (const match of source.matchAll(/\bimport\s+(?:[^"']+?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+    for (const match of source.matchAll(/\b(?:import|export)\s+(?:[^"']+?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
       const name = match[1] ?? match[2];
       if (!name.startsWith(".") && !ALLOWED.has(name) && !name.startsWith("@smithers-orchestrator/") && !name.startsWith("react/") && !name.startsWith("zod/")) {
         throw new Error(`Pack import not allowed: ${file} imports ${name}`);
@@ -94,8 +94,14 @@ function copyOrExtract(source, target, fallbackName, subdir = "") {
   validateArchiveManifest(source, fallbackName, subdir);
   mkdirSync(target, { recursive: true });
   execFileSync("tar", ["-xzf", source, "-C", target]);
+  // GitHub codeload tarballs wrap everything in a single `<repo>-<ref>/` root
+  // dir. Flatten it whenever the manifest lives below that wrapper — directly
+  // (`<root>/smithers.toon`) or under the requested subdir
+  // (`<root>/<subdir>/smithers.toon`) — so callers can address `<target>/<subdir>`.
   const child = readdirSync(target, { withFileTypes: true }).find((entry) => entry.isDirectory());
-  if (child && existsSync(join(target, child.name, "smithers.toon"))) {
+  const manifestUnderChild = child && (existsSync(join(target, child.name, "smithers.toon"))
+    || (subdir && existsSync(join(target, child.name, subdir, "smithers.toon"))));
+  if (manifestUnderChild && !existsSync(join(target, "smithers.toon"))) {
     const staging = `${target}.flat`; rmSync(staging, { recursive: true, force: true }); cpSync(join(target, child.name), staging, { recursive: true }); rmSync(target, { recursive: true, force: true }); cpSync(staging, target, { recursive: true }); rmSync(staging, { recursive: true, force: true });
   }
 }
@@ -125,8 +131,11 @@ async function fetchPack(parsed, staging) {
   return { resolved: parsed.ref ?? parsed.version, integrity: `sha256-${createHash("sha256").update(bytes).digest("hex")}` };
 }
 
-export async function addPack(spec, { from = process.cwd(), global = false, yes = false } = {}) {
-  const parsed = parsePackSpec(spec); const temp = mkdtempSync(join(resolve(from), ".smithers-pack-")); const staging = join(temp, "pack");
+export async function addPack(spec, { from = process.cwd(), global = false, yes = false, subdir = "" } = {}) {
+  const parsed = parsePackSpec(spec);
+  // file: archives have no spec-embedded subdir; allow callers to name one.
+  if (subdir && !parsed.subdir) parsed.subdir = subdir;
+  const temp = mkdtempSync(join(resolve(from), ".smithers-pack-")); const staging = join(temp, "pack");
   try {
     const fetched = await fetchPack(parsed, staging);
     const sourceRoot = parsed.subdir ? join(staging, parsed.subdir) : staging;
@@ -174,7 +183,7 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
     if (!yes && !(process.stdin.isTTY && process.stdout.isTTY)) throw new Error(`${report}\nConfirmation required; pass --yes in non-interactive mode`);
     if (!yes) { process.stderr.write(`${report}\nInstall ${manifest.name}? [y/N] `); const answer = readFileSync(0, "utf8").trim().toLowerCase(); if (answer !== "y" && answer !== "yes") throw new Error("Pack installation cancelled"); }
     const root = packRoot(from, global); const target = join(root, manifest.name); rmSync(target, { recursive: true, force: true }); mkdirSync(root, { recursive: true }); cpSync(sourceRoot, target, { recursive: true });
-    const lock = readLock(root); lock[manifest.name] = { spec, resolved: fetched.resolved, version: manifest.version, integrity: fetched.integrity }; writeLock(root, lock);
+    const lock = readLock(root); lock[manifest.name] = { spec, ...(parsed.subdir ? { subdir: parsed.subdir } : {}), resolved: fetched.resolved, version: manifest.version, integrity: fetched.integrity }; writeLock(root, lock);
     return { name: manifest.name, manifest, report, scope: global ? "global" : "local", path: target };
   } finally { rmSync(temp, { recursive: true, force: true }); }
 }
@@ -191,7 +200,7 @@ export function listPacks(from = process.cwd()) {
 export async function updatePack(name, { from = process.cwd(), global = false } = {}) {
   const root = packRoot(from, global); const lock = readLock(root); const entry = lock[name];
   if (!entry?.spec) throw new Error(`No lock entry for pack: ${name}`);
-  return addPack(entry.spec, { from, global, yes: true });
+  return addPack(entry.spec, { from, global, yes: true, subdir: typeof entry.subdir === "string" ? entry.subdir : "" });
 }
 
 export { renderManifest };

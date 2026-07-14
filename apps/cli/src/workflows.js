@@ -664,7 +664,24 @@ export function validateWorkflowName(name) {
  */
 export function resolveWorkflow(id, from = process.cwd(), env = process.env) {
     const [packName, workflowId] = id.includes(":") ? id.split(/:(.*)/s) : [undefined, id];
-    const workflow = discoverWorkflows(from, env).find((candidate) => candidate.id === workflowId && (!packName || candidate.source === `pack:${packName}`));
+    if (packName) {
+        // Resolve pack-qualified ids directly from the named pack's dirs.
+        // Going through discoverWorkflows would miss any pack workflow whose
+        // id is shadowed by a higher-precedence local workflow (shadowed ids
+        // are deduped out of the discovery result).
+        for (const { scope, dir, packDir } of resolveWorkflowDirs(from, env)) {
+            if (!packDir || basename(dirname(packDir)) !== "packs" || basename(packDir) !== packName)
+                continue;
+            if (!existsSync(dir) || !statSync(dir).isDirectory())
+                continue;
+            const entry = enumerateWorkflowEntries(dir).find((candidate) => candidate.id === workflowId);
+            if (entry) {
+                return { ...buildWorkflow(entry.id, entry.entryFile, scope, env, packDir), source: `pack:${packName}` };
+            }
+        }
+        throw new SmithersError("RUN_NOT_FOUND", `Workflow not found: ${id}`, { id, root: from });
+    }
+    const workflow = discoverWorkflows(from, env).find((candidate) => candidate.id === workflowId);
     if (!workflow) {
         throw new SmithersError("RUN_NOT_FOUND", `Workflow not found: ${id}`, {
             id,

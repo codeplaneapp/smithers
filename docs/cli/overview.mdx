@@ -109,7 +109,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[97]:
+commands[99]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -613,7 +613,13 @@ commands[97]:
       json,j,boolean,true,Emit raw row as JSON
       pretty,,boolean,false,Schema-ordered render
   - name: packs
-    purpose: List installed workflow packs.
+    purpose: List and update installed workflow packs.
+  - name: packs.list
+    purpose: List local and global workflow packs.
+  - name: packs.update
+    purpose: Re-resolve installed packs from their locked specs (all packs when no name is given).
+    args[1]{name,type,required,desc}:
+      name,string,false,Pack name to update (default: every locked pack)
   - name: remove
     purpose: Remove an installed workflow pack.
     args[1]{name,type,required,desc}:
@@ -692,7 +698,7 @@ commands[97]:
       latest,,boolean,false,Fetch the latest docs from smithers.sh instead of docs for this CLI version
       docs-version,,string,,Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0
   - name: update
-    purpose: Check for a newer Smithers release and upgrade the install (or print how)
+    purpose: Check for a newer Smithers release and upgrade the install (or print how). Workflow packs update via `packs update`.
     flags[2]{name,short,type,default,desc}:
       check,,boolean,false,Only report current vs latest version; never upgrade
       dry-run,,boolean,false,Print the upgrade command without running it

@@ -79,8 +79,11 @@ capabilities:
 
 - `smithers add <spec>` — fetch, validate manifest, scan imports, show trust report,
   extract, write lock entry
-- `smithers remove <name>`, `smithers update [name]` (re-resolve per lock spec),
-  `smithers packs list`
+- `smithers remove <name>`, `smithers packs update [name]` (re-resolve per lock
+  spec; bare form updates every locked pack), `smithers packs list`. Pack updates
+  live under `packs update` because bare `smithers update` already means "upgrade
+  the Smithers install itself" — overloading it was a collision found during
+  implementation (2026-07-13).
 - `smithers eject <pack>:<workflow>` — copy workflow + UI + referenced prompts/lib into
   local `.smithers/`; `update` never touches ejected copies
 - `smithers share` — uses the `gh` CLI to fork/clone awesome-smithers, add/update this
