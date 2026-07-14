@@ -698,6 +698,22 @@ describe("SmithersDb adapter", () => {
         expect(events.length).toBe(1);
         expect(events[0].seq).toBe(0);
     });
+    test("listNodeEvents seeds a live transcript with the newest window", async () => {
+        const { adapter } = createTestDb();
+        for (let seq = 1; seq <= 150; seq += 1) {
+            await adapter.insertEvent({
+                runId: "r1",
+                seq,
+                timestampMs: now + seq,
+                type: "AgentSessionEvent",
+                payloadJson: JSON.stringify({ nodeId: "task-a", seq }),
+            });
+        }
+        const events = await adapter.listNodeEvents("r1", "task-a", { limit: 120 });
+        expect(events).toHaveLength(120);
+        expect(events[0].seq).toBe(31);
+        expect(events.at(-1)?.seq).toBe(150);
+    });
     test("listEventHistory composes type and since filters", async () => {
         const { adapter } = createTestDb();
         await adapter.insertEvent({

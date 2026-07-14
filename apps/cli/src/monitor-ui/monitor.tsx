@@ -2044,7 +2044,10 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
     setFailed(false);
     setLoadedOnce(false);
     let cancelled = false;
-    let afterSeq = 0;
+    // An absent cursor asks the node-filtered events route for its newest
+    // bounded window. Once seeded, every poll advances forward from the last
+    // observed sequence.
+    let afterSeq: number | undefined;
     let inFlight = false;
     const poll = async () => {
       // The first poll scans history and can outlive the interval; overlapping
@@ -2053,7 +2056,7 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
       inFlight = true;
       try {
         const search = new URLSearchParams({ nodeId, limit: "120" });
-        if (afterSeq > 0) search.set("afterSeq", String(afterSeq));
+        if (afterSeq !== undefined) search.set("afterSeq", String(afterSeq));
         const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/events?${search}`);
         if (!response.ok) throw new Error(`events ${response.status}`);
         const body = (await response.json()) as { data?: unknown[] };
@@ -2063,7 +2066,7 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
           if (!isRecord(raw)) continue;
           const name = String(raw.event ?? "");
           const seq = asNumber(raw.seq) ?? 0;
-          if (seq > afterSeq) afterSeq = seq;
+          if (afterSeq === undefined || seq > afterSeq) afterSeq = seq;
           if (name === "AgentSessionEvent") {
             const formatted = formatSessionTranscriptLine(raw.payload);
             if (formatted) fresh.push({ seq, ...formatted });
