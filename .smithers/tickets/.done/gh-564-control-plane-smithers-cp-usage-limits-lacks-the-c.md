@@ -12,3 +12,6 @@ If a project row is ever deleted (org kept), that project's usage events, secret
 Same composite FK + cascade as the sibling tables.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 6b0b02f736ff0bec45b491eb21a2ab1df6c89283.
