@@ -1,7 +1,7 @@
 // smithers-display-name: Implement Packs
 // smithers-description: Implement the "Share workflows like skills" packs feature end-to-end from research/packs-share-workflows-like-skills.md — five gated phases (manifest, add, eject, workflows+share, messaging), each a Luna-implement / Terra-validate / Sol-review loop, then a final Sol polish pass.
 /** @jsxImportSource smithers-orchestrator */
-import { UI, createSmithers, Sequence, Task } from "smithers-orchestrator";
+import { UI, ClaudeCodeAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { implementer, validator, panelists, polishReviewer } from "../components/roles";
 import {
@@ -40,6 +40,9 @@ GROUND RULES (non-negotiable, apply to every step):
 - Before reporting done: 'pnpm typecheck' green at the repo root, and 'pnpm -C <package> test' green for every package you touched.
 - New CLI commands/flags or public surface MUST get docs in the same phase — 'node scripts/check-docs.mjs' and 'node scripts/check-llms.mjs' are CI gates.
 - Match surrounding code style: apps/cli/src is plain .js with sibling .d.ts where present; TOON parsing uses @toon-format/toon.
+
+SANCTIONED SPEC AMENDMENTS (maintainer-approved; treat the design doc's current text as authoritative, do NOT flag these as spec violations):
+- 2026-07-13: pack updates live under 'smithers packs update [name]' (bare form updates every locked pack). Bare 'smithers update' remains the product self-update — overloading it was a collision found during implementation. The design doc records this.
 `;
 
 type Phase = { key: string; title: string; prompt: string };
@@ -179,7 +182,12 @@ export default smithers((ctx) => {
               prompt={phase.prompt}
               implementAgents={implementer}
               validateAgents={validator}
-              reviewAgents={[panelists[0]!]}
+              // PACKS_REVIEW_FORCE_FABLE: recovery hatch when the codex-first
+              // failover ladder is saturated (quota) — pins review to a fresh
+              // single-agent Fable chain so a retry can't land on a dead rung.
+              reviewAgents={process.env.PACKS_REVIEW_FORCE_FABLE === "1"
+                ? [new ClaudeCodeAgent({ model: "claude-fable-5" })]
+                : [panelists[0]!]}
               reviewWhen={gate.validated}
               feedback={gate.feedback}
               done={gate.done}
