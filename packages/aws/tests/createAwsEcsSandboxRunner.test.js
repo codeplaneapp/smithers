@@ -11,16 +11,19 @@ import { createAwsEcsSandboxRunner } from "../src/createAwsEcsSandboxRunner.js";
 function ecsDouble(overrides = {}) {
 	/** @type {string[]} */
 	const stoppedTasks = [];
+	/** @type {(AbortSignal | undefined)[]} */
+	const stopSignals = [];
 	const client = {
 		runTask: overrides.runTask ?? (async () => ({ tasks: [{ taskArn: "arn:task/1" }], failures: [] })),
 		describeTasks: overrides.describeTasks ?? (async () => ({ tasks: [{ taskArn: "arn:task/1", lastStatus: "STOPPED", containers: [{ name: "runner", exitCode: 0 }] }] })),
 		/** @param {{ task: string }} input */
-		async stopTask(input) {
+		async stopTask(input, handlerOptions) {
 			stoppedTasks.push(String(input.task));
+			stopSignals.push(handlerOptions?.abortSignal);
 			return {};
 		},
 	};
-	return { client, stoppedTasks };
+	return { client, stoppedTasks, stopSignals };
 }
 
 const BASE = { cluster: "smithers", taskDefinition: "smithers-sandbox:1", subnets: ["subnet-a"], containerName: "runner" };
@@ -46,6 +49,25 @@ describe("createAwsEcsSandboxRunner — validation", () => {
 		expect(message).toMatch(/RunTask returned no task/);
 		expect(message).not.toContain("SEKRET");
 	});
+
+	test("aborting a pending RunTask request rejects promptly", async () => {
+		const controller = new AbortController();
+		let launchSignal;
+		const { client, stoppedTasks } = ecsDouble({
+			runTask: (_input, handlerOptions) => {
+				launchSignal = handlerOptions?.abortSignal;
+				return new Promise((_, reject) => {
+					launchSignal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+				});
+			},
+		});
+		const runner = await createAwsEcsSandboxRunner({ ...BASE, client });
+		const pending = runner.run("echo hi", { env: {}, timeoutMs: 60_000, signal: controller.signal });
+		expect(launchSignal).toBe(controller.signal);
+		controller.abort();
+		await expect(pending).rejects.toThrow(/cancelled before launch/);
+		expect(stoppedTasks).toEqual([]);
+	});
 });
 
 describe("createAwsEcsSandboxRunner — polling", () => {
@@ -68,14 +90,40 @@ describe("createAwsEcsSandboxRunner — polling", () => {
 	});
 
 	test("times out when the task never stops, and issues a StopTask", async () => {
-		const { client, stoppedTasks } = ecsDouble({
+		const { client, stoppedTasks, stopSignals } = ecsDouble({
 			describeTasks: async () => {
 				await new Promise((r) => setTimeout(r, 5));
 				return { tasks: [{ taskArn: "arn:task/1", lastStatus: "RUNNING", containers: [] }] };
 			},
 		});
 		const runner = await createAwsEcsSandboxRunner({ ...BASE, client });
-		await expect(runner.run("echo hi", { env: {}, timeoutMs: 1 })).rejects.toThrow(/did not stop within/);
+		const controller = new AbortController();
+		await expect(runner.run("echo hi", { env: {}, timeoutMs: 1, signal: controller.signal })).rejects.toThrow(/did not stop within/);
+		expect(stoppedTasks).toEqual(["arn:task/1"]);
+		expect(stopSignals).toEqual([controller.signal]);
+	});
+
+	test("aborting a pending DescribeTasks request rejects and cleans up exactly once", async () => {
+		const controller = new AbortController();
+		const pollStarted = Promise.withResolvers();
+		let pollSignal;
+		const { client, stoppedTasks } = ecsDouble({
+			describeTasks: (_input, handlerOptions) => {
+				pollSignal = handlerOptions?.abortSignal;
+				pollStarted.resolve();
+				return new Promise((_, reject) => {
+					pollSignal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+				});
+			},
+		});
+		const runner = await createAwsEcsSandboxRunner({ ...BASE, client });
+		const pending = runner.run("echo hi", { env: {}, timeoutMs: 60_000, signal: controller.signal });
+		await pollStarted.promise;
+		expect(pollSignal).toBe(controller.signal);
+		controller.abort();
+		await expect(pending).rejects.toThrow(/cancelled/);
+		expect(stoppedTasks).toEqual(["arn:task/1"]);
+		await runner.stop();
 		expect(stoppedTasks).toEqual(["arn:task/1"]);
 	});
 

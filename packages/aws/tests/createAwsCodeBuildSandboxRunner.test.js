@@ -11,16 +11,19 @@ import { createAwsCodeBuildSandboxRunner } from "../src/createAwsCodeBuildSandbo
 function codebuildDouble(overrides = {}) {
 	/** @type {string[]} */
 	const stoppedIds = [];
+	/** @type {(AbortSignal | undefined)[]} */
+	const stopSignals = [];
 	const client = {
 		startBuild: overrides.startBuild ?? (async () => ({ build: { id: "build-1", buildStatus: "IN_PROGRESS" } })),
 		batchGetBuilds: overrides.batchGetBuilds ?? (async () => ({ builds: [{ id: "build-1", buildStatus: "SUCCEEDED" }] })),
 		/** @param {{ id: string }} input */
-		async stopBuild(input) {
+		async stopBuild(input, handlerOptions) {
 			stoppedIds.push(String(input.id));
+			stopSignals.push(handlerOptions?.abortSignal);
 			return {};
 		},
 	};
-	return { client, stoppedIds };
+	return { client, stoppedIds, stopSignals };
 }
 
 const BASE = { projectName: "smithers-sandbox", bucket: "b", prefix: "smithers/sandbox/run/sbx" };
@@ -59,6 +62,25 @@ describe("createAwsCodeBuildSandboxRunner — validation & launch", () => {
 		const { client } = codebuildDouble({ startBuild: async () => ({ build: {} }) });
 		const runner = await createAwsCodeBuildSandboxRunner({ ...BASE, client });
 		await expect(runner.run("echo hi", { env: {}, timeoutMs: 1000 })).rejects.toThrow(/returned no build id/);
+	});
+
+	test("aborting a pending StartBuild request rejects promptly", async () => {
+		const controller = new AbortController();
+		let launchSignal;
+		const { client, stoppedIds } = codebuildDouble({
+			startBuild: (_input, handlerOptions) => {
+				launchSignal = handlerOptions?.abortSignal;
+				return new Promise((_, reject) => {
+					launchSignal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+				});
+			},
+		});
+		const runner = await createAwsCodeBuildSandboxRunner({ ...BASE, client });
+		const pending = runner.run("echo hi", { env: {}, timeoutMs: 60_000, signal: controller.signal });
+		expect(launchSignal).toBe(controller.signal);
+		controller.abort();
+		await expect(pending).rejects.toThrow(/cancelled before launch/);
+		expect(stoppedIds).toEqual([]);
 	});
 });
 
@@ -102,14 +124,40 @@ describe("createAwsCodeBuildSandboxRunner — polling", () => {
 	});
 
 	test("times out when the build never leaves IN_PROGRESS, and stops the build", async () => {
-		const { client, stoppedIds } = codebuildDouble({
+		const { client, stoppedIds, stopSignals } = codebuildDouble({
 			batchGetBuilds: async () => {
 				await new Promise((r) => setTimeout(r, 5));
 				return { builds: [{ id: "build-1", buildStatus: "IN_PROGRESS" }] };
 			},
 		});
 		const runner = await createAwsCodeBuildSandboxRunner({ ...BASE, client });
-		await expect(runner.run("echo hi", { env: {}, timeoutMs: 1 })).rejects.toThrow(/did not finish within/);
+		const controller = new AbortController();
+		await expect(runner.run("echo hi", { env: {}, timeoutMs: 1, signal: controller.signal })).rejects.toThrow(/did not finish within/);
+		expect(stoppedIds).toEqual(["build-1"]);
+		expect(stopSignals).toEqual([controller.signal]);
+	});
+
+	test("aborting a pending BatchGetBuilds request rejects and cleans up exactly once", async () => {
+		const controller = new AbortController();
+		const pollStarted = Promise.withResolvers();
+		let pollSignal;
+		const { client, stoppedIds } = codebuildDouble({
+			batchGetBuilds: (_input, handlerOptions) => {
+				pollSignal = handlerOptions?.abortSignal;
+				pollStarted.resolve();
+				return new Promise((_, reject) => {
+					pollSignal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+				});
+			},
+		});
+		const runner = await createAwsCodeBuildSandboxRunner({ ...BASE, client });
+		const pending = runner.run("echo hi", { env: {}, timeoutMs: 60_000, signal: controller.signal });
+		await pollStarted.promise;
+		expect(pollSignal).toBe(controller.signal);
+		controller.abort();
+		await expect(pending).rejects.toThrow(/cancelled/);
+		expect(stoppedIds).toEqual(["build-1"]);
+		await runner.stop();
 		expect(stoppedIds).toEqual(["build-1"]);
 	});
 

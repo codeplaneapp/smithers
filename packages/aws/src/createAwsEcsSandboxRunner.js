@@ -99,7 +99,7 @@ export async function createAwsEcsSandboxRunner(options) {
 				await stop();
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS fargate sandbox task was cancelled.", { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: taskArnToPoll });
 			}
-			const res = await ecs.describeTasks({ cluster, tasks: [taskArnToPoll] });
+			const res = await ecs.describeTasks({ cluster, tasks: [taskArnToPoll] }, { abortSignal: pollOpts.signal });
 			const task = /** @type {{ tasks?: Array<Record<string, any>> }} */ (res)?.tasks?.[0];
 			if (task && String(task.lastStatus) === "STOPPED") {
 				// The task has already terminated on its own, so a later cleanup must
@@ -108,7 +108,7 @@ export async function createAwsEcsSandboxRunner(options) {
 				return task;
 			}
 			if (Date.now() >= deadline) {
-				await stop();
+				await stop(pollOpts.signal);
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", `AWS fargate sandbox task did not stop within ${timeoutMs}ms.`, { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: taskArnToPoll });
 			}
 			try {
@@ -120,11 +120,14 @@ export async function createAwsEcsSandboxRunner(options) {
 		}
 	}
 
-	async function stop() {
+	/**
+	 * @param {AbortSignal} [signal]
+	 */
+	async function stop(signal) {
 		if (!taskArn || stopped) return;
 		stopped = true;
 		try {
-			await ecs.stopTask({ cluster, task: taskArn, reason: "smithers sandbox cleanup" });
+			await ecs.stopTask({ cluster, task: taskArn, reason: "smithers sandbox cleanup" }, { abortSignal: signal });
 		} catch {
 			// best-effort
 		}
@@ -167,8 +170,11 @@ export async function createAwsEcsSandboxRunner(options) {
 			};
 			let runRes;
 			try {
-				runRes = await ecs.runTask(runInput);
+				runRes = await ecs.runTask(runInput, { abortSignal: execOpts.signal });
 			} catch (error) {
+				if (execOpts.signal?.aborted) {
+					throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS fargate sandbox task was cancelled before launch.", { provider: AWS_SANDBOX_PROVIDER_ID });
+				}
 				const detail = scrubAwsSandboxSecrets(error instanceof Error ? error.message : String(error), secrets);
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", `AWS fargate RunTask failed: ${detail}`, { provider: AWS_SANDBOX_PROVIDER_ID });
 			}
@@ -179,7 +185,18 @@ export async function createAwsEcsSandboxRunner(options) {
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", `AWS fargate RunTask returned no task: ${reason}`, { provider: AWS_SANDBOX_PROVIDER_ID });
 			}
 
-			const task = await pollUntilStopped(taskArn, { timeoutMs: execOpts.timeoutMs, signal: execOpts.signal });
+			let task;
+			try {
+				task = await pollUntilStopped(taskArn, { timeoutMs: execOpts.timeoutMs, signal: execOpts.signal });
+			} catch (error) {
+				// A remote task now exists. Attempt cleanup exactly once, but do not pass
+				// an already-aborted signal because the cleanup request must still run.
+				await stop();
+				if (execOpts.signal?.aborted) {
+					throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS fargate sandbox task was cancelled.", { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: taskArn });
+				}
+				throw error;
+			}
 			const containers = /** @type {Array<{ name?: string; exitCode?: number }>} */ (task.containers ?? []);
 			const container = containers.find((c) => c.name === containerName) ?? containers[0];
 			const rawExit = container?.exitCode;
@@ -197,12 +214,21 @@ export async function createAwsEcsSandboxRunner(options) {
 				// `awslogs-stream-prefix` convention) but is configurable for task
 				// definitions that use a different prefix.
 				const streamPrefix = typeof options.awslogsStreamPrefix === "string" && options.awslogsStreamPrefix.length > 0 ? options.awslogsStreamPrefix : containerName;
-				stdout = await readCloudWatchLogs({
-					logs: /** @type {any} */ (options.logs),
-					logGroupName: options.logGroupName,
-					logStreamName: options.logGroupName ? `${streamPrefix}/${containerName}/${taskId}` : undefined,
-					maxOutputBytes: options.maxOutputBytes,
-				});
+				try {
+					stdout = await readCloudWatchLogs({
+						logs: /** @type {any} */ (options.logs),
+						logGroupName: options.logGroupName,
+						logStreamName: options.logGroupName ? `${streamPrefix}/${containerName}/${taskId}` : undefined,
+						maxOutputBytes: options.maxOutputBytes,
+						signal: execOpts.signal,
+					});
+				} catch (error) {
+					if (execOpts.signal?.aborted) {
+						await stop();
+						throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS fargate sandbox task was cancelled while reading logs.", { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: taskArn });
+					}
+					throw error;
+				}
 			}
 			const stderr = exitCode !== 0 && stoppedReason ? scrubAwsSandboxSecrets(String(stoppedReason), secrets) : "";
 			return { exitCode, stdout, stderr };

@@ -11,7 +11,9 @@ import { AWS_SANDBOX_PROVIDER_ID } from "./AWS_SANDBOX_PROVIDER_ID.js";
  *   the optional `@aws-sdk/*` packages installed.
  * - Otherwise the module is lazily imported; a real client is constructed (or an
  *   injected raw `.send()` client is reused) and each method is wrapped to
- *   `client.send(new <Method>Command(input))`.
+ *   `client.send(new <Method>Command(input), handlerOptions)` — the optional
+ *   second argument carries SDK handler options such as `abortSignal`, so a
+ *   pending request can be interrupted when a run is cancelled.
  *
  * @param {{
  *   injected?: unknown;
@@ -20,12 +22,12 @@ import { AWS_SANDBOX_PROVIDER_ID } from "./AWS_SANDBOX_PROVIDER_ID.js";
  *   methods: string[];
  *   clientOptions?: Record<string, unknown>;
  * }} config
- * @returns {Promise<Record<string, (input: Record<string, unknown>) => Promise<any>>>}
+ * @returns {Promise<Record<string, (input: Record<string, unknown>, handlerOptions?: { abortSignal?: AbortSignal }) => Promise<any>>>}
  */
 export async function resolveAwsSdkClient(config) {
 	const { injected, moduleName, clientExport, methods, clientOptions } = config;
 	if (injected && methods.every((method) => typeof (/** @type {Record<string, unknown>} */ (injected))[method] === "function")) {
-		return /** @type {Record<string, (input: Record<string, unknown>) => Promise<any>>} */ (injected);
+		return /** @type {Record<string, (input: Record<string, unknown>, handlerOptions?: { abortSignal?: AbortSignal }) => Promise<any>>} */ (injected);
 	}
 	let mod;
 	try {
@@ -46,7 +48,7 @@ export async function resolveAwsSdkClient(config) {
 		);
 	}
 	const client = injected ?? new Client({ ...(clientOptions ?? {}) });
-	/** @type {Record<string, (input: Record<string, unknown>) => Promise<any>>} */
+	/** @type {Record<string, (input: Record<string, unknown>, handlerOptions?: { abortSignal?: AbortSignal }) => Promise<any>>} */
 	const surface = {};
 	for (const method of methods) {
 		const commandExport = `${method.charAt(0).toUpperCase()}${method.slice(1)}Command`;
@@ -58,7 +60,7 @@ export async function resolveAwsSdkClient(config) {
 				{ provider: AWS_SANDBOX_PROVIDER_ID, module: moduleName },
 			);
 		}
-		surface[method] = (input) => /** @type {{ send: (command: unknown) => Promise<any> }} */ (client).send(new Command(input));
+		surface[method] = (input, handlerOptions) => /** @type {{ send: (command: unknown, handlerOptions?: { abortSignal?: AbortSignal }) => Promise<any> }} */ (client).send(new Command(input), handlerOptions);
 	}
 	return surface;
 }

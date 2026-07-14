@@ -212,7 +212,7 @@ export function createAwsEcsSandboxRunner(options: {
 		command: string,
 		execOpts: { env: Record<string, string>; timeoutMs: number; signal?: AbortSignal },
 	): Promise<{ exitCode: number; stdout: string; stderr: string }>;
-	stop: () => Promise<void>;
+	stop: (signal?: AbortSignal) => Promise<void>;
 }>;
 
 /**
@@ -237,5 +237,5 @@ export function createAwsCodeBuildSandboxRunner(options: {
 		command: string,
 		execOpts: { env: Record<string, string>; timeoutMs: number; signal?: AbortSignal },
 	): Promise<{ exitCode: number; stdout: string; stderr: string }>;
-	stop: () => Promise<void>;
+	stop: (signal?: AbortSignal) => Promise<void>;
 }>;

@@ -87,11 +87,14 @@ export async function createAwsCodeBuildSandboxRunner(options) {
 	let buildId;
 	let stopped = false;
 
-	async function stop() {
+	/**
+	 * @param {AbortSignal} [signal]
+	 */
+	async function stop(signal) {
 		if (!buildId || stopped) return;
 		stopped = true;
 		try {
-			await codebuild.stopBuild({ id: buildId });
+			await codebuild.stopBuild({ id: buildId }, { abortSignal: signal });
 		} catch {
 			// best-effort
 		}
@@ -110,11 +113,11 @@ export async function createAwsCodeBuildSandboxRunner(options) {
 				await stop();
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS codebuild sandbox build was cancelled.", { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: idToPoll });
 			}
-			const res = await codebuild.batchGetBuilds({ ids: [idToPoll] });
+			const res = await codebuild.batchGetBuilds({ ids: [idToPoll] }, { abortSignal: pollOpts.signal });
 			const build = /** @type {{ builds?: Array<Record<string, any>> }} */ (res)?.builds?.[0];
 			if (build && String(build.buildStatus) !== "IN_PROGRESS") return build;
 			if (Date.now() >= deadline) {
-				await stop();
+				await stop(pollOpts.signal);
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", `AWS codebuild sandbox build did not finish within ${timeoutMs}ms.`, { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: idToPoll });
 			}
 			try {
@@ -155,8 +158,11 @@ export async function createAwsCodeBuildSandboxRunner(options) {
 			};
 			let startRes;
 			try {
-				startRes = await codebuild.startBuild(startInput);
+				startRes = await codebuild.startBuild(startInput, { abortSignal: execOpts.signal });
 			} catch (error) {
+				if (execOpts.signal?.aborted) {
+					throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS codebuild sandbox build was cancelled before launch.", { provider: AWS_SANDBOX_PROVIDER_ID });
+				}
 				const detail = scrubAwsSandboxSecrets(error instanceof Error ? error.message : String(error), secrets);
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", `AWS codebuild StartBuild failed: ${detail}`, { provider: AWS_SANDBOX_PROVIDER_ID });
 			}
@@ -165,19 +171,39 @@ export async function createAwsCodeBuildSandboxRunner(options) {
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS codebuild StartBuild returned no build id.", { provider: AWS_SANDBOX_PROVIDER_ID });
 			}
 
-			const build = await pollUntilComplete(buildId, { timeoutMs: execOpts.timeoutMs, signal: execOpts.signal });
+			let build;
+			try {
+				build = await pollUntilComplete(buildId, { timeoutMs: execOpts.timeoutMs, signal: execOpts.signal });
+			} catch (error) {
+				// A remote build now exists. Attempt cleanup exactly once, but do not pass
+				// an already-aborted signal because the cleanup request must still run.
+				await stop();
+				if (execOpts.signal?.aborted) {
+					throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS codebuild sandbox build was cancelled.", { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: buildId });
+				}
+				throw error;
+			}
 			const buildStatus = String(build.buildStatus ?? "FAILED");
 			const exitCode = buildStatus === "SUCCEEDED" ? 0 : 1;
 
 			let stdout = "";
 			if (options.captureLogs) {
 				const logsRef = /** @type {{ logs?: { groupName?: string; streamName?: string } }} */ (build)?.logs;
-				stdout = await readCloudWatchLogs({
-					logs: /** @type {any} */ (options.logs),
-					logGroupName: logsRef?.groupName,
-					logStreamName: logsRef?.streamName,
-					maxOutputBytes: options.maxOutputBytes,
-				});
+				try {
+					stdout = await readCloudWatchLogs({
+						logs: /** @type {any} */ (options.logs),
+						logGroupName: logsRef?.groupName,
+						logStreamName: logsRef?.streamName,
+						maxOutputBytes: options.maxOutputBytes,
+						signal: execOpts.signal,
+					});
+				} catch (error) {
+					if (execOpts.signal?.aborted) {
+						await stop();
+						throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS codebuild sandbox build was cancelled while reading logs.", { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: buildId });
+					}
+					throw error;
+				}
 			}
 			const stderr = exitCode !== 0 ? scrubAwsSandboxSecrets(buildStatus, secrets) : "";
 			return { exitCode, stdout, stderr };

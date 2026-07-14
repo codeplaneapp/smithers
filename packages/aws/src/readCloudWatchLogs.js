@@ -8,6 +8,7 @@
  *   logGroupName?: string;
  *   logStreamName?: string;
  *   maxOutputBytes?: number;
+ *   signal?: AbortSignal;
  * }} config
  * @returns {Promise<string>}
  */
@@ -15,11 +16,14 @@ export async function readCloudWatchLogs(config) {
 	const { logs, logGroupName, logStreamName } = config;
 	if (!logs || !logGroupName || !logStreamName) return "";
 	try {
-		const res = await logs.getLogEvents({
-			logGroupName,
-			logStreamName,
-			startFromHead: true,
-		});
+		const res = await logs.getLogEvents(
+			{
+				logGroupName,
+				logStreamName,
+				startFromHead: true,
+			},
+			{ abortSignal: config.signal },
+		);
 		const events = /** @type {{ events?: Array<{ message?: unknown }> }} */ (res)?.events ?? [];
 		const text = events.map((event) => String(event?.message ?? "")).join("");
 		const maxBytes = config.maxOutputBytes;
@@ -28,7 +32,10 @@ export async function readCloudWatchLogs(config) {
 			return `${kept}… [truncated ${text.length - /** @type {number} */ (maxBytes)} chars]`;
 		}
 		return text;
-	} catch {
+	} catch (error) {
+		// Cancellation is control flow, not a best-effort logging failure. Let the
+		// runner turn it into its provider-specific cancellation error.
+		if (config.signal?.aborted) throw error;
 		return "";
 	}
 }

@@ -41,11 +41,14 @@ describe("resolveAwsSdkClient — real-import construction path", () => {
 	test("reuses an injected raw send() client (bypasses new Client) when it lacks the flat methods", async () => {
 		/** @type {unknown[]} */
 		const sent = [];
+		/** @type {unknown[]} */
+		const sentHandlerOptions = [];
 		const injected = {
 			// No putObject method, so the fast-path bail-out does not trigger, but it
 			// carries a `.send` the wrapper reuses instead of constructing a client.
-			send: async (/** @type {{ input: unknown }} */ command) => {
+			send: async (/** @type {{ input: unknown }} */ command, handlerOptions) => {
 				sent.push(command);
+				sentHandlerOptions.push(handlerOptions);
 				return { fromInjected: command.input };
 			},
 		};
@@ -55,9 +58,11 @@ describe("resolveAwsSdkClient — real-import construction path", () => {
 			clientExport: "Client",
 			methods: ["putObject"],
 		});
-		const res = await surface.putObject({ Key: "reused" });
+		const controller = new AbortController();
+		const res = await surface.putObject({ Key: "reused" }, { abortSignal: controller.signal });
 		expect(res).toEqual({ fromInjected: { Key: "reused" } });
 		expect(sent.length).toBe(1);
+		expect(sentHandlerOptions).toEqual([{ abortSignal: controller.signal }]);
 	});
 });
 
