@@ -83,6 +83,7 @@ const DESTRUCTIVE_TOOL_NAMES = new Set([
     "down",
     "fork",
     "replay",
+    "replay_run",
     "resolve_approval",
     "revert",
     "revert_attempt",

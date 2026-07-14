@@ -132,6 +132,7 @@ describe("createSmithersAgentContract categorization", () => {
         { name: "resolve_approval", description: "approve a gate" },
         { name: "get_run", description: "run details" },
         { name: "timeline", description: "debug timeline" },
+        { name: "replay_run", description: "replay a run from a checkpoint" },
         { name: "memory_query", description: "admin memory" },
         { name: "cancel", description: "stop a run" },
         { name: "risky_thing", description: "Destructive: nukes state" },
@@ -146,9 +147,11 @@ describe("createSmithersAgentContract categorization", () => {
     expect(byName.timeline.category).toBe("debug");
     expect(byName.memory_query.category).toBe("admin");
     expect(byName.cancel.destructive).toBe(true);
+    expect(byName.replay_run.destructive).toBe(true);
     expect(byName.risky_thing.destructive).toBe(true);
     expect(byName.list_workflows.destructive).toBe(false);
     expect(contract.promptGuidance).toContain("list_workflows");
+    expect(contract.promptGuidance).toContain("replay_run");
     expect(contract.docsGuidance).toContain("| `cancel` |");
   });
 });
