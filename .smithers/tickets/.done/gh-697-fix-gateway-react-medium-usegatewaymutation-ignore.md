@@ -18,3 +18,6 @@ A dashboard rendering runs, workflows, crons, tickets, and memory facts calls `u
 A public typed option is a silent no-op (contract violation), and full-graph invalidation on every domain write is a real refetch amplifier for any non-trivial UI built on these hooks. Note `packages/gateway-react/tests/collectionHooks.test.ts:288` already passes `{ invalidate: ["runs"] }` but asserts nothing about scoping, so the bug is uncaught by CI.
 
 **Fix**: read the option (`options.invalidate`) and pass it to `collections.invalidate(options.invalidate)`; rename `_options` → `options`; add a test asserting only the named collection(s) are invalidated.
+
+
+> Closed by ticket-fleet: landed on main in 7ebe0e5292ea70e9647062b65996b3d1daabba23.
