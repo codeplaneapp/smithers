@@ -4193,7 +4193,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // reproduces the crash), don't reuse the captured agentResume
                 // from the heartbeat. Forces the agent to start a fresh
                 // session on the next attempt.
-                const lastFailedAttempt = attempts.find((a) => a.state === "failed");
+                // Also match reset-cancelled attempts: retry-task flips failed
+                // attempts to "cancelled" but preserves their meta, and the
+                // poisoned heartbeat checkpoint survives the reset — losing the
+                // flag here would resume the corrupt session with a clean-looking
+                // attempt history.
+                const lastFailedAttempt = attempts.find((a) => a.state === "failed" ||
+                    parseAttemptMetaJson(a.metaJson)?.discardResumeSession === true);
                 const lastFailedMeta = parseAttemptMetaJson(lastFailedAttempt?.metaJson);
                 const discardResumeSession = lastFailedMeta?.discardResumeSession === true;
                 const checkpointResumeSession = !discardResumeSession
