@@ -16,6 +16,12 @@ function isIntegerNumberType(zodType, baseTypeName) {
     return def?.format === "safeint" ||
         def?.checks?.some((check) => check?._zod?.def?.check === "number_format");
 }
+function literalValue(zodType) {
+    const values = zodType._zod?.def?.values;
+    if (Array.isArray(values))
+        return values.length === 1 ? values[0] : undefined;
+    return zodType.value;
+}
 /**
  * Generates a Drizzle sqliteTable from a Zod object schema.
  *
@@ -46,7 +52,14 @@ export function zodToTable(tableName, schema, opts) {
         const colName = camelToSnake(key);
         const baseType = unwrapZodType(zodType);
         const baseTypeName = getZodBaseTypeName(baseType);
-        if (isIntegerNumberType(baseType, baseTypeName)) {
+        const literal = baseTypeName === "literal" ? literalValue(baseType) : undefined;
+        if (typeof literal === "number") {
+            columns[key] = Number.isInteger(literal) ? integer(colName) : real(colName);
+        }
+        else if (typeof literal === "boolean") {
+            columns[key] = integer(colName, { mode: "boolean" });
+        }
+        else if (isIntegerNumberType(baseType, baseTypeName)) {
             columns[key] = integer(colName);
         }
         else if (baseTypeName === "number" || baseTypeName === "float") {
@@ -57,7 +70,7 @@ export function zodToTable(tableName, schema, opts) {
         }
         else if (baseTypeName === "string" ||
             baseTypeName === "enum" ||
-            baseTypeName === "literal") {
+            (baseTypeName === "literal" && typeof literal === "string")) {
             columns[key] = text(colName);
         }
         else {

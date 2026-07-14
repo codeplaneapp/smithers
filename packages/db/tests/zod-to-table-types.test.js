@@ -59,6 +59,26 @@ describe("zodToTable", () => {
         const table = zodToTable("test_enum", schema);
         expect(Object.keys(table)).toContain("status");
     });
+    test("maps literals by their scalar value instead of coercing every literal to text", () => {
+        const schema = z.object({ version: z.literal(2), ratio: z.literal(2.5), enabled: z.literal(true), tag: z.literal("v2") });
+        const table = zodToTable("test_literals", schema);
+        const ddl = zodToCreateTableSQL("test_literals", schema);
+        expect(table.version.getSQLType()).toBe("integer");
+        expect(table.ratio.getSQLType()).toBe("real");
+        expect(table.enabled.getSQLType()).toBe("integer");
+        expect(table.tag.getSQLType()).toBe("text");
+        expect(ddl).toContain('"version" INTEGER');
+        expect(ddl).toContain('"ratio" REAL');
+        expect(ddl).toContain('"enabled" INTEGER');
+        expect(ddl).toContain('"tag" TEXT');
+    });
+    test("keeps multi-value literals on the safe text/json fallback without reading the throwing value getter", () => {
+        const schema = z.object({ status: z.literal(["ready", "done"]) });
+        const table = zodToTable("test_multi_literal", schema);
+        const ddl = zodToCreateTableSQL("test_multi_literal", schema);
+        expect(table.status.getSQLType()).toBe("text");
+        expect(ddl).toContain('"status" TEXT');
+    });
     test("maps array to json text column", () => {
         const schema = z.object({ tags: z.array(z.string()) });
         const table = zodToTable("test_array", schema);

@@ -15,9 +15,21 @@ function isIntegerNumberType(zodType, baseTypeName) {
     return def?.format === "safeint" ||
         def?.checks?.some((check) => check?._zod?.def?.check === "number_format");
 }
+function literalValue(zodType) {
+    const values = zodType._zod?.def?.values;
+    if (Array.isArray(values))
+        return values.length === 1 ? values[0] : undefined;
+    return zodType.value;
+}
 function sqliteTypeFor(zodFieldSchema) {
     const baseType = unwrapZodType(zodFieldSchema);
     const baseTypeName = getZodBaseTypeName(baseType);
+    const literal = baseTypeName === "literal" ? literalValue(baseType) : undefined;
+    if (typeof literal === "boolean" || (typeof literal === "number" && Number.isInteger(literal))) {
+        return "INTEGER";
+    }
+    if (typeof literal === "number")
+        return "REAL";
     if (baseTypeName === "boolean" || isIntegerNumberType(baseType, baseTypeName)) {
         return "INTEGER";
     }
@@ -28,6 +40,11 @@ function sqliteTypeFor(zodFieldSchema) {
 function sqliteKindFor(zodFieldSchema) {
     const baseType = unwrapZodType(zodFieldSchema);
     const baseTypeName = getZodBaseTypeName(baseType);
+    const literal = baseTypeName === "literal" ? literalValue(baseType) : undefined;
+    if (typeof literal === "boolean")
+        return "boolean";
+    if (typeof literal === "number")
+        return "number";
     if (baseTypeName === "boolean")
         return "boolean";
     if (baseTypeName === "number" ||
@@ -36,7 +53,7 @@ function sqliteKindFor(zodFieldSchema) {
         return "number";
     if (baseTypeName === "string" ||
         baseTypeName === "enum" ||
-        baseTypeName === "literal")
+        (baseTypeName === "literal" && typeof literal === "string"))
         return "string";
     return "json";
 }
