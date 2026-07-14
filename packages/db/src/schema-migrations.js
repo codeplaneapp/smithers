@@ -1105,6 +1105,21 @@ function buildMigrations(context) {
                 return { droppedTriggers };
             },
         },
+        {
+            id: "0027_add_rewind_leases",
+            name: "Add durable rewind lease table",
+            checksum: "packages/db/migrations/0027_add_rewind_leases.sql",
+            isApplied: (sqlite) => tableExists(sqlite, "_smithers_rewind_leases"),
+            isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_rewind_leases"),
+            up: (sqlite) => {
+                sqlite.run(createTableStatementFor("_smithers_rewind_leases", context.createTableStatements));
+                return { table: "_smithers_rewind_leases" };
+            },
+            upPostgres: async (pgConn) => {
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_rewind_leases", context.createTableStatements)) });
+                return { table: "_smithers_rewind_leases" };
+            },
+        },
     ];
 }
 

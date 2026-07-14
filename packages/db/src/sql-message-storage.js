@@ -230,6 +230,11 @@ const CREATE_TABLE_STATEMENTS = [
     duration_ms INTEGER,
     FOREIGN KEY (run_id) REFERENCES _smithers_runs(run_id) ON DELETE CASCADE
   )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_rewind_leases (
+    run_id TEXT PRIMARY KEY,
+    owner_token TEXT NOT NULL,
+    expires_at_ms INTEGER NOT NULL
+  )`,
     `CREATE TABLE IF NOT EXISTS _smithers_sandboxes (
     run_id TEXT NOT NULL,
     sandbox_id TEXT NOT NULL,

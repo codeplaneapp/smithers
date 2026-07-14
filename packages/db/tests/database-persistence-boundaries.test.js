@@ -93,6 +93,7 @@ describe("database persistence boundary coverage", () => {
                 "_smithers_cache",
                 "_smithers_node_diffs",
                 "_smithers_time_travel_audit",
+                "_smithers_rewind_leases",
                 "_smithers_schema_migrations",
                 "_smithers_sandboxes",
                 "_smithers_tool_calls",

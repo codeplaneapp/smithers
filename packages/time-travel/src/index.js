@@ -44,6 +44,6 @@ export { runForksCreated } from "./runForksCreated.js";
 export { replaysStarted } from "./replaysStarted.js";
 export { snapshotDuration } from "./snapshotDuration.js";
 export { jumpToFrame, JumpToFrameError, validateJumpRunId, validateJumpFrameNo, JUMP_RUN_ID_PATTERN, JUMP_MAX_FRAME_NO } from "./jumpToFrame.js";
-export { acquireRewindLock, hasRewindLock, resetRewindLocksForTests } from "./rewindLock.js";
+export { acquireRewindLock, hasRewindLock, resetRewindLocksForTests, REWIND_LEASE_TTL_MS } from "./rewindLock.js";
 export { evaluateRewindRateLimit, REWIND_RATE_LIMIT_MAX, REWIND_RATE_LIMIT_WINDOW_MS } from "./rewindRateLimit.js";
 export { writeRewindAuditRow, countRecentRewindAuditRows, listRewindAuditRows, updateRewindAuditRow, recoverInProgressRewindAudits } from "./rewindAudit.js";

@@ -102,6 +102,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(names.has("_smithers_runs")).toBe(true);
         expect(names.has("_smithers_events")).toBe(true);
         expect(names.has("_smithers_time_travel_audit")).toBe(true);
+        expect(names.has("_smithers_rewind_leases")).toBe(true);
     });
 
     test("ensureSchema records the shared schema migration ledger idempotently", async () => {

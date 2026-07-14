@@ -19,6 +19,7 @@ describe("ensureSmithersTables", () => {
         expect(tableNames).toContain("_smithers_cache");
         expect(tableNames).toContain("_smithers_node_diffs");
         expect(tableNames).toContain("_smithers_time_travel_audit");
+        expect(tableNames).toContain("_smithers_rewind_leases");
         expect(tableNames).toContain("_smithers_sandboxes");
         expect(tableNames).toContain("_smithers_tool_calls");
         expect(tableNames).toContain("_smithers_events");
@@ -91,6 +92,15 @@ describe("ensureSmithersTables", () => {
             "timestamp_ms",
             "result",
             "duration_ms",
+        ]));
+        const rewindLeaseCols = sqlite
+            .query('PRAGMA table_info("_smithers_rewind_leases")')
+            .all()
+            .map((column) => column.name);
+        expect(rewindLeaseCols).toEqual(expect.arrayContaining([
+            "run_id",
+            "owner_token",
+            "expires_at_ms",
         ]));
         const runIndexes = sqlite
             .query('PRAGMA index_list("_smithers_runs")')

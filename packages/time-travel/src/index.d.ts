@@ -40,7 +40,10 @@ type RewindAuditResult$4 = "success" | "failed" | "partial" | "in_progress";
 
 type RewindLockHandle$2 = {
     runId: string;
-    release: () => boolean;
+    ownerToken: string;
+    readonly expiresAtMs: number;
+    renew: () => Promise<boolean>;
+    release: () => Promise<boolean>;
 };
 
 type JumpStepName$1 = "snapshot-pre-jump" | "pause-event-loop" | "revert-sandboxes" | "truncate-frames" | "truncate-attempts" | "truncate-outputs" | "invalidate-diffs" | "rebuild-reconciler" | "resume-event-loop";
@@ -1036,16 +1039,28 @@ declare function jumpToFrame(input: JumpToFrameInput$1): Promise<JumpResult$1>;
 type JumpResult$1 = JumpResult$2;
 type JumpToFrameInput$1 = JumpToFrameInput$2;
 
-/** @typedef {import("./RewindLockHandle.ts").RewindLockHandle} RewindLockHandle */
 /**
- * Acquire a single-flight lock for one run.
- * Returns null when another rewind for this run is already in progress.
+ * Acquire a durable single-flight lease for one run. The database compare-and-set
+ * makes the exclusion visible to CLI, MCP, and server processes that share the
+ * Smithers store. An expired lease can be replaced atomically.
  *
+ * @param {SmithersDb} adapter
  * @param {string} runId
- * @returns {RewindLockHandle | null}
+ * @param {{
+ *   nowMs?: () => number;
+ *   leaseTtlMs?: number;
+ *   autoRenew?: boolean;
+ * }} [options]
+ * @returns {Promise<RewindLockHandle | null>}
  */
-declare function acquireRewindLock(runId: string): RewindLockHandle$1 | null;
+declare function acquireRewindLock(adapter: SmithersDb$d, runId: string, options?: {
+    nowMs?: () => number;
+    leaseTtlMs?: number;
+    autoRenew?: boolean;
+}): Promise<RewindLockHandle$1 | null>;
 type RewindLockHandle$1 = RewindLockHandle$2;
+
+declare const REWIND_LEASE_TTL_MS: 60000;
 
 /**
  * Check whether a run currently holds a rewind lock.
@@ -1228,4 +1243,4 @@ type RevertResult = RevertResult$2;
 type TimeTravelOptions = TimeTravelOptions$2;
 type TimeTravelResult = TimeTravelResult$2;
 
-export { type BranchInfo, type ForkParams, JUMP_MAX_FRAME_NO, JUMP_RUN_ID_PATTERN, type JumpResult, type JumpStepName, JumpToFrameError, type JumpToFrameInput, type NodeChange, type NodeSnapshot, type OutputChange, type ParsedSnapshot, REWIND_RATE_LIMIT_MAX, REWIND_RATE_LIMIT_WINDOW_MS, type RalphChange, type RalphSnapshot, type ReplayParams, type ReplayResult, type RevertOptions, type RevertResult, type RewindAuditResult, type RewindLockHandle, type RunTimeline, type Snapshot, type SnapshotData, type SnapshotDiff, type TimeTravelOptions, type TimeTravelResult, type TimelineFrame, type TimelineTree, type VcsTag, acquireRewindLock, buildTimeline, buildTimelineTree, captureSnapshot, countRecentRewindAuditRows, diffRawSnapshots, diffSnapshots, evaluateRewindRateLimit, forkRun, formatDiffAsJson, formatDiffForTui, formatTimelineAsJson, formatTimelineForTui, getBranchInfo, hasRewindLock, jumpToFrame, listBranches, listRewindAuditRows, listSnapshots, loadLatestSnapshot, loadSnapshot, loadVcsTag, parseSnapshot, recoverInProgressRewindAudits, replayFromCheckpoint, rerunAtRevision, resetRewindLocksForTests, resolveWorkflowAtRevision, revertToAttempt, smithersBranches, smithersSnapshots, smithersVcsTags, tagSnapshotVcs, timeTravel, updateRewindAuditRow, validateJumpFrameNo, validateJumpRunId, writeRewindAuditRow };
+export { type BranchInfo, type ForkParams, JUMP_MAX_FRAME_NO, JUMP_RUN_ID_PATTERN, type JumpResult, type JumpStepName, JumpToFrameError, type JumpToFrameInput, type NodeChange, type NodeSnapshot, type OutputChange, type ParsedSnapshot, REWIND_LEASE_TTL_MS, REWIND_RATE_LIMIT_MAX, REWIND_RATE_LIMIT_WINDOW_MS, type RalphChange, type RalphSnapshot, type ReplayParams, type ReplayResult, type RevertOptions, type RevertResult, type RewindAuditResult, type RewindLockHandle, type RunTimeline, type Snapshot, type SnapshotData, type SnapshotDiff, type TimeTravelOptions, type TimeTravelResult, type TimelineFrame, type TimelineTree, type VcsTag, acquireRewindLock, buildTimeline, buildTimelineTree, captureSnapshot, countRecentRewindAuditRows, diffRawSnapshots, diffSnapshots, evaluateRewindRateLimit, forkRun, formatDiffAsJson, formatDiffForTui, formatTimelineAsJson, formatTimelineForTui, getBranchInfo, hasRewindLock, jumpToFrame, listBranches, listRewindAuditRows, listSnapshots, loadLatestSnapshot, loadSnapshot, loadVcsTag, parseSnapshot, recoverInProgressRewindAudits, replayFromCheckpoint, rerunAtRevision, resetRewindLocksForTests, resolveWorkflowAtRevision, revertToAttempt, smithersBranches, smithersSnapshots, smithersVcsTags, tagSnapshotVcs, timeTravel, updateRewindAuditRow, validateJumpFrameNo, validateJumpRunId, writeRewindAuditRow };

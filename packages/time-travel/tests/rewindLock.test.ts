@@ -1,79 +1,96 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import {
   acquireRewindLock,
   hasRewindLock,
   resetRewindLocksForTests,
 } from "../src/rewindLock.js";
 
+function setupDb() {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  return { sqlite, adapter: new SmithersDb(db) };
+}
+
 afterEach(() => {
   resetRewindLocksForTests();
 });
 
 describe("rewindLock", () => {
-  test("single caller acquires/releases; second caller proceeds", () => {
-    const first = acquireRewindLock("run-1");
-    expect(first).not.toBeNull();
-    expect(hasRewindLock("run-1")).toBe(true);
+  test("single caller releases conditionally and a second caller proceeds", async () => {
+    const { sqlite, adapter } = setupDb();
+    try {
+      const first = await acquireRewindLock(adapter, "run-1", { autoRenew: false });
+      expect(first).not.toBeNull();
+      expect(hasRewindLock("run-1")).toBe(true);
 
-    expect(first?.release()).toBe(true);
-    expect(hasRewindLock("run-1")).toBe(false);
+      expect(await first?.release()).toBe(true);
+      expect(await first?.release()).toBe(false);
+      expect(hasRewindLock("run-1")).toBe(false);
 
-    const second = acquireRewindLock("run-1");
-    expect(second).not.toBeNull();
-    expect(hasRewindLock("run-1")).toBe(true);
-    expect(second?.release()).toBe(true);
+      const second = await acquireRewindLock(adapter, "run-1", { autoRenew: false });
+      expect(second).not.toBeNull();
+      expect(await second?.release()).toBe(true);
+    } finally {
+      sqlite.close();
+    }
   });
 
-  test("two concurrent callers on same run: second gets Busy lock miss immediately", () => {
-    const first = acquireRewindLock("run-busy");
-    const second = acquireRewindLock("run-busy");
-
-    expect(first).not.toBeNull();
-    expect(second).toBeNull();
-
-    expect(first?.release()).toBe(true);
+  test("same-process contenders get one durable owner", async () => {
+    const { sqlite, adapter } = setupDb();
+    try {
+      const [first, second] = await Promise.all([
+        acquireRewindLock(adapter, "run-busy", { autoRenew: false }),
+        acquireRewindLock(adapter, "run-busy", { autoRenew: false }),
+      ]);
+      const winner = first ?? second;
+      expect([first, second].filter(Boolean)).toHaveLength(1);
+      expect(await winner?.renew()).toBe(true);
+      expect(await winner?.release()).toBe(true);
+    } finally {
+      sqlite.close();
+    }
   });
 
-  test("concurrent callers on different runIds both proceed", () => {
-    const runA = acquireRewindLock("run-A");
-    const runB = acquireRewindLock("run-B");
+  test("expired owner is replaced and cannot release the new lease", async () => {
+    const { sqlite, adapter } = setupDb();
+    let now = 1_000;
+    try {
+      const staleOwner = await acquireRewindLock(adapter, "run-stale", {
+        nowMs: () => now,
+        leaseTtlMs: 100,
+        autoRenew: false,
+      });
+      expect(staleOwner).not.toBeNull();
 
-    expect(runA).not.toBeNull();
-    expect(runB).not.toBeNull();
+      // Simulate a crashed process by clearing only its advisory in-memory
+      // guard. The durable row remains until its lease expires.
+      resetRewindLocksForTests();
+      now = 1_099;
+      expect(
+        await acquireRewindLock(adapter, "run-stale", {
+          nowMs: () => now,
+          leaseTtlMs: 100,
+          autoRenew: false,
+        }),
+      ).toBeNull();
 
-    expect(hasRewindLock("run-A")).toBe(true);
-    expect(hasRewindLock("run-B")).toBe(true);
-
-    expect(runA?.release()).toBe(true);
-    expect(runB?.release()).toBe(true);
-  });
-
-  test("lock is released when handler throws", async () => {
-    const runId = "run-throw";
-
-    const runWithLock = async () => {
-      const lock = acquireRewindLock(runId);
-      if (!lock) {
-        throw new Error("Busy");
-      }
-      try {
-        throw new Error("boom");
-      } finally {
-        lock.release();
-      }
-    };
-
-    await expect(runWithLock()).rejects.toThrow("boom");
-    expect(hasRewindLock(runId)).toBe(false);
-    expect(acquireRewindLock(runId)).not.toBeNull();
-  });
-
-  test("release is idempotent and never unlocks twice", () => {
-    const lock = acquireRewindLock("run-idempotent");
-    expect(lock).not.toBeNull();
-
-    expect(lock?.release()).toBe(true);
-    expect(lock?.release()).toBe(false);
-    expect(hasRewindLock("run-idempotent")).toBe(false);
+      now = 1_100;
+      const replacement = await acquireRewindLock(adapter, "run-stale", {
+        nowMs: () => now,
+        leaseTtlMs: 100,
+        autoRenew: false,
+      });
+      expect(replacement).not.toBeNull();
+      expect(await staleOwner?.release()).toBe(false);
+      expect(await replacement?.renew()).toBe(true);
+      expect(await replacement?.release()).toBe(true);
+    } finally {
+      sqlite.close();
+    }
   });
 });

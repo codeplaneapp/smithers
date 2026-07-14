@@ -398,6 +398,51 @@ describe("jumpToFrame", () => {
     }
   });
 
+  test("lost lease ownership aborts before destructive work", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-lease-lost");
+      let reverted = false;
+
+      await expect(
+        jumpToFrame({
+          adapter,
+          runId: "run-lease-lost",
+          frameNo: 1,
+          confirm: true,
+          caller: "user:owner",
+          getCurrentPointerImpl: async () => "pre-pointer",
+          revertToPointerImpl: async () => {
+            reverted = true;
+            return { success: true };
+          },
+          hooks: {
+            beforeStep: (step) => {
+              if (step === "revert-sandboxes") {
+                sqlite
+                  .query(
+                    `UPDATE _smithers_rewind_leases
+                        SET owner_token = ?, expires_at_ms = ?
+                      WHERE run_id = ?`,
+                  )
+                  .run("replacement-owner", Date.now() + 60_000, "run-lease-lost");
+              }
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ code: "Busy" });
+
+      expect(reverted).toBe(false);
+      expect(
+        (await adapter.listFrames("run-lease-lost", 100))
+          .map((frame) => frame.frameNo)
+          .sort((a, b) => a - b),
+      ).toEqual([0, 1, 2]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("run not found surfaces RunNotFound", async () => {
     const { adapter, sqlite } = setupDb();
     try {
@@ -474,11 +519,9 @@ describe("jumpToFrame", () => {
   });
 
   test("refuses to rewind a run that still looks live, unless forced", async () => {
-    // Regression: jumpToFrame never checked run liveness, and the in-process
-    // rewind lock can't coordinate across OS processes — so the CLI/MCP rewind
-    // (a separate process) could truncate frames while the owning engine was
-    // still writing them. Now a running run with a live owner / fresh heartbeat
-    // is rejected unless force:true.
+    // A rewind must also reject a still-live engine owner. The durable rewind
+    // lease coordinates rewind operators, while this guard prevents the engine
+    // itself from writing frames during the destructive operation.
     const { adapter, sqlite } = setupDb();
     try {
       await adapter.insertRun({

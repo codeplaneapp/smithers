@@ -506,15 +506,27 @@ export async function jumpToFrame(input) {
           );
         }
 
+        lock = await withSpan(
+          "timetravel.lock.acquire",
+          { runId },
+          async () => {
+            const handle = await acquireRewindLock(input.adapter, runId);
+            if (!handle) {
+              throw new JumpToFrameError(
+                "Busy",
+                `Another jumpToFrame is already running for ${runId}.`,
+              );
+            }
+            return handle;
+          },
+        );
+
+        // The durable lease is held before any rewind state is loaded, so a
+        // contender cannot plan mutations from a snapshot being invalidated.
         const run = await input.adapter.getRun(runId);
         if (!run) {
           throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
         }
-        // Refuse to rewind a run still being driven by a live process. The rewind
-        // lock is in-process only and the CLI/MCP rewind paths run in a SEPARATE
-        // process from the engine, so a concurrent rewind would race the engine's
-        // frame writes against this truncation. Stale/crashed runs (dead owner,
-        // stale heartbeat) are recoverable and allowed; `force: true` overrides.
         if (
           input.force !== true &&
           run.status === "running" &&
@@ -533,21 +545,6 @@ export async function jumpToFrame(input) {
           );
         }
         canWriteAudit = true;
-
-        lock = await withSpan(
-          "timetravel.lock.acquire",
-          { runId },
-          async () => {
-            const handle = acquireRewindLock(runId);
-            if (!handle) {
-              throw new JumpToFrameError(
-                "Busy",
-                `Another jumpToFrame is already running for ${runId}.`,
-              );
-            }
-            return handle;
-          },
-        );
 
         const rateLimit = await evaluateRewindRateLimit({
           adapter: input.adapter,
@@ -666,6 +663,12 @@ export async function jumpToFrame(input) {
 
           await runStepHook(input.hooks, "before", "revert-sandboxes");
           for (const sandbox of sandboxPlan) {
+            if (!(await lock.renew())) {
+              throw new JumpToFrameError(
+                "Busy",
+                `Rewind lease ownership was lost for ${runId} before reverting sandboxes.`,
+              );
+            }
             const reverted = await withSpan(
               "timetravel.vcs.revert.target",
               { cwd: sandbox.cwd, pointer: sandbox.targetPointer },
@@ -718,9 +721,39 @@ export async function jumpToFrame(input) {
           // all commit together or roll back together. If the event insert throws
           // the frames truncation is reverted too, so DB is never left mutated
           // without an audit/event record.
+          if (!(await lock.renew())) {
+            throw new JumpToFrameError(
+              "Busy",
+              `Rewind lease ownership was lost for ${runId} before database mutation.`,
+            );
+          }
           const dbStats = await input.adapter.withTransaction(
                 `jump to frame ${runId}:${targetFrameNo}`,
                 Effect.gen(function* () {
+                  // Fence the DB mutation with the lease row in this same
+                  // transaction. PostgreSQL holds the updated row lock until
+                  // commit, so an expiry-based takeover cannot begin while the
+                  // destructive transaction is still running.
+                  yield* Effect.promise(async () => {
+                    const storage = resolveStorage(input.adapter);
+                    const rows = await storage.queryAllRaw(
+                      `UPDATE _smithers_rewind_leases
+                          SET expires_at_ms = expires_at_ms
+                        WHERE run_id = ?
+                          AND owner_token = ?
+                          AND expires_at_ms > ?
+                      RETURNING owner_token`,
+                      [runId, lock.ownerToken, Date.now()],
+                    );
+                    const ownerToken = rows[0]?.owner_token ?? rows[0]?.ownerToken;
+                    if (ownerToken !== lock.ownerToken) {
+                      throw new JumpToFrameError(
+                        "Busy",
+                        `Rewind lease ownership was lost for ${runId} during database mutation.`,
+                      );
+                    }
+                  });
+
                   // Invalidate node-diff cache BEFORE we truncate frames /
                   // attempts: the adapter hook computes which diffs are beyond
                   // the target by looking at the frame/attempt join, and that
@@ -1056,7 +1089,14 @@ export async function jumpToFrame(input) {
     }
 
     if (lock) {
-      lock.release();
+      try {
+        await lock.release();
+      } catch (releaseError) {
+        await emitLog(input.onLog, "error", "jumpToFrame lease release failed", {
+          runId: runIdForAudit,
+          error: formatError(releaseError),
+        });
+      }
     }
 
     let metricResultTag = "failed";

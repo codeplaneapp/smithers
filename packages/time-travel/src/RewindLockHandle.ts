@@ -1,4 +1,7 @@
 export type RewindLockHandle = {
   runId: string;
-  release: () => boolean;
+  ownerToken: string;
+  readonly expiresAtMs: number;
+  renew: () => Promise<boolean>;
+  release: () => Promise<boolean>;
 };
