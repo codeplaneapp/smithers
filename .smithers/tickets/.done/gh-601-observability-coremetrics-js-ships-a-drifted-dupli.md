@@ -15,3 +15,6 @@ Internally only `MetricsService` is imported from this module (`src/index.js:14`
 One catalog source of truth (`metrics/smithersMetricCatalog.js`); `_coreMetrics.js` reduced to the `MetricsService` tag (or the wildcard subpath export narrowed so private modules aren't part of the public surface).
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 991b03c195a159a058bddaf4a768c8d603b3f291.
