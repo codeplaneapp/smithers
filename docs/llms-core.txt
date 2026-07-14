@@ -7354,7 +7354,6 @@ type RunOptions = {
   parentRunId?: string | null;
   input: Record<string, unknown>;
   maxConcurrency?: number;          // default 4
-  maxConcurrencyPinned?: boolean;   // internal/runtime proof that maxConcurrency was explicitly persisted for this run
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
   signal?: AbortSignal;

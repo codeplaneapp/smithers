@@ -102,7 +102,7 @@ test("preparation stages a publishable copy and never mutates the live pack", ()
   writeFileSync(join(project, "project-secret.txt"), "must not be published");
   const result = preparePackForShare({ from: project });
   onTestFinished(() => rmSync(result.stagingRoot, { recursive: true, force: true }));
-  // The live pack keeps its state: publishing must be non-destructive.
+  // Publication is NON-DESTRUCTIVE: the live pack keeps its state.
   expect(existsSync(join(project, ".smithers", "smithers.db"))).toBe(true);
   expect(existsSync(join(project, ".smithers", "agents.ts"))).toBe(true);
   expect(existsSync(join(project, ".smithers", "runs"))).toBe(true);
@@ -115,6 +115,26 @@ test("preparation stages a publishable copy and never mutates the live pack", ()
   expect(existsSync(join(result.stagingRoot, "workflows", "ship.tsx"))).toBe(true);
   expect(existsSync(join(result.stagingRoot, "README.md"))).toBe(true);
   expect(existsSync(join(result.stagingRoot, "project-secret.txt"))).toBe(false);
+});
+
+test("staging strips nested VCS metadata and agent config so history cannot leak", () => {
+  const project = temp();
+  const pack = join(project, ".smithers");
+  mkdirSync(join(pack, "workflows"), { recursive: true });
+  mkdirSync(join(pack, ".git", "objects"), { recursive: true });
+  mkdirSync(join(pack, "lib", "node_modules", "dep"), { recursive: true });
+  mkdirSync(join(pack, "lib", ".claude"), { recursive: true });
+  writeFileSync(join(pack, "smithers.toon"), "name: vcs-pack\nrepository: owner/vcs\n");
+  writeFileSync(join(pack, ".git", "objects", "history"), "old secret history");
+  writeFileSync(join(pack, "lib", "node_modules", "dep", "index.js"), "dep");
+  writeFileSync(join(pack, "lib", ".claude", "settings.json"), "{}");
+  writeFileSync(join(pack, "workflows", "w.tsx"), "export default null;\n");
+  const result = preparePackForShare({ from: project });
+  onTestFinished(() => rmSync(result.stagingRoot, { recursive: true, force: true }));
+  expect(existsSync(join(result.stagingRoot, ".git"))).toBe(false);
+  expect(existsSync(join(result.stagingRoot, "lib", "node_modules"))).toBe(false);
+  expect(existsSync(join(result.stagingRoot, "lib", ".claude"))).toBe(false);
+  expect(existsSync(join(result.stagingRoot, "workflows", "w.tsx"))).toBe(true);
 });
 
 test("preparation writes the repository override to staging and rejects invalid overrides", () => {

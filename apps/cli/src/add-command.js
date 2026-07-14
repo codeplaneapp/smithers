@@ -12,6 +12,8 @@ export async function runDurableAdd({ spec, global = false, yes = false } = {}) 
   if (global) return null;
   const entryFile = resolve(process.cwd(), ".smithers", "workflows", "add.tsx");
   if (!existsSync(entryFile)) return null;
+  let workflow;
+  let runtime;
   try {
     const [{ Effect }, { runWorkflow }, { ensureSmithersTables }, { mdxPlugin }] = await Promise.all([
       import("effect"),
@@ -20,29 +22,31 @@ export async function runDurableAdd({ spec, global = false, yes = false } = {}) 
       import("./mdx-plugin.js"),
     ]);
     mdxPlugin();
-    const workflow = (await import(pathToFileURL(entryFile).href)).default;
+    workflow = (await import(pathToFileURL(entryFile).href)).default;
     if (!workflow) return null;
     ensureSmithersTables(workflow.db);
-    try {
-      const result = await Effect.runPromise(runWorkflow(workflow, {
-        input: { spec, global, yes },
-        runId: crypto.randomUUID(),
-        workflowPath: entryFile,
-      }));
-      // A run that ended failed/cancelled must never reach c.ok as a success.
-      // Fall back to the imperative path, which re-attempts and surfaces the
-      // real installation error with a non-zero exit.
-      if (!result || result.status !== "finished") {
-        process.stderr.write(`[smithers:add] durable add ended ${result?.status ?? "without a result"}; retrying imperatively\n`);
-        return null;
-      }
-      return result;
-    } finally {
-      const close = workflow.close ?? workflow.db?.close;
-      if (typeof close === "function") await close.call(workflow.close ? workflow : workflow.db);
-    }
+    runtime = { Effect, runWorkflow };
   } catch (error) {
+    // Fall back ONLY when the durable workflow is unavailable BEFORE any
+    // execution (stale pack, missing deps). Once it runs, its outcome is
+    // authoritative — re-running imperatively would fetch/extract twice and
+    // duplicate partial side effects.
     process.stderr.write(`[smithers:add] durable add unavailable, falling back: ${error?.message ?? String(error)}\n`);
     return null;
+  }
+  try {
+    const result = await runtime.Effect.runPromise(runtime.runWorkflow(workflow, {
+      input: { spec, global, yes },
+      runId: crypto.randomUUID(),
+      workflowPath: entryFile,
+    }));
+    if (!result || result.status !== "finished") {
+      const detail = result?.error?.message ?? result?.error ?? `run ended ${result?.status ?? "without a result"}`;
+      throw new Error(`Pack installation failed: ${detail}`);
+    }
+    return result;
+  } finally {
+    const close = workflow.close ?? workflow.db?.close;
+    if (typeof close === "function") await close.call(workflow.close ? workflow : workflow.db);
   }
 }

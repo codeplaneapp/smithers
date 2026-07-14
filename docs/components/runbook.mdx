@@ -458,10 +458,6 @@ export function Task(props) {
     const taskContext = props.smithersContext ?? SmithersContext;
     const ctx = React.useContext(taskContext);
     const aspectCtx = React.useContext(AspectContext);
-    if (props.maxSchemaRetries !== undefined &&
-        (!Number.isSafeInteger(props.maxSchemaRetries) || props.maxSchemaRetries < 0)) {
-        throw new SmithersError("INVALID_INPUT", "Task maxSchemaRetries must be a non-negative safe integer.");
-    }
     const depNodeIds = deriveDepNodeIds(deps, rest.needs);
     if (deps && !ctx) {
         throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "Task deps require a workflow context. Build the workflow with createSmithers().");
