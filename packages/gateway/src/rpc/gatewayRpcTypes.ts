@@ -275,7 +275,7 @@ export type ListApprovalsResponse = GatewayApprovalSummary[];
 
 export type GatewayDocRow = {
   path: string;
-  kind: "ticket" | "plan" | "spec" | "proposal" | "conflict" | string;
+  kind: "ticket" | "plan" | "spec" | "proposal" | "conflict" | (string & {});
   content: string;
   contentHash: string;
   updatedAtMs: number;

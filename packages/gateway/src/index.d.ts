@@ -1,7 +1,6 @@
 /** @typedef {(typeof GATEWAY_SCOPE_VALUES)[number]} GatewayScope */
 declare const GATEWAY_SCOPE_VALUES$2: readonly ["run:read", "run:write", "run:admin", "approval:submit", "signal:submit", "cron:read", "cron:write", "account:read", "memory:read", "prompt:read", "score:read", "ticket:read", "ticket:write", "observability:read"];
 type GatewayScope$4 = (typeof GATEWAY_SCOPE_VALUES$2)[number];
-
 /**
  * Type-only declarations for the stable v1 Gateway RPC contract. The runtime
  * catalog (schemas, error definitions, lookup helpers) lives in `index.js`,
@@ -191,7 +190,7 @@ type ListApprovalsRequest$1 = {
 type ListApprovalsResponse$1 = GatewayApprovalSummary$1[];
 type GatewayDocRow$1 = {
     path: string;
-    kind: "ticket" | "plan" | "spec" | "proposal" | "conflict" | string;
+    kind: "ticket" | "plan" | "spec" | "proposal" | "conflict" | (string & {});
     content: string;
     contentHash: string;
     updatedAtMs: number;
