@@ -10,6 +10,7 @@ export type SmithersCtxOptions = {
   auth?: RunAuthContext | null;
   outputs: OutputSnapshot;
   taskStates?: ReadonlyMap<string, unknown> | Record<string, unknown>;
+  taskIterations?: ReadonlyMap<string, number> | Record<string, number>;
   zodToKeyName?: Map<any, string>;
   runtimeConfig?: SmithersRuntimeConfig;
 };

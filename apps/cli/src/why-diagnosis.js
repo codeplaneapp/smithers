@@ -652,12 +652,19 @@ function buildDiagnosis(params) {
     const runError = parseObjectJson(run.errorJson);
     const runErrorDetails = isRecord(runError.details) ? runError.details : {};
     for (const node of nodes.filter((entry) => entry.state === "bound-stale")) {
-        const bindings = Array.isArray(runErrorDetails.bindings)
+        const staleTasks = Array.isArray(runErrorDetails.staleTasks)
+            ? runErrorDetails.staleTasks.filter(isRecord)
+            : [];
+        const staleTask = staleTasks.find((entry) => parseString(entry.nodeId) === node.nodeId &&
+            (parseNumber(entry.iteration) ?? 0) === (node.iteration ?? 0));
+        const legacyBindings = Array.isArray(runErrorDetails.bindings)
             ? runErrorDetails.bindings.filter(isRecord)
             : [];
-        const matchingBindings = parseString(runErrorDetails.nodeId) === node.nodeId
-            ? bindings
-            : [];
+        const matchingBindings = staleTask && Array.isArray(staleTask.bindings)
+            ? staleTask.bindings.filter(isRecord)
+            : parseString(runErrorDetails.nodeId) === node.nodeId
+                ? legacyBindings
+                : [];
         const context = matchingBindings.length > 0
             ? matchingBindings.map((binding) => {
                 const table = parseString(binding.table) ?? "<unknown>";

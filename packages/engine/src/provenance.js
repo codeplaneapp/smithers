@@ -21,14 +21,14 @@ function isProofBinding(value) {
  * same (table,nodeId,iteration) is a DB-level mutation and must retain the
  * original proof across re-render/resume; a new iteration is a newly-produced
  * authority row and may establish a new proof.
- * @param {readonly import("@smithers-orchestrator/graph/ProofBinding").ProofBinding[]} bindings
+ * @param {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} binding
  */
-function bindingIdentity(bindings) {
-    return JSON.stringify(bindings.map((binding) => [
+function bindingIdentity(binding) {
+    return JSON.stringify([
         binding.table,
         binding.nodeId,
         binding.iteration,
-    ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))));
+    ]);
 }
 
 /**
@@ -93,14 +93,18 @@ export function pinTaskProofBindings(tasks, pinned) {
             }
             continue;
         }
-        if (!existing || bindingIdentity(candidate) !== bindingIdentity(existing)) {
-            const next = candidate.map((binding) => ({ ...binding }));
-            pinned.set(key, next);
-            task.proofBindings = next.map((binding) => ({ ...binding }));
-        }
-        else {
-            task.proofBindings = existing.map((binding) => ({ ...binding }));
-        }
+        const existingByIdentity = new Map((existing ?? []).map((binding) => [
+            bindingIdentity(binding),
+            binding,
+        ]));
+        // Repin independently. A later producer row may establish a new proof,
+        // while a sibling binding that still names the same durable row keeps
+        // its original digest and therefore still detects DB-level mutation.
+        const next = candidate.map((binding) => ({
+            ...(existingByIdentity.get(bindingIdentity(binding)) ?? binding),
+        }));
+        pinned.set(key, next);
+        task.proofBindings = next.map((binding) => ({ ...binding }));
     }
 }
 

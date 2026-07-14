@@ -87,6 +87,8 @@ export class SmithersCtx {
     _currentScopes;
     /** @type {ReadonlyMap<string, unknown> | Record<string, unknown> | undefined} */
     _taskStates;
+    /** @type {ReadonlyMap<string, number> | Record<string, number> | undefined} */
+    _taskIterations;
     /**
      * Tasks that declared `deps` but could not resolve them this render, so
      * they deferred (returned null) instead of mounting. The engine reads this
@@ -112,6 +114,7 @@ export class SmithersCtx {
         this._zodToKeyName = opts.zodToKeyName;
         this._currentScopes = buildCurrentScopes(this.iterations);
         this._taskStates = opts.taskStates;
+        this._taskIterations = opts.taskIterations;
         /**
          * @param {string} table
          */
@@ -308,10 +311,20 @@ export class SmithersCtx {
         for (const [stateKey, state] of entries) {
             const separator = stateKey.lastIndexOf("::");
             const stateNodeId = separator >= 0 ? stateKey.slice(0, separator) : stateKey;
-            states.push({ nodeId: stateNodeId, state });
+            const parsedIteration = separator >= 0 ? Number(stateKey.slice(separator + 2)) : 0;
+            states.push({
+                nodeId: stateNodeId,
+                iteration: Number.isFinite(parsedIteration) ? parsedIteration : 0,
+                state,
+            });
         }
         const matching = filterRowsByNodeId(states, nodeId, this._currentScopes);
-        return matching.some((entry) => entry.state === "bound-stale");
+        const resolvedNodeId = matching[0]?.nodeId ?? nodeId;
+        const taskIteration = this._taskIterations instanceof Map
+            ? this._taskIterations.get(resolvedNodeId) ?? this._taskIterations.get(nodeId)
+            : this._taskIterations?.[resolvedNodeId] ?? this._taskIterations?.[nodeId];
+        const currentIteration = taskIteration ?? this.iteration;
+        return matching.some((entry) => entry.iteration === currentIteration && entry.state === "bound-stale");
     }
     /**
      * @param {unknown} value

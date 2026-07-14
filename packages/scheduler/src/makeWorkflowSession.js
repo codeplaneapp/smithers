@@ -653,6 +653,23 @@ export function makeWorkflowSession(options = {}) {
    */
     function applyFailure(descriptor, error) {
         const key = stateKeyFor(descriptor);
+        if (error && typeof error === "object" && error.code === "BOUND_STALE") {
+            // The engine revalidates immediately before each physical dispatch.
+            // A row can change during an attempt or retry backoff after the
+            // graph's schedule-time check, so this is a park transition, not a
+            // failed attempt and not a consumer of the retry budget.
+            descriptor.proofBindingStatus = "stale";
+            state.states.set(key, "bound-stale");
+            state.retryWait.delete(key);
+            return {
+                _tag: "ReRender",
+                context: renderContext(state, descriptor.iteration, {
+                    reason: "bound-check",
+                    nodeId: descriptor.nodeId,
+                    iteration: descriptor.iteration,
+                }),
+            };
+        }
         // Quota/usage-limit errors do not consume the task's retry budget.
         // Instead, put the task into "waiting-quota" so the run can pause
         // durably and resume cleanly after the provider resets — unless the

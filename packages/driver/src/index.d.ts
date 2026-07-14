@@ -374,6 +374,7 @@ type SmithersCtxOptions$2 = {
     auth?: RunAuthContext$2 | null;
     outputs: OutputSnapshot$2;
     taskStates?: ReadonlyMap<string, unknown> | Record<string, unknown>;
+    taskIterations?: ReadonlyMap<string, number> | Record<string, number>;
     zodToKeyName?: Map<any, string>;
     runtimeConfig?: SmithersRuntimeConfig$1;
 };
@@ -427,6 +428,8 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     _currentScopes: Set<string>;
     /** @type {ReadonlyMap<string, unknown> | Record<string, unknown> | undefined} */
     _taskStates: ReadonlyMap<string, unknown> | Record<string, unknown> | undefined;
+    /** @type {ReadonlyMap<string, number> | Record<string, number> | undefined} */
+    _taskIterations: ReadonlyMap<string, number> | Record<string, number> | undefined;
     /**
      * Tasks that declared `deps` but could not resolve them this render, so
      * they deferred (returned null) instead of mounting. The engine reads this

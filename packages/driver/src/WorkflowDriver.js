@@ -90,6 +90,30 @@ function buildWorktreePathLookup(tasks) {
     return lookup;
 }
 /**
+ * Resolve the iteration each task will render at from the previous graph and
+ * the scheduler's current loop cursors. Tasks outside loops stay at their own
+ * durable iteration even while an unrelated loop advances.
+ * @param {RenderContext} context
+ * @returns {Map<string, number>}
+ */
+function buildTaskIterationLookup(context) {
+    const lookup = new Map();
+    const iterations = context.iterations ?? context.ralphIterations;
+    for (const task of context.graph?.tasks ?? []) {
+        let iteration = task.iteration;
+        if (task.ralphId && iterations) {
+            const current = typeof iterations.get === "function"
+                ? iterations.get(task.ralphId)
+                : iterations[task.ralphId];
+            if (typeof current === "number") {
+                iteration = current;
+            }
+        }
+        lookup.set(task.nodeId, iteration);
+    }
+    return lookup;
+}
+/**
  * @param {RenderContext} context
  * @param {ReadonlyMap<string, string>} [knownOutputTables]
  * @returns {OutputSnapshot}
@@ -518,6 +542,7 @@ export class WorkflowDriver {
             auth: context.auth,
             outputs: mergeOutputSnapshots(this.baseOutputs, snapshotFromContext(context, this.outputTablesByNodeId)),
             taskStates: context.taskStates,
+            taskIterations: buildTaskIterationLookup(context),
             zodToKeyName: this.workflow.zodToKeyName,
             runtimeConfig: {
                 ...(this.activeOptions?.cliAgentToolsDefault

@@ -46,22 +46,31 @@ type ProofBinding = {
 ## Staleness is a signal, not an error
 
 `BOUND_STALE` does not fail the run. It is exposed to workflow code
-(`ctx.boundStale("lane:push")`) and to `bunx smithers-orchestrator why`, and the typical
-response is re-entering the correction loop so the upstream authority is
-re-produced against the current artifact:
+(`ctx.boundStale("lane:push")`) and to `bunx smithers-orchestrator why`. On a
+subsequent render, that signal can keep an active correction loop open while
+the upstream authority is re-produced against the current artifact:
 
 ```tsx
 const pushStale = ctx.boundStale("lane:push");
-<Loop id="lane:correct" until={(c) => gate.approved && !pushStale} maxIterations={5}>
+const authorityIsCurrent = gate?.approved === true && !pushStale;
+
+<Loop id="lane:correct" until={authorityIsCurrent} maxIterations={5}>
   …
 </Loop>
 ```
+
+`until` is a boolean in the public API. A loop that has already completed does
+not reopen merely because a downstream binding later becomes stale. Keep the
+correction path active until the bound action is safe, or re-produce the
+authority through an external/resume path before resuming the parked task.
 
 ## Notes
 
 - Bindings hash **content**, not iteration counters, so they survive resume,
   retry, replay, and time travel: a restored run re-verifies against whatever
   the rows say now.
+- `ctx.boundStale(nodeId)` reports only the current task iteration. A newly
+  rendered iteration starts false even when an older iteration parked stale.
 - Bind the *decision* row (the review verdict, the gate result), not raw agent
   text; digesting is deterministic over the typed output row.
 - This complements, not replaces, human approval:

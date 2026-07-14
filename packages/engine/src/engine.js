@@ -6704,26 +6704,51 @@ async function runWorkflowBodyDriver(workflow, opts) {
      * @param {Extract<WaitReason, { _tag: "Bound" }>} reason
      */
     const reconcileBoundWait = async (reason) => {
-        const task = lastGraph?.tasks.find((candidate) => candidate.nodeId === reason.nodeId);
-        if (task) {
+        const sessionStates = await Effect.runPromise(workflowSession.getTaskStates());
+        const blockedTasks = lastGraph?.tasks.filter((candidate) => {
+            const state = sessionStates.get(buildStateKey(candidate.nodeId, candidate.iteration));
+            return state === "bound-stale" || state === "waiting-bound";
+        }) ?? [];
+        const primaryTask = lastGraph?.tasks.find((candidate) => candidate.nodeId === reason.nodeId);
+        if (blockedTasks.length === 0 && primaryTask) {
+            blockedTasks.push(primaryTask);
+        }
+        for (const task of blockedTasks) {
+            const state = sessionStates.get(buildStateKey(task.nodeId, task.iteration));
+            const stale = state === "bound-stale" ||
+                (state == null && reason.nodeId === task.nodeId && reason.code === "BOUND_STALE");
             await Effect.runPromise(adapter.insertNode({
                 runId,
                 nodeId: task.nodeId,
                 iteration: task.iteration,
-                state: reason.code === "BOUND_STALE" ? "bound-stale" : "waiting-bound",
+                state: stale ? "bound-stale" : "waiting-bound",
                 lastAttempt: null,
                 updatedAtMs: nowMs(),
                 outputTable: task.outputTableName,
                 label: task.label ?? null,
             }));
         }
-        const bindings = reason.bindings ?? task?.proofBindings ?? [];
-        return markRunWaiting("waiting-event", "bound", reason.code === "BOUND_STALE"
+        const staleTasks = blockedTasks.flatMap((task) => {
+            const state = sessionStates.get(buildStateKey(task.nodeId, task.iteration));
+            const stale = state === "bound-stale" ||
+                (state == null && reason.nodeId === task.nodeId && reason.code === "BOUND_STALE");
+            return stale
+                ? [{ nodeId: task.nodeId, iteration: task.iteration, bindings: task.proofBindings ?? [] }]
+                : [];
+        });
+        const primaryBindings = reason.bindings ?? primaryTask?.proofBindings ?? [];
+        return markRunWaiting("waiting-event", "bound", staleTasks.length > 0
             ? {
                 errorJson: JSON.stringify({
                     code: "BOUND_STALE",
-                    message: `Task ${reason.nodeId} is parked because its bound authority row changed.`,
-                    details: { nodeId: reason.nodeId, bindings },
+                    message: staleTasks.length === 1
+                        ? `Task ${staleTasks[0].nodeId} is parked because its bound authority row changed.`
+                        : `${staleTasks.length} tasks are parked because their bound authority rows changed.`,
+                    details: {
+                        nodeId: reason.nodeId,
+                        bindings: primaryBindings,
+                        staleTasks,
+                    },
                 }),
             }
             : {});
@@ -6808,6 +6833,19 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     label: task.label ?? null,
                 }));
                 throw await readTaskFailure(task);
+            }
+            if (task.proofBindingRequired) {
+                // Rendering can be followed by a long running attempt or retry
+                // backoff. Re-read the durable rows after this task has acquired
+                // its execution slot and immediately before every real dispatch.
+                verifyTaskProofBindings([task], await loadOutputs(db, schema, runId));
+                if (task.proofBindingStatus !== "current") {
+                    throw new SmithersError("BOUND_STALE", `Task ${task.nodeId} is parked because its bound authority row changed.`, {
+                        nodeId: task.nodeId,
+                        iteration: task.iteration,
+                        bindings: task.proofBindings ?? [],
+                    });
+                }
             }
             await Effect.runPromise(withCorrelationContext(withSmithersSpan(smithersSpanNames.task, executeTaskBridgeEffect(adapter, db, runId, task, descriptorMap, inputTable, eventBus, toolConfig, workflowName, cacheEnabled, runAbortController.signal, disabledAgents, runAbortController, hijackState, legacyExecuteTask), {
                 runId,

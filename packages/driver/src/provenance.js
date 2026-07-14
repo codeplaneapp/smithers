@@ -40,7 +40,10 @@ export function canonicalJson(value, ancestors = new Set()) {
             const nextAncestors = new Set(ancestors);
             nextAncestors.add(objectValue);
             if (Array.isArray(value)) {
-                return `[${value.map((entry) => canonicalJson(entry, nextAncestors) ?? "null").join(",")}]`;
+                // Array.prototype.map skips sparse holes. Array.from visits
+                // every index, which preserves JSON.stringify semantics:
+                // holes and unsupported entries are encoded as null.
+                return `[${Array.from(value, (entry) => canonicalJson(entry, nextAncestors) ?? "null").join(",")}]`;
             }
             const record = /** @type {Record<string, unknown>} */ (value);
             const entries = [];
