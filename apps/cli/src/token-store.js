@@ -5,7 +5,7 @@
  * chars of the token's sha256, so an id is derivable from a presented secret
  * without keeping a reverse map.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import crypto from "node:crypto";
 import { dirname, resolve } from "node:path";
 
@@ -166,7 +166,7 @@ export function readSmithersTokenStore() {
 }
 
 /**
- * Persist the store (creating parent directories; new files are mode 0600).
+ * Persist the store (creating parent directories; files are mode 0600).
  *
  * @param {TokenStore} store
  */
@@ -174,6 +174,7 @@ export function writeSmithersTokenStore(store) {
     const path = smithersTokenStorePath();
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+    chmodSync(path, 0o600);
 }
 
 /**

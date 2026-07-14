@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -50,6 +50,27 @@ describe("CLI token store helpers", () => {
             expect(smithersTokenStorePath()).toBe(join(dir, "tokens.json"));
             expect(Object.values(readSmithersTokenStore().tokens)[0].role).toBe("operator");
             expect(readFileSync(join(dir, "tokens.json"), "utf8")).toContain('"run:read"');
+        }
+        finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("repairs permissive permissions when rewriting the token store", () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-token-store-"));
+        try {
+            const path = join(dir, "tokens.json");
+            process.env.SMITHERS_TOKEN_STORE = path;
+            writeFileSync(path, "{}\n", { mode: 0o644 });
+
+            writeSmithersTokenStore({
+                version: 2,
+                tokens: {},
+                actionTokens: {},
+                audit: [],
+            });
+
+            expect(statSync(path).mode & 0o777).toBe(0o600);
         }
         finally {
             rmSync(dir, { recursive: true, force: true });
