@@ -25,7 +25,7 @@ test("share dry-run builds a registry entry from the TOON manifest and workflow 
     "// smithers-description: Triage tickets on a live board.",
     "export default null;",
   ].join("\n"));
-  const result = sharePack({ from: project, dryRun: true });
+  const result = sharePack({ from: project, dryRun: true, registryReadme: "" });
   expect(result.entry).toContain("smithers add someuser/kanban-suite");
   expect(result.entry).toContain("`kanban`: Triage tickets on a live board.");
   expect(result.diff).toContain("## Packs");
@@ -44,7 +44,7 @@ test("share dry-run returns the entry and a preview without requiring gh", () =>
   mkdirSync(join(project, ".smithers", "workflows"), { recursive: true });
   writeFileSync(join(project, ".smithers", "smithers.toon"), "name: demo\nrepository: acme/demo\n");
   writeFileSync(join(project, ".smithers", "workflows", "demo.tsx"), "// smithers-description: Demo workflow\n");
-  const result = sharePack({ from: project, dryRun: true });
+  const result = sharePack({ from: project, dryRun: true, registryReadme: "" });
   expect(result.dryRun).toBe(true);
   expect(result.entry).toContain("| [demo]");
   expect(result.diff).toContain("README.md");
@@ -58,7 +58,7 @@ test("share dry-run never crosses the gh/git process boundary", () => {
   writeFileSync(join(project, ".smithers", "smithers.toon"), "name: dry\nrepository: owner/dry\n");
   const previousPath = process.env.PATH; const marker = join(project, "invoked"); process.env.PATH = `${bin}${process.platform === "win32" ? ";" : ":"}${previousPath ?? ""}`; process.env.SMITHERS_SENTINEL = marker;
   try {
-    const result = sharePack({ from: project, repo: "owner/registry", dryRun: true });
+    const result = sharePack({ from: project, repo: "owner/registry", dryRun: true, registryReadme: "" });
     expect(result.dryRun).toBe(true); expect(result.repository).toBe("owner/dry"); expect(result.registry).toBe("owner/registry"); expect(existsSync(marker)).toBe(false);
   } finally {
     if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;

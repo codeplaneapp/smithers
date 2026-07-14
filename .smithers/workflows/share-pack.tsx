@@ -54,11 +54,17 @@ export default smithers((ctx) => {
   const manifestReady = validate?.ok === true || revalidate?.ok === true;
   // The agent completes an incomplete manifest exactly once; if deterministic
   // revalidation still fails afterwards, the run terminates with that detail.
-  const needsCompletion = validate?.ok === false && completion === undefined;
+  // Mount stays keyed on the validation verdict (not on completion's absence)
+  // so the finished agent task remains in the tree instead of unmounting.
+  const needsCompletion = validate?.ok === false;
   const canPrepare = manifestReady;
   const canPublish = prepare?.ok === true && !ctx.input.dryRun;
   const canShare = prepare?.ok === true && (ctx.input.dryRun || publish?.ok === true);
-  const terminalFailure = [revalidate ?? validate, prepare, publish, shared].some((row) => row && !row.ok);
+  // A failed validation is NOT terminal until the completion agent has had
+  // its one chance and revalidation still fails — otherwise the terminal
+  // output task would race the completion task it is supposed to wait for.
+  const manifestTerminal = revalidate ? !revalidate.ok : (validate?.ok === false && completion !== undefined);
+  const terminalFailure = manifestTerminal || [prepare, publish, shared].some((row) => row && !row.ok);
   const done = shared?.ok === true || terminalFailure;
   return <Workflow name="share-pack"><Sequence>
     <Task id="validate-manifest" output={outputs.validate} retries={0}>{async () => {

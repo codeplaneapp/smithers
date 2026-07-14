@@ -10,7 +10,7 @@ import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({
-  spec: z.string().describe("Pack spec to install (for example user/repo or npm:pack)."),
+  spec: z.string().trim().min(1, "Pack spec is required").describe("Pack spec to install (for example user/repo or npm:pack)."),
   global: z.boolean().default(false),
   yes: z.boolean().default(true),
 });
