@@ -123,7 +123,6 @@
         "pages": [
           "how-it-works",
           "concepts/execution-model",
-          "concepts/provenance",
           "concepts/memory",
           "guides/context-engineering",
           "recipes",
@@ -169,7 +168,6 @@
         "group": "Workflow Pack",
         "pages": [
           "workflows/overview",
-          "workflows/authoring-rules",
           {
             "group": "Curated",
             "pages": [
@@ -182,9 +180,10 @@
           {
             "group": "System",
             "pages": [
-              "workflows/create-ui",
+              "workflows/add",
               "workflows/init",
               "workflows/post-failure",
+              "workflows/share-pack",
               "workflows/upgrade",
               "workflows/eval-suite-run"
             ]

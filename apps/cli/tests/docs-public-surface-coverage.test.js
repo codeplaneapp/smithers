@@ -212,12 +212,12 @@ test("workflow overview, catalog, and sidebar cover the curated pack", () => {
         .sort();
     const sidebarWorkflowIds = [...docsJson.matchAll(/"workflows\/([a-z0-9-]+)"/g)]
         .map((match) => match[1])
-        .filter((id) => !["overview", "catalog", "authoring-rules"].includes(id))
+        .filter((id) => id !== "overview" && id !== "catalog")
         .sort();
 
     expect(overviewWorkflowIds).toEqual(workflowDocIds);
     expect(catalogWorkflowIds).toEqual(workflowDocIds);
-    expect(sidebarWorkflowIds).toEqual([...workflowDocIds, "create-ui", "eval-suite-run", "init", "post-failure", "upgrade"].sort());
+    expect(sidebarWorkflowIds).toEqual([...workflowDocIds, "add", "eval-suite-run", "init", "post-failure", "share-pack", "upgrade"].sort());
 });
 
 test("error reference docs cover current Smithers error registry", () => {
