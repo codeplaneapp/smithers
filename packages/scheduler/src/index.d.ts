@@ -4,7 +4,7 @@ import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
 import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smithers-orchestrator/graph';
 import { TaskDescriptor as TaskDescriptor$4 } from '@smithers-orchestrator/graph/TaskDescriptor';
 
-type TaskState$2 = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
+type TaskState$2 = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "waiting-bound" | "bound-stale" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
 
 type TaskStateMap$4 = Map<string, TaskState$2>;
 
@@ -177,6 +177,16 @@ type WaitReason$1 = {
     readonly count: number;
 } | {
     readonly _tag: "ExternalTrigger";
+} | {
+    readonly _tag: "Bound";
+    readonly nodeId: string;
+    readonly code: "BOUND_STALE" | "BOUND_MISSING";
+    readonly bindings?: ReadonlyArray<{
+        readonly table: string;
+        readonly nodeId: string;
+        readonly iteration: number;
+        readonly digest: string;
+    }>;
 } | {
     readonly _tag: "Quota";
     readonly quotaBlockedCount: number;

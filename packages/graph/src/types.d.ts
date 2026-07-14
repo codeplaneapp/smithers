@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProofBinding } from './ProofBinding.js';
 
 type XmlNode = XmlElement | XmlText;
 type XmlElement = {
@@ -136,6 +137,12 @@ type TaskDescriptor = {
     ralphId?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;
+    /** True when the JSX task declared `bind`, including `bind={undefined}`. */
+    proofBindingRequired?: boolean;
+    /** Content-addressed authority rows pinned for this task execution. */
+    proofBindings?: readonly ProofBinding[];
+    /** Engine-computed result of the schedule-time binding verification. */
+    proofBindingStatus?: "current" | "missing" | "stale";
     /** Logical id of the task whose final agent session this task forks. Gates execution and seeds the session. */
     forkSource?: string;
     worktreeId?: string;

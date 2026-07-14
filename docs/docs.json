@@ -123,6 +123,7 @@
         "pages": [
           "how-it-works",
           "concepts/execution-model",
+          "concepts/provenance",
           "concepts/memory",
           "guides/context-engineering",
           "recipes",

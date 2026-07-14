@@ -1,5 +1,6 @@
 import { XmlNode as XmlNode$1 } from '../types.js';
 import 'zod';
+import '../ProofBinding.js';
 
 /**
  * @param {XmlNode | null} node

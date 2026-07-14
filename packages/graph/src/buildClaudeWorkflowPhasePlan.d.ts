@@ -3,6 +3,7 @@ import { ClaudeWorkflowNodeKind as ClaudeWorkflowNodeKind$1 } from './ClaudeWork
 import { XmlNode as XmlNode$1 } from './types.js';
 import './ClaudeWorkflowPhase.js';
 import 'zod';
+import './ProofBinding.js';
 
 /**
  * Core phase-plan walk shared by the live-snapshot and persisted-frame

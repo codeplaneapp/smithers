@@ -7,6 +7,17 @@ export type WaitReason =
   | { readonly _tag: "OrphanRecovery"; readonly count: number }
   | { readonly _tag: "ExternalTrigger" }
   | {
+      readonly _tag: "Bound";
+      readonly nodeId: string;
+      readonly code: "BOUND_STALE" | "BOUND_MISSING";
+      readonly bindings?: ReadonlyArray<{
+        readonly table: string;
+        readonly nodeId: string;
+        readonly iteration: number;
+        readonly digest: string;
+      }>;
+    }
+  | {
       readonly _tag: "Quota";
       readonly quotaBlockedCount: number;
       readonly resetAtMs?: number;

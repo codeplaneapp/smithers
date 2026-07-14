@@ -20,6 +20,7 @@ type TaskProps = {
   allowTools?: string[]; // CLI-agent tool allowlist
   key?: string;
   skipIf?: boolean;
+  bind?: ProofBinding | ProofBinding[]; // schedule only while the bound rows are current; see /concepts/provenance
   needsApproval?: boolean; // pause for human before executing
   async?: boolean; // with needsApproval: let unrelated flow continue
   timeoutMs?: number;

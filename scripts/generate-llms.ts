@@ -52,6 +52,7 @@ const CORE_PAGES = [
   "how-it-works.mdx",
   // Where agents run, sandboxes & cost (the execution model + serverless).
   "concepts/execution-model.mdx",
+  "concepts/provenance.mdx",
   "guides/context-engineering.mdx",
   "guides/agent-operating-playbook.mdx",
   // JSX surface (single page now — installation + quickstart are stubs)

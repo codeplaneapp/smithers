@@ -4,6 +4,8 @@ export type TaskState =
   | "waiting-event"
   | "waiting-timer"
   | "waiting-quota"
+  | "waiting-bound"
+  | "bound-stale"
   | "in-progress"
   | "finished"
   | "failed"

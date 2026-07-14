@@ -649,6 +649,44 @@ function buildDiagnosis(params) {
             retryInsightsByNode.set(key, insight);
     }
     const blockers = [];
+    const runError = parseObjectJson(run.errorJson);
+    const runErrorDetails = isRecord(runError.details) ? runError.details : {};
+    for (const node of nodes.filter((entry) => entry.state === "bound-stale")) {
+        const bindings = Array.isArray(runErrorDetails.bindings)
+            ? runErrorDetails.bindings.filter(isRecord)
+            : [];
+        const matchingBindings = parseString(runErrorDetails.nodeId) === node.nodeId
+            ? bindings
+            : [];
+        const context = matchingBindings.length > 0
+            ? matchingBindings.map((binding) => {
+                const table = parseString(binding.table) ?? "<unknown>";
+                const authorityNode = parseString(binding.nodeId) ?? "<unknown>";
+                const iteration = parseNumber(binding.iteration) ?? 0;
+                return `Bound row: ${table}/${authorityNode} (iteration ${iteration})`;
+            }).join("\n")
+            : undefined;
+        blockers.push({
+            kind: "bound-stale",
+            nodeId: node.nodeId,
+            iteration: node.iteration ?? 0,
+            reason: "BOUND_STALE: a bound authority row changed after it was proved",
+            waitingSince: waitingSinceFallback(nowMs, node.updatedAtMs, run.startedAtMs, run.createdAtMs),
+            unblocker: buildResumeUnblocker(run),
+            ...(context ? { context: `${context}\nRe-produce the authority row, then resume the run.` } : {}),
+        });
+    }
+    for (const node of nodes.filter((entry) => entry.state === "waiting-bound")) {
+        blockers.push({
+            kind: "binding-missing",
+            nodeId: node.nodeId,
+            iteration: node.iteration ?? 0,
+            reason: "waiting for a proof binding to be produced",
+            waitingSince: waitingSinceFallback(nowMs, node.updatedAtMs, run.startedAtMs, run.createdAtMs),
+            unblocker: buildResumeUnblocker(run),
+            context: "The Task declared bind={undefined}; produce the authority row, then resume the run.",
+        });
+    }
     for (const approval of approvals) {
         if (approval.status !== "requested")
             continue;
@@ -1096,6 +1134,8 @@ export function diagnosisCtaCommands(diagnosis) {
         "waiting-approval": "Approve pending gate",
         "waiting-event": "Send expected signal",
         "waiting-timer": "Resume once timer is due",
+        "bound-stale": "Resume after re-producing authority",
+        "binding-missing": "Resume after producing authority",
         "stale-task-heartbeat": "Retry timed-out task",
         "retry-backoff": "Retry blocked node",
         "retries-exhausted": "Resume run after fixing failure",

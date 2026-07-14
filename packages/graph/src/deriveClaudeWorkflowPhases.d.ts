@@ -4,6 +4,7 @@ import { TaskDescriptor as TaskDescriptor$1 } from './types.js';
 import { GraphSnapshot as GraphSnapshot$1 } from './GraphSnapshot.js';
 import './ClaudeWorkflowPhase.js';
 import 'zod';
+import './ProofBinding.js';
 
 /**
  * Derive a Claude Code /workflows phase plan from a live GraphSnapshot

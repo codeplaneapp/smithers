@@ -100,6 +100,7 @@
 /** @typedef {import("@smithers-orchestrator/agents").OpenCodeAgentOptions} OpenCodeAgentOptions */
 /** @typedef {import("@smithers-orchestrator/agents").VibeAgentOptions} VibeAgentOptions */
 /** @typedef {import("@smithers-orchestrator/components").PollerProps} PollerProps */
+/** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("@smithers-orchestrator/server/gateway").RequestFrame} RequestFrame */
 /** @typedef {import("@smithers-orchestrator/observability").ResolvedSmithersObservabilityOptions} ResolvedSmithersObservabilityOptions */
 /** @typedef {import("@smithers-orchestrator/server/gateway").ResponseFrame} ResponseFrame */

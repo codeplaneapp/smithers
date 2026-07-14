@@ -87,6 +87,27 @@ function isZodObject(value) {
 }
 /**
  * @param {Record<string, unknown>} raw
+ * @returns {{ proofBindingRequired?: boolean; proofBindings?: import("../ProofBinding.ts").ProofBinding[] }}
+ */
+function proofBindingProps(raw) {
+    if (!Object.hasOwn(raw, "bind"))
+        return {};
+    const values = Array.isArray(raw.bind) ? raw.bind : [raw.bind];
+    const bindings = values.filter((value) => Boolean(value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        typeof value.table === "string" &&
+        typeof value.nodeId === "string" &&
+        typeof value.iteration === "number" &&
+        Number.isFinite(value.iteration) &&
+        typeof value.digest === "string"));
+    return {
+        proofBindingRequired: true,
+        ...(bindings.length === values.length ? { proofBindings: bindings } : {}),
+    };
+}
+/**
+ * @param {Record<string, unknown>} raw
  * @returns {number | null}
  */
 function parseHeartbeatTimeoutMs(raw) {
@@ -925,6 +946,7 @@ export function extractFromHost(root, opts) {
                 ordinal: ordinal++,
                 iteration,
                 kind: /** @type {TaskDescriptor["kind"]} */ (taskKind),
+                ...proofBindingProps(raw),
                 ralphId,
                 worktreeId: topWorktree?.id,
                 worktreePath: topWorktree?.path,

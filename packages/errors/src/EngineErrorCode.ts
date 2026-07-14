@@ -13,6 +13,7 @@ export type EngineErrorCode =
   | "TASK_ABORTED"
   | "MISSING_OUTPUT"
   | "DEP_NOT_SATISFIED"
+  | "BOUND_STALE"
   | "RUN_CANCELLED"
   | "RUN_NOT_FOUND"
   | "NODE_NOT_FOUND"

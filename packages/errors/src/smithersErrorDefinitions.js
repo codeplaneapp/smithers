@@ -244,6 +244,11 @@ export const smithersErrorDefinitions = {
         when: "A typed dep on <Task> references an upstream output that has not been produced yet.",
         details: "{ taskId, depKey, resolvedNodeId }",
     },
+    BOUND_STALE: {
+        category: "engine",
+        when: "A <Task bind> authority row no longer has the content digest captured by ctx.prove(); the task is parked and the run remains resumable.",
+        details: "{ nodeId, bindings }",
+    },
     ASPECT_BUDGET_EXCEEDED: {
         category: "components",
         when: "An Aspects budget (tokens or latency) has been exceeded.",

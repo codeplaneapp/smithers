@@ -5,6 +5,7 @@ import type { SmithersCtx } from "@smithers-orchestrator/driver";
 import type { CachePolicy } from "@smithers-orchestrator/scheduler/CachePolicy";
 import type { RetryPolicy } from "@smithers-orchestrator/scheduler/RetryPolicy";
 import type { ScorersMap } from "@smithers-orchestrator/graph/types";
+import type { ProofBinding } from "@smithers-orchestrator/graph/ProofBinding";
 import type { TaskMemoryConfig } from "@smithers-orchestrator/memory/types";
 import type { OutputTarget } from "./OutputTarget.ts";
 import type { DepsSpec } from "./DepsSpec.ts";
@@ -52,6 +53,8 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
 	 * latest completed snapshot for that task id. Requires an agent task.
 	 */
 	fork?: string;
+	/** Schedule only while every bound authority row still has the proved content digest. */
+	bind?: ProofBinding | ProofBinding[];
 	skipIf?: boolean;
 	needsApproval?: boolean;
 	/** When paired with `needsApproval`, do not block unrelated downstream flow while the approval is pending. */

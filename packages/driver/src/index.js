@@ -10,6 +10,7 @@
  */
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./OutputSnapshot.ts").OutputSnapshot} OutputSnapshot */
+/** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
 /** @typedef {import("./RunOptions.ts").EffectPlatformRuntime} EffectPlatformRuntime */
 /** @typedef {import("./RunOptions.ts").RunOptions} RunOptions */

@@ -517,6 +517,7 @@ export class WorkflowDriver {
             input: context.input ?? this.activeOptions?.input ?? {},
             auth: context.auth,
             outputs: mergeOutputSnapshots(this.baseOutputs, snapshotFromContext(context, this.outputTablesByNodeId)),
+            taskStates: context.taskStates,
             zodToKeyName: this.workflow.zodToKeyName,
             runtimeConfig: {
                 ...(this.activeOptions?.cliAgentToolsDefault
@@ -763,6 +764,8 @@ export class WorkflowDriver {
                 return { runId: this.activeRunId, status: "waiting-timer" };
             case "Quota":
                 return { runId: this.activeRunId, status: "waiting-quota" };
+            case "Bound":
+                return { runId: this.activeRunId, status: "waiting-event" };
             case "RetryBackoff": {
                 try {
                     await sleepWithAbort(reason.waitMs, this.activeOptions?.signal);

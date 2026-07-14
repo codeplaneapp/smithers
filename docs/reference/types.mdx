@@ -144,6 +144,8 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
   output(table: any, key: OutputKey): any;
   outputMaybe(table: any, key: OutputKey): any | undefined;
   latest(table: any, nodeId: string): any | undefined;
+  prove(table: any, key: OutputKey): ProofBinding | undefined;
+  boundStale(nodeId: string): boolean;
   latestArray(value: unknown, schema: SafeParser): unknown[];
   iterationCount(table: any, nodeId: string): number;
   resolveTableName(table: any): string;
@@ -151,6 +153,12 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
 }
 
 type OutputKey = { nodeId: string; iteration?: number };
+type ProofBinding = {
+  table: string;
+  nodeId: string;
+  iteration: number;
+  digest: string;                  // sha256:<hex> over canonical JSON row content
+};
 type SafeParser = {
   safeParse(value: unknown):
     | { success: true; data: unknown }
@@ -273,6 +281,9 @@ type TaskDescriptor = {
   ralphId?: string;
   dependsOn?: string[];
   needs?: Record<string, string>;
+  proofBindingRequired?: boolean;
+  proofBindings?: readonly ProofBinding[];
+  proofBindingStatus?: "current" | "missing" | "stale";
   forkSource?: string;              // logical id of the task whose session this task forks
   worktreeId?: string;
   worktreePath?: string;
@@ -574,6 +585,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   needs?: Record<string, string>;
   deps?: D;
   fork?: string;                    // start from another task's final agent session snapshot
+  bind?: ProofBinding | ProofBinding[];
   skipIf?: boolean;
   needsApproval?: boolean;
   async?: boolean;                  // only with needsApproval
@@ -1244,7 +1256,7 @@ type KnownSmithersErrorCode =
   | "INVALID_CONTINUATION_STATE" | "RALPH_MAX_REACHED" | "SCHEDULER_ERROR" | "SESSION_ERROR"
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
-  | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
+  | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
   | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
   | "TOOL_PATH_INVALID" | "TOOL_PATH_ESCAPE" | "TOOL_FILE_TOO_LARGE" | "TOOL_CONTENT_TOO_LARGE"
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"

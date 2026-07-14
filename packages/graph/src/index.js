@@ -17,6 +17,7 @@
 /** @typedef {import("./HostText.ts").HostText} HostText */
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("./MemoryNamespaceKind.ts").MemoryNamespaceKind} MemoryNamespaceKind */
+/** @typedef {import("./ProofBinding.ts").ProofBinding} ProofBinding */
 /** @typedef {import("./RetryPolicy.ts").RetryPolicy} RetryPolicy */
 /** @typedef {import("./SamplingConfig.ts").SamplingConfig} SamplingConfig */
 /** @typedef {import("./ScoreResult.ts").ScoreResult} ScoreResult */

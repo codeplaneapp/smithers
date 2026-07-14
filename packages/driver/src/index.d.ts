@@ -10,6 +10,7 @@ import { SmithersWorkflowOptions } from '@smithers-orchestrator/scheduler/Smithe
 import { SchemaRegistryEntry } from '@smithers-orchestrator/db/SchemaRegistryEntry';
 import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
 import { ExtractOptions, WorkflowGraph } from '@smithers-orchestrator/graph';
+import type { ProofBinding } from '@smithers-orchestrator/graph/ProofBinding';
 
 /** @typedef {"filesystem" | "subprocess" | "worktree" | "sandbox"} RuntimeCapability */
 /** @typedef {{ runtime: string; capability: RuntimeCapability | string; operation: string }} RuntimeCapabilityErrorDetails */
@@ -372,6 +373,7 @@ type SmithersCtxOptions$2 = {
     input: unknown;
     auth?: RunAuthContext$2 | null;
     outputs: OutputSnapshot$2;
+    taskStates?: ReadonlyMap<string, unknown> | Record<string, unknown>;
     zodToKeyName?: Map<any, string>;
     runtimeConfig?: SmithersRuntimeConfig$1;
 };
@@ -423,6 +425,8 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     _zodToKeyName: Map<unknown, string> | undefined;
     /** @type {Set<string>} */
     _currentScopes: Set<string>;
+    /** @type {ReadonlyMap<string, unknown> | Record<string, unknown> | undefined} */
+    _taskStates: ReadonlyMap<string, unknown> | Record<string, unknown> | undefined;
     /**
      * Tasks that declared `deps` but could not resolve them this render, so
      * they deferred (returned null) instead of mounting. The engine reads this
@@ -518,6 +522,20 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
      * @returns {ResolveOutputRow<Schema, T> | undefined}
      */
     latest<T extends TableRef>(table: T, nodeId: string): ResolveOutputRow<Schema, T> | undefined;
+    /**
+     * Bind to the latest (or explicitly named) persisted output row for a node.
+     * @param {TableRef} table
+     * @param {OutputKey} key
+     * @returns {ProofBinding | undefined}
+     */
+    prove(table: TableRef, key: OutputKey$1): ProofBinding | undefined;
+    /**
+     * Whether the named task has attempted scheduling and its proof binding no
+     * longer matches the current authority row.
+     * @param {string} nodeId
+     * @returns {boolean}
+     */
+    boundStale(nodeId: string): boolean;
     /**
      * @param {unknown} value
      * @param {SafeParser} schema
@@ -857,4 +875,4 @@ type StoredRunState = StoredRunState$1;
 type RuntimeCapability = RuntimeCapability$1;
 type RuntimeCapabilityErrorDetails = RuntimeCapabilityErrorDetails$1;
 
-export { type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type OutputAccessor, type OutputKey, type OutputSnapshot, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeTaskExecutor, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };
+export { type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type OutputAccessor, type OutputKey, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeTaskExecutor, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };

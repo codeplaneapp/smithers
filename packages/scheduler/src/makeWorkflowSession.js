@@ -130,6 +130,21 @@ function findWaitingReason(state, currentTimeMs) {
                 });
             }
         }
+        else if (taskState === "bound-stale" && !primaryReason) {
+            primaryReason = {
+                _tag: "Bound",
+                nodeId: descriptor.nodeId,
+                code: "BOUND_STALE",
+                bindings: descriptor.proofBindings,
+            };
+        }
+        else if (taskState === "waiting-bound" && !primaryReason) {
+            primaryReason = {
+                _tag: "Bound",
+                nodeId: descriptor.nodeId,
+                code: "BOUND_MISSING",
+            };
+        }
     }
     if (primaryReason) {
         return primaryReason;
@@ -546,6 +561,13 @@ export function makeWorkflowSession(options = {}) {
             if (!state.states.has(key)) {
                 state.states.set(key, "pending");
             }
+            else if ((state.states.get(key) === "bound-stale" || state.states.get(key) === "waiting-bound") &&
+                (!task.proofBindingRequired || task.proofBindingStatus === "current")) {
+                // A newly-produced authority row (normally a later iteration)
+                // changes the descriptor's pinned binding and makes the task
+                // schedulable again. Removing `bind` also clears the wait.
+                state.states.set(key, "pending");
+            }
         }
     }
     /**
@@ -781,11 +803,25 @@ export function makeWorkflowSession(options = {}) {
         const executable = [];
         let waitReason;
         let changed = false;
+        let proofStateChanged = false;
         for (const task of schedule.runnable) {
             const key = stateKeyFor(task);
             if (task.skipIf) {
                 state.states.set(key, "skipped");
                 changed = true;
+                continue;
+            }
+            if (task.proofBindingRequired && task.proofBindingStatus !== "current") {
+                const stale = task.proofBindingStatus === "stale";
+                state.states.set(key, stale ? "bound-stale" : "waiting-bound");
+                waitReason ??= {
+                    _tag: "Bound",
+                    nodeId: task.nodeId,
+                    code: stale ? "BOUND_STALE" : "BOUND_MISSING",
+                    ...(stale && task.proofBindings ? { bindings: task.proofBindings } : {}),
+                };
+                changed = true;
+                proofStateChanged = true;
                 continue;
             }
             if (task.needsApproval && !state.approvals.has(key)) {
@@ -862,6 +898,15 @@ export function makeWorkflowSession(options = {}) {
         }
         if (executable.length > 0) {
             return { _tag: "Execute", tasks: executable };
+        }
+        if (proofStateChanged) {
+            // Give workflow code one render with ctx.boundStale(nodeId) === true
+            // before parking, so it can mount a correction loop that re-produces
+            // the authority row without failing or manually resuming the run.
+            return {
+                _tag: "ReRender",
+                context: renderContext(state, undefined, { reason: "bound-check" }),
+            };
         }
         if (waitReason) {
             return { _tag: "Wait", reason: waitReason };

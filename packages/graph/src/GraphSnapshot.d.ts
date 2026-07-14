@@ -1,5 +1,6 @@
 import { XmlNode, TaskDescriptor } from './types.js';
 import 'zod';
+import './ProofBinding.js';
 
 type GraphSnapshot = {
     runId: string;

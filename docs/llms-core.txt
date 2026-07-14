@@ -1198,6 +1198,82 @@ mean:
 
 ---
 
+## Provenance binding
+
+> Bind a task to the exact upstream artifact that authorized it; stale authority parks instead of running.
+
+A review approves a *specific* tree. A gate certifies a *specific* commit. The
+moment the artifact changes, the authority is stale - but in a re-rendering
+graph with loops and retries, nothing stops a task from reading last
+iteration's approval and acting on it. Provenance binding makes "the approval
+is only valid for the artifact it approved" an engine-enforced property
+instead of hand-rolled proof-id plumbing.
+
+```ts
+// In workflow code (render time):
+const approval = ctx.prove("review", { nodeId: "lane:review" });
+// → ProofBinding { table: "review", nodeId: "lane:review",
+//                  iteration: 3, digest: "sha256:…" } | undefined
+
+type ProofBinding = {
+  table: string;
+  nodeId: string;
+  iteration: number;
+  digest: string; // content hash of the bound output row
+};
+```
+
+```tsx
+<Task id="lane:push" bind={approval} agent={luna} output={outputs.push}>
+  Push the approved commit. …
+</Task>
+```
+
+## Semantics
+
+- **`ctx.prove(table, { nodeId, iteration? })`** reads the latest (or the
+  named-iteration) output row of that node and returns a `ProofBinding`
+  carrying a content digest of the row. It returns `undefined` while the row
+  does not exist - like `ctx.outputMaybe`, it never throws at render time.
+- **`bind`** on `<Task>` (a single binding or an array) is checked by the
+  engine **at schedule time**, not render time: the digest of the bound row's
+  *current* value is recomputed and compared. On mismatch the task parks as
+  `BOUND_STALE` instead of executing.
+- A `bind` of `undefined` blocks scheduling the same way an unmet dependency
+  does - a task cannot run on authority that was never produced.
+
+## Staleness is a signal, not an error
+
+`BOUND_STALE` does not fail the run. It is exposed to workflow code
+(`ctx.boundStale("lane:push")`) and to `bunx smithers-orchestrator why`, and the typical
+response is re-entering the correction loop so the upstream authority is
+re-produced against the current artifact:
+
+```tsx
+const pushStale = ctx.boundStale("lane:push");
+<Loop id="lane:correct" until={(c) => gate.approved && !pushStale} maxIterations={5}>
+  …
+</Loop>
+```
+
+## Notes
+
+- Bindings hash **content**, not iteration counters, so they survive resume,
+  retry, replay, and time travel: a restored run re-verifies against whatever
+  the rows say now.
+- Bind the *decision* row (the review verdict, the gate result), not raw agent
+  text; digesting is deterministic over the typed output row.
+- This complements, not replaces, human approval:
+  [`<Approval>`](/components/approval) answers "may this happen at all";
+  a proof binding answers "is the thing that was approved still the thing
+  about to happen".
+- [`<GitHubLanding>`](/components/github-landing) and
+  [`<IsolatedGate>`](/components/isolated-gate) are the canonical producers
+  and consumers: gate result rows and review verdicts get bound into the
+  landing step, so nothing stale can reach a push.
+
+---
+
 ## Context Engineering
 
 > The layered control system behind a reliable agent workflow, the three execution levers, and how Smithers does it for you.
@@ -3309,6 +3385,7 @@ type TaskProps = {
   allowTools?: string[]; // CLI-agent tool allowlist
   key?: string;
   skipIf?: boolean;
+  bind?: ProofBinding | ProofBinding[]; // schedule only while the bound rows are current; see /concepts/provenance
   needsApproval?: boolean; // pause for human before executing
   async?: boolean; // with needsApproval: let unrelated flow continue
   timeoutMs?: number;
@@ -7186,6 +7263,8 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
   output(table: any, key: OutputKey): any;
   outputMaybe(table: any, key: OutputKey): any | undefined;
   latest(table: any, nodeId: string): any | undefined;
+  prove(table: any, key: OutputKey): ProofBinding | undefined;
+  boundStale(nodeId: string): boolean;
   latestArray(value: unknown, schema: SafeParser): unknown[];
   iterationCount(table: any, nodeId: string): number;
   resolveTableName(table: any): string;
@@ -7193,6 +7272,12 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
 }
 
 type OutputKey = { nodeId: string; iteration?: number };
+type ProofBinding = {
+  table: string;
+  nodeId: string;
+  iteration: number;
+  digest: string;                  // sha256:<hex> over canonical JSON row content
+};
 type SafeParser = {
   safeParse(value: unknown):
     | { success: true; data: unknown }
@@ -7315,6 +7400,9 @@ type TaskDescriptor = {
   ralphId?: string;
   dependsOn?: string[];
   needs?: Record<string, string>;
+  proofBindingRequired?: boolean;
+  proofBindings?: readonly ProofBinding[];
+  proofBindingStatus?: "current" | "missing" | "stale";
   forkSource?: string;              // logical id of the task whose session this task forks
   worktreeId?: string;
   worktreePath?: string;
@@ -7616,6 +7704,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   needs?: Record<string, string>;
   deps?: D;
   fork?: string;                    // start from another task's final agent session snapshot
+  bind?: ProofBinding | ProofBinding[];
   skipIf?: boolean;
   needsApproval?: boolean;
   async?: boolean;                  // only with needsApproval
@@ -8286,7 +8375,7 @@ type KnownSmithersErrorCode =
   | "INVALID_CONTINUATION_STATE" | "RALPH_MAX_REACHED" | "SCHEDULER_ERROR" | "SESSION_ERROR"
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
-  | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
+  | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
   | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
   | "TOOL_PATH_INVALID" | "TOOL_PATH_ESCAPE" | "TOOL_FILE_TOO_LARGE" | "TOOL_CONTENT_TOO_LARGE"
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
@@ -9000,6 +9089,7 @@ try {
 | `CONTEXT_OUTSIDE_WORKFLOW` | Workflow context access happens outside an active Smithers workflow render. | -- |
 | `MISSING_OUTPUT` | Code calls `ctx.output()` for a node result that does not exist. | `{ nodeId, iteration }` |
 | `DEP_NOT_SATISFIED` | A typed dep on `<Task>` references an upstream output that has not been produced yet. | `{ taskId, depKey, resolvedNodeId }` |
+| `BOUND_STALE` | A `<Task bind>` authority row no longer matches the digest captured by `ctx.prove()`; the task parks while the run remains resumable. | `{ nodeId, bindings }` |
 | `ASPECT_BUDGET_EXCEEDED` | An Aspects budget (tokens or latency) has been exceeded. | `{ kind, limit, current }` |
 | `APPROVAL_OUTSIDE_TASK` | `<Approval>` is resolved outside the active task runtime. | -- |
 | `APPROVAL_OPTIONS_REQUIRED` | An approval mode that requires explicit options is missing them. | -- |

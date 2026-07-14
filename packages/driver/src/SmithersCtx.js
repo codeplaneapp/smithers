@@ -4,10 +4,12 @@ import { filterRowsByNodeId } from "./filterRowsByNodeId.js";
 import { normalizeInputRow } from "./normalizeInputRow.js";
 import { withLogicalIterationShortcuts } from "./withLogicalIterationShortcuts.js";
 import { RuntimeCapabilityError } from "./RuntimeCapabilityError.js";
+import { digestProofRow } from "./provenance.js";
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./SafeParser.ts").SafeParser} SafeParser */
 /** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
+/** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./SmithersRuntimeConfig.ts").SmithersRuntimeConfig} SmithersRuntimeConfig */
 /** @typedef {unknown} TableRef */
 /** @typedef {Record<string, unknown>} OutputRow User-visible output row — harness metadata fields (runId, nodeId, iteration) are stripped. */
@@ -83,6 +85,8 @@ export class SmithersCtx {
     _zodToKeyName;
     /** @type {Set<string>} */
     _currentScopes;
+    /** @type {ReadonlyMap<string, unknown> | Record<string, unknown> | undefined} */
+    _taskStates;
     /**
      * Tasks that declared `deps` but could not resolve them this render, so
      * they deferred (returned null) instead of mounting. The engine reads this
@@ -107,6 +111,7 @@ export class SmithersCtx {
         this._outputs = opts.outputs;
         this._zodToKeyName = opts.zodToKeyName;
         this._currentScopes = buildCurrentScopes(this.iterations);
+        this._taskStates = opts.taskStates;
         /**
          * @param {string} table
          */
@@ -249,6 +254,64 @@ export class SmithersCtx {
             }
         }
         return best;
+    }
+    /**
+     * Bind to the latest (or explicitly named) persisted output row for a node.
+     * The digest is computed from the typed row only; persistence identity
+     * columns are carried separately in the returned binding.
+     *
+     * @param {TableRef} table
+     * @param {OutputKey} key
+     * @returns {ProofBinding | undefined}
+     */
+    prove(table, key) {
+        const tableName = this.resolveTableName(table);
+        const rows = this._outputs[tableName] ?? [];
+        const matching = filterRowsByNodeId(rows, key.nodeId, this._currentScopes);
+        let row;
+        if (key.iteration !== undefined) {
+            row = matching.find((candidate) => Number(candidate.iteration ?? 0) === key.iteration);
+        }
+        else {
+            let bestIteration = -Infinity;
+            for (const candidate of matching) {
+                const candidateIteration = Number.isFinite(Number(candidate.iteration))
+                    ? Number(candidate.iteration)
+                    : 0;
+                if (!row || candidateIteration >= bestIteration) {
+                    row = candidate;
+                    bestIteration = candidateIteration;
+                }
+            }
+        }
+        if (!row)
+            return undefined;
+        return {
+            table: tableName,
+            nodeId: String(row.nodeId ?? key.nodeId),
+            iteration: Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0,
+            digest: digestProofRow(row),
+        };
+    }
+    /**
+     * Whether the named task has attempted scheduling and its proof binding no
+     * longer matches the current authority row.
+     *
+     * @param {string} nodeId
+     * @returns {boolean}
+     */
+    boundStale(nodeId) {
+        const entries = this._taskStates instanceof Map
+            ? this._taskStates.entries()
+            : Object.entries(this._taskStates ?? {});
+        const states = [];
+        for (const [stateKey, state] of entries) {
+            const separator = stateKey.lastIndexOf("::");
+            const stateNodeId = separator >= 0 ? stateKey.slice(0, separator) : stateKey;
+            states.push({ nodeId: stateNodeId, state });
+        }
+        const matching = filterRowsByNodeId(states, nodeId, this._currentScopes);
+        return matching.some((entry) => entry.state === "bound-stale");
     }
     /**
      * @param {unknown} value

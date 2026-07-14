@@ -27,6 +27,7 @@ import * as _smithers_orchestrator_agents_AgentLike from '@smithers-orchestrator
 import { AgentLike as AgentLike$2 } from '@smithers-orchestrator/agents/AgentLike';
 import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
 import { ScorersMap as ScorersMap$1 } from '@smithers-orchestrator/graph/types';
+import type { ProofBinding } from '@smithers-orchestrator/graph/ProofBinding';
 import { TaskMemoryConfig } from '@smithers-orchestrator/memory/types';
 import * as _smithers_orchestrator_errors from '@smithers-orchestrator/errors';
 import * as zod_v4_core from 'zod/v4/core';
@@ -182,6 +183,8 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
      * upstream throws at runtime despite compiling cleanly.
      */
     depsOptional?: boolean;
+    /** Pin scheduling to one or more content-addressed authority rows. */
+    bind?: ProofBinding | ProofBinding[];
     /**
      * Start this agent task from a copy of another task's final agent session context.
      * The fork source becomes an implicit dependency: this task waits for it to complete,

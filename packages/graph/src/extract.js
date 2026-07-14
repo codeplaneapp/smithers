@@ -50,6 +50,30 @@ function isDrizzleTable(value) {
     }
 }
 /**
+ * Preserve whether `bind` was authored even when its value is undefined. An
+ * undefined proof is a real scheduling dependency, distinct from omitting the
+ * prop entirely.
+ * @param {Record<string, unknown>} raw
+ * @returns {{ proofBindingRequired?: boolean; proofBindings?: import("./ProofBinding.ts").ProofBinding[] }}
+ */
+function proofBindingProps(raw) {
+    if (!Object.hasOwn(raw, "bind"))
+        return {};
+    const values = Array.isArray(raw.bind) ? raw.bind : [raw.bind];
+    const bindings = values.filter((value) => Boolean(value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        typeof value.table === "string" &&
+        typeof value.nodeId === "string" &&
+        typeof value.iteration === "number" &&
+        Number.isFinite(value.iteration) &&
+        typeof value.digest === "string"));
+    return {
+        proofBindingRequired: true,
+        ...(bindings.length === values.length ? { proofBindings: bindings } : {}),
+    };
+}
+/**
  * @param {Record<string, unknown>} raw
  * @returns {{ outputTable: unknown | null; outputTableName: string; outputRef: import("zod").ZodObject<any> | undefined; outputSchema: import("zod").ZodObject<any> | undefined; }}
  */
@@ -730,6 +754,7 @@ export function extractGraph(root, opts) {
             addDescriptor(nodeId, "Task", {
                 ...common,
                 ...output,
+                ...proofBindingProps(raw),
                 kind: /** @type {TaskDescriptor["kind"]} */ (taskKind),
                 forkSource: typeof raw.fork === "string" && raw.fork ? raw.fork : undefined,
                 needsApproval: Boolean(raw.needsApproval),

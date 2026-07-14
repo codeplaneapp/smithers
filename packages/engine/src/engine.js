@@ -67,6 +67,7 @@ import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import { createWorkflowVersioningRuntime, getWorkflowPatchDecisions, withWorkflowVersioningRuntime, } from "./effect/versioning.js";
 import { runWithCorrelationContext, updateCurrentCorrelationContext, withCorrelationContext, } from "@smithers-orchestrator/observability/correlation";
 import { extractWorkflowImportSpecifiers, getWorkflowImportScanLoader, readWorkflowEntryHash, readWorkflowGraphHash, resolveWorkflowImport, sha256Hex, } from "./workflow-hash.js";
+import { pinTaskProofBindings, proofBindingsFromFrame, verifyTaskProofBindings } from "./provenance.js";
 import { applyOptimizationArtifactToTasks } from "./optimization-artifact.js";
 import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.js";
 import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
@@ -6198,7 +6199,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
             annotations: opts.annotations,
         },
     };
-    let frameNo = ((await adapter.getLastFrame(runId))?.frameNo ?? 0);
+    const previousFrame = await adapter.getLastFrame(runId);
+    let frameNo = previousFrame?.frameNo ?? 0;
+    const pinnedProofBindings = proofBindingsFromFrame(previousFrame);
     let defaultIteration = 0;
     const workflowRef = workflow;
     let lastGraph = null;
@@ -6523,8 +6526,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
     };
     /**
    * @param {"waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota"} status
-   * @param {"approval" | "event" | "timer" | "quota"} waitReason
-   * @param {{ quotaMetadataJson?: string }} [opts]
+   * @param {"approval" | "event" | "timer" | "quota" | "bound"} waitReason
+   * @param {{ quotaMetadataJson?: string; errorJson?: string }} [opts]
    * @returns {Promise<RunResult>}
    */
     const markRunWaiting = async (status, waitReason, opts = {}) => {
@@ -6539,6 +6542,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
         };
         if (opts.quotaMetadataJson != null) {
             patch.errorJson = opts.quotaMetadataJson;
+        }
+        if (opts.errorJson != null) {
+            patch.errorJson = opts.errorJson;
         }
         const parked = await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, patch));
         if (!parked) {
@@ -6692,6 +6698,37 @@ async function runWorkflowBodyDriver(workflow, opts) {
         return markRunWaiting("waiting-timer", "timer");
     };
     /**
+     * Persist provenance waits as nonterminal node states. The run uses the
+     * existing resumable waiting-event status; BOUND_STALE is a park code, not
+     * a failed run or task attempt.
+     * @param {Extract<WaitReason, { _tag: "Bound" }>} reason
+     */
+    const reconcileBoundWait = async (reason) => {
+        const task = lastGraph?.tasks.find((candidate) => candidate.nodeId === reason.nodeId);
+        if (task) {
+            await Effect.runPromise(adapter.insertNode({
+                runId,
+                nodeId: task.nodeId,
+                iteration: task.iteration,
+                state: reason.code === "BOUND_STALE" ? "bound-stale" : "waiting-bound",
+                lastAttempt: null,
+                updatedAtMs: nowMs(),
+                outputTable: task.outputTableName,
+                label: task.label ?? null,
+            }));
+        }
+        const bindings = reason.bindings ?? task?.proofBindings ?? [];
+        return markRunWaiting("waiting-event", "bound", reason.code === "BOUND_STALE"
+            ? {
+                errorJson: JSON.stringify({
+                    code: "BOUND_STALE",
+                    message: `Task ${reason.nodeId} is parked because its bound authority row changed.`,
+                    details: { nodeId: reason.nodeId, bindings },
+                }),
+            }
+            : {});
+    };
+    /**
    * @param {WaitReason} reason
    * @returns {Promise<EngineDecision | RunResult>}
    */
@@ -6721,6 +6758,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
                             : {}),
                     }),
                 });
+            case "Bound":
+                return reconcileBoundWait(reason);
             case "HotReload":
             case "OrphanRecovery":
             case "ExternalTrigger":
@@ -6836,6 +6875,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 maxAttempts: typeof task.retries === "number" && Number.isFinite(task.retries)
                     ? task.retries + 1
                     : undefined,
+                proofBindingRequired: task.proofBindingRequired,
+                proofBindings: task.proofBindings,
+                proofBindingStatus: task.proofBindingStatus,
             }))),
             note: "react-driver",
         };
@@ -7471,6 +7513,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 await workflowVersioning.flush();
                 graph.tasks = applyOptimizationArtifactToTasks(graph.tasks);
                 resolveTaskOutputs(graph.tasks, workflowRef);
+                pinTaskProofBindings(graph.tasks, pinnedProofBindings);
+                // Verify after workflow render from a fresh durable snapshot,
+                // immediately before the graph is submitted to the scheduler.
+                // ctx.prove() and this check share digestProofRow().
+                verifyTaskProofBindings(graph.tasks, await loadOutputs(db, schema, runId));
                 attachSubflowComputeFns(graph.tasks, workflowRef, {
                     rootDir,
                     workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
