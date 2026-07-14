@@ -926,8 +926,11 @@ Same rule as React keys. A changed task ID looks like a new task to the runtime,
 The supervisor auto-resumes runs whose owner process died:
 
 ```bash
-bunx smithers-orchestrator supervise --interval 30s --stale-threshold 1m
+bunx smithers-orchestrator supervise --all --interval 30s --stale-threshold 1m
 ```
+
+Standalone supervision requires an explicit scope: pass one or more run IDs with
+`--run`, or opt into the workspace-wide sweep with `--all`.
 
 ## Session snapshots & fork
 
@@ -2418,7 +2421,7 @@ commands[94]:
     purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
-    flags[34]{name,short,type,default,desc}:
+    flags[36]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2433,6 +2436,8 @@ commands[94]:
       annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
+      parent-run-id,,string,,Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)
+      accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
       resume-claim-owner,,string,,Internal durable resume claim owner
       resume-claim-heartbeat,,number,,Internal durable resume claim heartbeat
       resume-restore-owner,,string,,Internal durable resume restore owner
@@ -2503,8 +2508,10 @@ commands[94]:
       max-output-bytes,,number,,Max bytes a single tool call can return
       tool-timeout-ms,,number,,Max wall-clock time per tool call in ms
   - name: supervise
-    purpose: Watch for stale running runs and auto-resume them
-    flags[4]{name,short,type,default,desc}:
+    purpose: Watch explicitly named stale runs and auto-resume them; --all opts into a workspace-wide sweep
+    flags[6]{name,short,type,default,desc}:
+      run,r,string,,Only supervise these run IDs (comma-separated)
+      all,a,boolean,false,Explicitly supervise every eligible run in the workspace
       dry-run,n,boolean,false,Detect stale runs without resuming
       interval,i,string,10s,Poll interval
       stale-threshold,t,string,30s,Heartbeat staleness threshold before resume
@@ -4301,7 +4308,7 @@ type TimerProps = {
 
 A waiting timer holds no worker and no CPU. The run's status becomes `waiting-timer`, only the absolute fire time is persisted, and the host releases the worker. Tear the worker down or redeploy mid-wait and nothing is lost.
 
-The host wakes the run on its own when the fire time arrives. A Gateway sweeps due timers on its scheduler tick (every 1 to 15s), and `bunx smithers-orchestrator supervise` also scans `waiting-timer` runs and resumes due ones when you are operating without Gateway. Wake resolution is bounded by the Gateway tick or supervisor interval rather than by a live process. Timers that came due while the host was down fire on the first sweep after it restarts.
+The host wakes the run on its own when the fire time arrives. A Gateway sweeps due timers on its scheduler tick (every 1 to 15s), and `bunx smithers-orchestrator supervise --run RUN_ID` also scans the explicitly scoped `waiting-timer` run and resumes it when due if you are operating without Gateway. Pass `--all` only when you intend a workspace-wide sweep. Wake resolution is bounded by the Gateway tick or supervisor interval rather than by a live process. Timers that came due while the host was down fire on the first sweep after it restarts.
 
 ---
 
@@ -4916,7 +4923,7 @@ import { Subflow } from "smithers-orchestrator";
 
 type SubflowProps = {
   id: string;
-  workflow: SmithersWorkflow<unknown>;
+  workflow: SmithersWorkflow<unknown> | WorkflowFileRef;
   output: OutputTarget;
   input?: unknown;
   mode?: "childRun" | "inline"; // default "childRun"
@@ -4970,6 +4977,22 @@ const childWorkflow = child.smithers(
 );
 
 export default childWorkflow;
+```
+
+For a workflow module generated at runtime, pass the exported `WorkflowFileRef`
+shape instead. The module must default-export a `SmithersWorkflow`; its resolved
+path (including symlinks) must remain within `approvedRoot`, which defaults to
+the parent run's `rootDir`:
+
+```tsx
+import type { WorkflowFileRef } from "smithers-orchestrator";
+
+const generated: WorkflowFileRef = {
+  path: ".smithers/generated/child.tsx",
+  approvedRoot: process.cwd(),
+};
+
+<Subflow id="generated-child" workflow={generated} output={outputs.childResult} />;
 ```
 
 The second argument to `smithers(build, { output })` declares which schema
@@ -6946,7 +6969,7 @@ returned row, persist it to the matching table, and feed the same schema to
 native structured-output agents.
 
 Major sections at a glance:
-- **Workflow / Context**: `SmithersWorkflow`, `SmithersCtx`, `RunOptions`, `RunResult`, the entry points for defining and running workflows.
+- **Workflow / Context**: `SmithersWorkflow`, `WorkflowFileRef`, `SmithersCtx`, `RunOptions`, `RunResult`, the entry points for defining and running workflows.
 - **Task / Graph**: `TaskDescriptor`, `TaskProps`, `GraphSnapshot`, the shape of nodes at runtime and in the JSX layer.
 - **Component props**: `WorkflowProps`, `ApprovalProps`, `SignalProps`, `LoopProps`, etc., all JSX component interfaces.
 - **Errors**: `SmithersError`, `KnownSmithersErrorCode`, typed error codes; see Errors for descriptions.
@@ -6969,6 +6992,11 @@ interface SmithersWorkflow<Schema = unknown> {
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
 }
+
+type WorkflowFileRef = {
+  path: string;
+  approvedRoot?: string;
+};
 
 type WorkflowViewDefinition = {
   kind: "ui" | "tui";
@@ -10648,14 +10676,12 @@ The command resolves the workspace's singleton gateway the same way `bunx smithe
 
 ## What you see
 
-- **Grouped runs list**: needs-attention, active, completed, failed, and cancelled groups with search, status and workflow filters, and live elapsed clocks.
-- **Execution tree per run**: the paths through running or failed nodes auto-expand, so the thing you are looking for is already open.
-- **Node inspector**: the selected node's output and tool calls.
-- **Live event log**: with a follow mode that tracks the newest events.
-- **Approvals inbox**: every pending gate across all runs, with approve/deny inline.
-- **Run actions**: cancel an active run or resume a failed/cancelled one.
-- **A truthful connection badge**: Live when the gateway stream is up, Offline when it is not.
-- **Deep links**: `?runId=` and `&nodeId=` address a specific run and node, so URLs are shareable.
+- **Workspace operations view**: a paginated all-runs landing page with search and filters, grouped run states, an operations summary, scheduled crons, and a Metrics view.
+- **Run health and controls**: an always-on health diagnosis with one-click recovery where available, plus Pause, Resume, Cancel, approvals, and run-level Scores.
+- **Execution history**: the live expandable tree or XML view, a chronological Timeline, and a frame scrubber for inspecting earlier committed states.
+- **Node investigation**: live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal for hijacking or reopening supported agent sessions.
+- **Events and navigation**: a filterable live event log with follow mode; shareable `?runId=` / `&nodeId=` deep links; and `?embed=1` for the focused embeddable run surface.
+- **Connection truth**: distinct Live, Connecting, Offline, and Unauthorized states with state-specific recovery guidance.
 
 ## How it relates to the other surfaces
 
@@ -13772,7 +13798,7 @@ For ChatGPT-account Codex auth, use an exact Codex model id such as
 ### Authentication
 
 - Subscription login: run `codex login` once. For isolated accounts, pass `configDir`; Smithers sets `CODEX_HOME` for that invocation.
-- API billing: pass `apiKey` or set `OPENAI_API_KEY`; Smithers forwards it to the spawned `codex` process.
+- `apiKey`: Smithers sets `OPENAI_API_KEY` on the spawned process, but Codex CLI >= 0.144 ignores that variable for auth/billing selection when subscription login is present. The option is therefore effectively inert on current CLIs; the subscription login wins.
 - Account registry: `bunx smithers-orchestrator agents add --provider codex ...` registers a subscription config directory, while `--provider openai-api` registers API-key billing for Codex-compatible providers.
 
 ### Structured output
@@ -13820,8 +13846,9 @@ const apiClaude = new ClaudeCodeAgent({
 });
 ```
 
-This mirrors the Codex authentication surface
-(`codex login` / `CODEX_HOME` via `configDir`, `OPENAI_API_KEY` via `apiKey`).
+Codex also supports `codex login` / `CODEX_HOME` via `configDir`. Although its
+`apiKey` option sets `OPENAI_API_KEY`, current Codex CLIs do not use that
+variable to switch away from subscription auth.
 
 ## Subscription-mode structured completion
 

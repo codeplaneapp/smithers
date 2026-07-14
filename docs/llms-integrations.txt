@@ -202,7 +202,7 @@ For ChatGPT-account Codex auth, use an exact Codex model id such as
 ### Authentication
 
 - Subscription login: run `codex login` once. For isolated accounts, pass `configDir`; Smithers sets `CODEX_HOME` for that invocation.
-- API billing: pass `apiKey` or set `OPENAI_API_KEY`; Smithers forwards it to the spawned `codex` process.
+- `apiKey`: Smithers sets `OPENAI_API_KEY` on the spawned process, but Codex CLI >= 0.144 ignores that variable for auth/billing selection when subscription login is present. The option is therefore effectively inert on current CLIs; the subscription login wins.
 - Account registry: `bunx smithers-orchestrator agents add --provider codex ...` registers a subscription config directory, while `--provider openai-api` registers API-key billing for Codex-compatible providers.
 
 ### Structured output
@@ -250,8 +250,9 @@ const apiClaude = new ClaudeCodeAgent({
 });
 ```
 
-This mirrors the [Codex authentication](#authentication) surface
-(`codex login` / `CODEX_HOME` via `configDir`, `OPENAI_API_KEY` via `apiKey`).
+Codex also supports `codex login` / `CODEX_HOME` via `configDir`. Although its
+`apiKey` option sets `OPENAI_API_KEY`, current Codex CLIs do not use that
+variable to switch away from subscription auth.
 
 ## Subscription-mode structured completion
 

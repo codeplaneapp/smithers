@@ -3,6 +3,8 @@ title: triage-run
 description: Diagnose one failed or stuck Smithers run and propose a fix, rewind, retry, or escalation.
 ---
 
+`triage-run` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
 `triage-run` takes a single run id, pulls that run's state and recent event log,
 diagnoses the most likely root cause, and recommends the exact next move: fix,
 rewind, retry, or escalate. Reach for it when a run failed or stalled and you

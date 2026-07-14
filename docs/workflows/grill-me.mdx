@@ -3,6 +3,8 @@ title: grill-me
 description: Stress-test a vague idea with agent-led questions.
 ---
 
+`grill-me` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
 `grill-me` runs an interview loop. The agent asks questions using `.smithers/scripts/ask-user.ts`, records answers, and keeps iterating until the request is clear enough to act on. Answers accumulate in the run context and are available to subsequent tasks in the same run, or can be passed as input to `tickets-create`.
 
 ```bash

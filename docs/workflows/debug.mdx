@@ -3,6 +3,8 @@ title: debug
 description: Reproduce and fix a reported bug with validation.
 ---
 
+`debug` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
 `debug` reuses the same `ValidationLoop` component as `implement`, but with a bug-focused default prompt. Unlike `implement`, `debug` does not pass early-exit (`done`) or prior-attempt feedback to the loop, so it runs all iterations (up to `maxIterations` = 3) rather than stopping as soon as validation passes and a reviewer approves.
 
 ```bash

@@ -3,6 +3,8 @@ title: mission
 description: Long-horizon workflow with planning, approval, milestone validation, and focused workers.
 ---
 
+`mission` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
 `mission` is for work that is too long or broad for one agent loop. It creates a milestone plan, optionally pauses for human approval, then executes one milestone at a time. Within the active milestone it can run multiple feature workers in parallel, integrate their work, validate the checkpoint, and repair failed validation before moving on.
 
 ```bash

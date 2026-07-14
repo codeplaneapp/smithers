@@ -3,6 +3,8 @@ title: kanban
 description: Implement ticket files from .smithers/tickets in parallel worktree branches.
 ---
 
+`kanban` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
 `kanban` reads Markdown tickets from `.smithers/tickets/`, runs each ticket in its own worktree branch, then asks an agent to merge successful branches back into the main workspace.
 
 ```bash
