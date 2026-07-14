@@ -11,6 +11,6 @@ describe("testing framework replay proof", () => {
     expect(replay.status).toBe("finished");
     expect(replay.replayIdentity).toBe(bundle.replayIdentity);
     const changed = await replayBundle({ ...bundle, controlLog: [{ ...controls[0], choice: "a" }, controls[1] ] });
-    expect(firstDivergence(replay.trace, changed.trace)?.sequence).toBeGreaterThanOrEqual(0);
+    expect(firstDivergence(replay.trace, changed.trace)?.sequence).toBe(0);
   });
 });
