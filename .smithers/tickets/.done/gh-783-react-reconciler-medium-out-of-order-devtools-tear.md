@@ -33,3 +33,6 @@ Use a shared active registration stack with a stable dispatcher, or unlink stopp
 ## Dedupe notes
 
 #737 and #733 concern different DevTools snapshot/unmount defects.
+
+
+> Closed by ticket-fleet: landed on main in 8669bd023dec7640953d97e2db80c6db4cbdc823.
