@@ -6,7 +6,7 @@ import { loadManifest } from "./manifest.js";
 import { parseWorkflowFrontmatter } from "./workflows.js";
 
 const REGISTRY_REPO = "smithersai/awesome-smithers";
-const PRIVATE_NAMES = new Set(["runs", "logs", "node_modules", "state", "executions"]);
+const PRIVATE_NAMES = new Set(["runs", "logs", "node_modules", "state", "executions", "agents"]);
 const PUBLISHABLE_ROOT_NAMES = new Set(["smithers.toon", "README.md", "workflows", "ui", "prompts", "lib"]);
 
 function findPackRoot(from = process.cwd()) {

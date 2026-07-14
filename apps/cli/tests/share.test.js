@@ -78,6 +78,8 @@ test("pack preparation strips private files from the pack root only", () => {
   writeFileSync(join(project, ".smithers", "smithers.toon"), "name: prepared\nrepository: owner/prepared\n");
   writeFileSync(join(project, ".smithers", "smithers.db"), "private");
   writeFileSync(join(project, ".smithers", "agents.ts"), "private");
+  mkdirSync(join(project, ".smithers", "agents"), { recursive: true });
+  mkdirSync(join(project, ".smithers", "runs"), { recursive: true });
   mkdirSync(join(project, ".smithers", "components"), { recursive: true });
   writeFileSync(join(project, ".smithers", "components", "private.ts"), "private");
   writeFileSync(join(project, ".smithers", "workflows", "ship.tsx"), "export default null;\n");
@@ -85,6 +87,8 @@ test("pack preparation strips private files from the pack root only", () => {
   preparePackForShare({ from: project });
   expect(existsSync(join(project, ".smithers", "smithers.db"))).toBe(false);
   expect(existsSync(join(project, ".smithers", "agents.ts"))).toBe(false);
+  expect(existsSync(join(project, ".smithers", "agents"))).toBe(false);
+  expect(existsSync(join(project, ".smithers", "runs"))).toBe(false);
   expect(existsSync(join(project, ".smithers", "components"))).toBe(false);
   expect(existsSync(join(project, ".smithers", "README.md"))).toBe(true);
   expect(existsSync(join(project, "project-secret.txt"))).toBe(true);
