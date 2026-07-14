@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -765,6 +765,23 @@ describe("executeSandbox", () => {
                 rootDir,
             ),
         ).rejects.toThrow("escapes sandbox root");
+    });
+
+    test("rejects a provider streamLogPath symlink that resolves outside the run root", async () => {
+        const rootDir = tempDir("smithers-provider-streamlog-symlink-root-");
+        const outsideDir = tempDir("smithers-provider-streamlog-symlink-outside-");
+        const outsideLog = join(outsideDir, "secret.ndjson");
+        const inRootLink = join(rootDir, "stream.ndjson");
+        writeFileSync(outsideLog, "{\"secret\":true}\n", "utf8");
+        symlinkSync(outsideLog, inRootLink);
+
+        await expect(
+            __executeSandboxInternals.materializeProviderResult(
+                { status: "finished", output: { ok: true }, streamLogPath: inRootLink },
+                join(rootDir, ".smithers", "sandboxes", "run", "sbx", "result"),
+                rootDir,
+            ),
+        ).rejects.toThrow("escapes sandbox root (via symlink)");
     });
 
     test("honors an in-root provider streamLogPath", async () => {

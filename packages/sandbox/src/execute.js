@@ -10,7 +10,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { validateSandboxBundle, writeSandboxBundle } from "./bundle.js";
-import { resolveSandboxPath } from "./sandboxPath.js";
+import { assertPathWithinRoot, resolveSandboxPath } from "./sandboxPath.js";
 import { normalizeSandboxEgressConfig, redactSandboxEgressConfig, writeSandboxEgressFiles } from "./egress.js";
 import { SandboxTransport, layerForSandboxRuntime, resolveSandboxRuntime, } from "./transport.js";
 /** @typedef {import("./ExecuteSandboxOptions.ts").ExecuteSandboxOptions} ExecuteSandboxOptions */
@@ -207,13 +207,15 @@ function isSandboxBundleStatus(status) {
  * Throws TOOL_PATH_ESCAPE when the path escapes the run root.
  * @param {unknown} streamLogPath
  * @param {string} rootDir
- * @returns {string | null}
+ * @returns {Promise<string | null>}
  */
-function resolveProviderStreamLogPath(streamLogPath, rootDir) {
+async function resolveProviderStreamLogPath(streamLogPath, rootDir) {
     if (typeof streamLogPath !== "string" || streamLogPath.length === 0) {
         return null;
     }
-    return resolveSandboxPath(rootDir, streamLogPath);
+    const resolvedPath = resolveSandboxPath(rootDir, streamLogPath);
+    await assertPathWithinRoot(rootDir, resolvedPath);
+    return resolvedPath;
 }
 /**
  * @param {SandboxProviderResult} result
@@ -249,7 +251,7 @@ async function materializeProviderResult(result, defaultBundlePath, rootDir) {
         output: source.outputs ?? source.output,
         status: source.status,
         runId: remoteRunId ?? undefined,
-        streamLogPath: resolveProviderStreamLogPath(source.streamLogPath, rootDir),
+        streamLogPath: await resolveProviderStreamLogPath(source.streamLogPath, rootDir),
         patches: Array.isArray(source.patches) ? source.patches : undefined,
         artifacts: Array.isArray(source.artifacts) ? source.artifacts : undefined,
         diffBundle: source.diffBundle,
