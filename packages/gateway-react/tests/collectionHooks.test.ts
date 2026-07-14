@@ -23,6 +23,7 @@ import {
   SmithersGatewayProvider,
   useGatewayActions,
   useGatewayApprovals,
+  SmithersCollectionsContext,
   useGatewayConnectionStatus,
   useGatewayCrons,
   useGatewayMemoryFacts,
@@ -425,6 +426,43 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     });
     expect(safeResult).toBeUndefined();
 
+    await harness.unmount();
+  });
+
+  test("useGatewayMutation scopes invalidation to the configured collections", async () => {
+    const invalidations: Array<readonly string[] | undefined> = [];
+    const client = {
+      api: {
+        launchRun: async () => ({ data: { runId: "run-1" } }),
+      },
+    } as any;
+    const collections = {
+      connect() {},
+      invalidate: async (names?: readonly string[]) => {
+        invalidations.push(names);
+      },
+    } as any;
+    const captured: { mutation?: any } = {};
+
+    function Probe() {
+      captured.mutation = useGatewayMutation("launchRun", { invalidate: ["runs"] });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(
+      createElement(
+        SmithersCollectionsContext.Provider,
+        { value: { client, collections, queryClient: {} as any } },
+        createElement(Probe),
+      ),
+    );
+
+    await act(async () => {
+      await captured.mutation!.mutate({ workflow: "value", input: {} });
+    });
+
+    expect(invalidations).toEqual([["runs"]]);
     await harness.unmount();
   });
 

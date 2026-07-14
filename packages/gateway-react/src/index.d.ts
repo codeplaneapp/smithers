@@ -138,7 +138,7 @@ type MutationState<TVariables, TData> = {
 type MutationOptions = {
     invalidate?: readonly unknown[];
 };
-declare function useGatewayMutation<TVariables = Record<string, unknown>, TData = unknown>(method: string, _options?: MutationOptions): MutationState<TVariables, TData>;
+declare function useGatewayMutation<TVariables = Record<string, unknown>, TData = unknown>(method: string, options?: MutationOptions): MutationState<TVariables, TData>;
 
 /**
  * Live registered-prompt list over the `prompts` collection (initial

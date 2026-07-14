@@ -15,7 +15,7 @@ type MutationOptions = {
 
 export function useGatewayMutation<TVariables = Record<string, unknown>, TData = unknown>(
   method: string,
-  _options: MutationOptions = {},
+  options: MutationOptions = {},
 ): MutationState<TVariables, TData> {
   const actions = useGatewayActions();
   const { collections } = useSmithersCollections();
@@ -70,7 +70,7 @@ export function useGatewayMutation<TVariables = Record<string, unknown>, TData =
         default:
           throw new Error(`Unsupported Gateway domain mutation: ${method}`);
       }
-      await collections.invalidate();
+      await collections.invalidate(options.invalidate as readonly string[] | undefined);
       return data as TData;
     } catch (cause) {
       const next = cause instanceof Error ? cause : new Error(String(cause));
@@ -79,7 +79,7 @@ export function useGatewayMutation<TVariables = Record<string, unknown>, TData =
     } finally {
       setIsLoading(false);
     }
-  }, [actions, collections, method]);
+  }, [actions, collections, method, options.invalidate]);
 
   const mutateSafe = useCallback(async (variables: TVariables) => {
     try {
