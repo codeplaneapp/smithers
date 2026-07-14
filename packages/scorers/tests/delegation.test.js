@@ -567,6 +567,25 @@ describe("estimateAccuracyScorer", () => {
         expect(result.score).toBeCloseTo((1 * 9 + 0.625 * 1) / 10, 5);
         expect(result.meta?.totals).toEqual({ predictedUsd: 10, actualUsd: 10 });
     });
+    it("uses the mean known cost for nodes without a positive costUsd", async () => {
+        const result = await scorer.score({
+            input: "task",
+            output: {
+                plan: [{
+                    children: [
+                        { logicalId: "costed", estimate: { tokens: 1000, costUsd: 0.02 } },
+                        { logicalId: "uncosted", estimate: { tokens: 1000 } },
+                    ],
+                }],
+                exec: [
+                    { logicalId: "costed", actual: { tokens: 2000, costUsd: 0.04 } },
+                    { logicalId: "uncosted", actual: { tokens: 1000 } },
+                ],
+            },
+        });
+        expect(result.score).toBeCloseTo(0.75, 5);
+        expect(result.meta?.nodes.map((node) => node.weight)).toEqual([0.02, 0.02]);
+    });
     it("treats zero-vs-zero as perfect and zero-vs-nonzero as zero", async () => {
         const result = await scorer.score({
             input: "task",

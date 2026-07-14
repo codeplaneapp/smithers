@@ -50,8 +50,9 @@ function isUsableNumber(value) {
  * `min(predicted, actual) / max(predicted, actual)` per dimension, averaged
  * over the dimensions present on both sides (1.0 = perfect forecast). The
  * run-level score is the mean over nodes weighted by predicted `costUsd`
- * (falling back to weight 1 when a node has no positive cost prediction), so
- * misforecasting big nodes matters more.
+ * (falling back to the mean positive weight when a node has no positive cost
+ * prediction), so misforecasting big nodes matters more. If no node has a
+ * positive cost prediction, all nodes receive equal weight.
  *
  * Replans re-forecast, so the LATEST estimate per node wins (plan rows are
  * read in order; later `children[].estimate` entries supersede earlier ones,
@@ -101,8 +102,8 @@ export function estimateAccuracyScorer() {
             }
             /** @type {{ logicalId: string; predicted: DelegationEstimate; actual: DelegationEstimate; ratio: number; weight: number; dimensions: Record<string, number> }[]} */
             const nodes = [];
-            let total = 0;
-            let weightSum = 0;
+            let knownWeightTotal = 0;
+            let knownWeightCount = 0;
             let predictedUsd = 0;
             let actualUsd = 0;
             for (const [id, predicted] of estimates) {
@@ -129,10 +130,12 @@ export function estimateAccuracyScorer() {
                 const ratio = dimTotal / dimCount;
                 const weight = isUsableNumber(predicted.costUsd) && predicted.costUsd > 0
                     ? predicted.costUsd
-                    : 1;
+                    : 0;
                 nodes.push({ logicalId: id, predicted, actual, ratio, weight, dimensions });
-                total += ratio * weight;
-                weightSum += weight;
+                if (weight > 0) {
+                    knownWeightTotal += weight;
+                    knownWeightCount++;
+                }
                 if (isUsableNumber(predicted.costUsd))
                     predictedUsd += predicted.costUsd;
                 if (isUsableNumber(actual.costUsd))
@@ -144,6 +147,17 @@ export function estimateAccuracyScorer() {
                     reason: "No node has both an estimate and actuals; skipping",
                     meta: { skipped: true },
                 };
+            }
+            const fallbackWeight = knownWeightCount > 0
+                ? knownWeightTotal / knownWeightCount
+                : 1;
+            let total = 0;
+            let weightSum = 0;
+            for (const node of nodes) {
+                if (node.weight === 0)
+                    node.weight = fallbackWeight;
+                total += node.ratio * node.weight;
+                weightSum += node.weight;
             }
             const score = Math.max(0, Math.min(1, total / weightSum));
             return {

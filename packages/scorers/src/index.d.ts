@@ -493,8 +493,9 @@ type Scorer$5 = Scorer$e;
  * `min(predicted, actual) / max(predicted, actual)` per dimension, averaged
  * over the dimensions present on both sides (1.0 = perfect forecast). The
  * run-level score is the mean over nodes weighted by predicted `costUsd`
- * (falling back to weight 1 when a node has no positive cost prediction), so
- * misforecasting big nodes matters more.
+ * (falling back to the mean positive weight when a node has no positive cost
+ * prediction), so misforecasting big nodes matters more. If no node has a
+ * positive cost prediction, all nodes receive equal weight.
  *
  * Replans re-forecast, so the LATEST estimate per node wins (plan rows are
  * read in order; later `children[].estimate` entries supersede earlier ones,
