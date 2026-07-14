@@ -284,6 +284,19 @@ describe("adapter: output tables + physical table checks", () => {
     });
 });
 
+describe("adapter: node event transcripts", () => {
+    test("listNodeEvents treats underscores in node ids literally", async () => {
+        const { adapter } = createDb();
+        await adapter.insertRun(runRow("r1"));
+        await adapter.insertEventWithNextSeq({ runId: "r1", timestampMs: now, type: "node.started", payloadJson: '{"nodeId":"build_step"}' });
+        await adapter.insertEventWithNextSeq({ runId: "r1", timestampMs: now + 1, type: "node.started", payloadJson: '{"nodeId":"buildXstep"}' });
+
+        const events = await adapter.listNodeEvents("r1", "build_step");
+        expect(events).toHaveLength(1);
+        expect(events[0].payloadJson).toContain('"build_step"');
+    });
+});
+
 describe("adapter: frame-truncation deletes", () => {
     test("deleteSnapshotsAfter + deleteVcsTagsAfter run against the durability tables", async () => {
         const { adapter } = createDb();

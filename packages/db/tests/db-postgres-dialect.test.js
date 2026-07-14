@@ -318,6 +318,19 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(rows).toHaveLength(0);
     });
 
+    test("listNodeEvents escapes LIKE wildcards for postgres transcripts", async () => {
+        const adapter = new SmithersDb(new Database(":memory:"));
+        adapter.internalStorage = storage;
+        adapter.db = { _: { fullSchema: {} } };
+        await adapter.insertRun({ runId: "pg-events", workflowName: "wf", status: "running", createdAtMs: 1 });
+        await adapter.insertEventWithNextSeq({ runId: "pg-events", timestampMs: 1, type: "node.started", payloadJson: '{"nodeId":"build_step"}' });
+        await adapter.insertEventWithNextSeq({ runId: "pg-events", timestampMs: 2, type: "node.started", payloadJson: '{"nodeId":"buildXstep"}' });
+
+        const events = await adapter.listNodeEvents("pg-events", "build_step");
+        expect(events).toHaveLength(1);
+        expect(events[0].payloadJson).toContain('"build_step"');
+    });
+
     test("insertEventWithNextSeq allocates gapless seqs under concurrency on the postgres fallback path", async () => {
         // Force the non-bun:sqlite fallback branch: internalStorage is postgres
         // and `db` exposes no sqlite exec/query/run client. Without the

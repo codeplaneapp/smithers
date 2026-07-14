@@ -2828,10 +2828,11 @@ export class SmithersDb {
     listNodeEvents(runId, nodeId, query = {}) {
         const limit = Math.max(1, Math.min(500, Math.floor(query.limit ?? 100)));
         const afterSeq = Math.max(0, Math.floor(query.afterSeq ?? 0));
-        const needle = `%"nodeId":"${nodeId}"%`;
+        const escapedNodeId = nodeId.replaceAll(`\\`, `\\\\`).replaceAll(`%`, `\\%`).replaceAll(`_`, `\\_`);
+        const needle = `%"nodeId":"${escapedNodeId}"%`;
         return this.read(`list node events ${nodeId}`, () => this.internalStorage.queryAll(`SELECT * FROM (
            SELECT * FROM _smithers_events
-           WHERE run_id = ? AND seq > ? AND payload_json LIKE ?
+           WHERE run_id = ? AND seq > ? AND payload_json LIKE ? ESCAPE '\\'
            ORDER BY seq DESC
            LIMIT ?
          ) ORDER BY seq ASC`, [runId, afterSeq, needle, limit]));
