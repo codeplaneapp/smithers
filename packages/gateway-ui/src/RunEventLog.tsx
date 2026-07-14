@@ -42,7 +42,7 @@ export function RunEventLog({
   className,
   style,
 }: RunEventLogProps) {
-  const { events, error, streaming } = useGatewayRunEvents(runId, { afterSeq: 0, maxEvents });
+  const { events, error, streaming } = useGatewayRunEvents(runId, { maxEvents });
   const endRef = useRef<HTMLDivElement | null>(null);
   const latestSeq = events[events.length - 1]?.seq;
 

@@ -539,11 +539,11 @@ describe("RunEventLog", () => {
     const gw = boot({
       events: {
         "run-a": [
-          { runId: "run-a", seq: 1, event: "run.started", payload: "a string payload" },
-          { runId: "run-a", seq: 2, event: "node.ok", payload: { small: true } },
-          { runId: "run-a", seq: 3, event: "node.big", payload: { big: "x".repeat(500) } },
-          { runId: "run-a", seq: 4, event: "node.null", payload: null },
-          { runId: "run-a", seq: 5, event: "run.heartbeat", payload: { hb: 1 } },
+          { runId: "run-a", seq: 0, event: "run.started", payload: "a string payload" },
+          { runId: "run-a", seq: 1, event: "node.ok", payload: { small: true } },
+          { runId: "run-a", seq: 2, event: "node.big", payload: { big: "x".repeat(500) } },
+          { runId: "run-a", seq: 3, event: "node.null", payload: null },
+          { runId: "run-a", seq: 4, event: "run.heartbeat", payload: { hb: 1 } },
         ],
       },
     });
@@ -553,6 +553,7 @@ describe("RunEventLog", () => {
     );
     await harness.flush(60);
     expect(harness.container.textContent).toContain("run.started");
+    expect(harness.container.textContent).toContain("0000");
     expect(harness.container.textContent).toContain("a string payload");
   });
 
