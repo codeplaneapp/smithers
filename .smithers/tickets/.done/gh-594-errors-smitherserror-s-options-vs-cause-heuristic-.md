@@ -12,3 +12,6 @@ A deserialized error record used as the cause — e.g. `errorToJson` output, whi
 Either (a) tighten the heuristic (e.g. an object with `message`/`stack` alongside `name` is a cause, not options), (b) move to an unambiguous options-only 4th arg in the next major, or (c) keep the heuristic but document the sharp edge on `SmithersErrorOptions` so callers know to wrap such causes as `{ cause }` explicitly.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 4df6fabf183bbaa5a9af41fcba1f881e975528b5.
