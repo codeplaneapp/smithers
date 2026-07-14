@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Fiber, Option, TestClock, TestContext } from "effect";
+import { setSmithersLogRunner } from "@smithers-orchestrator/observability/logging";
 import { makeGitHubClient, nextPageUrl } from "../src/github/GitHubClient.js";
 import { configureGitHub, resolveGitHubConfig } from "../src/github/config.js";
 
@@ -64,6 +65,12 @@ function startFixture() {
                 }
                 return json({ ok: true, path: "403" });
             }
+            if (url.pathname.startsWith("/retry-after-")) {
+                return json({ message: "API rate limit exceeded" }, {
+                    status: 429,
+                    headers: { "retry-after": "1" },
+                });
+            }
             if (url.pathname === "/foreign-paged") {
                 const next = url.searchParams.get("next");
                 return json([1], { headers: next ? { link: `<${next}>; rel="next"` } : {} });
@@ -114,6 +121,25 @@ const client = makeGitHubClient({
     apiBaseUrl: fixture.url,
 });
 
+/**
+ * Wait for the real HTTP fixture to observe the expected number of requests.
+ * The timeout uses the host timer because retry sleeps run on Effect's virtual
+ * TestClock in the focused retry tests below.
+ * @param {string} path
+ * @param {number} count
+ */
+async function waitForRequestCount(path, count) {
+    const deadline = Date.now() + 2_000;
+    while (fixture.requests.filter((request) => request.path === path).length < count) {
+        if (Date.now() >= deadline) {
+            throw new Error(`Timed out waiting for ${count} request(s) to ${path}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+}
+
+const settleHostTasks = () => new Promise((resolve) => setTimeout(resolve, 20));
+
 afterAll(() => {
     fixture.server.stop(true);
     foreign.server.stop(true);
@@ -151,6 +177,77 @@ describe("GitHubClient", () => {
         const response = await Effect.runPromise(client.request("GET", "/rate-limited-403"));
         expect(response).toEqual({ ok: true, path: "403" });
         expect(fixture.requests.filter((r) => r.path === "/rate-limited-403")).toHaveLength(2);
+    });
+    test("does not delay or log when retries are disabled", async () => {
+        const path = "/retry-after-disabled";
+        const retryDisabledClient = makeGitHubClient({
+            token: "test-token-shhh",
+            apiBaseUrl: fixture.url,
+            maxRetries: 0,
+        });
+        let retryLogs = 0;
+        const restoreLogger = setSmithersLogRunner({
+            runFork() {
+                retryLogs += 1;
+            },
+            async runPromise() { },
+        });
+        try {
+            const result = await Effect.runPromise(Effect.gen(function* () {
+                const fiber = yield* Effect.fork(retryDisabledClient.request("GET", path));
+                yield* Effect.promise(() => waitForRequestCount(path, 1));
+                yield* Effect.promise(settleHostTasks);
+                const sleeps = Array.from(yield* TestClock.sleeps());
+                const exit = yield* Fiber.poll(fiber);
+                yield* Fiber.interrupt(fiber);
+                return { sleeps, exit };
+            }).pipe(Effect.provide(TestContext.TestContext)));
+            expect(fixture.requests.filter((request) => request.path === path)).toHaveLength(1);
+            expect(result.sleeps).toHaveLength(0);
+            expect(Option.isSome(result.exit)).toBe(true);
+            expect(retryLogs).toBe(0);
+        }
+        finally {
+            restoreLogger();
+        }
+    });
+    test("delays and logs once between attempts without a trailing delay", async () => {
+        const path = "/retry-after-exhausted";
+        const retryOnceClient = makeGitHubClient({
+            token: "test-token-shhh",
+            apiBaseUrl: fixture.url,
+            maxRetries: 1,
+        });
+        let retryLogs = 0;
+        const restoreLogger = setSmithersLogRunner({
+            runFork() {
+                retryLogs += 1;
+            },
+            async runPromise() { },
+        });
+        try {
+            const result = await Effect.runPromise(Effect.gen(function* () {
+                const fiber = yield* Effect.fork(retryOnceClient.request("GET", path));
+                yield* Effect.promise(() => waitForRequestCount(path, 1));
+                yield* Effect.promise(settleHostTasks);
+                const sleepsBeforeRetry = Array.from(yield* TestClock.sleeps());
+                yield* TestClock.adjust("1250 millis");
+                yield* Effect.promise(() => waitForRequestCount(path, 2));
+                yield* Effect.promise(settleHostTasks);
+                const sleepsAfterFailure = Array.from(yield* TestClock.sleeps());
+                const exit = yield* Fiber.poll(fiber);
+                yield* Fiber.interrupt(fiber);
+                return { sleepsBeforeRetry, sleepsAfterFailure, exit };
+            }).pipe(Effect.provide(TestContext.TestContext)));
+            expect(fixture.requests.filter((request) => request.path === path)).toHaveLength(2);
+            expect(result.sleepsBeforeRetry).toHaveLength(1);
+            expect(result.sleepsAfterFailure).toHaveLength(0);
+            expect(Option.isSome(result.exit)).toBe(true);
+            expect(retryLogs).toBe(1);
+        }
+        finally {
+            restoreLogger();
+        }
     });
     test("does not retry 404 and never leaks the token into the error", async () => {
         const before = fixture.requests.length;

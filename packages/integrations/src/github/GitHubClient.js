@@ -214,28 +214,26 @@ export function makeGitHubClient(config) {
    * @param {string} url
    * @param {unknown} [body]
    */
-    const requestUrl = (method, url, body) => attemptOnce(method, url, body).pipe(
-    // Honor Retry-After / x-ratelimit-reset exactly (sleep before the
-    // schedule's own capped backoff decides whether to retry again).
-    Effect.tapError((error) => {
-        if (!isRetryableGitHubError(error)) {
-            return Effect.void;
-        }
-        const details = /** @type {{ retryAfterMs?: number | null; status?: number }} */ (error.details ?? {});
-        logWarning("github request retrying", {
-            method,
-            path: new URL(url).pathname,
-            status: details.status,
-            retryAfterMs: details.retryAfterMs ?? null,
-        }, "integrations:github");
-        return typeof details.retryAfterMs === "number" &&
-            details.retryAfterMs > 0
-            ? Effect.sleep(Duration.millis(details.retryAfterMs))
-            : Effect.void;
-    }), Effect.retry({
-        schedule: Schedule.intersect(Schedule.exponential("250 millis"), Schedule.recurs(resolved.maxRetries)),
-        while: (error) => isRetryableGitHubError(error),
-    }));
+    const requestUrl = (method, url, body) => {
+        const retrySchedule = Schedule.intersect(Schedule.exponential("250 millis"), Schedule.recurs(resolved.maxRetries)).pipe(Schedule.whileInput(isRetryableGitHubError), Schedule.passthrough, Schedule.addDelay(
+        /** @param {unknown} error */ (error) => {
+            if (!isRetryableGitHubError(error)) {
+                return Duration.zero;
+            }
+            const details = /** @type {{ retryAfterMs?: number | null; status?: number }} */ (error.details ?? {});
+            logWarning("github request retrying", {
+                method,
+                path: new URL(url).pathname,
+                status: details.status,
+                retryAfterMs: details.retryAfterMs ?? null,
+            }, "integrations:github");
+            return typeof details.retryAfterMs === "number" &&
+                details.retryAfterMs > 0
+                ? Duration.millis(details.retryAfterMs)
+                : Duration.zero;
+        }));
+        return attemptOnce(method, url, body).pipe(Effect.retry(retrySchedule));
+    };
     /** @type {GitHubClientService["request"]} */
     const request = (method, path, body, options) => requestUrl(method, buildUrl(path, options?.query), body).pipe(Effect.flatMap(({ json }) => options?.schema
         ? Schema.decodeUnknown(options.schema)(json).pipe(Effect.mapError((cause) => new IntegrationError("decode-failed", `GitHub response for ${method} ${path} failed schema validation.`, { method, path }, { cause })))
