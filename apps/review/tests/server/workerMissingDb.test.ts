@@ -79,4 +79,26 @@ describe("worker without a walkthrough storage binding", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "walkthrough storage unavailable" });
   });
+
+  test("rejects walkthrough deletes with a 503 JSON error instead of crashing", async () => {
+    const worker = makeWorker();
+    const env = await buildTestEnv();
+    const id = "abc12345";
+    await env.DB
+      .prepare("INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(id, "smithersai/smithers", 1, 1, null, Date.now())
+      .run();
+    env.WALKTHROUGHS = undefined as unknown as ReviewWorkerEnv["WALKTHROUGHS"];
+
+    const response = await worker.fetch(
+      new Request(`https://review.test/api/walkthroughs/${id}`, {
+        method: "DELETE",
+        headers: { authorization: "Bearer test-publish" },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "walkthrough storage unavailable" });
+  });
 });

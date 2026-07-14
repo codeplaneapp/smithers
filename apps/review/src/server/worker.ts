@@ -134,7 +134,7 @@ export function createReviewWorker(overrides?: Partial<ReviewWorkerDeps>) {
         (url.pathname === "/api/walkthroughs" && (request.method === "POST" || request.method === "GET")) ||
         (request.method === "DELETE" && url.pathname.startsWith("/api/walkthroughs/"))
       ) {
-        if (request.method === "POST" && !env.WALKTHROUGHS) {
+        if ((request.method === "POST" || request.method === "DELETE") && !env.WALKTHROUGHS) {
           return jsonError(503, "walkthrough storage unavailable");
         }
         return handleWalkthroughs(request, env, url, deps.now());
