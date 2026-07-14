@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ExecutionContextLike, ScheduledControllerLike, TelegramSummaryEnv } from "../src/env.ts";
+import { ingestTelegramUpdates } from "../src/service.ts";
 import worker from "../src/worker.ts";
 import { sqliteD1 } from "./helpers/sqliteD1.ts";
 
@@ -98,6 +99,62 @@ describe("worker scheduled handler", () => {
     const response = await worker.fetch(new Request(`${base}/api/status`), env);
     const body = (await response.json()) as { messages: number };
     expect(body.messages).toBe(0);
+  });
+
+  test("runs the digest from stored messages when the pre-digest ingest fails", async () => {
+    const env = buildEnv();
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          result: [
+            {
+              update_id: 10,
+              message: {
+                message_id: 22,
+                date: 1782931200,
+                chat: { id: -100123, title: "Smithers" },
+                from: { first_name: "Antonio" },
+                text: "A stored message for the daily digest.",
+              },
+            },
+          ],
+        }),
+      }) as unknown as Response) as unknown as typeof fetch;
+    await ingestTelegramUpdates(env, 1782931300000);
+
+    globalThis.fetch = (async (input: Request | string | URL) => {
+      const url = String(input);
+      if (url.includes("api.openai.com")) {
+        return Response.json({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  headline: "Daily recap",
+                  summary: "A stored message was summarized.",
+                  topics: [],
+                  actionItems: [],
+                  openQuestions: [],
+                  notableLinks: [],
+                  caveats: [],
+                }),
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/sendMessage")) return Response.json({ ok: true, result: {} });
+      throw new Error("Telegram temporarily unavailable");
+    }) as unknown as typeof fetch;
+
+    await runScheduled({ cron: "0 0 * * *", scheduledTime: 1782931400000 }, env);
+
+    const response = await worker.fetch(new Request(`${base}/api/latest`), env);
+    const body = (await response.json()) as { digest: { messageCount: number } | null };
+    expect(body.digest?.messageCount).toBe(1);
   });
 
   test("runs ingest only on the ingest cron", async () => {

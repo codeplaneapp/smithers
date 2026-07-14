@@ -71,7 +71,13 @@ async function fetchHandler(request: Request, env: TelegramSummaryEnv): Promise<
 
 async function scheduledHandler(controller: ScheduledControllerLike, env: TelegramSummaryEnv): Promise<void> {
   if (controller.cron === env.DIGEST_CRON) {
-    await ingestTelegramUpdates(env);
+    try {
+      await ingestTelegramUpdates(env);
+    } catch (error) {
+      console.warn(
+        `[telegram-summary] digest ingest failed; continuing with stored messages: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     await runDailyDigest(env, controller.scheduledTime ?? Date.now());
     return;
   }
