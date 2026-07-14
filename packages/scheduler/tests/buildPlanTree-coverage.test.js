@@ -30,11 +30,10 @@ describe("buildPlanTree stable id fallbacks", () => {
     expect(plan.children[0].id).toBe("saga:0");
   });
 
-  test("a ralph nested under a non-ralph wrapper (e.g. a Worktree or Sequence) carries an ancestor loop scope", () => {
-    // A <Loop> reached through a wrapper (not the literal immediate child of
-    // the outer <Loop>) is genuinely executable and scoped by the outer
-    // loop's iteration via the ancestor loop-scope suffix — see
-    // packages/engine/tests/nested-loop-runtime.test.jsx (issue #117).
+  test("a ralph nested under a <Worktree> lane carries an ancestor loop scope (fork, not same-lane nesting)", () => {
+    // A <Worktree> forks into an independently scoped lane, so a <Loop> inside
+    // it is not "nested" in the sense the engine can't execute — it's scoped
+    // by the outer loop's iteration via the ancestor loop-scope suffix.
     const { plan, ralphs } = buildPlanTree(
       el("smithers:workflow", {}, [
         el("smithers:ralph", { id: "outer", maxIterations: "2" }, [
@@ -51,6 +50,22 @@ describe("buildPlanTree stable id fallbacks", () => {
     const ralphIds = ralphs.map((ralph) => ralph.id);
     expect(ralphIds).toContain("outer");
     expect(ralphIds).toContain("inner@@outer=0");
+  });
+
+  test("a ralph nested under a same-lane wrapper (e.g. Sequence, no fork) throws NESTED_LOOP", () => {
+    expect(() =>
+      buildPlanTree(
+        el("smithers:workflow", {}, [
+          el("smithers:ralph", { id: "outer", maxIterations: "2" }, [
+            el("smithers:sequence", {}, [
+              el("smithers:ralph", { id: "inner", maxIterations: "2" }, [
+                el("smithers:task", { id: "t" }),
+              ]),
+            ]),
+          ]),
+        ]),
+      ),
+    ).toThrow(/Nested <Loop>\/<Ralph>/);
   });
 
   test("ralph maxIterations falls back for non-finite numeric caps", () => {
