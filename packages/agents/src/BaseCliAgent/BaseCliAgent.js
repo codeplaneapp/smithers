@@ -1234,7 +1234,10 @@ export class BaseCliAgent {
             })),
             Effect.tryPromise({
                 try: async () => {
-                    if (!diagnosticsPromise)
+                    // An explicit abort already explains the invocation failure.
+                    // Probe results are concurrent observations and can be stale or
+                    // unrelated, so do not attach or log them as follow-up causes.
+                    if (!diagnosticsPromise || (err instanceof SmithersError && err.code === "PROCESS_ABORTED"))
                         return;
                     const report = await diagnosticsPromise.catch(() => null);
                     if (report && err instanceof SmithersError) {
