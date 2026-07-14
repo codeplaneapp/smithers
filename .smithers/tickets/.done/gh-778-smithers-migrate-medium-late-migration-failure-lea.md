@@ -35,3 +35,6 @@ Use one migration-wide transaction where possible, or add a durable migration ID
 ## Dedupe notes
 
 No matching issue or PR. Closed #549 covers backend-inference probing, not partial-copy retry.
+
+
+> Closed by ticket-fleet: landed on main in 2e29d6aed367babbec21ea3e068a4e9072422451.
