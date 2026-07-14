@@ -99,13 +99,37 @@ describe("extractFromHost", () => {
         ]);
         expect(() => extractFromHost(root)).toThrow("Duplicate Task id");
     });
-    test("throws on nested ralph", () => {
+    test("throws on nested ralph (literal immediate <Loop>-in-<Loop> nesting)", () => {
         const root = hostEl("smithers:ralph", { id: "outer" }, [
             hostEl("smithers:ralph", { id: "inner" }, [
                 hostEl("smithers:task", { id: "t1", output: "t" }),
             ]),
         ]);
-        expect(() => extractFromHost(root)).toThrow("Nested <Ralph>");
+        expect(() => extractFromHost(root)).toThrow("Nested <Loop>/<Ralph>");
+        try {
+            extractFromHost(root);
+            throw new Error("expected extractFromHost to throw");
+        } catch (error) {
+            expect(error.code).toBe("NESTED_LOOP");
+            expect(String(error.message)).toContain("outer");
+            expect(String(error.message)).toContain("inner");
+            expect(String(error.message)).toContain("MergeQueue");
+        }
+    });
+
+    test("allows a Loop nested inside another Loop's Sequence wrapper (issue #117 regression shape)", () => {
+        // Regression guard for github.com/jjhub-ai/smithers/issues/117 and its
+        // runtime test (packages/engine/tests/nested-loop-runtime.test.jsx): a
+        // <Loop> reached through a <Sequence> wrapper — not the literal
+        // immediate child of the outer <Loop> — is genuinely executable.
+        const root = hostEl("smithers:ralph", { id: "outer" }, [
+            hostEl("smithers:sequence", {}, [
+                hostEl("smithers:ralph", { id: "inner" }, [
+                    hostEl("smithers:task", { id: "t1", output: "t" }),
+                ]),
+            ]),
+        ]);
+        expect(() => extractFromHost(root)).not.toThrow();
     });
     test("throws on duplicate ralph id", () => {
         const root = hostEl("smithers:workflow", {}, [

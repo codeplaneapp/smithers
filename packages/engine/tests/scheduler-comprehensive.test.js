@@ -111,7 +111,7 @@ describe("buildPlanTree", () => {
                 el("smithers:task", { id: "t1" }),
             ]),
         ]);
-        expect(() => buildPlanTree(xml)).toThrow("Nested <Ralph>");
+        expect(() => buildPlanTree(xml)).toThrow("Nested <Loop>/<Ralph>");
     });
     test("throws on duplicate ralph id", () => {
         const xml = el("smithers:workflow", {}, [

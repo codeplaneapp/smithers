@@ -203,7 +203,7 @@ describe("buildPlanTree error cases", () => {
                 ]),
             ]),
         ]);
-        expect(() => buildPlanTree(xml)).toThrow("Nested <Ralph>");
+        expect(() => buildPlanTree(xml)).toThrow("Nested <Loop>/<Ralph>");
     });
     test("throws DUPLICATE_ID for duplicate ralph ids", () => {
         // Two ralphs with the same id at the same level

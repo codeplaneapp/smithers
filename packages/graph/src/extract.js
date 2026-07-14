@@ -424,7 +424,8 @@ export function extractGraph(root, opts) {
         }
         if (node.tag === "smithers:ralph") {
             if (ctx.parentIsRalph) {
-                throw new SmithersError("NESTED_LOOP", "Nested <Ralph> is not supported.");
+                const innerId = resolveStableId(raw.id, "ralph", ctx.path);
+                throw new SmithersError("NESTED_LOOP", `Nested <Loop>/<Ralph> is not supported: "${innerId}" is nested inside loop "${ctx.ralphId ?? "<outer loop>"}". Run the inner work through a queue such as <MergeQueue> and re-enter via the outer loop's next iteration instead of nesting loops.`, { outerLoopId: ctx.ralphId, innerLoopId: innerId });
             }
             const logicalId = resolveStableId(raw.id, "ralph", ctx.path);
             const id = logicalId + buildLoopScope(loopStack);

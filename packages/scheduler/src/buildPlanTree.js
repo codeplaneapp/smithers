@@ -95,7 +95,9 @@ export function buildPlanTree(xml, ralphState) {
             return null;
         const tag = node.tag;
         if (ctx.parentIsRalph && tag === "smithers:ralph") {
-            throw new SmithersError("NESTED_LOOP", "Nested <Ralph> is not supported.");
+            const innerId = resolveStableId(node.props.id, "ralph", ctx.path);
+            const outerId = ctx.loopStack[ctx.loopStack.length - 1]?.ralphId ?? "<outer loop>";
+            throw new SmithersError("NESTED_LOOP", `Nested <Loop>/<Ralph> is not supported: "${innerId}" is nested inside loop "${outerId}". Run the inner work through a queue such as <MergeQueue> and re-enter via the outer loop's next iteration instead of nesting loops.`, { outerLoopId: outerId, innerLoopId: innerId });
         }
         let loopStack = ctx.loopStack;
         let scopedRalphId;
