@@ -6,23 +6,10 @@ import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunStat
 import type { RunRow } from "@smithers-orchestrator/db/adapter/RunRow";
 import type { RunState } from "@smithers-orchestrator/db/runState/RunState";
 import type { RunStateView } from "@smithers-orchestrator/db/runState/RunStateView";
+import { ALLOWED_STATES, assertNotIdle, isIdleLike } from "./case08InspectorHelpers.ts";
 import { skewClock } from "../harness/skewClock.ts";
 
 const STALE_THRESHOLD_MS = 30_000;
-
-const ALLOWED_STATES: ReadonlySet<RunState> = new Set<RunState>([
-  "running",
-  "waiting-approval",
-  "waiting-event",
-  "waiting-timer",
-  "recovering",
-  "stale",
-  "orphaned",
-  "failed",
-  "cancelled",
-  "succeeded",
-  "unknown",
-]);
 
 type Scenario = {
   label: string;
@@ -107,24 +94,6 @@ function persistAndRead(db: Database, row: RunRow): RunRow {
     heartbeatAtMs: raw.heartbeat_at_ms,
     runtimeOwnerId: raw.runtime_owner_id,
   };
-}
-
-function isIdleLike(state: string): boolean {
-  const lowered = state.toLowerCase();
-  return lowered === "idle" || lowered === "" || lowered === "unspecified";
-}
-
-function assertNotIdle(view: RunStateView, scenario: string): void {
-  expect(view.state, `${scenario} produced idle-like state`).not.toBe(
-    "idle" as unknown as RunState,
-  );
-  expect(isIdleLike(view.state), `${scenario} produced idle-like state`).toBe(
-    false,
-  );
-  expect(
-    ALLOWED_STATES.has(view.state),
-    `${scenario} produced state outside allowed enum: ${view.state}`,
-  ).toBe(true);
 }
 
 const SCENARIOS: Scenario[] = [
@@ -255,7 +224,7 @@ describe("case 08: inspector never shows idle", () => {
     for (const state of ALLOWED_STATES) {
       expect(isIdleLike(state)).toBe(false);
     }
-    expect(ALLOWED_STATES.size).toBe(11);
+    expect(ALLOWED_STATES.size).toBe(13);
   });
 
   test("semantic: every seeded scenario maps to a non-idle allowed state", () => {
@@ -273,7 +242,7 @@ describe("case 08: inspector never shows idle", () => {
           now,
           staleThresholdMs: STALE_THRESHOLD_MS,
         });
-        assertNotIdle(view, scenario.label);
+        assertNotIdle(view.state, scenario.label);
         observed.add(view.state);
       }
 
@@ -323,7 +292,7 @@ describe("case 08: inspector never shows idle", () => {
           now: clock.now(),
           staleThresholdMs: STALE_THRESHOLD_MS,
         });
-        assertNotIdle(view, `tool-call burst @ +${offset}ms`);
+        assertNotIdle(view.state, `tool-call burst @ +${offset}ms`);
 
         const beat = clock.now();
         row = persistAndRead(db, { ...row, heartbeatAtMs: beat });
@@ -332,7 +301,7 @@ describe("case 08: inspector never shows idle", () => {
           now: beat,
           staleThresholdMs: STALE_THRESHOLD_MS,
         });
-        assertNotIdle(afterBeat, `post-heartbeat @ +${offset}ms`);
+        assertNotIdle(afterBeat.state, `post-heartbeat @ +${offset}ms`);
         expect(afterBeat.state).toBe("running");
       }
     } finally {
@@ -360,7 +329,7 @@ describe("case 08: inspector never shows idle", () => {
           staleThresholdMs: STALE_THRESHOLD_MS,
         });
         assertNotIdle(
-          view,
+          view.state,
           `corrupt-clock heartbeat=${patch.heartbeatAtMs} started=${patch.startedAtMs}`,
         );
         expect(view.state).toBe("running");
@@ -385,19 +354,19 @@ describe("case 08: inspector never shows idle", () => {
         ...view,
         state: "idle" as unknown as RunState,
       };
-      expect(() => assertNotIdle(leaked, "synthetic-leak")).toThrow();
+      expect(() => assertNotIdle(leaked.state, "synthetic-leak")).toThrow();
 
       const blank: RunStateView = {
         ...view,
         state: "" as unknown as RunState,
       };
-      expect(() => assertNotIdle(blank, "synthetic-blank")).toThrow();
+      expect(() => assertNotIdle(blank.state, "synthetic-blank")).toThrow();
 
       const bogus: RunStateView = {
         ...view,
         state: "stalled" as unknown as RunState,
       };
-      expect(() => assertNotIdle(bogus, "synthetic-bogus")).toThrow();
+      expect(() => assertNotIdle(bogus.state, "synthetic-bogus")).toThrow();
     } finally {
       db.close();
     }

@@ -17,7 +17,7 @@ import {
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import type { RunState } from "@smithers-orchestrator/db/runState";
+import { assertNotIdle } from "./case08InspectorHelpers.ts";
 
 const APPROVAL_RUN_ID = "run-case08-real-approval";
 const FINISHED_RUN_ID = "run-case08-real-finished";
@@ -26,43 +26,11 @@ const FINISHED_WORKFLOW_NAME = "case08-real-finished-workflow";
 const APPROVAL_NODE_ID = "approve-deploy";
 const RESULT_NODE_ID = "deploy";
 
-const ALLOWED_STATES: ReadonlySet<RunState> = new Set<RunState>([
-  "running",
-  "waiting-approval",
-  "waiting-event",
-  "waiting-timer",
-  "waiting-quota",
-  "paused",
-  "recovering",
-  "stale",
-  "orphaned",
-  "failed",
-  "cancelled",
-  "succeeded",
-  "unknown",
-]);
-
 function makeDbPath(): string {
   return join(
     tmpdir(),
     `smithers-case08-real-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
   );
-}
-
-function isIdleLike(state: string): boolean {
-  const lowered = state.toLowerCase();
-  return lowered === "idle" || lowered === "" || lowered === "unspecified";
-}
-
-function assertNotIdle(state: RunState, scenario: string): void {
-  expect(state, `${scenario} produced idle-like state`).not.toBe(
-    "idle" as unknown as RunState,
-  );
-  expect(isIdleLike(state), `${scenario} produced idle-like state`).toBe(false);
-  expect(
-    ALLOWED_STATES.has(state),
-    `${scenario} produced state outside allowed enum: ${state}`,
-  ).toBe(true);
 }
 
 function createCase08Workflow(dbPath: string, includeApproval: boolean) {
