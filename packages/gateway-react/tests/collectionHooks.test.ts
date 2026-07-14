@@ -368,6 +368,43 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     await harness.unmount();
   });
 
+  test("useGatewayRunEvents surfaces and recovers from its source fetch failure", async () => {
+    const { baseUrl, grantToken } = await bootGateway();
+    const runId = await launchRun(baseUrl, 11);
+    const captured: Record<string, any> = {};
+
+    function Probe() {
+      captured.collections = useSmithersCollections();
+      captured.runEvents = useGatewayRunEvents(runId);
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(createElement(
+      SmithersGatewayProvider,
+      { client: makeClient(baseUrl, "run-events-recover-token") },
+      createElement(Probe),
+    ));
+
+    await waitFor(
+      () => captured.runEvents?.error instanceof Error && captured.runEvents?.streaming === false,
+      "run event source fetch failure",
+    );
+    expect(captured.runEvents.events).toEqual([]);
+    expect(captured.runEvents.error.message).not.toBe("Run event stream failed.");
+
+    grantToken("run-events-recover-token");
+    await act(async () => {
+      await captured.collections.collections.invalidate(["runEvents"]);
+    });
+
+    await waitFor(
+      () => captured.runEvents?.error === undefined && captured.runEvents?.events.length > 0,
+      "run event source fetch recovery",
+    );
+    await harness.unmount();
+  });
+
   test("useGatewayMutation dispatches every domain method and reports the default/error path", async () => {
     const { baseUrl } = await bootGateway();
 

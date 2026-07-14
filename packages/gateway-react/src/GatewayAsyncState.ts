@@ -17,7 +17,7 @@ type GatewayCollectionState = {
   };
 };
 
-function normalizeError(error: unknown): Error | undefined {
+export function normalizeError(error: unknown): Error | undefined {
   if (error === undefined || error === null) return undefined;
   return error instanceof Error ? error : new Error(String(error));
 }
