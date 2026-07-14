@@ -1579,12 +1579,19 @@ export class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     deleteOutputRow(tableName, key) {
-        return this.write(`delete output ${tableName}`, () => {
+        return this.write(`delete output ${tableName}`, async () => {
             if (!isBunSqliteStorage(this.internalStorage)) {
                 // External output tables are created from the Zod schema with
                 // snake_case run_id/node_id/iteration columns, so no PRAGMA-based
                 // column discovery is needed.
-                const escapedPg = tableName.replaceAll(`"`, `""`);
+                let resolvedTableName = tableName;
+                if (!(await this.hasPhysicalTable(resolvedTableName))) {
+                    const snakeName = camelToSnake(tableName);
+                    if (snakeName !== tableName && await this.hasPhysicalTable(snakeName)) {
+                        resolvedTableName = snakeName;
+                    }
+                }
+                const escapedPg = resolvedTableName.replaceAll(`"`, `""`);
                 return this.internalStorage.execute(`DELETE FROM "${escapedPg}"
              WHERE run_id = ? AND node_id = ? AND iteration = ?`, [key.runId, key.nodeId, key.iteration ?? 0]);
             }

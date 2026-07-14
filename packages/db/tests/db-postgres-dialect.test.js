@@ -297,6 +297,27 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(await adapter.getRawNodeOutputForIteration("pg_adapter_output", "run-pg", "node", 0)).toBeNull();
     });
 
+    test("deleteOutputRow resolves a camelCase key to a snake_case postgres output table", async () => {
+        await storage.execute(`DROP TABLE IF EXISTS "pg_camel_output"`);
+        await storage.execute(`
+            CREATE TABLE "pg_camel_output" (
+                run_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                iteration BIGINT NOT NULL,
+                PRIMARY KEY (run_id, node_id, iteration)
+            )
+        `);
+        await storage.execute(`INSERT INTO "pg_camel_output" (run_id, node_id, iteration) VALUES ('run-pg', 'node', 0)`);
+
+        const adapter = new SmithersDb(new Database(":memory:"));
+        adapter.internalStorage = storage;
+        adapter.db = { _: { fullSchema: {} } };
+
+        await adapter.deleteOutputRow("pgCamelOutput", { runId: "run-pg", nodeId: "node", iteration: 0 });
+        const rows = await storage.queryAll(`SELECT * FROM "pg_camel_output"`);
+        expect(rows).toHaveLength(0);
+    });
+
     test("insertEventWithNextSeq allocates gapless seqs under concurrency on the postgres fallback path", async () => {
         // Force the non-bun:sqlite fallback branch: internalStorage is postgres
         // and `db` exposes no sqlite exec/query/run client. Without the
