@@ -16,5 +16,7 @@ consume the catalog and adapter; `index.js` is the `./metrics` subpath barrel.
 Gotchas: some metrics exist as files but are NOT in the catalog (`devtools*`,
 `rewind*`, `attentionBacklog`, most `alerts*`, several memory/openApi/scorer
 counters) — they only appear in Prometheus output after their first update and
-get no default HELP line. Underscore files (`_buckets.js`, `_processStartMs.js`,
+get no default HELP line. The catalog in this directory is the single source
+of truth (`../_coreMetrics.js` holds only the `MetricsService` tag).
+Underscore files (`_buckets.js`, `_processStartMs.js`,
 `_asyncExternalWaitCounts.js`) hold module-level mutable/shared state.
