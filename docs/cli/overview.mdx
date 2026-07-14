@@ -184,7 +184,7 @@ commands[94]:
     purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
-    flags[34]{name,short,type,default,desc}:
+    flags[36]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -199,6 +199,8 @@ commands[94]:
       annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
+      parent-run-id,,string,,Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)
+      accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
       resume-claim-owner,,string,,Internal durable resume claim owner
       resume-claim-heartbeat,,number,,Internal durable resume claim heartbeat
       resume-restore-owner,,string,,Internal durable resume restore owner

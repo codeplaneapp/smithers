@@ -202,6 +202,7 @@ you did, you can see exactly what's happening:
 
 ```bash
 bunx smithers-orchestrator workflow run create-workflow --prompt "build a small hello workflow"
+# plan is archived under examples/init-pack/; copy it into .smithers/workflows/ first
 bunx smithers-orchestrator workflow run plan --prompt "add rate limiting and API key rotation"
 
 bunx smithers-orchestrator ps              # list active, paused, and recently completed runs

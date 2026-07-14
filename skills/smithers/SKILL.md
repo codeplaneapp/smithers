@@ -169,11 +169,12 @@ before every workflow you build, and the rest of this skill assumes them.
 3. **Proactively offer to visualize, every time.** Whenever a workflow or run is
    in play, suggest ways to *see* it instead of leaving the user with prose:
    - **Open the Smithers Monitor proactively.** Whenever you start or attach to
-     a run, immediately run `smithers monitor <run-id>` so the live web UI
+     a run, explicitly run `smithers monitor <run-id>` so the live web UI
      (status, execution tree, per-node live output, events, approvals) opens in
      the user's browser without being asked. `smithers up` and
-     `smithers workflow run` also do this by default now; pass `--no-open`
-     (or set SMITHERS_NO_OPEN=1) only for CI or when the user says not to.
+     `smithers workflow run` do not open a browser themselves. Browser opening
+     belongs to `smithers monitor`, `smithers gui`, and `smithers ui`; use
+     `smithers ui <run-id>` when you want the workflow's custom UI instead.
    - `smithers graph <file>.tsx` renders the workflow graph without executing
      (also your pre-run sanity check; it must exit 0).
    - `smithers tree <run-id>` prints the run's live node tree, and
