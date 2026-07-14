@@ -27,9 +27,9 @@ describe("priceEstimate", () => {
       { perTask: [{ nodeId: "a", tokens: 1_000_000, iterations: 1 }], confidence: "low", assumptions: [] },
       "claude-haiku-4-5",
     );
-    // haiku 0.8 in / 4 out => midpoint 2.4 per Mtok.
+    // haiku 1 in / 5 out => midpoint 3 per Mtok.
     expect(e.perTask[0].model).toBe("claude-haiku-4-5");
-    expect(e.costUsd).toBeCloseTo(2.4, 6);
+    expect(e.costUsd).toBeCloseTo(3, 6);
   });
 
   test("uses Luna as the default pricing model", () => {

@@ -1583,11 +1583,17 @@ export class SmithersDb {
             if (!isBunSqliteStorage(this.internalStorage)) {
                 // External output tables are created from the Zod schema with
                 // snake_case run_id/node_id/iteration columns, so no PRAGMA-based
-                // column discovery is needed.
+                // column discovery is needed. Query the held storage connection
+                // directly: calling hasPhysicalTable() here would try to acquire
+                // this adapter's transaction turn a second time and deadlock.
                 let resolvedTableName = tableName;
-                if (!(await this.hasPhysicalTable(resolvedTableName))) {
+                const tableExists = async (candidate) => {
+                    const row = await this.internalStorage.queryOneRaw(`SELECT 1 AS one FROM information_schema.tables WHERE table_name = ? LIMIT 1`, [candidate]);
+                    return row != null;
+                };
+                if (!(await tableExists(resolvedTableName))) {
                     const snakeName = camelToSnake(tableName);
-                    if (snakeName !== tableName && await this.hasPhysicalTable(snakeName)) {
+                    if (snakeName !== tableName && await tableExists(snakeName)) {
                         resolvedTableName = snakeName;
                     }
                 }
@@ -2827,7 +2833,11 @@ export class SmithersDb {
    */
     listNodeEvents(runId, nodeId, query = {}) {
         const limit = Math.max(1, Math.min(500, Math.floor(query.limit ?? 100)));
-        const afterSeq = Math.max(0, Math.floor(query.afterSeq ?? 0));
+        // Event sequences start at zero. With no cursor, include that first
+        // event; an explicit cursor remains exclusive and non-negative.
+        const afterSeq = query.afterSeq === undefined
+            ? -1
+            : Math.max(0, Math.floor(query.afterSeq));
         const escapedNodeId = nodeId.replaceAll(`\\`, `\\\\`).replaceAll(`%`, `\\%`).replaceAll(`_`, `\\_`);
         const needle = `%"nodeId":"${escapedNodeId}"%`;
         return this.read(`list node events ${nodeId}`, () => this.internalStorage.queryAll(`SELECT * FROM (

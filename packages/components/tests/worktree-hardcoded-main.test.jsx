@@ -69,7 +69,7 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
       </Workflow>));
         try {
             // First run: creates the worktree (from release via fallback chain)
-            const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+            const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, keepWorktrees: true }));
             expect(first.status).toBe("finished");
             expect(existsSync(worktreePath)).toBe(true);
             // Push a new commit to origin/release so the second run has something to sync
@@ -85,7 +85,7 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
             let second;
             try {
                 // Second run: should sync against origin/release, not origin/main
-                second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+                second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, keepWorktrees: true }));
             }
             finally {
                 process.env.PATH = previousPath;
@@ -119,12 +119,12 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
         </Worktree>
       </Workflow>));
         try {
-            const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+            const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, keepWorktrees: true }));
             expect(first.status).toBe("finished");
             expect(existsSync(worktreePath)).toBe(true);
             // Second run — sync path. Without baseBranch, origin/main doesn't exist,
             // but the engine should still not crash (best-effort sync with warning)
-            const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+            const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, keepWorktrees: true }));
             expect(second.status).toBe("finished");
         }
         finally {

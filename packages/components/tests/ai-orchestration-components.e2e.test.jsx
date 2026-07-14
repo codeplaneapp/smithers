@@ -784,7 +784,12 @@ describe("AI orchestration components across the real workflow engine", () => {
                 </Workflow>
             ));
 
-            const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, maxConcurrency: 3 }));
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                rootDir: repoDir,
+                maxConcurrency: 3,
+                keepWorktrees: true,
+            }));
 
             expect(result.status).toBe("finished");
             const workerRows = tableRows(api.db, api.tables.worker).sort((a, b) => a.workerType.localeCompare(b.workerType));

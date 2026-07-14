@@ -98,10 +98,6 @@ function spawnEngine(
       markerDir,
       counterFile,
       String(B_SLEEP_MS),
-      // engineChildRunner refuses to start without the production-runner
-      // handshake nonce (realProcessAdapter admission). This case spawns the
-      // runner directly to exercise kill/resume durability, not admission, so
-      // a fresh uuid per spawn satisfies the protocol.
       randomUUID(),
     ],
     { stdio: ["ignore", "pipe", "pipe"] },

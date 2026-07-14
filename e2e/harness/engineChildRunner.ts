@@ -13,7 +13,7 @@ import {
  * (or resumes) it.
  *
  * Usage:
- *   bun engineChildRunner.ts <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs]
+ *   bun engineChildRunner.ts <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs] <adapterNonce>
  *
  * It prints a single machine-readable line to stdout when the run resolves:
  *   RESULT_STATUS=<status>
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
 
   if (!dbPath || !runId || !modeArg || !markerDir || !counterFile) {
     fail(
-      "missing args: <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs]",
+      "missing args: <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs] <adapterNonce>",
     );
   }
   if (modeArg !== "initial" && modeArg !== "resume") {

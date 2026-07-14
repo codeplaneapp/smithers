@@ -56,7 +56,7 @@ describe("Worktree runtime", () => {
             </Task>
           </Worktree>
         </Workflow>));
-        const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, keepWorktrees: true }));
         try {
             expect(result.status).toBe("finished");
             expect(existsSync(linkedPath)).toBe(true);
@@ -82,13 +82,13 @@ describe("Worktree runtime", () => {
           </Worktree>
         </Workflow>));
         try {
-            const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+            const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, keepWorktrees: true }));
             expect(first.status).toBe("finished");
             expect(existsSync(linkedPath)).toBe(true);
             await rm(linkedPath, { recursive: true, force: true });
             runGit(repoDir, ["worktree", "prune"]);
             expect(existsSync(linkedPath)).toBe(false);
-            const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+            const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir, keepWorktrees: true }));
             expect(second.status).toBe("finished");
             expect(existsSync(linkedPath)).toBe(true);
         }

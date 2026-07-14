@@ -122,6 +122,7 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
     }
     expect(readdirSync(join(smithersHome, "workflows")).filter((name) => name.endsWith(".tsx")).sort()).toEqual([
         "create-skill.tsx",
+        "create-ui.tsx",
         "create-workflow.tsx",
         "docs-driven-development.tsx",
         "eval-suite-run.tsx",

@@ -182,6 +182,7 @@
           {
             "group": "System",
             "pages": [
+              "workflows/create-ui",
               "workflows/init",
               "workflows/post-failure",
               "workflows/upgrade",
