@@ -490,8 +490,8 @@ describe("extractGraph", () => {
 					{ key: "", label: "No key" },
 					"bad",
 				],
-				approvalAllowedScopes: ["admin", 1, "ops"],
-				approvalAllowedUsers: ["alice", null, "bob"],
+				approvalAllowedScopes: ["admin", "ops"],
+				approvalAllowedUsers: ["alice", "bob"],
 				approvalAutoApprove: { after: 10, audit: true, conditionMet: false, revertOnMet: true },
 				heartbeatTimeoutMs: 44.4,
 				hijack: true,
@@ -527,6 +527,27 @@ describe("extractGraph", () => {
 			expect(task.scorers).toBe(scorers);
 			expect(task.groundTruth).toBe(groundTruth);
 			expect(task.context).toBe(context);
+		});
+
+		test("rejects malformed approval restrictions", () => {
+			const cases = [
+				{ rawField: "approvalAllowedUsers", field: "allowedUsers", value: "alice" },
+				{ rawField: "approvalAllowedScopes", field: "allowedScopes", value: ["admin", 1] },
+				{ rawField: "approvalAllowedUsers", field: "allowedUsers", value: ["alice", ""] },
+				{ rawField: "approvalAllowedScopes", field: "allowedScopes", value: new Array(1) },
+			];
+			for (const { rawField, field, value } of cases) {
+				expect(() =>
+					extractGraph(
+						hostEl("smithers:task", {
+							id: "approval",
+							output: "out",
+							needsApproval: true,
+							[rawField]: value,
+						}),
+					),
+				).toThrow(`${field} must be an array of non-empty strings`);
+			}
 		});
 
 		test("rejects array meta and array scorers", () => {

@@ -86,6 +86,21 @@ function isZodObject(value) {
     return Boolean(value && typeof value === "object" && "shape" in value);
 }
 /**
+ * @param {unknown} value
+ * @param {"allowedScopes" | "allowedUsers"} field
+ * @param {string} nodeId
+ * @returns {string[] | undefined}
+ */
+function approvalRestriction(value, field, nodeId) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (!Array.isArray(value) || Array.from(value).some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
+        throw new SmithersError("INVALID_INPUT", `Approval ${nodeId} ${field} must be an array of non-empty strings.`);
+    }
+    return value;
+}
+/**
  * @param {Record<string, unknown>} raw
  * @returns {{ proofBindingRequired?: boolean; proofBindings?: import("../ProofBinding.ts").ProofBinding[] }}
  */
@@ -884,12 +899,8 @@ export function extractFromHost(root, opts) {
                 }))
                     .filter((value) => value.key && value.label)
                 : undefined;
-            const approvalAllowedScopes = Array.isArray(raw.approvalAllowedScopes)
-                ? raw.approvalAllowedScopes.filter((value) => typeof value === "string")
-                : undefined;
-            const approvalAllowedUsers = Array.isArray(raw.approvalAllowedUsers)
-                ? raw.approvalAllowedUsers.filter((value) => typeof value === "string")
-                : undefined;
+            const approvalAllowedScopes = approvalRestriction(raw.approvalAllowedScopes, "allowedScopes", logicalNodeId);
+            const approvalAllowedUsers = approvalRestriction(raw.approvalAllowedUsers, "allowedUsers", logicalNodeId);
             const approvalAutoApproveRaw = raw.approvalAutoApprove && typeof raw.approvalAutoApprove === "object" && !Array.isArray(raw.approvalAutoApprove)
                 ? /** @type {Record<string, unknown>} */ (raw.approvalAutoApprove)
                 : undefined;
