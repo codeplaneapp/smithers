@@ -321,7 +321,7 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
         // hung engine or a parked detached owner — terminate its process group
         // so its agent processes stop burning tokens.
         const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
-        if (result.won && (wasFresh || ownerPid !== null) && ownerPid !== null && isPidAlive(ownerPid)) {
+        if (result.won && ownerPid !== null && isPidAlive(ownerPid)) {
             outcome.ownerPid = ownerPid;
             const result = await terminateOwner(ownerPid, { graceMs: options.ownerKillGraceMs });
             outcome.ownerTerminated = result.terminated;
