@@ -8,6 +8,8 @@
  * RPC once it is listening.
  */
 import { Gateway, mdxPlugin } from "smithers-orchestrator";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, rmSync } from "node:fs";
@@ -28,16 +30,36 @@ for (const name of ["smithers.db", "smithers.db-shm", "smithers.db-wal"]) {
   if (existsSync(p)) rmSync(p);
 }
 
-const gateway = new Gateway({ heartbeatMs: 15_000 });
+const gateway = new Gateway({ heartbeatMs: 15_000, workspaceRoot: here });
+let seedDb: Parameters<typeof ensureSmithersTables>[0] | null = null;
 
 for (const key of ["e2e-task", "e2e-approval"]) {
   const mod = await import(`./workflows/${key}.tsx`);
+  if (key === "e2e-task") seedDb = mod.default.db;
   // e2e-task gets a custom UI (built from the shared gateway-ui components) so
   // the workflow store has a `hasUi` workflow to render and open.
   const uiEntry = resolve(here, "ui", `${key}.tsx`);
   const options = existsSync(uiEntry) ? { ui: { entry: uiEntry, title: "E2E Task" } } : {};
   gateway.register(key, mod.default, options);
   console.log(`[seed-gateway] registered ${key}${existsSync(uiEntry) ? " (with UI)" : ""}`);
+}
+
+if (!seedDb) throw new Error("e2e-task did not expose its database");
+ensureSmithersTables(seedDb);
+
+// Deterministic real memory rows. The gateway reads these through the same
+// `_smithers_memory_facts` adapter used by production workflows.
+const rawDb = seedDb.$client;
+const factTime = 1_720_000_000_000;
+for (const fact of [
+  ["project:smithers", "testing-style", JSON.stringify("Prefer real backends and no mocks."), null],
+  ["project:smithers", "release-channel", JSON.stringify({ channel: "stable", owner: "platform" }), 86_400_000],
+  ["agent:codex-main", "specialty", JSON.stringify("Rendered browser coverage for local UI surfaces."), null],
+] as const) {
+  rawDb.run(
+    "INSERT INTO _smithers_memory_facts (namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [fact[0], fact[1], fact[2], "e2e-memory-v1", factTime, factTime + 1_000, fact[3]],
+  );
 }
 
 // Register a few REAL default-pack workflows so the concierge has genuine work
@@ -63,3 +85,55 @@ for (const key of ["create-workflow", "implement", "research-plan-implement", "r
 
 await gateway.listen({ host, port });
 console.log(`[seed-gateway] listening on http://${host}:${port}`);
+
+// Runs are launched by globalSetup after the gateway starts. Watch the real run
+// table and attach deterministic scorer rows to each completed e2e-task run so
+// the Scores surface can switch between genuinely persisted run results.
+const adapter = new SmithersDb(seedDb);
+const scoredRunIds = new Set<string>();
+void (async () => {
+  for (;;) {
+    try {
+      const runs = await adapter.listRuns(100, undefined, "e2e-task");
+      for (const run of runs) {
+        if (scoredRunIds.has(run.runId) || run.status !== "finished") continue;
+        const checksum = [...run.runId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+        const quality = 0.75 + (checksum % 20) / 100;
+        await adapter.insertScorerResult({
+          id: `${run.runId}:compute:quality`,
+          runId: run.runId,
+          nodeId: "compute",
+          iteration: 0,
+          attempt: 1,
+          scorerId: "quality",
+          scorerName: "Quality",
+          source: "e2e",
+          score: quality,
+          reason: `Seeded quality result for ${run.runId}`,
+          scoredAtMs: run.createdAtMs + 10,
+          latencyMs: 120 + (checksum % 40),
+          durationMs: 180 + (checksum % 40),
+        });
+        await adapter.insertScorerResult({
+          id: `${run.runId}:compute:safety`,
+          runId: run.runId,
+          nodeId: "compute",
+          iteration: 0,
+          attempt: 1,
+          scorerId: "safety",
+          scorerName: "Safety",
+          source: "e2e",
+          score: 1,
+          reason: `No unsafe output in ${run.runId}`,
+          scoredAtMs: run.createdAtMs + 20,
+          latencyMs: 80,
+          durationMs: 95,
+        });
+        scoredRunIds.add(run.runId);
+      }
+    } catch (error) {
+      console.warn(`[seed-gateway] score seeding retry: ${(error as Error).message}`);
+    }
+    await Bun.sleep(100);
+  }
+})();

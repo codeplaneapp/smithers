@@ -61,7 +61,12 @@ export default async function globalSetup(): Promise<void> {
   freePort(CONCIERGE_PORT);
 
   const child = spawn("bun", [resolve(here, "seedGateway.ts")], {
-    env: { ...process.env, PORT: String(PORT), HOST },
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      HOST,
+      SMITHERS_HOME: resolve(here, "fixtures", "smithers-home"),
+    },
     stdio: "inherit",
     detached: true,
   });
@@ -97,8 +102,11 @@ export default async function globalSetup(): Promise<void> {
   // 2. Seed runs via the real RPC: two completed task runs plus several pending
   // approvals (margin so the approve + deny specs and any retries always find a
   // gate to act on).
-  await rpc("launchRun", { workflow: "e2e-task" });
-  await rpc("launchRun", { workflow: "e2e-task" });
+  const scoredRunIds: string[] = [];
+  for (let i = 0; i < 2; i += 1) {
+    const launched = (await rpc("launchRun", { workflow: "e2e-task" })) as { runId?: unknown };
+    if (typeof launched.runId === "string") scoredRunIds.push(launched.runId);
+  }
   for (let i = 0; i < 4; i += 1) {
     await rpc("launchRun", { workflow: "e2e-approval" });
   }
@@ -112,6 +120,31 @@ export default async function globalSetup(): Promise<void> {
     const approvals = (await rpc("listApprovals", {})) as unknown[];
     return Array.isArray(approvals) && approvals.length >= 4;
   });
+  await waitFor("seeded scores for task runs", async () => {
+    if (scoredRunIds.length !== 2) return false;
+    const rows = await Promise.all(
+      scoredRunIds.map((runId) => rpc("listScores", { runId }) as Promise<unknown[]>),
+    );
+    return rows.every((scores) => Array.isArray(scores) && scores.length >= 2);
+  });
 
-  console.log("[e2e] gateway seeded: 6 runs, 4 pending approvals");
+  // Seed two real ticket documents through the same gateway mutations the
+  // Tickets surface uses. Browser coverage can then exercise list/search/edit
+  // against persisted rows before creating and deleting its own ticket.
+  await rpc("createTicket", {
+    path: "e2e-auth-rotation",
+    content: "# Rotate auth tokens\n\nCover the token refresh path with rendered browser tests.",
+    status: "in-progress",
+  });
+  await rpc("createTicket", {
+    path: "e2e-release-checklist",
+    content: "# Release checklist\n\nVerify the real gateway surfaces before publishing.",
+    status: "todo",
+  });
+  await waitFor("seeded tickets", async () => {
+    const rows = (await rpc("listTickets", {})) as unknown[];
+    return Array.isArray(rows) && rows.length >= 2;
+  });
+
+  console.log("[e2e] gateway seeded: 6 runs, 4 pending approvals, scores, memory, accounts, prompts, tickets");
 }

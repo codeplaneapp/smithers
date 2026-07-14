@@ -104,6 +104,13 @@ button {
   outline-offset: 2px;
 }
 
+.landing-primary:focus-visible,
+.landing-secondary:focus-visible,
+.landing-prompt-list button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -563,6 +570,239 @@ button {
   font-weight: 600;
   letter-spacing: -0.02em;
   text-align: center;
+}
+
+/* First-run landing page. It gives the empty workspace a clear starting point
+   while the persistent composer remains the primary way to take action. */
+.landing-page {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, 1120px);
+  margin: 0 auto;
+  padding: clamp(72px, 11vh, 128px) 24px 170px;
+}
+
+.landing-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 760px;
+  text-align: center;
+  animation: landing-rise 550ms ease-out both;
+}
+
+.landing-mark {
+  width: 54px;
+  height: 54px;
+  margin-bottom: 24px;
+  filter: drop-shadow(0 10px 18px rgb(var(--shadow-rgb) / 0.16));
+}
+
+.landing-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.landing-mark-bg {
+  fill: var(--logo-bg);
+}
+
+.landing-mark-ring {
+  stroke: var(--logo-ring);
+}
+
+.landing-mark-stem {
+  stroke: var(--logo-stem);
+}
+
+.landing-eyebrow {
+  margin: 0 0 16px;
+  color: var(--brand);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.landing-hero h1 {
+  max-width: 700px;
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(3.2rem, 7vw, 6.4rem);
+  font-weight: 650;
+  letter-spacing: -0.075em;
+  line-height: 0.96;
+}
+
+.landing-hero h1 span {
+  color: var(--brand);
+}
+
+.landing-intro {
+  max-width: 520px;
+  margin: 26px 0 0;
+  color: var(--text-muted);
+  font-size: clamp(1rem, 1.5vw, 1.15rem);
+  line-height: 1.55;
+}
+
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 30px;
+}
+
+.landing-primary,
+.landing-secondary {
+  min-height: 42px;
+  padding: 0 17px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.landing-primary {
+  border: 1px solid var(--inverse-bg);
+  background: var(--inverse-bg);
+  color: var(--inverse-text);
+}
+
+.landing-primary span {
+  display: inline-block;
+  margin-left: 9px;
+  transition: transform 0.15s ease;
+}
+
+.landing-primary:hover {
+  background: var(--inverse-bg-hover);
+  transform: translateY(-1px);
+}
+
+.landing-primary:hover span {
+  transform: translateX(3px);
+}
+
+.landing-secondary {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.landing-secondary:hover {
+  border-color: var(--brand);
+  background: var(--hover);
+  transform: translateY(-1px);
+}
+
+.landing-prompts {
+  width: min(100%, 760px);
+  margin-top: clamp(70px, 10vh, 112px);
+  animation: landing-rise 650ms 90ms ease-out both;
+}
+
+.landing-prompts > p {
+  margin: 0 0 12px;
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.landing-prompt-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.landing-prompt-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-glass);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.landing-prompt-list button > span:last-child {
+  color: var(--brand);
+  font-size: 1rem;
+}
+
+.landing-prompt-list button:hover {
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--border));
+  background: color-mix(in srgb, var(--brand) 7%, var(--surface));
+  transform: translateY(-2px);
+}
+
+.landing-features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  width: min(100%, 960px);
+  margin-top: 88px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--border);
+  overflow: hidden;
+  animation: landing-rise 750ms 170ms ease-out both;
+}
+
+.landing-features article {
+  min-height: 178px;
+  padding: 22px;
+  background: var(--surface);
+}
+
+.landing-feature-number {
+  display: block;
+  margin-bottom: 27px;
+  color: var(--brand);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.landing-features h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.landing-features article p {
+  max-width: 240px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .not-found-shell {
@@ -2276,6 +2516,57 @@ button {
 
   .bubble {
     max-width: 88%;
+  }
+
+  .landing-page {
+    padding: 56px 14px 148px;
+  }
+
+  .landing-mark {
+    width: 46px;
+    height: 46px;
+    margin-bottom: 20px;
+  }
+
+  .landing-hero h1 {
+    font-size: clamp(3rem, 15vw, 4.5rem);
+  }
+
+  .landing-intro {
+    margin-top: 20px;
+    font-size: 0.96rem;
+  }
+
+  .landing-actions {
+    width: 100%;
+    margin-top: 24px;
+  }
+
+  .landing-primary,
+  .landing-secondary {
+    flex: 1 1 180px;
+  }
+
+  .landing-prompts {
+    margin-top: 64px;
+  }
+
+  .landing-prompt-list,
+  .landing-features {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-features {
+    margin-top: 64px;
+  }
+
+  .landing-features article {
+    min-height: 0;
+    padding: 18px;
+  }
+
+  .landing-feature-number {
+    margin-bottom: 16px;
   }
 
   .ghost-pill {

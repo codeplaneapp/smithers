@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { localFilesMiddleware } from "../cli/src/localUiServer.js";
 import { localWorkspaceDevMiddleware } from "./src/app/localWorkspaceDevServer";
 import { readLocalVcsSnapshot } from "./src/vcs/localAdapter";
 
@@ -74,6 +75,17 @@ export default defineConfig({
       },
       configurePreviewServer(server) {
         server.middlewares.use(localVcsMiddleware());
+      },
+    },
+    {
+      // Use the production CLI server's real filesystem implementation in dev
+      // and e2e too, so the Files surface never needs a fabricated backend.
+      name: "smithers-local-files",
+      configureServer(server) {
+        server.middlewares.use(localFilesMiddleware(workspaceRoot));
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use(localFilesMiddleware(workspaceRoot));
       },
     },
     {

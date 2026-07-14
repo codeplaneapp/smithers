@@ -1002,6 +1002,19 @@ async function handleFilesApi(req, res, url, workspaceRoot) {
   }
 }
 
+/**
+ * Connect-compatible wrapper around the production local files API. Vite uses
+ * this in development and browser e2e so `/files` exercises the exact same
+ * workspace containment, preview, and write implementation as `smithers ui`.
+ */
+export function localFilesMiddleware(workspaceRoot) {
+  return async (req, res, next) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (await handleFilesApi(req, res, url, workspaceRoot)) return;
+    next();
+  };
+}
+
 async function realpathIfPossible(path) {
   try {
     return await realpath(path);
