@@ -108,6 +108,19 @@ function ids(graph) {
     return graph.tasks.map((task) => task.nodeId);
 }
 
+function findXmlElement(node, tag, id) {
+    if (!node || node.kind === "text")
+        return undefined;
+    if (node.tag === tag && (id === undefined || node.props.id === id))
+        return node;
+    for (const child of node.children) {
+        const match = findXmlElement(child, tag, id);
+        if (match)
+            return match;
+    }
+    return undefined;
+}
+
 const estimate = { tokens: 1000, costUsd: 0.5, minutes: 3 };
 
 /** A canned two-level plan: root -> core (chunk) + docs (leaf); core -> a, b (leaves). */
@@ -634,6 +647,20 @@ describe("DelegationExecution", () => {
         const check = graph.tasks.find((t) => t.nodeId === "dc:root:core:a:review-2");
         expect(check.dependsOn).toEqual(["dc:root:core:a:exec"]);
         expect(check.prompt).toContain("bun test a");
+    });
+
+    test("fails a leaf attempt loop when maxAttempts is exhausted", async () => {
+        const graph = await renderWithOutputs(
+            <DelegationExecution agents={agents} outputs={outputs} maxAttempts={2} />,
+            { ...completePlans, ...execGates },
+        );
+        const attemptLoop = findXmlElement(graph.xml, "smithers:ralph", "dc:root:core:a:attempts");
+        expect(attemptLoop?.props).toEqual({
+            id: "dc:root:core:a:attempts",
+            until: "false",
+            maxIterations: "2",
+            onMaxReached: "fail",
+        });
     });
 
     test("review prompts carry the exec output + commit range with self-inspection instructions", async () => {

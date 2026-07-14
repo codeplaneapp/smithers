@@ -215,7 +215,7 @@ export function DelegationExecution(props) {
             id: physicalId(p, leaf.logicalId, "attempts"),
             until: state.allPass,
             maxIterations: maxAttempts,
-            onMaxReached: "return-last",
+            onMaxReached: "fail",
         }, React.createElement(Sequence, null, execTask, ...gateElements, ...previewElements));
         const pipelineChildren = [attemptLoop];
         if (state.allPass && approvals.length > 0) {
