@@ -13,6 +13,8 @@ bunx smithers-orchestrator workflow run WORKFLOW_ID --prompt "..."
 
 Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prompt":"..."}'`. Workflows with structured inputs also support `--input`.
 
+Writing your own workflow? Read [Workflow Authoring Rules](/workflows/authoring-rules) first: five rules (reserved output columns, no nested loops, loop output binding, the `renderWorkflow` test contract, and `.smithers/package.json` test registration) that otherwise get learned one runtime failure at a time.
+
 ## Workflows
 
 | Workflow | Use it for |

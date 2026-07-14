@@ -102,6 +102,7 @@ const CORE_PAGES = [
   "components/delegation-chain.mdx",
   // Recipes and reference
   "recipes.mdx",
+  "workflows/authoring-rules.mdx",
   "guides/common-footguns.mdx",
   "reference/types.mdx",
   "reference/errors.mdx",

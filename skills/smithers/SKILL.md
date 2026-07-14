@@ -752,6 +752,14 @@ assembles the prompts, context, components, and gates. See the
 [Context Engineering](https://smithers.sh/guides/context-engineering) guide for
 the layered model behind it.
 
+If you hand-author or hand-edit a workflow `.tsx` instead, read
+[Workflow Authoring Rules](https://smithers.sh/workflows/authoring-rules)
+first: reserved output columns, no nested loops (+ the queue-based backfill
+pattern), `ctx.latest` vs `outputMaybe({ nodeId, iteration })` for loop
+bindings, the `renderWorkflow`-based test contract, and
+`.smithers/package.json` test registration. Every one of these is a "passes
+`smithers graph`, fails at runtime hours later" trap if skipped.
+
 ## Custom workflow UIs
 
 A workflow can ship a **first-class browser UI** that the Gateway bundles, serves at `/workflows/<key>`, and the Smithers PWA / Studio / `smithers ui` embeds same-origin. Reach for this when a workflow has long-running interaction the CLI can't show well: a composer for an open-ended chat, a question pool, a live spec, a custom diff view. Per [How to guide the user](#how-to-guide-the-user-after-every-command), **offer to build a UI for every workflow that lacks one**: author `.smithers/ui/<workflowId>.tsx` with `smithers-orchestrator/gateway-react`, then open it with `smithers ui <runId>` (and `smithers ui --app` for the full control-plane UI).

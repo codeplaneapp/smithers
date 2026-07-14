@@ -168,6 +168,7 @@
         "group": "Workflow Pack",
         "pages": [
           "workflows/overview",
+          "workflows/authoring-rules",
           {
             "group": "Curated",
             "pages": [
