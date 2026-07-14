@@ -16,10 +16,10 @@ The default `.smithers` pack is intentionally small. It installs `create-workflo
 ## Pack Manifest (`smithers.toon`)
 
 Every `.smithers/` directory is a publishable pack, and its manifest is the file
-`smithers.toon` at the pack root. `smithers init` scaffolds one automatically
+`smithers.toon` at the pack root. `bunx smithers-orchestrator init` scaffolds one automatically
 (including on `--agents-only` runs, where `contents` starts empty), and re-init
 reports drift like any other pack file. The format is
-[TOON](https://github.com/toon-format/toon) — the same structured format the CLI
+[TOON](https://github.com/toon-format/toon), the same structured format the CLI
 uses for agent-facing output.
 
 ```toon
@@ -47,10 +47,10 @@ Field reference:
 | `smithers` | Compatible Smithers version range. Defaults to `*`. |
 | `contents.workflows` / `contents.ui` | Workflow ids and UI entrypoints the pack ships. Scaffolding derives `ui` from actual `<UI entry>` declarations, not from every file in `ui/`. |
 | `capabilities.bins` / `capabilities.env` | Executables and environment variables the pack's workflows require. |
-| `capabilities.writes` | `repo`, `sandbox`, or `none` — the pack's write surface, shown to operators before install. |
+| `capabilities.writes` | `repo`, `sandbox`, or `none`: the pack's write surface, shown to operators before install. |
 
 A malformed manifest (bad TOON, missing `name`, explicit `null` where a value is
-required, or an unknown `writes` value) fails loudly rather than degrading —
+required, or an unknown `writes` value) fails loudly rather than degrading:
 optional fields may be *omitted*, not nulled.
 
 ## Marketplace Metadata
