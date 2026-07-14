@@ -13,3 +13,6 @@ The exported public type omits the `sleepAfter` option that the runtime reads an
 **Failure scenario:** `createCloudflareSandboxProvider({ sleepAfter: "10m" })` fails `tsc` with `Object literal may only specify known properties, and 'sleepAfter' does not exist in type 'CloudflareSandboxProviderOptions'`. The idle-hibernation cost lever can only be set from TS via `as any` or by smuggling it through the untyped `sandboxOptions` field.
 
 **Why it matters:** The published `.d.ts` and the JS JSDoc disagree on the public contract for the documented primary cost control. Fix: add `sleepAfter?: string | number;` to `CloudflareSandboxProviderOptions` and regenerate `dist/index.d.ts`.
+
+
+> Closed by ticket-fleet: landed on main in c668f9187cabde5c144052c738feacc286a1bca2.
