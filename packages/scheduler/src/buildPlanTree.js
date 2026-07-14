@@ -72,13 +72,14 @@ export function buildPlanTree(xml, ralphState) {
    * @param {readonly { readonly ralphId: string; readonly iteration: number }[]} loopStack
    * @param {PlanNode[]} target
    */
-    function walkRegion(wrapper, basePath, loopStack, target, parentIsRalph) {
+    function walkRegion(wrapper, basePath, loopStack, target, parentIsRalph, loopForkBoundary) {
         let nestedIndex = 0;
         for (const nested of wrapper.children) {
             const nestedPath = nested.kind === "element" ? [...basePath, nestedIndex++] : basePath;
             const built = walk(nested, {
                 path: nestedPath,
                 parentIsRalph,
+                loopForkBoundary,
                 loopStack,
             });
             if (built)
@@ -87,14 +88,14 @@ export function buildPlanTree(xml, ralphState) {
     }
     /**
    * @param {XmlNode} node
-   * @param {{ readonly path: readonly number[]; readonly parentIsRalph: boolean; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; }} ctx
+     * @param {{ readonly path: readonly number[]; readonly parentIsRalph: boolean; readonly loopForkBoundary: boolean; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; }} ctx
    * @returns {PlanNode | null}
    */
     function walk(node, ctx) {
         if (node.kind === "text")
             return null;
         const tag = node.tag;
-        if (ctx.parentIsRalph && tag === "smithers:ralph") {
+        if ((ctx.parentIsRalph || ctx.loopForkBoundary) && tag === "smithers:ralph") {
             const innerId = resolveStableId(node.props.id, "ralph", ctx.path);
             const outerId = ctx.loopStack[ctx.loopStack.length - 1]?.ralphId ?? "<outer loop>";
             throw new SmithersError("NESTED_LOOP", `Nested <Loop>/<Ralph> is not supported: "${innerId}" is nested inside loop "${outerId}". Run the inner work through a queue such as <MergeQueue> and re-enter via the outer loop's next iteration instead of nesting loops.`, { outerLoopId: outerId, innerLoopId: innerId });
@@ -120,16 +121,17 @@ export function buildPlanTree(xml, ralphState) {
                     continue;
                 const nextPath = [...ctx.path, specialIndex++];
                 if (child.tag === "smithers:saga-actions") {
-                    walkRegion(child, nextPath, loopStack, actionChildren, ctx.parentIsRalph);
+                    walkRegion(child, nextPath, loopStack, actionChildren, ctx.parentIsRalph, ctx.loopForkBoundary);
                     continue;
                 }
                 if (child.tag === "smithers:saga-compensations") {
-                    walkRegion(child, nextPath, loopStack, compensationChildren, ctx.parentIsRalph);
+                    walkRegion(child, nextPath, loopStack, compensationChildren, ctx.parentIsRalph, ctx.loopForkBoundary);
                     continue;
                 }
                 const built = walk(child, {
                     path: nextPath,
                     parentIsRalph: ctx.parentIsRalph,
+                    loopForkBoundary: ctx.loopForkBoundary,
                     loopStack,
                 });
                 if (built)
@@ -170,12 +172,13 @@ export function buildPlanTree(xml, ralphState) {
                 if (child.tag === "smithers:tcf-try" ||
                     child.tag === "smithers:tcf-catch" ||
                     child.tag === "smithers:tcf-finally") {
-                    walkRegion(child, nextPath, loopStack, target, ctx.parentIsRalph);
+                    walkRegion(child, nextPath, loopStack, target, ctx.parentIsRalph, ctx.loopForkBoundary);
                     continue;
                 }
                 const built = walk(child, {
                     path: nextPath,
                     parentIsRalph: ctx.parentIsRalph,
+                    loopForkBoundary: ctx.loopForkBoundary,
                     loopStack,
                 });
                 if (built)
@@ -193,15 +196,21 @@ export function buildPlanTree(xml, ralphState) {
         const children = [];
         let elementIndex = 0;
         const isRalph = tag === "smithers:ralph";
-        // Loop nesting is unsupported regardless of intervening containers.
-        // Keep the active-loop marker through fork containers to match the
-        // Effect builder's unconditional nested-loop check.
-        const nextParentIsRalph = ctx.parentIsRalph || isRalph;
+        // Sequence is a supported scoped nested-loop topology. Forked lanes
+        // are not: their loop state cannot be unambiguously resumed.
+        const nextParentIsRalph = isRalph ||
+            (ctx.parentIsRalph && tag !== "smithers:sequence");
+        const nextLoopForkBoundary = ctx.loopForkBoundary ||
+            (loopStack.length > 0 &&
+                (tag === "smithers:parallel" ||
+                    tag === "smithers:merge-queue" ||
+                    tag === "smithers:worktree"));
         for (const child of node.children) {
             const nextPath = child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
             const built = walk(child, {
                 path: nextPath,
                 parentIsRalph: nextParentIsRalph,
+                loopForkBoundary: nextLoopForkBoundary,
                 loopStack,
             });
             if (built)
@@ -270,6 +279,6 @@ export function buildPlanTree(xml, ralphState) {
         }
         return { kind: "group", children };
     }
-    const plan = walk(xml, { path: [], parentIsRalph: false, loopStack: [] });
+    const plan = walk(xml, { path: [], parentIsRalph: false, loopForkBoundary: false, loopStack: [] });
     return { plan, ralphs };
 }

@@ -44,9 +44,8 @@ describe("buildPlanTree stable id fallbacks", () => {
     )).toThrow(/Nested <Loop>\/\<Ralph>/);
   });
 
-  test("a ralph nested under a same-lane wrapper (e.g. Sequence, no fork) throws NESTED_LOOP", () => {
-    expect(() =>
-      buildPlanTree(
+  test("preserves a ralph nested through the supported Sequence topology", () => {
+    const { plan } = buildPlanTree(
         el("smithers:workflow", {}, [
           el("smithers:ralph", { id: "outer", maxIterations: "2" }, [
             el("smithers:sequence", {}, [
@@ -56,8 +55,8 @@ describe("buildPlanTree stable id fallbacks", () => {
             ]),
           ]),
         ]),
-      ),
-    ).toThrow(/Nested <Loop>\/<Ralph>/);
+      );
+    expect(plan.children[0].children[0].kind).toBe("sequence");
   });
 
   test("ralph maxIterations falls back for non-finite numeric caps", () => {

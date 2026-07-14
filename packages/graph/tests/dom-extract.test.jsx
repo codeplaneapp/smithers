@@ -108,7 +108,7 @@ describe("extractFromHost", () => {
         expect(() => extractFromHost(root)).toThrow("Nested <Loop>/<Ralph>");
     });
 
-    test("throws on nested ralph reached through a non-loop wrapper (e.g. Sequence)", () => {
+    test("preserves the supported scoped nested-loop topology through Sequence", () => {
         const root = hostEl("smithers:ralph", { id: "outer" }, [
             hostEl("smithers:sequence", {}, [
                 hostEl("smithers:ralph", { id: "inner" }, [
@@ -116,15 +116,7 @@ describe("extractFromHost", () => {
                 ]),
             ]),
         ]);
-        expect(() => extractFromHost(root)).toThrow("Nested <Loop>/<Ralph>");
-        try {
-            extractFromHost(root);
-            throw new Error("expected extractFromHost to throw");
-        } catch (error) {
-            expect(error.code).toBe("NESTED_LOOP");
-            expect(String(error.message)).toContain("outer");
-            expect(String(error.message)).toContain("inner");
-        }
+        expect(extractFromHost(root).tasks[0].nodeId).toContain("outer=0");
     });
     test("throws on duplicate ralph id", () => {
         const root = hostEl("smithers:workflow", {}, [

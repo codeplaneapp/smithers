@@ -306,7 +306,7 @@ export function extractFromHost(root, opts) {
     }
     /**
    * @param {HostNode} node
-     * @param {{ path: number[]; iteration: number; ralphId?: string; parentIsRalph: boolean; parallelStack: { id: string; max?: number }[];  worktreeStack: { id: string; path: string; branch?: string; baseBranch?: string }[];  loopStack: { ralphId: string; iteration: number }[]; subtree?: { groupId: string; max: number; childKey: string }; priority?: number; failurePolicy?: "halt" | "quarantine" }} ctx
+     * @param {{ path: number[]; iteration: number; ralphId?: string; parentIsRalph: boolean; loopForkBoundary: boolean; parallelStack: { id: string; max?: number }[];  worktreeStack: { id: string; path: string; branch?: string; baseBranch?: string }[];  loopStack: { ralphId: string; iteration: number }[]; subtree?: { groupId: string; max: number; childKey: string }; priority?: number; failurePolicy?: "halt" | "quarantine" }} ctx
    */
     function walk(node, ctx) {
         if (node.kind === "text")
@@ -317,7 +317,7 @@ export function extractFromHost(root, opts) {
         const worktreeStack = ctx.worktreeStack;
         let loopStack = ctx.loopStack;
         if (node.tag === "smithers:ralph") {
-            if (ctx.parentIsRalph) {
+            if (ctx.parentIsRalph || ctx.loopForkBoundary) {
                 const innerId = resolveStableId(node.rawProps?.id, "ralph", ctx.path);
                 throw new SmithersError("NESTED_LOOP", `Nested <Loop>/<Ralph> is not supported: "${innerId}" is nested inside loop "${ctx.ralphId ?? "<outer loop>"}". Run the inner work through a queue such as <MergeQueue> and re-enter via the outer loop's next iteration instead of nesting loops.`, { outerLoopId: ctx.ralphId, innerLoopId: innerId });
             }
@@ -1006,7 +1006,15 @@ export function extractFromHost(root, opts) {
         // Loop nesting is unsupported regardless of intervening containers.
         // Keep the active-loop marker through fork containers to match the
         // Effect builder's unconditional nested-loop check.
-        const nextParentIsRalph = ctx.parentIsRalph || node.tag === "smithers:ralph";
+        // Sequence is a supported scoped nested-loop topology. Forked lanes
+        // are not: their loop state cannot be unambiguously resumed.
+        const nextParentIsRalph = node.tag === "smithers:ralph" ||
+            (ctx.parentIsRalph && node.tag !== "smithers:sequence");
+        const nextLoopForkBoundary = ctx.loopForkBoundary ||
+            (loopStack.length > 0 &&
+                (node.tag === "smithers:parallel" ||
+                    node.tag === "smithers:merge-queue" ||
+                    node.tag === "smithers:worktree"));
         let elementIndex = 0;
         for (const child of node.children) {
             const childOrdinal = elementIndex;
@@ -1016,6 +1024,7 @@ export function extractFromHost(root, opts) {
                 iteration,
                 ralphId,
                 parentIsRalph: nextParentIsRalph,
+                loopForkBoundary: nextLoopForkBoundary,
                 parallelStack: nextParallelStack,
                 worktreeStack: nextWorktreeStack,
                 loopStack,
@@ -1031,6 +1040,6 @@ export function extractFromHost(root, opts) {
             });
         }
     }
-    walk(root, { path: [], iteration: 0, parentIsRalph: false, parallelStack: [], worktreeStack: [], loopStack: [] });
+    walk(root, { path: [], iteration: 0, parentIsRalph: false, loopForkBoundary: false, parallelStack: [], worktreeStack: [], loopStack: [] });
     return { xml: toXmlNode(root), tasks, mountedTaskIds };
 }

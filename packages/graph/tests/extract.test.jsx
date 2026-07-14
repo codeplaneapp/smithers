@@ -550,28 +550,15 @@ describe("extractGraph", () => {
 			expect(() => extractGraph(root)).toThrow("Nested <Loop>/<Ralph>");
 		});
 
-		test("throws on nested ralph reached through a same-lane wrapper (e.g. Sequence)", () => {
-			// Real authored JSX never nests a <Loop> as the literal immediate
-			// child of another <Loop> — it goes through a <Sequence> (or similar
-			// same-lane) wrapper. The rejection must catch that too, not just
-			// direct nesting, since a same-lane nested loop has no clear "whose
-			// iteration is this" semantics.
+		test("preserves the supported scoped nested-loop topology through Sequence", () => {
 			const root = hostEl("smithers:ralph", { id: "outer" }, [
 				hostEl("smithers:sequence", {}, [
 					hostEl("smithers:ralph", { id: "inner" }, [
 						hostEl("smithers:task", { id: "t1", output: "t" }),
-					]),
 				]),
+			]),
 			]);
-			expect(() => extractGraph(root)).toThrow("Nested <Loop>/<Ralph>");
-			try {
-				extractGraph(root);
-				throw new Error("expected extractGraph to throw");
-			} catch (error) {
-				expect(error.code).toBe("NESTED_LOOP");
-				expect(String(error.message)).toContain("outer");
-				expect(String(error.message)).toContain("inner");
-			}
+			expect(extractGraph(root).tasks[0].nodeId).toContain("outer=0");
 		});
 
 		test("rejects a Loop nested inside another Loop's forked lane", () => {
