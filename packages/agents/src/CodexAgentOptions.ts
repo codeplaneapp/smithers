@@ -41,9 +41,9 @@ export type CodexAgentOptions = BaseCliAgentOptions & {
    */
   configDir?: string;
   /**
-   * OpenAI API key for billing this invocation against the API instead of a
-   * ChatGPT Plus/Pro subscription. Sets `OPENAI_API_KEY` on the spawned
-   * process.
+   * Sets `OPENAI_API_KEY` on the spawned process. Codex CLI >= 0.144 ignores
+   * that variable for auth/billing selection when subscription login is
+   * present, so this option is effectively inert on current CLIs.
    */
   apiKey?: string;
 };

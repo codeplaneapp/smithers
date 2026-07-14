@@ -308,13 +308,17 @@ and so on) with the same arguments, for use inside an Effect pipeline.
 </ResponseField>
 
 <Note>
-Notes require the SQLite backend: note writes and search ride the synchronous
-sqlite driver (transactions for note+edge atomicity, FTS5 for search). On a
-Postgres/PGlite-backed workspace `saveNote`, `enableNoteSearch`, and
-`searchNotes` fail loud with an explicit error.
+Note writes and search require the bun:sqlite backend: transactions provide
+note+edge atomicity and FTS5 provides search. Migration 0023 creates the note
+tables on Postgres/PGlite, but the runtime still rejects `saveNote` and
+`enableNoteSearch` there with `DB_WRITE_FAILED`, and `searchNotes` with
+`DB_QUERY_FAILED`.
 </Note>
 
 <ResponseField name="Threads & messages" type="methods">
+  Thread and message reads/writes use the portable Drizzle tables. The
+  transactional `deleteThread` operation is the exception: it currently
+  requires bun:sqlite and raises `DB_WRITE_FAILED` on Postgres/PGlite.
   <Expandable title="thread and message methods">
     <ResponseField name="createThread" type="(ns, title?) => Promise<MemoryThread>" />
     <ResponseField name="getThread" type="(threadId) => Promise<MemoryThread | undefined>" />

@@ -18,14 +18,12 @@ The command resolves the workspace's singleton gateway the same way `bunx smithe
 
 ## What you see
 
-- **Grouped runs list**: needs-attention, active, completed, failed, and cancelled groups with search, status and workflow filters, and live elapsed clocks.
-- **Execution tree per run**: the paths through running or failed nodes auto-expand, so the thing you are looking for is already open.
-- **Node inspector**: the selected node's output and tool calls.
-- **Live event log**: with a follow mode that tracks the newest events.
-- **Approvals inbox**: every pending gate across all runs, with approve/deny inline.
-- **Run actions**: cancel an active run or resume a failed/cancelled one.
-- **A truthful connection badge**: Live when the gateway stream is up, Offline when it is not.
-- **Deep links**: `?runId=` and `&nodeId=` address a specific run and node, so URLs are shareable.
+- **Workspace operations view**: a paginated all-runs landing page with search and filters, grouped run states, an operations summary, scheduled crons, and a Metrics view.
+- **Run health and controls**: an always-on health diagnosis with one-click recovery where available, plus Pause, Resume, Cancel, approvals, and run-level Scores.
+- **Execution history**: the live expandable tree or XML view, a chronological Timeline, and a frame scrubber for inspecting earlier committed states.
+- **Node investigation**: live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal for hijacking or reopening supported agent sessions.
+- **Events and navigation**: a filterable live event log with follow mode; shareable `?runId=` / `&nodeId=` deep links; and `?embed=1` for the focused embeddable run surface.
+- **Connection truth**: distinct Live, Connecting, Offline, and Unauthorized states with state-specific recovery guidance.
 
 ## How it relates to the other surfaces
 

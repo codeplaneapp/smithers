@@ -8,7 +8,7 @@ import { Subflow } from "smithers-orchestrator";
 
 type SubflowProps = {
   id: string;
-  workflow: SmithersWorkflow<unknown>;
+  workflow: SmithersWorkflow<unknown> | WorkflowFileRef;
   output: OutputTarget;
   input?: unknown;
   mode?: "childRun" | "inline"; // default "childRun"
@@ -62,6 +62,22 @@ const childWorkflow = child.smithers(
 );
 
 export default childWorkflow;
+```
+
+For a workflow module generated at runtime, pass the exported `WorkflowFileRef`
+shape instead. The module must default-export a `SmithersWorkflow`; its resolved
+path (including symlinks) must remain within `approvedRoot`, which defaults to
+the parent run's `rootDir`:
+
+```tsx
+import type { WorkflowFileRef } from "smithers-orchestrator";
+
+const generated: WorkflowFileRef = {
+  path: ".smithers/generated/child.tsx",
+  approvedRoot: process.cwd(),
+};
+
+<Subflow id="generated-child" workflow={generated} output={outputs.childResult} />;
 ```
 
 The second argument to `smithers(build, { output })` declares which schema

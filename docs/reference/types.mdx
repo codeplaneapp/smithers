@@ -39,7 +39,7 @@ returned row, persist it to the matching table, and feed the same schema to
 native structured-output agents.
 
 Major sections at a glance:
-- **Workflow / Context**: `SmithersWorkflow`, `SmithersCtx`, `RunOptions`, `RunResult`, the entry points for defining and running workflows.
+- **Workflow / Context**: `SmithersWorkflow`, `WorkflowFileRef`, `SmithersCtx`, `RunOptions`, `RunResult`, the entry points for defining and running workflows.
 - **Task / Graph**: `TaskDescriptor`, `TaskProps`, `GraphSnapshot`, the shape of nodes at runtime and in the JSX layer.
 - **Component props**: `WorkflowProps`, `ApprovalProps`, `SignalProps`, `LoopProps`, etc., all JSX component interfaces.
 - **Errors**: `SmithersError`, `KnownSmithersErrorCode`, typed error codes; see [Errors](/reference/errors) for descriptions.
@@ -62,6 +62,11 @@ interface SmithersWorkflow<Schema = unknown> {
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
 }
+
+type WorkflowFileRef = {
+  path: string;
+  approvedRoot?: string;
+};
 
 type WorkflowViewDefinition = {
   kind: "ui" | "tui";
