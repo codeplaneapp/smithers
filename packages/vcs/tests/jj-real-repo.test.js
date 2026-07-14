@@ -183,6 +183,7 @@ describeIfJj("workspaceAdd / workspaceList / workspaceClose against real jj", ()
             const before = await vcs.workspaceList(repo.dir);
             expect(Array.isArray(before)).toBe(true);
             expect(before.some((w) => w.name === "default")).toBe(true);
+            expect(before.find((w) => w.name === "default")?.selected).toBe(true);
             expect(before.some((w) => w.name === "extra")).toBe(false);
 
             // Add a second workspace and confirm jj actually materialized it.
@@ -196,6 +197,8 @@ describeIfJj("workspaceAdd / workspaceList / workspaceClose against real jj", ()
             const names = after.map((w) => w.name).sort();
             expect(names).toContain("default");
             expect(names).toContain("extra");
+            expect(after.find((w) => w.name === "default")?.selected).toBe(true);
+            expect(after.find((w) => w.name === "extra")?.selected).toBe(false);
 
             // Close (forget) the workspace; jj drops it from its metadata.
             const closed = await vcs.workspaceClose("extra", { cwd: repo.dir });

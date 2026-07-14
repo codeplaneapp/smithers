@@ -364,13 +364,10 @@ exit 1
     });
 });
 describe("workspaceList", () => {
-    test("uses -T for structured names output", async () => {
+    test("uses -T for structured names and selection output", async () => {
         const script = `
-if [[ "$1" = "workspace" && "$2" = "list" && "$3" = "-T" ]]; then
-  # print only names, one per line
-  echo "default"
-  echo "other"
-  echo "solo"
+if [[ "$1" = "workspace" && "$2" = "list" && "$3" = "-T" && "$4" = *"target.current_working_copy()"* ]]; then
+  printf 'default\ttrue\nother\tfalse\nsolo\tfalse\n'
   exit 0
 fi
 exit 1
@@ -378,7 +375,7 @@ exit 1
         await withFakeJj(script, async () => {
             const rows = await vcs.workspaceList();
             expect(rows).toEqual([
-                { name: "default", path: null, selected: false },
+                { name: "default", path: null, selected: true },
                 { name: "other", path: null, selected: false },
                 { name: "solo", path: null, selected: false },
             ]);

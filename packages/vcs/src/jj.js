@@ -328,7 +328,7 @@ export function workspaceAdd(name, path, opts = {}) {
  */
 export function workspaceList(cwd) {
     return Effect.gen(function* () {
-        let res = yield* runJj(["workspace", "list", "-T", 'name ++ "\\n"'], {
+        let res = yield* runJj(["workspace", "list", "-T", 'name ++ "\\t" ++ if(target.current_working_copy(), "true", "false") ++ "\\n"'], {
             cwd,
         });
         if (res.code === 0) {
@@ -336,7 +336,10 @@ export function workspaceList(cwd) {
                 .split(/\r?\n/)
                 .map((line) => line.trim())
                 .filter(Boolean);
-            return lines.map((name) => ({ name, path: /** @type {string | null} */ (null), selected: false }));
+            return lines.map((line) => {
+                const [name = "", selected = "false"] = line.split("\t");
+                return { name, path: /** @type {string | null} */ (null), selected: selected === "true" };
+            });
         }
         res = yield* runJj(["workspace", "list"], { cwd });
         if (res.code !== 0)
