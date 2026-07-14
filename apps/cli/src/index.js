@@ -67,7 +67,7 @@ import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
-import { addPack, removePack, listPacks, updatePack } from "./packs.js";
+import { addPack, removePack, listPacks, listLockedPacks, updatePack } from "./packs.js";
 import { createEvalsExtension } from "./evals-extension.js";
 import {
     assertEvalRunIdsAvailable,
@@ -5072,9 +5072,10 @@ const cli = Cli.create({
 })
     .command("add", {
     description: "Install a workflow pack from GitHub, npm, or a local file.",
-    alias: "install",
+    aliases: ["install"],
     args: packSpecArgs,
     options: packOptions,
+    alias: { global: "g" },
     async run(c) {
         try { return c.ok(await addPack(c.args.spec, { from: process.cwd(), global: c.options.global, yes: c.options.yes })); }
         catch (error) { return c.error({ code: "PACK_ADD_FAILED", message: error?.message ?? String(error) }); }
@@ -5084,6 +5085,7 @@ const cli = Cli.create({
     description: "Remove an installed workflow pack.",
     args: packNameArgs,
     options: z.object({ global: z.boolean().default(false).describe("Remove from ~/.smithers/packs") }),
+    alias: { global: "g" },
     run(c) {
         try { return c.ok(removePack(c.args.name, { from: process.cwd(), global: c.options.global })); }
         catch (error) { return c.error({ code: "PACK_REMOVE_FAILED", message: error?.message ?? String(error) }); }
@@ -5100,12 +5102,14 @@ const cli = Cli.create({
     args: z.object({ name: z.string().optional().describe("Pack name to update (default: every locked pack)") }),
     async run(c) {
         try {
-            const packs = listPacks(process.cwd()).filter((pack) => !c.args.name || pack.name === c.args.name);
-            if (packs.length === 0) {
-                return c.error({ code: "PACK_NOT_FOUND", message: c.args.name ? `Pack not found: ${c.args.name}` : "No packs installed" });
+            // The lock is the source of truth: a pack whose directory is
+            // missing or damaged is restored from its locked spec, not skipped.
+            const locked = listLockedPacks(process.cwd()).filter((pack) => !c.args.name || pack.name === c.args.name);
+            if (locked.length === 0) {
+                return c.error({ code: "PACK_NOT_FOUND", message: c.args.name ? `No lock entry for pack: ${c.args.name}` : "No packs installed" });
             }
             const results = [];
-            for (const pack of packs) results.push(await updatePack(pack.name, { from: process.cwd(), global: pack.scope === "global" }));
+            for (const pack of locked) results.push(await updatePack(pack.name, { from: process.cwd(), global: pack.scope === "global" }));
             return c.ok({ updated: results });
         }
         catch (error) { return c.error({ code: "PACK_UPDATE_FAILED", message: error?.message ?? String(error) }); }

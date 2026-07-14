@@ -81,6 +81,8 @@ export const workflowSummarySchema = z.object({
     system: z.boolean().optional(),
     eligible: z.boolean().optional(),
     ineligibleReasons: z.array(z.string()).optional(),
+    // Discovery tier: "local" | "global" | "explicit" | "curated" | "pack:<name>".
+    source: z.string().optional(),
 });
 const timerSchema = z.object({
     nodeId: z.string(),

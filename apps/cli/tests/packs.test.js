@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { addPack, listPacks, lockPath, parsePackSpec, removePack, updatePack } from "../src/packs.js";
+import { addPack, listLockedPacks, listPacks, lockPath, parsePackSpec, removePack, scanPackImports, updatePack } from "../src/packs.js";
 import { discoverWorkflows, resolveWorkflow } from "../src/workflows.js";
 
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), "smithers-packs-")); onTestFinished(() => rmSync(dir, { recursive: true, force: true })); return dir; };
@@ -71,6 +71,41 @@ test("github-style tarballs with a wrapper dir and subdir manifest install and u
   const updated = await updatePack("demo-pack", { from: project });
   expect(updated.name).toBe("demo-pack");
   expect(listPacks(project).map((pack) => pack.name)).toEqual(["demo-pack"]);
+});
+
+test("the lock lives beside the packs dir and drives updates even when a pack dir is damaged", async () => {
+  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
+  const fixture = temp();
+  mkdirSync(join(fixture, "workflows"), { recursive: true });
+  writeFileSync(join(fixture, "smithers.toon"), "name: lock-pack\nversion: 1.0.0\n");
+  writeFileSync(join(fixture, "workflows", "w.tsx"), "export default null;\n");
+  await addPack(`file:${fixture}`, { from: project, yes: true });
+  const packsRoot = join(project, ".smithers", "packs");
+  // Beside the packs dir, not inside it.
+  expect(lockPath(packsRoot)).toBe(join(project, ".smithers", "packs.lock.toon"));
+  expect(readFileSync(lockPath(packsRoot), "utf8")).toContain("lock-pack");
+  // A damaged/missing pack dir is still visible via the lock and restorable.
+  rmSync(join(packsRoot, "lock-pack"), { recursive: true, force: true });
+  expect(listPacks(project)).toEqual([]);
+  expect(listLockedPacks(project).map((pack) => pack.name)).toEqual(["lock-pack"]);
+  const restored = await updatePack("lock-pack", { from: project });
+  expect(restored.name).toBe("lock-pack");
+  expect(listPacks(project).map((pack) => pack.name)).toEqual(["lock-pack"]);
+});
+
+test("import scanning ignores comments and string contents but catches import-assignment", () => {
+  const fixture = temp();
+  writeFileSync(join(fixture, "ok.ts"), [
+    '// import banned from "node:fs" — just a comment',
+    '/* import "child_process" */',
+    'const example = `import fs from "node:fs"`;',
+    'const text = "require(\'node:net\')";',
+    'import { z } from "zod/v4";',
+    "export default example;",
+  ].join("\n"));
+  expect(() => scanPackImports(fixture)).not.toThrow();
+  writeFileSync(join(fixture, "bad.ts"), 'import fs = require("node:fs");\nexport default fs;\n');
+  expect(() => scanPackImports(fixture)).toThrow(/bad\.ts imports node:fs/);
 });
 
 test("add rejects a disallowed bare re-export before installation", async () => {

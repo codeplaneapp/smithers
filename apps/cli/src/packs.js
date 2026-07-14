@@ -44,14 +44,51 @@ function packRoot(from, global) {
 }
 
 export function packDirs(from = process.cwd(), global = false) { return packRoot(from, global); }
-export function lockPath(root) { return join(root, "packs.lock.toon"); }
+// The lock lives BESIDE the packs dir (.smithers/packs.lock.toon), not inside
+// it — the packs dir holds only installed pack contents.
+export function lockPath(root) { return join(dirname(root), "packs.lock.toon"); }
 function readLock(root) {
-  const path = lockPath(root);
+  // Legacy location (inside the packs dir) is read as a fallback so packs
+  // installed before the move keep updating; the next write lands beside.
+  const path = existsSync(lockPath(root)) ? lockPath(root) : join(root, "packs.lock.toon");
   if (!existsSync(path)) return {};
   const value = decode(readFileSync(path, "utf8"));
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
-function writeLock(root, value) { mkdirSync(root, { recursive: true }); writeFileSync(lockPath(root), `${encode(value)}\n`); }
+function writeLock(root, value) { mkdirSync(dirname(lockPath(root)), { recursive: true }); rmSync(join(root, "packs.lock.toon"), { force: true }); writeFileSync(lockPath(root), `${encode(value)}\n`); }
+
+/** Lock entries for both scopes, for `packs update` (the lock — not the set of
+ * currently-intact pack dirs — is the source of truth for what to update). */
+export function listLockedPacks(from = process.cwd()) {
+  return [false, true].flatMap((global) => {
+    const root = packRoot(from, global);
+    return Object.entries(readLock(root)).map(([name, entry]) => ({ name, entry, scope: global ? "global" : "local" }));
+  });
+}
+
+function importAllowed(name) {
+  return name.startsWith(".") || ALLOWED.has(name) || name.startsWith("@smithers-orchestrator/") || name.startsWith("react/") || name.startsWith("zod/");
+}
+
+/** Lex one module's import specifiers. Prefers Bun's transpiler (a real lexer:
+ * ignores comments and string contents, sees static/dynamic imports,
+ * export-from, require, and `import x = require(...)`); falls back to a
+ * comment-stripped regex scan when Bun is unavailable. */
+function moduleImports(file, source) {
+  if (typeof Bun !== "undefined" && Bun.Transpiler) {
+    try {
+      return new Bun.Transpiler({ loader: "tsx" }).scanImports(source).map((record) => record.path);
+    } catch (error) {
+      throw new Error(`Pack file does not parse: ${file}: ${error?.message ?? error}`);
+    }
+  }
+  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const names = [];
+  for (const match of stripped.matchAll(/\b(?:import|export)\s+(?:[^"'`;]+?\s+from\s+)?["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)|\bimport\s+\w+\s*=\s*require\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+    names.push(match[1] ?? match[2] ?? match[3]);
+  }
+  return names;
+}
 
 export function scanPackImports(root) {
   const files = [];
@@ -65,10 +102,8 @@ export function scanPackImports(root) {
   };
   visit(root);
   for (const file of files) {
-    const source = readFileSync(file, "utf8");
-    for (const match of source.matchAll(/\b(?:import|export)\s+(?:[^"']+?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
-      const name = match[1] ?? match[2];
-      if (!name.startsWith(".") && !ALLOWED.has(name) && !name.startsWith("@smithers-orchestrator/") && !name.startsWith("react/") && !name.startsWith("zod/")) {
+    for (const name of moduleImports(file, readFileSync(file, "utf8"))) {
+      if (!importAllowed(name)) {
         throw new Error(`Pack import not allowed: ${file} imports ${name}`);
       }
     }
@@ -106,6 +141,20 @@ function copyOrExtract(source, target, fallbackName, subdir = "") {
   }
 }
 
+/** Resolve a GitHub ref to the commit SHA it points at (lock contract records
+ * commits, not movable refs). Falls back to the ref itself when the API is
+ * unreachable — the integrity hash still pins the exact content. */
+async function resolveGithubSha(owner, repo, ref) {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`, {
+      headers: { Accept: "application/vnd.github.sha", "User-Agent": "smithers-cli" },
+    });
+    if (!response.ok) return ref;
+    const sha = (await response.text()).trim();
+    return /^[0-9a-f]{40}$/.test(sha) ? sha : ref;
+  } catch { return ref; }
+}
+
 async function fetchPack(parsed, staging) {
   if (parsed.kind === "file") { copyOrExtract(parsed.path, staging, parsed.name, parsed.subdir); return { resolved: parsed.path, integrity: "file" }; }
   let url = parsed.kind === "github"
@@ -117,7 +166,9 @@ async function fetchPack(parsed, staging) {
   let bytes;
   if (parsed.kind === "npm") {
     const metadata = await response.json();
-    const version = parsed.version === "latest" ? metadata["dist-tags"]?.latest : parsed.version;
+    // A requested "version" may be a dist-tag (latest, next, beta, …) — npm
+    // resolves dist-tags first, then exact versions.
+    const version = metadata["dist-tags"]?.[parsed.version] ?? parsed.version;
     const tarball = metadata.versions?.[version]?.dist?.tarball;
     if (!tarball) throw new Error(`npm pack version not found: ${parsed.package}@${parsed.version}`);
     parsed.version = version;
@@ -128,7 +179,10 @@ async function fetchPack(parsed, staging) {
   const archive = `${staging}.tgz`; writeFileSync(archive, bytes);
   validateArchiveManifest(archive, parsed.name, parsed.subdir);
   copyOrExtract(archive, staging, parsed.name, parsed.subdir); rmSync(archive, { force: true });
-  return { resolved: parsed.ref ?? parsed.version, integrity: `sha256-${createHash("sha256").update(bytes).digest("hex")}` };
+  const resolved = parsed.kind === "github"
+    ? await resolveGithubSha(parsed.owner, parsed.repo, parsed.ref)
+    : parsed.version;
+  return { resolved, integrity: `sha256-${createHash("sha256").update(bytes).digest("hex")}` };
 }
 
 export async function addPack(spec, { from = process.cwd(), global = false, yes = false, subdir = "" } = {}) {
@@ -179,9 +233,18 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
       };
       walk(workflowDir);
     }
-    const report = `Pack ${manifest.name} (${manifest.version})\\nCapabilities: bins=${manifest.capabilities.bins.join(",") || "none"}, env=${manifest.capabilities.env.join(",") || "none"}, writes=${manifest.capabilities.writes}${workflowTrust.length ? `\\nWorkflows: ${workflowTrust.join("; ")}` : ""}`;
+    const report = `Pack ${manifest.name} (${manifest.version})\nCapabilities: bins=${manifest.capabilities.bins.join(",") || "none"}, env=${manifest.capabilities.env.join(",") || "none"}, writes=${manifest.capabilities.writes}${workflowTrust.length ? `\nWorkflows: ${workflowTrust.join("; ")}` : ""}`;
     if (!yes && !(process.stdin.isTTY && process.stdout.isTTY)) throw new Error(`${report}\nConfirmation required; pass --yes in non-interactive mode`);
-    if (!yes) { process.stderr.write(`${report}\nInstall ${manifest.name}? [y/N] `); const answer = readFileSync(0, "utf8").trim().toLowerCase(); if (answer !== "y" && answer !== "yes") throw new Error("Pack installation cancelled"); }
+    if (!yes) {
+      process.stderr.write(`${report}\n`);
+      // One line from the terminal — readFileSync(0) would block until EOF,
+      // which an interactive `y⏎` never sends.
+      const readline = await import("node:readline/promises");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+      const answer = (await rl.question(`Install ${manifest.name}? [y/N] `)).trim().toLowerCase();
+      rl.close();
+      if (answer !== "y" && answer !== "yes") throw new Error("Pack installation cancelled");
+    }
     const root = packRoot(from, global); const target = join(root, manifest.name); rmSync(target, { recursive: true, force: true }); mkdirSync(root, { recursive: true }); cpSync(sourceRoot, target, { recursive: true });
     const lock = readLock(root); lock[manifest.name] = { spec, ...(parsed.subdir ? { subdir: parsed.subdir } : {}), resolved: fetched.resolved, version: manifest.version, integrity: fetched.integrity }; writeLock(root, lock);
     return { name: manifest.name, manifest, report, scope: global ? "global" : "local", path: target };
