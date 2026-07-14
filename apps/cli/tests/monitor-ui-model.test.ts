@@ -899,8 +899,10 @@ describe("PTY hijack affordance", () => {
     expect(hijackActionFor("running", true, true)).toEqual({ kind: "hijack", label: "Hijack" });
   });
 
-  test("live run + finished node reopens the recorded session (post-mortem one lane without waiting for the fleet)", () => {
-    expect(hijackActionFor("running", false, true)).toEqual({ kind: "reopen", label: "Reopen session" });
+  test("live run + finished node hides the button because hijack would park the whole run", () => {
+    // The PTY invokes `smithers hijack --target <node>`, whose live-run path
+    // requests a hand-off of the entire run rather than reopening one lane.
+    expect(hijackActionFor("running", false, true)).toBeNull();
   });
 
   test("settled runs reopen the recorded session for finished AND failed nodes", () => {

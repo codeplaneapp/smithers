@@ -1256,11 +1256,9 @@ export function hijackActionFor(
 ): HijackAction | null {
   if (!hasCandidate) return null;
   const runLive = normalizeStatus(runStatus) === "running";
-  if (runLive && nodeLive) {
-    return { kind: "hijack", label: "Hijack" };
+  if (runLive) {
+    return nodeLive ? { kind: "hijack", label: "Hijack" } : null;
   }
-  // A settled node's recorded session stays reopenable even while the run is
-  // live — post-morteming one lane must not wait for the whole fleet.
   return { kind: "reopen", label: "Reopen session" };
 }
 
