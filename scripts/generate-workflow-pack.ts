@@ -46,6 +46,10 @@ const SEEDED_WORKFLOW_IDS = [
   // Parent workflow the `evals` gateway extension launches to run a saved
   // suite's cases as real child runs (system workflow — issue #77).
   "eval-suite-run",
+  // Durable pack installation (system workflow — hidden from default listings).
+  "add",
+  // Guided pack publishing workflow.
+  "share-pack",
 ];
 
 type TemplateFile = { path: string; contents: string };
@@ -54,7 +58,7 @@ type TemplateFile = { path: string; contents: string };
  * Seeded ids whose canonical multi-file UI (`.smithers/ui/<id>.tsx` plus its
  * relative sibling modules) ships with the pack.
  */
-const SEEDED_UI_IDS = new Set(["create-workflow", "create-skill", "docs-driven-development"]);
+const SEEDED_UI_IDS = new Set(["create-workflow", "create-skill", "docs-driven-development", "share-pack"]);
 
 const DDD_HELPER_FILES = [
   "auditInputs.ts",

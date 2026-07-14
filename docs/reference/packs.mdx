@@ -42,3 +42,18 @@ bunx smithers-orchestrator add user/repository --yes
 bunx smithers-orchestrator packs list
 bunx smithers-orchestrator remove kanban-suite
 ```
+
+## Share a pack
+
+Every initialized `.smithers/` directory can be published as a pack. Set its
+`repository` in `smithers.toon`, then preview the awesome-smithers entry:
+
+```bash
+bunx smithers-orchestrator share --dry-run
+```
+
+The normal command uses the authenticated `gh` CLI to fork the registry,
+update its Packs section, push a branch, and open a pull request. Use
+`--repo owner/registry` to override the registry repository. The seeded
+`share-pack` workflow performs the validation and repository preparation steps
+before calling this command.

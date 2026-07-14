@@ -68,6 +68,7 @@ import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import { addPack, removePack, listPacks, listLockedPacks, updatePack, ejectPack } from "./packs.js";
+import { sharePack } from "./share.js";
 import { createEvalsExtension } from "./evals-extension.js";
 import {
     assertEvalRunIdsAvailable,
@@ -81,6 +82,7 @@ import {
     writeEvalReport,
 } from "./eval-suite.js";
 import { initArgs, initOptions, runInitCommand } from "./init-command.js";
+import { runDurableAdd } from "./add-command.js";
 import { startersArgs, startersOptions, runStartersCommand } from "./starter-gallery-command.js";
 import { runTuiCommand } from "./tui.js";
 import { optimizeOptions, runOptimizeCommand, withOptimizationArtifactEnv } from "./optimize-command.js";
@@ -5078,7 +5080,11 @@ const cli = Cli.create({
     options: packOptions,
     alias: { global: "g" },
     async run(c) {
-        try { return c.ok(await addPack(c.args.spec, { from: process.cwd(), global: c.options.global, yes: c.options.yes })); }
+        try {
+            const durable = await runDurableAdd({ spec: c.args.spec, global: c.options.global, yes: c.options.yes });
+            if (durable) return c.ok(durable);
+            return c.ok(await addPack(c.args.spec, { from: process.cwd(), global: c.options.global, yes: c.options.yes }));
+        }
         catch (error) { return c.error({ code: "PACK_ADD_FAILED", message: error?.message ?? String(error) }); }
     },
 })
@@ -5098,6 +5104,18 @@ const cli = Cli.create({
     run(c) {
         try { return c.ok(ejectPack(c.args.spec, { from: process.cwd() })); }
         catch (error) { return c.error({ code: "PACK_EJECT_FAILED", message: error?.message ?? String(error) }); }
+    },
+})
+    .command("share", {
+    description: "Add this project's workflow pack to awesome-smithers and open a pull request.",
+    options: z.object({
+        repo: z.string().optional().describe("Override the awesome-smithers repository (owner/name)"),
+        dryRun: z.boolean().default(false).describe("Print the registry entry and diff without pushing"),
+    }),
+    alias: { dryRun: "n" },
+    run(c) {
+        try { return c.ok(sharePack({ from: process.cwd(), repo: c.options.repo, dryRun: c.options.dryRun })); }
+        catch (error) { return c.error({ code: "PACK_SHARE_FAILED", message: error?.message ?? String(error) }); }
     },
 })
     .command("packs", Cli.create({

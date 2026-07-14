@@ -630,6 +630,11 @@ commands[100]:
     purpose: Copy a pack workflow and its UI, prompts, and libraries into the local .smithers pack.
     args[1]{name,type,required,desc}:
       spec,string,true,Pack workflow in the form <pack>:<workflow>
+  - name: share
+    purpose: Add this project's workflow pack to awesome-smithers and open a pull request.
+    flags[2]{name,short,type,default,desc}:
+      repo,,string,,Override the awesome-smithers repository (owner/name)
+      dry-run,n,boolean,false,Print the registry entry and diff without pushing
   - name: rewind
     purpose: Rewind a run to a previous frame
     args[2]{name,type,required,desc}:

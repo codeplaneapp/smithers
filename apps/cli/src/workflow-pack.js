@@ -225,7 +225,7 @@ export const CURATED_PUBLIC_WORKFLOW_IDS = [
     "create-skill",
     "docs-driven-development",
 ];
-export const CURATED_SYSTEM_WORKFLOW_IDS = ["create-ui", "eval-suite-run", "init", "post-failure", "upgrade"];
+export const CURATED_SYSTEM_WORKFLOW_IDS = ["add", "eval-suite-run", "init", "post-failure", "share-pack", "upgrade"];
 /**
  * @param {{ scaffoldCustomAgent?: boolean }} [options]
  * @returns {TemplateFile[]}
