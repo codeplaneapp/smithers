@@ -3,7 +3,7 @@ title: Curated Workflows
 description: The workflow pack scaffolded by bunx smithers-orchestrator init.
 ---
 
-`bunx smithers-orchestrator init` creates a focused `.smithers/workflows/` directory containing `create-workflow`, `create-skill`, and `docs-driven-development`. Hidden system workflows support init, custom UI generation, evals, failure autopsies, and upgrades. The former starter suite is retained under `examples/init-pack/`; monitoring remains `smithers monitor` and Gateway `/monitor`.
+`bunx smithers-orchestrator init` creates a focused `.smithers/workflows/` directory containing `create-workflow`, `create-skill`, and `docs-driven-development`. Hidden system workflows support init, failure autopsies, and upgrades. The former starter suite is retained under `examples/init-pack/`; monitoring remains `smithers monitor` and Gateway `/monitor`.
 
 Run any curated workflow by ID:
 
@@ -13,7 +13,7 @@ bunx smithers-orchestrator workflow run WORKFLOW_ID --prompt "..."
 
 Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prompt":"..."}'`. Workflows with structured inputs also support `--input`.
 
-Writing your own workflow? Read [Workflow Authoring Rules](/workflows/authoring-rules) first: five rules (reserved output columns, no nested loops, loop output binding, the `renderWorkflow` test contract, and `.smithers/package.json` test registration) that otherwise get learned one runtime failure at a time.
+Before authoring or reviewing a workflow, read the [workflow authoring rules](/workflows/authoring-rules): it covers reserved output metadata, loop topology, loop output bindings, production-shaped tests, and pack test registration.
 
 ## Workflows
 
