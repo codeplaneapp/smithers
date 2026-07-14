@@ -193,15 +193,10 @@ export function buildPlanTree(xml, ralphState) {
         const children = [];
         let elementIndex = 0;
         const isRalph = tag === "smithers:ralph";
-        // A <Parallel>/<MergeQueue>/<Worktree> forks into an independently
-        // scoped lane (per array item, per isolated worktree): a <Loop> inside
-        // one of those lanes is not "nested" in the sense the engine can't
-        // execute — it's a fresh, disjoint loop scoped to that lane, exactly
-        // what the ancestor loop-scope suffix exists to key. Only same-lane
-        // nesting (straight through <Sequence>/<Branch>/<Match>/etc., with no
-        // fork in between) is genuinely unsupported, so only that propagates.
-        const forksLane = tag === "smithers:parallel" || tag === "smithers:merge-queue" || tag === "smithers:worktree";
-        const nextParentIsRalph = forksLane ? false : ctx.parentIsRalph || isRalph;
+        // Loop nesting is unsupported regardless of intervening containers.
+        // Keep the active-loop marker through fork containers to match the
+        // Effect builder's unconditional nested-loop check.
+        const nextParentIsRalph = ctx.parentIsRalph || isRalph;
         for (const child of node.children) {
             const nextPath = child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
             const built = walk(child, {

@@ -30,11 +30,8 @@ describe("buildPlanTree stable id fallbacks", () => {
     expect(plan.children[0].id).toBe("saga:0");
   });
 
-  test("a ralph nested under a <Worktree> lane carries an ancestor loop scope (fork, not same-lane nesting)", () => {
-    // A <Worktree> forks into an independently scoped lane, so a <Loop> inside
-    // it is not "nested" in the sense the engine can't execute — it's scoped
-    // by the outer loop's iteration via the ancestor loop-scope suffix.
-    const { plan, ralphs } = buildPlanTree(
+  test("a ralph nested under a <Worktree> lane is rejected", () => {
+    expect(() => buildPlanTree(
       el("smithers:workflow", {}, [
         el("smithers:ralph", { id: "outer", maxIterations: "2" }, [
           el("smithers:worktree", {}, [
@@ -44,12 +41,7 @@ describe("buildPlanTree stable id fallbacks", () => {
           ]),
         ]),
       ]),
-    );
-    expect(plan.kind).toBe("sequence");
-    // The inner ralph id is suffixed with the outer loop scope.
-    const ralphIds = ralphs.map((ralph) => ralph.id);
-    expect(ralphIds).toContain("outer");
-    expect(ralphIds).toContain("inner@@outer=0");
+    )).toThrow(/Nested <Loop>\/\<Ralph>/);
   });
 
   test("a ralph nested under a same-lane wrapper (e.g. Sequence, no fork) throws NESTED_LOOP", () => {

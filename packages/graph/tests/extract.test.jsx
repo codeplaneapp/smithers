@@ -574,12 +574,7 @@ describe("extractGraph", () => {
 			}
 		});
 
-		test("allows a Loop nested inside another Loop's Parallel/Worktree lane (per-item correction loop)", () => {
-			// The documented queue-based-backfill pattern: an outer batch Loop's
-			// Parallel forks one independent Worktree lane per item, and each
-			// lane may run its own bounded correction Loop. This is NOT the same
-			// as same-lane nesting — each lane's loop is scoped by buildLoopScope
-			// to that ancestor iteration and is genuinely executable.
+		test("rejects a Loop nested inside another Loop's forked lane", () => {
 			const root = hostEl("smithers:ralph", { id: "outer" }, [
 				hostEl("smithers:parallel", {}, [
 					hostEl("smithers:worktree", { path: "/tmp/lane" }, [
@@ -589,9 +584,7 @@ describe("extractGraph", () => {
 					]),
 				]),
 			]);
-			expect(() => silenceWorktreePathWarning(() => extractGraph(root, {
-				ralphIterations: { outer: 2, "inner@@outer=2": 1 },
-			}))).not.toThrow();
+			expect(() => silenceWorktreePathWarning(() => extractGraph(root))).toThrow("Nested <Loop>/<Ralph>");
 		});
 
 		test("throws on duplicate ralph id", () => {

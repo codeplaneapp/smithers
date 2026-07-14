@@ -800,15 +800,10 @@ export function extractGraph(root, opts) {
                 aspects: aspects(raw.__aspects),
             });
         }
-        // A <Parallel>/<MergeQueue>/<Worktree> forks into an independently
-        // scoped lane (per array item, per isolated worktree): a <Loop> inside
-        // one of those lanes is not "nested" in the sense the engine can't
-        // execute — it's a fresh, disjoint loop scoped to that lane, exactly
-        // what buildLoopScope's ancestor-scoping exists to key. Only same-lane
-        // nesting (straight through <Sequence>/<Branch>/<Match>/etc., with no
-        // fork in between) is genuinely unsupported, so only that propagates.
-        const forksLane = node.tag === "smithers:parallel" || node.tag === "smithers:merge-queue" || node.tag === "smithers:worktree";
-        const nextParentIsRalph = forksLane ? false : ctx.parentIsRalph || node.tag === "smithers:ralph";
+        // Loop nesting is unsupported regardless of intervening containers.
+        // Keep the active-loop marker through fork containers to match the
+        // Effect builder's unconditional nested-loop check.
+        const nextParentIsRalph = ctx.parentIsRalph || node.tag === "smithers:ralph";
         let elementIndex = 0;
         for (const child of node.children) {
             const childOrdinal = elementIndex;
