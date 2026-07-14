@@ -326,7 +326,11 @@ async function parseResponseBody(response) {
   }
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
   return text;
 }

@@ -84,6 +84,28 @@ describe("createHttpTool", () => {
     expect(result.body).toBeNull(); // empty text -> null
   });
 
+  test("returns malformed JSON as text while preserving the HTTP response envelope", async () => {
+    stub(
+      () =>
+        new Response("{bad", {
+          status: 502,
+          statusText: "Bad Gateway",
+          headers: { "content-type": "application/json", "x-upstream": "gateway" },
+        }),
+    );
+    const tool = createHttpTool();
+
+    const result = await tool.execute({ url: "https://api.example.com/failure" }, callOptions);
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      headers: { "content-type": "application/json", "x-upstream": "gateway" },
+      body: "{bad",
+    });
+  });
+
   test("fires the abort when the request outlives its timeout", async () => {
     let aborted = false;
     stub(async (_url, init) => {
