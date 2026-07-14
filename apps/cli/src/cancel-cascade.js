@@ -43,28 +43,6 @@ function sleep(ms) {
 }
 
 /**
- * Directly flip a run (and its in-flight / waiting-timer work) to cancelled.
- * Correct only when no live engine owns the run: a live engine must instead be
- * asked via the durable cancel request (`requestRunCancel`), or it would
- * overwrite our flip with "finished" on completion.
- *
- * @param {SmithersDb} adapter
- * @param {string} runId
- * @param {number} now
- * @returns {Promise<number>} number of attempts flipped to cancelled
- */
-export async function directCancelRun(adapter, runId, now) {
-    // Keep the in-progress read as the cancellation-entry probe: besides being
-    // the cheapest fast path, this closes the race with a child launcher that
-    // is still publishing attempts while the cascade is discovering runs.
-    await adapter.listInProgressAttempts(runId);
-    const allAttempts = await adapter.listAttemptsForRun(runId);
-    const activeAttempts = allAttempts.filter((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state));
-    await finalizeCancelledRun(adapter, runId, { now });
-    return activeAttempts.length;
-}
-
-/**
  * Terminate a detached run owner process and, where possible, its whole
  * process group (agent CLIs spawned by the engine live under it).
  *
