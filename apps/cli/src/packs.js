@@ -333,6 +333,13 @@ function workflowEntries(root) {
 }
 
 function uiEntries(source) {
+  const uiTags = new Set(["UI"]);
+  for (const match of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']smithers-orchestrator["']/g)) {
+    for (const specifier of match[1].split(",")) {
+      const parts = specifier.trim().split(/\s+as\s+/);
+      if (parts[0] === "UI") uiTags.add(parts[1] ?? "UI");
+    }
+  }
   const bindings = new Map([...source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(["'])([^"']+)\2/g)].map((match) => [match[1], match[3]]));
   const entries = [];
   let index = 0;
@@ -347,7 +354,7 @@ function uiEntries(source) {
     }
     if (character === "<" && /[A-Za-z_$]/.test(source[index + 1] ?? "")) {
       const tag = source.slice(index + 1).match(/^([A-Za-z_$][\w$]*)/);
-      if (tag?.[1] === "UI") {
+      if (tag && uiTags.has(tag[1])) {
         const start = index + 1 + tag[0].length;
         let cursor = start, braces = 0, quote = null;
         for (; cursor < source.length; cursor++) {

@@ -163,7 +163,8 @@ describe("pack eject", () => {
       "// <UI entry=\"../ui/not-real.tsx\" />",
       'const entry = "../ui/demo.tsx";',
       'const text = "<UI entry=\\\"../ui/not-real.tsx\\\" />";',
-      'export default <UI\n  entry={entry}\n/>;',
+      'import { UI as WorkflowUI } from "smithers-orchestrator";',
+      'export default <WorkflowUI\n  entry={entry}\n/>;',
     ].join("\n"));
     try {
       await addPack(`file:${source}`, { from: workspace, yes: true });
