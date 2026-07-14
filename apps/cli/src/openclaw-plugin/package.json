@@ -1,5 +1,6 @@
 {
   "name": "@smithers/openclaw-plugin",
+  "private": true,
   "version": "0.1.0",
   "type": "module",
   "description": "Native OpenClaw plugin for driving and improving Smithers workflows.",
