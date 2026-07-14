@@ -314,13 +314,13 @@ describe("createAwsSandboxProvider — codebuild mode", () => {
 		expect(startInput.timeoutInMinutesOverride).toBe(5);
 	});
 
-	test("cleanup destroy stops the build", async () => {
+	test("cleanup destroy skips StopBuild for an already-completed build", async () => {
 		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished" }));
 		const provider = createAwsSandboxProvider({ clients: env, ...CODEBUILD_OPTS });
 		const { request } = makeRequest();
 		await provider.run(request);
 		await provider.cleanup?.(request);
-		expect(env.stoppedBuilds.length).toBe(1);
+		expect(env.stoppedBuilds.length).toBe(0);
 	});
 });
 

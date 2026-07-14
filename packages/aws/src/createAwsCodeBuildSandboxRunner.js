@@ -115,7 +115,11 @@ export async function createAwsCodeBuildSandboxRunner(options) {
 			}
 			const res = await codebuild.batchGetBuilds({ ids: [idToPoll] }, { abortSignal: pollOpts.signal });
 			const build = /** @type {{ builds?: Array<Record<string, any>> }} */ (res)?.builds?.[0];
-			if (build && String(build.buildStatus) !== "IN_PROGRESS") return build;
+			if (build && String(build.buildStatus) !== "IN_PROGRESS") {
+				// The build has already terminated, so cleanup must not issue a redundant StopBuild.
+				stopped = true;
+				return build;
+			}
 			if (Date.now() >= deadline) {
 				await stop(pollOpts.signal);
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", `AWS codebuild sandbox build did not finish within ${timeoutMs}ms.`, { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: idToPoll });
