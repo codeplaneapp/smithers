@@ -12,3 +12,6 @@ An Effect is a re-runnable description: if the returned effect is ever run later
 Capture the start inside the effect (e.g. `Effect.sync(() => nowMs())` at the head of the gen block, or a Metric timing combinator) so duration measures execution only.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 730e349d3f3e93698682f41eac6a171faf004b49.
