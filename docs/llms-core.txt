@@ -3429,7 +3429,6 @@ type TaskProps = {
   async?: boolean; // with needsApproval: let unrelated flow continue
   timeoutMs?: number;
   retries?: number; // default Infinity with exponential backoff
-  maxSchemaRetries?: number; // output-format/schema corrections; default 3, 0 disables
   noRetry?: boolean;
   retryPolicy?: { backoff?: "fixed" | "linear" | "exponential"; initialDelayMs?: number };
   continueOnFail?: boolean;
@@ -3642,11 +3641,7 @@ const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reas
 
 - Three modes by `children` shape: agent (with `agent`), compute (function, no agent), static (value, no agent).
 - `fork` requires an agent task; the source must be an agent task with a session snapshot. Forking copies the conversation into a new session and never reuses a native session id.
-- When `outputSchema` is set, JSON is extracted from agent text. `maxSchemaRetries`
-  bounds all extra agent calls used to correct malformed JSON or schema-invalid
-  output; it defaults to `3` and is separate from execution `retries`. Set it to
-  `0` when another protocol owns repair or when a second call could repeat tools
-  or side effects.
+- When `outputSchema` is set, JSON is extracted from agent text; schema-validation retries don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.
 
 ---
@@ -6279,10 +6274,6 @@ phase is reactive: it re-derives its slice of the delegation tree from the
 rows land, and user edits or probe findings replan the affected subtree
 without restarting anything.
 
-For recursive model-selected topology, see the experimental
-[`<Trellis>`](/components/trellis). `DelegationChain` remains the fixed,
-phase-oriented v1 contract.
-
 ```ts
 // Props
 import { DelegationChain } from "smithers-orchestrator";
@@ -7363,7 +7354,7 @@ type RunOptions = {
   parentRunId?: string | null;
   input: Record<string, unknown>;
   maxConcurrency?: number;          // default 4
-  maxConcurrencyPinned?: boolean;   // internal proof that maxConcurrency was explicitly persisted
+  maxConcurrencyPinned?: boolean;   // internal/runtime proof that maxConcurrency was explicitly persisted for this run
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
   signal?: AbortSignal;

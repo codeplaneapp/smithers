@@ -1,0 +1,254 @@
+---
+title: <Trellis>
+description: Recursive, model-authored delegation over a strict and fuel-bounded workflow IR.
+---
+
+`<Trellis>` lets Sol or Fable decide the useful workflow shape from evidence
+discovered during the run. Authors return declarative `agent | sequence |
+parallel` data; Smithers validates and compiles it into ordinary tasks in the
+same run. Terra and Luna can execute bounded goals, but their schemas contain
+no way to delegate.
+
+Trellis is experimental and coexists with the fixed
+[`<DelegationChain>`](/components/delegation-chain). Use it for open-ended work
+whose topology should adapt at runtime. Keep fixed JSX for known deterministic
+graphs.
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import {
+  ClaudeCodeAgent,
+  CodexAgent,
+  Trellis,
+  createSmithers,
+  delegationV2Schemas,
+} from "smithers-orchestrator";
+import { z } from "zod/v4";
+
+const input = z.object({ prompt: z.string().min(1) });
+const { Workflow, smithers, outputs } = createSmithers({
+  input,
+  ...delegationV2Schemas,
+});
+
+const sol = new CodexAgent({ model: "gpt-5.6-sol" });
+const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
+const terra = new CodexAgent({ model: "gpt-5.6-terra" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna" });
+
+export default smithers((ctx) => (
+  <Workflow name="adaptive-work">
+    <Trellis
+      prompt={ctx.input.prompt}
+      agents={{ sol, fable, terra, luna }}
+      outputs={outputs}
+      maxConcurrency={4}
+      limits={{
+        maxTotalAuthorTurns: 32,
+        maxAuthorGenerations: 4,
+        maxAuthorDepth: 4,
+      }}
+    />
+  </Workflow>
+));
+```
+
+The run must explicitly pin the same concurrency value:
+
+```bash
+bunx smithers-orchestrator up workflow.tsx \
+  --input '{"prompt":"Implement the feature and prove it works"}' \
+  --max-concurrency 4
+```
+
+Trellis rejects an omitted or mismatched run cap and rejects
+`requireRerenderOnOutputChange: false`. This keeps recursive fan-out inside one
+authoritative scheduler pool and ensures outputs trigger the continuation
+render that consumes them.
+
+## Props
+
+```ts
+type TrellisProps = {
+  prompt: string;
+  goal?: GoalContract;
+  acceptance?: AcceptanceCriterion[];
+  instructions?: string;
+  role?: "sol" | "fable";             // default "sol"
+  work?: WorkKind;                     // default "synthesize"
+  outputContract?: OutputContractId;   // default "work_product"
+  agents: Record<"sol" | "fable" | "terra" | "luna", AgentLike | AgentLike[]>;
+  outputs: TrellisOutputs;             // from delegationV2Schemas
+  idPrefix?: string;                   // default "trellis"
+  semanticRevision?: string;
+  criticalExecutionPolicy?: {
+    allowedCategories: Array<
+      | "security_boundary"
+      | "data_integrity"
+      | "concurrency_invariant"
+      | "protocol_core"
+      | "irreversible_migration"
+    >;
+    allowedPathPrefixes: string[];     // normalized workspace-relative paths
+    maxChangedLines: number;           // 1..500, per admitted execution
+  };
+  maxConcurrency?: number;             // default 4; must equal the pinned run cap
+  limits?: {
+    maxTotalAuthorTurns?: number;       // default 32; global recursive author fuel
+    maxAuthorGenerations?: number;      // default 4 per logical author
+    maxAuthorDepth?: number;            // default 4
+    maxNodesPerProgram?: number;        // default 64
+    maxProgramDepth?: number;           // default 8
+    maxFanout?: number;                 // default 16
+    maxPromptBytes?: number;            // default 16,384
+    maxTotalPromptBytes?: number;       // default 131,072
+  };
+  skipIf?: boolean;
+};
+```
+
+Spread `delegationV2Schemas` into the same `createSmithers` call and pass its
+`outputs`. It registers raw author and worker envelopes, validation rows,
+canonical outcomes, the final row, and reserved question/answer rows.
+
+`semanticRevision` is a caller-owned cache/identity revision. Change it when an
+agent's provider, sandbox, ambient commands, or tool policy changes in a way
+that is not visible in the agent fingerprint; Trellis then derives new root and
+final node IDs instead of reusing old semantic results.
+
+### Exceptional Sol/Fable execution
+
+Direct Sol/Fable implementation is disabled when `criticalExecutionPolicy` is
+omitted. With a policy, an authored `execute` node must request a registered
+criticality category, state the invariant and line sensitivity, name explicit
+workspace-relative paths and expected changed lines, identify surrounding
+delegated work, and feed its output to an independent review node. That review,
+or a node consuming it, must be a declared program output so the next author
+continuation cannot race it.
+
+Independent means a different role backed by a non-overlapping configured
+agent or failover chain, not merely a different graph node. Trellis derives the
+allowed reviewer-role matrix from `agents`: the executor and reviewer cannot
+share the same `AgentLike` object or the same non-empty `AgentLike.id`, and any
+overlap between their failover chains disqualifies that role pairing.
+
+The validator admits a request only inside the caller's category, path-prefix,
+and line ceiling. The compiler then binds the canonical grant to the exact
+invocation, program ID/digest, logical node, role, `execute` work kind, and the
+reviewer's role and canonical outcome node; an
+ungranted or mismatched Sol/Fable `complete` becomes
+`runtime_failed/invalid_return`. Policy and grant hashes are persisted in task
+metadata, and changing policy changes the root semantic identity.
+
+This is an admission contract, not measured filesystem enforcement in Phase A.
+The runtime does not yet compare the reported estimate with a real diff or
+prevent symlink/ambient-shell escapes. Configure an adapter-owned sandbox/tool
+boundary when those guarantees are required.
+
+## Authority and return types
+
+Every model return is a strict top-level object containing a tagged union:
+
+| Renderer | Allowed final tags | May author descendants |
+| --- | --- | --- |
+| Sol/Fable author | `subworkflow | complete | blocked` | Yes |
+| Sol/Fable semantic repair | `subworkflow` only after settlement rules | Correct one rejected fragment |
+| Terra worker | `complete | blocked` | No |
+| Luna worker | `complete | blocked` | No |
+| Trusted settlement | `complete | blocked | runtime_failed` | No |
+| Root final row | `complete | blocked | runtime_failed | fuel_exhausted` | No |
+
+An authored subworkflow can contain Sol, Fable, Terra, or Luna `agent` nodes
+inside `sequence` and `parallel` containers. Sol/Fable agent nodes recursively
+render another author invocation. Terra/Luna agent nodes render one worker and
+one deterministic settlement. Workers cannot smuggle graph structure because
+`subworkflow` is absent from their output schema.
+
+The runtime does not trust a model's terminal claim directly. Settlement binds
+it to the trusted assignment's role, work kind, output contract, and exact
+acceptance IDs; every passed or failed criterion must cite a real evidence or
+artifact ID. Bad coverage, a dangling proof, the wrong work kind, or a
+contract-specific shape violation becomes parent-visible
+`runtime_failed/invalid_return`.
+
+## Recursive execution
+
+One logical author invocation proceeds as follows:
+
+1. Sol/Fable returns `complete`, `blocked`, or a proposed subworkflow.
+2. A deterministic validation node receives a bounded raw JSON proposal and
+   rejects unknown fields/tags, bad roles,
+   unresolved/forward references, unsafe parallel writes, invalid critical
+   execution, contract mismatches, and resource-limit violations.
+3. One semantic-repair author turn may correct rejected IR. A structural diff
+   permits changes only at diagnosed fragments and necessarily affected
+   references; valid nodes, intent, and continuation state cannot be replaced.
+   Rejection never mounts descendants.
+4. Accepted IR compiles inline into the current run and preserves explicit
+   declared-output fan-in.
+5. Every child settles to a canonical outcome. The author receives a bounded,
+   provenance-bearing evidence packet and either finishes or authors the
+   smallest corrective fragment.
+
+This expresses direct delegation, pipelines, fan-out/fan-in, research and POC
+waves, debate, and review/optimization loops. The loop is the author
+continuation over settled evidence rather than a model-authored JavaScript
+condition.
+
+Accepted history is append-only. Physical IDs include runtime/prompt/registry
+versions, the root assignment, author lineage, generation, semantic program
+digest, logical ID, and phase. Reordering parallel siblings does not change the
+digest; changing sequence order or prompt semantics does. Completed rows are
+therefore replay-safe without treating a mutable logical ID as identity.
+
+## Fuel and concurrency
+
+`maxTotalAuthorTurns` is the hard recursive cap for all Sol/Fable calls,
+including semantic repair. After an accepted fragment, remaining turns are
+deterministically partitioned between the parent continuation and immediate
+nested authors by sorted logical ID. Shares are immutable and non-refundable:
+unused child fuel burns, so concurrent siblings cannot race or reset a shared
+counter. Author tasks have no execution retries and set `maxSchemaRetries={0}`.
+At the last permitted author depth, Sol/Fable may still author Terra/Luna work,
+but validation rejects another Sol/Fable child before it can mount.
+
+Trusted task metadata persists the pinned root concurrency, global author-turn
+cap, generation/depth limits, and each author invocation's immutable allocation
+and local remainder. Workflow UIs can therefore distinguish selected-run truth
+from next-launch controls. A root invocation remainder is not the global
+remainder after fuel has been partitioned into child allocations.
+
+The pinned run `maxConcurrency` is the hard aggregate. An authored
+`parallel.maxConcurrency` may add a smaller local cap but cannot exceed the
+root. Nested authored local caps that Smithers cannot compose faithfully are
+rejected in this release.
+
+## Output contracts
+
+Work intent and output shape are separate. The closed registry supports
+`work_product`, `goal_contract`, `plan`, `evaluation`, `classification`,
+`issue_scan`, `condition`, `artifact_collection`, and `evidence_collection`.
+The validator restricts which work kinds may promise each contract, and
+settlement checks contract-specific cardinality or structured detail.
+
+Unfavorable evidence is still a completed result: a failed review, disproven
+POC, or failed preview is not automatically `blocked`. Runtime crash, timeout,
+cancel, invalid return, fuel exhaustion, and invalid subworkflow remain typed
+separately.
+
+## Phase A limitations
+
+- The nonblocking `ask_question` broker is not wired. Prompts explicitly say
+  questions are unavailable, and the UI offers no answer control.
+- `Task.allowTools` is not an authority boundary for every adapter. Prompt
+  policy cannot prevent a shell-capable agent from invoking ambient commands;
+  configure role agents with the appropriate real sandbox/tool policy. The
+  example UI labels this boundary explicitly rather than presenting prompt
+  policy as enforced tool or filesystem isolation.
+- Hierarchical token, USD, and time reservations are not enforced.
+- Only `agent | sequence | parallel` is authorable. Branches, loops, macros,
+  approvals, arbitrary callbacks, child runs, and model-authored schemas are
+  intentionally unavailable.
+
+The repository includes a real custom UI and example workflow documented at
+[`trellis`](/workflows/trellis).
