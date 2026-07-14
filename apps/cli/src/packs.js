@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
@@ -280,7 +280,7 @@ function resolveModuleFile(file) {
     `${file}.ts`, `${file}.tsx`, `${file}.js`, `${file}.jsx`, `${file}.json`, `${file}.md`, `${file}.mdx`,
     join(file, "index.ts"), join(file, "index.tsx"), join(file, "index.js"), join(file, "index.jsx"),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+  return candidates.find((candidate) => existsSync(candidate) && statSync(candidate).isFile()) ?? null;
 }
 
 function localPackDir(from) {

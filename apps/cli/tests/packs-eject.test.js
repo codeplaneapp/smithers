@@ -27,6 +27,25 @@ function writePack(root, version = "1.0.0", marker = "original") {
   writeFileSync(join(root, "lib", "helper.ts"), `export default "${marker}";\n`);
 }
 
+function writeDirectoryWorkflowPack(root) {
+  mkdirSync(join(root, "workflows", "nested"), { recursive: true });
+  mkdirSync(join(root, "ui"), { recursive: true });
+  mkdirSync(join(root, "lib", "shared"), { recursive: true });
+  writeFileSync(join(root, "smithers.toon"), "name: directory-pack\nversion: 1.0.0\n");
+  writeFileSync(join(root, "workflows", "nested", "workflow.tsx"), [
+    "/* smithers",
+    "name: nested",
+    "*/",
+    'import helper from "../../lib/shared";',
+    'import { UI, Workflow, createSmithers } from "smithers-orchestrator";',
+    "const { smithers } = createSmithers({});",
+    'export default smithers(() => <Workflow name={helper}><UI entry="../../ui/nested.tsx" /></Workflow>);',
+    "",
+  ].join("\n"));
+  writeFileSync(join(root, "ui", "nested.tsx"), "export const uiMarker = true;\n");
+  writeFileSync(join(root, "lib", "shared", "index.ts"), 'export default "nested";\n');
+}
+
 function tempWorkspace() {
   const root = mkdtempSync(join(tmpdir(), "smithers-pack-eject-"));
   mkdirSync(join(root, ".smithers"), { recursive: true });
@@ -34,6 +53,25 @@ function tempWorkspace() {
 }
 
 describe("pack eject", () => {
+  test("copies directory-form workflows and resolves directory imports", async () => {
+    const workspace = tempWorkspace();
+    const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
+    writeDirectoryWorkflowPack(source);
+    try {
+      await addPack(`file:${source}`, { from: workspace, yes: true });
+      const result = ejectPack("directory-pack:nested", { from: workspace });
+
+      expect(result.files.map((file) => file.replace(`${workspace}/`, "")).sort()).toEqual([
+        ".smithers/lib/shared/index.ts",
+        ".smithers/ui/nested.tsx",
+        ".smithers/workflows/nested/workflow.tsx",
+      ]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(source, { recursive: true, force: true });
+    }
+  });
+
   test("copies the workflow's UI, prompts, and lib closure and local discovery shadows it", async () => {
     const workspace = tempWorkspace();
     const source = mkdtempSync(join(tmpdir(), "smithers-pack-source-"));
