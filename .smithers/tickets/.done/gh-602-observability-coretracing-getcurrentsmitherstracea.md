@@ -12,3 +12,6 @@ No in-repo code imports the `_coreTracing` variant (importers take `TracingServi
 A single implementation, or a distinct name for the correlation-context variant (or drop it from `_coreTracing.js` since nothing uses it).
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 67bea7399b96b4c7d6cc187d1deb27e1a174b3d3.
