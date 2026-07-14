@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
 import { loadManifest, parseManifest, renderManifest } from "./manifest.js";
+import { evaluateEligibility, parseWorkflowFrontmatter } from "./workflows.js";
 
 const ALLOWED = new Set(["smithers-orchestrator", "react", "zod"]);
 
@@ -67,7 +68,7 @@ export function scanPackImports(root) {
     const source = readFileSync(file, "utf8");
     for (const match of source.matchAll(/\bimport\s+(?:[^"']+?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
       const name = match[1] ?? match[2];
-      if (!name.startsWith(".") && !ALLOWED.has(name) && !name.startsWith("@smithers-orchestrator/")) {
+      if (!name.startsWith(".") && !ALLOWED.has(name) && !name.startsWith("@smithers-orchestrator/") && !name.startsWith("react/") && !name.startsWith("zod/")) {
         throw new Error(`Pack import not allowed: ${file} imports ${name}`);
       }
     }
@@ -130,8 +131,23 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
           if (entry.isDirectory()) walk(file);
           else if (/\.tsx$/.test(entry.name)) {
             const source = readFileSync(file, "utf8");
-            const fields = ["required-os", "required-bins", "required-env"].map((key) => source.match(new RegExp(`^//\\s*smithers-${key}:\\s*(.+)$`, "m"))?.[1]?.trim()).filter(Boolean);
-            if (fields.length) workflowTrust.push(`${entry.name}: ${fields.join(", ")}`);
+            const frontmatter = parseWorkflowFrontmatter(source);
+            const parseList = (key) => {
+              const value = frontmatter[key] ?? source.match(new RegExp(`^//\\s*smithers-${key}:\\s*(.+)$`, "m"))?.[1];
+              if (Array.isArray(value)) return value;
+              return typeof value === "string" ? value.replace(/^\\[(.*)\\]$/, "$1").split(",").map((item) => item.trim()).filter(Boolean) : [];
+            };
+            const requiredOs = parseList("required-os");
+            const requiredBins = parseList("required-bins");
+            const requiredEnv = parseList("required-env");
+            const eligibility = evaluateEligibility({
+              requiredOs,
+              requiredBins,
+              requiredEnv,
+            }, process.env);
+            if (requiredOs.length || requiredBins.length || requiredEnv.length) {
+              workflowTrust.push(`${entry.name}: ${eligibility.eligible ? "eligible" : eligibility.ineligibleReasons.join("; ")}`);
+            }
           }
         }
       };

@@ -125,7 +125,7 @@ function metadataValue(source, key) {
  * @param {string} source
  * @returns {Record<string, string | string[]>}
  */
-function parseWorkflowFrontmatter(source) {
+export function parseWorkflowFrontmatter(source) {
     // Only honor a block that appears before any executable statement so it is
     // unambiguously frontmatter (JSX pragma comments above it are fine).
     const match = source.match(/\/\*\s*smithers\b[^\n]*\n([\s\S]*?)\*\//);
@@ -258,7 +258,7 @@ function fieldBool(frontmatter, source, key) {
  * @param {NodeJS.ProcessEnv} env
  * @returns {{ eligible: boolean; ineligibleReasons: string[] }}
  */
-function evaluateEligibility(gating, env) {
+export function evaluateEligibility(gating, env) {
     /** @type {string[]} */
     const reasons = [];
     if (gating.requiredOs.length > 0 && !gating.requiredOs.includes(process.platform)) {
