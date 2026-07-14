@@ -2,6 +2,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { readAccounts } from "./readAccounts.js";
 import { writeAccounts } from "./writeAccounts.js";
 import { withAccountsLock } from "./withAccountsLock.js";
+import { invalidateUsageCacheEntry } from "./invalidateUsageCacheEntry.js";
 import { API_KEY_PROVIDERS, SUBSCRIPTION_PROVIDERS, VALID_PROVIDERS } from "./parseAccountsFile.js";
 
 /** @typedef {import("./Account.ts").Account} Account */
@@ -62,6 +63,9 @@ export function addAccount(account, options = {}) {
         // `replace: true` on a legacy label supersedes it — the migration path.
         const nextUnknown = preserved.filter((entry) => entry.label !== account.label);
         writeAccounts({ version: 1, accounts: next, unknownAccounts: nextUnknown }, env);
+        if (conflict >= 0 || preservedConflict >= 0) {
+            invalidateUsageCacheEntry(account.label, env);
+        }
         return persisted;
     });
 }

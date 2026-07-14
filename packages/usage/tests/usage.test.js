@@ -303,4 +303,36 @@ describe("getUsageForAccounts caching", () => {
         const second = await getUsageForAccounts(accounts, { env, nowMs: NOW + 1000 });
         expect(second[0].stale).toBe(true);
     });
+
+    test("does not replay a same-label report after the provider changes", async () => {
+        const env = newSmithersHome();
+        await getUsageForAccounts(
+            [{ label: "same", provider: "kimi", configDir: "/kimi" }],
+            { env, nowMs: NOW },
+        );
+
+        const [report] = await getUsageForAccounts(
+            [{ label: "same", provider: "codex", configDir: "/missing-codex" }],
+            { env, nowMs: NOW + 1000 },
+        );
+
+        expect(report.provider).toBe("codex");
+        expect(report.stale).toBe(false);
+        expect(report.error).not.toContain("Kimi");
+    });
+
+    test("misses after a same-provider config replacement, then hits for that account", async () => {
+        const env = newSmithersHome();
+        await getUsageForAccounts(
+            [{ label: "same", provider: "kimi", configDir: "/first" }],
+            { env, nowMs: NOW },
+        );
+
+        const replacement = [{ label: "same", provider: "kimi", configDir: "/second" }];
+        const second = await getUsageForAccounts(replacement, { env, nowMs: NOW + 1000 });
+        expect(second[0].stale).toBe(false);
+
+        const third = await getUsageForAccounts(replacement, { env, nowMs: NOW + 2000 });
+        expect(third[0].stale).toBe(true);
+    });
 });

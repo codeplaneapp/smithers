@@ -371,6 +371,7 @@ describe("getUsageForAccounts cache decisions", () => {
             version: 1,
             entries: {
                 k: {
+                    identity: { provider: "kimi", configDir: "/x" },
                     report: {
                         accountLabel: "k",
                         provider: "kimi",
@@ -401,6 +402,7 @@ describe("getUsageForAccounts cache decisions", () => {
             version: 1,
             entries: {
                 claude: {
+                    identity: { provider: "claude-code", configDir: "/x" },
                     report: {
                         accountLabel: "claude",
                         provider: "claude-code",
@@ -444,6 +446,7 @@ describe("getUsageForAccounts cache decisions", () => {
             version: 1,
             entries: {
                 cx: {
+                    identity: { provider: "codex", configDir: "/x" },
                     report: {
                         accountLabel: "cx", provider: "codex", authMode: "subscription",
                         source: "oauth", stale: false, estimate: false,
@@ -451,6 +454,7 @@ describe("getUsageForAccounts cache decisions", () => {
                     },
                 },
                 cl: {
+                    identity: { provider: "claude-code", configDir: claudeConfig },
                     report: {
                         accountLabel: "cl", provider: "claude-code", authMode: "subscription",
                         source: "oauth", stale: false, estimate: false,
@@ -458,6 +462,7 @@ describe("getUsageForAccounts cache decisions", () => {
                     },
                 },
                 km: {
+                    identity: { provider: "kimi", configDir: "/x" },
                     report: {
                         accountLabel: "km", provider: "kimi", authMode: "subscription",
                         source: "none", stale: false, estimate: false,

@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
-/** @typedef {{ version: 1; entries: Record<string, { report: UsageReport }> }} UsageCacheFile */
+/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }} UsageCacheAccountIdentity */
+/** @typedef {{ version: 1; entries: Record<string, { identity?: UsageCacheAccountIdentity; report: UsageReport }> }} UsageCacheFile */
 
 /**
  * Path to the on-disk usage cache. Lives next to `accounts.json` under the

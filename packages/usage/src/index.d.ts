@@ -410,7 +410,9 @@ declare const PUBLISHED_CAPS: Record<string, {
 }>;
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
-/** @typedef {{ version: 1; entries: Record<string, { report: UsageReport }> }} UsageCacheFile */
+/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }} UsageCacheAccountIdentity */
+/** @typedef {{ version: 1; entries: Record<string, { identity?: UsageCacheAccountIdentity; report: UsageReport }> }} UsageCacheFile */
 /**
  * Path to the on-disk usage cache. Lives next to `accounts.json` under the
  * Smithers root so it honors `SMITHERS_HOME` in tests and CI.
@@ -436,9 +438,16 @@ declare function readUsageCache(env?: NodeJS.ProcessEnv): UsageCacheFile;
  */
 declare function writeUsageCache(contents: UsageCacheFile, env?: NodeJS.ProcessEnv): string;
 type UsageReport = UsageReport$5;
+type UsageCacheAccountIdentity = {
+    provider: AccountProvider;
+    configDir?: string;
+    model?: string;
+    apiKeyHash?: string;
+};
 type UsageCacheFile = {
     version: 1;
     entries: Record<string, {
+        identity?: UsageCacheAccountIdentity;
         report: UsageReport;
     }>;
 };

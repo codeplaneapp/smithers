@@ -261,6 +261,24 @@ describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
         expect(replaced.addedAt).toBe(original.addedAt);
         expect(listAccounts(env)[0].addedAt).toBe(original.addedAt);
     });
+    test("addAccount invalidates only the replaced label's usage cache entry", () => {
+        const env = newSmithersHome();
+        addAccount({ label: "x", provider: "claude-code", configDir: "/a" }, { env });
+        const cachePath = join(env.SMITHERS_HOME, "usage-cache.json");
+        writeFileSync(cachePath, JSON.stringify({
+            version: 1,
+            entries: {
+                x: { report: { accountLabel: "x" } },
+                keep: { report: { accountLabel: "keep" } },
+            },
+        }));
+
+        addAccount({ label: "x", provider: "codex", configDir: "/b" }, { env, replace: true });
+
+        const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+        expect(cache.entries.x).toBeUndefined();
+        expect(cache.entries.keep).toBeDefined();
+    });
     test("addAccount accepts empty apiKey and persists api-provider models", () => {
         const env = newSmithersHome();
         const account = addAccount({
