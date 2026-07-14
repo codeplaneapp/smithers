@@ -4207,7 +4207,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 const priorContinuation = hijackCapableEngine
                     ? findHijackContinuation(attempts, hijackCapableEngine)
                     : undefined;
-                const resumeSession = priorContinuation?.mode === "native-cli"
+                // discardResumeSession must also veto the hijack-continuation
+                // path: the corrupt session id lives in prior attempt meta, so
+                // resuming it via priorContinuation reproduces the crash on
+                // every retry despite the checkpoint gate above.
+                const resumeSession = priorContinuation?.mode === "native-cli" && !discardResumeSession
                     ? priorContinuation.resume
                     : checkpointResumeSession;
                 // Fallback: we should be resuming (the same agent ran before) but
@@ -4217,6 +4221,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // worktree is shared by concurrent tasks, --continue is cwd-scoped
                 // and may attach the most recent session.
                 const continueSession = !resumeSession
+                    && !discardResumeSession
                     && heartbeatCheckpointUsable
                     && typeof heartbeatCheckpoint?.agentEngine === "string"
                     && attempts.length > 0;
