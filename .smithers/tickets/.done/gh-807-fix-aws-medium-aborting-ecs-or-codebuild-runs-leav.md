@@ -34,3 +34,6 @@ Accept AWS handler options and call client.send(command,{abortSignal}); thread t
 ## Dedupe notes
 
 #721 is redundant cleanup; #724/#738 are GCP/Vercel cancellation.
+
+
+> Closed by ticket-fleet: landed on main in 0fb5e448567a50cb04071c0d0328be31d84a1436.
