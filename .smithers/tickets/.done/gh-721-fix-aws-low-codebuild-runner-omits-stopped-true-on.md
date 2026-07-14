@@ -22,3 +22,6 @@ Concrete state-tracking asymmetry with the ECS runner: a wasted (and error-gener
 
 ## Fix
 Set `stopped = true` immediately before `return build` in `pollUntilComplete`, mirroring the ECS runner, and update the codebuild cleanup test to assert `stoppedBuilds.length === 0`.
+
+
+> Closed by ticket-fleet: landed on main in 6608f4ff785452f74cf3d22a68a3c585ab70388b.
