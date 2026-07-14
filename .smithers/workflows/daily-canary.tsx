@@ -13,7 +13,7 @@ import { codexFirst } from "../lib/codexAccounts";
 const inputSchema = z.object({
   mode: z.enum(["fresh", "persistent"]).default("fresh"),
   workspaceDir: z.string().default(""),
-  runLabel: z.string().default(new Date().toISOString().slice(0, 10)),
+  runLabel: z.string().default(() => new Date().toISOString().slice(0, 10)),
   lruLimit: z.number().int().positive().default(30),
   runHello: z.boolean().default(true),
   summaryPath: z.string().default(""),

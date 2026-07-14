@@ -11,7 +11,7 @@ import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 
 const inputSchema = z.object({
-  runLabel: z.string().default(new Date().toISOString().slice(0, 10)),
+  runLabel: z.string().default(() => new Date().toISOString().slice(0, 10)),
   summaryPath: z.string().default("/tmp/smithers-daily-research-summary.md"),
   sotaSummaryPath: z.string().default("/tmp/sota-research-summary.md"),
   runSotaResearch: z.boolean().default(true),
