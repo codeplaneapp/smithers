@@ -10,7 +10,8 @@ import './ExternalEventTypes.js';
  * Start the process-wide integration runtime: forks one supervised delivery
  * fiber per event source (webhook + polling) and exposes a promise-based
  * `handleWebhook` seam for the node HTTP server, plus a graceful `shutdown`.
- * Fibers run on a dedicated ManagedRuntime so shutdown cannot leak them.
+ * Shutdown drains accepted webhook events before interrupting polling and
+ * arbitrary sources. Fibers run on a dedicated ManagedRuntime so none leak.
  *
  * @param {MakeIntegrationRuntimeOptions} options
  * @returns {IntegrationRuntime}

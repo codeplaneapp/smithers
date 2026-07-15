@@ -16,6 +16,8 @@ sources emit acknowledged EventBatches. Core `deliverEvents` claims each event,
 signals runs parked on `WaitForEvent`, and completes the claim after full
 fanout; only then does a polling batch commit its proposed cursor. Components
 render `WaitForEvent` listeners (inbound) and compute-Task API calls (outbound).
+Runtime shutdown first closes webhook ingress and drains every accepted event,
+then stops polling and other open-ended source fibers.
 
 Conventions: implementation is `.js` with JSDoc types; type-only `.ts`
 sidecars (e.g. `GitHubConfig.ts`) hold the shapes. The

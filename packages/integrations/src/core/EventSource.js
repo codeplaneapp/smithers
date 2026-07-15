@@ -14,12 +14,15 @@ import { decodeExternalEvent } from "./ExternalEvent.js";
 import { IntegrationError } from "./IntegrationError.js";
 
 const DEFAULT_WEBHOOK_CAPACITY = 256;
+const WEBHOOK_END = Symbol("smithers.integration.webhook.end");
 
 /**
  * Build a Queue-backed webhook EventSource. Ingress code calls
  * `offer(request)` per incoming HTTP request: the request is verified
  * (`invalid-signature` failure on mismatch), decoded into ExternalEvents, and
  * enqueued; the returned `source.events` stream feeds the delivery pipeline.
+ * `shutdown` atomically closes ingress and appends EOS after every accepted
+ * event, allowing the stream to drain in FIFO order and complete naturally.
  *
  * @param {MakeWebhookSourceOptions} options
  * @returns {Effect.Effect<WebhookSource, never>}
@@ -27,11 +30,20 @@ const DEFAULT_WEBHOOK_CAPACITY = 256;
 export function makeWebhookSource(options) {
     const { id, capacity = DEFAULT_WEBHOOK_CAPACITY, verify, decode } = options;
     return Effect.gen(function* () {
-        /** @type {Queue.Queue<import("./ExternalEventTypes.ts").ExternalEvent>} */
-        const queue = yield* Queue.dropping(capacity);
+        // Reserve one internal slot for EOS. Public event capacity remains
+        // exactly `capacity`, so close never waits behind a full event queue.
+        /** @type {Queue.Queue<import("./ExternalEventTypes.ts").ExternalEvent | typeof WEBHOOK_END>} */
+        const queue = yield* Queue.bounded(capacity + 1);
         const offerLock = yield* Effect.makeSemaphore(1);
+        let closed = false;
         /** @type {EventSource} */
-        const source = { id, events: Stream.fromQueue(queue) };
+        const source = {
+            id,
+            events: Stream.fromQueue(queue).pipe(
+                Stream.takeWhile((item) => item !== WEBHOOK_END),
+                Stream.map((item) => /** @type {import("./ExternalEventTypes.ts").ExternalEvent} */ (item)),
+            ),
+        };
         /**
      * @param {WebhookRequest} request
      */
@@ -55,7 +67,7 @@ export function makeWebhookSource(options) {
                 events.push(yield* decodeExternalEvent(candidate).pipe(Effect.mapError((cause) => new IntegrationError("decode-failed", `Webhook decoder produced an invalid ExternalEvent for source "${id}".`, { sourceId: id }, { cause }))));
             }
             return yield* offerLock.withPermits(1)(Effect.gen(function* () {
-                if (yield* Queue.isShutdown(queue)) {
+                if (closed) {
                     return yield* Effect.fail(new IntegrationError("queue-closed", `Webhook source "${id}" is shut down.`, { sourceId: id }));
                 }
                 // Serialize producers so the capacity check and batch offer are
@@ -75,11 +87,16 @@ export function makeWebhookSource(options) {
                     return yield* Effect.fail(new IntegrationError("queue-full", `Webhook source "${id}" rejected the event batch.`, { sourceId: id, capacity, requested: events.length }));
                 }
                 return { accepted: events.length };
-            })).pipe(Effect.catchAllCause((cause) => Queue.isShutdown(queue).pipe(Effect.flatMap((isShutdown) => isShutdown
-                ? Effect.fail(new IntegrationError("queue-closed", `Webhook source "${id}" is shut down.`, { sourceId: id }))
-                : Effect.failCause(cause)))));
+            }));
         });
-        return { source, offer, shutdown: Queue.shutdown(queue) };
+        const shutdown = offerLock.withPermits(1)(Effect.uninterruptible(Effect.gen(function* () {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            yield* Queue.offer(queue, WEBHOOK_END);
+        })));
+        return { source, offer, shutdown };
     });
 }
 

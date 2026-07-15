@@ -9,6 +9,8 @@ import './ExternalEventTypes.js';
  * `offer(request)` per incoming HTTP request: the request is verified
  * (`invalid-signature` failure on mismatch), decoded into ExternalEvents, and
  * enqueued; the returned `source.events` stream feeds the delivery pipeline.
+ * `shutdown` atomically closes ingress and appends EOS after every accepted
+ * event, allowing the stream to drain in FIFO order and complete naturally.
  *
  * @param {MakeWebhookSourceOptions} options
  * @returns {Effect.Effect<WebhookSource, never>}

@@ -6,6 +6,8 @@ The service-agnostic integration pipeline every service builds on:
   `offer(request)` per HTTP request) and `makePollingSource` (repeat
   `poll(cursor)` on a schedule and emit an acknowledged `EventBatch`). A
   proposed cursor reaches the CursorStore only after the whole batch delivers.
+  Webhook close reserves an internal EOS slot, so the advertised event
+  capacity remains available and accepted events drain before the stream ends.
 - `deliverEvents.js` — acquire a leased pending claim in
   `_smithers_integration_deliveries`, then `signalRun` every run parked on
   `WaitForEvent(eventName, correlationId)`. A typed signal failure is recorded
@@ -14,7 +16,9 @@ The service-agnostic integration pipeline every service builds on:
   for immediate replay, while stale leases remain reclaimable after a crash.
 - `IntegrationRuntime.js` — the process-wide supervisor: one restart-forever
   fiber per source on a dedicated ManagedRuntime, a promise-based
-  `handleWebhook` seam for the node HTTP server, graceful `shutdown`.
+  `handleWebhook` seam for the node HTTP server, graceful `shutdown`. Shutdown
+  closes webhook ingress, drains accepted events, then interrupts polling and
+  arbitrary source fibers.
 
 Contracts:
 

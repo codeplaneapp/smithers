@@ -17,7 +17,8 @@ const SOURCE_RESTART_SCHEDULE = Schedule.union(Schedule.exponential("1 second"),
  * Start the process-wide integration runtime: forks one supervised delivery
  * fiber per event source (webhook + polling) and exposes a promise-based
  * `handleWebhook` seam for the node HTTP server, plus a graceful `shutdown`.
- * Fibers run on a dedicated ManagedRuntime so shutdown cannot leak them.
+ * Shutdown drains accepted webhook events before interrupting polling and
+ * arbitrary sources. Fibers run on a dedicated ManagedRuntime so none leak.
  *
  * @param {MakeIntegrationRuntimeOptions} options
  * @returns {IntegrationRuntime}
@@ -28,9 +29,11 @@ export function makeIntegrationRuntime(options) {
     /** @type {Map<string, (request: import("./EventSourceTypes.ts").WebhookRequest) => Effect.Effect<{ accepted: number }, import("@smithers-orchestrator/errors/SmithersError").SmithersError>>} */
     const webhookOffers = new Map();
     /** @type {Effect.Effect<void>[]} */
-    const sourceShutdowns = [];
+    const webhookShutdowns = [];
     /** @type {import("effect/Fiber").RuntimeFiber<void, never>[]} */
-    const fibers = [];
+    const webhookFibers = [];
+    /** @type {import("effect/Fiber").RuntimeFiber<void, never>[]} */
+    const sourceFibers = [];
     /**
    * @param {import("./EventSourceTypes.ts").EventSource} source
    */
@@ -46,11 +49,11 @@ export function makeIntegrationRuntime(options) {
         }
         const webhook = runtime.runSync(makeWebhookSource(config));
         webhookOffers.set(config.id, webhook.offer);
-        sourceShutdowns.push(webhook.shutdown);
-        fibers.push(runtime.runFork(supervise(webhook.source)));
+        webhookShutdowns.push(webhook.shutdown);
+        webhookFibers.push(runtime.runFork(supervise(webhook.source)));
     }
     for (const source of sources) {
-        fibers.push(runtime.runFork(supervise(source)));
+        sourceFibers.push(runtime.runFork(supervise(source)));
     }
     logInfo("integration runtime started", {
         webhookSourceCount: webhookOffers.size,
@@ -86,16 +89,34 @@ export function makeIntegrationRuntime(options) {
                 shuttingDown = true;
                 shutdownPromise = (async () => {
                     try {
-                        // Close the webhook queues first so in-flight events drain,
-                        // then interrupt the delivery fibers and dispose the runtime.
-                        await runtime.runPromise(Effect.all(sourceShutdowns, { discard: true }));
-                        await runtime.runPromise(Fiber.interruptAll(fibers));
+                        // Establish every webhook EOS concurrently, then wait for
+                        // accepted events to drain without interrupting delivery.
+                        await runtime.runPromise(Effect.all(webhookShutdowns, {
+                            concurrency: "unbounded",
+                            discard: true,
+                        }));
+                        await runtime.runPromise(Effect.gen(function* () {
+                            const exits = yield* Effect.all(webhookFibers.map((fiber) => Fiber.await(fiber)), {
+                                concurrency: "unbounded",
+                            });
+                            for (const exit of exits) {
+                                if (Exit.isFailure(exit)) {
+                                    return yield* Effect.failCause(exit.cause);
+                                }
+                            }
+                        }));
                     }
-                    catch {
-                        // best-effort — dispose below regardless
+                    finally {
+                        // Polling and arbitrary sources have no finite EOS
+                        // contract. Stop them only after webhook drain completes.
+                        try {
+                            await runtime.runPromise(Fiber.interruptAll(sourceFibers));
+                        }
+                        finally {
+                            await runtime.dispose();
+                            logInfo("integration runtime stopped", {}, "integrations:runtime");
+                        }
                     }
-                    await runtime.dispose();
-                    logInfo("integration runtime stopped", {}, "integrations:runtime");
                 })();
             }
             return shutdownPromise;

@@ -29,6 +29,9 @@ export type IntegrationRuntime = {
     sourceId: string,
     request: WebhookRequest,
   ) => Promise<{ accepted: number }>;
-  /** Interrupt all source fibers and dispose the runtime. Idempotent. */
+  /**
+   * Reject new ingress, drain accepted webhooks, stop other source fibers,
+   * and dispose the runtime. Concurrent calls share one promise.
+   */
   shutdown: () => Promise<void>;
 };

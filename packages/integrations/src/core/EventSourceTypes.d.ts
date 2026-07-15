@@ -46,6 +46,10 @@ type WebhookSource = {
     offer: (request: WebhookRequest) => effect.Effect.Effect<{
         accepted: number;
     }, SmithersError>;
+    /**
+     * Atomically reject new offers and append EOS after accepted events.
+     * Idempotent; the event stream drains in FIFO order before completing.
+     */
     shutdown: effect.Effect.Effect<void>;
 };
 type PollResult = {
