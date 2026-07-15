@@ -101,8 +101,15 @@ function tailLines(text: string, max: number): string[] {
 }
 
 export default smithers((ctx) => {
-  const targetRunId = ctx.input.targetRunId.trim();
-  const workflowPath = ctx.input.workflowPath ?? null;
+  // `smithers graph` renders with an empty input object so it can inspect the
+  // workflow without executing it. Runtime runs are still schema-validated,
+  // while graph rendering gets a stable display-only placeholder.
+  const inputTargetRunId = ctx.input?.targetRunId;
+  const targetRunId =
+    typeof inputTargetRunId === "string" && inputTargetRunId.trim()
+      ? inputTargetRunId.trim()
+      : "<target-run-id>";
+  const workflowPath = ctx.input?.workflowPath ?? null;
 
   const gather = ctx.outputMaybe("gather", { nodeId: "gather" });
   const investigate = ctx.outputMaybe("investigate", { nodeId: "investigate" });

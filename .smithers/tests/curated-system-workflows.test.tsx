@@ -151,6 +151,12 @@ describe.serial("curated system workflow causal contracts", () => {
       expect((await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line))).toEqual([["smithers-orchestrator", "inspect", "target-9", "--format", "json"], ["smithers-orchestrator", "events", "target-9"], ["smithers-orchestrator", "--version"]]);
       const postFailureWorkflow = await load("post-failure.tsx");
       expect(() => postFailureWorkflow.inputSchema.parse({ targetRunId: "   " })).toThrow();
+      const graphFrame = await renderWorkflow(postFailureWorkflow, {
+        workflowPath: join(workflows, "post-failure.tsx"),
+        input: {},
+        outputs: {},
+      });
+      expect(graphFrame.tasks.map((candidate) => candidate.nodeId)).toEqual(["gather"]);
       const normal = await render("post-failure.tsx", { targetRunId: "target-9", workflowPath: source }, [row("gather", gather as Row), row("investigate", investigate)]);
       expect(await runTask(task(normal, "output"))).toEqual({ targetRunId: "target-9", failureClass: "workflow-bug", confidence: "high", rootCause: investigate.rootCause, suggestion: investigate.suggestion, suggestionDetail: investigate.suggestionDetail, commands: investigate.commands, bugFiled: false, bugUrl: "", summary: `workflow-bug (high): edit-workflow-and-reset — ${(gather as { summary: string }).summary}` });
       const pending = await render("post-failure.tsx", { targetRunId: "target-9", workflowPath: source }, [row("gather", gather as Row), row("investigate", smithersBug)]);

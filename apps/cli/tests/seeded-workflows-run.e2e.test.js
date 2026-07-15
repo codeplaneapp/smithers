@@ -21,6 +21,8 @@ const SMOKE_COMMAND_TIMEOUT_MS = 120_000;
 const SMOKE_TEST_TIMEOUT_MS = 180_000;
 
 const AGENT_RESPONSE = JSON.stringify({
+  completed: true,
+  detail: "completed the seeded smoke-test fixture",
   greeting: "Hello, world.",
   summary: "mock agent completed the task",
   prompt: "hello",
@@ -153,11 +155,13 @@ const AGENT_RESPONSE = JSON.stringify({
 });
 
 const WORKFLOW_INPUTS = {
+  add: { spec: "file:fixture-pack" },
   "create-skill": { prompt: "Create a tiny test skill.", review: false, name: "mock-skill" },
   "create-ui": { targetWorkflow: "hello" },
   "create-workflow": { prompt: "Create a tiny test workflow.", review: false, name: "mock-workflow" },
   "context-engineer": { prompt: "Plan a tiny safe change.", review: false },
   "post-failure": { targetRunId: "missing-run" },
+  "share-pack": { repo: "smithersai/seeded-smoke-pack", dryRun: true },
   "report-slideshow": { targetRunId: "missing-run", title: "Missing run report" },
   smithering: {
     prompt: "Make a tiny harmless change.",
@@ -205,6 +209,7 @@ function writeFakeAgentBinaries(binDir) {
     // stage and conceal retry regressions.
     'const scaffoldStage = invocation.includes("# scaffold the workflow files\\n\\nyou are the scaffolder.");',
     'const documentStage = invocation.includes("# document the new workflow\\n\\nthe new workflow verifies cleanly.");',
+    'const completeManifestStage = invocation.includes("the pack manifest .smithers/smithers.toon in this repository is incomplete:");',
     "function writeFixtureFiles() {",
     "  const root = process.cwd();",
     '  const workflowDir = path.join(root, ".smithers", "workflows");',
@@ -242,8 +247,14 @@ function writeFakeAgentBinaries(binDir) {
     '  if (mode === "mismatched") { fs.writeFileSync(path.join(skillsDir, "mock-workflow.md"), "---\\nname: other-workflow\\nworkflow: mock-workflow\\n---\\n", "utf8"); return; }',
     '  fs.writeFileSync(path.join(skillsDir, "mock-workflow.md"), "---\\nname: mock-workflow\\ndescription: Test fixture skill.\\nworkflow: mock-workflow\\n---\\n\\n# Mock Workflow\\n", "utf8");',
     "}",
+    "function completeManifestFixture() {",
+    "  const manifestPath = path.join(process.cwd(), \".smithers\", \"smithers.toon\");",
+    '  const manifest = fs.readFileSync(manifestPath, "utf8").replace(/^description:.*$/m, "description: Seeded smoke-test pack");',
+    '  fs.writeFileSync(manifestPath, manifest, "utf8");',
+    "}",
     'if (scaffoldStage) writeFixtureFiles();',
     'if (documentStage) writeSkillFixture();',
+    'if (completeManifestStage) completeManifestFixture();',
   ].join("\n");
   const responseLiteral = JSON.stringify(AGENT_RESPONSE);
   writeExecutable(binDir, "claude", [
@@ -294,6 +305,7 @@ function initWorkflowPack() {
     tokens: { access_token: "fake-access-token", account_id: "acct_test" },
   }) + "\n");
   repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
+  repo.write("registry-readme.md", "# Awesome Smithers\n\n## Packs\n\n");
   const env = {
     HOME: repo.dir,
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
@@ -302,6 +314,7 @@ function initWorkflowPack() {
     GEMINI_API_KEY: "",
     GOOGLE_API_KEY: "",
     SMITHERS_FAKE_AGENT_RESPONSE: AGENT_RESPONSE,
+    SMITHERS_SHARE_REGISTRY_README: repo.path("registry-readme.md"),
   };
   const init = runSmithers(["init", "--no-install"], {
     cwd: repo.dir,
@@ -315,7 +328,7 @@ function initWorkflowPack() {
 
 test("every generated init-pack workflow starts and reaches a valid smoke state with fake agents", () => {
   expect(SEEDED_WORKFLOW_IDS).toEqual([
-    "create-skill", "create-ui", "create-workflow", "docs-driven-development", "eval-suite-run", "init", "post-failure", "upgrade",
+    "add", "create-skill", "create-ui", "create-workflow", "docs-driven-development", "eval-suite-run", "init", "post-failure", "share-pack", "upgrade",
   ]);
 });
 
@@ -352,6 +365,17 @@ for (const id of SEEDED_WORKFLOW_IDS) {
   }
   test(`seeded workflow ${id} runs with fake agents`, () => {
     const { repo, env } = initWorkflowPack();
+    if (id === "add") {
+      repo.write("fixture-pack/smithers.toon", [
+        "name: seeded-smoke-fixture",
+        "version: 1.0.0",
+        "description: Seeded add workflow smoke fixture",
+        "capabilities:",
+        "  writes: none",
+        "",
+      ].join("\n"));
+      repo.write("fixture-pack/workflows/hello.tsx", "export default null;\n");
+    }
     const result = runSmithers(
       ["workflow", "run", id, "--input", JSON.stringify(workflowInput(id))],
       { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS },
