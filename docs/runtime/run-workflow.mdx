@@ -28,6 +28,18 @@ function runWorkflow<Schema>(
 
 Both `RunOptions` and `RunResult` are defined in [Types](/reference/types).
 
+## Concurrency
+
+When `opts.maxConcurrency` is omitted, a run starts with a cap of 4 concurrent
+tasks. Smithers can raise that cap as work queues, up to the positive-integer
+`SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` environment setting (16 by default).
+A wider declared `<Parallel maxConcurrency>` or `subtreeConcurrency` also raises
+an unpinned run's initial cap and is not limited by that automatic ceiling.
+
+Providing `opts.maxConcurrency` explicitly pins the cap. It disables automatic
+raises, including declared-width raises, and the run cannot exceed the supplied
+value. The supplied value can itself be larger than the automatic ceiling.
+
 ## Resume
 
 Pass the original `runId` plus `resume: true`. State loads from the configured durable store, completed tasks are skipped, in-progress attempts older than 15 minutes are abandoned and retried.

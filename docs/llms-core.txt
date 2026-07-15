@@ -2319,6 +2319,27 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 - Rewrites: `bunx smithers-orchestrator workflow WORKFLOW_ID` runs a discovered workflow when `<id>` resolves; `bunx smithers-orchestrator workflow.tsx` behaves like `bunx smithers-orchestrator up workflow.tsx`; `bunx smithers-orchestrator chat create` behaves like `bunx smithers-orchestrator chat-create`.
 - JSON arguments are preflighted before workflow modules load. `--input` and `--annotations` accept an inline JSON value or `-` to read JSON from stdin, capped at 1 MiB.
 
+## Run concurrency
+
+`up` and `workflow run` begin with a run-wide cap of 4 concurrent tasks when
+you omit `--max-concurrency`. Smithers raises that default automatically when
+queued work shows that the workflow needs more slots. Demand-driven raises stop
+at `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING`, which defaults to 16. Set that
+environment variable to a positive integer to choose a different automatic
+ceiling; an absent or invalid value uses 16.
+
+Passing `--max-concurrency N` (or `-c N`) is an explicit pin, not a starting
+value. It disables both demand-driven raises and automatic raises derived from
+the workflow's declared `<Parallel>` width, so the run never exceeds `N`.
+The explicit value is not limited by `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING`:
+use `--max-concurrency 64` when you intentionally want a 64-task cap.
+
+Without an explicit pin, a workflow that declares a wider `<Parallel
+maxConcurrency={N}>` or `subtreeConcurrency={N}` starts at that declared width,
+even when `N` exceeds the automatic ceiling. The ceiling applies only to
+additional demand-driven raises. See [Parallel](/components/parallel) for how
+the run-wide and group caps compose.
+
 ## Exit codes
 
 ```text
@@ -3700,7 +3721,7 @@ import { Parallel } from "smithers-orchestrator";
 type ParallelProps = {
   id?: string;
   label?: string; // display name for this group in run views (graph, /workflows mirror)
-  maxConcurrency?: number; // default: no per-group cap; effective concurrency is min(this, the run-level --max-concurrency, which defaults to 4)
+  maxConcurrency?: number; // default: no per-group cap; effective concurrency is bounded by the run-level cap
   subtreeConcurrency?: number; // opt-in: cap DIRECT CHILDREN (whole subtrees) in flight, not leaf tasks
   skipIf?: boolean;
   children?: ReactNode;
@@ -3793,7 +3814,7 @@ reviews run concurrently; the run-level cap still bounds total in-flight tasks.
 
 - Group completes when all children finish. To let the group proceed past a failing child, set `continueOnFail` on that individual child `<Task>`. It is not a `<Parallel>` prop.
 - Children receive `parallelGroupId` and `parallelMaxConcurrency` in their descriptor; under a subtree cap every descendant task also receives `subtreeGroupId`, `subtreeChildKey`, and `subtreeMax`.
-- A run-level cap (`bunx smithers-orchestrator up --max-concurrency, -c`, default `4`) bounds the total in-flight tasks across the whole run, applied on top of every group. So a group can never exceed it: `<Parallel>` with no cap runs at most 4 children at once, and even `<Parallel maxConcurrency={5}>` is silently truncated to 4. To fan out wider, raise `-c` (or set the run's `maxConcurrency`) as well. `subtreeConcurrency` composes the same way: leaf-group cap, subtree cap, and the run-level cap must all pass.
+- The run-wide cap applies on top of every group. With no `--max-concurrency` pin, it starts at 4 and automatically grows with queued demand up to `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` (16 by default). A declared `maxConcurrency` or `subtreeConcurrency` width can also raise the initial run-wide cap above that automatic ceiling. `--max-concurrency N` pins the cap instead: it disables those raises and the run never exceeds `N`, but `N` itself may be larger than the automatic ceiling. `subtreeConcurrency` composes the same way: leaf-group cap, subtree cap, and the run-wide cap must all pass.
 
 ---
 
@@ -10510,6 +10531,18 @@ function runWorkflow<Schema>(
 ```
 
 Both `RunOptions` and `RunResult` are defined in [Types](/reference/types).
+
+## Concurrency
+
+When `opts.maxConcurrency` is omitted, a run starts with a cap of 4 concurrent
+tasks. Smithers can raise that cap as work queues, up to the positive-integer
+`SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` environment setting (16 by default).
+A wider declared `<Parallel maxConcurrency>` or `subtreeConcurrency` also raises
+an unpinned run's initial cap and is not limited by that automatic ceiling.
+
+Providing `opts.maxConcurrency` explicitly pins the cap. It disables automatic
+raises, including declared-width raises, and the run cannot exceed the supplied
+value. The supplied value can itself be larger than the automatic ceiling.
 
 ## Resume
 

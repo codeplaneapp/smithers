@@ -17,6 +17,27 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 - Rewrites: `bunx smithers-orchestrator workflow WORKFLOW_ID` runs a discovered workflow when `<id>` resolves; `bunx smithers-orchestrator workflow.tsx` behaves like `bunx smithers-orchestrator up workflow.tsx`; `bunx smithers-orchestrator chat create` behaves like `bunx smithers-orchestrator chat-create`.
 - JSON arguments are preflighted before workflow modules load. `--input` and `--annotations` accept an inline JSON value or `-` to read JSON from stdin, capped at 1 MiB.
 
+## Run concurrency
+
+`up` and `workflow run` begin with a run-wide cap of 4 concurrent tasks when
+you omit `--max-concurrency`. Smithers raises that default automatically when
+queued work shows that the workflow needs more slots. Demand-driven raises stop
+at `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING`, which defaults to 16. Set that
+environment variable to a positive integer to choose a different automatic
+ceiling; an absent or invalid value uses 16.
+
+Passing `--max-concurrency N` (or `-c N`) is an explicit pin, not a starting
+value. It disables both demand-driven raises and automatic raises derived from
+the workflow's declared `<Parallel>` width, so the run never exceeds `N`.
+The explicit value is not limited by `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING`:
+use `--max-concurrency 64` when you intentionally want a 64-task cap.
+
+Without an explicit pin, a workflow that declares a wider `<Parallel
+maxConcurrency={N}>` or `subtreeConcurrency={N}` starts at that declared width,
+even when `N` exceeds the automatic ceiling. The ceiling applies only to
+additional demand-driven raises. See [Parallel](/components/parallel) for how
+the run-wide and group caps compose.
+
 ## Exit codes
 
 ```text

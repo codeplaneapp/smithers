@@ -9,7 +9,7 @@ import { Parallel } from "smithers-orchestrator";
 type ParallelProps = {
   id?: string;
   label?: string; // display name for this group in run views (graph, /workflows mirror)
-  maxConcurrency?: number; // default: no per-group cap; effective concurrency is min(this, the run-level --max-concurrency, which defaults to 4)
+  maxConcurrency?: number; // default: no per-group cap; effective concurrency is bounded by the run-level cap
   subtreeConcurrency?: number; // opt-in: cap DIRECT CHILDREN (whole subtrees) in flight, not leaf tasks
   skipIf?: boolean;
   children?: ReactNode;
@@ -102,4 +102,4 @@ reviews run concurrently; the run-level cap still bounds total in-flight tasks.
 
 - Group completes when all children finish. To let the group proceed past a failing child, set `continueOnFail` on that individual child `<Task>`. It is not a `<Parallel>` prop.
 - Children receive `parallelGroupId` and `parallelMaxConcurrency` in their descriptor; under a subtree cap every descendant task also receives `subtreeGroupId`, `subtreeChildKey`, and `subtreeMax`.
-- A run-level cap (`bunx smithers-orchestrator up --max-concurrency, -c`, default `4`) bounds the total in-flight tasks across the whole run, applied on top of every group. So a group can never exceed it: `<Parallel>` with no cap runs at most 4 children at once, and even `<Parallel maxConcurrency={5}>` is silently truncated to 4. To fan out wider, raise `-c` (or set the run's `maxConcurrency`) as well. `subtreeConcurrency` composes the same way: leaf-group cap, subtree cap, and the run-level cap must all pass.
+- The run-wide cap applies on top of every group. With no `--max-concurrency` pin, it starts at 4 and automatically grows with queued demand up to `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` (16 by default). A declared `maxConcurrency` or `subtreeConcurrency` width can also raise the initial run-wide cap above that automatic ceiling. `--max-concurrency N` pins the cap instead: it disables those raises and the run never exceeds `N`, but `N` itself may be larger than the automatic ceiling. `subtreeConcurrency` composes the same way: leaf-group cap, subtree cap, and the run-wide cap must all pass.
