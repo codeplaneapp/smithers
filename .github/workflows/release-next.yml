@@ -39,22 +39,25 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Require every push workflow green for this commit
+      - name: Require the latest push workflow runs green for this commit
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          ready=true
           runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-            --jq '[.workflow_runs[] | select(.event == "push") | {name, conclusion}]')
-          for wf in "CI" "Faults (per-PR)"; do
-            green=$(echo "$runs" | jq --arg wf "$wf" '[.[] | select(.name == $wf) | .conclusion] | (length > 0) and all(. == "success")')
-            if [ "$green" != "true" ]; then
-              echo "✗ $wf is not (yet) green for $HEAD_SHA — skipping; its completion event will re-trigger this workflow"
-              ready=false
-            fi
-          done
+            --jq '.workflow_runs')
+          if gate=$(printf '%s' "$runs" | node scripts/release-next-gate.mjs); then
+            ready=true
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then exit "$status"; fi
+            ready=false
+          fi
+          echo "$gate"
+          if [ "$ready" != "true" ]; then
+            echo "Latest required push workflows are not yet green for $HEAD_SHA; their completion events will re-trigger this workflow"
+          fi
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v6.0.2

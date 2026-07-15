@@ -18,34 +18,66 @@ function git(cwd, ...args) {
 
 function scratchRepo() {
   const dir = mkdtempSync(join(tmpdir(), "smithers-release-tag-"));
-  created.push(dir);
+  const origin = mkdtempSync(join(tmpdir(), "smithers-release-tag-origin-"));
+  created.push(dir, origin);
   git(dir, "init", "--quiet");
   git(dir, "config", "user.name", "Release Guard Test");
   git(dir, "config", "user.email", "release-guard@example.com");
   git(dir, "commit", "--allow-empty", "-m", "base", "--quiet");
-  return dir;
+  git(origin, "init", "--bare", "--quiet");
+  git(dir, "remote", "add", "origin", origin);
+  return { dir, origin };
 }
 
 describe("release tag guard", () => {
   test("allows a tag that resolves to HEAD", () => {
-    const dir = scratchRepo();
+    const { dir } = scratchRepo();
     git(dir, "tag", "-a", "v9.9.9", "-m", "release");
 
     expect(() => assertReleaseTagMatchesHead({ cwd: dir, version: "9.9.9" })).not.toThrow();
   });
 
   test("rejects a tag that resolves behind HEAD with recovery instructions", () => {
-    const dir = scratchRepo();
+    const { dir } = scratchRepo();
     git(dir, "tag", "-a", "v9.9.9", "-m", "release");
     git(dir, "commit", "--allow-empty", "-m", "new work", "--quiet");
 
     expect(() => assertReleaseTagMatchesHead({ cwd: dir, version: "9.9.9" })).toThrow(
-      /release tag v9\.9\.9 points to .* but HEAD is .*Re-tag.*git tag -f -a v9\.9\.9 HEAD.*force-push.*or bump/s,
+      /local release tag v9\.9\.9 points to .* but HEAD is .*Re-tag.*git tag -f -a v9\.9\.9 HEAD.*force-push.*or bump/s,
     );
   });
 
-  test("allows a release version whose tag does not exist", () => {
-    const dir = scratchRepo();
+  test("rejects a local tag at HEAD when origin has the tag on another commit", () => {
+    const { dir } = scratchRepo();
+    git(dir, "tag", "-a", "v9.9.9", "-m", "old release");
+    git(dir, "push", "origin", "refs/tags/v9.9.9");
+    git(dir, "commit", "--allow-empty", "-m", "new release", "--quiet");
+    git(dir, "tag", "-f", "-a", "v9.9.9", "-m", "retagged release");
+
+    expect(() => assertReleaseTagMatchesHead({ cwd: dir, version: "9.9.9" })).toThrow(
+      /release tag v9\.9\.9 on origin points to .* but HEAD is .*force-push it with.*git push --force origin refs\/tags\/v9\.9\.9/s,
+    );
+  });
+
+  test("allows a remote tag that resolves to HEAD", () => {
+    const { dir } = scratchRepo();
+    git(dir, "tag", "-a", "v9.9.9", "-m", "release");
+    git(dir, "push", "origin", "refs/tags/v9.9.9");
+
+    expect(() => assertReleaseTagMatchesHead({ cwd: dir, version: "9.9.9" })).not.toThrow();
+  });
+
+  test("throws when origin cannot be queried", () => {
+    const { dir } = scratchRepo();
+    git(dir, "remote", "set-url", "origin", join(dir, "missing-origin.git"));
+
+    expect(() => assertReleaseTagMatchesHead({ cwd: dir, version: "9.9.9" })).toThrow(
+      /could not query release tag v9\.9\.9 on origin.*transport and authentication/i,
+    );
+  });
+
+  test("allows a release version whose tag is absent locally and remotely", () => {
+    const { dir } = scratchRepo();
     expect(() => assertReleaseTagMatchesHead({ cwd: dir, version: "9.9.9" })).not.toThrow();
   });
 });
