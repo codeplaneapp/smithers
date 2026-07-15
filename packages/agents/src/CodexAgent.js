@@ -538,7 +538,10 @@ export class CodexAgent extends BaseCliAgent {
             pushFlag(args, "--sandbox", this.opts.sandbox);
         if (!resumeSession)
             pushFlag(args, "--profile", this.opts.profile);
-        if (!resumeSession && this.opts.fullAuto) {
+        if (!resumeSession && this.opts.fullAuto && !this.opts.sandbox) {
+            // `--full-auto` is a deprecated alias for `--sandbox workspace-write`;
+            // codex-cli 0.144+ rejects the flag alongside an explicit --sandbox,
+            // so an explicit sandbox option wins and the alias is dropped.
             args.push("--full-auto");
         }
         else if (yoloEnabled || this.opts.dangerouslyBypassApprovalsAndSandbox) {

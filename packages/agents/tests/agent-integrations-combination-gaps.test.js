@@ -133,6 +133,24 @@ describe("CodexAgent approval-mode precedence", () => {
     }
   });
 
+  test("an explicit sandbox suppresses the deprecated --full-auto alias", async () => {
+    const command = await new CodexAgent({
+      fullAuto: true,
+      sandbox: "workspace-write",
+    }).buildCommand({
+      cwd: "/tmp/project",
+      prompt: "go",
+      options: {},
+    });
+    try {
+      expect(command.args).not.toContain("--full-auto");
+      expect(command.args).toContain("--sandbox");
+      expect(command.args).toContain("workspace-write");
+    } finally {
+      await command.cleanup?.();
+    }
+  });
+
   test("resume drops --full-auto and falls back to the dangerous bypass flag", async () => {
     const command = await new CodexAgent({
       fullAuto: true,
