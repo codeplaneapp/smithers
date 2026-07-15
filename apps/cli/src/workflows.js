@@ -563,12 +563,15 @@ export function resolveWorkflowDirs(from = process.cwd(), env = process.env) {
     for (const { packDir } of resolvePackDirs(from, env)) {
         dirs.push({ scope: "curated", dir: join(workflowsDirForPack(packDir), CURATED_SUBDIR), packDir });
     }
+    const global = globalPackDir(env);
     const local = findLocalPackDir(from);
-    if (local) {
+    // A home-dir workspace resolves its local pack to the global pack; collapse
+    // the tiers so the pack is enumerated once, labeled global, mirroring the
+    // local==global collapse resolvePackDirs applies to the curated tier.
+    if (local && resolve(local) !== resolve(global)) {
         dirs.push({ scope: "local", dir: workflowsDirForPack(local), packDir: local });
         for (const packDir of installedPackDirs(join(local, "packs"))) dirs.push({ scope: "local", dir: workflowsDirForPack(packDir), packDir });
     }
-    const global = globalPackDir(env);
     if (existsSync(global)) dirs.push({ scope: "global", dir: workflowsDirForPack(global), packDir: global });
     for (const packDir of installedPackDirs(join(global, "packs"))) {
         dirs.push({ scope: "global", dir: workflowsDirForPack(packDir), packDir });

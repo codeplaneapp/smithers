@@ -7,6 +7,7 @@ import {
     discoverWorkflows,
     renderWorkflowSkill,
     resolveWorkflow,
+    resolveWorkflowDirs,
     validateWorkflowName,
     writeWorkflowSkillFiles,
 } from "../src/workflows.js";
@@ -384,6 +385,26 @@ describe("discoverWorkflows — skill-parity spec", () => {
         const wf = discoverWorkflows(root, { ...process.env, SMITHERS_WORKFLOW_PATHS: extraRoot }).find((w) => w.id === "dup");
         expect(wf.description).toBe("explicit version.");
         expect(wf.scope).toBe("explicit");
+    });
+
+    test("collapses the local pack when cwd is a home subdirectory", () => {
+        const home = makeTempDir();
+        dirs.push(home);
+        const nested = join(home, "projects", "nested");
+        mkdirSync(nested, { recursive: true });
+        const globalWorkflows = join(home, ".smithers", "workflows");
+        mkdirSync(globalWorkflows, { recursive: true });
+        writeFileSync(join(globalWorkflows, "home-workflow.tsx"), "export default {};\n");
+
+        const env = { ...process.env, HOME: home, SMITHERS_HOME: "" };
+        const resolved = resolveWorkflowDirs(nested, env);
+        const baseEntries = resolved.filter(({ dir }) => dir === globalWorkflows);
+
+        expect(new Set(resolved.map(({ dir }) => dir)).size).toBe(resolved.length);
+        expect(baseEntries).toHaveLength(1);
+        expect(baseEntries).toEqual([{ scope: "global", dir: globalWorkflows, packDir: join(home, ".smithers") }]);
+        expect(resolved.some(({ scope, dir }) => scope === "local" && dir === globalWorkflows)).toBe(false);
+        expect(discoverWorkflows(nested, env).find(({ id }) => id === "home-workflow")?.scope).toBe("global");
     });
 });
 
