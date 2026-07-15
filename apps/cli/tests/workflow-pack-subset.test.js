@@ -44,7 +44,8 @@ test("fresh init installs exactly the curated public and hidden system workflows
   );
   const gateway = readFileSync(join(pack, "gateway.ts"), "utf8");
   const mounted = [...gateway.matchAll(/await mountWorkflow\("([^"]+)"/g)].map((match) => match[1]);
-  expect(mounted).toEqual(CURATED_PUBLIC_WORKFLOW_IDS);
+  // Hidden system workflows may still own UIs that are directly addressable.
+  expect(mounted).toEqual([...CURATED_PUBLIC_WORKFLOW_IDS, "share-pack"]);
 }, 30_000);
 
 test("the curated contract cannot be narrowed by a removed selectedWorkflows option", () => {
