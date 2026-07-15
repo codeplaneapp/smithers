@@ -34,6 +34,7 @@ import { camelToSnake } from "./utils/camelToSnake.js";
  */
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
+const POSTGRES_SEQUENCE_ALLOCATION_MAX_ATTEMPTS = 128;
 /**
  * @param {string} dialect
  * @param {string} operation
@@ -1118,6 +1119,120 @@ export class SqlMessageStorage {
             throw new Error(`The ${this.externalSqlite.driver} descriptor must provide an atomic transaction() callback.`);
         }
         return await operation();
+    }
+    /**
+     * Allocate and insert one append-only stream row on PostgreSQL. The insert
+     * computes the next sequence and writes it in one statement. A concurrent
+     * writer that chose the same sequence gets no RETURNING row, so it must
+     * recheck idempotency and retry instead of reporting a row PostgreSQL
+     * ignored.
+     *
+     * The NOT EXISTS predicate is part of the INSERT statement so an identical
+     * redelivery that becomes visible after the first lookup cannot consume a
+     * second sequence.
+     *
+     * @param {string} table
+     * @param {Record<string, unknown>} row
+     * @param {string} dedupeWhereSql
+     * @param {ReadonlyArray<SqliteParam>} dedupeParams
+     * @returns {Promise<number>}
+     */
+    async insertWithNextSeqPostgres(table, row, dedupeWhereSql, dedupeParams) {
+        if (this.dialect !== POSTGRES) {
+            throw new Error("Atomic PostgreSQL sequence allocation requires the postgres dialect.");
+        }
+        const filteredRow = this.filterKnownColumns(table, row);
+        const entries = Object.entries(filteredRow)
+            .filter(([key, value]) => key !== "seq" && value !== undefined);
+        const runId = entries.find(([key]) => key === "runId")?.[1];
+        if (typeof runId !== "string") {
+            throw new Error("Atomic PostgreSQL sequence allocation requires a runId.");
+        }
+        const tableSql = quoteIdentifier(table);
+        const columnSql = [
+            ...entries.map(([key]) => quoteIdentifier(camelToSnake(key))),
+            quoteIdentifier("seq"),
+        ].join(", ");
+        const valueSql = [
+            ...entries.map(() => "?"),
+            "COALESCE(MAX(seq), -1) + 1",
+        ].join(", ");
+        const insertSql = `INSERT INTO ${tableSql} (${columnSql})
+            SELECT ${valueSql}
+            FROM ${tableSql}
+            WHERE run_id = ?
+            HAVING NOT EXISTS (
+                SELECT 1 FROM ${tableSql} WHERE ${dedupeWhereSql}
+            )
+            ON CONFLICT (run_id, seq) DO NOTHING
+            RETURNING seq`;
+        const insertParams = [
+            ...entries.map(([, value]) => value),
+            runId,
+            ...dedupeParams,
+        ];
+
+        // Smithers-owned transactions use PostgreSQL's default READ COMMITTED
+        // isolation, so each retry sees the winner. Keep a hard ceiling for a
+        // caller-owned fixed snapshot or sustained contention: failure is loud,
+        // and no sequence is reported without a RETURNING row or dedupe match.
+        for (let attempt = 0; attempt < POSTGRES_SEQUENCE_ALLOCATION_MAX_ATTEMPTS; attempt += 1) {
+            const existing = await this.queryOne(`SELECT seq
+                FROM ${tableSql}
+                WHERE ${dedupeWhereSql}
+                ORDER BY seq DESC
+                LIMIT 1`, dedupeParams);
+            if (existing?.seq !== undefined) {
+                return Number(existing.seq);
+            }
+            const inserted = await this.queryAllRaw(insertSql, insertParams);
+            if (inserted[0]?.seq !== undefined) {
+                return Number(inserted[0].seq);
+            }
+        }
+        throw new Error(`PostgreSQL sequence allocation for ${table} did not converge after ${POSTGRES_SEQUENCE_ALLOCATION_MAX_ATTEMPTS} conflicts.`);
+    }
+    /**
+     * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string; }} row
+     * @returns {Promise<number>}
+     */
+    insertEventWithNextSeqPostgres(row) {
+        const dedupeWhereSql = `run_id = ?
+            AND timestamp_ms = ?
+            AND type = ?
+            AND payload_json = ?`;
+        return this.insertWithNextSeqPostgres(
+            "_smithers_events",
+            row,
+            dedupeWhereSql,
+            [row.runId, row.timestampMs, row.type, row.payloadJson],
+        );
+    }
+    /**
+     * @param {{ runId: string; signalName: string; correlationId: string | null; payloadJson: string; receivedAtMs: number; receivedBy?: string | null; }} row
+     * @returns {Promise<number>}
+     */
+    insertSignalWithNextSeqPostgres(row) {
+        const dedupeWhereSql = `run_id = ?
+            AND signal_name = ?
+            AND ${row.correlationId === null ? "correlation_id IS NULL" : "correlation_id = ?"}
+            AND payload_json = ?
+            AND received_at_ms = ?
+            AND ${row.receivedBy == null ? "received_by IS NULL" : "received_by = ?"}`;
+        const dedupeParams = [
+            row.runId,
+            row.signalName,
+            ...(row.correlationId === null ? [] : [row.correlationId]),
+            row.payloadJson,
+            row.receivedAtMs,
+            ...(row.receivedBy == null ? [] : [row.receivedBy]),
+        ];
+        return this.insertWithNextSeqPostgres(
+            "_smithers_signals",
+            { ...row, receivedBy: row.receivedBy ?? null },
+            dedupeWhereSql,
+            dedupeParams,
+        );
     }
     /**
    * @param {string} runId

@@ -11,6 +11,7 @@
  */
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { Effect } from "effect";
 import pg from "pg";
 import { z } from "zod";
 import { SmithersDb } from "../src/adapter.js";
@@ -37,6 +38,48 @@ let client;
 let schema;
 /** @type {SqlMessageStorage} */
 let storage;
+
+async function connectPeerClient() {
+    const peer = PG_URL
+        ? new pg.Client({ connectionString: PG_URL })
+        : new pg.Client({ host: HOST, port: PORT, database: "postgres", user: "postgres", ssl: false });
+    await peer.connect();
+    if (schema) {
+        await peer.query(`SET search_path TO "${schema}"`);
+    }
+    return peer;
+}
+
+function twoPartyBarrier() {
+    let arrived = 0;
+    let release;
+    const ready = new Promise((resolve) => {
+        release = resolve;
+    });
+    return async () => {
+        arrived += 1;
+        if (arrived === 2) release();
+        await ready;
+    };
+}
+
+function blockFirstInsert(connection, table, waitForPeer) {
+    let blocked = false;
+    return {
+        async query(config) {
+            const text = typeof config === "string" ? config : config.text;
+            if (!blocked && text.includes(`INSERT INTO "${table}"`)) {
+                blocked = true;
+                await waitForPeer();
+            }
+            return connection.query(config);
+        },
+    };
+}
+
+function postgresAdapter(connection) {
+    return new SmithersDb({ dialect: "postgres", connection });
+}
 
 // PGlite's socket server currently desyncs node-postgres on Windows CI. The
 // real Postgres dialect still runs through the separate test-postgres job.
@@ -331,40 +374,230 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(events[0].payloadJson).toContain('"build_step"');
     });
 
-    test("insertEventWithNextSeq allocates gapless seqs under concurrency on the postgres fallback path", async () => {
-        // Force the non-bun:sqlite fallback branch: internalStorage is postgres
-        // and `db` exposes no sqlite exec/query/run client. Without the
-        // transaction-turn fix, concurrent allocations read the same MAX(seq)
-        // and collide on the (run_id, seq) PK, so insertIgnore silently drops
-        // events — the exact bug this regression test guards.
-        const adapter = new SmithersDb(new Database(":memory:"));
-        adapter.internalStorage = storage;
-        adapter.db = { _: { fullSchema: {} } };
-
-        const runId = "pg-race-run";
+    test("independent postgres adapters allocate and persist every event seq", async () => {
+        const runId = "pg-cross-adapter-event-race";
         await storage.upsert(
             "_smithers_runs",
             { runId, workflowName: "demo", status: "running", createdAtMs: 1 },
             ["runId"],
         );
 
-        const N = 8;
-        const seqs = await Promise.all(
-            Array.from({ length: N }, (_, i) =>
-                adapter.insertEventWithNextSeq({
-                    runId,
-                    timestampMs: 3000 + i,
-                    type: "pg.race",
-                    payloadJson: JSON.stringify({ i }),
-                }),
-            ),
+        const peer = await connectPeerClient();
+        try {
+            const waitForPeer = twoPartyBarrier();
+            const first = postgresAdapter(blockFirstInsert(client, "_smithers_events", waitForPeer));
+            const second = postgresAdapter(blockFirstInsert(peer, "_smithers_events", waitForPeer));
+            const firstRow = {
+                runId,
+                timestampMs: 3000,
+                type: "pg.race",
+                payloadJson: JSON.stringify({ writer: "first" }),
+            };
+            const secondRow = {
+                runId,
+                timestampMs: 3001,
+                type: "pg.race",
+                payloadJson: JSON.stringify({ writer: "second" }),
+            };
+
+            const seqs = await Promise.all([
+                first.insertEventWithNextSeq(firstRow),
+                second.insertEventWithNextSeq(secondRow),
+            ]);
+            const sorted = [...seqs].sort((a, b) => a - b);
+            expect(sorted).toEqual([0, 1]);
+            expect(new Set(seqs).size).toBe(2);
+
+            const history = await storage.listEventHistory(runId, { limit: 10 });
+            expect(history.map((event) => event.seq)).toEqual([0, 1]);
+            expect(history).toHaveLength(2);
+
+            const redelivered = await Promise.all([
+                first.insertEventWithNextSeq(firstRow),
+                second.insertEventWithNextSeq(firstRow),
+            ]);
+            expect(redelivered).toEqual([seqs[0], seqs[0]]);
+            expect(await storage.countEventHistory(runId)).toBe(2);
+
+            const duplicateRunId = `${runId}-duplicate`;
+            await storage.upsert(
+                "_smithers_runs",
+                { runId: duplicateRunId, workflowName: "demo", status: "running", createdAtMs: 1 },
+                ["runId"],
+            );
+            const duplicateBarrier = twoPartyBarrier();
+            const duplicateFirst = postgresAdapter(blockFirstInsert(client, "_smithers_events", duplicateBarrier));
+            const duplicateSecond = postgresAdapter(blockFirstInsert(peer, "_smithers_events", duplicateBarrier));
+            const duplicateRow = {
+                runId: duplicateRunId,
+                timestampMs: 3100,
+                type: "pg.duplicate",
+                payloadJson: JSON.stringify({ delivery: "same" }),
+            };
+            expect(await Promise.all([
+                duplicateFirst.insertEventWithNextSeq(duplicateRow),
+                duplicateSecond.insertEventWithNextSeq(duplicateRow),
+            ])).toEqual([0, 0]);
+            expect(await storage.countEventHistory(duplicateRunId)).toBe(1);
+        }
+        finally {
+            await peer.end().catch(() => {});
+        }
+    }, 60_000);
+
+    test("event seq allocation remains idempotent inside an outer postgres transaction", async () => {
+        const runId = "pg-outer-transaction-event";
+        await storage.upsert(
+            "_smithers_runs",
+            { runId, workflowName: "demo", status: "running", createdAtMs: 1 },
+            ["runId"],
         );
-        const sorted = [...seqs].sort((a, b) => a - b);
-        expect(sorted).toEqual(Array.from({ length: N }, (_, i) => i));
-        expect(new Set(seqs).size).toBe(N); // no two writers got the same seq
-        expect(await adapter.getLastEventSeq(runId)).toBe(N - 1);
-        const history = await adapter.listEventHistory(runId, { limit: N * 2 });
-        expect(history.length).toBe(N); // no event silently dropped
+        const adapter = postgresAdapter(client);
+        const row = {
+            runId,
+            timestampMs: 3500,
+            type: "pg.outer",
+            payloadJson: JSON.stringify({ writer: "transaction" }),
+        };
+
+        const first = await adapter.withTransaction(
+            "outer event",
+            Effect.suspend(() => adapter.insertEventWithNextSeq(row)),
+        );
+        const second = await adapter.withTransaction(
+            "outer event redelivery",
+            Effect.suspend(() => adapter.insertEventWithNextSeq(row)),
+        );
+
+        expect(first).toBe(0);
+        expect(second).toBe(first);
+        expect(await storage.countEventHistory(runId)).toBe(1);
+    }, 60_000);
+
+    // PGlite's socket server serializes the peer's first query behind an open
+    // transaction. Real PostgreSQL permits both connections to overlap here.
+    test.skipIf(!PG_URL)("outer postgres transaction coordinates event seq allocation with an independent writer", async () => {
+        const runId = "pg-real-outer-event-race";
+        await storage.upsert(
+            "_smithers_runs",
+            { runId, workflowName: "demo", status: "running", createdAtMs: 1 },
+            ["runId"],
+        );
+
+        const peer = await connectPeerClient();
+        try {
+            const waitForPeer = twoPartyBarrier();
+            const first = postgresAdapter(blockFirstInsert(client, "_smithers_events", waitForPeer));
+            const second = postgresAdapter(blockFirstInsert(peer, "_smithers_events", waitForPeer));
+            const seqs = await Promise.all([
+                first.withTransaction("outer event race", Effect.suspend(() => first.insertEventWithNextSeq({
+                    runId,
+                    timestampMs: 3600,
+                    type: "pg.outer.race",
+                    payloadJson: JSON.stringify({ writer: "transaction" }),
+                }))),
+                second.insertEventWithNextSeq({
+                    runId,
+                    timestampMs: 3601,
+                    type: "pg.outer.race",
+                    payloadJson: JSON.stringify({ writer: "standalone" }),
+                }),
+            ]);
+
+            expect([...seqs].sort((a, b) => a - b)).toEqual([0, 1]);
+            expect(new Set(seqs).size).toBe(2);
+            expect(await storage.countEventHistory(runId)).toBe(2);
+        }
+        finally {
+            await peer.end().catch(() => {});
+        }
+    }, 60_000);
+
+    test("independent postgres adapters allocate and persist every signal seq", async () => {
+        const runId = "pg-cross-adapter-signal-race";
+        await storage.upsert(
+            "_smithers_runs",
+            { runId, workflowName: "demo", status: "running", createdAtMs: 1 },
+            ["runId"],
+        );
+
+        const peer = await connectPeerClient();
+        try {
+            const waitForPeer = twoPartyBarrier();
+            const first = postgresAdapter(blockFirstInsert(client, "_smithers_signals", waitForPeer));
+            const second = postgresAdapter(blockFirstInsert(peer, "_smithers_signals", waitForPeer));
+            const firstRow = {
+                runId,
+                signalName: "go",
+                correlationId: "first",
+                payloadJson: JSON.stringify({ writer: "first" }),
+                receivedAtMs: 4000,
+                receivedBy: null,
+            };
+            const secondRow = {
+                runId,
+                signalName: "go",
+                correlationId: "second",
+                payloadJson: JSON.stringify({ writer: "second" }),
+                receivedAtMs: 4001,
+                receivedBy: "gateway",
+            };
+
+            const seqs = await Promise.all([
+                first.insertSignalWithNextSeq(firstRow),
+                second.insertSignalWithNextSeq(secondRow),
+            ]);
+            const sorted = [...seqs].sort((a, b) => a - b);
+            expect(sorted).toEqual([0, 1]);
+            expect(new Set(seqs).size).toBe(2);
+
+            const signals = await storage.queryAll(
+                "SELECT * FROM _smithers_signals WHERE run_id = ? ORDER BY seq ASC",
+                [runId],
+            );
+            expect(signals.map((signal) => signal.seq)).toEqual([0, 1]);
+            expect(signals).toHaveLength(2);
+
+            const redelivered = await Promise.all([
+                first.insertSignalWithNextSeq(firstRow),
+                second.insertSignalWithNextSeq(firstRow),
+            ]);
+            expect(redelivered).toEqual([seqs[0], seqs[0]]);
+            expect(await storage.getLastSignalSeq(runId)).toBe(1);
+            expect(await storage.queryAll(
+                "SELECT seq FROM _smithers_signals WHERE run_id = ? ORDER BY seq ASC",
+                [runId],
+            )).toHaveLength(2);
+
+            const duplicateRunId = `${runId}-duplicate`;
+            await storage.upsert(
+                "_smithers_runs",
+                { runId: duplicateRunId, workflowName: "demo", status: "running", createdAtMs: 1 },
+                ["runId"],
+            );
+            const duplicateBarrier = twoPartyBarrier();
+            const duplicateFirst = postgresAdapter(blockFirstInsert(client, "_smithers_signals", duplicateBarrier));
+            const duplicateSecond = postgresAdapter(blockFirstInsert(peer, "_smithers_signals", duplicateBarrier));
+            const duplicateRow = {
+                runId: duplicateRunId,
+                signalName: "go",
+                correlationId: null,
+                payloadJson: JSON.stringify({ delivery: "same" }),
+                receivedAtMs: 4100,
+                receivedBy: null,
+            };
+            expect(await Promise.all([
+                duplicateFirst.insertSignalWithNextSeq(duplicateRow),
+                duplicateSecond.insertSignalWithNextSeq(duplicateRow),
+            ])).toEqual([0, 0]);
+            expect(await storage.queryAll(
+                "SELECT seq FROM _smithers_signals WHERE run_id = ?",
+                [duplicateRunId],
+            )).toHaveLength(1);
+        }
+        finally {
+            await peer.end().catch(() => {});
+        }
     }, 60_000);
 
     async function columnNames(table) {

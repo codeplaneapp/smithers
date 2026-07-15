@@ -456,6 +456,36 @@ declare class SqlMessageStorage {
    */
     transaction<A>(operation: () => A | Promise<A>): Promise<A>;
     /**
+     * @param {string} table
+     * @param {Record<string, unknown>} row
+     * @param {string} dedupeWhereSql
+     * @param {ReadonlyArray<SqliteParam>} dedupeParams
+     * @returns {Promise<number>}
+     */
+    insertWithNextSeqPostgres(table: string, row: Record<string, unknown>, dedupeWhereSql: string, dedupeParams: ReadonlyArray<SqliteParam>): Promise<number>;
+    /**
+     * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string; }} row
+     * @returns {Promise<number>}
+     */
+    insertEventWithNextSeqPostgres(row: {
+        runId: string;
+        timestampMs: number;
+        type: string;
+        payloadJson: string;
+    }): Promise<number>;
+    /**
+     * @param {{ runId: string; signalName: string; correlationId: string | null; payloadJson: string; receivedAtMs: number; receivedBy?: string | null; }} row
+     * @returns {Promise<number>}
+     */
+    insertSignalWithNextSeqPostgres(row: {
+        runId: string;
+        signalName: string;
+        correlationId: string | null;
+        payloadJson: string;
+        receivedAtMs: number;
+        receivedBy?: string | null;
+    }): Promise<number>;
+    /**
    * @param {string} runId
    * @param {SqlMessageStorageEventHistoryQuery} [query]
    * @returns {{ whereSql: string; params: Array<SqliteParam> }}

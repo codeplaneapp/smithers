@@ -85,7 +85,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SmithersDb + snapshot 
         const ancestry = await adapter.listRunAncestry("pg-child");
         expect(ancestry.map((r) => r.runId)).toEqual(["pg-child", "pg-root"]);
 
-        // insertSignalWithNextSeq takes the non-bun (serialized read-MAX) fallback.
+        // insertSignalWithNextSeq takes the PostgreSQL atomic allocator path.
         const seq0 = await adapter.insertSignalWithNextSeq({ runId: "pg-root", signalName: "go", correlationId: null, payloadJson: "{}", receivedAtMs: now, receivedBy: null });
         expect(seq0).toBe(0);
         const seq1 = await adapter.insertSignalWithNextSeq({ runId: "pg-root", signalName: "go", correlationId: "c", payloadJson: "{}", receivedAtMs: now, receivedBy: null });
@@ -93,7 +93,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SmithersDb + snapshot 
         expect((await adapter.listSignals("pg-root")).length).toBe(2);
     });
 
-    test("event allocation via the non-bun fallback", async () => {
+    test("event allocation via the PostgreSQL atomic allocator", async () => {
         await adapter.insertEventWithNextSeq({ runId: "pg-root", timestampMs: now, type: "run.started", payloadJson: "{}" });
         await adapter.insertEventWithNextSeq({ runId: "pg-root", timestampMs: now + 1, type: "run.progress", payloadJson: "{}" });
         expect(await adapter.getLastEventSeq("pg-root")).toBe(1);

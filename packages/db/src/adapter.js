@@ -2367,7 +2367,10 @@ export class SmithersDb {
 	            if (typeof client.exec !== "function" ||
 	                typeof client.query !== "function" ||
 	                typeof client.run !== "function") {
-	                // Non-bun:sqlite (Postgres/pglite) fallback. Serialize the
+	                if (self.internalStorage.dialect === POSTGRES) {
+	                    return yield* self.write(label, () => self.internalStorage.insertSignalWithNextSeqPostgres(row));
+	                }
+	                // External-SQLite fallback. Serialize the
 	                // dedupe/read-MAX/insert sequence under the shared transaction
 	                // turn so concurrent identical redeliveries return the first
 	                // seq instead of allocating duplicate signal rows.
@@ -2684,6 +2687,9 @@ export class SmithersDb {
         // an event is part of that atomic lifecycle transition.
         if (this.transactionDepth > 0) {
             return this.write(label, async () => {
+                if (this.internalStorage.dialect === POSTGRES) {
+                    return this.internalStorage.insertEventWithNextSeqPostgres(row);
+                }
                 const existing = await this.internalStorage.queryOne(`SELECT seq
                    FROM _smithers_events
                    WHERE run_id = ? AND timestamp_ms = ? AND type = ? AND payload_json = ?
@@ -2711,7 +2717,10 @@ export class SmithersDb {
 	            if (typeof client.exec !== "function" ||
 	                typeof client.query !== "function" ||
 	                typeof client.run !== "function") {
-	                // Non-bun:sqlite (Postgres/pglite) fallback. Serialize the
+	                if (self.internalStorage.dialect === POSTGRES) {
+	                    return yield* self.write(label, () => self.internalStorage.insertEventWithNextSeqPostgres(row));
+	                }
+	                // External-SQLite fallback. Serialize the
 	                // read-MAX-then-insert under the shared transaction turn — the
 	                // same primitive the bun:sqlite path below relies on — so two
 	                // concurrent allocations can't both read the same lastSeq and

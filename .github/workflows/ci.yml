@@ -276,12 +276,15 @@ jobs:
       - name: Run Postgres-gated tests
         env:
           SMITHERS_TEST_PG_URL: postgresql://smithers:smithers_pw@127.0.0.1:54329/smithers
-        # Give every migrate-store test its own bun process. A live PGlite uses
-        # >1GB of WASM memory and bun reclaims closed instances lazily, so even
-        # sequential tests in one process can exhaust the ~2GB runner ceiling.
+        # Run the DB dialect suite separately before the CLI and migration
+        # suites. Give every migrate-store test its own bun process. A live
+        # PGlite uses >1GB of WASM memory and bun reclaims closed instances
+        # lazily, so even sequential tests in one process can exhaust the ~2GB
+        # runner ceiling.
         # Each file currently has at most 13 chunked tests; running every chunk
         # for every file preserves coverage while bounding each process to one.
         run: |
+          bun test packages/db/tests/db-postgres-dialect.test.js
           bun test apps/cli/tests/*postgres*
           for test_file in \
             packages/smithers/tests/migrateSmithersStore.test.js \
