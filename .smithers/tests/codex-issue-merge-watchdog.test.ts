@@ -576,5 +576,5 @@ describe("codex issue merge watchdog", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

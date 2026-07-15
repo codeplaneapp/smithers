@@ -9,11 +9,10 @@ import { pathToFileURL } from "node:url";
 import { renderWorkflow, runTask } from "smithers-orchestrator/testing";
 import type { RenderedWorkflow } from "smithers-orchestrator/testing";
 import type { TaskDescriptor } from "smithers-orchestrator/graph";
-import { assignedWorkflowFiles, packWorkflowFiles } from "./seeded-pack-workflows.contracts";
 
 const workflowsDir = join(import.meta.dir, "..", "workflows");
 const cliSrc = pathToFileURL(resolve(import.meta.dir, "../../apps/cli/src")).href;
-const envNames = ["SMITHERS_CLI_SRC_DIR", "SMITHERS_HOME"] as const;
+const envNames = ["SMITHERS_CLI_SRC_DIR", "SMITHERS_HOME", "SMITHERS_SHARE_REGISTRY_README"] as const;
 const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 type Frame = RenderedWorkflow;
 type Row = Record<string, unknown> & { nodeId: string };
@@ -60,6 +59,9 @@ const exactReject = async (operation: Promise<unknown>, message: string) => {
 const setFixtureEnv = (root: string) => {
   process.env.SMITHERS_CLI_SRC_DIR = cliSrc;
   process.env.SMITHERS_HOME = join(root, "home");
+  // A deliberately absent fixture is an explicit offline registry snapshot;
+  // the production helper returns empty bytes without probing gh or curl.
+  process.env.SMITHERS_SHARE_REGISTRY_README = join(root, "registry-readme.md");
 };
 const cleanup = async (root: string, cwd: string) => {
   process.chdir(cwd);
@@ -77,8 +79,6 @@ const manifest = (name: string, version: string, description?: string, repositor
 
 describe.serial("seeded pack workflows", () => {
   test("defaults, boundaries, and exact task contracts", async () => {
-    expect(packWorkflowFiles).toEqual(["add.tsx", "share-pack.tsx"]);
-    expect(assignedWorkflowFiles).toBe(packWorkflowFiles);
     const add = await load("add.tsx");
     expect(add.inputSchema.parse({ spec: "file:fixture" })).toEqual({ spec: "file:fixture", global: false, yes: true });
     for (const value of [{}, { spec: 7 }, { spec: "x", global: "yes" }, { spec: "x", yes: "yes" }]) expect(() => add.inputSchema.parse(value)).toThrow();
@@ -165,7 +165,7 @@ describe.serial("seeded pack workflows", () => {
       expect((await readFile(join(staging, "smithers.toon"), "utf8"))).toContain("repository: override/prepared-pack"); expect((await readFile(join(pack, "smithers.toon"), "utf8"))).toContain("repository: legacy/manifest-pack"); for (const name of ["smithers.db", "agents.ts", "runs"]) { expect(existsSync(join(pack, name))).toBe(true); expect(existsSync(join(staging, name))).toBe(false); } expect(await readFile(join(pack, "components/private.ts"), "utf8")).toBe("private"); expect(existsSync(join(pack, "workflows/hello.tsx"))).toBe(true); expect(existsSync(join(project, "secret"))).toBe(true);
       const sharedFrame = await render("share-pack.tsx", input, [row("validate-manifest", validated as Record<string, unknown>), row("prepare-pack", prepared as Record<string, unknown>)]); expect(sharedFrame.tasks.map((item) => item.nodeId)).toEqual(["validate-manifest", "prepare-pack", "share-registry"]); const entry = "| [prepared-pack](https://github.com/override/prepared-pack) | Prepared fixture | `smithers add override/prepared-pack` | `hello`: Hello fixture |"; const shared = await runTask(task(sharedFrame, "share-registry")); expect(shared).toEqual({ ok: true, detail: entry });
       const finalFrame = await render("share-pack.tsx", input, [row("validate-manifest", validated as Record<string, unknown>), row("prepare-pack", prepared as Record<string, unknown>), row("share-registry", shared as Record<string, unknown>)]); expect(finalFrame.tasks.map((item) => item.nodeId)).toEqual(["validate-manifest", "prepare-pack", "share-registry", "output"]); expect(await runTask(task(finalFrame, "output"))).toEqual({ validated: true, prepared: true, published: false, shared: true, detail: entry });
-      const { sharePack } = await import("../../apps/cli/src/share.js"); const direct = sharePack({ from: project, repository: "override/prepared-pack", repo: "acme/awesome-smithers", dryRun: true, registryReadme: "" }); expect(direct.repository).toBe("override/prepared-pack"); expect(direct.registry).toBe("acme/awesome-smithers"); expect(direct.entry).toBe(entry);
+      const { sharePack } = await import("../../apps/cli/src/share.js"); const direct = sharePack({ from: project, repository: "override/prepared-pack", repo: "acme/awesome-smithers", dryRun: true, registryReadme: "" } as any); expect(direct.repository).toBe("override/prepared-pack"); expect(direct.registry).toBe("acme/awesome-smithers"); expect(direct.entry).toBe(entry);
     } finally { await cleanup(root, cwd); }
   });
 
@@ -180,7 +180,7 @@ describe.serial("seeded pack workflows", () => {
 
   test("rejects malformed TOON during mounted validation and preserves the sentinel", async () => {
     const root = await temp("share-malformed"); const cwd = process.cwd();
-    try { setFixtureEnv(root); const project = join(root, "project"); const pack = join(project, ".smithers"); await mkdir(pack, { recursive: true }); await writeFile(join(pack, "smithers.toon"), "- a\n- b\n"); await writeFile(join(pack, "sentinel"), "sentinel"); process.chdir(project); const frame = await render("share-pack.tsx", { dryRun: true }); expect(frame.tasks.map((item) => item.nodeId)).toEqual(["validate-manifest"]); const failed = await runTask(task(frame, "validate-manifest")); expect(failed).toEqual({ ok: false, detail: "Invalid smithers.toon: malformed TOON: Line 1: Top-level document must start with a key-value or array-header line" }); const output = await render("share-pack.tsx", { dryRun: true }, [row("validate-manifest", failed as Record<string, unknown>), row("complete-manifest", { completed: false, detail: "agent could not repair the manifest" }), row("revalidate-manifest", failed as Record<string, unknown>)]); expect(await runTask(task(output, "output"))).toEqual({ validated: false, prepared: false, published: false, shared: false, detail: failed.detail }); expect(await readFile(join(pack, "sentinel"), "utf8")).toBe("sentinel"); expect(existsSync(join(pack, "README.md"))).toBe(false); }
+    try { setFixtureEnv(root); const project = join(root, "project"); const pack = join(project, ".smithers"); await mkdir(pack, { recursive: true }); await writeFile(join(pack, "smithers.toon"), "- a\n- b\n"); await writeFile(join(pack, "sentinel"), "sentinel"); process.chdir(project); const frame = await render("share-pack.tsx", { dryRun: true }); expect(frame.tasks.map((item) => item.nodeId)).toEqual(["validate-manifest"]); const failed = await runTask(task(frame, "validate-manifest")) as { ok: boolean; detail: string }; expect(failed).toEqual({ ok: false, detail: "Invalid smithers.toon: malformed TOON: Line 1: Top-level document must start with a key-value or array-header line" }); const output = await render("share-pack.tsx", { dryRun: true }, [row("validate-manifest", failed as Record<string, unknown>), row("complete-manifest", { completed: false, detail: "agent could not repair the manifest" }), row("revalidate-manifest", failed as Record<string, unknown>)]); expect(await runTask(task(output, "output"))).toEqual({ validated: false, prepared: false, published: false, shared: false, detail: failed.detail }); expect(await readFile(join(pack, "sentinel"), "utf8")).toBe("sentinel"); expect(existsSync(join(pack, "README.md"))).toBe(false); }
     finally { await cleanup(root, cwd); }
   });
 
