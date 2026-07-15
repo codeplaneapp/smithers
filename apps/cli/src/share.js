@@ -6,7 +6,8 @@ import { loadManifest, renderManifest } from "./manifest.js";
 import { parseWorkflowFrontmatter } from "./workflows.js";
 
 const REGISTRY_REPO = "smithersai/awesome-smithers";
-const PRIVATE_ROOT_NAMES = new Set(["runs", "logs", "node_modules", "state", "executions", "agents", "agents.ts", "CLAUDE.md", "AGENTS.md", ".claude", ".codex", ".env"]);
+const SHARE_RECEIPT_FILE = ".smithers-share-receipt.json";
+const PRIVATE_ROOT_NAMES = new Set(["runs", "logs", "node_modules", "state", "executions", "agents", "agents.ts", "CLAUDE.md", "AGENTS.md", ".claude", ".codex", ".env", SHARE_RECEIPT_FILE]);
 
 function findPackRoot(from = process.cwd()) {
   let dir = resolve(from);
@@ -269,11 +270,35 @@ export function preparePackForShare({ from = process.cwd(), repository } = {}) {
   };
 }
 
-export function publishPackRepository({ from = process.cwd(), repository, stagingRoot } = {}) {
+function shareReceiptPath(root) { return join(root, SHARE_RECEIPT_FILE); }
+
+function readShareReceipt(root, repository) {
+  try {
+    const receipt = JSON.parse(readFileSync(shareReceiptPath(root), "utf8"));
+    if (receipt?.version !== 1 || receipt.repository !== repository || typeof receipt.pushedCommit !== "string" || !/^[0-9a-f]{40,64}$/i.test(receipt.pushedCommit)) return null;
+    return receipt;
+  } catch { return null; }
+}
+
+function writeShareReceipt(root, repository, pushedCommit) {
+  writeFileSync(shareReceiptPath(root), `${JSON.stringify({ version: 1, repository, pushedCommit }, null, 2)}\n`);
+}
+
+function existingRepositoryWithoutReceiptError(repository) {
+  return new Error(`GitHub repository ${repository} already exists, but no Smithers share receipt proves this flow created it. Refusing to change main. Delete it deliberately and retry if Smithers should create it, or publish to the existing repository with your normal Git workflow.`);
+}
+
+/**
+ * Publish a staged pack, only retrying an existing repository when the pack's
+ * durable receipt proves this flow created its current main commit.
+ *
+ * @param {{ from?: string; repository?: string; stagingRoot?: string; exec?: typeof execFileSync }} [options]
+ */
+export function publishPackRepository({ from = process.cwd(), repository, stagingRoot, exec = execFileSync } = {}) {
   const root = findPackRoot(from);
   const manifest = loadManifest(join(root, "smithers.toon"));
   const effectiveRepository = resolveShareRepositories({ repository, manifestRepository: manifest.repository }).repository;
-  try { execFileSync("gh", ["auth", "status"], { stdio: "ignore" }); }
+  try { exec("gh", ["auth", "status"], { stdio: "ignore" }); }
   catch { throw new Error("The `gh` CLI is required and must be authenticated (`gh auth login`) to publish a pack"); }
   // Publish the STAGED copy, never the live pack root (which contains run
   // state, credentials scaffolding, and node_modules).
@@ -281,20 +306,26 @@ export function publishPackRepository({ from = process.cwd(), repository, stagin
   const handedOff = stagingRoot && existsSync(stagingRoot) ? stagingRoot : preparedStagingRoots.get(key);
   const staged = handedOff && existsSync(handedOff) ? handedOff : preparePackForShare({ from, repository }).stagingRoot;
   try {
-    execFileSync("git", ["init", "--quiet", "--initial-branch", "main"], { cwd: staged, stdio: "inherit" });
-    execFileSync("git", ["add", "-A"], { cwd: staged, stdio: "inherit" });
-    execFileSync("git", ["commit", "--quiet", "-m", `feat: publish ${manifest.name} workflow pack`], { cwd: staged, stdio: "inherit" });
-    // Idempotent across durable retries: a repo created by a prior attempt is
-    // pushed to, not re-created.
     let repoExists = true;
-    try { execFileSync("gh", ["repo", "view", effectiveRepository], { stdio: "ignore" }); }
+    try { exec("gh", ["repo", "view", effectiveRepository], { stdio: "ignore" }); }
     catch { repoExists = false; }
+    const receipt = repoExists ? readShareReceipt(root, effectiveRepository) : null;
+    if (repoExists && !receipt) throw existingRepositoryWithoutReceiptError(effectiveRepository);
+
+    exec("git", ["init", "--quiet", "--initial-branch", "main"], { cwd: staged, stdio: "inherit" });
+    exec("git", ["add", "-A"], { cwd: staged, stdio: "inherit" });
+    exec("git", ["commit", "--quiet", "-m", `feat: publish ${manifest.name} workflow pack`], { cwd: staged, stdio: "inherit" });
+    const pushedCommit = String(exec("git", ["rev-parse", "HEAD"], { cwd: staged, encoding: "utf8" })).trim();
     if (repoExists) {
-      execFileSync("git", ["remote", "add", "origin", `https://github.com/${effectiveRepository}.git`], { cwd: staged, stdio: "inherit" });
-      execFileSync("git", ["push", "--force", "origin", "HEAD:main"], { cwd: staged, stdio: "inherit" });
+      exec("git", ["remote", "add", "origin", `https://github.com/${effectiveRepository}.git`], { cwd: staged, stdio: "inherit" });
+      exec("git", ["push", `--force-with-lease=main:${receipt.pushedCommit}`, "origin", "HEAD:main"], { cwd: staged, stdio: "inherit" });
     } else {
-      execFileSync("gh", ["repo", "create", effectiveRepository, "--public", "--source", staged, "--remote", "origin", "--push"], { cwd: staged, stdio: "inherit" });
+      exec("gh", ["repo", "create", effectiveRepository, "--public", "--source", staged, "--remote", "origin", "--push"], { cwd: staged, stdio: "inherit" });
     }
+    // Record only after the create or lease-protected push succeeds. A crash
+    // before this write leaves the repository safe to inspect, not eligible
+    // for an automatic retry that could replace an unrelated main branch.
+    writeShareReceipt(root, effectiveRepository, pushedCommit);
   } finally {
     rmSync(staged, { recursive: true, force: true });
     if (preparedStagingRoots.get(key) === staged) preparedStagingRoots.delete(key);
