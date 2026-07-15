@@ -54,4 +54,20 @@ describe("simulate function mocks", () => {
 
     expect(sim.outputs.grade).toEqual([{ output: "A", score: 95 }]);
   });
+
+  test("still validates a function mock when its nested output is invalid", async () => {
+    let caught: unknown;
+    try {
+      await simulate(buildWorkflow(), {
+        mocks: {
+          grade: () => ({ output: { output: "A", score: "not a number" } }),
+        },
+      }).run();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('simulate(): task "grade" output failed validation');
+  });
 });
