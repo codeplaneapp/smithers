@@ -155,7 +155,14 @@ declare function useGatewayActions(): {
         content: string;
         kind?: "ticket" | "plan" | "spec" | "proposal";
         status?: string;
-    }) => Promise<_smithers_orchestrator_gateway_client.GatewayTicketRow & {
+    }) => Promise<{
+        path: string;
+        kind: "ticket" | "plan" | "spec" | "proposal";
+        content: string;
+        contentHash: string;
+        status?: string | null;
+        updatedAtMs: number;
+    } & {
         seq?: number;
         txid?: string;
     }>;
@@ -163,7 +170,14 @@ declare function useGatewayActions(): {
         path: string;
         content?: string;
         status?: string;
-    }) => Promise<_smithers_orchestrator_gateway_client.GatewayTicketRow & {
+    }) => Promise<{
+        path: string;
+        kind: "ticket" | "plan" | "spec" | "proposal";
+        content: string;
+        contentHash: string;
+        status?: string | null;
+        updatedAtMs: number;
+    } & {
         seq?: number;
         txid?: string;
     }>;

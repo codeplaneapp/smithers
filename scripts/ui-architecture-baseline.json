@@ -85,6 +85,7 @@
       "packages/engine/package.json#name=\"@smithers-orchestrator/engine\"",
       "packages/errors/package.json#name=\"@smithers-orchestrator/errors\"",
       "packages/gateway-client/package.json#name=\"@smithers-orchestrator/gateway-client\"",
+      "packages/gateway-react/package.json#./*={\"default\":\"./src/*.ts\",\"import\":\"./src/*.ts\",\"types\":\"./src/*.ts\"}",
       "packages/gateway-react/package.json#.={\"default\":\"./src/index.ts\",\"import\":\"./src/index.ts\",\"types\":\"./src/index.ts\"}",
       "packages/gateway-react/package.json#name=\"@smithers-orchestrator/gateway-react\"",
       "packages/gateway-ui/package.json#./*={\"default\":\"./src/*.ts\",\"import\":\"./src/*.ts\",\"types\":\"./src/*.ts\"}",
