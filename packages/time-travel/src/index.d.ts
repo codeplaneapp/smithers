@@ -1,6 +1,6 @@
 import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEvent';
 import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
-import { SmithersDb as SmithersDb$d } from '@smithers-orchestrator/db/adapter';
+import { SmithersDb as SmithersDb$e } from '@smithers-orchestrator/db/adapter';
 export { replaysStarted, runForksCreated, snapshotDuration, snapshotsCaptured } from '@smithers-orchestrator/observability/metrics';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 
@@ -49,7 +49,7 @@ type RewindLockHandle$2 = {
 type JumpStepName$1 = "snapshot-pre-jump" | "pause-event-loop" | "revert-sandboxes" | "truncate-frames" | "truncate-attempts" | "truncate-outputs" | "invalidate-diffs" | "rebuild-reconciler" | "resume-event-loop";
 
 type JumpToFrameInput$2 = {
-    adapter: SmithersDb$d;
+    adapter: SmithersDb$e;
     runId: unknown;
     frameNo: unknown;
     confirm?: unknown;
@@ -244,6 +244,17 @@ type ReplayParams$2 = {
     branchLabel?: string;
     restoreVcs?: boolean;
     cwd?: string;
+    /**
+     * Re-bless the forked run's durable workflow metadata to the workflow being
+     * replayed. Without these, the fork inherits the PARENT's hashes and the
+     * resume guard (assertResumeDurabilityMetadata) rejects a replay whose
+     * workflow source was edited — defeating the "carry the edit forward" purpose
+     * of replay. The CLI computes these from the resolved workflow file (mirrors
+     * the `fork` command); omit them to keep the parent's metadata unchanged.
+     */
+    workflowPath?: string;
+    workflowHash?: string | null;
+    entryWorkflowHash?: string | null;
 };
 
 /**
@@ -282,18 +293,18 @@ type ForkParams$2 = {
  * @param {RevertOptions} opts
  * @returns {Promise<RevertResult>}
  */
-declare function revertToAttempt(adapter: SmithersDb$c, opts: RevertOptions$1): Promise<RevertResult$1>;
+declare function revertToAttempt(adapter: SmithersDb$d, opts: RevertOptions$1): Promise<RevertResult$1>;
 type RevertOptions$1 = RevertOptions$2;
 type RevertResult$1 = RevertResult$2;
-type SmithersDb$c = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$d = _smithers_orchestrator_db_adapter.SmithersDb;
 
 /**
  * @param {SmithersDb} adapter
  * @param {TimeTravelOptions} opts
  * @returns {Promise<TimeTravelResult>}
  */
-declare function timeTravel(adapter: SmithersDb$b, opts: TimeTravelOptions$1): Promise<TimeTravelResult$1>;
-type SmithersDb$b = _smithers_orchestrator_db_adapter.SmithersDb;
+declare function timeTravel(adapter: SmithersDb$c, opts: TimeTravelOptions$1): Promise<TimeTravelResult$1>;
+type SmithersDb$c = _smithers_orchestrator_db_adapter.SmithersDb;
 type TimeTravelOptions$1 = TimeTravelOptions$2;
 type TimeTravelResult$1 = TimeTravelResult$2;
 
@@ -306,9 +317,9 @@ type TimeTravelResult$1 = TimeTravelResult$2;
  * @param {ReplayParams} params
  * @returns {Promise<ReplayResult>}
  */
-declare function replayFromCheckpoint(adapter: SmithersDb$a, params: ReplayParams$1): Promise<ReplayResult$1>;
+declare function replayFromCheckpoint(adapter: SmithersDb$b, params: ReplayParams$1): Promise<ReplayResult$1>;
 
-type SmithersDb$a = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$b = _smithers_orchestrator_db_adapter.SmithersDb;
 type ReplayParams$1 = ReplayParams$2;
 type ReplayResult$1 = ReplayResult$2;
 
@@ -330,7 +341,7 @@ type Snapshot$4 = Snapshot$5;
  * @param {SnapshotData} data
  * @returns {Promise<Snapshot>}
  */
-declare function captureSnapshot(adapter: SmithersDb$9, runId: string, frameNo: number, data: SnapshotData$1): Promise<Snapshot$3>;
+declare function captureSnapshot(adapter: SmithersDb$a, runId: string, frameNo: number, data: SnapshotData$1): Promise<Snapshot$3>;
 /**
  * Load a specific snapshot row for a run/frame.
  *
@@ -339,7 +350,7 @@ declare function captureSnapshot(adapter: SmithersDb$9, runId: string, frameNo: 
  * @param {number} frameNo
  * @returns {Promise<Snapshot | undefined>}
  */
-declare function loadSnapshot(adapter: SmithersDb$9, runId: string, frameNo: number): Promise<Snapshot$3 | undefined>;
+declare function loadSnapshot(adapter: SmithersDb$a, runId: string, frameNo: number): Promise<Snapshot$3 | undefined>;
 /**
  * Load the most recent snapshot row for a run.
  *
@@ -347,7 +358,7 @@ declare function loadSnapshot(adapter: SmithersDb$9, runId: string, frameNo: num
  * @param {string} runId
  * @returns {Promise<Snapshot | undefined>}
  */
-declare function loadLatestSnapshot(adapter: SmithersDb$9, runId: string): Promise<Snapshot$3 | undefined>;
+declare function loadLatestSnapshot(adapter: SmithersDb$a, runId: string): Promise<Snapshot$3 | undefined>;
 /**
  * List lightweight snapshot index rows for a run.
  *
@@ -355,9 +366,9 @@ declare function loadLatestSnapshot(adapter: SmithersDb$9, runId: string): Promi
  * @param {string} runId
  * @returns {Promise<Array<Pick<Snapshot, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>>}
  */
-declare function listSnapshots(adapter: SmithersDb$9, runId: string): Promise<Array<Pick<Snapshot$3, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>>;
+declare function listSnapshots(adapter: SmithersDb$a, runId: string): Promise<Array<Pick<Snapshot$3, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>>;
 
-type SmithersDb$9 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$a = _smithers_orchestrator_db_adapter.SmithersDb;
 type Snapshot$3 = Snapshot$5;
 type SnapshotData$1 = SnapshotData$2;
 
@@ -411,7 +422,7 @@ type SnapshotDiff$1 = SnapshotDiff$2;
  * @param {ForkParams} params
  * @returns {Promise<{ runId: string; branch: BranchInfo; snapshot: Snapshot }>}
  */
-declare function forkRun(adapter: SmithersDb$8, params: ForkParams$1): Promise<{
+declare function forkRun(adapter: SmithersDb$9, params: ForkParams$1): Promise<{
     runId: string;
     branch: BranchInfo$1;
     snapshot: Snapshot$1;
@@ -423,7 +434,7 @@ declare function forkRun(adapter: SmithersDb$8, params: ForkParams$1): Promise<{
  * @param {string} parentRunId
  * @returns {Promise<BranchInfo[]>}
  */
-declare function listBranches(adapter: SmithersDb$8, parentRunId: string): Promise<BranchInfo$1[]>;
+declare function listBranches(adapter: SmithersDb$9, parentRunId: string): Promise<BranchInfo$1[]>;
 /**
  * Get the branch record for a run, if any.
  *
@@ -431,8 +442,8 @@ declare function listBranches(adapter: SmithersDb$8, parentRunId: string): Promi
  * @param {string} runId
  * @returns {Promise<BranchInfo | undefined>}
  */
-declare function getBranchInfo(adapter: SmithersDb$8, runId: string): Promise<BranchInfo$1 | undefined>;
-type SmithersDb$8 = _smithers_orchestrator_db_adapter.SmithersDb;
+declare function getBranchInfo(adapter: SmithersDb$9, runId: string): Promise<BranchInfo$1 | undefined>;
+type SmithersDb$9 = _smithers_orchestrator_db_adapter.SmithersDb;
 type BranchInfo$1 = BranchInfo$2;
 type ForkParams$1 = ForkParams$2;
 type Snapshot$1 = Snapshot$5;
@@ -447,7 +458,7 @@ type Snapshot$1 = Snapshot$5;
  * @param {{ cwd?: string }} [opts]
  * @returns {Promise<VcsTag | null>}
  */
-declare function tagSnapshotVcs(adapter: SmithersDb$7, runId: string, frameNo: number, opts?: {
+declare function tagSnapshotVcs(adapter: SmithersDb$8, runId: string, frameNo: number, opts?: {
     cwd?: string;
 }): Promise<VcsTag$1 | null>;
 /**
@@ -458,7 +469,7 @@ declare function tagSnapshotVcs(adapter: SmithersDb$7, runId: string, frameNo: n
  * @param {number} frameNo
  * @returns {Promise<VcsTag | undefined>}
  */
-declare function loadVcsTag(adapter: SmithersDb$7, runId: string, frameNo: number): Promise<VcsTag$1 | undefined>;
+declare function loadVcsTag(adapter: SmithersDb$8, runId: string, frameNo: number): Promise<VcsTag$1 | undefined>;
 /**
  * Create a jj workspace at the revision recorded for a run/frame pair.
  *
@@ -468,7 +479,7 @@ declare function loadVcsTag(adapter: SmithersDb$7, runId: string, frameNo: numbe
  * @param {string} workspacePath
  * @returns {Promise<{ workspacePath: string; vcsPointer: string } | null>}
  */
-declare function resolveWorkflowAtRevision(adapter: SmithersDb$7, runId: string, frameNo: number, workspacePath: string): Promise<{
+declare function resolveWorkflowAtRevision(adapter: SmithersDb$8, runId: string, frameNo: number, workspacePath: string): Promise<{
     workspacePath: string;
     vcsPointer: string;
 } | null>;
@@ -481,14 +492,14 @@ declare function resolveWorkflowAtRevision(adapter: SmithersDb$7, runId: string,
  * @param {{ cwd?: string }} [opts]
  * @returns {Promise<{ restored: boolean; vcsPointer: string | null; error?: string }>}
  */
-declare function rerunAtRevision(adapter: SmithersDb$7, runId: string, frameNo: number, opts?: {
+declare function rerunAtRevision(adapter: SmithersDb$8, runId: string, frameNo: number, opts?: {
     cwd?: string;
 }): Promise<{
     restored: boolean;
     vcsPointer: string | null;
     error?: string;
 }>;
-type SmithersDb$7 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$8 = _smithers_orchestrator_db_adapter.SmithersDb;
 type VcsTag$1 = VcsTag$2;
 
 /**
@@ -516,7 +527,7 @@ type TimelineTree$2 = TimelineTree$4;
  * @param {string} runId
  * @returns {Promise<RunTimeline>}
  */
-declare function buildTimeline(adapter: SmithersDb$6, runId: string): Promise<RunTimeline$1>;
+declare function buildTimeline(adapter: SmithersDb$7, runId: string): Promise<RunTimeline$1>;
 /**
  * Build the recursive timeline tree (run + all descendants) for a run.
  *
@@ -524,9 +535,9 @@ declare function buildTimeline(adapter: SmithersDb$6, runId: string): Promise<Ru
  * @param {string} runId
  * @returns {Promise<TimelineTree>}
  */
-declare function buildTimelineTree(adapter: SmithersDb$6, runId: string): Promise<TimelineTree$1>;
+declare function buildTimelineTree(adapter: SmithersDb$7, runId: string): Promise<TimelineTree$1>;
 
-type SmithersDb$6 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$7 = _smithers_orchestrator_db_adapter.SmithersDb;
 type RunTimeline$1 = RunTimeline$2;
 type TimelineTree$1 = TimelineTree$4;
 
@@ -1040,6 +1051,19 @@ type JumpResult$1 = JumpResult$2;
 type JumpToFrameInput$1 = JumpToFrameInput$2;
 
 /**
+ * Check whether a run currently holds a rewind lock.
+ *
+ * @param {string} runId
+ * @returns {boolean}
+ */
+declare function hasRewindLock(runId: string): boolean;
+
+/**
+ * Reset lock state for tests.
+ */
+declare function resetRewindLocksForTests(): void;
+
+/**
  * Acquire a durable single-flight lease for one run. The database compare-and-set
  * makes the exclusion visible to CLI, MCP, and server processes that share the
  * Smithers store. An expired lease can be replaced atomically.
@@ -1053,27 +1077,16 @@ type JumpToFrameInput$1 = JumpToFrameInput$2;
  * }} [options]
  * @returns {Promise<RewindLockHandle | null>}
  */
-declare function acquireRewindLock(adapter: SmithersDb$d, runId: string, options?: {
+declare function acquireRewindLock(adapter: SmithersDb$6, runId: string, options?: {
     nowMs?: () => number;
     leaseTtlMs?: number;
     autoRenew?: boolean;
 }): Promise<RewindLockHandle$1 | null>;
-type RewindLockHandle$1 = RewindLockHandle$2;
-
+/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("./RewindLockHandle.ts").RewindLockHandle} RewindLockHandle */
 declare const REWIND_LEASE_TTL_MS: 60000;
-
-/**
- * Check whether a run currently holds a rewind lock.
- *
- * @param {string} runId
- * @returns {boolean}
- */
-declare function hasRewindLock(runId: string): boolean;
-
-/**
- * Reset lock state for tests.
- */
-declare function resetRewindLocksForTests(): void;
+type SmithersDb$6 = _smithers_orchestrator_db_adapter.SmithersDb;
+type RewindLockHandle$1 = RewindLockHandle$2;
 
 declare const REWIND_RATE_LIMIT_MAX: 10;
 
@@ -1197,17 +1210,18 @@ type RewindAuditRow = {
     durationMs: number | null;
 };
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /**
  * On startup, find rewind audit rows left in `in_progress` by a prior crash,
- * mark them as `partial`, and flag the associated runs as `needs_attention`.
+ * mark them as `partial`, and fail the associated runs with a durable
+ * `needsAttention` error payload.
  *
  * @param {SmithersDb} adapter
- * @param {{ nowMs?: () => number }} [options]
+ * @param {{ nowMs?: () => number; staleAfterMs?: number }} [options]
  * @returns {Promise<{ recovered: Array<{ id: number; runId: string }> }>}
  */
 declare function recoverInProgressRewindAudits(adapter: SmithersDb, options?: {
     nowMs?: () => number;
+    staleAfterMs?: number;
 }): Promise<{
     recovered: Array<{
         id: number;

@@ -278,7 +278,7 @@ describe("rewind audit helpers", () => {
       const id = await writeRewindAuditRow(adapter, {
         runId: "run-r", fromFrameNo: 5, toFrameNo: 2, caller: "user:r", timestampMs: Date.now() - 500, result: "in_progress", durationMs: null,
       });
-      const { recovered } = await recoverInProgressRewindAudits(adapter);
+      const { recovered } = await recoverInProgressRewindAudits(adapter, { staleAfterMs: 0 });
       expect(recovered).toEqual([{ id: id as number, runId: "run-r" }]);
       const rows = await listRewindAuditRows(adapter, { runId: "run-r" });
       expect(rows[0]?.result).toBe("partial");

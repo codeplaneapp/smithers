@@ -23,6 +23,9 @@ import { Workflow } from "@smithers-orchestrator/components/components/index";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { runWorkflow, Smithers, __builderInternals as I } from "@smithers-orchestrator/engine";
 import { jumpToFrame } from "../src/jumpToFrame.js";
+import { listRewindAuditRows } from "../src/listRewindAuditRows.js";
+import { recoverInProgressRewindAudits } from "../src/recoverInProgressRewindAudits.js";
+import { writeRewindAuditRow } from "../src/writeRewindAuditRow.js";
 
 setDefaultTimeout(180_000);
 
@@ -68,6 +71,56 @@ function uniqueRunId(prefix: string) {
 describe.skipIf(process.platform === "win32" && !PG_URL)(
   "jumpToFrame rewind (postgres)",
   () => {
+    test("claims stale audits with portable RETURNING and a live-lease predicate", async () => {
+      const { adapter, close } = await bootPg([]);
+      const now = 500_000;
+      const runId = uniqueRunId("pg-rewind-recovery");
+      try {
+        await adapter.insertRun({
+          runId,
+          workflowName: "pg-rewind-recovery",
+          status: "running",
+          createdAtMs: 1,
+        });
+        const id = await writeRewindAuditRow(adapter, {
+          runId,
+          fromFrameNo: 5,
+          toFrameNo: 2,
+          caller: "user:pg-integration",
+          timestampMs: now - 10_000,
+          result: "in_progress",
+          durationMs: null,
+        });
+        await adapter.internalStorage.execute(
+          `INSERT INTO _smithers_rewind_leases (run_id, owner_token, expires_at_ms)
+           VALUES (?, ?, ?)`,
+          [runId, "pg-owner", now + 60_000],
+        );
+
+        expect(await recoverInProgressRewindAudits(adapter, {
+          nowMs: () => now,
+          staleAfterMs: 0,
+        })).toEqual({ recovered: [] });
+        expect((await listRewindAuditRows(adapter, { runId }))[0]?.result).toBe("in_progress");
+
+        await adapter.internalStorage.execute(
+          `UPDATE _smithers_rewind_leases SET expires_at_ms = ? WHERE run_id = ?`,
+          [now, runId],
+        );
+        expect(await recoverInProgressRewindAudits(adapter, {
+          nowMs: () => now,
+          staleAfterMs: 0,
+        })).toEqual({ recovered: [{ id: id as number, runId }] });
+        expect((await listRewindAuditRows(adapter, { runId }))[0]).toMatchObject({
+          result: "partial",
+          durationMs: 10_000,
+        });
+        expect((await adapter.getRun(runId))?.status).toBe("failed");
+      } finally {
+        await close();
+      }
+    });
+
     test("rewinds a finished run to the earliest frame and resume re-executes tasks", async () => {
       let callsA = 0;
       let callsB = 0;

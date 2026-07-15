@@ -34,6 +34,7 @@ describe("recoverRewindAuditsAtStartup", () => {
       let errored = false;
       await recoverRewindAuditsAtStartup(adapter, {
         nowMs: () => 2_500,
+        staleAfterMs: 0,
         onRecovered: (count) => {
           recoveredCount = count;
         },
@@ -47,6 +48,7 @@ describe("recoverRewindAuditsAtStartup", () => {
       const audits = await listRewindAuditRows(adapter, { runId });
       expect(audits[0]?.result).toBe("partial");
       const run = await adapter.getRun(runId);
+      expect(run?.status).toBe("failed");
       expect(run?.errorJson).toContain("needsAttention");
     } finally {
       sqlite.close();
