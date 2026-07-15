@@ -115,7 +115,7 @@ describe.serial("curated system workflow causal contracts", () => {
 
       const noRefresh = await runTask(task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }, [row("install-pack", forced as Row)]), "refresh-skills"));
       expect(noRefresh).toEqual({ refreshed: false, detail: "skipped (refreshSkills=false)" });
-      const refreshed = await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row)]), "refresh-skills"));
+      const refreshed = (await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row)]), "refresh-skills"))) as { refreshed: boolean; detail: string };
       // The fixture guarantees Claude Code and Codex; OpenCode rides along only
       // where the host environment leaks a detection signal (never on the
       // Windows runner), so the agent list tail is platform-dependent.
@@ -131,12 +131,12 @@ describe.serial("curated system workflow causal contracts", () => {
       expect(await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row)]), "refresh-skills"))).toEqual({ refreshed: false, detail: "skipped (SMITHERS_NO_SKILL_REFRESH=1)" });
       delete process.env.SMITHERS_NO_SKILL_REFRESH;
       await writeFile(join(root, ".smithers/pack-selections.json"), JSON.stringify({ deselectedAgentDocs: ["AGENTS.md"] }));
-      const docs = await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row), row("refresh-skills", refreshed as Row)]), "note-agent-docs"));
+      const docs = await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row), row("refresh-skills", refreshed as unknown as Row)]), "note-agent-docs"));
       expect(docs).toEqual({ noted: true, detail: "appended guidance to 1 agent doc(s)" });
       const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
       expect(claude).toContain("smithers.sh");
       expect(existsSync(join(root, "AGENTS.md"))).toBe(false);
-      expect(await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row), row("refresh-skills", refreshed as Row)]), "note-agent-docs"))).toEqual({ noted: false, detail: "no agent docs to update" });
+      expect(await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row), row("refresh-skills", refreshed as unknown as Row)]), "note-agent-docs"))).toEqual({ noted: false, detail: "no agent docs to update" });
       expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toBe(claude);
       expect(relative(root, resolve(root, ".claude/skills/smithers/SKILL.md"))).toBe(join(".claude", "skills", "smithers", "SKILL.md"));
     });
