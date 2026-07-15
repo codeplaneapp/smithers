@@ -3,7 +3,9 @@
   "version": "0.28.0",
   "description": "Concrete Smithers workflow execution engine",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/workflow-module-resolution.js"
+  ],
   "exports": {
     ".": {
       "types": "./src/index.d.ts",

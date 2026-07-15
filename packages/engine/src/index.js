@@ -3,6 +3,8 @@
 /** @typedef {import("./ChildWorkflowFileRef.ts").ChildWorkflowFileRef} ChildWorkflowFileRef */
 // @smithers-type-exports-end
 
+import "./workflow-module-resolution.js";
+
 export { runWorkflow } from "./engine.js";
 export { renderFrame } from "./engine.js";
 export { resolveSchema } from "./engine.js";
