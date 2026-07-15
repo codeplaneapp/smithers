@@ -811,17 +811,19 @@ when you need the exact API: every component, the CLI catalog, the Gateway HTTP
 API and browser console, memory, OpenAPI tools, evals, optimization, and the
 full event union.
 
-The docs are **progressively disclosed**, so you don't have to load the whole
-bundle to answer a focused question. Start narrow and widen only as needed:
+The docs are **progressively disclosed**, so start narrow and widen only as
+needed:
 
-- **`smithers.sh/llms.txt`**: a tiny index that points to the topic fragments below.
-- **Topic fragments** (each a few KB, pull only what's relevant):
-  `llms-core.txt` (runtime, JSX surface, CLI, components, recipes, types, errors),
-  `llms-memory.txt`, `llms-openapi.txt`, `llms-observability.txt` (HTTP server,
-  gateway, MCP, OpenTelemetry), `llms-effect.txt` (Effect-ts authoring API),
-  `llms-integrations.txt` (agent runtimes, tools), `llms-events.txt` (the full
-  `SmithersEvent` union).
-- **`llms-full.txt`**: everything concatenated, when you want it all in context.
+- **`https://smithers.sh/llms.txt`**: the compact website index. Along with
+  `https://smithers.sh/llms-full.txt`, it is one of the only two llms files
+  served on the docs site.
+- **`https://smithers.sh/llms-full.txt`**: every topic in one bundle, when you
+  want the complete reference in context.
+- **Topic fragments**: `llms-core.txt`, `llms-memory.txt`,
+  `llms-openapi.txt`, `llms-observability.txt`, `llms-effect.txt`,
+  `llms-integrations.txt`, and `llms-events.txt` are generated build artifacts
+  under `docs/` in a repository checkout. Read them locally when useful; they
+  are not separately resolvable from `smithers.sh`.
 
 ```bash
 bunx smithers-orchestrator docs           # prints llms.txt (the concise index)
@@ -829,7 +831,8 @@ bunx smithers-orchestrator docs-full      # prints llms-full.txt
 bunx smithers-orchestrator ask "How do I add a human approval gate?"
 ```
 
-- Docs: **https://smithers.sh**  ·  fragments at `smithers.sh/llms-*.txt`
+- Docs: **https://smithers.sh** (`/llms.txt` and `/llms-full.txt` are the
+  served llms documents)
 - Repo: **https://github.com/smithersai/smithers**
 - npm package: `smithers-orchestrator`
 

@@ -37,6 +37,8 @@ const MIRRORS = [
   resolve(import.meta.dir, "../apps/cli/docs/llms-full.txt"),
   resolve(import.meta.dir, "../packages/smithers/docs/llms-full.txt"),
 ];
+// Keep the release-pinned artifact frozen after publication without blocking
+// regeneration of the living docs and their package mirrors.
 const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION);
 const before = readFileSync(TARGET, "utf8");
 let text = before;
@@ -412,7 +414,6 @@ const versionedMirrorResult = versionedArtifacts.write(VERSIONED_MIRROR, text);
 if (versionedMirrorResult === "written") {
   console.log(`  mirrored: ${VERSIONED_MIRROR.replace(resolve(import.meta.dir, "..") + "/", "")}`);
 }
-versionedArtifacts.assertNoPublishedVersion();
 
 if (text === before) {
   console.log("No changes to docs/llms-full.txt; mirrors refreshed.");

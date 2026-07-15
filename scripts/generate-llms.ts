@@ -35,6 +35,8 @@ if (typeof PACKAGE_VERSION !== "string" || PACKAGE_VERSION.length === 0) {
   throw new Error("Could not resolve package version from package.json");
 }
 
+// A published version keeps its historical artifacts immutable, but the living
+// docs and the next release's package mirrors must still be regenerable.
 const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION);
 mkdirSync(PACKAGE_DOCS, { recursive: true });
 
@@ -439,5 +441,3 @@ console.log(`\n→ apps/cli/docs/llms.txt (packaged CLI copy)`);
 console.log(`  ${indexContent.length.toLocaleString()} bytes`);
 
 console.log(`\nTotal: ${totalBytes.toLocaleString()} bytes (~${Math.round(totalBytes / 4).toLocaleString()} tokens) across all fragments.`);
-
-versionedArtifacts.assertNoPublishedVersion();

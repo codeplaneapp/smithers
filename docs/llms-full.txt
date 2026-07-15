@@ -3328,7 +3328,7 @@ bunx smithers-orchestrator starters                                   # browse t
 **Verify the setup**
 
 ```bash
-bunx smithers-orchestrator --version          # prints the installed version
+bunx smithers-orchestrator --version          # prints the version you installed
 bunx smithers-orchestrator workflow doctor    # vcs + workflow pack health
 bunx smithers-orchestrator workflow list      # workflows discovered in this repo
 ```
@@ -3364,7 +3364,15 @@ workflows[3]:
 
 `ok: true` under `vcs` means jj or git resolved; if it is `false`, install one (see Installation). A non-empty `workflows[...]` count means the pack is in place. `workflow list` prints the same workflow entries with full metadata.
 
-**Run**
+**Before your first run**
+
+Your workflow hands real work to a coding agent. Before you start it, make sure
+the agent you chose during `init` is installed and authenticated. For example,
+run `codex login` for Codex, or configure the model/provider credentials your
+chosen agent uses. See Set up in your harness for agent-specific
+instructions.
+
+**Run your first workflow**
 
 ```bash
 bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build a new workflow from a plain-English ask
