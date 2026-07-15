@@ -548,6 +548,13 @@ export class WorkflowDriver {
                 ...(this.activeOptions?.cliAgentToolsDefault
                     ? { cliAgentToolsDefault: this.activeOptions.cliAgentToolsDefault }
                     : {}),
+                ...(typeof this.activeOptions?.maxConcurrency === "number"
+                    ? { maxConcurrency: this.activeOptions.maxConcurrency }
+                    : {}),
+                maxConcurrencyPinned: this.activeOptions?.maxConcurrencyPinned === true,
+                requireRerenderOnOutputChange: this.activeOptions?.requireRerenderOnOutputChange !== false,
+                ...(context.taskStates instanceof Map ? { taskStates: context.taskStates } : {}),
+                ...(context.taskFailures instanceof Map ? { taskFailures: context.taskFailures } : {}),
                 baseRootDir,
                 workflowPath,
                 worktreePaths: this.worktreePathsById,

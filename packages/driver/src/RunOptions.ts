@@ -23,6 +23,8 @@ export type RunOptions = {
   parentRunId?: string | null;
   input: Record<string, unknown>;
   maxConcurrency?: number;
+  /** Internal/runtime proof that maxConcurrency was explicitly persisted for this run. */
+  maxConcurrencyPinned?: boolean;
   requireRerenderOnOutputChange?: boolean;
   onProgress?: (e: SmithersEvent) => void;
   signal?: AbortSignal;

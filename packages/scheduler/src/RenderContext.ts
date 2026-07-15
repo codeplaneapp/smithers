@@ -25,6 +25,7 @@ export type RenderContext = {
   readonly outputs?: Record<string, unknown[]> | ReadonlyMap<string, TaskOutput>;
   readonly auth?: unknown;
   readonly taskStates?: unknown;
+  readonly taskFailures?: unknown;
   readonly ralphIterations?: ReadonlyMap<string, number>;
   readonly trigger?: RenderTrigger;
 };

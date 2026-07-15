@@ -1,5 +1,10 @@
 export type SmithersRuntimeConfig = {
   cliAgentToolsDefault?: "all" | "explicit-only";
+  maxConcurrency?: number;
+  maxConcurrencyPinned?: boolean;
+  requireRerenderOnOutputChange?: boolean;
+  taskStates?: ReadonlyMap<string, string>;
+  taskFailures?: ReadonlyMap<string, unknown>;
   baseRootDir?: string;
   workflowPath?: string | null;
   worktreePaths?: Record<string, string>;

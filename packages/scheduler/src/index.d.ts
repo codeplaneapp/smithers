@@ -1,5 +1,5 @@
 import * as effect from 'effect';
-import { Context, Layer, Effect, Schedule as Schedule$1 } from 'effect';
+import { Effect, Context, Layer, Schedule } from 'effect';
 import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
 import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smithers-orchestrator/graph';
 import { TaskDescriptor as TaskDescriptor$4 } from '@smithers-orchestrator/graph/TaskDescriptor';
@@ -130,6 +130,7 @@ type RenderContext$1 = {
     readonly outputs?: Record<string, unknown[]> | ReadonlyMap<string, TaskOutput$1>;
     readonly auth?: unknown;
     readonly taskStates?: unknown;
+    readonly taskFailures?: unknown;
     readonly ralphIterations?: ReadonlyMap<string, number>;
     readonly trigger?: RenderTrigger;
 };
@@ -191,6 +192,15 @@ type WaitReason$1 = {
     readonly _tag: "Quota";
     readonly quotaBlockedCount: number;
     readonly resetAtMs?: number;
+    /**
+     * The quota-blocked tasks (capped sample): which node hit which
+     * provider limit, so operators see WHO is waiting, not just a count.
+     */
+    readonly blocked?: ReadonlyArray<{
+        readonly nodeId: string;
+        readonly resetAtMs?: number;
+        readonly message?: string;
+    }>;
 };
 
 type EngineDecision$1 = {
@@ -451,6 +461,30 @@ declare class WorkflowSession extends Context.TagClassShape<"WorkflowSession", W
 }
 
 /**
+ * Mutable per-run session state, owned exclusively by makeWorkflowSession.
+ * All maps/sets are keyed by the canonical task state key (`nodeId::iteration`)
+ * unless noted otherwise.
+ * @typedef {object} SessionState
+ * @property {string} runId
+ * @property {WorkflowGraph | null} graph
+ * @property {PlanNode | null} plan
+ * @property {Map<string, TaskDescriptor>} descriptors keyed by nodeId
+ * @property {TaskStateMap} states
+ * @property {Map<string, TaskOutput>} outputs
+ * @property {Map<string, unknown>} failures
+ * @property {Map<string, TaskDescriptor>} failureDescriptors
+ * @property {Map<string, number>} retryCounts
+ * @property {RetryWaitMap} retryWait state key → earliest retry time (ms)
+ * @property {Set<string>} approvals
+ * @property {RalphStateMap} ralphState keyed by ralph loop id
+ * @property {Map<string, number>} quotaResetTimes state key → quota reset timestamp (ms)
+ * @property {Map<string, number>} timerStarts state key → duration-timer start (ms), the anchor its deadline is computed from
+ * @property {ScheduleSnapshot | null} schedule
+ * @property {boolean} cancelled
+ * @property {string | null} lastMountedSignature
+ * @property {string | null} lastDeadlockSignature
+ */
+/**
  * @param {WorkflowSessionOptions} [options]
  * @returns {WorkflowSessionService}
  */
@@ -483,15 +517,15 @@ declare function nowMs(): number;
  * @param {RetryPolicy} policy
  * @returns {Schedule.Schedule<unknown>}
  */
-declare function retryPolicyToSchedule(policy: RetryPolicy$2): Schedule$1.Schedule<unknown>;
+declare function retryPolicyToSchedule(policy: RetryPolicy$2): Schedule.Schedule<unknown>;
 type RetryPolicy$2 = RetryPolicy$3;
 
 /**
- * @param {Schedule.Schedule<unknown>} schedule
+ * @param {import("effect").Schedule.Schedule<unknown>} schedule
  * @param {number} attempt
  * @returns {number}
  */
-declare function retryScheduleDelayMs(schedule: Schedule.Schedule<unknown>, attempt: number): number;
+declare function retryScheduleDelayMs(schedule: effect.Schedule.Schedule<unknown>, attempt: number): number;
 
 /** @typedef {import("./RetryPolicy.ts").RetryPolicy} RetryPolicy */
 /**

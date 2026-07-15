@@ -70,6 +70,7 @@ function renderContext(state, iterationOverride, trigger) {
         iteration: iterationOverride ??
             (ralphIterations.length === 1 ? ralphIterations[0] : 0),
         taskStates: cloneTaskStateMap(state.states),
+        taskFailures: new Map(state.failures),
         outputs: new Map(state.outputs),
         ralphIterations: new Map([...state.ralphState.entries()].map(([id, value]) => [id, value.iteration])),
         ...(trigger ? { trigger } : {}),
