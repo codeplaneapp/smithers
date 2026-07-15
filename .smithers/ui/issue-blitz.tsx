@@ -7,8 +7,10 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
 } from "smithers-orchestrator/gateway-react";
-
-type NodeStatus = "pending" | "running" | "done" | "failed" | "waiting" | "skipped";
+import {
+  buildIssueBlitzNodeState,
+  type IssueBlitzNodeStatus as NodeStatus,
+} from "../lib/buildIssueBlitzNodeState";
 
 const ITEMS: Array<{ key: string; kind: "hard" | "quick"; issues: number[]; title: string }> = [
   { key: "ci-postgres", kind: "hard", issues: [1331], title: "CI test-postgres red (PGlite migrate suites)" },
@@ -39,39 +41,6 @@ function unwrapRow(value: unknown): Record<string, unknown> | null {
   const data = isRecord(response.data) ? response.data : response;
   return isRecord(data.row) ? (data.row as Record<string, unknown>) : isRecord(data) ? data : null;
 }
-function parseMaybeJson(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
-/** Latest lifecycle status + iteration per nodeId, derived from the event stream. */
-function buildNodeState(events: unknown[]): { status: Map<string, NodeStatus>; iteration: Map<string, number> } {
-  const status = new Map<string, NodeStatus>();
-  const iteration = new Map<string, number>();
-  for (const raw of events) {
-    const ev = isRecord(raw) ? (isRecord(raw.event) ? raw.event : raw) : null;
-    if (!ev) continue;
-    const nodeId = asString(ev.nodeId);
-    const type = asString(ev.type);
-    if (!nodeId || !type) continue;
-    if (typeof ev.iteration === "number") {
-      iteration.set(nodeId, Math.max(iteration.get(nodeId) ?? 0, ev.iteration));
-    }
-    if (type === "NodeFinished") status.set(nodeId, "done");
-    else if (type === "NodeFailed" || type === "NodeCancelled") status.set(nodeId, "failed");
-    else if (type === "NodeSkipped") status.set(nodeId, "skipped");
-    else if (type === "NodeWaitingApproval") status.set(nodeId, "waiting");
-    else if (type === "NodeStarted" || type === "NodeRetrying" || type === "TaskHeartbeat") {
-      status.set(nodeId, "running");
-    }
-  }
-  return { status, iteration };
-}
-
 const DOT: Record<NodeStatus, string> = {
   pending: "#3a3a40",
   running: "#60a5fa",
@@ -102,16 +71,17 @@ function Chip({ label, state }: { label: string; state: NodeStatus }) {
   );
 }
 
-function SummaryCard({ title, runId, nodeId }: { title: string; runId?: string; nodeId: string }) {
+function SummaryCard({ title, runId, nodeId, state }: { title: string; runId?: string; nodeId: string; state: NodeStatus }) {
   const out = useGatewayNodeOutput({ runId, nodeId });
   const row = unwrapRow(out.data);
   if (!row) return null;
-  const summary = asString(row.summary) ?? asString(row.verdict) ?? "";
-  const ok = row.approved === true || row.pushed === true || row.committed === true;
+  const summary = asString(row.summary) ?? asString(row.verdict) ?? asString(row.note) ?? "";
+  const ok = row.approved === true || row.pushed === true || row.committed === true || row.passed === true || row.ready === true;
+  const terminalFailure = state === "failed" || row.status === "blocked" || row.approved === false || row.passed === false;
   return (
     <div style={{ border: "1px solid #262629", borderRadius: 8, padding: "10px 14px", background: "#151518" }}>
       <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
-        {title} <span style={{ color: ok ? "#4ade80" : "#fbbf24" }}>{ok ? "✔" : "…"}</span>
+        {title} <span style={{ color: ok ? "#4ade80" : terminalFailure ? "#f87171" : "#fbbf24" }}>{ok ? "✔" : terminalFailure ? "✕" : "…"}</span>
       </div>
       <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 11, color: "#b6b6ba", fontFamily: "ui-monospace,monospace" }}>
         {summary.slice(0, 1200)}
@@ -125,11 +95,12 @@ function App() {
   const run = useGatewayRun(runId);
   const { events } = useGatewayRunEvents(runId, { maxEvents: 4000 });
   const { cancelRun } = useGatewayActions();
-  const { status, iteration } = useMemo(() => buildNodeState(events as unknown[]), [events]);
+  const { status, iteration } = useMemo(() => buildIssueBlitzNodeState(events as unknown[]), [events]);
   const st = (nodeId: string): NodeStatus => status.get(nodeId) ?? "pending";
   const runStatus = asString(run.data?.status) ?? "…";
 
-  const doneItems = ITEMS.filter((i) => st(`${i.key}:review`) === "done").length;
+  const doneItems = ITEMS.filter((item) => st(`${item.key}:ready`) === "done").length;
+  const terminal = (nodeId: string) => ["done", "failed", "skipped"].includes(st(nodeId));
 
   return (
     <div style={{ minHeight: "100vh", background: "#0c0c0e", color: "#eee", fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize: 13 }}>
@@ -140,7 +111,7 @@ function App() {
           {runStatus}
         </span>
         <span style={{ color: "#8a8a8e", fontSize: 12 }}>
-          {doneItems}/{ITEMS.length} items through review · sol plans → terra/luna implement → luna LGTM → sol commits → fable gate → push
+          {doneItems}/{ITEMS.length} isolated lanes settled · exact candidate review → serial integration → sandboxed gate → human-approved exact-SHA push
         </span>
         <span style={{ flex: 1 }} />
         <button
@@ -155,15 +126,17 @@ function App() {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <Chip label="discover" state={st("discover")} />
           <span style={{ color: "#3a3a40" }}>→</span>
-          <Chip label={`plan ×${ITEMS.length} (sol)`} state={ITEMS.every((i) => st(`${i.key}:plan`) === "done") ? "done" : ITEMS.some((i) => st(`${i.key}:plan`) === "running") ? "running" : "pending"} />
+          <Chip label={`isolated worktrees ×${ITEMS.length}`} state={doneItems === ITEMS.length ? "done" : ITEMS.some((item) => st(`${item.key}:bootstrap`) === "running" || st(`${item.key}:plan`) === "running" || st(`${item.key}:implement`) === "running" || st(`${item.key}:review`) === "running") ? "running" : "pending"} />
           <span style={{ color: "#3a3a40" }}>→</span>
-          <Chip label="implement + review" state={doneItems === ITEMS.length ? "done" : ITEMS.some((i) => st(`${i.key}:implement`) === "running" || st(`${i.key}:review`) === "running") ? "running" : "pending"} />
+          <Chip label="serial integration" state={st("commit-all")} />
           <span style={{ color: "#3a3a40" }}>→</span>
-          <Chip label="commit (sol)" state={st("commit-all")} />
+          <Chip label="sandboxed gate" state={st("local-gate")} />
           <span style={{ color: "#3a3a40" }}>→</span>
           <Chip label="review (fable)" state={st("fable-review")} />
           <span style={{ color: "#3a3a40" }}>→</span>
-          <Chip label="rebase + push" state={st("push")} />
+          <Chip label="human approval" state={st("approve-push")} />
+          <span style={{ color: "#3a3a40" }}>→</span>
+          <Chip label="exact-SHA push" state={st("push")} />
         </div>
 
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -174,7 +147,9 @@ function App() {
               <th style={{ padding: "6px 8px" }}>Implementer</th>
               <th style={{ padding: "6px 8px" }}>Plan</th>
               <th style={{ padding: "6px 8px" }}>Implement</th>
-              <th style={{ padding: "6px 8px" }}>Luna review</th>
+              <th style={{ padding: "6px 8px" }}>Snapshot</th>
+              <th style={{ padding: "6px 8px" }}>Exact review</th>
+              <th style={{ padding: "6px 8px" }}>Ready</th>
               <th style={{ padding: "6px 8px" }}>Iter</th>
             </tr>
           </thead>
@@ -195,7 +170,9 @@ function App() {
                 </td>
                 <td style={{ padding: "8px" }}><Chip label="plan" state={st(`${item.key}:plan`)} /></td>
                 <td style={{ padding: "8px" }}><Chip label="impl" state={st(`${item.key}:implement`)} /></td>
+                <td style={{ padding: "8px" }}><Chip label="sha" state={st(`${item.key}:candidate`)} /></td>
                 <td style={{ padding: "8px" }}><Chip label="review" state={st(`${item.key}:review`)} /></td>
+                <td style={{ padding: "8px" }}><Chip label="ready" state={st(`${item.key}:ready`)} /></td>
                 <td style={{ padding: "8px", fontFamily: "ui-monospace,monospace", fontSize: 11, color: "#8a8a8e" }}>
                   {(iteration.get(`${item.key}:implement`) ?? 0) + 1}
                 </td>
@@ -204,9 +181,11 @@ function App() {
           </tbody>
         </table>
 
-        <SummaryCard title="Sol commits" runId={runId} nodeId="commit-all" />
-        <SummaryCard title="Fable final review" runId={runId} nodeId="fable-review" />
-        <SummaryCard title="Rebase + push" runId={runId} nodeId="push" />
+        {terminal("commit-all") ? <SummaryCard key={`commit-all:${st("commit-all")}:${iteration.get("commit-all") ?? 0}`} title="Serialized integration" runId={runId} nodeId="commit-all" state={st("commit-all")} /> : null}
+        {terminal("local-gate") ? <SummaryCard key={`local-gate:${st("local-gate")}:${iteration.get("local-gate") ?? 0}`} title="Sandboxed local gate" runId={runId} nodeId="local-gate" state={st("local-gate")} /> : null}
+        {terminal("fable-review") ? <SummaryCard key={`fable-review:${st("fable-review")}:${iteration.get("fable-review") ?? 0}`} title="Fable exact-head review" runId={runId} nodeId="fable-review" state={st("fable-review")} /> : null}
+        {terminal("approve-push") ? <SummaryCard key={`approve-push:${st("approve-push")}:${iteration.get("approve-push") ?? 0}`} title="Human publication decision" runId={runId} nodeId="approve-push" state={st("approve-push")} /> : null}
+        {terminal("push") ? <SummaryCard key={`push:${st("push")}:${iteration.get("push") ?? 0}`} title="Exact-SHA publication" runId={runId} nodeId="push" state={st("push")} /> : null}
       </div>
     </div>
   );
