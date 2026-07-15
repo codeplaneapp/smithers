@@ -264,6 +264,7 @@ describe("smithers agents capabilities", () => {
             "opencode",
             "openclaw",
             "pi",
+            "pool",
             "vibe",
         ]);
         expect(report.find((entry) => entry.id === "codex")?.capabilities.mcp.bootstrap)
