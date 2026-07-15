@@ -1,11 +1,11 @@
 {
   "suiteId": "phase1-authoring",
-  "runLabel": "20260714221952-a4d15b49",
+  "runLabel": "20260715095244-aa8549b8",
   "workflowPath": "evals/phase1-authoring-benchmark.tsx",
   "casesPath": "/Users/williamcory/smithers/evals/suites/phase1-authoring/cases.jsonl",
-  "startedAtMs": 1784067592673,
-  "finishedAtMs": 1784067792699,
-  "durationMs": 200026,
+  "startedAtMs": 1784109167883,
+  "finishedAtMs": 1784109721979,
+  "durationMs": 554096,
   "reportPath": "/Users/williamcory/smithers/.smithers/evals/phase1-authoring.json",
   "summary": {
     "total": 1,
@@ -14,12 +14,12 @@
     "byStatus": {
       "waiting-quota": 1
     },
-    "durationMs": 200026
+    "durationMs": 554096
   },
   "results": [
     {
       "caseId": "phase1-authoring-haiku",
-      "runId": "eval-phase1-authorin-821fbb5e-phase1-authoring-haiku",
+      "runId": "eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku",
       "expectedStatus": "finished",
       "status": "waiting-quota",
       "passed": false,
@@ -43,13 +43,13 @@
           "actual": {
             "init": [
               {
-                "runId": "eval-phase1-authorin-821fbb5e-phase1-authoring-haiku",
+                "runId": "eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku",
                 "nodeId": "init",
                 "iteration": 0,
-                "dir": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku",
-                "candidate": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku/phase1-issue-sweep.tsx",
-                "test": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku/phase1-issue-sweep.test.tsx",
-                "packageJson": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku/package.json"
+                "dir": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku",
+                "candidate": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku/phase1-issue-sweep.tsx",
+                "test": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku/phase1-issue-sweep.test.tsx",
+                "packageJson": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku/package.json"
               }
             ],
             "artifact": [],
@@ -57,20 +57,20 @@
           }
         }
       ],
-      "durationMs": 200026,
+      "durationMs": 554096,
       "input": {
         "model": "haiku"
       },
       "output": {
         "init": [
           {
-            "runId": "eval-phase1-authorin-821fbb5e-phase1-authoring-haiku",
+            "runId": "eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku",
             "nodeId": "init",
             "iteration": 0,
-            "dir": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku",
-            "candidate": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku/phase1-issue-sweep.tsx",
-            "test": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku/phase1-issue-sweep.test.tsx",
-            "packageJson": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-821fbb5e-phase1-authoring-haiku/package.json"
+            "dir": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku",
+            "candidate": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku/phase1-issue-sweep.tsx",
+            "test": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku/phase1-issue-sweep.test.tsx",
+            "packageJson": "/Users/williamcory/smithers/.smithers/eval-runs/eval-phase1-authorin-3a79c4c6-phase1-authoring-haiku/package.json"
           }
         ],
         "artifact": [],
