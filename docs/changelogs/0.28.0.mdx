@@ -1,99 +1,78 @@
 ---
 title: "0.28.0"
-description: "Operate runs from a full Monitor console, install and share workflow packs, bind sensitive work to the exact evidence that authorized it, use fixed or adaptive delegation, keep durable knowledge across runs, and run the same workflow core in Node or the browser."
+description: "Diagnose and fix stuck runs from the Monitor, install and share workflow packs, bind tasks to the exact approval that authorized them, keep knowledge across runs with memory notes, and run the workflow core in Node, Bun, or the browser."
 ---
 
-Smithers 0.28.0 makes long-running agent work easier to operate, distribute,
-and trust. The Monitor is now a full operations console. Workflow packs can be
-installed, updated, ejected for local editing, and shared. Provenance bindings
-stop a task when the approval or artifact that authorized it has changed.
-Delegation gains both a fixed `DelegationChain` and the experimental, adaptive
-`Trellis`. Durable memory notes turn observations into reviewable knowledge,
-and a new runtime adapter runs the real workflow driver in Node or a browser.
+Smithers 0.28.0 is about operating agent fleets you can trust. You can now see
+why a run is stuck and fix it from the Monitor, install workflow packs from any
+repository, prove that the artifact a human approved is the artifact that
+shipped, and give agents durable knowledge that outlives the run that learned
+it. A large security and reliability pass sits underneath; the
+[upgrade notes](#upgrade-notes) are at the bottom.
 
-This release also contains a broad reliability and security pass across the
-engine, Gateway, CLI, time travel, database backends, integrations, agents,
-sandbox providers, and the shipped workflow pack.
+<Frame caption="Smithers 0.28.0: a Monitor operations console, installable workflow packs, provenance-bound tasks, memory notes, and a portable workflow runtime.">
+ <img src="/images/0.28.0/hero.svg" alt="Smithers 0.28.0 release card listing the headline features" />
+</Frame>
 
 ---
 
-## Monitor: a full operations console
+## See why a run is stuck, then fix it
 
-The Monitor is now where you understand and steer a run, rather than a page you
-open only to check whether it finished.
+The Monitor is now a full operations console. The CLI opens it when a run
+starts; `bunx smithers-orchestrator monitor` opens it for an existing run or
+workspace.
 
-- **Always-on run health** diagnoses stalled, stale, orphaned, quota-parked,
-  and terminal runs. A one-click Resume action handles recoverable runs.
-- **In-browser session hijack** opens a node's real agent session through a PTY
-  websocket channel, with per-node hijack candidates supplied by the Gateway.
-- **Live agent transcripts and structured output** open at the newest events
-  and keep streaming while a busy run produces more output.
-- **DevTools inspection** includes an interactive XML tree, frame scrubber,
-  activity feed, diff view, timeline, scores, crons, operations statistics,
-  quota state, and run or task controls.
-- **Large-run navigation** adds container rollups, failure reasons, notable
-  event filtering, and a paginated all-runs table.
-- **Agent attribution** follows every task through declared agent, acting
-  engine, model, failover position, and attempt history.
-- **Embedded guest mode** uses `?embed=1` for chrome-less run detail or
-  rail-less overview pages, fail-closed host-origin messaging, and explicit
-  `?theme=` parity. The iframe-safe cancel flow no longer depends on
-  `window.confirm`.
-- **Accessibility and responsiveness** now have keyboard, focus, reduced
-  motion, light/dark theme, authenticated recovery, and narrow-layout browser
-  coverage.
+<Frame caption="Every run in the workspace, grouped by what needs your attention first. The waiting-quota run at the bottom will auto-wake when its quota resets.">
+ <img src="/images/monitor/runs.png" alt="The Monitor runs overview: a needs-attention rail on the left and a filterable all-runs table" />
+</Frame>
 
-The CLI opens the Monitor when a run starts. `bunx smithers-orchestrator
-monitor` remains the direct entry point for an existing run or workspace.
+- **Run health names the problem.** Stalled, stale, orphaned, quota-parked, and
+  terminal runs are diagnosed continuously, and recoverable ones get a
+  one-click Resume.
+- **Hijack a live agent session in the browser.** Each node exposes its real
+  agent session over a PTY websocket, so you can take over without a terminal.
+- **Transcripts stream live.** Agent output and structured results open at the
+  newest events and keep streaming while the run works.
+- **DevTools built in:** interactive XML tree, frame scrubber, diff view,
+  timeline, scores, quota state, and run/task controls.
+- **Embed it anywhere.** `?embed=1` serves chrome-less run pages with
+  fail-closed host-origin messaging, for dropping the Monitor into your own
+  tools.
 
-## Workflow packs: install, update, edit, share, and remove
+<Frame caption="Run detail: a health verdict up top, the live execution tree, and the event feed underneath.">
+ <img src="/images/monitor/run-detail.png" alt="The Monitor run detail page showing a completed audit run with its execution tree and event feed" />
+</Frame>
 
-Workflow packs are a complete lifecycle in 0.28.0.
+See the [Monitor guide](/guides/monitor).
+
+## Install workflows like packages
+
+Workflow packs get a complete lifecycle: install from any repository, update
+like a dependency, eject to make a workflow yours, and share your own.
 
 ```bash
-bunx smithers-orchestrator add user/repository --yes
-bunx smithers-orchestrator packs list
-bunx smithers-orchestrator packs update
-bunx smithers-orchestrator eject pack-name:workflow-name
-bunx smithers-orchestrator share --dry-run
-bunx smithers-orchestrator remove pack-name
+bunx smithers-orchestrator add acme/review-pack --yes  # install from a repo
+bunx smithers-orchestrator packs update                # refresh every locked pack
+bunx smithers-orchestrator eject review-pack:review    # editable local copy
+bunx smithers-orchestrator share --dry-run             # publish your own pack
+bunx smithers-orchestrator remove review-pack          # uninstall
 ```
 
-- **`smithers.toon` manifests** declare a pack's name, description,
-  repository, workflows, and UIs. `init` scaffolds the manifest, including an
-  agents-only initialization.
-- **Local and global discovery** finds installed packs, validates their
-  manifests and import closure, scans JavaScript pack modules, and reports
-  whether a workflow is eligible to run.
-- **Qualified names remove ambiguity.** A pack workflow can be addressed as
-  `pack-name:workflow-name`; an unqualified local workflow shadows the pack
-  copy.
-- **Updates are explicit.** `packs update NAME` refreshes one locked pack, and
-  bare `packs update` refreshes all of them without touching local files.
-- **Removal is explicit and scoped.** `remove NAME` uninstalls a local pack;
-  `remove NAME --global` removes its global installation. Ejected local files
-  are separate and remain yours.
-- **`eject` makes a workflow yours.** It copies the workflow plus its relative
-  UI, prompt, library, stylesheet, Sass closure, directory imports, aliases,
-  re-exports, and asset leaves into the local `.smithers` tree. Collision and
-  rollback checks prevent a partial local copy.
-- **Sharing is durable.** The seeded `share-pack` workflow validates and, when
-  necessary, completes the manifest before preparing a repository and registry
-  pull request. The `add` and `share-pack` system workflows make both sides of
-  the lifecycle runnable and inspectable.
-- **Pack writes are non-destructive.** Installs use a staged, symlink-safe,
-  same-filesystem swap. Publishing works from a staged copy, never the live
-  pack, strips local agent configuration, supports idempotent retries, and
-  cleans its temporary state on every terminal path.
+- Installed packs are read-only, so updates never clobber your edits. `eject`
+  copies a workflow plus its UI, prompts, styles, and assets into your local
+  `.smithers/` tree, where it shadows the pack copy.
+- Address a pack workflow as `pack-name:workflow-name`; an unqualified local
+  name wins.
+- Installs and shares are staged and atomic. A failed install rolls back
+  instead of leaving half a pack in your project.
 
 See [Workflow packs](/reference/packs), [`add`](/workflows/add), and
 [`share-pack`](/workflows/share-pack).
 
-## Provenance-bound execution
+## The artifact you approved is the artifact that ships
 
-Approving an artifact should authorize that artifact, not whatever happens to
-occupy the same output slot later. Provenance binding makes that rule part of
-the engine.
+A task acting on an approved artifact should stop if that artifact changes
+after approval. Provenance binding makes the engine enforce that rule.
 
 ```tsx
 const approval = ctx.prove("review", { nodeId: "lane:review" });
@@ -103,415 +82,164 @@ const approval = ctx.prove("review", { nodeId: "lane:review" });
 </Task>
 ```
 
-`ctx.prove()` captures a digest of the exact upstream row. `<Task bind>` checks
-that digest again at schedule time. If the row changed, the task parks as
-`BOUND_STALE` instead of acting on stale authority. The state is visible to
-workflow code through `ctx.boundStale("lane:publish")` and to operators through
-`bunx smithers-orchestrator why`, so a correction loop can produce and approve
-a new artifact without failing the run.
-
-Bindings are carried through graph extraction, scheduler state, persisted task
-metadata, DOM compatibility paths, and generated types. SHA-256 behavior is
-verified against standard vectors and the active platform crypto provider.
+`ctx.prove()` captures a SHA-256 digest of the exact upstream row, and `bind`
+re-checks it at schedule time. If the row changed, the task parks as
+`BOUND_STALE` instead of acting on stale authority. Workflow code sees the
+state through `ctx.boundStale()`, operators see it through
+`bunx smithers-orchestrator why`, and a correction loop can approve a new
+artifact without failing the run.
 
 See [Provenance binding](/concepts/provenance).
 
-## Fixed and adaptive delegation
+## Two ways to delegate
 
-Smithers now ships two delegation models.
+- **[`<DelegationChain>`](/components/delegation-chain)** is the fixed,
+  inspectable pipeline: refine the goal, plan, preview cost, execute, review,
+  score, and re-plan within a bounded budget. It ships in the pack with its
+  own live UI.
+- **[`<Trellis>`](/components/trellis)** (experimental) lets a strong model
+  author the plan itself. It writes a bounded `agent | sequence | parallel`
+  program from settled evidence, and Smithers validates and compiles it into
+  ordinary durable tasks in the same run, with immutable recursive fuel and
+  strict output contracts.
 
-- **`DelegationChain`** is the fixed, inspectable composite for goal
-  refinement, planning, preview, execution, review, scoring, and bounded
-  re-planning. Its workflow and multi-file UI ship in the pack, and
-  `gateway-react` exposes the durable delegation event fold.
-- **`Trellis`** is the experimental adaptive model. Sol or Fable authors a
-  bounded `agent | sequence | parallel` intermediate representation from
-  settled evidence; Smithers validates and compiles it into ordinary tasks in
-  the same run. Terra and Luna can complete bounded work but cannot author more
-  graph structure.
+<Frame caption="The DelegationChain workflow's live UI following a run through refinement, planning, execution, and review.">
+ <img src="/images/workflow-ui/delegation-chain.png" alt="The DelegationChain workflow UI showing a live delegated run" />
+</Frame>
 
-The fixed chain includes probe-judgment, plan-solidity, estimate-accuracy,
-tier-fit, and human-poll scorers with weighted run aggregation. Shared token
-prices and `estimateCostUsd` keep cost forecasts consistent across the chain,
-review app, and workflow helpers.
+Agent tasks also gain `maxSchemaRetries` to budget or disable hidden
+structured-output correction calls, and exhausted delegation leaves now fail
+instead of passing as completed work.
 
-Trellis has deterministic program digests, immutable recursive fuel,
-depth/fan-out/prompt limits, one bounded semantic-repair turn, strict output
-contracts, canonical settlement, and explicit handling for runtime failure and
-fuel exhaustion. Direct Sol/Fable implementation is disabled unless the caller
-supplies a critical-execution policy with category, path, line, and independent
-review constraints. Its custom UI shows accepted and rejected generations,
-fuel allocation, real node outputs, events, and the final canonical outcome.
+## Agents that remember
 
-Trellis is not part of the default init pack in this release. It is available
-as a repository workflow and public component for experimental use. See
-[`<Trellis>`](/components/trellis) and the [`trellis`](/workflows/trellis)
-workflow.
+The memory package gains append-only notes: observations that survive the run,
+with human review built in.
 
-Agent tasks also gain `maxSchemaRetries`, so workflow authors can budget or
-disable hidden structured-output correction calls. Exhausted delegation leaves
-now fail instead of being mistaken for completed work.
+```js
+await store.saveNote({
+  namespace: OPS,
+  body: "Deploys that touch the schema need a warm replica first.",
+  kind: "lesson",
+  tags: ["deploys"],
+  provenance, // the run, node, and iteration that learned it
+});
+```
 
-## Durable knowledge across runs
+- A note is `pending`, `accepted`, or `rejected`. Readers get accepted notes
+  that no newer accepted note supersedes.
+- Consolidation keeps history: a rule that supersedes ten lessons records the
+  relationship without deleting anything.
+- Full-text search is opt-in per namespace via `enableNoteSearch` and
+  `searchNotes`.
 
-The memory package gains an append-only notes layer for knowledge that should
-survive one run without becoming mutable ambient state.
+The `incident-runbook-memory` example in the repository runs the whole loop: bank lessons during an incident, propose a consolidated
+rule, gate it on human approval, and serve the accepted rule to the next
+incident. Notes require SQLite in this release.
 
-- Facts, messages, and notes can carry explicit run, node, and iteration
-  provenance.
-- Notes are append-only and idempotent. A supersession junction records which
-  accepted note replaced which older observations without deleting history.
-- `pending`, `accepted`, and `rejected` status is the one mutable field. The
-  default read contract returns accepted notes that have not been superseded by
-  another accepted note.
-- Full-text search is opt-in and created lazily per namespace kind, so unused
-  namespaces pay no FTS write cost.
-- `saveNote`, `getNote`, `listNotes`, `setNoteStatus`, `enableNoteSearch`, and
-  `searchNotes` are published through both the store and Effect service APIs.
-- The `incident-runbook-memory` example shows ordinary tasks banking
-  provenance-stamped lessons, proposing a consolidated rule, waiting for human
-  approval, and serving that accepted rule to the next incident.
+See the [memory reference](/reference/memory).
 
-The notes and FTS implementation is SQLite-only in 0.28.0 and fails with an
-explicit backend error on Postgres or PGlite. Facts and messages keep their
-existing backend support.
+## Workflows carry their own UI
 
-## Workflows declare their own views
+A workflow now declares its browser and terminal views inline, so the right
+view opens wherever the workflow runs.
 
-- **`<UI>` and `<TUI>` components** let a workflow declare its browser and
-  terminal views inline. The Gateway resolves them through the run's
-  `entryFile`, while `ui/<key>.tsx` convention entries are discovered at
-  request time.
-- **`@smithers-orchestrator/ui`** is a token-native component library with
-  shadcn anatomy, shared by seeded workflow UIs and init templates. Gateway UI
-  bundles use production React and stamp the theme before first paint.
-- **`create-ui`** has one agent author and verify a custom UI for an existing
-  workflow. It is shipped as a curated system workflow, so the Monitor's
-  Create UI action works outside the Smithers development repository.
-- A UI architecture gate tracks package boundaries, shared primitive usage,
-  and shadcn provenance.
+```tsx
+<Workflow name="release">
+  <UI entry="../ui/release.tsx" title="Release" />
+  {/* ...tasks... */}
+</Workflow>
+```
 
-## Runtime portability and child workflows
+- The Gateway discovers `<UI>` and `<TUI>` at register time;
+  `ui/<key>.tsx` convention entries keep working.
+- `smithers-orchestrator/ui` is a new shared component library
+  (shadcn anatomy, theme tokens) used by every seeded workflow UI.
+- The Monitor's **Create UI** button runs the `create-ui` system workflow: one
+  agent writes and verifies a custom UI for any workflow you point it at.
 
-The workflow driver now runs behind a typed `RuntimeAdapter` for clock,
-storage, identifiers, task execution, files, subprocesses, worktrees, and
-sandboxes.
+See the [migration guide](/guides/workflow-owned-ui-migration).
 
-- **`smithers-orchestrator/browser`** runs the real `WorkflowDriver`, renderer,
-  graph extraction, and core workflow components in a browser. Unsupported
-  filesystem, subprocess, sandbox, or worktree operations fail with
-  `RUNTIME_CAPABILITY_UNAVAILABLE`.
-- **Node-compatible entry points** keep the same workflow core loadable without
-  pulling a static Bun SQLite dependency through the module graph.
-- **Five-runtime conformance coverage** exercises Node, Bun, browser,
-  Cloudflare Workers, and Vercel, including a real headless browser
-  and a packed npm consumer.
-- **`WorkflowFileRef`** lets `<Subflow>` run a workflow module generated at
-  runtime, with its file lifecycle linked to the child node.
-- **Child-run lineage** can be supplied from the CLI with `--parent-run-id` and
-  is persisted for inspection, cancellation, and MCP consumers.
-- **Prefer-resume fan-out** reuses a matching child run after a parent resume,
-  and runnable `childRun` references can expose workflows with several output
-  tables instead of only a conventional final table.
+## The same workflow core, everywhere
 
-## Engine, scheduler, and time travel
+The workflow driver now runs behind a typed `RuntimeAdapter`, with conformance
+suites on Node, Bun, browsers, Cloudflare Workers, and Vercel.
 
-- **Owned worktree lifecycle:** `bunx smithers-orchestrator worktree list` shows
-  the run that owns each worktree, and `bunx smithers-orchestrator worktree
-  prune` safely reclaims completed-run worktrees. Dirty worktrees and branches
-  with unpushed commits are always preserved.
-- **Demand-driven concurrency:** the scheduler derives a useful default from
-  declared parallel widths, raises `maxConcurrency` when runnable work would
-  otherwise starve, honors `subtreeConcurrency`, and emits one warning when a
-  pinned cap remains saturated.
-- **Numeric `priority`** orders tasks competing for a concurrency-limited slot.
-- **`failurePolicy="quarantine"`** lets a container isolate a failed child
-  without failing the whole run.
-- **Graceful pause:** `bunx smithers-orchestrator pause` and the `pauseRun` RPC
-  stop scheduling new work, allow in-flight tasks to finish, and park the run
-  in a resumable `paused` state.
-- **Single-owner terminal cancellation** uses a compare-and-set claim. Pending
-  approvals, human requests, events, and timers finalize durably, and surviving
-  owner processes are reaped by `cancel` and `down`.
-- **Quota parking** fails over to another agent before parking, keeps task and
-  workflow identity stable through resets, auto-wakes at the known reset time,
-  and can now be cancelled through the control plane.
-- **Replay-sensitive tools require approval.** The MCP contract marks replay
-  destructive, prompts before destructive time travel, and parks replay-unsafe
-  tool use behind an approval gate.
-- **Content-addressed snapshot payloads** deduplicate identical large states.
-  Rewinds are serialized behind durable leases, replay re-blesses the edited
-  workflow hash, and truncation is correct even when every retained frame is
-  newer than the target attempt.
-- **Schema defaults apply before validation.** Zod defaults in the workflow
-  input schema are now present in `ctx.input` on a new run.
-- **Structured-output correction is bounded** by `Task.maxSchemaRetries` and
-  retains the task root, output limit, task context, and retry policy.
-- Concurrent `WatchTree` waiters are supported, durable deferred resolutions
-  are bounded, malformed waiting timers keep an attempt-relative anchor, and
-  compute-task timers are cleared after completion.
+```js
+import { runBrowserWorkflow } from "smithers-orchestrator/browser";
+```
 
-## Gateway, protocol, and control plane
+- `smithers-orchestrator/browser` runs the real `WorkflowDriver`, renderer, and
+  graph extraction in a browser. Node-only operations (filesystem, subprocess,
+  worktrees, sandboxes) fail closed with `RUNTIME_CAPABILITY_UNAVAILABLE`.
+- **AWS, GCP, Daytona, and Vercel** join Cloudflare as first-class sandbox
+  providers, on a shared provider kit with contract tests for adapter authors.
+- `<Subflow>` can run a workflow module generated at runtime via
+  `WorkflowFileRef`, and child runs carry persisted parent lineage
+  (`--parent-run-id`).
 
-- **A protocol-owned Gateway RPC module** is now the wire-contract source of
-  truth. Gateway, gateway-client, gateway-react, and their generated
-  declarations consume the same method and row types through focused subpaths.
-- **Cross-run score comparison** adds `listScoresForRuns`, `getScoreDetail`,
-  and `GET /v1/api/scores/compare`.
-- **Saved eval suites** store cases and launch the hidden `eval-suite-run`
-  system workflow. Each case runs as a real child workflow and is graded
-  against an expected value or assertion specification.
-- **Run recovery over the wire** adds `retryTask`, node-state reads, graceful
-  pause, and the `whatHappened` summary route.
-- **Final run diffs over RPC** add `getRunDiff` plus gateway-client and React
-  bindings and a closed, generated response type. Terminal revisions are
-  resolved per checkout lane and merged, with durable node-diff cache fallback
-  after a checkout is reaped. The response preserves an honest empty patch
-  list and returns an explicit oversized marker instead of silently truncating
-  the result.
-- **Accessible control requests** use a real dialog with keyboard and focus
-  behavior rather than an inaccessible browser prompt.
-- **Control-plane mutations and audit records** commit atomically, project
-  usage limits cascade to their children, and quota-parked runs accept
-  cancellation.
-- **Run-event replay order and cron ownership** are stable under reconnects and
-  concurrent ticks. Multiplayer run forests preserve parentage while parked
-  streams recover.
+## Ask the CLI what happened
 
-## CLI
+```bash
+bunx smithers-orchestrator status RUN_ID   # health verdict, blockers, throughput
+bunx smithers-orchestrator what RUN_ID     # an agent narrates the recorded facts
+bunx smithers-orchestrator why RUN_ID      # why the run is blocked or paused
+bunx smithers-orchestrator pause RUN_ID    # finish in-flight work, park resumably
+bunx smithers-orchestrator worktree prune  # reclaim completed-run worktrees
+bunx smithers-orchestrator review          # code review + HTML walkthrough
+bunx smithers-orchestrator upgrade         # agent-assisted upgrade from changelogs
+```
 
-- **`bunx smithers-orchestrator status RUN_ID`** gives a compact health verdict,
-  node counts, agent/model mix, throughput, and current blockers.
-- **`bunx smithers-orchestrator what RUN_ID [NODE_ID]`** uses a cheap agent to
-  narrate the recorded facts, with a deterministic fallback when no agent is
-  available.
-- **`bunx smithers-orchestrator review`** runs code review plus a story-form
-  HTML walkthrough for a repository or pull request.
-- **`bunx smithers-orchestrator upgrade`** reads the relevant changelogs,
-  upgrades with a cheap agent, and escalates only when necessary. Workflow
-  packs update separately through `packs update`.
-- **Scoped supervision** watches and resumes stale runs only when their recorded
-  owner process is verifiably dead.
-- **Init redesign** asks one agent-selection question, then opens a hijacked
-  tutorial session. The init pack is focused on authoring workflows, with older
-  starters kept under `examples/`.
-- **`up --dry-run`** redirects to `bunx smithers-orchestrator graph`, the
-  non-executing construct check.
-- **SOTA registry** publishes a canonical model table, benchmark results, a
-  daily research cron, a drift check, and a notice when a newer registry ships.
-- Global-pack root overrides, JavaScript pack modules, duplicate home workflow
-  directories, invalid subcommands, semantic MCP timeouts, and token-store
-  writes now have explicit, bounded behavior.
+`worktree list` shows which run owns each worktree, and `prune` never touches
+dirty worktrees or branches with unpushed commits.
 
-## Agents, plugins, and sandbox providers
+## Engine improvements you will feel
 
-- **PoolAgent** wraps Poolside's `pool` CLI for headless Smithers tasks, with
-  capability detection, diagnostics, published types, and a main-package
-  export. It is available to configure explicitly and is not added to the
-  default workflow pack.
-- **Codex plugin routing** uses the Codex App Server with crash-safe journals,
-  stale-lock reclaim, ownership-aware recovery, ABA-proof state transitions,
-  and Windows-safe launch behavior.
-- **Claude Code mirroring** follows only runs subscribed by the current
-  session, emits actionable transitions, accepts workflow file paths, and
-  suppresses terminal-run approval ghosts.
-- **Cross-provider failover** advances through a task's agent chain when a
-  provider preflight or rate limit makes the current agent unavailable.
-- **Account and summarizer surfaces** add authorization-code PKCE helpers to
-  `@smithers-orchestrator/accounts` and an OpenAI provider to the Telegram
-  summary workflow. Unknown account providers survive unrelated account-file
-  rewrites, and Telegram windows undated messages by their persisted creation
-  time.
-- **AWS, GCP, Daytona, and Vercel** join the first-class sandbox-provider
-  surface. A shared provider kit supplies request/result files, command
-  deadlines, redaction, CA handling, contract tests, and mock environments for
-  adapter authors.
-- Provider-specific fixes align Cloud Run Jobs, ECS, CodeBuild, S3 transport,
-  CloudWatch logs, Daytona timeouts, Vercel deadlines, and Cloudflare process
-  results with their real SDK contracts.
+- **Graceful pause:** `pause` stops scheduling new work, lets in-flight tasks
+  finish, and parks the run resumably.
+- **Demand-driven concurrency:** the scheduler raises `maxConcurrency` when
+  runnable work would otherwise starve, and warns once when a pinned cap stays
+  saturated. Numeric `priority` orders tasks competing for a slot.
+- **`failurePolicy="quarantine"`** isolates a failed child without failing the
+  whole run.
+- **Quota parking got smarter:** runs fail over to another agent before
+  parking, auto-wake at the known reset time, and can now be cancelled.
+- **Zod defaults apply.** Defaults in the workflow input schema are finally
+  present in `ctx.input` on a new run.
+- **Snapshots are cheaper:** content-addressed payloads deduplicate identical
+  states, and frame snapshots are incremental.
 
-## Workflows, testing, and evals
+## Security and reliability
 
-- **`@smithers-orchestrator/testing`** ships a workflow simulator plus a
-  deterministic scenario kernel with seeded ready-set scheduling, strict
-  control rendezvous, replay bundles, cleanup scopes, trace collection, and
-  real-database/real-process adapters protected by nonce admission.
-- **Production-parity `simulate`** uses engine-owned output validation and real
-  task semantics. Files-only fake-agent wrappers preserve their filesystem
-  results, and invalid function wrappers fail explicitly.
-- **Authoring benchmark and rules** cover reserved columns, nested-loop shapes,
-  loop output lookup, real graph rendering in tests, and pack-test
-  registration. A deterministic phase-one suite establishes a repeatable
-  baseline for one-shot workflow authors.
-- **Docs-driven development** now ships in the init pack with a reproducible
-  feature-spec build gate, derived feature docs, a browser UI, bounded audit
-  inputs, ranked triage, materialized tickets, and an
-  audit-to-implement-to-review loop over the target repository.
-- **Workflow estimates** add a repository `<Estimate>` helper that lets a cheap
-  agent forecast per-task tokens and iterations while deterministic shared
-  pricing computes the total cost. It is designed to run beside real work
-  without blocking it.
-- **Benchmark infrastructure** adds the Kanban speed benchmark and concurrency
-  modes, a results site, a cloud benchmark-fleet package, model-registry
-  results, and repository workflows for daily benchmark maintenance and
-  canary runs.
-- **Multi-segment coverage** runs compound package test scripts and merges
-  their LCOV data instead of discarding later segments.
-- New repository workflows include `issue-blitz` with a live UI,
-  `riskless-github-issue-sweep`, `implement-packs`,
-  `implement-testing-framework-e2e`, `test-fortress`, `break-smithers`,
-  `pr-review-improve-merge`, `route-and-merge-issues`,
-  `codex-issue-merge-queue`, `serverless-refactor`, `ticket-fleet`, and
-  Trellis. These are repo-local or system workflows unless their individual
-  docs say they ship in the default init pack.
+This release closes a security review across the toolchain: credentials no
+longer follow cross-origin redirects, pack and token writes are staged and
+atomic, approval restrictions fail closed, Gateway websocket admission is
+bounded and authenticated, destructive time travel prompts for confirmation,
+and secrets are recursively redacted from observability output.
 
-## Docs and hosted review
+Behind it sits a reliability pass of several hundred fixes across the engine,
+scheduler, Gateway, CLI, time travel, database backends, agents, sandbox
+providers, and integrations, plus a new `@smithers-orchestrator/testing`
+package with a deterministic workflow simulator. The full list lives in the
+git history.
 
-- **The Mintlify documentation site** gains an editorial landing page,
-  component-first workflow UI guidance, a generated CLI catalog, refreshed LLM
-  bundles, and a GitHub social-preview card.
-- **Hosted walkthrough lifecycle** adds an onboarding landing page,
-  `GET /api/plan`, walkthrough history management, seeded review evals, and
-  durable story-form review output.
-- **Review spending remains bounded** with repository, session, and API-key
-  caps. Token pricing is corrected, concurrent usage is recorded honestly, and
-  missing R2 bindings return explicit service errors instead of crashing a
-  walkthrough route.
+## Upgrade notes
 
-## Security hardening
-
-- **Credentials stay on their origin.** Generic HTTP and OpenAPI tools, Exa
-  and API-key search providers, ElevenLabs TTS, the Anthropic review proxy,
-  and integrations drop sensitive headers before a cross-origin redirect.
-- **Network destinations are validated.** Agent HTTP tools reject malformed or
-  non-HTTP base URLs, GitHub integrations reject foreign API URLs, and provider
-  stream-log paths stay inside their realpath-confined root.
-- **Pack and token writes are atomic.** Pack installs and shares use staged,
-  symlink-safe copies; the CLI token store is written through a secure atomic
-  replacement.
-- **Approval restrictions fail closed.** Malformed access restrictions are
-  rejected, custom scopes match literally, destructive MCP time travel asks
-  for confirmation, and legacy RPC aliases cannot resolve prototype keys.
-- **Local UI proxies require a loopback Host.** Embedded cross-origin messages
-  also require the explicit host origin.
-- **Gateway websocket admission** has an authentication deadline, isolated
-  unauthenticated capacity, subscription caps, and one heartbeat scheduler per
-  socket.
-- **Structured secrets are recursively redacted** from observability data, and
-  Telegram removes bot tokens from network errors.
-- **OpenAPI protected headers are case-insensitive**, and Electric proxy shape
-  templates cannot be weakened by a caller-supplied `where` clause.
-- **Abort signals and response-size bounds** propagate through tools,
-  integrations, parsing, transcription, and provider calls.
-
-## Performance
-
-- Per-node event reads use one SQL pass, gateway-client invalidations coalesce
-  instead of causing refetch storms, and Monitor node inspection keeps loading
-  states honest while avoiding redundant reads.
-- Engine frame snapshots are incremental. Worktree fetches use a bounded TTL
-  cache, and patch-identical rebases skip needless work.
-- Gateway boot loads workflow modules concurrently, production UI bundles serve
-  production React, and the ticket-fleet pipeline can run wide sweeps with
-  separately bounded implementation lanes.
-
-## Reliability by subsystem
-
-- **Database and migration:** SQLite transaction ownership is scoped and
-  `updateWhere` is serialized; malformed WAL/SHM sidecars fail with an
-  actionable error instead of crashing Bun; identical signals and events are
-  deduplicated; ancestry cycles are rejected; output-table names are normalized
-  on every backend; external runs claim runtime ownership; mounted approvals
-  surface correctly; scorer-context migration applies to Postgres/PGlite; and
-  a failed store migration rolls back the partial target.
-- **Engine and scheduler:** render and empty-prompt failures are typed; event
-  waiters skip terminal rows; retry walks are bounded; malformed cache rows are
-  misses; exact abort errors are distinguished from ordinary failures; timer
-  anchors survive continuations; `discardResumeSession` survives retry and
-  hijack-continuation resets; input schemas apply defaults; and retry repair
-  retains the original task execution context.
-- **Gateway and clients:** SSE cursors validate before headers are sent, event
-  tails page instead of growing without bound, unread websocket events are
-  capped, the first event is not dropped, paused runs render as waiting,
-  approval notes validate, approval updates preserve deny decisions, document
-  kind literals survive serialization, filtered multiplayer collections honor
-  run, approval, score, cron, document, and ticket filters, tombstones stay
-  hidden, collection load errors are visible, mutation invalidation is scoped,
-  cascade reaffirmations have stable priority, and approval pending semantics
-  remain on the RPC path.
-- **Monitor and DevTools:** unreachable and loading states are honest, live
-  output survives busy runs, settled-node reopen cannot park an active run,
-  cancellation removes stale gates, null task updates are rejected, teardown is
-  order-safe, fiber identity and package attribution stay stable, and the last
-  valid snapshot survives a null render.
-- **CLI and workflows:** global pack discovery is deterministic, seeded
-  workflows validate their real graphs and inputs, pack install/share/eject is
-  rollback-safe, `down` reaps surviving owners, daily cron defaults are computed
-  lazily, and graceful pauses exit as a successful parked state.
-- **Agents:** Claude session loss retries with a fresh session, diagnostics stop
-  after abort, quota banners avoid benign prose, MCP stderr is drained once,
-  isolated CLI environments are supported, Amp IDE flags are honored,
-  output-file usage is parsed from the right source, and published CLI agent
-  declarations include the complete option surface.
-- **Driver, graph, and components:** cancellation interrupts deadline waits,
-  subprocess capture truncates on UTF-8 boundaries, idle-timeout errors report
-  the effective timeout, duplicate inline subflows are rejected, numeric props
-  are coerced consistently, CheckSuite commands use the run root, Poller uses a
-  durable timer, seven composite components carry their dependency maps and loop
-  conditions through extraction, and inactive MDX preloads are detected from
-  object children instead of stringified prompts.
-- **Memory and errors:** note side effects occur only after insertion, message
-  re-saves retain their original ordering time, history order and limits are
-  stable, summarizer failures retain Smithers error identity, top-level arrays
-  serialize safely, and plain-object legacy causes are preserved.
-- **Time travel:** rewind locks are durable, state truncation is atomic,
-  snapshots are shape-checked, timeline recursion is bounded, and failed VCS
-  restores keep the selected workspace and target recoverable.
-- **Integrations and providers:** full webhook queues reject instead of dropping
-  silently; Telegram markdown, approval timestamps, and digest recovery are
-  correct; Linear outbound tasks retain Smithers context; GitHub retries avoid a
-  final sleep; Cloudflare unknown exits fail closed; and AWS cleanup retains
-  failed keys for retry.
-- **OpenAPI and parsing:** YAML specifications load under Node, unsupported
-  Swagger input fails explicitly, schema conversion is recursion-bounded,
-  request metadata survives parsing, protected headers remain protected, and
-  cancellation reaches LlamaParse, Firecrawl, Mistral OCR, Whisper, and
-  Deepgram work.
-- **Observability, usage, and scoring:** paused and quota-waiting states are in
-  metric unions, status labels and cache-token counts are retained, account
-  usage caches key by identity, missing Codex short windows still expose weekly
-  quota, failed Anthropic probes remain visible, replay sampling is stable, and
-  a throwing event bus cannot abort scoring.
-- **TUI and error surfaces:** large tree previews truncate, connector columns
-  size to their arrows, the returned-session dialog keeps its dismiss action,
-  Eliza validates frontmatter tags and aliases, grep accepts dash-prefixed
-  patterns, and malformed provider or plugin errors retain their typed cause.
-- **Build and release:** declaration builds are serialized, complete generated
-  types are drift-checked, release publishing verifies that the release tag
-  still points at HEAD, and every fully green main commit can publish to the npm
-  `next` channel without moving the manual `latest` release tag.
-
-## Behavior and upgrade notes
-
-- Completed-run worktrees are reaped by default. Set
-  `RunOptions.keepWorktrees` or `SMITHERS_KEEP_WORKTREES=1` to opt out. Dirty or
-  unpushed worktrees are always preserved.
-- `supervise` requires an explicit scope. It resumes only a run whose recorded
-  owner PID is verifiably dead.
-- Zod defaults in the input schema now apply before validation and are visible
-  through `ctx.input` on a new run.
-- Unsupported nested-loop lanes fail during graph extraction with both loop IDs
-  in the `NESTED_LOOP` error. Supported per-item correction loops behind a
-  `Parallel` or `Worktree` fork keep working.
-- `replay_run` is marked destructive in agent contracts, and replay-unsafe tool
-  use requires approval.
-- Installed pack workflows are read-only. Use `eject` to create an editable
-  local copy that shadows the installed workflow.
-- Memory notes and note search require SQLite in this release.
-- Trellis is experimental, is not in the default init pack, and requires the
-  workflow's `maxConcurrency` input to match the pinned run cap.
-- `PoolAgent` is exported but is not installed into the default agent config.
-- Browser workflows receive typed capability errors for Node-only operations.
-- `up --dry-run` prints the graph instead of partially starting a run.
-- Fresh init packs are intentionally smaller. Archived starter workflows remain
-  available under `examples/`.
+- **Completed-run worktrees are now reaped by default.** Set
+  `RunOptions.keepWorktrees` or `SMITHERS_KEEP_WORKTREES=1` to opt out. Dirty
+  or unpushed worktrees are always preserved.
+- **Zod input defaults now apply before validation** and are visible through
+  `ctx.input` on a new run.
+- **Unsupported nested-loop lanes fail at graph extraction** with both loop IDs
+  in the `NESTED_LOOP` error. Per-item correction loops behind a `Parallel` or
+  `Worktree` fork keep working.
+- **Installed pack workflows are read-only.** Use `eject` for an editable
+  local copy.
+- **`up --dry-run` prints the graph** instead of partially starting a run.
+- **`supervise` requires an explicit scope** and resumes only runs whose
+  recorded owner process is verifiably dead.
+- Memory notes and note search require SQLite. Trellis is experimental and
+  outside the default init pack. `PoolAgent` (Poolside's `pool` CLI) is
+  exported but never auto-configured.
+- Fresh init packs are intentionally smaller; the older starters live on under
+  `examples/`.
