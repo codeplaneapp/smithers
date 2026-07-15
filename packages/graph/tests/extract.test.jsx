@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { extractGraph } from "../src/extract.js";
+import { resolveWorktreePath } from "../src/worktree-path.js";
 
 /**
  * @param {string} tag
@@ -541,27 +542,37 @@ describe("extractGraph", () => {
 			expect(result.tasks[0].iteration).toBe(2);
 		});
 
-		test("throws on nested ralph", () => {
+		test("throws on nested ralph (literal immediate <Loop>-in-<Loop> nesting)", () => {
+			// A <Loop> as the *literal immediate* JSX child of another <Loop> is
+			// the one case with no clear "whose iteration is this" semantics — the
+			// error names both loop ids and suggests the queue-based fix instead
+			// of nesting loops.
 			const root = hostEl("smithers:ralph", { id: "outer" }, [
 				hostEl("smithers:ralph", { id: "inner" }, [
 					hostEl("smithers:task", { id: "t1", output: "t" }),
 				]),
 			]);
 			expect(() => extractGraph(root)).toThrow("Nested <Loop>/<Ralph>");
+			try {
+				extractGraph(root);
+				throw new Error("expected extractGraph to throw");
+			} catch (error) {
+				expect(error.code).toBe("NESTED_LOOP");
+				expect(String(error.message)).toContain("outer");
+				expect(String(error.message)).toContain("inner");
+				expect(String(error.message)).toContain("MergeQueue");
+			}
 		});
 
-		test("preserves the supported scoped nested-loop topology through Sequence", () => {
-			const root = hostEl("smithers:ralph", { id: "outer" }, [
-				hostEl("smithers:sequence", {}, [
-					hostEl("smithers:ralph", { id: "inner" }, [
-						hostEl("smithers:task", { id: "t1", output: "t" }),
-				]),
-			]),
-			]);
-			expect(extractGraph(root).tasks[0].nodeId).toContain("outer=0");
-		});
-
-		test("rejects a Loop nested inside another Loop's forked lane", () => {
+		test("allows a Loop nested inside another Loop's Sequence/Parallel/Worktree wrapper (per-item correction loop)", () => {
+			// Regression guard for github.com/jjhub-ai/smithers/issues/117 and its
+			// runtime test (packages/engine/tests/nested-loop-runtime.test.jsx):
+			// a <Loop> reached through a <Sequence>/<Parallel>/<Worktree> wrapper —
+			// not the literal immediate child of the outer <Loop> — is genuinely
+			// executable and scoped by buildLoopScope to the outer iteration. This
+			// is also the shape the seeded audit-burndown.tsx and
+			// studio-parity-swarm.tsx workflows rely on (outer batch Loop ->
+			// Parallel -> Worktree -> per-item Loop).
 			const root = hostEl("smithers:ralph", { id: "outer" }, [
 				hostEl("smithers:parallel", {}, [
 					hostEl("smithers:worktree", { path: "/tmp/lane" }, [
@@ -571,7 +582,27 @@ describe("extractGraph", () => {
 					]),
 				]),
 			]);
-			expect(() => silenceWorktreePathWarning(() => extractGraph(root))).toThrow("Nested <Loop>/<Ralph>");
+			expect(() => silenceWorktreePathWarning(() => extractGraph(root, {
+				ralphIterations: { outer: 2, "inner@@outer=2": 1 },
+				resolveWorktreePath,
+			}))).not.toThrow();
+		});
+
+		test("scopes task ids by ancestor Ralph loops (nested through a non-loop wrapper)", () => {
+			const root = hostEl("smithers:ralph", { id: "outer" }, [
+				hostEl("smithers:workflow", {}, [
+					hostEl("smithers:ralph", { id: "inner" }, [
+						hostEl("smithers:task", { id: "work", output: "out" }),
+					]),
+				]),
+			]);
+			const result = extractGraph(root, {
+				ralphIterations: { outer: 2, "inner@@outer=2": 4 },
+			});
+			expect(result.tasks[0].nodeId).toBe("work@@outer=2");
+			expect(result.tasks[0].ralphId).toBe("inner@@outer=2");
+			expect(result.tasks[0].iteration).toBe(4);
+			expect(result.mountedTaskIds).toEqual(["work@@outer=2::4"]);
 		});
 
 		test("throws on duplicate ralph id", () => {
@@ -584,22 +615,6 @@ describe("extractGraph", () => {
 				]),
 			]);
 			expect(() => extractGraph(root)).toThrow("Duplicate Ralph id");
-		});
-
-		test("rejects a Ralph loop nested inside another Ralph loop's non-loop wrapper (workflow)", () => {
-			// Nested loops are not supported by the engine (see docs/effect/overview.mdx and
-			// the workflow authoring rules doc); an intervening non-loop element such as
-			// <Workflow> does not make this legal.
-			const root = hostEl("smithers:ralph", { id: "outer" }, [
-				hostEl("smithers:workflow", {}, [
-					hostEl("smithers:ralph", { id: "inner" }, [
-						hostEl("smithers:task", { id: "work", output: "out" }),
-					]),
-				]),
-			]);
-			expect(() => extractGraph(root, {
-				ralphIterations: { outer: 2, "inner@@outer=2": 4 },
-			})).toThrow("Nested <Loop>/<Ralph>");
 		});
 	});
 
@@ -643,7 +658,7 @@ describe("extractGraph", () => {
 				{ id: "wt1", path: "workspace", branch: "feature", baseBranch: "main" },
 				[hostEl("smithers:task", { id: "t1", output: "t" })],
 			);
-			const result = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root" }));
+			const result = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root", resolveWorktreePath }));
 			expect(result.tasks[0].worktreeId).toBe("wt1");
 			expect(result.tasks[0].worktreePath).toBe(resolve("/tmp/root", "workspace"));
 			expect(result.tasks[0].worktreeBranch).toBe("feature");
@@ -659,7 +674,7 @@ describe("extractGraph", () => {
 					hostEl("smithers:task", { id: "t2", output: "t" }),
 				]),
 			]);
-			expect(() => extractGraph(root)).toThrow("Duplicate Worktree id");
+			expect(() => extractGraph(root, { resolveWorktreePath })).toThrow("Duplicate Worktree id");
 		});
 
 		test("throws on empty worktree path", () => {
@@ -667,6 +682,17 @@ describe("extractGraph", () => {
 				hostEl("smithers:task", { id: "t1", output: "t" }),
 			]);
 			expect(() => extractGraph(root)).toThrow("non-empty path");
+		});
+
+		test("throws a typed RUNTIME_CAPABILITY_UNAVAILABLE error when a <Worktree> is rendered without a resolveWorktreePath resolver in opts", () => {
+			const root = hostEl(
+				"smithers:worktree",
+				{ id: "wt1", path: "workspace" },
+				[hostEl("smithers:task", { id: "t1", output: "t" })],
+			);
+			expect(() => extractGraph(root, { baseRootDir: "/tmp/root" })).toThrow(
+				/resolveWorktreePath|RUNTIME_CAPABILITY_UNAVAILABLE/,
+			);
 		});
 	});
 
@@ -698,7 +724,7 @@ describe("extractGraph", () => {
 					],
 				),
 			]);
-			const task = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root" })).tasks[0];
+			const task = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root", resolveWorktreePath })).tasks[0];
 			expect(task.nodeId).toBe("sf");
 			expect(task.outputRef).toBe(output);
 			expect(task.retries).toBe(2);

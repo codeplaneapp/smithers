@@ -168,13 +168,13 @@
         "group": "Workflow Pack",
         "pages": [
           "workflows/overview",
+          "workflows/authoring-rules",
           {
             "group": "Curated",
             "pages": [
               "workflows/create-workflow",
               "workflows/create-skill",
               "workflows/docs-driven-development",
-              "workflows/authoring-rules",
               "workflows/catalog"
             ]
           },

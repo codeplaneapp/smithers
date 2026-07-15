@@ -260,6 +260,21 @@ for (const [name, mutate, expected] of [
     "single-public-hook-package",
   ],
   [
+    "a CommonJS object public hook entry",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        main: "index.cjs",
+      });
+      write(
+        root,
+        "packages/data/index.cjs",
+        "function useData() { return null; }\nmodule.exports = { useData };\n",
+      );
+    },
+    "single-public-hook-package",
+  ],
+  [
     "a public hook hidden behind an export-star entry",
     (root) => {
       json(root, "packages/data/package.json", {
@@ -349,6 +364,38 @@ for (const [name, mutate, expected] of [
     assert.match(result.errors.join("\n"), new RegExp(expected));
   });
 }
+
+test("wildcard public export targets are expanded before checking for hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { "./*": "./src/*.js" },
+  });
+  write(root, "packages/data/src/constants.js", "export const value = 1;\n");
+  snapshot(root);
+  write(root, "packages/data/src/use-data.js", "export function useData() { return null; }\n");
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /single-public-hook-package/);
+});
+
+test("wildcard public exports do not mistake hook calls for hook exports", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { "./*": "./src/*.js" },
+  });
+  write(root, "packages/data/src/constants.js", "export const value = 1;\n");
+  snapshot(root);
+  write(
+    root,
+    "packages/data/src/read-context.js",
+    "export function readContext() { return React.useContext(DataContext); }\n",
+  );
+  assert.equal(check(root).ok, true);
+});
 
 test("valid official shadcn provenance passes", (context) => {
   const root = fixture();

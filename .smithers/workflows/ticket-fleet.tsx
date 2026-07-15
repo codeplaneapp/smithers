@@ -1,4 +1,4 @@
-// smithers-display-name: Ticket fleet: sync → triage → research → plan → implement → merge queue
+// smithers-display-name: Ticket fleet: implement → cross-model review → merge train
 // smithers-source: two-way ticket/GitHub sync + difficulty-tiered backlog burndown; lands on main via a serialized local merge queue with per-landing pushes. Landing runs concurrently with the lanes (land-as-you-go), and triage verdicts are memoized across runs in .smithers/executions/ticket-fleet/triage-ledger.json. Pass solNumbers/fableNumbers to split implementers explicitly (Sol vs Fable, each fix reviewed by the opposite model).
 /** @jsxImportSource smithers-orchestrator */
 import {
@@ -22,6 +22,17 @@ const DEFAULT_REPO = "smithersai/smithers";
 const SWEEP_CONCURRENCY = 32;
 const LANE_CONCURRENCY = 24;
 const LANDING_GATE_COMMAND = "pnpm typecheck && pnpm lint && pnpm test";
+// Merge-train tuning. Each round stacks up to TRAIN_MAX_BATCH ready fixes
+// speculatively (entry k sits on main + entries 1..k-1), validates every
+// stacked state CONCURRENTLY (TRAIN_GATE_CONCURRENCY gates at once), then
+// lands the longest green prefix in a single fast-forward push. A failed or
+// conflicting entry is popped and requeued; TRAIN_MAX_EVICTIONS strikes parks
+// it for a human. Rounds repeat until every target lands or is parked.
+const TRAIN_MAX_BATCH = 12;
+const TRAIN_GATE_CONCURRENCY = 6;
+const TRAIN_MAX_ROUNDS = 200;
+const TRAIN_MAX_EVICTIONS = 2;
+const TRAIN_IDLE_SLEEP_MS = 120_000;
 const MAX_REVIEW_DIFF_BYTES = 200_000;
 const AGENT_RETRIES = 2;
 const HEARTBEAT_MS = 10 * 60_000;
@@ -243,7 +254,7 @@ const reviewSchema = z.object(reviewFields);
 type Review = z.infer<typeof reviewSchema>;
 const gateSchema = z.object({
   issueNumber: z.number().int(),
-  phase: z.enum(["candidate", "landing", "ci-fix", "poc"]),
+  phase: z.enum(["candidate", "landing", "ci-fix", "poc", "train"]),
   headSha: z.string(),
   passed: z.boolean(),
   exitCode: z.number().int(),
@@ -298,6 +309,54 @@ const mergeSchema = z.object({
   summary: z.string().default(""),
 });
 type Merge = z.infer<typeof mergeSchema>;
+// --- merge-train rows ---
+const trainEntrySchema = z.object({
+  issueNumber: z.number().int(),
+  fixSha: z.string(),
+});
+type TrainEntry = z.infer<typeof trainEntrySchema>;
+const trainSnapshotSchema = z.object({
+  round: z.number().int(),
+  entries: z.array(trainEntrySchema).default([]),
+  skipped: z.array(z.string()).default([]),
+  // Issues whose reviewed fix is ALREADY on origin/main (landed by an earlier
+  // mechanism, e.g. the pre-train queue before a hot swap): adopted into the
+  // cumulative landed ledger so trainDone can converge and closes mount.
+  adopted: z.array(z.object({ issueNumber: z.number().int(), sha: z.string() })).default([]),
+  // Ready lanes that are structurally unlandable (candidate sha missing):
+  // counted as eviction strikes so they park instead of looping forever.
+  strikes: z.array(z.number().int()).default([]),
+  summary: z.string(),
+});
+type TrainSnapshot = z.infer<typeof trainSnapshotSchema>;
+const stackedEntrySchema = z.object({
+  issueNumber: z.number().int(),
+  stackedSha: z.string(),
+  changedPaths: z.array(z.string()).default([]),
+});
+type StackedEntry = z.infer<typeof stackedEntrySchema>;
+const trainStackSchema = z.object({
+  round: z.number().int(),
+  baseSha: z.string(),
+  stacked: z.array(stackedEntrySchema).default([]),
+  evicted: z.array(z.object({ issueNumber: z.number().int(), reason: z.string() })).default([]),
+  summary: z.string(),
+});
+type TrainStack = z.infer<typeof trainStackSchema>;
+const trainLandSchema = z.object({
+  round: z.number().int(),
+  landedIssues: z.array(z.number().int()).default([]),
+  landedTip: z.string().default(""),
+  pushed: z.boolean(),
+  requeued: z.array(z.number().int()).default([]),
+  // Cumulative across rounds so render logic needs only the LATEST row:
+  // landedAll pins issue -> landed sha; evictedAllNumbers repeats a number
+  // once per eviction event, so counting occurrences gives strike counts.
+  landedAll: z.array(z.object({ issueNumber: z.number().int(), sha: z.string() })).default([]),
+  evictedAllNumbers: z.array(z.number().int()).default([]),
+  summary: z.string(),
+});
+type TrainLand = z.infer<typeof trainLandSchema>;
 const dispositionSchema = z.object({
   issueNumber: z.number().int(),
   closed: z.boolean(),
@@ -332,7 +391,7 @@ const summarySchema = z.object({
 });
 
 const {
-  Workflow, Task, Sequence, Parallel, Loop, Worktree, MergeQueue, smithers, outputs,
+  Workflow, Task, Sequence, Parallel, Loop, Worktree, smithers, outputs,
 } = createSmithers({
   input: inputSchema,
   tfLocalScan: localScanSchema,
@@ -363,6 +422,9 @@ const {
   tfResolution: resolutionSchema,
   tfLandingPrep: landingPrepSchema,
   tfMerge: mergeSchema,
+  tfTrainSnapshot: trainSnapshotSchema,
+  tfTrainStack: trainStackSchema,
+  tfTrainLand: trainLandSchema,
   tfDisposition: dispositionSchema,
   tfGuard: guardSchema,
   tfBaseline: baselineSchema,
@@ -1483,15 +1545,6 @@ function mechanicallyRebase(n: number, cwd: string, expectedHead: string): Rebas
     return { issueNumber: n, status: "blocked", baseSha, headSha: "", conflictPaths: [], summary: String(error).slice(0, 8_000) };
   }
 }
-function resolutionPrompt(issue: Issue, rebase: Rebase): string {
-  return [
-    UNTRUSTED,
-    "You are Terra resolving merge-queue rebase conflicts for issue #" + issue.number + " in this worktree (cwd).",
-    "A deterministic rebase onto main stopped with conflicts in: " + JSON.stringify(rebase.conflictPaths),
-    "Resolve ONLY those conflicted files, preserving both the issue fix and current main. Remove every conflict marker.",
-    "Do not run VCS commands, tests, or network commands, and do not edit other files.",
-  ].join("\n");
-}
 function finalizeRebase(n: number, cwd: string, rebase: Rebase, resolution: Resolution | undefined, candidate: Candidate | undefined): LandingPrep {
   if (rebase.status === "blocked") return { issueNumber: n, ready: false, baseSha: rebase.baseSha, headSha: "", patchId: "", sameAsCandidate: false, changedPaths: [], reviewDiff: "", summary: rebase.summary };
   if (rebase.status === "conflict") {
@@ -1532,32 +1585,287 @@ function finalizeRebase(n: number, cwd: string, rebase: Rebase, resolution: Reso
     return { issueNumber: n, ready: false, baseSha: rebase.baseSha, headSha, patchId: "", sameAsCandidate: false, changedPaths, reviewDiff: "", summary: String(error) };
   }
 }
-export async function landAndPush(input: Input, n: number, prep: LandingPrep, reviewApproved: boolean, gatePassed: boolean): Promise<Merge> {
+// Merge-train landing: rebase the lane's fix onto the CURRENT origin/main tip
+// and fast-forward push it. Retry on a lost race. The old one-shot CAS
+// (update-ref main head base) gave up the moment main moved — so once one queue
+// entry landed (or a concurrent push advanced main), every later land returned
+// merged:false and the serial queue wedged. Re-rebasing onto the live tip makes
+// each entry land regardless of how many landed before it.
+async function landAndPush(input: Input, n: number, prep: LandingPrep, reviewApproved: boolean, gatePassed: boolean, cwd: string): Promise<Merge> {
   const valid = prep.ready && reviewApproved && gatePassed;
   if (!valid) return { issueNumber: n, merged: false, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Final review or landing gate did not pass on the exact rebased head." };
-  if (input.dryRun) {
-    return { issueNumber: n, merged: false, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Dry run: verified the landing candidate but did not move or push main." };
+  if (input.dryRun) return { issueNumber: n, merged: true, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Dry run: landing skipped." };
+  let base = prep.baseSha;
+  let head = prep.headSha;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    git(["fetch", "origin", "main"]);
+    const tip = git(["rev-parse", "refs/remotes/origin/main"]);
+    if (base !== tip) {
+      try {
+        git(["rebase", "--onto", tip, base, head], cwd);
+      } catch {
+        try { git(["rebase", "--abort"], cwd); } catch { /* not mid-rebase */ }
+        return { issueNumber: n, merged: false, pushed: false, baseSha: tip, headSha: head, remoteSha: "", summary: "Rebase onto the latest main conflicted; queue entry needs conflict resolution." };
+      }
+      base = tip;
+      head = currentHead(cwd);
+    }
+    const push = await runProcess("git", ["push", "origin", head + ":refs/heads/main"], repoRoot, 15 * 60_000);
+    if (push.exitCode === 0) {
+      git(["update-ref", "refs/heads/main", head]);
+      git(["fetch", "origin", "main"]);
+      return { issueNumber: n, merged: true, pushed: true, baseSha: base, headSha: head, remoteSha: git(["rev-parse", "refs/remotes/origin/main"]), summary: "Landed on main (merge-train push at attempt " + (attempt + 1) + ")." };
+    }
+    // Non-fast-forward: origin advanced during our window. Loop to re-rebase.
   }
+  return { issueNumber: n, merged: false, pushed: false, baseSha: base, headSha: head, remoteSha: "", summary: "Lost the main landing race after 6 attempts." };
+}
+
+// ---------------------------------------------------------------------------
+// Merge train. Classic design: stack ready fixes speculatively (entry k is
+// cherry-picked onto main + entries 1..k-1), validate every stacked state in
+// PARALLEL, land the longest green prefix in ONE fast-forward push, pop the
+// first failure and requeue everything behind it. No agent re-review: the
+// cross-model candidate review already approved each patch, a conflict-free
+// cherry-pick preserves it byte-for-byte, and the stacked-state gate
+// (typecheck + lint + scoped tests) is what catches cross-entry breakage.
+// ---------------------------------------------------------------------------
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function trainWorktree(key: string): string {
+  const cwd = join(repoRoot, ".smithers", "worktrees", "ticket-fleet", key, "train");
+  if (!existsSync(cwd)) {
+    mkdirSync(join(repoRoot, ".smithers", "worktrees", "ticket-fleet", key), { recursive: true });
+    git(["worktree", "add", "--detach", cwd, "HEAD"]);
+  }
+  return cwd;
+}
+// Adoption must be patch-verified: a bare "Fixes #N" message match could be an
+// OLD fix for a reopened issue, and adopting it would close the issue without
+// the new reviewed candidate ever landing. Returns the main commit whose
+// content is patch-identical to the reviewed candidate, "" when the candidate
+// is not on main, and "ambiguous" when Fixes-commits exist but none match.
+function landedOnMain(issueNumber: number, reviewedSha: string): string {
   try {
-    git(["update-ref", "refs/heads/main", prep.headSha, prep.baseSha]);
-  } catch (error) {
-    return { issueNumber: n, merged: false, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Local main moved; queue entry must retry: " + String(error).slice(0, 4_000) };
+    const candidates = git(["log", "origin/main", "-8", "--grep", "^Fixes #" + issueNumber + "$", "--format=%H"]).split("\n").filter(Boolean);
+    if (!candidates.length) return "";
+    const reviewedPatchId = patchIdFor(reviewedSha + "~1", reviewedSha, repoRoot);
+    if (!reviewedPatchId) return "";
+    for (const c of candidates) {
+      if (patchIdFor(c + "~1", c, repoRoot) === reviewedPatchId) return c;
+    }
+    return "ambiguous";
+  } catch {
+    return "";
   }
-  const push = await pushMain(input.dryRun);
-  if (!push.pushed) {
+}
+async function trainSnapshot(round: number, readyLanes: { issueNumber: number; sha: string }[], evictedAllNumbers: number[], landedAllNumbers: number[]): Promise<TrainSnapshot> {
+  try { git(["fetch", "origin", "main"]); } catch { /* offline fetch; stale refs still work */ }
+  const entries: TrainEntry[] = [];
+  const skipped: string[] = [];
+  const adopted: { issueNumber: number; sha: string }[] = [];
+  const strikes: number[] = [];
+  for (const lane of readyLanes) {
+    const n = lane.issueNumber;
+    if (landedAllNumbers.includes(n)) continue;
+    if (evictedAllNumbers.filter((x) => x === n).length >= TRAIN_MAX_EVICTIONS) { skipped.push(n + ":evicted-" + TRAIN_MAX_EVICTIONS + "x-parked"); continue; }
     try {
-      // Do not leave a push-rejected change looking landed locally. The CAS
-      // makes this rollback safe if another queue entry advanced main first.
-      git(["update-ref", "refs/heads/main", prep.baseSha, prep.headSha]);
-    } catch { /* a concurrently advanced main must never be rewound */ }
+      // Board the EXACT sha the cross-model review and candidate gate
+      // approved (readiness.headSha) — never a mutable branch ref that a
+      // stray process could have advanced past the reviewed content.
+      git(["cat-file", "-e", lane.sha + "^{commit}"]);
+      if (git(["merge-base", lane.sha, "origin/main"]) === lane.sha) { adopted.push({ issueNumber: n, sha: lane.sha }); continue; }
+      const landedSha = landedOnMain(n, lane.sha);
+      if (landedSha === "ambiguous") {
+        strikes.push(n);
+        skipped.push(n + ":fixes-commit-on-main-but-not-patch-identical(reopened?)-parked-for-human");
+        continue;
+      }
+      if (landedSha) { adopted.push({ issueNumber: n, sha: landedSha }); continue; }
+      if (entries.length >= TRAIN_MAX_BATCH) { skipped.push(n + ":over-batch-cap"); continue; }
+      entries.push({ issueNumber: n, fixSha: lane.sha });
+    } catch (error) {
+      strikes.push(n);
+      skipped.push(n + ":candidate-sha-unusable:" + String(error).slice(0, 100));
+    }
+  }
+  if (!entries.length && !adopted.length) await sleep(TRAIN_IDLE_SLEEP_MS);
+  return { round, entries, skipped, adopted, strikes, summary: "Round " + round + ": boarded " + entries.length + ", adopted " + adopted.length + ", skipped " + skipped.length + "." };
+}
+async function trainStack(key: string, round: number, entries: TrainEntry[]): Promise<TrainStack> {
+  // Any failure before the per-entry loop must still produce a row, or the
+  // round can never reach train:land and the loop wedges.
+  let cwd = "";
+  let baseSha = "";
+  try {
+    cwd = trainWorktree(key);
+    git(["fetch", "origin", "main"], cwd);
+    baseSha = git(["rev-parse", "refs/remotes/origin/main"], cwd);
+    try { git(["cherry-pick", "--abort"], cwd); } catch { /* not mid-pick */ }
+    git(["checkout", "--detach", baseSha], cwd);
+    git(["reset", "--hard", baseSha], cwd);
+    git(["clean", "-fdq"], cwd);
+  } catch (error) {
+    // "infra:" evictions requeue WITHOUT an eviction strike — a transient
+    // fetch/worktree failure is not the entry's fault and must never park it.
+    // Back off before yielding the round so a hard-down remote cannot burn
+    // through the loop's iteration budget at full speed.
+    await sleep(TRAIN_IDLE_SLEEP_MS);
     return {
-      issueNumber: n, merged: false, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: push.remoteSha,
-      summary: "Landing push failed; local main was rolled back when still safe. " + push.summary,
+      round, baseSha, stacked: [],
+      evicted: entries.map((e) => ({ issueNumber: e.issueNumber, reason: "infra: train worktree unavailable: " + String(error).slice(0, 200) })),
+      summary: "Round " + round + ": train worktree setup failed; all entries requeued without strikes.",
     };
   }
+  const stacked: StackedEntry[] = [];
+  const evicted: { issueNumber: number; reason: string }[] = [];
+  let tip = baseSha;
+  for (const entry of entries) {
+    // The boarded sha is the single atomic fix commit the review approved
+    // (captureCandidate squashes each lane to exactly one commit off its
+    // base). Cherry-pick exactly that commit — nothing more can board.
+    try {
+      git(["cherry-pick", "--allow-empty-message", entry.fixSha], cwd);
+      const newTip = currentHead(cwd);
+      const changedPaths = splitZero(git(["diff", "--name-only", "-z", tip + ".." + newTip], cwd));
+      const protectedPaths = protectedAutomationPaths(changedPaths);
+      if (protectedPaths.length || !changedPaths.length) {
+        git(["reset", "--hard", tip], cwd);
+        evicted.push({ issueNumber: entry.issueNumber, reason: protectedPaths.length ? "protected paths: " + protectedPaths.join(", ") : "empty diff after stacking" });
+        continue;
+      }
+      stacked.push({ issueNumber: entry.issueNumber, stackedSha: newTip, changedPaths });
+      tip = newTip;
+    } catch {
+      try { git(["cherry-pick", "--abort"], cwd); } catch { /* not mid-pick */ }
+      git(["reset", "--hard", tip], cwd);
+      evicted.push({ issueNumber: entry.issueNumber, reason: "stack conflict" });
+    }
+  }
+  return { round, baseSha, stacked, evicted, summary: "Round " + round + ": stacked " + stacked.length + " on " + baseSha.slice(0, 10) + ", evicted " + evicted.length + "." };
+}
+async function trainGate(n: number, key: string, baseSha: string, stackedSha: string): Promise<Gate> {
+  // Every return path stamps headSha = stackedSha: the render layer treats a
+  // gate row with that sha as "this round's verdict exists" (passed says
+  // whether it is green), so a failure can never wedge the round.
+  const failed = (summary: string, log = ""): Gate =>
+    ({ issueNumber: n, phase: "train", headSha: stackedSha, passed: false, exitCode: 1, durationMs: 0, command: "", log, summary });
+  const cwd = worktreePath("issue", n, key);
+  const branch = branchName("issue", n, key);
+  try {
+    try {
+      if (git(["status", "--porcelain"], cwd)) {
+        // A crashed prior gate can leave the lane dirty or detached. The lane
+        // is finished (its reviewed sha is pinned by readiness), so a hard
+        // restore to its branch is always safe.
+        git(["reset", "--hard", branch], cwd);
+        git(["clean", "-fdq"], cwd);
+      }
+      git(["checkout", "--detach", stackedSha], cwd);
+      // Always run the frozen install first: the engine may have rebased this
+      // lane without reinstalling, so node_modules is not guaranteed to match
+      // ANY ref's lockfile, and a warm-store install costs seconds. Spawn pnpm
+      // DIRECTLY (inheriting the driver's node) — running it through
+      // `bash -lc` re-sources the login profile, which can select an older
+      // default node whose pnpm prunes engine-gated deps (observed: node v20
+      // dropping koffi, failing typecheck repo-wide for every later gate).
+      const install = await runProcess("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], cwd, 15 * 60_000);
+      if (install.exitCode !== 0) {
+        return failed("infra: frozen install failed in lane worktree", (install.stderr + "\n" + install.stdout).slice(-4_000));
+      }
+      // Validate the CUMULATIVE prefix: this stacked state contains every
+      // entry ahead of us, so test all packages the prefix touched — entry B
+      // must not pass while breaking a package entry A changed.
+      const prefixPaths = splitZero(git(["diff", "--name-only", "-z", baseSha + ".." + stackedSha], cwd));
+      const gate = await runGate(n, "train", cwd, stackedSha, landingGateCommand(prefixPaths), 45 * 60_000);
+      return gate.headSha === stackedSha ? gate : { ...gate, headSha: stackedSha, passed: false };
+    } catch (error) {
+      // EVERY failure path must persist a verdict row for this stacked sha,
+      // or trainGatesDone can never settle and the round wedges.
+      return failed("Stacked validation threw: " + String(error).slice(0, 400));
+    }
+  } finally {
+    // Restore the lane exactly: tests may leave stray files that would make a
+    // bare checkout refuse. The branch ref itself never moved.
+    try {
+      git(["reset", "--hard", "HEAD"], cwd);
+      git(["clean", "-fdq"], cwd);
+      git(["checkout", branch], cwd);
+    } catch { /* recovered by the next gate's dirty-lane restore */ }
+  }
+}
+async function trainLand(input: Input, round: number, snapshot: TrainSnapshot | undefined, stack: TrainStack | undefined, gates: Gate[], previous: TrainLand | undefined): Promise<TrainLand> {
+  const landedAll = previous ? asObjArray<{ issueNumber: number; sha: string }>(previous.landedAll).map((p) => ({ issueNumber: Number(p.issueNumber), sha: String(p.sha) })) : [];
+  const evictedAllNumbers = previous ? asStrArray(previous.evictedAllNumbers).map(Number) : [];
+  // Adopt issues whose reviewed fix was already on main, and strike lanes the
+  // snapshot found structurally unlandable, so both converge instead of
+  // re-polling forever.
+  for (const pair of (snapshot ? asObjArray<{ issueNumber: number; sha: string }>(snapshot.adopted) : [])) {
+    if (!landedAll.some((p) => p.issueNumber === Number(pair.issueNumber))) landedAll.push({ issueNumber: Number(pair.issueNumber), sha: String(pair.sha) });
+  }
+  for (const n of (snapshot ? asStrArray(snapshot.strikes).map(Number) : [])) evictedAllNumbers.push(n);
+  const stacked = stack ? asObjArray<StackedEntry>(stack.stacked) : [];
+  for (const e of (stack ? asObjArray<{ issueNumber: number; reason: string }>(stack.evicted) : [])) {
+    if (!String(e.reason).startsWith("infra:")) evictedAllNumbers.push(Number(e.issueNumber));
+  }
+  const gateFor = (e: StackedEntry) => gates.find((g) => g.headSha === e.stackedSha && g.passed === true);
+  const prefix: StackedEntry[] = [];
+  let popped: StackedEntry | undefined;
+  for (const e of stacked) {
+    if (gateFor(e)) prefix.push(e);
+    else { popped = e; break; }
+  }
+  const requeued = stacked.slice(prefix.length + (popped ? 1 : 0)).map((e) => Number(e.issueNumber));
+  if (popped) {
+    // Gate failures caused by infrastructure (install failed, worktree
+    // unavailable) requeue without a strike, same as infra stack evictions —
+    // only a genuine red verdict on the entry's own content counts.
+    const poppedGate = gates.find((g) => g.headSha === popped!.stackedSha);
+    if (!poppedGate || !String(poppedGate.summary ?? "").startsWith("infra:")) {
+      evictedAllNumbers.push(Number(popped.issueNumber));
+    }
+  }
+  if (input.dryRun) {
+    // Record the simulated landings in the cumulative ledger so trainDone
+    // converges instead of re-stacking and re-gating the same green prefix
+    // for the entire round budget. Nothing external happens: no push, no gh
+    // close, no ticket write (all are dryRun-guarded downstream).
+    for (const e of prefix) landedAll.push({ issueNumber: Number(e.issueNumber), sha: String(e.stackedSha) });
+    return {
+      round, landedIssues: prefix.map((e) => Number(e.issueNumber)), landedTip: "", pushed: false,
+      requeued, landedAll, evictedAllNumbers,
+      summary: "Dry run: simulated landing of " + prefix.length + " issue(s).",
+    };
+  }
+  if (!prefix.length) {
+    return {
+      round, landedIssues: [], landedTip: "", pushed: false,
+      requeued, landedAll, evictedAllNumbers,
+      summary: "Round " + round + ": no green prefix" + (popped ? " (first failure #" + popped.issueNumber + ")" : "") + ".",
+    };
+  }
+  const tipSha = String(prefix[prefix.length - 1].stackedSha);
+  const push = await runProcess("git", ["push", "origin", tipSha + ":refs/heads/main"], repoRoot, 15 * 60_000);
+  if (push.exitCode !== 0) {
+    // Non-fast-forward: main moved externally during validation. Everything is
+    // still intact; requeue the whole round so the next one restacks on the
+    // new tip and revalidates. Never force.
+    return {
+      round, landedIssues: [], landedTip: "", pushed: false,
+      requeued: stacked.map((e) => Number(e.issueNumber)),
+      landedAll, evictedAllNumbers,
+      summary: "Round " + round + ": push rejected (main moved externally); restacking. " + (push.stderr || push.stdout).slice(-500),
+    };
+  }
+  try { git(["update-ref", "refs/heads/main", tipSha]); } catch { /* local ref is cosmetic */ }
+  try { git(["fetch", "origin", "main"]); } catch { /* next round re-fetches */ }
+  const landedIssues = prefix.map((e) => Number(e.issueNumber));
+  for (const e of prefix) landedAll.push({ issueNumber: Number(e.issueNumber), sha: String(e.stackedSha) });
   return {
-    issueNumber: n, merged: true, pushed: push.pushed, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: push.remoteSha,
-    summary: "Landed on local main. " + push.summary,
+    round, landedIssues, landedTip: tipSha, pushed: true, requeued, landedAll, evictedAllNumbers,
+    summary: "Round " + round + ": landed " + landedIssues.length + " issue(s) in one push (" + tipSha.slice(0, 10) + ")" + (popped ? "; popped #" + popped.issueNumber : "") + (requeued.length ? "; requeued " + requeued.length : "") + ".",
   };
 }
 export async function closeAfterLanding(input: Input, issue: Issue, merge: Merge, localTickets: LocalTicket[]): Promise<z.infer<typeof dispositionSchema>> {
@@ -1571,8 +1879,14 @@ export async function closeAfterLanding(input: Input, issue: Issue, merge: Merge
       gh(["issue", "close", String(issue.number), "--repo", input.repo, "--reason", "completed",
         "--comment", "Resolved by ticket-fleet: landed on main in " + merge.headSha + "."]);
       closed = true;
-    } catch (error) {
-      closeFailure = " GitHub close failed: " + String(error).slice(0, 500);
+    } catch {
+      // Close can fail because the Fixes trailer already closed it, or from a
+      // transient gh error. Only a verified CLOSED state counts as success.
+      try {
+        closed = gh(["issue", "view", String(issue.number), "--repo", input.repo, "--json", "state", "--jq", ".state"]).trim() === "CLOSED";
+      } catch {
+        closed = false;
+      }
     }
   }
   // Move the mirrored local ticket (if any) to .done and commit it.
@@ -1588,17 +1902,46 @@ export async function closeAfterLanding(input: Input, issue: Issue, merge: Merge
       if (candidates.length) ticketPath = "smithers/" + candidates[0];
     } catch { /* no smithers dir */ }
   }
-  if (ticketPath && existsSync(join(ticketsDir, ticketPath)) && !input.dryRun) {
+  if (ticketPath && existsSync(join(ticketsDir, ticketPath)) && !input.dryRun && closed) {
     mkdirSync(join(ticketsDir, ".done"), { recursive: true });
     const content = readFileSync(join(ticketsDir, ticketPath), "utf8");
     writeFileSync(join(ticketsDir, ".done", basename(ticketPath)),
       content + "\n\n> Closed by ticket-fleet: landed on main in " + merge.headSha + ".\n", "utf8");
     rmSync(join(ticketsDir, ticketPath), { force: true });
-    commitPathsToMain([".smithers/tickets"],
-      "🚚 chore(tickets): close " + basename(ticketPath) + " (#" + issue.number + ")\n\nCo-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>");
-    const ticketPush = await pushMain(input.dryRun);
-    ticketMoved = ticketPush.pushed;
-    if (!ticketPush.pushed) closeFailure += " Local ticket commit was not pushed: " + ticketPush.summary.slice(0, 500);
+    // A concurrent merge-train landing can move refs/heads/main between our
+    // ticket commit and its push, orphaning the commit. Only the exact ticket
+    // commit becoming an ancestor of origin/main counts as moved; retry the
+    // commit+push cycle a few times to ride out landings.
+    for (let attempt = 0; attempt < 3 && !ticketMoved; attempt++) {
+      // Rebuild on the CURRENT origin tip each attempt: commitPathsToMain
+      // commits the on-disk tickets tree onto local refs/heads/main, so a
+      // stale local ref (a concurrent train landing advanced origin) would
+      // otherwise reproduce the same rejected non-fast-forward push forever.
+      try {
+        git(["fetch", "origin", "main"]);
+        const originTip = git(["rev-parse", "refs/remotes/origin/main"]);
+        try {
+          // Origin contained in local: local is equal or strictly ahead with a
+          // fast-forwardable commit; keep it.
+          git(["merge-base", "--is-ancestor", originTip, "refs/heads/main"]);
+        } catch {
+          // Local is behind or DIVERGED (its unpushed commits are only ticket
+          // commits whose file state lives on disk and gets rebuilt below):
+          // reset to origin so the rebuilt commit fast-forwards.
+          git(["update-ref", "refs/heads/main", originTip]);
+        }
+      } catch { /* offline; try with what we have */ }
+      const ticketCommit = commitPathsToMain([".smithers/tickets"],
+        "🚚 chore(tickets): close " + basename(ticketPath) + " (#" + issue.number + ")\n\nCo-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>");
+      await pushMain(input.dryRun);
+      try {
+        git(["fetch", "origin", "main"]);
+        git(["merge-base", "--is-ancestor", ticketCommit.sha, "refs/remotes/origin/main"]);
+        ticketMoved = true;
+      } catch {
+        await sleep(5_000);
+      }
+    }
   }
   return {
     issueNumber: issue.number,
@@ -1666,7 +2009,43 @@ export default smithers((ctx) => {
     const approval = latest<z.infer<typeof approvalDecisionSchema>>(ctx, outputs.tfMergeApproval, "i" + issue.number + ":merge-approval");
     return approval?.approved === true;
   });
-  const merged = ready.filter(({ issue }) => latest<Merge>(ctx, outputs.tfMerge, "i" + issue.number + ":land")?.merged === true);
+  // --- merge-train render state. Cumulative fields ride on the LATEST land
+  // row, so one read gives the full picture regardless of round count. ---
+  const lastTrainLand = latest<TrainLand>(ctx, outputs.tfTrainLand, "train:land");
+  const trainRound = (lastTrainLand ? Number(lastTrainLand.round) : -1) + 1;
+  const landedAllPairs = lastTrainLand ? asObjArray<{ issueNumber: number; sha: string }>(lastTrainLand.landedAll) : [];
+  const landedSet = new Set(landedAllPairs.map((p) => Number(p.issueNumber)));
+  const trainEvictedAll = lastTrainLand ? asStrArray(lastTrainLand.evictedAllNumbers).map(Number) : [];
+  const trainSnapshotNow = (() => {
+    const row = latest<TrainSnapshot>(ctx, outputs.tfTrainSnapshot, "train:snapshot");
+    return row && Number(row.round) === trainRound ? row : undefined;
+  })();
+  const trainStackNow = (() => {
+    const row = latest<TrainStack>(ctx, outputs.tfTrainStack, "train:stack");
+    return row && Number(row.round) === trainRound ? row : undefined;
+  })();
+  const trainStackedNow = trainStackNow ? asObjArray<StackedEntry>(trainStackNow.stacked) : [];
+  const trainGatesNow = trainStackedNow
+    .map((e) => latest<Gate>(ctx, outputs.tfGate, "train:gate:" + e.issueNumber))
+    .filter((g): g is Gate => !!g);
+  const trainGatesDone = trainStackedNow.every((e) => {
+    const gate = latest<Gate>(ctx, outputs.tfGate, "train:gate:" + e.issueNumber);
+    return !!gate && gate.headSha === e.stackedSha;
+  });
+  const laneDead = (n: number, needsApproval: boolean) => {
+    const readiness = latest<Readiness>(ctx, outputs.tfReadiness, "i" + n + ":ready");
+    if (readiness && readiness.ready !== true) return true;
+    if (needsApproval) {
+      const approval = latest<z.infer<typeof approvalDecisionSchema>>(ctx, outputs.tfMergeApproval, "i" + n + ":merge-approval");
+      if (approval && approval.approved !== true) return true;
+    }
+    return false;
+  };
+  const trainDone = selected.length > 0 && selected.every(({ issue, triage }) =>
+    landedSet.has(issue.number)
+    || trainEvictedAll.filter((x) => x === issue.number).length >= TRAIN_MAX_EVICTIONS
+    || laneDead(issue.number, triage.needsHumanApproval === true));
+  const merged = ready.filter(({ issue }) => landedSet.has(issue.number));
 
   return (
     <Workflow name="ticket-fleet">
@@ -1761,7 +2140,7 @@ export default smithers((ctx) => {
                           ) : null}
                           {prep?.ready && gate ? (
                             <Task id="ci-fix:land" output={outputs.tfMerge} timeoutMs={30 * 60_000} continueOnFail>
-                              {() => landAndPush(input, 0, prep, true, gate.passed === true && gate.headSha === prep.headSha)}
+                              {() => landAndPush(input, 0, prep, true, gate.passed === true && gate.headSha === prep.headSha, cwd)}
                             </Task>
                           ) : null}
                         </Sequence>
@@ -2017,86 +2396,66 @@ export default smithers((ctx) => {
             })}
           </Parallel>
 
-          {/* Serialized merge queue; each landing pushes main immediately. */}
-          {ready.length ? (
-          <MergeQueue id="merge-queue" maxConcurrency={1}>
-            <Parallel id="merge-queue-serial" subtreeConcurrency={1}>
-              {ready.map(({ issue, triage }) => {
-                const n = issue.number;
-                const cwd = worktreePath("issue", n, key);
-                const hardTier = hardTierOf(triage);
-                const readiness = latest<Readiness>(ctx, outputs.tfReadiness, "i" + n + ":ready")!;
-                const candidate = latest<Candidate>(ctx, outputs.tfCandidate, "i" + n + ":candidate");
-                const rebase = latest<Rebase>(ctx, outputs.tfRebase, "i" + n + ":queue-rebase");
-                const resolution = latest<Resolution>(ctx, outputs.tfResolution, "i" + n + ":queue-resolve");
-                const prep = latest<LandingPrep>(ctx, outputs.tfLandingPrep, "i" + n + ":queue-prep");
-                const queueReview = latest<Review>(ctx, outputs.tfReview, reviewNodeIdFor(n, hardTier, "landing"));
-                const queueGate = latest<Gate>(ctx, outputs.tfGate, "i" + n + ":queue-gate");
-                const merge = latest<Merge>(ctx, outputs.tfMerge, "i" + n + ":land");
-                const reviewApproved = prep?.sameAsCandidate === true
-                  || (queueReview?.approved === true && queueReview.headSha === prep?.headSha);
-                // Content-equivalent rebases may reuse the candidate review,
-                // but they still run the landing gate against the exact new
-                // head and latest main dependency graph.
-                const gatePassed = queueGate?.passed === true && queueGate.headSha === prep?.headSha;
+          {/* ---- Merge train. Stack ready fixes speculatively, validate all
+               stacked states in parallel, land the longest green prefix in a
+               single fast-forward push, pop failures and requeue the rest.
+               Rounds repeat until every selected issue lands or parks. ---- */}
+          {ready.length || lastTrainLand ? (
+            <Loop id="merge-train" until={trainDone} maxIterations={TRAIN_MAX_ROUNDS} onMaxReached="return-last">
+              <Sequence>
+                <Task id="train:snapshot" output={outputs.tfTrainSnapshot} timeoutMs={10 * 60_000}>
+                  {() => trainSnapshot(
+                    trainRound,
+                    ready
+                      .map(({ issue }) => ({ issueNumber: issue.number, sha: String(latest<Readiness>(ctx, outputs.tfReadiness, "i" + issue.number + ":ready")?.headSha ?? "") }))
+                      .filter((lane) => lane.sha.length > 0),
+                    trainEvictedAll,
+                    [...landedSet],
+                  )}
+                </Task>
+                {trainSnapshotNow && asObjArray<TrainEntry>(trainSnapshotNow.entries).length ? (
+                  <Task id="train:stack" output={outputs.tfTrainStack} timeoutMs={20 * 60_000} continueOnFail>
+                    {() => trainStack(key, trainRound, asObjArray<TrainEntry>(trainSnapshotNow.entries).map((e) => ({ issueNumber: Number(e.issueNumber), fixSha: String(e.fixSha) })))}
+                  </Task>
+                ) : null}
+                {trainStackedNow.length ? (
+                  <Parallel id="train:validate" maxConcurrency={TRAIN_GATE_CONCURRENCY}>
+                    {trainStackedNow.map((e) => (
+                      <Task key={"tg" + e.issueNumber} id={"train:gate:" + e.issueNumber} output={outputs.tfGate} timeoutMs={50 * 60_000} continueOnFail>
+                        {() => trainGate(Number(e.issueNumber), key, String(trainStackNow!.baseSha), String(e.stackedSha))}
+                      </Task>
+                    ))}
+                  </Parallel>
+                ) : null}
+                {trainSnapshotNow && (!asObjArray<TrainEntry>(trainSnapshotNow.entries).length || (trainStackNow && trainGatesDone)) ? (
+                  <Task id="train:land" output={outputs.tfTrainLand} timeoutMs={20 * 60_000}>
+                    {() => trainLand(input, trainRound, trainSnapshotNow, trainStackNow, trainGatesNow, lastTrainLand)}
+                  </Task>
+                ) : null}
+                <Task id="train:guard" output={outputs.tfGuard}>
+                  {() => runGuard(ctx, "train:round")}
+                </Task>
+              </Sequence>
+            </Loop>
+          ) : null}
+
+          {/* Close issues as soon as their fix is on main. Sibling of the
+               train, keyed per issue, so a round boundary can never strand a
+               close. The Fixes #N trailer already auto-closes on GitHub; this
+               adds the audit comment and moves the local ticket. */}
+          {landedAllPairs.length ? (
+            <Parallel id="train-closes" maxConcurrency={4}>
+              {landedAllPairs.map((pair) => {
+                const n = Number(pair.issueNumber);
+                const issue = issueByNumber.get(n);
+                if (!issue) return null;
                 return (
-                  <Sequence key={"queue-" + n}>
-                    <Task id={"i" + n + ":queue-rebase"} output={outputs.tfRebase} timeoutMs={20 * 60_000} continueOnFail>
-                      {() => mechanicallyRebase(n, cwd, readiness.headSha)}
-                    </Task>
-                    {rebase?.status === "conflict" ? (
-                      <Task id={"i" + n + ":queue-resolve"} output={outputs.tfResolution} agent={supportAgent(cwd)} {...agentTaskProps}>
-                        {resolutionPrompt(issue, { ...rebase, conflictPaths: asStrArray(rebase.conflictPaths) })}
-                      </Task>
-                    ) : null}
-                    {rebase ? (
-                      <Task id={"i" + n + ":queue-prep"} output={outputs.tfLandingPrep} continueOnFail>
-                        {() => finalizeRebase(n, cwd, { ...rebase, conflictPaths: asStrArray(rebase.conflictPaths) }, resolution, candidate)}
-                      </Task>
-                    ) : null}
-                    {prep?.ready ? (
-                      <Parallel id={"i" + n + ":queue-review-and-gate"} maxConcurrency={2}>
-                        {!prep.sameAsCandidate ? (
-                          hardTier ? (
-                            <Panel id={"i" + n + ":queue-review-panel"}
-                              panelists={[
-                                { agent: fableAgent(cwd), label: "fable", role: "Fable final reviewer" },
-                                { agent: solAgent(cwd), label: "sol", role: "Sol final reviewer" },
-                              ]}
-                              moderator={moderatorAgent(cwd)} panelistOutput={outputs.tfReviewSeat} moderatorOutput={outputs.tfReview}
-                              strategy="consensus" minAgree={2} maxConcurrency={2}
-                              panelistTaskProps={agentTaskProps} moderatorTaskProps={agentTaskProps}>
-                              {reviewPrompt(issue, { headSha: prep.headSha, changedPaths: asStrArray(prep.changedPaths), reviewDiff: prep.reviewDiff }, "rebased landing head")}
-                            </Panel>
-                          ) : (
-                            <Task id={"i" + n + ":queue-review"} output={outputs.tfReview} agent={fableAgent(cwd)} {...agentTaskProps}>
-                              {reviewPrompt(issue, { headSha: prep.headSha, changedPaths: asStrArray(prep.changedPaths), reviewDiff: prep.reviewDiff }, "rebased landing head")}
-                            </Task>
-                          )
-                        ) : null}
-                        <Task id={"i" + n + ":queue-gate"} output={outputs.tfGate} timeoutMs={110 * 60_000} continueOnFail>
-                          {() => runGate(n, "landing", cwd, prep.headSha, landingGateCommand(asStrArray(prep.changedPaths)), 100 * 60_000)}
-                        </Task>
-                      </Parallel>
-                    ) : null}
-                    {prep ? (
-                      <Task id={"i" + n + ":land"} output={outputs.tfMerge} timeoutMs={30 * 60_000} continueOnFail>
-                        {() => landAndPush(input, n, prep, reviewApproved, gatePassed)}
-                      </Task>
-                    ) : null}
-                    {merge?.merged ? (
-                      <Task id={"i" + n + ":close"} output={outputs.tfDisposition} continueOnFail>
-                        {() => closeAfterLanding(input, issue, merge, localTickets)}
-                      </Task>
-                    ) : null}
-                    <Task id={"i" + n + ":queue-guard"} output={outputs.tfGuard}>
-                      {() => runGuard(ctx, "i" + n + ":post-landing")}
-                    </Task>
-                  </Sequence>
+                  <Task key={"tc" + n} id={"i" + n + ":train-close"} output={outputs.tfDisposition} continueOnFail>
+                    {() => closeAfterLanding(input, issue, { issueNumber: n, merged: true, pushed: true, baseSha: String(pair.sha), headSha: String(pair.sha), remoteSha: String(pair.sha), summary: "merge train" }, localTickets)}
+                  </Task>
                 );
               })}
             </Parallel>
-          </MergeQueue>
           ) : null}
           </Parallel>
         ) : null}
@@ -2109,8 +2468,8 @@ export default smithers((ctx) => {
           {() => {
             const researched = selected.filter(({ issue }) => !!researchDone(issue.number)).length;
             const pocsLanded = selected.filter(({ issue }) => latest<z.infer<typeof pocLandSchema>>(ctx, outputs.tfPocLand, "i" + issue.number + ":poc-land")?.landed === true).length;
-            const pushedCount = merged.filter(({ issue }) => latest<Merge>(ctx, outputs.tfMerge, "i" + issue.number + ":land")?.pushed === true).length;
-            const closedCount = merged.filter(({ issue }) => latest<z.infer<typeof dispositionSchema>>(ctx, outputs.tfDisposition, "i" + issue.number + ":close")?.closed === true).length;
+            const pushedCount = landedAllPairs.length;
+            const closedCount = landedAllPairs.filter((pair) => latest<z.infer<typeof dispositionSchema>>(ctx, outputs.tfDisposition, "i" + Number(pair.issueNumber) + ":train-close")?.closed === true).length;
             return {
               localTickets: localTickets.length,
               ghIssues: ghIssues.length,

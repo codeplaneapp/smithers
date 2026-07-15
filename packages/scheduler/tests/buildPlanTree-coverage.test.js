@@ -30,8 +30,12 @@ describe("buildPlanTree stable id fallbacks", () => {
     expect(plan.children[0].id).toBe("saga:0");
   });
 
-  test("a ralph nested under a <Worktree> lane is rejected", () => {
-    expect(() => buildPlanTree(
+  test("a ralph nested under a non-ralph wrapper (e.g. a Worktree or Sequence) carries an ancestor loop scope", () => {
+    // A <Loop> reached through a wrapper (not the literal immediate child of
+    // the outer <Loop>) is genuinely executable and scoped by the outer
+    // loop's iteration via the ancestor loop-scope suffix — see
+    // packages/engine/tests/nested-loop-runtime.test.jsx (issue #117).
+    const { plan, ralphs } = buildPlanTree(
       el("smithers:workflow", {}, [
         el("smithers:ralph", { id: "outer", maxIterations: "2" }, [
           el("smithers:worktree", {}, [
@@ -41,22 +45,12 @@ describe("buildPlanTree stable id fallbacks", () => {
           ]),
         ]),
       ]),
-    )).toThrow(/Nested <Loop>\/\<Ralph>/);
-  });
-
-  test("preserves a ralph nested through the supported Sequence topology", () => {
-    const { plan } = buildPlanTree(
-        el("smithers:workflow", {}, [
-          el("smithers:ralph", { id: "outer", maxIterations: "2" }, [
-            el("smithers:sequence", {}, [
-              el("smithers:ralph", { id: "inner", maxIterations: "2" }, [
-                el("smithers:task", { id: "t" }),
-              ]),
-            ]),
-          ]),
-        ]),
-      );
-    expect(plan.children[0].children[0].kind).toBe("sequence");
+    );
+    expect(plan.kind).toBe("sequence");
+    // The inner ralph id is suffixed with the outer loop scope.
+    const ralphIds = ralphs.map((ralph) => ralph.id);
+    expect(ralphIds).toContain("outer");
+    expect(ralphIds).toContain("inner@@outer=0");
   });
 
   test("ralph maxIterations falls back for non-finite numeric caps", () => {

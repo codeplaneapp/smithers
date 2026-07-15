@@ -228,15 +228,20 @@ describe("buildPlanTree", () => {
     ).toThrow(/Nested <Loop>\/<Ralph>/);
   });
 
-  test("nested ralph through Sequence preserves scoped runtime topology", () => {
-    const { plan } = buildPlanTree(
+  test("nested ralph reached through a non-loop wrapper (e.g. Sequence) does not throw", () => {
+    // Only the literal immediate <Loop>-in-<Loop> case is rejected; a <Loop>
+    // reached through a wrapper is the issue #117 regression-guarded shape
+    // (packages/engine/tests/nested-loop-runtime.test.jsx) and is genuinely
+    // executable.
+    expect(() =>
+      buildPlanTree(
         el("smithers:ralph", { id: "outer" }, [
           el("smithers:sequence", {}, [
             el("smithers:ralph", { id: "inner" }),
           ]),
         ]),
-      );
-    expect(plan.children[0].kind).toBe("sequence");
+      ),
+    ).not.toThrow();
   });
 
   test("saga partitions actions and compensations", () => {

@@ -11,17 +11,21 @@ const CLI_ENTRY = resolve(REPO_ROOT, "apps/cli/src/index.js");
 // arbitrary tmp directory outside the monorepo.
 const FIXTURE_PATH = resolve(REPO_ROOT, "examples", "_nested-loop-rejection-fixture.jsx");
 
-// A same-lane nested <Loop> (no <Parallel>/<Worktree> fork in between) has no
-// clear "whose iteration is this" semantics and the engine cannot execute it —
+// A <Loop> as the literal immediate JSX child of another <Loop> has no clear
+// "whose iteration is this" semantics and the engine cannot execute it —
 // `smithers graph` must reject it statically instead of failing at runtime.
 // This is the JSX-authoring analogue of the Effect builder's unconditional
 // `annotateLoops` NESTED_LOOP rejection (packages/engine/src/effect/builder.js).
+// (A <Loop> reached through a <Sequence>/<Parallel>/<Worktree> wrapper is a
+// different, genuinely-executable shape — see the issue #117 regression test
+// at packages/engine/tests/nested-loop-runtime.test.jsx — and must NOT be
+// rejected.)
 const NESTED_LOOP_FIXTURE = `
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { Workflow, Loop, Sequence, Task, smithers, outputs } = createSmithers({
+const { Workflow, Loop, Task, smithers, outputs } = createSmithers({
   input: z.object({}),
   result: z.object({ ok: z.boolean() }),
 });
@@ -30,20 +34,18 @@ export default smithers((ctx) => {
   return (
     <Workflow name="nested-loop-fixture">
       <Loop id="outer" until={false} maxIterations={2}>
-        <Sequence>
-          <Loop id="inner" until={false} maxIterations={2}>
-            <Task id="t1" output={outputs.result}>
-              {{ ok: true }}
-            </Task>
-          </Loop>
-        </Sequence>
+        <Loop id="inner" until={false} maxIterations={2}>
+          <Task id="t1" output={outputs.result}>
+            {{ ok: true }}
+          </Task>
+        </Loop>
       </Loop>
     </Workflow>
   );
 });
 `;
 
-test("smithers graph fails fast (statically) on a same-lane nested <Loop>", () => {
+test("smithers graph fails fast (statically) on a literal immediate nested <Loop>", () => {
     writeFileSync(FIXTURE_PATH, NESTED_LOOP_FIXTURE, "utf8");
     try {
         const result = spawnSync(process.execPath, ["run", CLI_ENTRY, "graph", "examples/_nested-loop-rejection-fixture.jsx"], {

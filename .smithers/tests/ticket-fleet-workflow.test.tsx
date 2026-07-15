@@ -151,43 +151,28 @@ describe("ticket-fleet workflow", () => {
     expect(existsSync(join(repo, ".smithers/executions/ticket-fleet/triage-ledger.json"))).toBe(false);
   }));
 
-  test("landing dry-runs do not advance main and rejected pushes roll the CAS landing back", async () => isolated(async ({ mod, outer, repo }) => {
-    const baseSha = git(repo, "rev-parse", "refs/heads/main");
-    const lane = join(outer, "lane");
-    git(repo, "worktree", "add", "-b", "candidate", lane, "main");
-    writeFileSync(join(lane, "feature.txt"), "candidate\n");
-    git(lane, "add", "feature.txt");
-    git(lane, "commit", "-m", "candidate");
-    const headSha = git(lane, "rev-parse", "HEAD");
-    const prep = { issueNumber: 7, ready: true, baseSha, headSha, patchId: "patch", sameAsCandidate: true, changedPaths: ["feature.txt"], reviewDiff: "diff", summary: "ready" };
-    const dry = await mod.landAndPush(mod.parseInput({ dryRun: true }), 7, prep, true, true);
-    expect(dry).toMatchObject({ merged: false, pushed: false });
-    expect(dry.summary).toContain("did not move or push main");
-    expect(git(repo, "rev-parse", "refs/heads/main")).toBe(baseSha);
-    git(repo, "remote", "set-url", "origin", join(outer, "missing.git"));
-    const rejected = await mod.landAndPush(mod.parseInput({ dryRun: false }), 7, prep, true, true);
-    expect(rejected).toMatchObject({ merged: false, pushed: false });
-    expect(rejected.summary).toContain("rolled back");
-    expect(git(repo, "rev-parse", "refs/heads/main")).toBe(baseSha);
+  test("unlanded merges never close issues", async () => isolated(async ({ mod, repo }) => {
+    const headSha = git(repo, "rev-parse", "refs/heads/main");
+    const input = mod.parseInput({ repo: "owner/repo" });
+    const unpushed = { issueNumber: 7, merged: true, pushed: false, baseSha: headSha, headSha, remoteSha: "", summary: "not pushed" };
+    const skipped = await mod.closeAfterLanding(input, issue(7), unpushed, []);
+    expect(skipped).toMatchObject({ closed: false, ticketMoved: false });
+    expect(skipped.summary).toContain("landing or push incomplete");
+    expect(git(repo, "rev-parse", "refs/heads/main")).toBe(headSha);
   }));
 
-  test("GitHub-close and local-ticket push failures remain truthful", async () => isolated(async (fixture) => {
-    const { mod, outer, repo } = fixture;
+  test("GitHub-close failures stay truthful: only a verified CLOSED state counts", async () => isolated(async (fixture) => {
+    const { mod, repo } = fixture;
     const headSha = git(repo, "rev-parse", "refs/heads/main");
     const input = mod.parseInput({ repo: "owner/repo" });
     const merge = { issueNumber: 9, merged: true, pushed: true, baseSha: headSha, headSha, remoteSha: headSha, summary: "landed" };
     installGh(1);
     const closeFailed = await mod.closeAfterLanding(input, issue(9), merge, []);
     expect(closeFailed).toMatchObject({ closed: false, ticketMoved: false });
-    expect(closeFailed.summary).toContain("GitHub close failed");
-    process.env.FAKE_GH_EXIT = "0";
-    git(repo, "remote", "set-url", "origin", join(outer, "missing.git"));
-    const moveFailed = await mod.closeAfterLanding(input, issue(8), { ...merge, issueNumber: 8 }, [{ ticketPath: "smithers/gh-8-test.md", slug: "gh-8-test", title: "Issue 8", linkedIssue: 8, isEpicDir: false, body: issue(8).url }]);
-    expect(moveFailed).toMatchObject({ closed: true, ticketMoved: false });
-    expect(moveFailed.summary).toContain("Local ticket commit was not pushed");
+    expect(closeFailed.summary).toContain("Issue remains open");
   }));
 
-  test("routing is cross-reviewed and approvals feed a serial exact-head merge queue", async () => isolated(async ({ mod, repo }) => {
+  test("routing is cross-reviewed and approvals feed the merge train", async () => isolated(async ({ mod, repo }) => {
     const splitInput = { repo: "owner/repo", dryRun: true, skipSync: true, skipCiLane: true, solNumbers: [31], fableNumbers: [32], lunaNumbers: [33], reviewIterations: 1 };
     let frame = await renderWorkflow(mod.default, { input: splitInput, workflowPath: source });
     let outputs = add(frame, {}, "triage-scan", { issues: [issue(31), issue(32), issue(33)], summary: "assigned" });
@@ -228,23 +213,20 @@ describe("ticket-fleet workflow", () => {
       outputs = add(frame, outputs, `i${n}:merge-approval`, approval());
     }
     frame = await renderWorkflow(mod.default, { input, outputs, workflowPath: source });
-    const queue = frame.tasks.filter((item) => /i(42|41):queue-rebase/.test(item.nodeId));
-    expect(queue.map((item) => item.nodeId)).toEqual(["i42:queue-rebase", "i41:queue-rebase"]);
-    for (const queued of queue) expect(queued).toMatchObject({ parallelGroupId: "merge-queue-serial", subtreeGroupId: "merge-queue-serial", subtreeMax: 1 });
-    outputs = add(frame, outputs, "i42:queue-rebase", { issueNumber: 42, status: "rebased", baseSha: "base", headSha: "exact-head", conflictPaths: [], summary: "rebased" });
+    expect(frame.tasks.some((item) => item.nodeId.startsWith("i42:queue-"))).toBe(false);
+    expect(task(frame, "train:snapshot").nodeId).toBe("train:snapshot");
+    outputs = add(frame, outputs, "train:snapshot", { round: 0, entries: [{ issueNumber: 42, fixSha: "candidate-42" }, { issueNumber: 41, fixSha: "candidate-41" }], skipped: [], adopted: [], strikes: [], summary: "boarded 2" });
     frame = await renderWorkflow(mod.default, { input, outputs, workflowPath: source });
-    outputs = add(frame, outputs, "i42:queue-prep", { issueNumber: 42, ready: true, baseSha: "base", headSha: "exact-head", patchId: "patch", sameAsCandidate: true, changedPaths: ["feature.ts"], reviewDiff: "diff", summary: "same patch" });
+    expect(task(frame, "train:stack").nodeId).toBe("train:stack");
+    outputs = add(frame, outputs, "train:stack", { round: 0, baseSha: "base", stacked: [{ issueNumber: 42, fixSha: "candidate-42", stackedSha: "stack-42" }, { issueNumber: 41, fixSha: "candidate-41", stackedSha: "stack-41" }], evicted: [], summary: "stacked 2" });
     frame = await renderWorkflow(mod.default, { input, outputs, workflowPath: source });
-    expect(frame.tasks.some((item) => item.nodeId === "i42:queue-review")).toBe(false);
-    expect(task(frame, "i42:queue-gate").nodeId).toBe("i42:queue-gate");
-    const withoutGate = outputs;
-    outputs = add(frame, outputs, "i42:queue-gate", { issueNumber: 42, phase: "landing", headSha: "wrong-head", passed: true, exitCode: 0, durationMs: 1, command: "true", log: "", summary: "wrong" });
-    let landFrame = await renderWorkflow(mod.default, { input, outputs, workflowPath: source });
-    expect(await runTask(task(landFrame, "i42:land"))).toMatchObject({ merged: false, summary: expect.stringContaining("exact rebased head") });
-    outputs = add(frame, withoutGate, "i42:queue-gate", { issueNumber: 42, phase: "landing", headSha: "exact-head", passed: true, exitCode: 0, durationMs: 1, command: "true", log: "", summary: "green" });
-    landFrame = await renderWorkflow(mod.default, { input, outputs, workflowPath: source });
+    expect(frame.tasks.filter((item) => item.nodeId.startsWith("train:gate:")).map((item) => item.nodeId).sort()).toEqual(["train:gate:41", "train:gate:42"]);
+    outputs = add(frame, outputs, "train:gate:42", { issueNumber: 42, phase: "train", headSha: "stack-42", passed: true, exitCode: 0, durationMs: 1, command: "true", log: "", summary: "green" });
+    outputs = add(frame, outputs, "train:gate:41", { issueNumber: 41, phase: "train", headSha: "stack-41", passed: true, exitCode: 0, durationMs: 1, command: "true", log: "", summary: "green" });
+    frame = await renderWorkflow(mod.default, { input, outputs, workflowPath: source });
     const before = git(repo, "rev-parse", "refs/heads/main");
-    expect(await runTask(task(landFrame, "i42:land"))).toMatchObject({ merged: false, pushed: false, summary: expect.stringContaining("did not move or push main") });
+    const land = await runTask(task(frame, "train:land")) as Record<string, unknown>;
+    expect(land).toMatchObject({ pushed: false, landedIssues: [42, 41] });
     expect(git(repo, "rev-parse", "refs/heads/main")).toBe(before);
   }));
 });

@@ -72,6 +72,8 @@ deno.lock
 **/.smithers/executions/
 # Local `smithers bug-report` drafts (per-machine, not history)
 **/.smithers/bug-reports/
+# Benchmark eval staging projects written by `smithers eval` runs
+**/.smithers/eval-runs/
 # Behavioral-test temp op-console stores (random suffixes)
 **/.smithers-op-console-*/
 # PGlite/Postgres durable store (default backend's data dir) + migration marker

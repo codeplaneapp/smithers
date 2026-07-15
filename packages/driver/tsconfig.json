@@ -26,7 +26,6 @@
     "allowJs": true,
     "allowImportingTsExtensions": true,
     "rootDir": "src",
-    "ignoreDeprecations": "6.0"
   },
   "include": [
     "src/**/*"

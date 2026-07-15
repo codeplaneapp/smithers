@@ -25,6 +25,7 @@ const ignoredDirs = new Set([
   "worktrees",
   "coverage",
   "dist",
+  "eval-runs",
   "node_modules",
   "tmp",
 ]);

@@ -37,6 +37,8 @@ const workflowOwners = {
   "./tests/local-workflows-c-utilities.test.tsx": ["review-codex-antigravity.tsx", "review-nokimi.tsx", "run-on-plue.tsx", "test-fortress-monitor.tsx", "trellis.tsx", "vcs.tsx", "verify-push-safety.tsx"],
   "./tests/local-workflows-c-orchestration.test.tsx": ["route-and-merge-issues.tsx", "studio-parity-swarm.tsx", "test-fortress.tsx", "ultragrill.tsx", "validated-implement.tsx"],
   "./tests/ticket-fleet-workflow.test.tsx": ["ticket-fleet.tsx"],
+  "./tests/authoring-benchmark-workflow.test.ts": ["authoring-benchmark.tsx"],
+  "./tests/riskless-github-issue-sweep.test.ts": ["riskless-github-issue-sweep.tsx"],
 } as const;
 
 const componentOwners = {

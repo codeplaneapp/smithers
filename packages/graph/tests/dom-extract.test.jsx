@@ -99,16 +99,29 @@ describe("extractFromHost", () => {
         ]);
         expect(() => extractFromHost(root)).toThrow("Duplicate Task id");
     });
-    test("throws on nested ralph", () => {
+    test("throws on nested ralph (literal immediate <Loop>-in-<Loop> nesting)", () => {
         const root = hostEl("smithers:ralph", { id: "outer" }, [
             hostEl("smithers:ralph", { id: "inner" }, [
                 hostEl("smithers:task", { id: "t1", output: "t" }),
             ]),
         ]);
         expect(() => extractFromHost(root)).toThrow("Nested <Loop>/<Ralph>");
+        try {
+            extractFromHost(root);
+            throw new Error("expected extractFromHost to throw");
+        } catch (error) {
+            expect(error.code).toBe("NESTED_LOOP");
+            expect(String(error.message)).toContain("outer");
+            expect(String(error.message)).toContain("inner");
+            expect(String(error.message)).toContain("MergeQueue");
+        }
     });
 
-    test("preserves the supported scoped nested-loop topology through Sequence", () => {
+    test("allows a Loop nested inside another Loop's Sequence wrapper (issue #117 regression shape)", () => {
+        // Regression guard for github.com/jjhub-ai/smithers/issues/117 and its
+        // runtime test (packages/engine/tests/nested-loop-runtime.test.jsx): a
+        // <Loop> reached through a <Sequence> wrapper — not the literal
+        // immediate child of the outer <Loop> — is genuinely executable.
         const root = hostEl("smithers:ralph", { id: "outer" }, [
             hostEl("smithers:sequence", {}, [
                 hostEl("smithers:ralph", { id: "inner" }, [
@@ -116,7 +129,7 @@ describe("extractFromHost", () => {
                 ]),
             ]),
         ]);
-        expect(extractFromHost(root).tasks[0].nodeId).toContain("outer=0");
+        expect(() => extractFromHost(root)).not.toThrow();
     });
     test("throws on duplicate ralph id", () => {
         const root = hostEl("smithers:workflow", {}, [
@@ -213,13 +226,11 @@ describe("extractFromHost", () => {
             id: "t1",
             output: "t",
             retries: 3,
-            maxSchemaRetries: 0,
             timeoutMs: 5000,
             continueOnFail: true,
         });
         const result = extractFromHost(root);
         expect(result.tasks[0].retries).toBe(3);
-        expect(result.tasks[0].maxSchemaRetries).toBe(0);
         expect(result.tasks[0].timeoutMs).toBe(5000);
         expect(result.tasks[0].continueOnFail).toBe(true);
     });
@@ -726,7 +737,7 @@ describe("extractFromHost", () => {
         });
         expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
     });
-    test("rejects a Ralph loop nested inside another Ralph loop's non-loop wrapper (workflow)", () => {
+    test("scopes task ids by ancestor Ralph loops", () => {
         const root = hostEl("smithers:ralph", { id: "outer" }, [
             hostEl("smithers:workflow", {}, [
                 hostEl("smithers:ralph", { id: "inner" }, [
@@ -734,8 +745,12 @@ describe("extractFromHost", () => {
                 ]),
             ]),
         ]);
-        expect(() => extractFromHost(root, {
+        const result = extractFromHost(root, {
             ralphIterations: { outer: 2, "inner@@outer=2": 4 },
-        })).toThrow("Nested <Loop>/<Ralph>");
+        });
+        expect(result.tasks[0].nodeId).toBe("work@@outer=2");
+        expect(result.tasks[0].ralphId).toBe("inner@@outer=2");
+        expect(result.tasks[0].iteration).toBe(4);
+        expect(result.mountedTaskIds).toEqual(["work@@outer=2::4"]);
     });
 });

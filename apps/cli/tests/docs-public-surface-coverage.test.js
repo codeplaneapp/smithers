@@ -212,7 +212,7 @@ test("workflow overview, catalog, and sidebar cover the curated pack", () => {
         .sort();
     const sidebarWorkflowIds = [...docsJson.matchAll(/"workflows\/([a-z0-9-]+)"/g)]
         .map((match) => match[1])
-        .filter((id) => id !== "overview" && id !== "catalog")
+        .filter((id) => id !== "overview" && id !== "catalog" && id !== "authoring-rules")
         .sort();
 
     expect(overviewWorkflowIds).toEqual(workflowDocIds);

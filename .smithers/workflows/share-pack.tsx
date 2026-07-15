@@ -3,6 +3,7 @@
 // smithers-display-name: Share pack
 // smithers-description: Validate, prepare, publish, and list a Smithers workflow pack in awesome-smithers.
 // smithers-tags: packs, sharing, github
+// smithers-system: true
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, UI } from "smithers-orchestrator";
 import { z } from "zod/v4";

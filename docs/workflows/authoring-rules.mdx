@@ -1,28 +1,126 @@
 ---
-title: Workflow authoring rules
-description: The static contracts that keep authored Smithers workflows renderable and executable.
+title: Workflow Authoring Rules
+description: The rules that repeatedly cost authoring runs when learned at runtime instead of before render. Read this before hand-authoring a workflow.
 ---
 
-These rules are intentionally short and mechanical. `bunx smithers-orchestrator graph` should be the first feedback loop for a new workflow; it catches topology and schema mistakes before a run is launched.
+These five rules keep biting workflow-authoring agents at runtime, hours after
+a workflow was written, instead of in the first second of `bunx smithers-orchestrator graph`.
+Each is already documented elsewhere in full; this page exists so a builder
+(human or agent) hits all five in one read before writing JSX, not one at a
+time across several failed runs. See
+[the postmortem](https://github.com/smithersai/smithers/blob/main/research/workflow-authoring-friction-postmortem.md)
+this page was written to close.
 
-## Reserved columns
+## 1. Output schemas cannot reuse the reserved key columns
 
-Do not declare output fields named `runId`, `nodeId`, or `iteration`; Smithers writes those columns to every output row so it can identify the run, node, and loop pass. Input schemas must also leave `runId` reserved because the runtime supplies it. This prevents collisions between authored data and durable execution metadata. See [database reference](/reference/db#reserved-columns).
+Every output table gets a fixed `run_id` / `node_id` / `iteration` key prefix;
+an input table gets `run_id` only. **Why:** those columns are how Smithers
+correlates a row back to the run, node, and loop iteration that produced it,
+so a field named `runId`, `nodeId`, or `iteration` in your own schema would
+collide with the reserved one.
 
-## Loops and queue-based backfill
+```ts
+const outputs = z.object({
+  // runId / nodeId / iteration: DON'T, reserved, collides at construction
+  summary: z.string(),
+});
+```
 
-Do not directly nest a `<Loop>` (or `<Ralph>`) or put one inside a loop's `<Parallel>`, `<MergeQueue>`, or `<Worktree>` lane. The engine supports the scoped `Loop → Sequence → Loop` topology, but forked loop state has no unambiguous dependency frontier; graph extraction rejects unsupported cases as `NESTED_LOOP` and names both loop ids. When per-item correction is needed, fan items into independent `<Parallel>`/`<Worktree>` lanes and put one global serialized `<MergeQueue maxConcurrency={1}>` around the landing work. Re-enter the outer loop on its next iteration to process queue failures or backfill items; do not render another loop in its forked lanes.
+A collision throws `INVALID_INPUT` at construction (schema build time), not
+at run time; see [`zodToTable`](/reference/db#zod-table-helpers).
 
-## Reading loop outputs
+## 2. No nested loops, use the queue-based backfill pattern instead
 
-Use `ctx.latest(outputs.review, "review")` in a loop's `until` expression: it reads the highest-iteration row for that node. For a specific cross-iteration read, use `ctx.outputMaybe(outputs.review, { nodeId: "review", iteration })`; the explicit iteration makes the dependency unambiguous. This keeps loop termination and historical reads from accidentally inspecting the current frame or an arbitrary row. See [the recipes loop pattern](/recipes#loop-output-binding).
+A `<Loop>`/`<Ralph>` as the **literal immediate JSX child** of another
+`<Loop>`/`<Ralph>` throws `NESTED_LOOP` at graph-extraction time (before any
+agent runs). **Why:** with nothing between the two loops, there's no clear
+"whose iteration is this" semantics for the inner one, the same gap the
+[Effect combinator builder](/effect/overview#control-flow)'s `G.loop` rejects
+unconditionally.
 
-## Production-shaped tests
+```tsx
+<Loop id="outer" until={outerDone}>
+  <Loop id="inner" until={innerDone}>{/* throws NESTED_LOOP */}</Loop>
+</Loop>
+```
 
-Production workflow tests must load the real workflow and call `renderWorkflow` from `smithers-orchestrator/testing` with representative inputs and persisted outputs. A hand-built graph copy only proves that the test fixture is internally consistent; it cannot catch a production import, JSX, binding, or graph-extraction regression. Keep the test's output and task assertions typed, and use fake agents only at the execution boundary.
+The fix the error message suggests: run the inner work through a queue such as
+`<MergeQueue>` and re-enter via the outer loop's next iteration, instead of
+nesting loops.
 
-## Registering pack tests
+This is narrower than it sounds. A `<Loop>` reached through a
+`<Sequence>`/`<Parallel>`/`<Worktree>` wrapper (not the literal immediate
+child) is a **different, genuinely-supported shape**: each `<Parallel>`-forked
+lane (one per array item, one per isolated `<Worktree>`) may run its own
+bounded correction loop, scoped to the outer loop's iteration. That's exactly
+what `close-issues.tsx` and `studio-parity-swarm.tsx` do (outer discover step,
+then a `<Parallel>` of per-item `<Worktree>` lanes, each with its own
+correction `<Loop>`), and it's regression-guarded by
+[`nested-loop-runtime.test.jsx`](https://github.com/smithersai/smithers/blob/main/packages/engine/tests/nested-loop-runtime.test.jsx)
+(issue #117): the inner loop's state and cache correctly reset per outer
+iteration. Don't avoid that shape; it's the sanctioned pattern for "per-item
+lanes, each with a correction loop." What to avoid is a *second* loop
+governing the *same* lane with nothing forking between them.
 
-Pack tests belong in `.smithers/tests/` and must be included by the `.smithers/package.json` `test` script (or an explicitly included test script called by it). Bun will not discover an unregistered pack test in CI, so a green local test command is not evidence that the workflow contract is covered until the file is registered.
+## 3. `ctx.latest` vs `outputMaybe({ nodeId, iteration })` for loop bindings
 
-For the full curated workflow catalog, see [workflows overview](/workflows/overview). For a runnable authoring benchmark with deterministic gates, see the Phase 1 benchmark in `evals/`.
+Inside a `<Loop>`'s `until`, read the most recent iteration with
+[`ctx.latest`](/recipes#implement-review-loop):
+
+```tsx
+<Loop until={ctx.latest(outputs.review, "review")?.approved === true} maxIterations={5}>
+```
+
+**Why `ctx.latest` and not bare `ctx.outputMaybe`:** `ctx.outputMaybe(schema, {
+nodeId })` with no explicit `iteration` resolves the *current render
+iteration*, which equals the loop's iteration only for a single, non-nested
+loop, and is `0` when several loops coexist (sibling loops, or a loop nested
+under a `<Parallel>`/`<Worktree>` fork per rule 2). An `outputMaybe`-based
+`until` built on that ambient iteration can silently never advance: the loop
+just spins to `maxIterations` and returns the last result, with no error
+telling you why. If you need `outputMaybe` directly (not `ctx.latest`), pass
+the loop's own scoped node id and iteration explicitly:
+`ctx.outputMaybe(schema, { nodeId: "review", iteration: N })`.
+
+## 4. Workflow tests must render the real graph via `renderWorkflow`, not a hand-built one
+
+A workflow test imports the actual workflow module and drives it through
+[`renderWorkflow`](/reference/package-configuration#subpath-exports)
+(`smithers-orchestrator/testing`):
+
+```ts
+import { renderWorkflow } from "smithers-orchestrator/testing";
+
+const render = async (name, input = {}, outputs = {}) =>
+  renderWorkflow(await load(name), { workflowPath: join(workflowsDir, name), input, outputs });
+```
+
+**Why:** a test that hand-builds its own plan/graph object (bypassing
+`extractGraph`/`buildPlanTree`) can pass while the real workflow file has a
+typo, a `NESTED_LOOP`, or a reserved-column collision; it's testing a fiction
+that happens to resemble the workflow, not the workflow. `renderWorkflow`
+exercises the same extraction path `bunx smithers-orchestrator graph`/`bunx smithers-orchestrator up`
+do, so a graph-level defect fails the test the same way it would fail a real
+run.
+
+## 5. New `.smithers` test files must be registered in `.smithers/package.json`
+
+`.smithers/package.json`'s `test` script is an explicit, space-separated list
+of test file paths, not a glob. **Why:** pack tests run outside the normal
+per-package `bun test tests` convention (they share fixtures/agents across
+many workflow files), so there's no directory-wide default to fall back on. A
+new test file that isn't appended to that list is silently never run by
+`pnpm test` or CI; it can sit green-looking in the repo indefinitely while
+contributing zero coverage. `node scripts/check-smithers-test-script.mjs`
+(part of the root `pnpm test` gate) catches an unregistered test file; run it
+after adding one, or just add the new path to the list yourself.
+
+## See also
+
+- [Curated Workflows](/workflows/overview), the workflow pack this page's
+  rules apply to.
+- [Recipes](/recipes), the implement to review loop pattern rule 3 refines.
+- [Effect combinator overview](/effect/overview), the stricter builder API
+  rule 2 contrasts with.
+- [`db` reference](/reference/db), the full reserved-column and table-helper
+  contract behind rule 1.

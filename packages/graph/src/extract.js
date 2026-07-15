@@ -426,7 +426,7 @@ export function extractGraph(root, opts) {
     }
     /**
    * @param {HostNode} node
-     * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly loopForkBoundary: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; readonly priority?: number; readonly failurePolicy?: "halt" | "quarantine"; }} ctx
+     * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; readonly priority?: number; readonly failurePolicy?: "halt" | "quarantine"; }} ctx
    */
     function walk(node, ctx) {
         if (node.kind === "text")
@@ -447,7 +447,7 @@ export function extractGraph(root, opts) {
             nextFailurePolicy = parseFailurePolicy(raw.failurePolicy) ?? nextFailurePolicy;
         }
         if (node.tag === "smithers:ralph") {
-            if (ctx.parentIsRalph || ctx.loopForkBoundary) {
+            if (ctx.parentIsRalph) {
                 const innerId = resolveStableId(raw.id, "ralph", ctx.path);
                 throw new SmithersError("NESTED_LOOP", `Nested <Loop>/<Ralph> is not supported: "${innerId}" is nested inside loop "${ctx.ralphId ?? "<outer loop>"}". Run the inner work through a queue such as <MergeQueue> and re-enter via the outer loop's next iteration instead of nesting loops.`, { outerLoopId: ctx.ralphId, innerLoopId: innerId });
             }
@@ -800,15 +800,6 @@ export function extractGraph(root, opts) {
                 aspects: aspects(raw.__aspects),
             });
         }
-        // Sequence is a supported scoped nested-loop topology. Forked lanes
-        // are not: their loop state cannot be unambiguously resumed.
-        const nextParentIsRalph = node.tag === "smithers:ralph" ||
-            (ctx.parentIsRalph && node.tag !== "smithers:sequence");
-        const nextLoopForkBoundary = ctx.loopForkBoundary ||
-            (loopStack.length > 0 &&
-                (node.tag === "smithers:parallel" ||
-                    node.tag === "smithers:merge-queue" ||
-                    node.tag === "smithers:worktree"));
         let elementIndex = 0;
         for (const child of node.children) {
             const childOrdinal = elementIndex;
@@ -817,8 +808,7 @@ export function extractGraph(root, opts) {
                 path: nextPath,
                 iteration,
                 ralphId,
-                parentIsRalph: nextParentIsRalph,
-                loopForkBoundary: nextLoopForkBoundary,
+                parentIsRalph: node.tag === "smithers:ralph",
                 parallelStack: nextParallelStack,
                 worktreeStack: nextWorktreeStack,
                 loopStack,
@@ -838,7 +828,6 @@ export function extractGraph(root, opts) {
         path: [],
         iteration: 0,
         parentIsRalph: false,
-        loopForkBoundary: false,
         parallelStack: [],
         worktreeStack: [],
         loopStack: [],

@@ -454,7 +454,11 @@ function stringLeaves(value) {
   return [];
 }
 
-function publicEntryPaths(root, manifestPath, manifest) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function publicEntryPaths(root, manifestPath, manifest, files) {
   const directory = posix.dirname(manifestPath);
   const conventionalEntries = ["./index.js", "./index.jsx", "./index.ts", "./index.tsx"];
   const targets = [
@@ -465,9 +469,13 @@ function publicEntryPaths(root, manifestPath, manifest) {
   return sorted(
     targets
       .filter((target) => !posix.isAbsolute(target) && !target.includes(":"))
-      .map((target) => posix.normalize(posix.join(directory, target)))
+      .flatMap((target) => {
+        const normalized = posix.normalize(posix.join(directory, target));
+        if (!normalized.includes("*")) return existsSync(join(root, normalized)) ? [normalized] : [];
+        const pattern = new RegExp(`^${normalized.split("*").map(escapeRegExp).join(".*")}$`);
+        return files.filter((path) => pattern.test(path));
+      })
       .filter((target) => !target.endsWith(".d.ts"))
-      .filter((target) => existsSync(join(root, target))),
   );
 }
 
@@ -497,37 +505,108 @@ function jsxComponentSpecifiers(source) {
   return sorted(specifiers);
 }
 
-function hasPublicHookExport(source) {
-  const tokens = lexModules(source);
-  for (let index = 0; index < tokens.length - 2; index += 1) {
-    const commonJsExport =
-      (tokens[index].value === "exports" && tokens[index + 1].value === ".") ||
-      (
-        tokens[index].value === "module" &&
-        tokens[index + 1].value === "." &&
-        tokens[index + 2].value === "exports" &&
-        tokens[index + 3].value === "."
-      );
-    const name = commonJsExport
-      ? tokens[index].value === "exports"
-        ? tokens[index + 2]?.value
-        : tokens[index + 4]?.value
-      : null;
-    if (typeof name === "string" && /^use[A-Z]/.test(name)) return true;
+function staticPropertyName(name) {
+  if (!name) return null;
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteral(name.expression)) return name.expression.text;
+  return null;
+}
+
+function isModuleExports(node) {
+  return (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "module" &&
+    node.name.text === "exports"
+  );
+}
+
+function commonJsExportName(node) {
+  if (ts.isPropertyAccessExpression(node)) {
+    if (ts.isIdentifier(node.expression) && node.expression.text === "exports") return node.name.text;
+    if (isModuleExports(node.expression)) return node.name.text;
   }
-  for (let index = 0; index < tokens.length; index += 1) {
-    if (tokens[index].value !== "export") continue;
-    let hookFound = false;
-    let sourceSpecifier = null;
-    for (let cursor = index + 1; cursor < Math.min(tokens.length, index + 80); cursor += 1) {
-      if (tokens[cursor].value === ";") break;
-      if (tokens[cursor].kind === "identifier" && /^use[A-Z]/.test(tokens[cursor].value)) hookFound = true;
-      if (tokens[cursor].kind === "string" && /(^|\/)use[A-Z]/.test(tokens[cursor].value)) hookFound = true;
-      if (tokens[cursor].value === "from" && tokens[cursor + 1]?.kind === "string") sourceSpecifier = tokens[cursor + 1].value;
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)) {
+    if (ts.isIdentifier(node.expression) && node.expression.text === "exports") return node.argumentExpression.text;
+    if (isModuleExports(node.expression)) return node.argumentExpression.text;
+  }
+  return null;
+}
+
+function hasPublicHookExport(source, path) {
+  const extension = extname(path);
+  const scriptKind = extension === ".tsx"
+    ? ts.ScriptKind.TSX
+    : extension === ".jsx"
+      ? ts.ScriptKind.JSX
+      : [".js", ".mjs", ".cjs"].includes(extension)
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS;
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind);
+  const isHookName = (name) => /^use[A-Z]/.test(name ?? "");
+  const hasExportModifier = (node) =>
+    node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+  const bindingExportsHook = (name) => {
+    if (ts.isIdentifier(name)) return isHookName(name.text);
+    return name.elements.some((element) => ts.isBindingElement(element) && bindingExportsHook(element.name));
+  };
+
+  for (const statement of file.statements) {
+    if (ts.isExportDeclaration(statement) && statement.exportClause) {
+      if (
+        ts.isNamedExports(statement.exportClause) &&
+        statement.exportClause.elements.some((element) =>
+          isHookName(element.name.text) ||
+          (element.name.text === "default" && isHookName(element.propertyName?.text)),
+        )
+      ) {
+        return true;
+      }
+      if (ts.isNamespaceExport(statement.exportClause) && isHookName(statement.exportClause.name.text)) return true;
     }
-    if (hookFound && (!sourceSpecifier || sourceSpecifier.startsWith(".") || isGatewayReact(sourceSpecifier) || basePackage(sourceSpecifier) === "react")) return true;
+    if (hasExportModifier(statement)) {
+      if (
+        (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
+        isHookName(statement.name?.text)
+      ) {
+        return true;
+      }
+      if (
+        ts.isVariableStatement(statement) &&
+        statement.declarationList.declarations.some((declaration) => bindingExportsHook(declaration.name))
+      ) {
+        return true;
+      }
+    }
+    if (
+      ts.isExportAssignment(statement) &&
+      ts.isIdentifier(statement.expression) &&
+      isHookName(statement.expression.text)
+    ) {
+      return true;
+    }
   }
-  return false;
+
+  let commonJsHookFound = false;
+  const visit = (node) => {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      if (isHookName(commonJsExportName(node.left))) {
+        commonJsHookFound = true;
+        return;
+      }
+      if (
+        isModuleExports(node.left) &&
+        ts.isObjectLiteralExpression(node.right) &&
+        node.right.properties.some((property) => isHookName(staticPropertyName(property.name)))
+      ) {
+        commonJsHookFound = true;
+        return;
+      }
+    }
+    if (!commonJsHookFound) ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return commonJsHookFound;
 }
 
 function relativeExportStarSpecifiers(source) {
@@ -559,7 +638,7 @@ function publicEntryExportsHook(entryPath, files, sources) {
     visited.add(path);
     const source = sources.get(path);
     if (source === undefined) continue;
-    if (hasPublicHookExport(source)) return true;
+    if (hasPublicHookExport(source, path)) return true;
     for (const specifier of relativeExportStarSpecifiers(source)) {
       const target = resolveRelativeSource(path, specifier, files);
       if (target && !visited.has(target)) pending.push(target);
@@ -958,7 +1037,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       violations.push(formatViolation("single-public-hook-package", `${path} publishes a hook package or hook export`));
     }
     if (kind === "smithers" && manifest.name !== "@smithers-orchestrator/gateway-react") {
-      for (const entryPath of publicEntryPaths(absoluteRoot, path, manifest)) {
+      for (const entryPath of publicEntryPaths(absoluteRoot, path, manifest, files)) {
         const entrySource = readFileSync(join(absoluteRoot, entryPath), "utf8");
         if (publicEntryExportsHook(entryPath, files, sources)) {
           violations.push(formatViolation("single-public-hook-package", `${path} root entry ${entryPath} exports a React-style hook`));
@@ -996,7 +1075,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       const packageDirectory = posix.dirname(path);
       const packageSources = sorted([
         ...files.filter((file) => file.startsWith(`${packageDirectory}/src/`)),
-        ...publicEntryPaths(absoluteRoot, path, manifest),
+        ...publicEntryPaths(absoluteRoot, path, manifest, files),
       ]);
       for (const sourcePath of packageSources) {
         const source = sources.get(sourcePath) ?? readFileSync(join(absoluteRoot, sourcePath), "utf8");
