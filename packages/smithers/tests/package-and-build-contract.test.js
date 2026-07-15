@@ -201,6 +201,8 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts.test).toBe([
       "node scripts/check-single-effect-version.mjs",
       "node scripts/check-dependency-boundaries.mjs",
+      "node scripts/check-ui-architecture.mjs",
+      "node --test scripts/check-ui-architecture.test.mjs",
       "node scripts/check-no-direct-db-access.mjs",
       "node scripts/check-docs.mjs",
       "node scripts/check-llms.mjs",
