@@ -99,6 +99,15 @@ function normalizeResult<T>(schema: SafeSchema<T>, result: FakeAgentResult<T> | 
   if (isAuto(result)) {
     return { output: schemaExample(schema) };
   }
+  // A text/files-only value is an explicit response wrapper. Handle it before
+  // probing the value as a bare output: permissive schemas otherwise accept
+  // the wrapper itself and silently discard its declared files.
+  if (hasResponseKeys(result) && !("output" in result)) {
+    const response: FakeAgentResult<T> = {};
+    if (typeof result.text === "string") response.text = result.text;
+    if (result.files) response.files = result.files;
+    return response;
+  }
   // Disambiguate the {output,text,files} wrapper from a bare task output.
   // Treat it as a wrapper only when it carries wrapper keys AND its nested
   // `output` validates as the schema — this dominates both tricky cases: a
@@ -120,7 +129,7 @@ function normalizeResult<T>(schema: SafeSchema<T>, result: FakeAgentResult<T> | 
   if (asOutput.success) {
     return { output: asOutput.data };
   }
-  // A wrapper carrying only text/files (no valid output), or a bad bare output
+  // A wrapper with an invalid nested output, or a bad bare output
   // (assertSchema throws a clear validation error).
   if (hasResponseKeys(result)) {
     const response: FakeAgentResult<T> = {};

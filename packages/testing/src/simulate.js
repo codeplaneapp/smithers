@@ -44,6 +44,12 @@ function normalizeResult(schema, result) {
   if (isAuto(result)) {
     return { output: schemaExample(schema) };
   }
+  if (hasResponseKeys(result) && !("output" in result)) {
+    const response = {};
+    if (typeof result.text === "string") response.text = result.text;
+    if (result.files) response.files = result.files;
+    return response;
+  }
   if (hasResponseKeys(result) && "output" in result) {
     const parsedOutput = schema.safeParse(result.output);
     if (parsedOutput.success) {
