@@ -533,7 +533,7 @@ function commonJsExportName(node) {
   return null;
 }
 
-function hasPublicHookExport(source, path) {
+function sourceFile(source, path) {
   const extension = extname(path);
   const scriptKind = extension === ".tsx"
     ? ts.ScriptKind.TSX
@@ -542,36 +542,69 @@ function hasPublicHookExport(source, path) {
       : [".js", ".mjs", ".cjs"].includes(extension)
         ? ts.ScriptKind.JS
         : ts.ScriptKind.TS;
-  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind);
+  return ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind);
+}
+
+function hasPublicHookExport(source, path, exportMode = "all") {
+  const file = sourceFile(source, path);
+  const includesNamedExports = exportMode !== "default";
+  const includesDefaultExport = exportMode !== "named";
   const isHookName = (name) => /^use[A-Z]/.test(name ?? "");
   const hasExportModifier = (node) =>
     node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+  const hasDefaultModifier = (node) =>
+    node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ?? false;
+  const moduleName = posix.basename(path, extname(path));
+  const hookModuleName = moduleName === "index" ? posix.basename(posix.dirname(path)) : moduleName;
+  const isHookModule = /^use(?:[-_A-Z]|$)/.test(hookModuleName);
   const bindingExportsHook = (name) => {
     if (ts.isIdentifier(name)) return isHookName(name.text);
     return name.elements.some((element) => ts.isBindingElement(element) && bindingExportsHook(element.name));
   };
+  let hasRuntimeDefaultExport = false;
 
   for (const statement of file.statements) {
-    if (ts.isExportDeclaration(statement) && statement.exportClause) {
+    if (ts.isExportDeclaration(statement) && !statement.isTypeOnly && statement.exportClause) {
       if (
         ts.isNamedExports(statement.exportClause) &&
-        statement.exportClause.elements.some((element) =>
-          isHookName(element.name.text) ||
-          (element.name.text === "default" && isHookName(element.propertyName?.text)),
-        )
+        statement.exportClause.elements.some((element) => {
+          if (element.isTypeOnly) return false;
+          const exportedName = element.name.text;
+          const localName = (element.propertyName ?? element.name).text;
+          if (exportedName === "default") {
+            if (!includesDefaultExport) return false;
+            hasRuntimeDefaultExport = true;
+            return isHookName(localName);
+          }
+          return includesNamedExports && isHookName(exportedName);
+        })
       ) {
         return true;
       }
-      if (ts.isNamespaceExport(statement.exportClause) && isHookName(statement.exportClause.name.text)) return true;
+      if (
+        includesNamedExports &&
+        ts.isNamespaceExport(statement.exportClause) &&
+        isHookName(statement.exportClause.name.text)
+      ) {
+        return true;
+      }
     }
     if (hasExportModifier(statement)) {
+      const isDefaultExport = hasDefaultModifier(statement);
+      const isTypeOnlyDeclaration =
+        ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement);
+      if (isDefaultExport && includesDefaultExport && !isTypeOnlyDeclaration) {
+        hasRuntimeDefaultExport = true;
+      }
       if (
         (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
+        ((isDefaultExport && includesDefaultExport) || (!isDefaultExport && includesNamedExports)) &&
         isHookName(statement.name?.text)
       ) {
         return true;
       }
       if (
+        includesNamedExports &&
         ts.isVariableStatement(statement) &&
         statement.declarationList.declarations.some((declaration) => bindingExportsHook(declaration.name))
       ) {
@@ -580,21 +613,31 @@ function hasPublicHookExport(source, path) {
     }
     if (
       ts.isExportAssignment(statement) &&
-      ts.isIdentifier(statement.expression) &&
-      isHookName(statement.expression.text)
+      includesDefaultExport
     ) {
-      return true;
+      hasRuntimeDefaultExport = true;
+      if (ts.isIdentifier(statement.expression) && isHookName(statement.expression.text)) return true;
     }
   }
+  if (includesDefaultExport && hasRuntimeDefaultExport && isHookModule) return true;
 
   let commonJsHookFound = false;
+  let commonJsDefaultExportFound = false;
   const visit = (node) => {
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-      if (isHookName(commonJsExportName(node.left))) {
+      if (includesNamedExports && isHookName(commonJsExportName(node.left))) {
         commonJsHookFound = true;
         return;
       }
+      if (includesDefaultExport && isModuleExports(node.left)) {
+        commonJsDefaultExportFound = true;
+        if (ts.isIdentifier(node.right) && isHookName(node.right.text)) {
+          commonJsHookFound = true;
+          return;
+        }
+      }
       if (
+        includesNamedExports &&
         isModuleExports(node.left) &&
         ts.isObjectLiteralExpression(node.right) &&
         node.right.properties.some((property) => isHookName(staticPropertyName(property.name)))
@@ -603,45 +646,79 @@ function hasPublicHookExport(source, path) {
         return;
       }
     }
+    if (
+      includesNamedExports &&
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "Object" &&
+      node.expression.name.text === "defineProperty" &&
+      node.arguments.length >= 2 &&
+      ((ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === "exports") ||
+        isModuleExports(node.arguments[0])) &&
+      ts.isStringLiteralLike(node.arguments[1]) &&
+      isHookName(node.arguments[1].text)
+    ) {
+      commonJsHookFound = true;
+      return;
+    }
     if (!commonJsHookFound) ts.forEachChild(node, visit);
   };
   visit(file);
-  return commonJsHookFound;
+  return commonJsHookFound || (includesDefaultExport && commonJsDefaultExportFound && isHookModule);
 }
 
-function relativeExportStarSpecifiers(source) {
-  const tokens = lexModules(source);
-  const specifiers = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    if (tokens[index].value !== "export" || tokens[index + 1]?.value !== "*") continue;
-    for (let cursor = index + 2; cursor < Math.min(tokens.length, index + 80); cursor += 1) {
-      if (tokens[cursor].value === ";") break;
-      if (
-        tokens[cursor].value === "from" &&
-        tokens[cursor + 1]?.kind === "string" &&
-        tokens[cursor + 1].value.startsWith(".")
-      ) {
-        specifiers.push(tokens[cursor + 1].value);
-        break;
-      }
+function relativeHookReexports(source, path) {
+  const file = sourceFile(source, path);
+  const reexports = [];
+  for (const statement of file.statements) {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      statement.isTypeOnly ||
+      !statement.moduleSpecifier ||
+      !ts.isStringLiteralLike(statement.moduleSpecifier) ||
+      !statement.moduleSpecifier.text.startsWith(".")
+    ) {
+      continue;
+    }
+    if (!statement.exportClause) {
+      reexports.push({ exportedMode: "named", targetMode: "named", specifier: statement.moduleSpecifier.text });
+      continue;
+    }
+    if (ts.isNamespaceExport(statement.exportClause)) {
+      reexports.push({ exportedMode: "named", targetMode: "all", specifier: statement.moduleSpecifier.text });
+      continue;
+    }
+    if (
+      statement.exportClause.elements.some((element) =>
+        !element.isTypeOnly &&
+        element.name.text === "default" &&
+        (element.propertyName ?? element.name).text === "default",
+      )
+    ) {
+      reexports.push({ exportedMode: "default", targetMode: "default", specifier: statement.moduleSpecifier.text });
     }
   }
-  return sorted(specifiers);
+  return reexports;
 }
 
 function publicEntryExportsHook(entryPath, files, sources) {
-  const pending = [entryPath];
+  const pending = [{ mode: "all", path: entryPath }];
   const visited = new Set();
   while (pending.length > 0) {
-    const path = pending.pop();
-    if (!path || visited.has(path)) continue;
-    visited.add(path);
+    const current = pending.pop();
+    if (!current) continue;
+    const { mode, path } = current;
+    const visitKey = `${mode}:${path}`;
+    if (visited.has(visitKey)) continue;
+    visited.add(visitKey);
     const source = sources.get(path);
     if (source === undefined) continue;
-    if (hasPublicHookExport(source, path)) return true;
-    for (const specifier of relativeExportStarSpecifiers(source)) {
-      const target = resolveRelativeSource(path, specifier, files);
-      if (target && !visited.has(target)) pending.push(target);
+    if (hasPublicHookExport(source, path, mode)) return true;
+    for (const reexport of relativeHookReexports(source, path)) {
+      if (mode !== "all" && reexport.exportedMode !== mode) continue;
+      const target = resolveRelativeSource(path, reexport.specifier, files);
+      if (target) pending.push({ mode: reexport.targetMode, path: target });
     }
   }
   return false;

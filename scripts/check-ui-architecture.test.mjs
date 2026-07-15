@@ -275,6 +275,63 @@ for (const [name, mutate, expected] of [
     "single-public-hook-package",
   ],
   [
+    "a direct CommonJS-assigned public hook entry",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        main: "index.cjs",
+      });
+      write(
+        root,
+        "packages/data/index.cjs",
+        "function useData() { return null; }\nmodule.exports = useData;\n",
+      );
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "a TypeScript CommonJS public hook export assignment",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        main: "index.ts",
+      });
+      write(
+        root,
+        "packages/data/index.ts",
+        "function useData() { return null; }\nexport = useData;\n",
+      );
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "an Object.defineProperty public hook entry",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        main: "index.cjs",
+      });
+      write(
+        root,
+        "packages/data/index.cjs",
+        'function useData() { return null; }\nObject.defineProperty(exports, "useData", { enumerable: true, get: () => useData });\n',
+      );
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "a default re-export from a hook-named module",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        exports: { ".": "./index.js" },
+      });
+      write(root, "packages/data/index.js", 'export { default } from "./useData.js";\n');
+      write(root, "packages/data/useData.js", "export default function() { return null; }\n");
+    },
+    "single-public-hook-package",
+  ],
+  [
     "a public hook hidden behind an export-star entry",
     (root) => {
       json(root, "packages/data/package.json", {
@@ -287,6 +344,18 @@ for (const [name, mutate, expected] of [
         "packages/data/hooks.js",
         "export * from './index.js';\nexport function useSecret() { return 'secret'; }\nexport function useData() { return null; }\n",
       );
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "a public hook hidden behind a runtime namespace re-export",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        exports: { ".": "./index.js" },
+      });
+      write(root, "packages/data/index.js", 'export * as hooks from "./hooks.js";\n');
+      write(root, "packages/data/hooks.js", "export function useData() { return null; }\n");
     },
     "single-public-hook-package",
   ],
@@ -396,6 +465,146 @@ test("wildcard public exports do not mistake hook calls for hook exports", (cont
   );
   assert.equal(check(root).ok, true);
 });
+
+test("default hook re-exports are followed through intermediate modules", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { ".": "./index.js" },
+  });
+  write(root, "packages/data/index.js", "export const data = true;\n");
+  snapshot(root);
+  write(root, "packages/data/index.js", 'export { default } from "./bridge.js";\n');
+  write(root, "packages/data/bridge.js", 'export { default } from "./useData.js";\n');
+  write(root, "packages/data/useData.js", "export default function() { return null; }\n");
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /single-public-hook-package/);
+});
+
+test("default re-exports do not expose unrelated named hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { ".": "./index.js" },
+  });
+  write(root, "packages/data/index.js", 'export { default } from "./values.js";\n');
+  write(
+    root,
+    "packages/data/values.js",
+    "export default 42;\nexport function useInternal() { return null; }\n",
+  );
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
+test("export-star barrels do not expose default hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { ".": "./index.js" },
+  });
+  write(root, "packages/data/index.js", "export const data = true;\n");
+  write(root, "packages/data/useData.js", "export default function() { return null; }\n");
+  snapshot(root);
+  write(root, "packages/data/index.js", 'export * from "./useData.js";\n');
+  assert.equal(check(root).ok, true);
+});
+
+test("runtime namespace re-exports expose default hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { ".": "./index.js" },
+  });
+  write(root, "packages/data/index.js", "export const data = true;\n");
+  write(root, "packages/data/useData.js", "export default function useData() {}\n");
+  snapshot(root);
+  write(root, "packages/data/index.js", 'export * as hooks from "./useData.js";\n');
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /single-public-hook-package/);
+});
+
+test("default type-only declarations do not count as public runtime hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { ".": "./useData.ts" },
+  });
+  write(root, "packages/data/useData.ts", "export const data = true;\n");
+  snapshot(root);
+  write(root, "packages/data/useData.ts", "export default interface Value { data: string }\n");
+  assert.equal(check(root).ok, true);
+});
+
+test("type-only hook exports do not count as public runtime hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { ".": "./index.ts" },
+  });
+  write(root, "packages/data/index.ts", "export const data = true;\n");
+  write(root, "packages/data/types.ts", "export interface useSecret { value: string }\n");
+  snapshot(root);
+  write(
+    root,
+    "packages/data/index.ts",
+    [
+      "interface useData { value: string }",
+      "type useResult = string;",
+      "export type { useData };",
+      "export { type useResult };",
+      'export type { useSecret } from "./types.js";',
+      'export type * from "./types.js";',
+      'export type * as useTypes from "./types.js";',
+      "",
+    ].join("\n"),
+  );
+  assert.equal(check(root).ok, true);
+});
+
+test("type-only namespace re-exports do not expose runtime hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/data/package.json", {
+    name: "@smithers-orchestrator/data",
+    exports: { ".": "./index.ts" },
+  });
+  write(root, "packages/data/index.ts", "export const data = true;\n");
+  write(root, "packages/data/hooks.ts", "export function useData() { return null; }\n");
+  snapshot(root);
+  write(root, "packages/data/index.ts", 'export type * as hooks from "./hooks.js";\n');
+  assert.equal(check(root).ok, true);
+});
+
+for (const [name, source] of [
+  ["zero-argument", "function useData() { return null; }\nObject.defineProperty();\n"],
+  ["one-argument", "function useData() { return null; }\nObject.defineProperty(exports);\n"],
+]) {
+  test(`${name} Object.defineProperty calls do not fabricate public hooks`, (context) => {
+    const root = fixture();
+    context.after(() => rmSync(root, { recursive: true, force: true }));
+    json(root, "packages/data/package.json", {
+      name: "@smithers-orchestrator/data",
+      main: "index.cjs",
+    });
+    write(root, "packages/data/index.cjs", "module.exports.value = true;\n");
+    snapshot(root);
+    write(root, "packages/data/index.cjs", source);
+    let result;
+    assert.doesNotThrow(() => {
+      result = check(root);
+    });
+    assert.equal(result.ok, true);
+  });
+}
 
 test("valid official shadcn provenance passes", (context) => {
   const root = fixture();
