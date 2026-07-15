@@ -22,6 +22,54 @@ function serializeDecision(decision) {
     return decision === undefined ? null : JSON.stringify(decision);
 }
 /**
+ * @param {string | null | undefined} requestJson
+ * @returns {{ runId: string; nodeId: string; iteration: number; fingerprint: string; authorizedAttempt: number } | null}
+ */
+function parseReplayUnsafeApprovalRequest(requestJson) {
+    if (!requestJson)
+        return null;
+    try {
+        const request = JSON.parse(requestJson);
+        if (request?.kind !== "ReplayUnsafeApproval" ||
+            typeof request.runId !== "string" ||
+            typeof request.nodeId !== "string" ||
+            !Number.isSafeInteger(request.iteration) ||
+            typeof request.fingerprint !== "string" ||
+            !Number.isSafeInteger(request.authorizedAttempt)) {
+            return null;
+        }
+        return {
+            runId: request.runId,
+            nodeId: request.nodeId,
+            iteration: request.iteration,
+            fingerprint: request.fingerprint,
+            authorizedAttempt: request.authorizedAttempt,
+        };
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * @param {string | null | undefined} requestJson
+ * @param {unknown} decision
+ * @param {boolean} approved
+ * @returns {string | null}
+ */
+function serializeApprovalDecision(requestJson, decision, approved) {
+    const replayRequest = parseReplayUnsafeApprovalRequest(requestJson);
+    if (!replayRequest) {
+        return serializeDecision(decision);
+    }
+    return JSON.stringify({
+        kind: "ReplayUnsafeApproval",
+        approved,
+        fingerprint: replayRequest.fingerprint,
+        authorizedAttempt: replayRequest.authorizedAttempt,
+        ...(decision === undefined ? {} : { decision }),
+    });
+}
+/**
  * @param {string | null} [requestJson]
  */
 function isAsyncApprovalRequest(requestJson) {
@@ -63,37 +111,59 @@ function validateNodeWaitingForApproval(runId, nodeId, iteration, state) {
  */
 function resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy, decision, { approved, autoApproved }) {
     const ts = nowMs();
-    const event = {
-        type: approved
-            ? (autoApproved ? "ApprovalAutoApproved" : "ApprovalGranted")
-            : "ApprovalDenied",
-        runId,
-        nodeId,
-        iteration,
-        timestampMs: ts,
-    };
     return Effect.gen(function* () {
-        const existing = yield* adapter.getApproval(runId, nodeId, iteration);
-        const currentNode = yield* adapter.getNode(runId, nodeId, iteration);
-        yield* validateNodeWaitingForApproval(runId, nodeId, iteration, currentNode?.state);
+        let approvalNodeId = nodeId;
+        let approvalIteration = iteration;
+        let existing = yield* adapter.getApproval(runId, approvalNodeId, approvalIteration);
+        if (existing?.status !== "requested") {
+            const pendingApprovals = yield* adapter.listPendingApprovals(runId);
+            const pendingReplayApproval = pendingApprovals.find((approval) => {
+                const request = parseReplayUnsafeApprovalRequest(approval.requestJson);
+                return request?.runId === runId
+                    && request.nodeId === nodeId
+                    && request.iteration === iteration;
+            });
+            if (pendingReplayApproval) {
+                approvalNodeId = pendingReplayApproval.nodeId;
+                approvalIteration = pendingReplayApproval.iteration;
+                existing = pendingReplayApproval;
+            }
+        }
+        const replayRequest = parseReplayUnsafeApprovalRequest(existing?.requestJson);
+        const targetNodeId = replayRequest?.nodeId ?? nodeId;
+        const targetIteration = replayRequest?.iteration ?? iteration;
+        const currentNode = yield* adapter.getNode(runId, targetNodeId, targetIteration);
+        yield* validateNodeWaitingForApproval(runId, targetNodeId, targetIteration, currentNode?.state);
+        const decisionJson = serializeApprovalDecision(existing?.requestJson, decision, approved)
+            ?? existing?.decisionJson
+            ?? null;
+        const event = {
+            type: approved
+                ? (autoApproved ? "ApprovalAutoApproved" : "ApprovalGranted")
+                : "ApprovalDenied",
+            runId,
+            nodeId: approvalNodeId,
+            iteration: approvalIteration,
+            timestampMs: ts,
+        };
         yield* adapter.withTransactionEffect("approval", Effect.gen(function* () {
             yield* adapter.insertOrUpdateApproval({
                 runId,
-                nodeId,
-                iteration,
+                nodeId: approvalNodeId,
+                iteration: approvalIteration,
                 status: approved ? "approved" : "denied",
                 requestedAtMs: null,
                 decidedAtMs: ts,
                 note: note ?? null,
                 decidedBy: decidedBy ?? null,
                 requestJson: existing?.requestJson ?? null,
-                decisionJson: serializeDecision(decision) ?? existing?.decisionJson ?? null,
+                decisionJson,
                 autoApproved,
             });
             yield* adapter.insertNode({
                 runId,
-                nodeId,
-                iteration,
+                nodeId: targetNodeId,
+                iteration: targetIteration,
                 // Approval re-arms the node to run; denial fails it.
                 state: approved ? "pending" : "failed",
                 lastAttempt: currentNode?.lastAttempt ?? null,
@@ -127,13 +197,13 @@ function resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy,
             ? (autoApproved ? "approval auto-approved" : "approval granted")
             : "approval denied");
         yield* Effect.promise(() =>
-            bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
+            bridgeApprovalResolve(adapter, runId, targetNodeId, targetIteration, {
                 approved,
                 // Pass the note through as-is (string | undefined); bridgeApprovalResolve
                 // omits the `note` key when it is absent so optional string schemas validate.
                 note,
                 decidedBy: decidedBy ?? null,
-                decisionJson: serializeDecision(decision),
+                decisionJson,
                 // The deny payload carries no `autoApproved` key at all (not even false).
                 ...(approved ? { autoApproved } : {}),
             }).catch((bridgeError) => {

@@ -718,7 +718,80 @@ function collectReplayUnsafeToolCalls(toolCalls, agents, currentAttempt) {
         if (!metadata?.sideEffect || metadata.idempotent !== false) return false;
         return metadata.acceptsIdempotencyKey !== true;
     })
-        .map((call) => ({ toolName: String(call.toolName), attempt: Number(call.attempt), seq: Number(call.seq) }));
+        .map((call) => ({ toolName: String(call.toolName), attempt: Number(call.attempt), seq: Number(call.seq) }))
+        .sort((left, right) => left.toolName.localeCompare(right.toolName)
+        || left.attempt - right.attempt
+        || left.seq - right.seq);
+}
+/**
+ * @param {Array<{ toolName: string; attempt: number; seq: number }>} offending
+ * @returns {string}
+ */
+function replayUnsafeToolCallFingerprint(offending) {
+    return sha256Hex(JSON.stringify(offending.map((call) => [call.toolName, call.attempt, call.seq])));
+}
+/**
+ * Additional replay approvals share the task node id, but use a negative
+ * approval-only iteration so an earlier decided row remains immutable.
+ * @param {number} taskIteration
+ * @param {number} attempt
+ * @returns {number}
+ */
+function distinctReplayUnsafeApprovalIteration(taskIteration, attempt) {
+    const iterationPart = Number.isSafeInteger(taskIteration) && taskIteration >= 0 ? taskIteration : 0;
+    const attemptPart = Number.isSafeInteger(attempt) && attempt >= 0 ? attempt : 0;
+    const sum = iterationPart + attemptPart;
+    return -(((sum * (sum + 1)) / 2) + attemptPart + 1);
+}
+/**
+ * @param {string | null | undefined} value
+ * @returns {Record<string, unknown> | null}
+ */
+function parseJsonRecord(value) {
+    if (!value) return null;
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * @param {ApprovalRow | undefined} approval
+ * @param {{ runId: string; nodeId: string; iteration: number; fingerprint: string; authorizedAttempt: number }} expected
+ * @returns {boolean}
+ */
+function replayUnsafeApprovalCovers(approval, expected) {
+    if (!approval || (approval.status !== "approved" && approval.status !== "denied")) {
+        return false;
+    }
+    const request = parseJsonRecord(approval.requestJson);
+    const decision = parseJsonRecord(approval.decisionJson);
+    const approved = approval.status === "approved";
+    return request?.kind === "ReplayUnsafeApproval"
+        && request.runId === expected.runId
+        && request.nodeId === expected.nodeId
+        && request.iteration === expected.iteration
+        && request.fingerprint === expected.fingerprint
+        && decision?.kind === "ReplayUnsafeApproval"
+        && decision.approved === approved
+        && decision.fingerprint === expected.fingerprint
+        && decision.authorizedAttempt === request.authorizedAttempt
+        && (!approved || request.authorizedAttempt === expected.authorizedAttempt);
+}
+/**
+ * @param {ApprovalRow | undefined} approval
+ * @param {{ runId: string; nodeId: string; iteration: number; fingerprint?: string }} expected
+ * @returns {boolean}
+ */
+function isReplayUnsafeApprovalFor(approval, expected) {
+    const request = parseJsonRecord(approval?.requestJson);
+    return request?.kind === "ReplayUnsafeApproval"
+        && request.runId === expected.runId
+        && request.nodeId === expected.nodeId
+        && request.iteration === expected.iteration
+        && (expected.fingerprint === undefined || request.fingerprint === expected.fingerprint);
 }
 /**
  * @param {ToolResumeWarning[]} warnings
@@ -4158,67 +4231,128 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 : [];
             const replayUnsafeToolCalls = collectReplayUnsafeToolCalls(priorToolCalls, allAgents, attemptNo);
             if (replayUnsafeToolCalls.length > 0) {
-                const requestedAtMs = nowMs();
-                const request = {
-                    kind: "ReplayUnsafeApproval",
+                const fingerprint = replayUnsafeToolCallFingerprint(replayUnsafeToolCalls);
+                const approvalTarget = {
                     runId,
                     nodeId: desc.nodeId,
                     iteration: desc.iteration,
-                    attempt: attemptNo,
-                    offending: replayUnsafeToolCalls,
-                    prompt: "Replay would re-execute non-idempotent side-effect tools without a usable idempotency key.",
+                    fingerprint,
+                    authorizedAttempt: attemptNo,
                 };
-                await adapter.withTransaction("replay-unsafe-approval", Effect.gen(function* () {
-                    yield* adapter.insertOrUpdateApproval({
+                const existingApproval = await Effect.runPromise(adapter.getApproval(runId, desc.nodeId, desc.iteration));
+                const decidedApprovals = await Effect.runPromise(adapter.listAllDecidedApprovals(runId));
+                const coveringApproval = [existingApproval, ...decidedApprovals]
+                    .find((approval, index, rows) => approval
+                    && rows.findIndex((candidate) => candidate?.nodeId === approval.nodeId
+                        && candidate?.iteration === approval.iteration) === index
+                    && replayUnsafeApprovalCovers(approval, approvalTarget));
+                if (coveringApproval?.status === "denied") {
+                    attemptMeta.replayUnsafeToolCalls = replayUnsafeToolCalls;
+                    attemptMeta.replayUnsafeApproval = {
+                        status: "denied",
+                        fingerprint,
+                        authorizedAttempt: attemptNo,
+                    };
+                    throw new SmithersError("INVALID_INPUT", `Replay of task ${desc.nodeId} was denied.`, {
+                        nodeId: desc.nodeId,
+                        iteration: desc.iteration,
+                        attempt: attemptNo,
+                        fingerprint,
+                        failureRetryable: false,
+                    });
+                }
+                if (coveringApproval?.status === "approved") {
+                    attemptMeta.replayUnsafeApproval = {
+                        status: "approved",
+                        fingerprint,
+                        authorizedAttempt: attemptNo,
+                    };
+                }
+                else {
+                    const requestedAtMs = nowMs();
+                    const authorizedAttempt = attemptNo + 1;
+                    const pendingApprovals = await Effect.runPromise(adapter.listPendingApprovals(runId));
+                    const existingPendingApproval = pendingApprovals.find((approval) => isReplayUnsafeApprovalFor(approval, {
                         runId,
                         nodeId: desc.nodeId,
                         iteration: desc.iteration,
-                        status: "requested",
-                        requestedAtMs,
-                        decidedAtMs: null,
-                        note: null,
-                        decidedBy: null,
-                        requestJson: JSON.stringify(request),
-                        decisionJson: null,
-                        autoApproved: false,
-                    });
-                    yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-                        state: "waiting-approval",
-                        metaJson: JSON.stringify({ ...attemptMeta, replayUnsafeToolCalls }),
-                    });
-                    yield* adapter.insertNode({
+                        fingerprint,
+                    }));
+                    const initialApprovalIteration = existingPendingApproval?.iteration
+                        ?? (!existingApproval || existingApproval.status === "requested"
+                            ? desc.iteration
+                            : distinctReplayUnsafeApprovalIteration(desc.iteration, attemptNo));
+                    const request = await adapter.withTransaction("replay-unsafe-approval", Effect.gen(function* () {
+                        let approvalIteration = initialApprovalIteration;
+                        let approvalAtIteration = yield* adapter.getApproval(runId, desc.nodeId, approvalIteration);
+                        while (approvalAtIteration && approvalAtIteration.status !== "requested") {
+                            approvalIteration -= 1;
+                            approvalAtIteration = yield* adapter.getApproval(runId, desc.nodeId, approvalIteration);
+                        }
+                        const persistedRequest = {
+                            kind: "ReplayUnsafeApproval",
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            approvalIteration,
+                            attempt: attemptNo,
+                            authorizedAttempt,
+                            fingerprint,
+                            offending: replayUnsafeToolCalls,
+                            prompt: "Replay would re-execute non-idempotent side-effect tools without a usable idempotency key.",
+                        };
+                        yield* adapter.insertOrUpdateApproval({
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: approvalIteration,
+                            status: "requested",
+                            requestedAtMs,
+                            decidedAtMs: null,
+                            note: null,
+                            decidedBy: null,
+                            requestJson: JSON.stringify(persistedRequest),
+                            decisionJson: null,
+                            autoApproved: false,
+                        });
+                        yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+                            state: "waiting-approval",
+                            metaJson: JSON.stringify({ ...attemptMeta, replayUnsafeToolCalls }),
+                        });
+                        yield* adapter.insertNode({
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            state: "waiting-approval",
+                            lastAttempt: attemptNo,
+                            updatedAtMs: requestedAtMs,
+                            outputTable: desc.outputTableName,
+                            label: desc.label ?? null,
+                        });
+                        yield* adapter.updateRunIfNotCancelled(runId, {
+                            status: "waiting-approval",
+                            heartbeatAtMs: null,
+                            runtimeOwnerId: null,
+                        });
+                        return persistedRequest;
+                    }));
+                    await Effect.runPromise(eventBus.emitEventWithPersist({
+                        type: "ApprovalRequested",
+                        runId,
+                        nodeId: desc.nodeId,
+                        iteration: request.approvalIteration,
+                        request,
+                        timestampMs: requestedAtMs,
+                    }));
+                    await Effect.runPromise(eventBus.emitEventWithPersist({
+                        type: "NodeWaitingApproval",
                         runId,
                         nodeId: desc.nodeId,
                         iteration: desc.iteration,
-                        state: "waiting-approval",
-                        lastAttempt: attemptNo,
-                        updatedAtMs: requestedAtMs,
-                        outputTable: desc.outputTableName,
-                        label: desc.label ?? null,
-                    });
-                    yield* adapter.updateRunIfNotCancelled(runId, {
-                        status: "waiting-approval",
-                        heartbeatAtMs: null,
-                        runtimeOwnerId: null,
-                    });
-                }));
-                await Effect.runPromise(eventBus.emitEventWithPersist({
-                    type: "ApprovalRequested",
-                    runId,
-                    nodeId: desc.nodeId,
-                    iteration: desc.iteration,
-                    request,
-                    timestampMs: requestedAtMs,
-                }));
-                await Effect.runPromise(eventBus.emitEventWithPersist({
-                    type: "NodeWaitingApproval",
-                    runId,
-                    nodeId: desc.nodeId,
-                    iteration: desc.iteration,
-                    attempt: attemptNo,
-                    timestampMs: requestedAtMs,
-                }));
-                return;
+                        attempt: attemptNo,
+                        timestampMs: requestedAtMs,
+                    }));
+                    return;
+                }
             }
             const toolResumeWarnings = collectToolResumeWarnings(priorToolCalls, allAgents, attemptNo);
             const toolResumeWarningMessage = buildToolResumeWarningMessage(toolResumeWarnings);
