@@ -6961,10 +6961,69 @@ async function runWorkflowBodyDriver(workflow, opts) {
         return markRunWaiting("waiting-event", "event");
     };
     /**
+     * @param {TaskDescriptor} task
+     * @param {boolean} stale
+     */
+    const persistBoundWaitTask = async (task, stale) => {
+        await Effect.runPromise(adapter.insertNode({
+            runId,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            state: stale ? "bound-stale" : "waiting-bound",
+            lastAttempt: null,
+            updatedAtMs: nowMs(),
+            outputTable: task.outputTableName,
+            label: task.label ?? null,
+        }));
+    };
+    /**
+     * Materialize non-primary waits before a timer parks the run. A timer owns
+     * the run-level status, but approvals and event waits still need their
+     * durable rows so an external decision or signal can wake the run first.
+     * @param {TaskStateMap} sessionStates
+     * @returns {Promise<EngineDecision | RunResult | null>}
+     */
+    const reconcileTimerCompanionWaits = async (sessionStates) => {
+        for (const task of lastGraph?.tasks ?? []) {
+            const state = sessionStates.get(buildStateKey(task.nodeId, task.iteration));
+            if (state === "waiting-approval") {
+                const resolved = await resolveDeferredTaskStateBridge(adapter, db, runId, task, eventBus);
+                if (!resolved.handled || resolved.state !== "waiting-approval") {
+                    return reconcileApprovalWait(task.nodeId);
+                }
+                continue;
+            }
+            if (state === "waiting-event" && task.meta?.__waitForEvent) {
+                const resolved = await resolveDeferredTaskStateBridge(adapter, db, runId, task, eventBus);
+                if (!resolved.handled || resolved.state === "waiting-event") {
+                    continue;
+                }
+                if (resolved.state === "finished" || resolved.state === "skipped") {
+                    return completeSessionTask(task);
+                }
+                if (resolved.state === "failed") {
+                    return failSessionTask(task);
+                }
+                if (resolved.state === "pending") {
+                    return submitLastGraph();
+                }
+                continue;
+            }
+            if (state === "bound-stale" || state === "waiting-bound") {
+                await persistBoundWaitTask(task, state === "bound-stale");
+            }
+        }
+        return null;
+    };
+    /**
    * @param {number} resumeAtMs
    */
     const reconcileTimerWait = async (resumeAtMs) => {
         const sessionStates = await Effect.runPromise(workflowSession.getTaskStates());
+        const companionDecision = await reconcileTimerCompanionWaits(sessionStates);
+        if (companionDecision) {
+            return companionDecision;
+        }
         const tasks = lastGraph?.tasks.filter((candidate) => {
             if (!candidate.meta?.__timer)
                 return false;
@@ -7014,16 +7073,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             const state = sessionStates.get(buildStateKey(task.nodeId, task.iteration));
             const stale = state === "bound-stale" ||
                 (state == null && reason.nodeId === task.nodeId && reason.code === "BOUND_STALE");
-            await Effect.runPromise(adapter.insertNode({
-                runId,
-                nodeId: task.nodeId,
-                iteration: task.iteration,
-                state: stale ? "bound-stale" : "waiting-bound",
-                lastAttempt: null,
-                updatedAtMs: nowMs(),
-                outputTable: task.outputTableName,
-                label: task.label ?? null,
-            }));
+            await persistBoundWaitTask(task, stale);
         }
         const staleTasks = blockedTasks.flatMap((task) => {
             const state = sessionStates.get(buildStateKey(task.nodeId, task.iteration));

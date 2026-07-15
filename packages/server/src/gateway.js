@@ -5189,10 +5189,15 @@ a { color: var(--brand); }</style>
                 seenAdapters.add(adapter);
                 let waitingRuns;
                 try {
-                    waitingRuns = await adapter.listRuns(1_000, "waiting-timer");
-                    if (waitingRuns.length > 0) {
-                        this.hasPendingTimers = true;
+                    const waitingRunsById = new Map();
+                    for (const status of ["waiting-timer", "waiting-approval", "waiting-event"]) {
+                        for (const run of await adapter.listRuns(1_000, status)) {
+                            if (!waitingRunsById.has(run.runId)) {
+                                waitingRunsById.set(run.runId, run);
+                            }
+                        }
                     }
+                    waitingRuns = [...waitingRunsById.values()];
                 }
                 catch (error) {
                     emitGatewayLog("error", "Gateway timer sweep failed to list runs", {
@@ -5201,13 +5206,14 @@ a { color: var(--brand); }</style>
                     continue;
                 }
                 for (const run of waitingRuns) {
-                    if (this.activeRuns.has(run.runId)) {
-                        continue;
-                    }
                     const workflowKey = this.resolveRunWorkflowKey(run, registeredKeys, entry.key);
                     try {
                         const dueAtMs = await this.runTimerDueAtMs(adapter, run.runId);
-                        if (dueAtMs === null || dueAtMs > now) {
+                        if (dueAtMs === null) {
+                            continue;
+                        }
+                        this.hasPendingTimers = true;
+                        if (this.activeRuns.has(run.runId) || dueAtMs > now) {
                             continue;
                         }
                         await this.resumeRunIfNeeded(run.runId, workflowKey, adapter, {

@@ -77,6 +77,26 @@ function renderContext(state, iterationOverride, trigger) {
     };
 }
 /**
+ * Keep the first non-timer wait reason, but always prefer a timer so a durable
+ * deadline can wake a run that is also parked on an approval, event, or bound.
+ * When several timers coexist, the earliest deadline owns the run-level wait.
+ * @param {WaitReason | undefined} current
+ * @param {WaitReason} candidate
+ * @returns {WaitReason}
+ */
+function preferWaitReason(current, candidate) {
+    if (!current) {
+        return candidate;
+    }
+    if (candidate._tag !== "Timer") {
+        return current;
+    }
+    if (current._tag !== "Timer" || candidate.resumeAtMs < current.resumeAtMs) {
+        return candidate;
+    }
+    return current;
+}
+/**
  * @param {SessionState} state
  * @param {number} currentTimeMs
  * @returns {WaitReason | undefined}
@@ -93,22 +113,22 @@ function findWaitingReason(state, currentTimeMs) {
     const QUOTA_BLOCKED_SAMPLE_MAX = 10;
     for (const descriptor of state.descriptors.values()) {
         const taskState = state.states.get(stateKeyFor(descriptor));
-        if (taskState === "waiting-approval" && !primaryReason) {
-            primaryReason = { _tag: "Approval", nodeId: descriptor.nodeId };
+        if (taskState === "waiting-approval") {
+            primaryReason = preferWaitReason(primaryReason, { _tag: "Approval", nodeId: descriptor.nodeId });
         }
-        else if (taskState === "waiting-event" && !primaryReason) {
+        else if (taskState === "waiting-event") {
             const eventName = typeof descriptor.meta?.__eventName === "string"
                 ? descriptor.meta.__eventName
                 : "";
-            primaryReason = { _tag: "Event", eventName };
+            primaryReason = preferWaitReason(primaryReason, { _tag: "Event", eventName });
         }
-        else if (taskState === "waiting-timer" && !primaryReason) {
+        else if (taskState === "waiting-timer") {
             // A task only reaches waiting-timer once decide() has validated its
             // spec, so this cannot be null in practice; the fallback is defensive.
-            primaryReason = {
+            primaryReason = preferWaitReason(primaryReason, {
                 _tag: "Timer",
                 resumeAtMs: timerResumeAtMs(state, descriptor, currentTimeMs) ?? currentTimeMs,
-            };
+            });
         }
         else if (taskState === "waiting-quota") {
             quotaBlockedCount += 1;
@@ -131,20 +151,20 @@ function findWaitingReason(state, currentTimeMs) {
                 });
             }
         }
-        else if (taskState === "bound-stale" && !primaryReason) {
-            primaryReason = {
+        else if (taskState === "bound-stale") {
+            primaryReason = preferWaitReason(primaryReason, {
                 _tag: "Bound",
                 nodeId: descriptor.nodeId,
                 code: "BOUND_STALE",
                 bindings: descriptor.proofBindings,
-            };
+            });
         }
-        else if (taskState === "waiting-bound" && !primaryReason) {
-            primaryReason = {
+        else if (taskState === "waiting-bound") {
+            primaryReason = preferWaitReason(primaryReason, {
                 _tag: "Bound",
                 nodeId: descriptor.nodeId,
                 code: "BOUND_MISSING",
-            };
+            });
         }
     }
     if (primaryReason) {
@@ -832,12 +852,12 @@ export function makeWorkflowSession(options = {}) {
             if (task.proofBindingRequired && task.proofBindingStatus !== "current") {
                 const stale = task.proofBindingStatus === "stale";
                 state.states.set(key, stale ? "bound-stale" : "waiting-bound");
-                waitReason ??= {
+                waitReason = preferWaitReason(waitReason, {
                     _tag: "Bound",
                     nodeId: task.nodeId,
                     code: stale ? "BOUND_STALE" : "BOUND_MISSING",
                     ...(stale && task.proofBindings ? { bindings: task.proofBindings } : {}),
-                };
+                });
                 changed = true;
                 proofStateChanged = true;
                 continue;
@@ -848,7 +868,7 @@ export function makeWorkflowSession(options = {}) {
                 if (task.waitAsync) {
                     continue;
                 }
-                waitReason ??= { _tag: "Approval", nodeId: task.nodeId };
+                waitReason = preferWaitReason(waitReason, { _tag: "Approval", nodeId: task.nodeId });
                 continue;
             }
             if (task.meta?.__waitForEvent) {
@@ -857,10 +877,10 @@ export function makeWorkflowSession(options = {}) {
                 if (task.waitAsync) {
                     continue;
                 }
-                waitReason ??= {
+                waitReason = preferWaitReason(waitReason, {
                     _tag: "Event",
                     eventName: typeof task.meta.__eventName === "string" ? task.meta.__eventName : "",
-                };
+                });
                 continue;
             }
             if (task.meta?.__timer) {
@@ -884,7 +904,7 @@ export function makeWorkflowSession(options = {}) {
                     };
                 }
                 state.states.set(key, "waiting-timer");
-                waitReason ??= { _tag: "Timer", resumeAtMs };
+                waitReason = preferWaitReason(waitReason, { _tag: "Timer", resumeAtMs });
                 changed = true;
                 continue;
             }

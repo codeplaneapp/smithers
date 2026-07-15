@@ -157,6 +157,105 @@ describe("WorkflowSessionService direct methods", () => {
     expect(afterReDecide).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
   });
 
+  test("timer wait outranks approval and event waits in both descriptor orders", () => {
+    for (const blocker of [
+      descriptor("approval", { needsApproval: true }),
+      descriptor("event", { meta: { __waitForEvent: true, __eventName: "ready" } }),
+    ]) {
+      for (const timerFirst of [false, true]) {
+        const timer = descriptor("timer", { meta: { __timer: true, __timerDuration: "2s" } });
+        const tasks = timerFirst ? [timer, blocker] : [blocker, timer];
+        const session = makeWorkflowSession({ nowMs: () => 1_000 });
+        const xml = workflow([
+          el("smithers:parallel", {}, tasks.map((task) => el(
+            task.meta?.__timer
+              ? "smithers:timer"
+              : task.meta?.__waitForEvent
+                ? "smithers:wait-for-event"
+                : "smithers:task",
+            { id: task.nodeId },
+          ))),
+        ]);
+
+        expect(run(session.submitGraph(graph(tasks, xml)))).toEqual({
+          _tag: "Wait",
+          reason: { _tag: "Timer", resumeAtMs: 3_000 },
+        });
+        expect(run(session.eventReceived("unrelated", { ignored: true }))).toEqual({
+          _tag: "Wait",
+          reason: { _tag: "Timer", resumeAtMs: 3_000 },
+        });
+        let afterBlockerResolved;
+        if (blocker.needsApproval) {
+          const approved = run(session.approvalResolved("approval", { approved: true, note: "approved" }));
+          expect(approved._tag).toBe("Execute");
+          expect(approved.tasks.map((task) => task.nodeId)).toEqual(["approval"]);
+          afterBlockerResolved = run(session.taskCompleted({
+            nodeId: "approval",
+            iteration: 0,
+            output: { approved: true },
+          }));
+        }
+        else {
+          afterBlockerResolved = run(session.signalReceived("ready", { ok: true }));
+        }
+        expect(afterBlockerResolved).toEqual({
+          _tag: "Wait",
+          reason: { _tag: "Timer", resumeAtMs: 3_000 },
+        });
+      }
+    }
+  });
+
+  test("timer wait outranks a bound wait after the required bound-check render", () => {
+    for (const timerFirst of [false, true]) {
+      const bound = descriptor("bound", {
+        proofBindingRequired: true,
+        proofBindingStatus: "missing",
+      });
+      const timer = descriptor("timer", { meta: { __timer: true, __timerDuration: "2s" } });
+      const tasks = timerFirst ? [timer, bound] : [bound, timer];
+      const session = makeWorkflowSession({ nowMs: () => 1_000 });
+      const xml = workflow([
+        el("smithers:parallel", {}, tasks.map((task) => el(
+          task.meta?.__timer ? "smithers:timer" : "smithers:task",
+          { id: task.nodeId },
+        ))),
+      ]);
+      const mounted = graph(tasks, xml);
+
+      expect(run(session.submitGraph(mounted))).toMatchObject({
+        _tag: "ReRender",
+        context: { trigger: { reason: "bound-check" } },
+      });
+      expect(run(session.submitGraph(mounted))).toEqual({
+        _tag: "Wait",
+        reason: { _tag: "Timer", resumeAtMs: 3_000 },
+      });
+    }
+  });
+
+  test("parallel timers choose the earliest deadline in both descriptor orders", () => {
+    for (const slowFirst of [true, false]) {
+      const slow = descriptor("slow", { meta: { __timer: true, __timerDuration: "10s" } });
+      const fast = descriptor("fast", { meta: { __timer: true, __timerDuration: "2s" } });
+      const tasks = slowFirst ? [slow, fast] : [fast, slow];
+      const session = makeWorkflowSession({ nowMs: () => 1_000 });
+      const xml = workflow([
+        el("smithers:parallel", {}, tasks.map((task) => el("smithers:timer", { id: task.nodeId }))),
+      ]);
+
+      expect(run(session.submitGraph(graph(tasks, xml)))).toEqual({
+        _tag: "Wait",
+        reason: { _tag: "Timer", resumeAtMs: 3_000 },
+      });
+      expect(run(session.eventReceived("unrelated", { ignored: true }))).toEqual({
+        _tag: "Wait",
+        reason: { _tag: "Timer", resumeAtMs: 3_000 },
+      });
+    }
+  });
+
   test("duration timer start is carried in continuation state", () => {
     let now = 1_000;
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });

@@ -38,14 +38,15 @@ function createTimerHostWorkflow(dbPath) {
  * @param {string} runId
  * @param {string} workflowName
  * @param {number} firesAtMs
+ * @param {{ runStatus?: "waiting-timer" | "waiting-approval" | "waiting-event"; metaJson?: string }} [options]
  */
-async function seedWaitingTimerRun(adapter, runId, workflowName, firesAtMs) {
+async function seedWaitingTimerRun(adapter, runId, workflowName, firesAtMs, options = {}) {
     const now = Date.now();
     await adapter.insertRun({
         runId,
         workflowName,
         workflowHash: "timer-hash",
-        status: "waiting-timer",
+        status: options.runStatus ?? "waiting-timer",
         createdAtMs: now,
     });
     await adapter.insertNode({
@@ -67,7 +68,7 @@ async function seedWaitingTimerRun(adapter, runId, workflowName, firesAtMs) {
         startedAtMs: now,
         finishedAtMs: null,
         errorJson: null,
-        metaJson: JSON.stringify({
+        metaJson: options.metaJson ?? JSON.stringify({
             timer: {
                 timerId: "cooldown",
                 timerType: "duration",
@@ -163,6 +164,106 @@ describe("Gateway timer sweep", () => {
         await seedWaitingTimerRun(adapter, "pending-run", "report", Date.now() + 3_600_000);
         await gateway.processDueTimers();
         expect(resumed).toEqual([]);
+    });
+    test("resumes due timers shadowed by approval and event run statuses once per shared DB", async () => {
+        const dbPath = makeDbPath("shadow-due");
+        dbPaths.push(dbPath);
+        const first = createTimerHostWorkflow(dbPath);
+        const second = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", first.workflow);
+        gateway.register("report-copy", second.workflow);
+        const resumed = [];
+        gateway.resumeRunIfNeeded = async (runId, workflowKey) => {
+            resumed.push({ runId, workflowKey });
+        };
+        const adapter = new SmithersDb(first.db);
+        await seedWaitingTimerRun(adapter, "approval-shadow", "report", Date.now() - 1_000, {
+            runStatus: "waiting-approval",
+        });
+        await seedWaitingTimerRun(adapter, "event-shadow", "report", Date.now() - 1_000, {
+            runStatus: "waiting-event",
+        });
+
+        await gateway.processDueTimers();
+
+        expect(resumed).toEqual([
+            { runId: "approval-shadow", workflowKey: "report" },
+            { runId: "event-shadow", workflowKey: "report" },
+        ]);
+    });
+    test("future timers shadowed by approval and event keep the gateway awake", async () => {
+        const dbPath = makeDbPath("shadow-future");
+        dbPaths.push(dbPath);
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow);
+        const resumed = [];
+        gateway.resumeRunIfNeeded = async (runId, workflowKey) => {
+            resumed.push({ runId, workflowKey });
+        };
+        const adapter = new SmithersDb(db);
+        await seedWaitingTimerRun(adapter, "approval-future", "report", Date.now() + 3_600_000, {
+            runStatus: "waiting-approval",
+        });
+        await seedWaitingTimerRun(adapter, "event-future", "report", Date.now() + 3_600_000, {
+            runStatus: "waiting-event",
+        });
+
+        await gateway.processDueTimers();
+
+        expect(resumed).toEqual([]);
+        expect(gateway.hasPendingTimers).toBe(true);
+    });
+    test("active shadowed timer runs stay fenced from the sweep", async () => {
+        const dbPath = makeDbPath("shadow-active");
+        dbPaths.push(dbPath);
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow);
+        const resumed = [];
+        gateway.resumeRunIfNeeded = async (runId, workflowKey) => {
+            resumed.push({ runId, workflowKey });
+        };
+        const adapter = new SmithersDb(db);
+        await seedWaitingTimerRun(adapter, "approval-active", "report", Date.now() - 1_000, {
+            runStatus: "waiting-approval",
+        });
+        gateway.activeRuns.set("approval-active", { abort: { abort() { } } });
+
+        await gateway.processDueTimers();
+
+        expect(resumed).toEqual([]);
+        expect(gateway.hasPendingTimers).toBe(true);
+    });
+    test("approval and event rows without a valid timer deadline do not pin idle shutdown", async () => {
+        const dbPath = makeDbPath("shadow-invalid");
+        dbPaths.push(dbPath);
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow);
+        const resumed = [];
+        gateway.resumeRunIfNeeded = async (runId, workflowKey) => {
+            resumed.push({ runId, workflowKey });
+        };
+        const adapter = new SmithersDb(db);
+        await adapter.insertRun({
+            runId: "approval-no-timer",
+            workflowName: "report",
+            workflowHash: "timer-hash",
+            status: "waiting-approval",
+            createdAtMs: Date.now(),
+        });
+        await seedWaitingTimerRun(adapter, "event-malformed", "report", Date.now() + 3_600_000, {
+            runStatus: "waiting-event",
+            metaJson: JSON.stringify({ timer: { firesAtMs: "not-a-number" } }),
+        });
+
+        await gateway.processDueTimers();
+
+        expect(resumed).toEqual([]);
+        expect(gateway.hasPendingTimers).toBe(false);
+        expect(gateway.isIdle()).toBe(true);
     });
     test("skips a run that is already being driven", async () => {
         const dbPath = makeDbPath("active");
