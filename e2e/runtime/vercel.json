@@ -1,1 +1,0 @@
-{"version":2,"builds":[{"src":"runtime/vercel-api.js","use":"@vercel/node"}],"routes":[{"src":"/api/conformance","dest":"/runtime/vercel-api.js"}]}

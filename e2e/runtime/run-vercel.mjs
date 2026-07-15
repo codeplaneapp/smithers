@@ -1,20 +1,41 @@
-import { spawn } from "node:child_process";
+import { fork } from "node:child_process";
+import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
-import { rm } from "node:fs/promises";
 import { assertRuntimeConformance } from "@smithers-orchestrator/testing/runtimeConformance";
+import { terminateChild } from "./terminateChild.mjs";
 
-const port = 8788;
-const child = spawn("pnpm", ["exec", "vercel", "dev", "--local-config", "runtime/vercel.json", "--listen", `127.0.0.1:${port}`, "--yes"], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, VERCEL_TELEMETRY_DISABLED: "1", VERCEL_RUNTIME_CONFORMANCE: "1", VERCEL_ORG_ID: "", VERCEL_PROJECT_ID: "" } });
-let output = "";
-child.stdout.on("data", (chunk) => { output += chunk; });
-child.stderr.on("data", (chunk) => { output += chunk; });
+// Drive @vercel/node's own local Node.js function bridge directly
+// (the same module `vercel dev` forks internally to serve a Node
+// function) instead of the `vercel` CLI. The CLI's `dev`/`link` flow
+// reaches out to the Vercel API and, on any machine with a cached
+// `vercel login` token, silently authenticates as that real account
+// and creates a real project -- there is no CLI flag that makes
+// project-linking itself work fully offline. Forking the bridge
+// module skips that layer entirely: no network calls, no account,
+// no `.vercel` directory, just the real request/response runtime.
+const require = createRequire(import.meta.url);
+const devServerPath = require.resolve("@vercel/node/dist/dev-server.mjs");
+
+const child = fork(devServerPath, [], {
+  cwd: process.cwd(),
+  env: { ...process.env, VERCEL_DEV_ENTRYPOINT: "runtime/vercel-api.js" },
+  stdio: ["ignore", "pipe", "pipe", "ipc"],
+});
+let stderr = "";
+child.stderr?.on("data", (chunk) => { stderr += chunk; });
+
 try {
-  let response;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try { response = await fetch(`http://127.0.0.1:${port}/api/conformance`); if (response.ok) break; } catch {}
-    await delay(250);
-  }
-  if (!response?.ok) throw new Error(`Vercel local runtime did not become ready: ${output}`);
+  const address = await Promise.race([
+    new Promise((resolve, reject) => {
+      child.once("message", resolve);
+      child.once("exit", (code) => reject(new Error(`Vercel dev-server exited early (code ${code}): ${stderr}`)));
+    }),
+    delay(15000).then(() => { throw new Error(`Vercel local runtime did not become ready within 15s: ${stderr}`); }),
+  ]);
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/conformance`);
+  if (!response.ok) throw new Error(`Vercel local runtime request failed (${response.status}): ${await response.text()}`);
   assertRuntimeConformance(await response.json(), "Vercel");
   console.log("Vercel runtime conformance passed");
-} finally { child.kill("SIGTERM"); await delay(100); if (!child.killed) child.kill("SIGKILL"); await rm(".vercel", { recursive: true, force: true }); }
+} finally {
+  await terminateChild(child);
+}

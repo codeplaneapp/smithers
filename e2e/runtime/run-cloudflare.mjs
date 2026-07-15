@@ -1,9 +1,16 @@
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { assertRuntimeConformance } from "@smithers-orchestrator/testing/runtimeConformance";
+import { terminateChild } from "./terminateChild.mjs";
 
 const port = 8787;
-const child = spawn("pnpm", ["exec", "wrangler", "dev", "--local", "--config", "runtime/wrangler.toml", "--port", String(port), "--ip", "127.0.0.1"], { stdio: ["ignore", "pipe", "pipe"] });
+const wranglerStateDir = join(process.cwd(), "runtime", ".wrangler");
+// `detached: true` makes this child its own process-group leader so
+// terminateChild can signal the whole tree (wrangler --local spawns
+// workerd as a child of its own) instead of leaving it orphaned.
+const child = spawn("pnpm", ["exec", "wrangler", "dev", "--local", "--config", "runtime/wrangler.toml", "--port", String(port), "--ip", "127.0.0.1"], { stdio: ["ignore", "pipe", "pipe"], detached: true });
 let output = "";
 child.stdout.on("data", (chunk) => { output += chunk; });
 child.stderr.on("data", (chunk) => { output += chunk; });
@@ -16,4 +23,7 @@ try {
   if (!response?.ok) throw new Error(`Cloudflare local worker did not become ready: ${output}`);
   assertRuntimeConformance(await response.json(), "Cloudflare Workers");
   console.log("Cloudflare Workers runtime conformance passed");
-} finally { child.kill("SIGTERM"); await delay(100); if (!child.killed) child.kill("SIGKILL"); }
+} finally {
+  await terminateChild(child, { killProcessGroup: true });
+  await rm(wranglerStateDir, { recursive: true, force: true });
+}

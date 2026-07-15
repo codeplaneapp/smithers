@@ -9,13 +9,14 @@
     "test:faults": "node ../scripts/check-fault-skips.mjs && bun test faults",
     "test:soak": "node ../scripts/check-fault-skips.mjs && SMITHERS_E2E_SOAK=1 bun test faults",
     "test:browser:install": "pnpm exec playwright install chromium",
-    "test:browser:types": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --moduleResolution bundler --module esnext --target es2022 --jsx react-jsx browser/consumer.ts",
+    "test:browser:types": "tsc -p browser/tsconfig.json",
     "test:browser": "node browser/run-browser.mjs",
     "test:browser:package": "node browser/packed-consumer.mjs",
-    "test:runtime:browser": "pnpm run test:browser",
+    "test:runtime:browser": "pnpm run test:browser:types && pnpm run test:browser:package && pnpm run test:browser",
+    "test:runtime:worker:types": "tsc -p runtime/tsconfig.worker.json",
     "test:runtime:node": "node runtime/run-node.mjs",
     "test:runtime:bun": "bun runtime/run-bun.mjs",
-    "test:runtime:cloudflare": "node runtime/run-cloudflare.mjs",
+    "test:runtime:cloudflare": "pnpm run test:runtime:worker:types && node runtime/run-cloudflare.mjs",
     "test:runtime:vercel": "node runtime/run-vercel.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -42,11 +43,12 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "4.20260701.1",
     "@types/better-sqlite3": "^7.6.11",
     "@types/bun": "latest",
     "@types/ws": "^8.18.1",
+    "@vercel/node": "5.5.6",
     "typescript": "~6.0.3",
-    "vercel": "48.10.2",
     "wrangler": "4.106.0"
   }
 }
