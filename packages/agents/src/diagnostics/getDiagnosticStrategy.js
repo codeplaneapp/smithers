@@ -1,7 +1,7 @@
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { runDiagnosticCommand } from "./runDiagnosticCommand.js";
 /** @typedef {import("./DiagnosticCheck.ts").DiagnosticCheck} DiagnosticCheck */
 /** @typedef {import("./DiagnosticCheckId.ts").DiagnosticCheckId} DiagnosticCheckId */
 /** @typedef {import("./DiagnosticContext.ts").DiagnosticContext} DiagnosticContext */
@@ -29,12 +29,13 @@ function checkCliInstalled(command, agentId) {
         id: "cli_installed",
         run: async (ctx) => {
             const start = performance.now();
-            const result = spawnSync("which", [command], {
-                stdio: ["pipe", "pipe", "pipe"],
+            const result = await runDiagnosticCommand("which", [command], {
                 env: ctx.env,
+                cwd: ctx.cwd,
+                signal: ctx.signal,
             });
             const elapsed = performance.now() - start;
-            const binaryPath = result.stdout?.toString("utf8").trim();
+            const binaryPath = result.stdout.trim();
             if (result.status === 0 && binaryPath) {
                 return {
                     id: "cli_installed",
@@ -72,15 +73,15 @@ const claudeApiKeyCheck = {
         const start = performance.now();
         const apiKey = ctx.env.ANTHROPIC_API_KEY;
         if (!apiKey) {
-            const status = spawnSync("claude", ["auth", "status"], {
+            const status = await runDiagnosticCommand("claude", ["auth", "status"], {
                 env: ctx.env,
-                stdio: ["ignore", "pipe", "pipe"],
-                timeout: 15_000,
-                encoding: "utf8",
+                cwd: ctx.cwd,
+                signal: ctx.signal,
+                timeoutMs: 15_000,
             });
             const output = [status.stdout, status.stderr].filter(Boolean).join("\n").trim();
             try {
-                const parsed = JSON.parse(status.stdout?.toString("utf8") ?? "");
+                const parsed = JSON.parse(status.stdout);
                 if (parsed?.loggedIn === true) {
                     return {
                         id: "api_key_valid",
@@ -99,7 +100,7 @@ const claudeApiKeyCheck = {
                 }
             }
             catch { }
-            const credentials = readClaudeCliCredentials(ctx.env);
+            const credentials = await readClaudeCliCredentials(ctx);
             if (credentials.valid) {
                 return {
                     id: "api_key_valid",
@@ -135,9 +136,10 @@ const claudeApiKeyCheck = {
 };
 
 /**
- * @param {Record<string, string | undefined>} env
+ * @param {DiagnosticContext} ctx
  */
-function readClaudeCliCredentials(env) {
+async function readClaudeCliCredentials(ctx) {
+    const env = ctx.env;
     const configDir = env.CLAUDE_CONFIG_DIR?.trim() || join(env.HOME?.trim() || homedir(), ".claude");
     let raw;
     try {
@@ -146,13 +148,13 @@ function readClaudeCliCredentials(env) {
     catch {
         // macOS Claude Code stores OAuth credentials in the Keychain, not on disk.
         if (process.platform === "darwin") {
-            const keychain = spawnSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+            const keychain = await runDiagnosticCommand("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
                 env,
-                stdio: ["ignore", "pipe", "pipe"],
-                timeout: 5_000,
-                encoding: "utf8",
+                cwd: ctx.cwd,
+                signal: ctx.signal,
+                timeoutMs: 5_000,
             });
-            if (keychain.status === 0 && keychain.stdout?.trim()) {
+            if (keychain.status === 0 && keychain.stdout.trim()) {
                 raw = keychain.stdout;
             }
         }
@@ -559,14 +561,15 @@ const googleAuthCheck = {
             }
         }
         // No API key — check gcloud auth. Honor the diagnostic env (like every
-        // other spawnSync check here) so gcloud resolves against the same PATH.
-        const result = spawnSync("gcloud", ["auth", "print-access-token"], {
-            stdio: ["pipe", "pipe", "pipe"],
+        // other command check here) so gcloud resolves against the same PATH.
+        const result = await runDiagnosticCommand("gcloud", ["auth", "print-access-token"], {
             env: ctx.env,
-            timeout: 3_000,
+            cwd: ctx.cwd,
+            signal: ctx.signal,
+            timeoutMs: 3_000,
         });
         const elapsed = performance.now() - start;
-        if (result.status === 0 && result.stdout?.toString("utf8").trim()) {
+        if (result.status === 0 && result.stdout.trim()) {
             return {
                 id: "api_key_valid",
                 status: "pass",

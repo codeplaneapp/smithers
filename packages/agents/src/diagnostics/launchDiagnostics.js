@@ -18,5 +18,7 @@ export function launchDiagnostics(command, env, cwd, hints, run = runDiagnostics
         return null;
     const apiKeyEnv = diagnosticApiKeyEnv(command, hints);
     const effectiveEnv = apiKeyEnv ? { ...env, ...apiKeyEnv } : env;
-    return run(strategy, { env: effectiveEnv, cwd }).catch(() => null);
+    return Promise.resolve()
+        .then(() => run(strategy, { env: effectiveEnv, cwd }))
+        .catch(() => null);
 }

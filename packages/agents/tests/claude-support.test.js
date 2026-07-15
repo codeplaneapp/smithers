@@ -10,7 +10,13 @@ const originalPath = process.env.PATH ?? "";
  */
 async function makeFakeClaude(stdoutScript) {
     const dir = await mkdtemp(join(tmpdir(), "smithers-claude-test-"));
-    return makeFakeNodeCli(dir, "claude", stdoutScript);
+    return makeFakeNodeCli(dir, "claude", `
+const smithersDiagnosticArgs = process.argv.slice(2);
+if (smithersDiagnosticArgs.length === 2 && smithersDiagnosticArgs[0] === "auth" && smithersDiagnosticArgs[1] === "status") {
+  process.stdout.write(JSON.stringify({ loggedIn: true }) + "\\n");
+  process.exit(0);
+}
+${stdoutScript}`);
 }
 afterEach(() => {
     process.env.PATH = originalPath;

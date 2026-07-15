@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runDiagnostics, getDiagnosticStrategy, enrichReportWithErrorAnalysis, formatDiagnosticSummary, launchDiagnostics, } from "../src/diagnostics/index.js";
 import { BaseCliAgent } from "../src/BaseCliAgent/index.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { runDiagnosticCommand } from "../src/diagnostics/runDiagnosticCommand.js";
 
 /**
  * Create an isolated CODEX_HOME directory, optionally seeding an auth.json. The
@@ -22,6 +23,141 @@ function makeCodexHome(authJson) {
         dispose: () => rmSync(codexHome, { recursive: true, force: true }),
     };
 }
+
+/** @param {string} path */
+async function waitForPid(path) {
+    const deadline = performance.now() + 2_000;
+    while (performance.now() < deadline) {
+        try {
+            return Number.parseInt(readFileSync(path, "utf8"), 10);
+        }
+        catch {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+    }
+    throw new Error(`timed out waiting for PID file: ${path}`);
+}
+
+/** @param {number} pid */
+function isProcessAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch (error) {
+        if (/** @type {NodeJS.ErrnoException} */ (error).code === "ESRCH")
+            return false;
+        throw error;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runDiagnosticCommand
+// ---------------------------------------------------------------------------
+describe("runDiagnosticCommand", () => {
+    test("preserves env and cwd without invoking a shell", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-diagnostic-command-"));
+        const executable = join(dir, "probe");
+        writeFileSync(executable, [
+            `#!${process.execPath}`,
+            "process.stdout.write(JSON.stringify({ marker: process.env.DIAGNOSTIC_MARKER, cwd: process.cwd(), args: process.argv.slice(2) }));",
+            "",
+        ].join("\n"));
+        chmodSync(executable, 0o755);
+        try {
+            const result = await runDiagnosticCommand(executable, ["literal;echo not-a-shell"], {
+                cwd: dir,
+                env: { DIAGNOSTIC_MARKER: "preserved" },
+            });
+            expect(result.status).toBe(0);
+            expect(result.signal).toBeNull();
+            expect(result.spawnError).toBeNull();
+            expect(JSON.parse(result.stdout)).toEqual({
+                marker: "preserved",
+                cwd: realpathSync(dir),
+                args: ["literal;echo not-a-shell"],
+            });
+        }
+        finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("bounds captured stdout and stderr", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-diagnostic-output-"));
+        const executable = join(dir, "noisy");
+        writeFileSync(executable, [
+            `#!${process.execPath}`,
+            "process.stdout.write('o'.repeat(4096));",
+            "process.stderr.write('e'.repeat(4096));",
+            "",
+        ].join("\n"));
+        chmodSync(executable, 0o755);
+        try {
+            const result = await runDiagnosticCommand(executable, [], {
+                cwd: dir,
+                env: {},
+                maxOutputBytes: 128,
+            });
+            expect(result.status).toBe(0);
+            expect(Buffer.byteLength(result.stdout)).toBe(128);
+            expect(Buffer.byteLength(result.stderr)).toBe(128);
+            expect(result.stdoutTruncated).toBe(true);
+            expect(result.stderrTruncated).toBe(true);
+        }
+        finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("reports ENOENT as a spawn error with no exit status", async () => {
+        const result = await runDiagnosticCommand("smithers-command-that-does-not-exist-677", [], {
+            env: { PATH: "" },
+            cwd: "/tmp",
+        });
+        expect(result.status).toBeNull();
+        expect(result.signal).toBeNull();
+        expect(/** @type {NodeJS.ErrnoException | null} */ (result.spawnError)?.code).toBe("ENOENT");
+    });
+
+    test.skipIf(process.platform === "win32")("escalates an ignored abort from TERM to KILL and reaps the process", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-diagnostic-abort-"));
+        const executable = join(dir, "hanging-probe");
+        const pidFile = join(dir, "pid");
+        writeFileSync(executable, [
+            `#!${process.execPath}`,
+            "const { writeFileSync } = require('node:fs');",
+            "writeFileSync(process.env.DIAGNOSTIC_PID_FILE, String(process.pid));",
+            "process.on('SIGTERM', () => {});",
+            "setInterval(() => {}, 1000);",
+            "",
+        ].join("\n"));
+        chmodSync(executable, 0o755);
+        const controller = new AbortController();
+        /** @type {ReturnType<typeof runDiagnosticCommand> | undefined} */
+        let command;
+        try {
+            command = runDiagnosticCommand(executable, [], {
+                cwd: dir,
+                env: { DIAGNOSTIC_PID_FILE: pidFile },
+                signal: controller.signal,
+                killGraceMs: 50,
+            });
+            const pid = await waitForPid(pidFile);
+            controller.abort();
+            const result = await command;
+            expect(result.aborted).toBe(true);
+            expect(result.status).toBeNull();
+            expect(result.signal).toBe("SIGKILL");
+            expect(isProcessAlive(pid)).toBe(false);
+        }
+        finally {
+            controller.abort();
+            await command?.catch(() => null);
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
 // ---------------------------------------------------------------------------
 // runDiagnostics
 // ---------------------------------------------------------------------------
@@ -77,6 +213,48 @@ describe("runDiagnostics", () => {
         expect(report.checks[0].status).toBe("error");
         expect(report.checks[0].message).toBe("boom");
     });
+    test("times out a real diagnostic executable and reaps it before returning", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-diagnostic-timeout-"));
+        const executable = join(dir, "claude");
+        const pidFile = join(dir, "pid");
+        writeFileSync(executable, [
+            `#!${process.execPath}`,
+            "const { writeFileSync } = require('node:fs');",
+            "writeFileSync(process.env.DIAGNOSTIC_PID_FILE, String(process.pid));",
+            "setInterval(() => {}, 1000);",
+            "",
+        ].join("\n"));
+        chmodSync(executable, 0o755);
+        let pid;
+        try {
+            const startedAt = performance.now();
+            const report = await runDiagnostics(getDiagnosticStrategy("claude"), {
+                env: {
+                    HOME: dir,
+                    PATH: `${dir}:/usr/bin:/bin`,
+                    DIAGNOSTIC_PID_FILE: pidFile,
+                },
+                cwd: dir,
+            });
+            const elapsed = performance.now() - startedAt;
+            pid = await waitForPid(pidFile);
+            const authCheck = report.checks.find((check) => check.id === "api_key_valid");
+            expect(authCheck?.status).toBe("error");
+            expect(authCheck?.detail?.errorCode).toBe("AGENT_DIAGNOSTIC_TIMEOUT");
+            expect(elapsed).toBeGreaterThanOrEqual(4_800);
+            expect(elapsed).toBeLessThan(6_000);
+            expect(isProcessAlive(pid)).toBe(false);
+        }
+        finally {
+            if (pid !== undefined && isProcessAlive(pid)) {
+                try {
+                    process.kill(pid, "SIGKILL");
+                }
+                catch { }
+            }
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }, 10_000);
 });
 // ---------------------------------------------------------------------------
 // getDiagnosticStrategy
@@ -219,6 +397,37 @@ describe("launchDiagnostics", () => {
         const report = await result;
         expect(report.agentId).toBe("claude-code");
         expect(report.checks.length).toBeGreaterThan(0);
+    });
+    test("returns before a diagnostic executable can block the event loop", async () => {
+        const binDir = mkdtempSync(join(tmpdir(), "smithers-diagnostic-launch-"));
+        const claudePath = join(binDir, "claude");
+        writeFileSync(claudePath, [
+            `#!${process.execPath}`,
+            "setTimeout(() => {",
+            "  process.stdout.write(JSON.stringify({ loggedIn: true }) + '\\n');",
+            "}, 300);",
+            "",
+        ].join("\n"));
+        chmodSync(claudePath, 0o755);
+        let heartbeat = 0;
+        const heartbeatHandle = setInterval(() => heartbeat++, 10);
+        /** @type {Promise<DiagnosticReport | null> | undefined} */
+        let result;
+        try {
+            const startedAt = performance.now();
+            result = launchDiagnostics("claude", { PATH: `${binDir}:/usr/bin:/bin` }, "/tmp") ?? undefined;
+            const launchDurationMs = performance.now() - startedAt;
+            expect(result).toBeInstanceOf(Promise);
+            expect(launchDurationMs).toBeLessThan(100);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(heartbeat).toBeGreaterThan(0);
+            await result;
+        }
+        finally {
+            clearInterval(heartbeatHandle);
+            await result?.catch(() => null);
+            rmSync(binDir, { recursive: true, force: true });
+        }
     });
 });
 // ---------------------------------------------------------------------------

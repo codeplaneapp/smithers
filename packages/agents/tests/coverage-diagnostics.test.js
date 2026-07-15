@@ -208,6 +208,17 @@ describe("pi google checks", () => {
     expect(r.message).toContain("gcloud");
   });
 
+  test("api key: keeps the gcloud probe capped at three seconds", async () => {
+    const binDir = temp("smithers-gcloud-timeout-");
+    makeFakeNodeCliSync(binDir, "gcloud", "setInterval(() => {}, 1000);");
+    const startedAt = performance.now();
+    const r = await auth().run({ env: { PATH: `${binDir}:${realPath ?? ""}` }, cwd: "/tmp" });
+    const elapsed = performance.now() - startedAt;
+    expect(r.status).toBe("fail");
+    expect(elapsed).toBeGreaterThanOrEqual(2_800);
+    expect(elapsed).toBeLessThan(4_000);
+  }, 6_000);
+
   test("api key: handles gcloud being unavailable", async () => {
     const bogus = join(temp("smithers-gcloud-none-"), "nope");
     // With the diagnostic env honored this fails (gcloud not found); stays green
