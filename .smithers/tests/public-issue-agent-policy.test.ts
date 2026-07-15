@@ -615,6 +615,8 @@ describe("public issue agent policy", () => {
         await rm(codexHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
       }
     },
-    30_000,
+    // The codex sandbox spawn is fast unloaded (~10s) but competes with every
+    // other package suite during `pnpm test`; 30s flakes under that load.
+    120_000,
   );
 });

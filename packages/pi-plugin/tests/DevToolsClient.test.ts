@@ -199,6 +199,53 @@ describe("DevToolsClient", () => {
     abort.abort();
   });
 
+  test("an explicit fresh subscribe is not backfilled from the client's own last-seen cache", async () => {
+    // Regression: a caller (DevToolsStore, after a decode error) subscribes
+    // with afterSeq=undefined to force a full-snapshot resubscribe. The
+    // client previously refilled that with its own lastSeqSeenByRunId cache
+    // from an earlier stream, silently defeating the fresh-resync request.
+    const streamRequests: Array<Record<string, unknown>> = [];
+    const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    servers.push(server);
+    server.on("connection", (ws) => {
+      ws.send(JSON.stringify({ type: "event", event: "connect.challenge", payload: {} }));
+      ws.on("message", (raw) => {
+        const frame = JSON.parse(String(raw));
+        if (frame.method === "connect") {
+          ws.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: {} }));
+          return;
+        }
+        if (frame.method === "streamDevTools") {
+          streamRequests.push(frame.params);
+          ws.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { streamId: "stream-1" } }));
+          ws.send(JSON.stringify({
+            type: "event",
+            event: "devtools.event",
+            payload: { streamId: "stream-1", event: { type: "snapshot", ...snapshot(5) } },
+          }));
+        }
+      });
+    });
+    const address = server.address();
+    if (typeof address === "string" || address === null) {
+      throw new Error("expected TCP server address");
+    }
+    const client = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` });
+
+    const firstAbort = new AbortController();
+    const firstStream = client.streamDevTools("run-client", undefined, firstAbort.signal);
+    await next(firstStream);
+    expect(client.lastSeqSeen("run-client")).toBe(5);
+    firstAbort.abort();
+
+    const secondAbort = new AbortController();
+    const secondStream = client.streamDevTools("run-client", undefined, secondAbort.signal);
+    await next(secondStream);
+    secondAbort.abort();
+
+    expect(streamRequests).toEqual([{ runId: "run-client" }, { runId: "run-client" }]);
+  });
+
   test("throws devtools stream errors for the active stream", async () => {
     const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
     servers.push(server);

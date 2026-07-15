@@ -209,6 +209,33 @@ describe("DevToolsStore reconnect state", () => {
     store.disconnect();
   });
 
+  test("a decode error after a snapshot has been applied still forces a fresh stream, not the last seen seq", async () => {
+    const attempts: Array<number | undefined> = [];
+    const store = new DevToolsStore({
+      staleBannerDelayMs: 5,
+      client: fakeClient({
+        streamDevTools: async function* (_runId, afterSeq) {
+          attempts.push(afterSeq);
+          if (attempts.length === 1) {
+            yield { version: 1, kind: "snapshot", snapshot: snapshot(3, [task(2, "task:a", "running")]) };
+            throw new SmithersError("PI_DEVTOOLS_DECODE_ERROR", "The event payload is invalid.");
+          }
+        },
+      }),
+    });
+
+    store.connect("run-store");
+    await waitFor(() => attempts.length >= 2);
+
+    expect(store.decodeErrorCount).toBe(1);
+    // Regression: nextAfterSeq = undefined (the fresh-resync signal) was
+    // previously overwritten by `nextAfterSeq ?? lastSeenSeq(runId)` once a
+    // snapshot had populated lastSeenSeq, so the reconnect wrongly resumed
+    // from seq 3 instead of requesting a fresh full snapshot.
+    expect(attempts).toEqual([undefined, undefined]);
+    store.disconnect();
+  });
+
   test("message-only matches do not count as decode errors or force a fresh stream", async () => {
     const attempts: Array<number | undefined> = [];
     const store = new DevToolsStore({

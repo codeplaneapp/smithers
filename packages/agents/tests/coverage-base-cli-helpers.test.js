@@ -231,6 +231,26 @@ describe("createAgentStdoutTextEmitter", () => {
     expect(joined).toContain("agent-answer");
   });
 
+  test("assistant message/MESSAGE lines with string content emit exactly once", () => {
+    /** @type {string[]} */
+    const chunks = [];
+    const emitter = createAgentStdoutTextEmitter({
+      outputFormat: "stream-json",
+      onText: (t) => chunks.push(t),
+    });
+    emitter.push(JSON.stringify({ type: "message", role: "assistant", content: "Answer" }) + "\n");
+    expect(chunks).toEqual(["Answer"]);
+
+    /** @type {string[]} */
+    const chunks2 = [];
+    const emitter2 = createAgentStdoutTextEmitter({
+      outputFormat: "stream-json",
+      onText: (t) => chunks2.push(t),
+    });
+    emitter2.push(JSON.stringify({ type: "MESSAGE", role: "assistant", content: "x" }) + "\n");
+    expect(chunks2).toEqual(["x"]);
+  });
+
   test("agent_end with no assistant message emits nothing", () => {
     /** @type {string[]} */
     const chunks = [];

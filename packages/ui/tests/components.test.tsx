@@ -101,7 +101,7 @@ describe("Badge + StatusPill", () => {
 
     expect(renderToStaticMarkup(<StatusPill status="ok" />)).toContain("sui-badge-success");
     expect(renderToStaticMarkup(<StatusPill status="failed" />)).toContain("sui-badge-destructive");
-    expect(renderToStaticMarkup(<StatusPill status="cancelled" />)).toContain("sui-badge-muted");
+    expect(renderToStaticMarkup(<StatusPill status="cancelled" />)).toContain("sui-badge-destructive");
     expect(renderToStaticMarkup(<StatusPill status="waiting_approval" />)).toContain("Waiting for approval");
   });
 

@@ -346,7 +346,12 @@ export class DevToolsClient {
     afterSeq?: number,
     signal?: AbortSignal,
   ): AsyncGenerator<DevToolsRuntimeEvent> {
-    let afterSeqCursor = afterSeq ?? this.lastSeqSeenByRunId.get(runId);
+    // afterSeq is the caller's explicit resume cursor. An omitted/undefined
+    // value means "start with a fresh full-snapshot subscribe" (e.g. a
+    // decode-error recovery) — it must not be silently backfilled from this
+    // client's own last-seen cache, or that fresh-resync request never
+    // reaches the gateway.
+    let afterSeqCursor = afterSeq;
     while (!signal?.aborted) {
       const connection = await GatewayWsConnection.open(toWsUrl(this.baseUrl));
       const abort = () => connection.close();

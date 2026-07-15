@@ -1,6 +1,6 @@
 import { applyPatch as applyUnifiedPatch } from "diff";
 import { spawn } from "node:child_process";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /** @typedef {import("./DiffBundle.ts").DiffBundle} DiffBundle */
@@ -113,6 +113,14 @@ function extractPatchPath(chunk) {
         return diffHeader[2].trim();
     }
     throw new SmithersError("INVALID_INPUT", "Unable to determine file path from diff chunk", { chunk: chunk.slice(0, 200) });
+}
+/**
+ * @param {string} chunk
+ * @returns {string | undefined}
+ */
+function extractRenameFrom(chunk) {
+    const renameFrom = chunk.match(/^rename from (.+)$/m)?.[1];
+    return renameFrom ? renameFrom.trim() : undefined;
 }
 /**
  * @param {string} chunk
@@ -367,21 +375,32 @@ function resolveContainedPath(targetDir, patchPath) {
 async function applyPatchFallback(patch, targetDir) {
     const targetPath = resolveContainedPath(targetDir, patch.path);
     const targetExists = await fileExists(targetPath);
+    const renameFrom = extractRenameFrom(patch.diff);
+    const sourcePath = renameFrom ? resolveContainedPath(targetDir, renameFrom) : undefined;
+    const sourceExists = sourcePath ? await fileExists(sourcePath) : false;
     if (patch.binaryContent) {
         if (patch.operation === "delete") {
             await rm(targetPath, { force: true });
             return;
         }
         await mkdir(dirname(targetPath), { recursive: true });
+        // rename() before writing (never write+rm): on a case-insensitive
+        // filesystem a case-only rename aliases source and target to the same
+        // file, and rm-ing the source would delete the file just written.
+        if (sourceExists && sourcePath !== targetPath) {
+            await rename(sourcePath, targetPath);
+        }
         await writeFile(targetPath, Buffer.from(patch.binaryContent, "base64"));
         return;
     }
     if (patch.operation === "delete" && !targetExists) {
         return;
     }
-    const current = patch.operation === "add" || !targetExists
-        ? ""
-        : await readFile(targetPath, "utf8");
+    const current = sourceExists
+        ? await readFile(sourcePath, "utf8")
+        : patch.operation === "add" || !targetExists
+            ? ""
+            : await readFile(targetPath, "utf8");
     const updated = applyUnifiedPatch(current, patch.diff);
     if (updated === false) {
         throw new SmithersError("TOOL_PATCH_FAILED", `Failed to apply patch for ${patch.path}`, { path: patch.path, operation: patch.operation });
@@ -391,6 +410,10 @@ async function applyPatchFallback(patch, targetDir) {
         return;
     }
     await mkdir(dirname(targetPath), { recursive: true });
+    // See the binary branch: rename(), never write+rm, for case-only renames.
+    if (sourceExists && sourcePath !== targetPath) {
+        await rename(sourcePath, targetPath);
+    }
     await writeFile(targetPath, updated, "utf8");
 }
 /**

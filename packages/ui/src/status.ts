@@ -15,10 +15,10 @@ export type StatusClass = "ok" | "warn" | "bad" | "muted";
 /** Bucket a status string into the four badge tints. */
 export function statusClass(status: string | undefined): StatusClass {
   const normalized = normalizeStatus(status);
-  if (["fixed", "ready", "done", "finished", "continued", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
-  if (["broken", "blocked", "failed", "failure", "error"].includes(normalized)) return "bad";
+  if (["fixed", "ready", "done", "finished", "continued", "succeeded", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
+  if (["broken", "blocked", "failed", "failure", "error", "cancelled", "canceled", "stale", "orphaned"].includes(normalized)) return "bad";
   if (
-    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "paused", "todo", "open"].includes(normalized) ||
+    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "paused", "recovering", "todo", "open"].includes(normalized) ||
     normalized.startsWith("waiting-")
   ) return "warn";
   return "muted";
@@ -38,6 +38,7 @@ export function formatStatus(status: string | undefined): string {
     done: "Done",
     finished: "Finished",
     continued: "Continued",
+    succeeded: "Complete",
     running: "Running",
     pending: "Pending",
     queued: "Queued",
@@ -61,6 +62,9 @@ export function formatStatus(status: string | undefined): string {
     todo: "Todo",
     open: "Open",
     closed: "Closed",
+    recovering: "Recovering",
+    stale: "Stale",
+    orphaned: "Orphaned",
   };
   return labels[normalized] ?? normalized.split("-").map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part).join(" ");
 }
@@ -71,6 +75,7 @@ const TERMINAL_STATUSES = new Set([
   "done",
   "finished",
   "continued",
+  "succeeded",
   "complete",
   "completed",
   "closed",

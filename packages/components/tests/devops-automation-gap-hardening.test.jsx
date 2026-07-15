@@ -90,6 +90,25 @@ describe("devops automation gap hardening", () => {
         expect(row.error.length).toBeGreaterThan(0);
     });
 
+    test("CheckSuite command check kills a hanging command after timeoutMs instead of hanging forever", async () => {
+        const hangCommand = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 60000)"`;
+        const { graph } = await render(
+            <CheckSuite
+                id="gate"
+                verdictOutput="verdict_out"
+                checks={[{ id: "hung", command: hangCommand, timeoutMs: 200 }]}
+            />,
+        );
+
+        const row = await byId(graph, "gate-hung").computeFn();
+        expect(row).toMatchObject({
+            passed: false,
+            ok: false,
+            command: hangCommand,
+            timedOut: true,
+        });
+    }, 10_000);
+
     test("CheckSuite command check keeps the real exit code when stdout exceeds the capture limit", async () => {
         const largeCommand = `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(17 * 1024 * 1024) + 'tail-marker')"`;
         const { graph } = await render(

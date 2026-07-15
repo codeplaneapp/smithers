@@ -137,7 +137,14 @@ const SandboxEntityLayer = SandboxEntity.toLayer(Effect.gen(function* () {
     return SandboxEntity.of({
         create: ({ payload }) => executor.create(payload),
         ship: ({ payload }) => executor.ship(payload.bundlePath, payload.handle),
-        execute: ({ payload }) => executor.execute(payload.command, payload.handle),
+        execute: ({ payload }) => {
+            // AbortSignal isn't serializable over RPC, so the caller's cancellation
+            // reaches us as an interruption of this handler fiber (forwarded by
+            // @effect/rpc when the client-side call is interrupted); translate that
+            // interruption back into a real AbortSignal for the executor to kill on.
+            const controller = new AbortController();
+            return executor.execute(payload.command, payload.handle, controller.signal).pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())));
+        },
         collect: ({ payload }) => executor.collect(payload.handle),
         cleanup: ({ payload }) => executor.cleanup(payload.handle),
     });
@@ -154,6 +161,26 @@ function sandboxEntityError(error, operation, details) {
         details,
     });
 }
+/**
+ * Interrupts `effect` as soon as `signal` aborts, so the caller's cancellation
+ * propagates through the entity RPC boundary as fiber interruption instead of
+ * being silently dropped (an `AbortSignal` itself can't cross the RPC wire).
+ * @template A, E
+ * @param {Effect.Effect<A, E>} effect
+ * @param {AbortSignal | undefined} signal
+ * @returns {Effect.Effect<A, E>}
+ */
+const interruptibleBySignal = (effect, signal) => {
+    if (!signal)
+        return effect;
+    if (signal.aborted)
+        return Effect.interrupt;
+    return Effect.raceFirst(effect, Effect.async((resume) => {
+        const onAbort = () => resume(Effect.interrupt);
+        signal.addEventListener("abort", onAbort, { once: true });
+        return Effect.sync(() => signal.removeEventListener("abort", onAbort));
+    }));
+};
 /**
  * @template R, E
  * @param {Layer.Layer<SandboxEntityExecutor, E, R>} executorLayer
@@ -177,7 +204,7 @@ export const makeSandboxTransportServiceEffect = (executorLayer) => Effect.gen(f
     const service = {
         create: (config) => withClient(config, "create", { runtime: config.runtime, rootDir: config.rootDir }, (client) => client.create(config)),
         ship: (bundlePath, handle) => withClient(handle, "ship", { bundlePath }, (client) => client.ship({ bundlePath, handle })),
-        execute: (command, handle) => withClient(handle, "execute", { command }, (client) => client.execute({ command, handle })),
+        execute: (command, handle, signal) => withClient(handle, "execute", { command }, (client) => interruptibleBySignal(client.execute({ command, handle }), signal)),
         collect: (handle) => withClient(handle, "collect", {}, (client) => client.collect({ handle })),
         cleanup: (handle) => withClient(handle, "cleanup", {}, (client) => client.cleanup({ handle })),
     };

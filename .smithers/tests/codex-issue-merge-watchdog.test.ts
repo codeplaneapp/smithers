@@ -568,8 +568,15 @@ describe("codex issue merge watchdog", () => {
     const source = join(root, "stuck-smithers.ts");
     const binary = join(root, process.platform === "win32" ? "stuck-smithers.exe" : "stuck-smithers");
     try {
-      writeFileSync(source, "while (true) await Bun.sleep(1_000);\n");
-      compileFixture(source, binary);
+      if (process.platform === "win32") {
+        writeFileSync(source, "while (true) await Bun.sleep(1_000);\n");
+        compileFixture(source, binary);
+      } else {
+        // A compiled Bun binary can spend the whole deadline paging in at
+        // startup on a loaded machine; the deadline behavior under test only
+        // needs a process that hangs and dies to SIGTERM.
+        writeFileSync(binary, "#!/bin/sh\nexec sleep 1000\n", { mode: 0o755 });
+      }
       const startedAt = Date.now();
       const result = runSmithersJson("inspect", "run-stuck", root, { binary, timeoutMs: 50 });
       expect(result.ok).toBe(false);

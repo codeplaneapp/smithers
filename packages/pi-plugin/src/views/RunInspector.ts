@@ -37,6 +37,8 @@ export class RunInspector {
   private focus: FocusPane = "tree";
   private cachedLines: string[] | undefined;
   private cachedWidth = 0;
+  private cachedHeight = 0;
+  private cachedTheme: Theme | undefined;
 
   constructor(
     private readonly store: DevToolsStore,
@@ -107,7 +109,7 @@ export class RunInspector {
   }
 
   render(width: number, height = 34, theme: Theme = this.theme) {
-    if (this.cachedLines && this.cachedWidth === width) {
+    if (this.cachedLines && this.cachedWidth === width && this.cachedHeight === height && this.cachedTheme === theme) {
       return this.cachedLines;
     }
     const W = Math.max(60, width);
@@ -140,14 +142,22 @@ export class RunInspector {
         W,
       ),
     );
-    this.cachedWidth = width;
-    this.cachedLines = lines;
+    // The stale banner embeds an elapsed-seconds counter, so those lines must
+    // be recomputed every render; only time-independent output is cacheable.
+    if (!this.store.isStaleBannerVisible) {
+      this.cachedWidth = width;
+      this.cachedHeight = height;
+      this.cachedTheme = theme;
+      this.cachedLines = lines;
+    }
     return lines;
   }
 
   invalidate() {
     this.cachedLines = undefined;
     this.cachedWidth = 0;
+    this.cachedHeight = 0;
+    this.cachedTheme = undefined;
   }
 
   dispose() {

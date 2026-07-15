@@ -317,6 +317,96 @@ describe("createTranscriptionTool", () => {
       }
     });
   }
+
+  test("rejects an oversized declared Whisper audio download before requesting transcription", async () => {
+    let cancelled = false;
+    let providerCalled = false;
+    const transcription = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "openai-test-key",
+      maxResponseBytes: 4,
+      audioUrlResolver: async () => [{ address: "8.8.8.8", family: 4 }],
+      audioUrlTransport: async () =>
+        new Response(
+          new ReadableStream({ cancel: () => void (cancelled = true) }),
+          { headers: { "content-length": "5" } },
+        ),
+      fetch: async () => {
+        providerCalled = true;
+        return Response.json({ text: "unexpected" });
+      },
+    });
+
+    await expect(transcription.execute({ audioUrl: "https://cdn.example.com/audio.mp3" }, callOptions)).rejects.toThrow(
+      /exceeds 4 bytes/,
+    );
+    expect(cancelled).toBe(true);
+    expect(providerCalled).toBe(false);
+  });
+
+  test("cancels a chunked Whisper audio download that exceeds the cap", async () => {
+    let cancelled = false;
+    const transcription = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "openai-test-key",
+      maxResponseBytes: 4,
+      audioUrlResolver: async () => [{ address: "8.8.8.8", family: 4 }],
+      audioUrlTransport: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2]));
+              controller.enqueue(new Uint8Array([3, 4, 5]));
+            },
+            cancel: () => void (cancelled = true),
+          }),
+        ),
+      fetch: async () => Response.json({ text: "unexpected" }),
+    });
+
+    await expect(transcription.execute({ audioUrl: "https://cdn.example.com/audio.mp3" }, callOptions)).rejects.toThrow(
+      /exceeds 4 bytes/,
+    );
+    expect(cancelled).toBe(true);
+  });
+
+  test("cancels a chunked provider response that exceeds the cap", async () => {
+    let cancelled = false;
+    const transcription = createTranscriptionTool({
+      provider: "deepgram",
+      apiKey: "deepgram-test-key",
+      maxResponseBytes: 4,
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2]));
+              controller.enqueue(new Uint8Array([3, 4, 5]));
+            },
+            cancel: () => void (cancelled = true),
+          }),
+        ),
+    });
+
+    await expect(
+      transcription.execute({ audioBase64: Buffer.from("audio bytes").toString("base64") }, callOptions),
+    ).rejects.toThrow(/exceeds 4 bytes/);
+    expect(cancelled).toBe(true);
+  });
+
+  test("accepts a provider response exactly at the configured cap", async () => {
+    const payload = JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: "ok" }] }] } });
+    const transcription = createTranscriptionTool({
+      provider: "deepgram",
+      apiKey: "deepgram-test-key",
+      maxResponseBytes: Buffer.byteLength(payload),
+      fetch: async () => new Response(payload),
+    });
+
+    await expect(
+      transcription.execute({ audioBase64: Buffer.from("audio bytes").toString("base64") }, callOptions),
+    ).resolves.toEqual({ text: "ok", provider: "deepgram" });
+  });
 });
 
 describe("createTranscriptionTool cancellation against real servers", () => {

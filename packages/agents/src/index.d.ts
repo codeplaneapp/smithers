@@ -42,6 +42,8 @@ type CreateTranscriptionToolOptions$1 = {
     description?: string;
     /** Provider API fetch implementation. Never used for local Whisper audio downloads. */
     fetch?: typeof fetch;
+    /** Maximum bytes accepted from a remote audio URL or transcription provider response. Defaults to 25 MiB. */
+    maxResponseBytes?: number;
     /**
      * Hosts an agent-supplied `audioUrl` may use. When set, only these hosts are
      * allowed and the private/loopback guard is bypassed for them. Use to permit
@@ -105,6 +107,12 @@ type HttpToolInput$1 = {
 
 type CreateHttpToolOptions$2 = {
     description?: string;
+    /**
+     * Maximum number of response-body bytes the tool will buffer. Responses
+     * larger than this are rejected to prevent model-selected endpoints from
+     * exhausting process memory. Defaults to 1 MiB.
+     */
+    maxResponseBytes?: number;
     /**
      * Headers merged into every request the tool makes. The model picks the
      * request URL, so when these carry secrets (API keys, cookies) pin them to

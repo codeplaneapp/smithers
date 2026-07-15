@@ -18,7 +18,12 @@ describe("statusClass", () => {
     expect(statusClass("waiting-approval")).toBe("warn");
     expect(statusClass("waiting-quota")).toBe("warn");
     expect(statusClass("continued")).toBe("ok");
-    expect(statusClass("cancelled")).toBe("muted");
+    expect(statusClass("succeeded")).toBe("ok");
+    expect(statusClass("cancelled")).toBe("bad");
+    expect(statusClass("canceled")).toBe("bad");
+    expect(statusClass("stale")).toBe("bad");
+    expect(statusClass("orphaned")).toBe("bad");
+    expect(statusClass("recovering")).toBe("warn");
     expect(statusClass("something-new")).toBe("muted");
   });
 });
@@ -28,6 +33,10 @@ describe("formatStatus", () => {
     expect(formatStatus("waiting-approval")).toBe("Waiting for approval");
     expect(formatStatus("waiting-quota")).toBe("Waiting on quota");
     expect(formatStatus("continued")).toBe("Continued");
+    expect(formatStatus("succeeded")).toBe("Complete");
+    expect(formatStatus("stale")).toBe("Stale");
+    expect(formatStatus("orphaned")).toBe("Orphaned");
+    expect(formatStatus("recovering")).toBe("Recovering");
     expect(formatStatus("ok")).toBe("Complete");
     expect(formatStatus("some-new-state")).toBe("Some New State");
     expect(formatStatus(undefined)).toBe("Unknown");
@@ -43,6 +52,7 @@ describe("isTerminalRunStatus", () => {
     expect(isTerminalRunStatus("canceled")).toBe(true);
     expect(isTerminalRunStatus("skipped")).toBe(true);
     expect(isTerminalRunStatus("continued")).toBe(true);
+    expect(isTerminalRunStatus("succeeded")).toBe(true);
   });
 
   test("pins terminality across the DB run vocabulary", () => {
@@ -72,6 +82,9 @@ describe("isTerminalRunStatus", () => {
     expect(isTerminalRunStatus("running")).toBe(false);
     expect(isTerminalRunStatus("waiting-approval")).toBe(false);
     expect(isTerminalRunStatus("queued")).toBe(false);
+    expect(isTerminalRunStatus("recovering")).toBe(false);
+    expect(isTerminalRunStatus("stale")).toBe(false);
+    expect(isTerminalRunStatus("orphaned")).toBe(false);
     expect(isTerminalRunStatus(undefined)).toBe(false);
     expect(isTerminalRunStatus("")).toBe(false);
   });

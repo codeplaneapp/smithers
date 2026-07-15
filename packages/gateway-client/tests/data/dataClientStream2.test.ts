@@ -77,6 +77,40 @@ describe("createSmithersDataClient change stream", () => {
     client.close();
   });
 
+  test("parses multi-line data fields, no-space colons, and CRLF frames per the SSE spec", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const events: SmithersStreamEvent[] = [];
+    const client = createSmithersDataClient({
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
+      fetch: streamingFetch((c) => { controller = c; }),
+    });
+    const unsubscribe = client.stream.subscribe((event) => events.push(event));
+    await waitFor(() => client.stream.status().status === "online");
+
+    // Multiple `data:` lines must be joined with `\n`, not truncated to the
+    // first line; a `data:` with no space after the colon must not be dropped.
+    // The split falls right after a comma, so the inserted `\n` is valid
+    // whitespace between JSON tokens once the lines are rejoined.
+    const firstHalf = `{"seq":11,`;
+    const secondHalf = `"collections":["runs"]}`;
+    const frame = `event:change\r\ndata:${firstHalf}\r\ndata: ${secondHalf}\r\n\r\n`;
+    // Deliver the frame split between a CR and its LF: the pair straddling a
+    // chunk boundary must still count as one line break, not two.
+    const splitAt = frame.indexOf("\n");
+    controller.enqueue(encoder.encode(frame.slice(0, splitAt)));
+    controller.enqueue(encoder.encode(frame.slice(splitAt)));
+
+    await waitFor(() => events.some((event) => event.type === "change" && event.seq === 11));
+    const change = events.find((event) => event.type === "change" && event.seq === 11) as Extract<
+      SmithersStreamEvent,
+      { type: "change" }
+    >;
+    expect(change.collections).toEqual(["runs"]);
+
+    unsubscribe();
+    client.close();
+  });
+
   test("close() drains outstanding waitForSeq waiters instead of leaking them", async () => {
     const client = createSmithersDataClient({
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },

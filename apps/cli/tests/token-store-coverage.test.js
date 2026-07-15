@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -88,13 +88,15 @@ describe("readSmithersTokenStore filesystem fallbacks", () => {
         expect(readSmithersTokenStore().tokens).toEqual({});
     });
 
-    test("returns a default store when the file is corrupt", () => {
+    test("throws on a corrupt file instead of silently returning an empty store, leaving it untouched for recovery", () => {
         const dir = mkdtempSync(join(tmpdir(), "token-corrupt-"));
         try {
             const p = join(dir, "tokens.json");
-            writeFileSync(p, "{not valid json");
+            const corruptContents = "{not valid json";
+            writeFileSync(p, corruptContents);
             process.env.SMITHERS_TOKEN_STORE = p;
-            expect(readSmithersTokenStore().tokens).toEqual({});
+            expect(() => readSmithersTokenStore()).toThrow(/corrupt/);
+            expect(readFileSync(p, "utf8")).toBe(corruptContents);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

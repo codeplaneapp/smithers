@@ -365,4 +365,70 @@ describe("diff bundle", () => {
             cleanup(target);
         }
     });
+
+    test("falls back to a rename without dropping content or orphaning the source path", async () => {
+        const target = makeTempDir("smithers-diff-rename-fallback-");
+        try {
+            writeFileSync(join(target, "foo.ts"), "rename\n", "utf8");
+            writeFileSync(join(target, "edit-me.ts"), "old line\n", "utf8");
+
+            // The last patch is malformed so the batched `git apply` fails and
+            // the whole bundle - including the otherwise-valid renames - is
+            // retried through the per-patch fallback.
+            await expect(applyDiffBundle({
+                seq: 1,
+                baseRef: "base",
+                patches: [
+                    {
+                        path: "bar.ts",
+                        operation: "modify",
+                        diff: [
+                            "diff --git a/foo.ts b/bar.ts",
+                            "similarity index 100%",
+                            "rename from foo.ts",
+                            "rename to bar.ts",
+                            "",
+                        ].join("\n"),
+                    },
+                    {
+                        path: "renamed-edited.ts",
+                        operation: "modify",
+                        diff: [
+                            "diff --git a/edit-me.ts b/renamed-edited.ts",
+                            "similarity index 90%",
+                            "rename from edit-me.ts",
+                            "rename to renamed-edited.ts",
+                            "--- a/edit-me.ts",
+                            "+++ b/renamed-edited.ts",
+                            "@@ -1 +1 @@",
+                            "-old line",
+                            "+new line",
+                            "",
+                        ].join("\n"),
+                    },
+                    {
+                        path: "force-fallback.txt",
+                        operation: "modify",
+                        diff: [
+                            "diff --git a/force-fallback.txt b/force-fallback.txt",
+                            "--- a/force-fallback.txt",
+                            "+++ b/force-fallback.txt",
+                            "@@ -99 +99 @@",
+                            "-nope",
+                            "+bad",
+                            "",
+                        ].join("\n"),
+                    },
+                ],
+            }, target)).rejects.toThrow("Failed to apply patch for force-fallback.txt");
+
+            expect(readFileSync(join(target, "bar.ts"), "utf8")).toBe("rename\n");
+            expect(existsSync(join(target, "foo.ts"))).toBe(false);
+            expect(readFileSync(join(target, "renamed-edited.ts"), "utf8")).toBe("new line\n");
+            expect(existsSync(join(target, "edit-me.ts"))).toBe(false);
+        }
+        finally {
+            cleanup(target);
+        }
+    });
 });

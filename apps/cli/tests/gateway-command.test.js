@@ -124,7 +124,9 @@ async function findOpenPort(host = "127.0.0.1") {
     return address.port;
 }
 
-async function waitFor(predicate, timeoutMs = 10_000) {
+// Cold CLI spawns page in the whole monorepo; under a full parallel
+// `pnpm test` run that can take well over ten seconds.
+async function waitFor(predicate, timeoutMs = 30_000) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
         const value = await predicate();

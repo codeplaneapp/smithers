@@ -520,6 +520,7 @@ export class DevToolsStore {
     while (this.shouldReconnect && !signal.aborted) {
       this.connectionState = { kind: "connecting" };
       this.emit();
+      let forceFreshResync = false;
       try {
         for await (const event of this.client.streamDevTools(runId, nextAfterSeq, signal)) {
           if (signal.aborted) {
@@ -542,6 +543,7 @@ export class DevToolsStore {
         if (err instanceof SmithersError && err.code === "PI_DEVTOOLS_DECODE_ERROR") {
           this.decodeErrorCount += 1;
           nextAfterSeq = undefined;
+          forceFreshResync = true;
         }
         this.connectionState = { kind: "error", error: err };
         this.markConnectionInterrupted();
@@ -549,7 +551,9 @@ export class DevToolsStore {
 
       this.backoff.recordFailure();
       this.reconnectCount += 1;
-      nextAfterSeq = nextAfterSeq ?? this.lastSeenSeq(runId);
+      if (!forceFreshResync) {
+        nextAfterSeq = nextAfterSeq ?? this.lastSeenSeq(runId);
+      }
       const delayMs = this.backoff.currentDelayMs();
       this.emit();
       await sleep(delayMs, signal);

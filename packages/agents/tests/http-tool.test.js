@@ -120,6 +120,92 @@ describe("createHttpTool", () => {
     });
     expect(agent).toBeDefined();
   });
+
+  test("rejects an oversized declared response length before reading the body", async () => {
+    const originalFetch = globalThis.fetch;
+    let cancelled = false;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { "content-length": "11" } },
+      );
+    try {
+      await expect(
+        createHttpTool({ maxResponseBytes: 10 }).execute(
+          { url: `${baseUrl}/large` },
+          callOptions,
+        ),
+      ).rejects.toThrow("exceeds the 10-byte limit");
+      expect(cancelled).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("cancels a chunked response that exceeds the configured limit", async () => {
+    const originalFetch = globalThis.fetch;
+    let cancelled = false;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("12345"));
+            controller.enqueue(new TextEncoder().encode("6"));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+      );
+    try {
+      await expect(
+        createHttpTool({ maxResponseBytes: 5 }).execute(
+          { url: `${baseUrl}/chunked` },
+          callOptions,
+        ),
+      ).rejects.toThrow("exceeds the 5-byte limit");
+      expect(cancelled).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("keeps body-less responses that declare an oversized Content-Length (HEAD)", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(null, { headers: { "content-length": "999999999" } });
+    try {
+      const result = await createHttpTool({ maxResponseBytes: 10 }).execute(
+        { method: "HEAD", url: `${baseUrl}/large` },
+        callOptions,
+      );
+      expect(result.ok).toBe(true);
+      expect(result.body).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("accepts a response exactly at the configured limit and preserves JSON parsing", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('{"ok":true}', {
+        headers: { "content-type": "application/json", "content-length": "11" },
+      });
+    try {
+      const result = await createHttpTool({ maxResponseBytes: 11 }).execute(
+        { url: `${baseUrl}/exact` },
+        callOptions,
+      );
+      expect(result.body).toEqual({ ok: true });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 /** A prebuilt language model so constructing the agent needs no API key. */

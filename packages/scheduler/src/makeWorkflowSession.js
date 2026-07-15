@@ -1138,7 +1138,11 @@ export function makeWorkflowSession(options = {}) {
                 return failedDecision(new SmithersError("NODE_NOT_FOUND", `Unknown timer task ${nodeId}`), "timerFired");
             }
             const key = stateKeyFor(descriptor);
-            if (state.states.get(key) !== "waiting-timer" && !descriptor.meta?.__timer) {
+            // Only a task the scheduler has actually parked on (waiting-timer)
+            // may be force-finished here. A pending timer with unmet
+            // dependencies, or one already finished/skipped/failed, must not be
+            // completed or have its output overwritten (#545).
+            if (state.states.get(key) !== "waiting-timer") {
                 return decide();
             }
             markTaskFinished({

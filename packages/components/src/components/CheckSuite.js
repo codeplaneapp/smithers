@@ -12,6 +12,7 @@ import { Task } from "./Task.js";
 /** @typedef {import("./CheckConfig.ts").CheckConfig} CheckConfig */
 
 const COMMAND_MAX_BUFFER = 16 * 1024 * 1024;
+const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Keep the most recent bytes from a process stream without retaining the
@@ -134,10 +135,12 @@ function normalizeChecks(checks) {
  * shape used by agent checks, without failing the whole suite on a non-zero
  * exit code.
  * @param {string} command
+ * @param {number} [timeoutMs] - Kill the command after this many milliseconds; `0` disables the timeout.
  * @returns {Promise<Record<string, unknown>>}
  */
-async function runCommandCheck(command) {
-    const cwd = getTaskRuntime()?.rootDir ?? process.cwd();
+async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
+    const runtime = getTaskRuntime();
+    const cwd = runtime?.rootDir ?? process.cwd();
     return await new Promise((resolve) => {
         const stdout = createTailBuffer(COMMAND_MAX_BUFFER);
         const stderr = createTailBuffer(COMMAND_MAX_BUFFER);
@@ -164,12 +167,26 @@ async function runCommandCheck(command) {
             return;
         }
         let spawnError = null;
+        let timedOut = false;
+        const timer = timeoutMs > 0
+            ? setTimeout(() => {
+                timedOut = true;
+                child.kill("SIGTERM");
+                const hardKill = setTimeout(() => child.kill("SIGKILL"), 5_000);
+                hardKill.unref?.();
+            }, timeoutMs)
+            : null;
+        timer?.unref?.();
+        const onAbort = () => child.kill("SIGTERM");
+        runtime?.signal?.addEventListener?.("abort", onAbort, { once: true });
         child.stdout?.on("data", (chunk) => stdout.append(chunk));
         child.stderr?.on("data", (chunk) => stderr.append(chunk));
         child.on("error", (error) => {
             spawnError = /** @type {Error} */ (error);
         });
         child.on("close", (exitCode, signal) => {
+            if (timer) clearTimeout(timer);
+            runtime?.signal?.removeEventListener?.("abort", onAbort);
             const actualExitCode = typeof exitCode === "number" ? exitCode : null;
             const actualSignal = typeof signal === "string" ? signal : null;
             const passed = spawnError == null && actualExitCode === 0 && actualSignal == null;
@@ -189,6 +206,12 @@ async function runCommandCheck(command) {
                 result.error = actualSignal
                     ? `Command terminated by ${actualSignal}`
                     : `Command exited with code ${actualExitCode ?? "unknown"}`;
+            }
+            if (timedOut) {
+                result.passed = false;
+                result.ok = false;
+                result.timedOut = true;
+                result.error = `Command exceeded the ${timeoutMs}ms timeout and was killed`;
             }
             if (stdout.truncated || stderr.truncated) {
                 result.truncated = true;
@@ -222,7 +245,7 @@ export function CheckSuite(props) {
             label: check.label ?? check.id,
         };
         if (check.command) {
-            return React.createElement(Task, taskProps, () => runCommandCheck(check.command ?? ""));
+            return React.createElement(Task, taskProps, () => runCommandCheck(check.command ?? "", check.timeoutMs));
         }
         const childContent = `Run check: ${check.label ?? check.id}`;
         if (check.agent) {

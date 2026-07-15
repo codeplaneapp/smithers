@@ -154,4 +154,25 @@ describe("createSmithersAgentContract categorization", () => {
     expect(contract.promptGuidance).toContain("replay_run");
     expect(contract.docsGuidance).toContain("| `cancel` |");
   });
+
+  test("categorizes the semantic time-travel tools as debug, not admin", () => {
+    const contract = createSmithersAgentContract({
+      serverName: "smithers",
+      toolSurface: "semantic",
+      tools: [
+        { name: "fork_run", description: "fork a run from a checkpoint" },
+        { name: "replay_run", description: "replay a run from a checkpoint" },
+        { name: "rewind_run", description: "Destructive: rewind a run" },
+        { name: "restore_checkpoint", description: "Destructive: restore a checkpoint" },
+        { name: "list_snapshots", description: "list checkpoints for a run" },
+        { name: "get_timeline", description: "return the timeline for a run" },
+        { name: "time_travel", description: "Destructive: reset a run to a prior attempt" },
+      ],
+    });
+    const byName = Object.fromEntries(contract.tools.map((t) => [t.name, t]));
+    for (const name of ["fork_run", "replay_run", "rewind_run", "restore_checkpoint", "list_snapshots", "get_timeline", "time_travel"]) {
+      expect(byName[name].category).toBe("debug");
+      expect(contract.promptGuidance).toContain(name);
+    }
+  });
 });

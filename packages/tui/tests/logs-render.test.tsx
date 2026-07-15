@@ -1,7 +1,8 @@
 /** @jsxImportSource @opentui/react */
 import { it, expect } from "bun:test";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
-import { act } from "react";
+import { act, useState } from "react";
+import { useKeyboard } from "@opentui/react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { LogView } from "../src/modes/LogMode.tsx";
 
@@ -154,6 +155,54 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("2/2 events");
+
+    renderer.destroy();
+  });
+
+  it("keeps the selection anchored to the same attempt across ring eviction (no positional drift)", async () => {
+    const beforeEviction: GatewayEventFrame[] = [
+      frame(1, "run.event", { nodeId: "n-1", text: "n1 log", iteration: 0 }),
+      frame(2, "run.event", { nodeId: "n-2", text: "n2 log", iteration: 0 }),
+      frame(3, "run.event", { nodeId: "n-3", text: "n3 log", iteration: 0 }),
+    ];
+    // Simulates the oldest attempt's frames (n-1) aging out of the sliding
+    // event window: every later attempt's positional index shifts left by one.
+    const afterEviction: GatewayEventFrame[] = [
+      frame(2, "run.event", { nodeId: "n-2", text: "n2 log", iteration: 0 }),
+      frame(3, "run.event", { nodeId: "n-3", text: "n3 log", iteration: 0 }),
+    ];
+
+    function EvictionHarness() {
+      const [events, setEvents] = useState(beforeEviction);
+      useKeyboard((e) => {
+        if (e.name === "e") setEvents(afterEviction);
+      });
+      return <LogView events={events} />;
+    }
+
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
+      await renderForTest(<EvictionHarness />, { width: 120, height: 20 });
+    await waitForVisualIdle();
+
+    // Select the SECOND attempt (n-2:0). Its index (1) is not at the tail, so
+    // a positional-index bug and a key-anchored fix diverge once the window
+    // shifts left.
+    act(() => { mockInput.pressKey("]"); }); // -> n-1:0
+    act(() => { mockInput.pressKey("]"); }); // -> n-2:0
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("attempt:n-2:0");
+
+    // Evict n-1's frames from the window; n-2/n-3 both shift left by one index.
+    act(() => { mockInput.pressKey("e"); });
+    await flush();
+    await waitForVisualIdle();
+
+    const afterFrame = captureCharFrame();
+    // Selection must still read n-2:0, not silently drift to n-3:0.
+    expect(afterFrame).toContain("attempt:n-2:0");
+    expect(afterFrame).toContain("n2 log");
+    expect(afterFrame).not.toContain("n3 log");
 
     renderer.destroy();
   });

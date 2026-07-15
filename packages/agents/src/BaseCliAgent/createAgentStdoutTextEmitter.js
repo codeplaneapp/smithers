@@ -43,7 +43,7 @@ function extractCliStreamTextChunks(parsed, state) {
    * @param {string | undefined} text
    */
     const emitFinal = (text) => {
-        if (text && !state.sawDeltaSinceBoundary) {
+        if (text && !state.sawDeltaSinceBoundary && text !== state.lastFinalText) {
             chunks.push(text);
             state.lastFinalText = text;
         }
@@ -100,9 +100,6 @@ function extractCliStreamTextChunks(parsed, state) {
             emitDelta(record.text);
         }
     }
-    if (type === "message" && record.role === "assistant") {
-        emitFinal(extractTextFromJsonValue(record.content ?? record.message ?? record));
-    }
     if (upperType === "MESSAGE" && record.role === "assistant") {
         if (record.delta === true && typeof record.content === "string") {
             emitDelta(record.content);
@@ -111,7 +108,7 @@ function extractCliStreamTextChunks(parsed, state) {
             emitFinal(extractTextFromJsonValue(record.content ?? record.message ?? record));
         }
     }
-    if (record.role === "assistant" && typeof record.content === "string") {
+    else if (record.role === "assistant" && typeof record.content === "string") {
         emitFinal(record.content);
     }
     const message = /** @type {Record<string, unknown> | undefined} */ (

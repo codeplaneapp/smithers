@@ -102,7 +102,15 @@ async function openPostgresStore(choice, opts) {
     const env = opts.env ?? process.env;
     const pgModule = await import("pg");
     const pg = pgModule.default ?? pgModule;
-    pg.types.setTypeParser(20, (value) => (value === null ? null : Number(value)));
+    // Scoped to this client's `types` config (not `pg.types.setTypeParser`,
+    // which is a process-global singleton shared by every pg.Client/Pool and
+    // would corrupt BIGINT reads for unrelated clients in the host process).
+    // (Text format only, matching setTypeParser's default; binary values are Buffers.)
+    const bigintTypes = {
+        getTypeParser: (oid, format) => oid === 20 && format !== "binary"
+            ? (value) => (value === null ? null : Number(value))
+            : pg.types.getTypeParser(oid, format),
+    };
     /** @type {Array<() => Promise<void>>} */
     const teardown = [];
     let connectionString = opts.connectionString ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL;
@@ -121,7 +129,7 @@ async function openPostgresStore(choice, opts) {
         });
         connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
     }
-    const client = new pg.Client(connectionString ? { connectionString } : opts.connection);
+    const client = new pg.Client({ ...(connectionString ? { connectionString } : opts.connection), types: bigintTypes });
     try {
         await client.connect();
         teardown.push(async () => {

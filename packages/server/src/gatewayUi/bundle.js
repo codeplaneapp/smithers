@@ -186,6 +186,15 @@ function renderComponentInlineUiEntry(source, exportName) {
 }
 
 /**
+ * @returns {boolean}
+ */
+function noCacheRequested() {
+    return !!process.env.SMITHERS_GATEWAY_UI_NO_CACHE
+        && process.env.SMITHERS_GATEWAY_UI_NO_CACHE !== "0"
+        && process.env.SMITHERS_GATEWAY_UI_NO_CACHE !== "false";
+}
+
+/**
  * @param {Record<string, unknown>} config
  * @param {Map<string, string>} cache
  */
@@ -194,9 +203,7 @@ export async function bundleGatewayUiEntry(config, cache) {
     // request so edits to the entry OR any of its imported modules show up on a
     // plain page reload — no gateway restart needed. Default (unset) keeps the
     // build-once cache for production serving.
-    const noCache = !!process.env.SMITHERS_GATEWAY_UI_NO_CACHE
-        && process.env.SMITHERS_GATEWAY_UI_NO_CACHE !== "0"
-        && process.env.SMITHERS_GATEWAY_UI_NO_CACHE !== "false";
+    const noCache = noCacheRequested();
     const inlineEntry = inlineEntrypoint(config);
     const cacheKey = inlineEntry ?? String(config.entry);
     const cached = noCache ? undefined : cache.get(cacheKey);
@@ -206,6 +213,63 @@ export async function bundleGatewayUiEntry(config, cache) {
     if (typeof Bun === "undefined" || typeof Bun.build !== "function") {
         throw new SmithersError("INVALID_INPUT", "Gateway UI bundling requires Bun.build.");
     }
+    let body;
+    try {
+        body = await buildGatewayUiBundle(config);
+    }
+    catch (inProcessError) {
+        // Globally registered Bun runtime plugins leak into every in-process
+        // Bun.build call that passes a `plugins` array. The engine's
+        // workflow-module-resolution plugin registers virtual modules for bare
+        // specifiers ("react", ...), which the bundler then resolves to
+        // non-absolute paths and fails. A pristine subprocess has an empty
+        // runtime-module registry, so retry there before giving up.
+        body = await buildGatewayUiBundleInSubprocess(config, inProcessError);
+    }
+    if (!noCache) {
+        cache.set(cacheKey, body);
+    }
+    return body;
+}
+
+/**
+ * @param {Record<string, unknown>} config
+ * @param {unknown} inProcessError
+ * @returns {Promise<string>}
+ */
+async function buildGatewayUiBundleInSubprocess(config, inProcessError) {
+    if (typeof Bun.spawn !== "function") {
+        throw inProcessError;
+    }
+    // cwd is thisDir, not process.cwd(): a bunfig.toml at the caller's cwd may
+    // preload modules that poison the fresh registry the same way (the
+    // .smithers pack preloads smithers-orchestrator). The worker chdirs back
+    // to the real cwd before building.
+    const proc = Bun.spawn([process.execPath, resolve(thisDir, "bundleWorker.js")], {
+        cwd: thisDir,
+        stdin: new TextEncoder().encode(JSON.stringify({ config, cwd: process.cwd() })),
+        stdout: "pipe",
+        stderr: "ignore",
+    });
+    const [exitCode, stdout] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+    ]);
+    if (exitCode !== 0) {
+        // Both builds failed: the entry itself is broken. The in-process error
+        // carries the log-derived message callers already rely on.
+        throw inProcessError;
+    }
+    return stdout;
+}
+
+/**
+ * @param {Record<string, unknown>} config
+ * @returns {Promise<string>}
+ */
+export async function buildGatewayUiBundle(config) {
+    const noCache = noCacheRequested();
+    const inlineEntry = inlineEntrypoint(config);
     const result = await Bun.build({
         entrypoints: [inlineEntry ?? String(config.entry)],
         root: process.cwd(),
@@ -248,9 +312,5 @@ export async function bundleGatewayUiEntry(config, cache) {
         throw new SmithersError("INVALID_INPUT", message);
     }
     const output = result.outputs.find((entry) => entry.path.endsWith(".js")) ?? result.outputs[0];
-    const body = await output.text();
-    if (!noCache) {
-        cache.set(cacheKey, body);
-    }
-    return body;
+    return output.text();
 }

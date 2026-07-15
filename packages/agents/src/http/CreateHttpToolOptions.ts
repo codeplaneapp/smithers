@@ -1,6 +1,12 @@
 export type CreateHttpToolOptions = {
   description?: string;
   /**
+   * Maximum number of response-body bytes the tool will buffer. Responses
+   * larger than this are rejected to prevent model-selected endpoints from
+   * exhausting process memory. Defaults to 1 MiB.
+   */
+  maxResponseBytes?: number;
+  /**
    * Headers merged into every request the tool makes. The model picks the
    * request URL, so when these carry secrets (API keys, cookies) pin them to
    * trusted hosts with `baseUrl`/`allowedHosts`; otherwise a model could point

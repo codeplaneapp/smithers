@@ -7027,11 +7027,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
         const tasks = lastGraph?.tasks.filter((candidate) => {
             if (!candidate.meta?.__timer)
                 return false;
+            // Only timers the scheduler has actually parked on (deps satisfied,
+            // decide() moved them to waiting-timer) are eligible here. A timer
+            // still "pending" on unmet dependencies must not have its clock
+            // anchored early by the deferred-state bridge (#545).
             const state = sessionStates.get(buildStateKey(candidate.nodeId, candidate.iteration));
-            return (state !== "finished" &&
-                state !== "skipped" &&
-                state !== "failed" &&
-                state !== "cancelled");
+            return state === "waiting-timer";
         }) ?? [];
         for (const task of tasks) {
             const resolved = await resolveDeferredTaskStateBridge(adapter, db, runId, task, eventBus, undefined, carriedTimerStarts);

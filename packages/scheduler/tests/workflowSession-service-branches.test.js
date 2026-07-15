@@ -117,6 +117,41 @@ describe("WorkflowSessionService direct methods", () => {
     });
   });
 
+  test("timerFired on a dependency-gated pending timer leaves it pending (#545)", () => {
+    const upstream = descriptor("a");
+    const timer = descriptor("timer", { dependsOn: ["a"], meta: { __timer: true, __timerDuration: "5s" } });
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+
+    const initial = run(session.submitGraph(graph([upstream, timer], workflow([
+      el("smithers:task", { id: "a" }),
+      el("smithers:timer", { id: "timer" }),
+    ]))));
+    expect(initial._tag).toBe("Execute");
+    expect(initial.tasks.map((task) => task.nodeId)).toEqual(["a"]);
+
+    // A premature engine reconcile (clock anchored before deps ran) must not
+    // force-finish a timer whose dependencies are still unmet.
+    const decision = run(session.timerFired("timer", 9_000));
+    expect(decision._tag).not.toBe("Finished");
+    expect(run(session.getTaskStates()).get("timer::0")).toBe("pending");
+  });
+
+  test("timerFired on an already-finished timer does not overwrite its output (#545)", () => {
+    const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+
+    expect(run(session.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))))._tag).toBe("Wait");
+    expect(run(session.timerFired("timer", 6_000))._tag).toBe("Finished");
+
+    const replay = run(session.timerFired("timer", 9_000));
+    expect(replay).toMatchObject({
+      _tag: "Finished",
+      result: { output: { firedAtMs: 6_000 } },
+    });
+  });
+
   test("an unparseable timer duration fails loudly instead of firing immediately", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "soon" } });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });

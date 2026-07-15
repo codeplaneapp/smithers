@@ -5,6 +5,8 @@ import { guardedAudioDownload } from "./guardedAudioDownload.js";
 
 const defaultPinnedAudioTransport = createPinnedAudioTransport();
 
+const DEFAULT_MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
+
 const transcriptionInputSchema = {
   type: "object",
   properties: {
@@ -41,8 +43,12 @@ const transcriptionInputSchema = {
 export function createTranscriptionTool(options) {
   const provider = options.provider;
   const fetchImpl = options.fetch ?? globalThis.fetch;
+  const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   if (typeof fetchImpl !== "function") {
     throw new Error("createTranscriptionTool requires fetch to be available");
+  }
+  if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
+    throw new Error("maxResponseBytes must be a positive safe integer");
   }
 
   return dynamicTool({
@@ -55,14 +61,14 @@ export function createTranscriptionTool(options) {
       signal?.throwIfAborted();
       const request = normalizeInput(input);
       if (provider === "whisper") {
-        return transcribeWithWhisper(options, request, fetchImpl, signal);
+        return transcribeWithWhisper(options, request, fetchImpl, signal, maxResponseBytes);
       }
       if (provider === "deepgram") {
         // Deepgram receives the URL as JSON and downloads it server-side. Keep
         // its existing literal-host policy without running the local resolver
         // or pinned transport.
         if (request.audioUrl) assertSafeAudioUrl(request.audioUrl, options);
-        return transcribeWithDeepgram(options, request, fetchImpl, signal);
+        return transcribeWithDeepgram(options, request, fetchImpl, signal, maxResponseBytes);
       }
       throw new Error(`Unsupported transcription provider: ${provider}`);
     },
@@ -194,9 +200,10 @@ function stripBrackets(host) {
  * @param {import("./createTranscriptionTool.ts").TranscriptionToolInput} input
  * @param {typeof fetch} fetchImpl
  * @param {AbortSignal} [signal]
+ * @param {number} maxResponseBytes
  * @returns {Promise<import("./createTranscriptionTool.ts").TranscriptionToolResult>}
  */
-async function transcribeWithWhisper(options, input, fetchImpl, signal) {
+async function transcribeWithWhisper(options, input, fetchImpl, signal, maxResponseBytes) {
   const form = new FormData();
   form.set("model", options.model ?? "whisper-1");
   form.set("response_format", "verbose_json");
@@ -216,8 +223,9 @@ async function transcribeWithWhisper(options, input, fetchImpl, signal) {
         : {}),
       ...(signal ? { signal } : {}),
     });
-    await assertOk(audioResponse, "download audio for Whisper transcription");
-    const blob = await audioResponse.blob();
+    await assertOk(audioResponse, "download audio for Whisper transcription", maxResponseBytes);
+    const bytes = await readResponseBytes(audioResponse, "download audio for Whisper transcription", maxResponseBytes);
+    const blob = new Blob([bytes], { type: audioResponse.headers.get("content-type") ?? "" });
     form.set("file", new File([blob], filenameForMime(input.mimeType ?? blob.type), { type: input.mimeType ?? blob.type }));
   }
 
@@ -227,8 +235,11 @@ async function transcribeWithWhisper(options, input, fetchImpl, signal) {
     body: form,
     signal,
   });
-  await assertOk(response, "transcribe audio with Whisper");
-  const payload = /** @type {any} */ (await response.json());
+  await assertOk(response, "transcribe audio with Whisper", maxResponseBytes);
+  const payload = parseJsonResponse(
+    await readResponseBytes(response, "read Whisper transcription response", maxResponseBytes),
+    "Whisper transcription response",
+  );
   return {
     text: String(payload.text ?? ""),
     ...(typeof payload.language === "string" ? { language: payload.language } : {}),
@@ -242,9 +253,10 @@ async function transcribeWithWhisper(options, input, fetchImpl, signal) {
  * @param {import("./createTranscriptionTool.ts").TranscriptionToolInput} input
  * @param {typeof fetch} fetchImpl
  * @param {AbortSignal} [signal]
+ * @param {number} maxResponseBytes
  * @returns {Promise<import("./createTranscriptionTool.ts").TranscriptionToolResult>}
  */
-async function transcribeWithDeepgram(options, input, fetchImpl, signal) {
+async function transcribeWithDeepgram(options, input, fetchImpl, signal, maxResponseBytes) {
   const body = input.audioUrl
     ? JSON.stringify({ url: input.audioUrl })
     : Buffer.from(input.audioBase64 ?? "", "base64");
@@ -262,8 +274,11 @@ async function transcribeWithDeepgram(options, input, fetchImpl, signal) {
     body,
     signal,
   });
-  await assertOk(response, "transcribe audio with Deepgram");
-  const payload = /** @type {any} */ (await response.json());
+  await assertOk(response, "transcribe audio with Deepgram", maxResponseBytes);
+  const payload = parseJsonResponse(
+    await readResponseBytes(response, "read Deepgram transcription response", maxResponseBytes),
+    "Deepgram transcription response",
+  );
   const alternative = payload.results?.channels?.[0]?.alternatives?.[0] ?? {};
   return {
     text: String(alternative.transcript ?? ""),
@@ -275,11 +290,69 @@ async function transcribeWithDeepgram(options, input, fetchImpl, signal) {
 /**
  * @param {Response} response
  * @param {string} action
+ * @param {number} maxBytes
  */
-async function assertOk(response, action) {
+async function assertOk(response, action, maxBytes) {
   if (response.ok) return;
-  const message = await response.text().catch(() => "");
+  const bytes = await readResponseBytes(response, action, maxBytes).catch(() => new Uint8Array());
+  const message = new TextDecoder().decode(bytes);
   throw new Error(`Failed to ${action}: ${response.status} ${response.statusText}${message ? ` - ${message}` : ""}`);
+}
+
+/**
+ * Read a remote body without allowing it to exceed its configured bound.
+ *
+ * @param {Response} response
+ * @param {string} action
+ * @param {number} maxBytes
+ * @returns {Promise<Uint8Array>}
+ */
+async function readResponseBytes(response, action, maxBytes) {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
+    await response.body?.cancel();
+    throw new Error(`Failed to ${action}: response body exceeds ${maxBytes} bytes`);
+  }
+
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error(`Failed to ${action}: response body exceeds ${maxBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @param {string} action
+ * @returns {any}
+ */
+function parseJsonResponse(bytes, action) {
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    throw new Error(`Failed to parse ${action}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**

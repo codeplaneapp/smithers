@@ -5506,6 +5506,7 @@ a { color: var(--brand); }</style>
             transport: "ws",
             ws,
             seq: 0,
+            closed: false,
             authenticated: false,
             sessionToken: null,
             role: null,
@@ -5609,6 +5610,10 @@ a { color: var(--brand); }</style>
                 return;
             }
             cleanedUp = true;
+            // Set before the cleanup calls below run, so any subscribe handler
+            // resuming from an in-flight await after this point can observe
+            // that the connection is gone and skip registering onto it (#553).
+            connection.closed = true;
             if (connection.heartbeatTimer) {
                 clearInterval(connection.heartbeatTimer);
             }
@@ -7814,6 +7819,13 @@ a { color: var(--brand); }</style>
                 if (!resolved) {
                     return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
                 }
+                if (connection.closed) {
+                    // The WS closed while resolveRun() was in flight; its close
+                    // path already ran cleanupRunEventSubscribers for this
+                    // connection. Registering now would leak a subscriber that
+                    // cleanup will never see again (#553).
+                    return responseError(frame.id, "ConnectionClosed", "Connection closed before subscription could be registered.");
+                }
                 // Capture a replay cutoff and retained window before registering
                 // the live subscriber. Live events emitted after this point are
                 // buffered on the replay-pending stream until the captured replay
@@ -7910,6 +7922,15 @@ a { color: var(--brand); }</style>
                             this.recordDevToolsSubscribeAttempt("error");
                             return responseError(frame.id, "SeqOutOfRange", `fromSeq ${fromSeq} is newer than current seq ${latestSeq}`);
                         }
+                    }
+                    if (connection.closed) {
+                        // The WS closed while resolveRun()/getLastFrame() were in
+                        // flight; its close path already ran
+                        // cleanupDevToolsSubscribers for this connection.
+                        // Registering now would leak a subscriber that stays in
+                        // devtoolsSubscribers with a never-aborted signal (#553).
+                        this.recordDevToolsSubscribeAttempt("error");
+                        return responseError(frame.id, "ConnectionClosed", "Connection closed before subscription could be registered.");
                     }
                     const abort = this.registerDevToolsSubscriber(connection, streamId, runId);
                     emitGatewayLog("info", "devtools stream subscribed", {
@@ -8883,6 +8904,16 @@ a { color: var(--brand); }</style>
                 if ("initial" in result) {
                     initial = result.initial;
                 }
+            }
+            if (connection.closed) {
+                // The WS closed while resolved.entry.subscribe() was in flight;
+                // its close path already ran cleanupExtensionSubscriptions for
+                // this connection. Registering now would leak whatever
+                // handler-owned resources (DB cursors, watchers, shape
+                // handles) the subscribe call above just acquired (#553).
+                abort.abort();
+                try { await cleanupFn(); } catch { /* swallow */ }
+                return responseError(frame.id, "ConnectionClosed", "Connection closed before subscription could be registered.");
             }
             // Size-bound the initial snapshot the same way ctx.send frames are
             // bounded. An extension that crams 100 MiB into `initial` would

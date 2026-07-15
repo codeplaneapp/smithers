@@ -74,6 +74,29 @@ describe.skipIf(process.platform === "win32")("createSmithersPostgres", () => {
   });
 });
 
+describe.skipIf(process.platform === "win32")("BIGINT (oid 20) type parsing", () => {
+  test("coerces BIGINT to number on smithers' own connection without mutating the global pg.types registry", async () => {
+    const pgModule = await import("pg");
+    const pg = pgModule.default ?? pgModule;
+    const globalBigintParser = pg.types.getTypeParser(20);
+
+    const api = await createSmithersPostgres(
+      { result: z.object({ value: z.string() }) },
+      { provider: "pglite" },
+    );
+    cleanups.push(() => api.close());
+
+    // smithers' own client coerces oid 20 to a JS number
+    const { rows } = await api.db.connection.query({ text: `SELECT 9007199254740991::bigint AS n` });
+    expect(rows[0].n).toBe(9007199254740991);
+
+    // the process-global pg.types registry is untouched — a host app's own
+    // pg.Client still gets node-postgres' default lossless string decoding
+    expect(pg.types.getTypeParser(20)).toBe(globalBigintParser);
+    expect(pg.types.getTypeParser(20)("9007199254740993")).toBe("9007199254740993");
+  });
+});
+
 describe.skipIf(process.platform === "win32")("findFreePgPort (via createSmithersPostgres)", () => {
   test("allocates a non-zero port for the PGlite socket server", async () => {
     const api = await createSmithersPostgres(

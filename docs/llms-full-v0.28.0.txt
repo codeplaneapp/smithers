@@ -7984,6 +7984,7 @@ type CheckConfig = {
   agent?: AgentLike;
   command?: string;
   label?: string;
+  timeoutMs?: number;
 };
 type CheckSuiteProps = {
   id?: string;

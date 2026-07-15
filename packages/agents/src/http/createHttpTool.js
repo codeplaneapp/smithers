@@ -34,6 +34,13 @@ export function createHttpTool(options = {}) {
   if (options.baseUrl !== undefined) {
     hostOfBaseUrl(options.baseUrl);
   }
+  if (
+    options.maxResponseBytes !== undefined &&
+    (!Number.isSafeInteger(options.maxResponseBytes) ||
+      options.maxResponseBytes < 0)
+  ) {
+    throw new TypeError("createHttpTool maxResponseBytes must be a non-negative safe integer");
+  }
   return dynamicTool({
     description:
       options.description ??
@@ -49,6 +56,9 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /** Hop budget for one logical request, matching the fetch spec's limit. */
 const MAX_REDIRECTS = 20;
+
+/** Default maximum response body size (1 MiB). */
+const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 
 /**
  * @param {HttpToolInput} input
@@ -100,7 +110,10 @@ async function executeHttpRequest(input, options, abortSignal) {
           status: response.status,
           statusText: response.statusText,
           headers: Object.fromEntries(response.headers.entries()),
-          body: await parseResponseBody(response),
+          body: await parseResponseBody(
+            response,
+            options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
+          ),
         };
       }
       if (hop + 1 > MAX_REDIRECTS) {
@@ -329,13 +342,26 @@ function serializeBody(body, headers) {
 
 /**
  * @param {Response} response
+ * @param {number} maxResponseBytes
  * @returns {Promise<unknown>}
  */
-async function parseResponseBody(response) {
+async function parseResponseBody(response, maxResponseBytes) {
   if (response.status === 204 || response.status === 205) {
     return null;
   }
-  const text = await response.text();
+  // A body-less response (HEAD, 304) may still declare the Content-Length of
+  // the representation it describes; with nothing to buffer, don't reject it.
+  const declaredLength = response.headers.get("content-length");
+  if (
+    response.body !== null &&
+    declaredLength !== null &&
+    /^\d+$/.test(declaredLength) &&
+    Number(declaredLength) > maxResponseBytes
+  ) {
+    await cancelBody(response.body);
+    throw responseTooLargeError(maxResponseBytes);
+  }
+  const text = await readResponseText(response.body, maxResponseBytes);
   if (!text) {
     return null;
   }
@@ -348,4 +374,51 @@ async function parseResponseBody(response) {
     }
   }
   return text;
+}
+
+/** @param {ReadableStream<Uint8Array> | null} body @param {number} maxResponseBytes */
+async function readResponseText(body, maxResponseBytes) {
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxResponseBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The size error below is more useful than cancellation failures.
+        }
+        throw responseTooLargeError(maxResponseBytes);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/** @param {ReadableStream<Uint8Array> | null} body */
+async function cancelBody(body) {
+  try {
+    await body?.cancel();
+  } catch {
+    // The response is being discarded because it exceeds the configured cap.
+  }
+}
+
+/** @param {number} maxResponseBytes */
+function responseTooLargeError(maxResponseBytes) {
+  return new RangeError(`HTTP tool response body exceeds the ${maxResponseBytes}-byte limit`);
 }

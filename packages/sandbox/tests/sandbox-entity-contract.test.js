@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import { SandboxEntityExecutor } from "../src/effect/sandbox-entity.js";
 import { SandboxTransport, makeSandboxTransportLayer, } from "../src/transport.js";
 const config = {
@@ -95,6 +95,34 @@ describe("sandbox entity contract", () => {
                 sandboxId: "sb-1",
             },
         ]);
+    });
+
+    test("propagates a caller abort signal through the entity boundary to the executor", async () => {
+        const { promise: signalReceived, resolve: resolveSignal } = Promise.withResolvers();
+        const executorLayer = Layer.succeed(SandboxEntityExecutor, SandboxEntityExecutor.of({
+            create: () => Effect.succeed(handle),
+            ship: () => Effect.void,
+            execute: (_command, _currentHandle, signal) => Effect.async(() => {
+                resolveSignal(signal);
+                // never resumes on its own; only the abort should end the call
+            }),
+            collect: (currentHandle) => Effect.succeed({ bundlePath: currentHandle.resultPath }),
+            cleanup: () => Effect.void,
+        }));
+        const controller = new AbortController();
+        const program = Effect.gen(function* () {
+            const transport = yield* SandboxTransport;
+            const created = yield* transport.create(config);
+            yield* transport.execute("smithers up bundle.tsx", created, controller.signal);
+        }).pipe(Effect.provide(makeSandboxTransportLayer(executorLayer)));
+        const exitPromise = Effect.runPromiseExit(program);
+        const executorSignal = await signalReceived;
+        expect(executorSignal).toBeInstanceOf(AbortSignal);
+        expect(executorSignal.aborted).toBe(false);
+        controller.abort();
+        const exit = await exitPromise;
+        expect(Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)).toBe(true);
+        expect(executorSignal.aborted).toBe(true);
     });
 
     test("wraps executor failures with sandbox entity context", async () => {

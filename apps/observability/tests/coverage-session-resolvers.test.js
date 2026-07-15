@@ -53,10 +53,20 @@ describe("resolvePiSessionFile", () => {
 });
 
 describe("resolveCodexSessionFile default roots", () => {
-    test("a CodexAgent-named agent falls back to the default ~/.codex root", async () => {
+    test("a CodexAgent-named agent falls back to the default codex sessions root", async () => {
         class CodexAgent {}
         const agent = Object.assign(new CodexAgent(), { opts: {} });
-        expect(await resolveCodexSessionFile(agent, "/no/such/cwd/xyz", Date.now())).toBeNull();
+        // Pin CODEX_HOME to an empty temp root: the operator's real ~/.codex
+        // can hold thousands of sessions, which makes this scan minutes-slow
+        // and non-hermetic.
+        const previousCodexHome = process.env.CODEX_HOME;
+        process.env.CODEX_HOME = await makeTempDir();
+        try {
+            expect(await resolveCodexSessionFile(agent, "/no/such/cwd/xyz", Date.now())).toBeNull();
+        } finally {
+            if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+            else process.env.CODEX_HOME = previousCodexHome;
+        }
     });
     test("a non-CodexAgent with no custom dir has no roots and returns null", async () => {
         expect(await resolveCodexSessionFile({ opts: {} }, "/no/such/cwd/xyz", Date.now())).toBeNull();

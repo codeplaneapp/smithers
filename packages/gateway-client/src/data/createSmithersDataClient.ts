@@ -227,13 +227,26 @@ function fetchEventSource(
         const read = await reader.read();
         if (read.done) break;
         buffer += decoder.decode(read.value, { stream: true });
+        // Normalize CR/CRLF to LF per the SSE spec's line-splitting rule. A
+        // trailing CR is held back in the buffer: it may be the first half of
+        // a CRLF pair whose LF arrives in the next chunk.
+        buffer = buffer.replace(/\r\n/g, "\n").replace(/\r(?=[\s\S])/g, "\n");
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
         for (const part of parts) {
           const lines = part.split("\n");
-          const type = lines.find((line) => line.startsWith("event: "))?.slice(7) ?? "message";
-          const data = lines.find((line) => line.startsWith("data: "))?.slice(6) ?? "{}";
-          dispatch(type, data);
+          let type = "message";
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line === "" || line.startsWith(":")) continue;
+            const colonIndex = line.indexOf(":");
+            const field = colonIndex === -1 ? line : line.slice(0, colonIndex);
+            const rawValue = colonIndex === -1 ? "" : line.slice(colonIndex + 1);
+            const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+            if (field === "event") type = value;
+            else if (field === "data") dataLines.push(value);
+          }
+          dispatch(type, dataLines.length > 0 ? dataLines.join("\n") : "{}");
         }
       }
       fail(new Error("Smithers stream ended before the run was done."));

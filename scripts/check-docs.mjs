@@ -1598,7 +1598,7 @@ function checkCreateSmithersPostgresDocsMatchFactory() {
     [PRODUCTION_HARDENING_GUIDE, readFileSync(PRODUCTION_HARDENING_GUIDE, "utf8")],
   ]);
   const required = [
-    [SMITHERS_CREATE_SOURCE, "const client = new pg.Client(connectionString ? { connectionString } : opts?.connection);"],
+    [SMITHERS_CREATE_SOURCE, "const client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });"],
     [SMITHERS_CREATE_SOURCE, "close: async () => {"],
     [SMITHERS_FACADE_DECLARATIONS, "connection?: object;"],
     [SMITHERS_FACADE_DECLARATIONS, "close: () => Promise<void>;"],

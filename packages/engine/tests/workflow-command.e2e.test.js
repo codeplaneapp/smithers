@@ -1,7 +1,10 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { delimiter } from "node:path";
 import { createExecutableDir, createTempRepo, pinSqliteBackend, runSmithers, writeFakeCodexBinary, writeTestWorkflow, } from "../../smithers/tests/e2e-helpers.js";
+// Every test here spawns the smithers CLI as a subprocess; under full-repo
+// `pnpm test` load even the --help invocations can exceed bun's 5s default.
+setDefaultTimeout(180_000);
 /**
  * @param {string} homeDir
  */
@@ -161,7 +164,7 @@ test("workflow create writes a new flat workflow file", () => {
     });
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/workflows/foo.tsx")).toBe(true);
-}, 60_000);
+}, 180_000);
 test("workflow create scaffolds a workflow that runs immediately", () => {
     const repo = createTempRepo();
     const env = buildWorkflowEnv(repo.dir);
@@ -186,7 +189,7 @@ test("workflow create scaffolds a workflow that runs immediately", () => {
     expect(runResult.json).toMatchObject({
         status: "finished",
     });
-}, 60_000);
+}, 180_000);
 test("workflow path can pause on WaitForEvent, accept a signal, and resume", () => {
     const repo = createTempRepo();
     pinSqliteBackend(repo.dir);
@@ -251,7 +254,7 @@ test("workflow path can pause on WaitForEvent, accept a signal, and resume", () 
     finally {
         sqlite.close();
     }
-}, 60_000);
+}, 180_000);
 test("workflow create rejects invalid workflow names", () => {
     const repo = createTempRepo();
     const env = buildWorkflowEnv(repo.dir);
@@ -270,7 +273,7 @@ test("workflow create rejects invalid workflow names", () => {
     expect(result.json).toMatchObject({
         code: "INVALID_WORKFLOW_NAME",
     });
-}, 60_000);
+}, 180_000);
 test("workflow doctor reports discovered workflows, preload files, and agent detection", () => {
     const repo = createTempRepo();
     const env = buildWorkflowEnv(repo.dir);
@@ -301,4 +304,4 @@ test("workflow doctor reports discovered workflows, preload files, and agent det
         ],
     });
     expect(JSON.stringify(result.json)).toContain('"id":"codex"');
-}, 60_000);
+}, 180_000);

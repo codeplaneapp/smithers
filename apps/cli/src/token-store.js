@@ -146,8 +146,11 @@ export function smithersTokenStorePath() {
 }
 
 /**
- * Load and normalize the on-disk store. A missing or corrupt file yields an
- * empty store rather than an error.
+ * Load and normalize the on-disk store. A missing file yields an empty
+ * store. A file that exists but fails to read or parse is left untouched
+ * and throws instead of silently falling back to an empty store, so a
+ * caller can't turn around and overwrite the damaged file with a fresh
+ * empty one (which would permanently drop every recoverable grant).
  *
  * @returns {TokenStore}
  */
@@ -160,8 +163,9 @@ export function readSmithersTokenStore() {
         const parsed = JSON.parse(readFileSync(path, "utf8"));
         return normalizeStore(parsed);
     }
-    catch {
-        return defaultStore();
+    catch (err) {
+        throw new Error(`Smithers token store at ${path} is unreadable or corrupt and was left untouched; ` +
+            `fix or remove it manually before issuing or revoking tokens (${err?.message ?? err}).`);
     }
 }
 

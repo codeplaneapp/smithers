@@ -28,7 +28,10 @@ function buildCodexSessionRoots(agent) {
     const custom = agent?.opts?.sessionDir ?? agent?.opts?.codexSessionDir;
     if (typeof custom === "string" && custom) return [custom];
     if (String(agent?.constructor?.name ?? "") !== "CodexAgent") return [];
-    return [join(homedir(), ".codex", "sessions")];
+    // The Codex CLI keeps all state (including sessions) under CODEX_HOME
+    // when set; ~/.codex is only its default.
+    const codexHome = process.env.CODEX_HOME?.trim();
+    return [codexHome ? join(codexHome, "sessions") : join(homedir(), ".codex", "sessions")];
 }
 
 /**

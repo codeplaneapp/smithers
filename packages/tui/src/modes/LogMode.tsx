@@ -7,6 +7,7 @@ import {
   extractAttemptKeys,
   filterEventsByAttempt,
   splitAttemptKey,
+  type AttemptKey,
 } from "./logUtils.ts";
 import { normalizeFrame } from "./eventFrame.ts";
 import { isModifiedKeyEvent } from "./treeUtils.ts";
@@ -41,28 +42,25 @@ export function LogView({
   const compact = width < COMPACT_WIDTH;
   const overlayOpen = useOverlayOpen();
   const [follow, setFollow] = useState(true);
-  const [attemptIdx, setAttemptIdx] = useState(-1); // -1 = all attempts
+  // The filter is pinned to the attempt's KEY (nodeId:iteration), not a
+  // positional index. `attempts` is rebuilt from the sliding event window, so
+  // once the oldest attempt's frames evict from the front of the ring every
+  // later index shifts left by one — a stored index would silently resolve to
+  // a different attempt. null = "all attempts".
+  const [selectedAttempt, setSelectedAttempt] = useState<AttemptKey | null>(null);
 
   const attempts = useMemo(() => extractAttemptKeys(events), [events]);
 
-  // Keep the selection in range as attempts appear/disappear: snap back to -1
-  // ("all") when there are no attempts, and clamp to the last attempt when the
-  // list shrinks. Without this, a `]` press while empty would pin attemptIdx to
-  // 0 and silently filter every later event to the first attempt.
+  // If the window empties out entirely, fall back to "all" rather than
+  // pinning to a key that can never come back.
   useEffect(() => {
-    setAttemptIdx((prev) => {
-      if (attempts.length === 0) return -1;
-      if (prev > attempts.length - 1) return attempts.length - 1;
-      return prev;
-    });
+    if (attempts.length === 0) setSelectedAttempt(null);
   }, [attempts.length]);
 
   const filteredEvents = useMemo(() => {
-    if (attemptIdx < 0 || attempts.length === 0) return events;
-    const key = attempts[attemptIdx];
-    if (!key) return events;
-    return filterEventsByAttempt(events, key);
-  }, [events, attempts, attemptIdx]);
+    if (selectedAttempt === null) return events;
+    return filterEventsByAttempt(events, selectedAttempt);
+  }, [events, selectedAttempt]);
 
   useKeyboard((e) => {
     // Keys must not leak through an open help overlay, and ctrl/meta chords
@@ -71,24 +69,36 @@ export function LogView({
     if (e.name === "f") {
       setFollow((prev) => !prev);
     } else if (e.name === "[") {
-      setAttemptIdx((prev) => Math.max(-1, prev - 1));
+      setSelectedAttempt((prev) => {
+        if (prev === null) return null;
+        const idx = attempts.indexOf(prev);
+        // idx < 0 means the selected attempt's own frames evicted from the
+        // window; treat "previous" from an unknown position as "all".
+        if (idx <= 0) return null;
+        return attempts[idx - 1] ?? null;
+      });
     } else if (e.name === "]") {
-      // No attempts → stay at -1 ("all"); never jump to a phantom attempt 0.
-      setAttemptIdx((prev) =>
-        attempts.length === 0 ? -1 : Math.min(attempts.length - 1, prev + 1),
-      );
+      setSelectedAttempt((prev) => {
+        // No attempts → stay at "all"; never jump to a phantom attempt.
+        if (attempts.length === 0) return null;
+        if (prev === null) return attempts[0] ?? null;
+        const idx = attempts.indexOf(prev);
+        // idx < 0 means the selected attempt's own frames evicted from the
+        // window; snap forward to the earliest attempt still present.
+        if (idx < 0) return attempts[0] ?? null;
+        if (idx >= attempts.length - 1) return prev;
+        return attempts[idx + 1] ?? prev;
+      });
     }
   });
 
   const tagMaxLen = compact ? 6 : 12;
 
   const attemptLabel = (() => {
-    if (attemptIdx < 0 || attempts.length === 0) return null;
-    const key = attempts[attemptIdx];
-    if (!key) return null;
+    if (selectedAttempt === null) return null;
     // Split on the LAST colon so namespaced node ids (which contain colons)
     // aren't truncated to their first segment.
-    const { nodeId, iteration } = splitAttemptKey(key);
+    const { nodeId, iteration } = splitAttemptKey(selectedAttempt);
     return `${nodeId.slice(0, tagMaxLen)}:${iteration}`;
   })();
 

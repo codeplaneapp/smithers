@@ -209,7 +209,7 @@ describe("RunInspector keyboard dispatch", () => {
 });
 
 describe("RunInspector rendering", () => {
-  test("renders header, stale banner, panes and the focus footer, caching by width", () => {
+  test("renders header, stale banner, panes and the focus footer", () => {
     const store = storeWithSelectedTask();
     store.isStaleBannerVisible = true;
     store.staleSince = new Date(Date.now() - 4_000);
@@ -218,13 +218,43 @@ describe("RunInspector rendering", () => {
     const first = inspector.render(120, 30, plainTheme).join("\n");
     expect(first).toContain("stale: gateway disconnected");
     expect(first).toContain("focus:");
+  });
 
-    // A second render at the same width returns the cached lines.
-    const cached = inspector.render(120, 30, plainTheme);
-    expect(cached.join("\n")).toBe(first);
+  test("never caches while the stale banner is visible, so its seconds counter ticks", () => {
+    const store = storeWithSelectedTask();
+    store.isStaleBannerVisible = true;
+    store.staleSince = new Date(Date.now() - 4_000);
+    const inspector = new RunInspector(store, fakeClient({}), { workflowName: "wf" });
 
-    // Changing width invalidates the cache.
-    const wider = inspector.render(160, 30, plainTheme).join("\n");
-    expect(wider.length).toBeGreaterThan(0);
+    expect(inspector.render(120, 30, plainTheme).join("\n")).toContain("disconnected for 4s");
+
+    // Move staleSince back without emitting a store event (no invalidate()):
+    // the next render must still recompute the counter.
+    store.staleSince = new Date(Date.now() - 9_000);
+    expect(inspector.render(120, 30, plainTheme).join("\n")).toContain("disconnected for 9s");
+  });
+
+  test("caches by width, height, and theme identity once the banner clears", () => {
+    const store = storeWithSelectedTask();
+    const inspector = new RunInspector(store, fakeClient({}), { workflowName: "wf" });
+
+    const first = inspector.render(120, 30, plainTheme);
+    // Same width/height/theme -> the exact cached array is returned.
+    expect(inspector.render(120, 30, plainTheme)).toBe(first);
+
+    // A vertical-only resize busts the cache and produces a taller layout.
+    const taller = inspector.render(120, 40, plainTheme);
+    expect(taller).not.toBe(first);
+    expect(taller.length).toBeGreaterThan(first.length);
+
+    // A different theme object busts the cache even at the same dimensions.
+    const otherTheme = { ...plainTheme };
+    expect(inspector.render(120, 40, otherTheme)).not.toBe(taller);
+
+    // invalidate() clears the cache entirely.
+    const cached = inspector.render(120, 40, otherTheme);
+    expect(inspector.render(120, 40, otherTheme)).toBe(cached);
+    inspector.invalidate();
+    expect(inspector.render(120, 40, otherTheme)).not.toBe(cached);
   });
 });

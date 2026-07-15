@@ -580,7 +580,15 @@ export async function createSmithersPostgres(schemas, opts) {
     const pgModule = await import("pg");
     const pg = pgModule.default ?? pgModule;
     // BIGINT (ms timestamps, counters) → JS number, matching SQLite's behavior.
-    pg.types.setTypeParser(20, (value) => (value === null ? null : Number(value)));
+    // Scoped to this client's `types` config (not `pg.types.setTypeParser`,
+    // which is a process-global singleton shared by every pg.Client/Pool and
+    // would corrupt BIGINT reads for unrelated clients in the host process).
+    // (Text format only, matching setTypeParser's default; binary values are Buffers.)
+    const bigintTypes = {
+        getTypeParser: (oid, format) => oid === 20 && format !== "binary"
+            ? (value) => (value === null ? null : Number(value))
+            : pg.types.getTypeParser(oid, format),
+    };
     /** @type {Array<() => Promise<void>>} */
     const teardown = [];
     let connectionString = opts?.connectionString;
@@ -604,7 +612,7 @@ export async function createSmithersPostgres(schemas, opts) {
         });
         connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
     }
-    const client = new pg.Client(connectionString ? { connectionString } : opts?.connection);
+    const client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });
     /** @type {{ api: import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> }} */
     let built;
     try {
