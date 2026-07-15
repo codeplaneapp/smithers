@@ -288,10 +288,9 @@ declare function useGatewayRunDiff(params: {
     baseRef: string;
     patches: {
         path: string;
+        operation: "add" | "modify" | "delete";
         diff: string;
-        additions?: number;
-        deletions?: number;
-        binary?: boolean;
+        binaryContent?: string;
     }[];
 } | {
     status: "oversized";

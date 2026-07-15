@@ -2168,8 +2168,10 @@ async function getRunDurabilityMetadata(workflowPath, rootDir) {
             vcsRevision: null,
         };
     }
+    // JJ change_ids are mutable across working-copy snapshots. Persist the
+    // immutable commit_id so a completion-time diff has a trustworthy base.
     const vcsRevision = vcs.type === "jj"
-        ? await Effect.runPromise(getJjPointer(rootDir).pipe(Effect.provide(getPlatformLayer())))
+        ? await getJjCommitId(rootDir)
         : await getGitPointer(rootDir);
     return {
         workflowHash,
@@ -2178,6 +2180,14 @@ async function getRunDurabilityMetadata(workflowPath, rootDir) {
         vcsRoot: vcs.root,
         vcsRevision,
     };
+}
+
+/** @param {string} cwd @returns {Promise<string | null>} */
+async function getJjCommitId(cwd) {
+    const result = await Effect.runPromise(runJj(["log", "-r", "@", "--no-graph", "--template", "commit_id"], { cwd }).pipe(Effect.provide(getPlatformLayer())));
+    if (result.code !== 0) return null;
+    const commitId = result.stdout.trim();
+    return commitId || null;
 }
 /**
  * @param {Record<string, unknown>} config
