@@ -159,7 +159,7 @@ describe("makeWebhookSource offer failure branches", () => {
 });
 
 describe("deliverEvent / deliverEvents error handling", () => {
-    test("a per-run signal failure is retried, logged, and swallowed (delivered stays empty)", async () => {
+    test("a per-run signal failure propagates and leaves the delivery retryable", async () => {
         const { adapter } = createTestAdapter();
         await seedWaitingEventRun(adapter, { runId: "run-fault", signalName: EVENT_NAME, correlationId: "corr-1" });
         const faultAdapter = new Proxy(adapter, {
@@ -171,39 +171,129 @@ describe("deliverEvent / deliverEvents error handling", () => {
                 return typeof original === "function" ? original.bind(target) : original;
             },
         });
-        const result = await Effect.runPromise(deliverEvent(/** @type {any} */ (faultAdapter), makeEvent({ dedupeKey: "fault-1" })));
-        expect(result.deduped).toBe(false);
-        expect(result.runIds).toEqual([]);
+        const event = makeEvent({ dedupeKey: "fault-1" });
+        const error = await Effect.runPromise(deliverEvent(/** @type {any} */ (faultAdapter), event).pipe(Effect.flip));
+        expect(error).toBeInstanceOf(IntegrationError);
+        expect(error.message).toContain("signal write forced to fail");
+        const retry = await Effect.runPromise(deliverEvent(adapter, event));
+        expect(retry).toMatchObject({ deduped: false, runIds: ["run-fault"] });
+        expect(await adapter.listSignals("run-fault", { signalName: EVENT_NAME })).toHaveLength(1);
     }, 15_000);
 
-    test("deliverEvents drains a source and swallows a per-event delivery error", async () => {
+    test("a failed matched run does not block later fanout or queued webhook events", async () => {
         const { adapter } = createTestAdapter();
+        await seedWaitingEventRun(adapter, { runId: "run-fanout-a", signalName: EVENT_NAME, correlationId: "corr-1" });
+        await seedWaitingEventRun(adapter, { runId: "run-fanout-b", signalName: EVENT_NAME, correlationId: "corr-1" });
+        await seedWaitingEventRun(adapter, { runId: "run-after", signalName: EVENT_NAME, correlationId: "corr-2" });
+        const faultAdapter = new Proxy(adapter, {
+            get(target, prop, receiver) {
+                if (prop === "insertSignalWithNextSeq") {
+                    return (/** @type {any} */ row) => row.runId === "run-fanout-a"
+                        ? Effect.fail(new IntegrationError("delivery-failed", "first matched run forced to fail"))
+                        : target.insertSignalWithNextSeq(row);
+                }
+                const original = Reflect.get(target, prop, receiver);
+                return typeof original === "function" ? original.bind(target) : original;
+            },
+        });
+        const webhook = await Effect.runPromise(makeWebhookSource({
+            id: "fanout-drain",
+            decode: (request) => {
+                const payload = JSON.parse(request.rawBody);
+                return makeEvent({
+                    source: "fanout-drain",
+                    correlationId: payload.correlationId,
+                    dedupeKey: payload.deliveryId,
+                    receivedAtMs: payload.receivedAtMs,
+                    payload,
+                });
+            },
+        }));
+        try {
+            await Effect.runPromise(webhook.offer({
+                headers: {},
+                rawBody: JSON.stringify({ deliveryId: "fanout-retry", correlationId: "corr-1", receivedAtMs: 1_000 }),
+            }));
+            await Effect.runPromise(webhook.offer({
+                headers: {},
+                rawBody: JSON.stringify({ deliveryId: "fanout-after", correlationId: "corr-2", receivedAtMs: 2_000 }),
+            }));
+            const finiteSource = { ...webhook.source, events: Stream.take(webhook.source.events, 2) };
+            await Effect.runPromise(deliverEvents(/** @type {any} */ (faultAdapter), finiteSource));
+
+            expect(await adapter.listSignals("run-fanout-a", { signalName: EVENT_NAME })).toHaveLength(0);
+            const laterMatchSignals = await adapter.listSignals("run-fanout-b", { signalName: EVENT_NAME });
+            expect(laterMatchSignals).toHaveLength(1);
+            expect(laterMatchSignals[0].receivedAtMs).toBe(1_000);
+            expect(await adapter.listSignals("run-after", { signalName: EVENT_NAME })).toHaveLength(1);
+
+            const replay = await Effect.runPromise(deliverEvent(adapter, makeEvent({
+                source: "fanout-drain",
+                correlationId: "corr-1",
+                dedupeKey: "fanout-retry",
+                receivedAtMs: 9_999,
+            })));
+            expect(replay).toEqual({ deduped: false, runIds: ["run-fanout-a"] });
+            const retriedSignals = await adapter.listSignals("run-fanout-a", { signalName: EVENT_NAME });
+            expect(retriedSignals).toHaveLength(1);
+            expect(retriedSignals[0].receivedAtMs).toBe(1_000);
+            expect(await adapter.claimIntegrationDelivery({
+                sourceId: "fanout-drain",
+                dedupeKey: "fanout-retry",
+                eventName: EVENT_NAME,
+                receivedAtMs: 20_000,
+            }, { ownerToken: "completed-probe", nowMs: 20_000 })).toMatchObject({
+                status: "completed",
+                receivedAtMs: 1_000,
+            });
+        }
+        finally {
+            await Effect.runPromise(webhook.shutdown);
+        }
+    }, 15_000);
+
+    test("a failed queued webhook item is logged without killing delivery of the next item", async () => {
+        const { adapter } = createTestAdapter();
+        await seedWaitingEventRun(adapter, { runId: "run-drain", signalName: EVENT_NAME, correlationId: "corr-1" });
         let failNext = true;
         const faultAdapter = new Proxy(adapter, {
             get(target, prop, receiver) {
-                if (prop === "insertIntegrationDeliveryIfNew") {
-                    return (/** @type {any} */ row) => {
+                if (prop === "claimIntegrationDelivery") {
+                    return (/** @type {any} */ row, /** @type {any} */ options) => {
                         if (failNext) {
                             failNext = false;
                             return Effect.fail(new IntegrationError("delivery-failed", "dedupe write forced to fail"));
                         }
-                        return Reflect.get(target, prop, receiver).call(target, row);
+                        return Reflect.get(target, prop, receiver).call(target, row, options);
                     };
                 }
                 const original = Reflect.get(target, prop, receiver);
                 return typeof original === "function" ? original.bind(target) : original;
             },
         });
-        const badEvent = makeEvent({ dedupeKey: "drain-bad", source: "drain" });
-        const goodEvent = makeEvent({ dedupeKey: "drain-good", source: "drain", correlationId: "none" });
-        const source = { id: "drain", events: Stream.fromIterable([badEvent, goodEvent]) };
-        await Effect.runPromise(deliverEvents(/** @type {any} */ (faultAdapter), source));
-        expect(await adapter.insertIntegrationDeliveryIfNew({
-            sourceId: "drain",
-            dedupeKey: "drain-good",
-            eventName: EVENT_NAME,
-            receivedAtMs: Date.now(),
-        })).toBe(false);
+        const webhook = await Effect.runPromise(makeWebhookSource({
+            id: "drain",
+            decode: (request) => {
+                const payload = JSON.parse(request.rawBody);
+                return makeEvent({
+                    source: "drain",
+                    dedupeKey: payload.deliveryId,
+                    payload,
+                });
+            },
+        }));
+        try {
+            await Effect.runPromise(webhook.offer({ headers: {}, rawBody: JSON.stringify({ deliveryId: "drain-bad", kind: "bad" }) }));
+            await Effect.runPromise(webhook.offer({ headers: {}, rawBody: JSON.stringify({ deliveryId: "drain-good", kind: "good" }) }));
+            const finiteSource = { ...webhook.source, events: Stream.take(webhook.source.events, 2) };
+            await Effect.runPromise(deliverEvents(/** @type {any} */ (faultAdapter), finiteSource));
+            const signals = await adapter.listSignals("run-drain", { signalName: EVENT_NAME });
+            expect(signals).toHaveLength(1);
+            expect(JSON.parse(signals[0].payloadJson)).toMatchObject({ deliveryId: "drain-good", kind: "good" });
+        }
+        finally {
+            await Effect.runPromise(webhook.shutdown);
+        }
     });
 });
 

@@ -160,6 +160,64 @@ describe("DB migration edges", () => {
     }
   });
 
+  test("legacy integration deliveries reopen as completed claims after migration", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-integration-mig-"));
+    const dbPath = join(dir, "store.sqlite");
+    try {
+      const legacy = new Database(dbPath);
+      legacy.exec(`
+        CREATE TABLE _smithers_integration_deliveries (
+          source_id TEXT NOT NULL,
+          dedupe_key TEXT NOT NULL,
+          event_name TEXT NOT NULL,
+          received_at_ms INTEGER NOT NULL,
+          PRIMARY KEY (source_id, dedupe_key)
+        );
+        INSERT INTO _smithers_integration_deliveries
+          (source_id, dedupe_key, event_name, received_at_ms)
+        VALUES ('github', 'legacy-guid', 'integration:github:push', 1234);
+      `);
+      legacy.close();
+
+      const reopened = new Database(dbPath);
+      const db = drizzle(reopened);
+      ensureSmithersTables(db);
+
+      const columns = reopened
+        .query('PRAGMA table_info("_smithers_integration_deliveries")')
+        .all()
+        .map((column) => column.name);
+      expect(columns).toEqual(expect.arrayContaining([
+        "status",
+        "claim_token",
+        "claim_expires_at_ms",
+        "completed_at_ms",
+      ]));
+      expect(reopened.query(`SELECT status, claim_token, claim_expires_at_ms
+        FROM _smithers_integration_deliveries
+        WHERE source_id = 'github' AND dedupe_key = 'legacy-guid'`).get()).toEqual({
+        status: "completed",
+        claim_token: null,
+        claim_expires_at_ms: null,
+      });
+      expect(migrationRows(reopened).map((row) => row.id)).toContain("0029_integration_delivery_claims");
+
+      const adapter = new SmithersDb(db);
+      expect(await adapter.claimIntegrationDelivery({
+        sourceId: "github",
+        dedupeKey: "legacy-guid",
+        eventName: "integration:github:push",
+        receivedAtMs: 9999,
+      }, { ownerToken: "new-worker", nowMs: 10_000 })).toMatchObject({
+        status: "completed",
+        receivedAtMs: 1234,
+      });
+      reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("snapshot storage migration is additive and preserves compressed prototype rows", () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(`

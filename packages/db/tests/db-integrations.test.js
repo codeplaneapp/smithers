@@ -49,13 +49,48 @@ async function seedWait(adapter, options) {
     });
 }
 
-describe("integration delivery dedupe", () => {
-    test("insertIntegrationDeliveryIfNew returns true first, false on redelivery", async () => {
+describe("integration delivery claims", () => {
+    test("legacy insert-if-new API remains a permanent dedupe ledger", async () => {
         const { adapter } = createTestDb();
-        const row = { sourceId: "github", dedupeKey: "guid-1", eventName: "integration:github:push", receivedAtMs: Date.now() };
+        const row = { sourceId: "webhook", dedupeKey: "delivery-1", eventName: "integration:webhook:push", receivedAtMs: 1_000 };
         expect(await adapter.insertIntegrationDeliveryIfNew(row)).toBe(true);
-        expect(await adapter.insertIntegrationDeliveryIfNew(row)).toBe(false);
-        expect(await adapter.insertIntegrationDeliveryIfNew({ ...row, dedupeKey: "guid-2" })).toBe(true);
+        expect(await adapter.insertIntegrationDeliveryIfNew({ ...row, receivedAtMs: 9_999 })).toBe(false);
+        const claim = await adapter.claimIntegrationDelivery(row, { ownerToken: "owner-a", nowMs: 2_000 });
+        expect(claim).toMatchObject({ status: "completed", receivedAtMs: 1_000 });
+    });
+    test("one concurrent owner claims while the duplicate stays busy with the canonical timestamp", async () => {
+        const { adapter } = createTestDb();
+        const row = { sourceId: "github", dedupeKey: "guid-1", eventName: "integration:github:push", receivedAtMs: 1_000 };
+        const [first, duplicate] = await Promise.all([
+            adapter.claimIntegrationDelivery(row, { ownerToken: "owner-a", nowMs: 2_000, leaseDurationMs: 5_000 }),
+            adapter.claimIntegrationDelivery({ ...row, receivedAtMs: 9_999 }, { ownerToken: "owner-b", nowMs: 2_000, leaseDurationMs: 5_000 }),
+        ]);
+        expect([first.status, duplicate.status].sort()).toEqual(["busy", "claimed"]);
+        expect(first.receivedAtMs).toBe(1_000);
+        expect(duplicate.receivedAtMs).toBe(1_000);
+    });
+    test("completed claims suppress duplicates and preserve first receivedAtMs", async () => {
+        const { adapter } = createTestDb();
+        const row = { sourceId: "telegram", dedupeKey: "update:1", eventName: "integration:telegram:message", receivedAtMs: 1_000 };
+        expect((await adapter.claimIntegrationDelivery(row, { ownerToken: "owner-a", nowMs: 2_000 })).status).toBe("claimed");
+        expect(await adapter.completeIntegrationDelivery("telegram", "update:1", "owner-a", 2_100)).toBe(true);
+        const replay = await adapter.claimIntegrationDelivery({ ...row, receivedAtMs: 9_999 }, { ownerToken: "owner-b", nowMs: 3_000 });
+        expect(replay).toMatchObject({ status: "completed", receivedAtMs: 1_000 });
+        expect(await adapter.releaseIntegrationDeliveryClaim("telegram", "update:1", "owner-a")).toBe(false);
+    });
+    test("released pending claims retry immediately and expired leases can be taken over", async () => {
+        const { adapter } = createTestDb();
+        const row = { sourceId: "linear", dedupeKey: "evt-1", eventName: "integration:linear:update", receivedAtMs: 1_000 };
+        expect((await adapter.claimIntegrationDelivery(row, { ownerToken: "owner-a", nowMs: 2_000, leaseDurationMs: 1_000 })).status).toBe("claimed");
+        expect(await adapter.releaseIntegrationDeliveryClaim("linear", "evt-1", "owner-a")).toBe(true);
+        expect((await adapter.claimIntegrationDelivery({ ...row, receivedAtMs: 4_000 }, { ownerToken: "owner-b", nowMs: 2_100, leaseDurationMs: 1_000 })).status).toBe("claimed");
+        expect(await adapter.renewIntegrationDeliveryClaim("linear", "evt-1", "owner-b", 2_400, 1_000)).toBe(true);
+        expect((await adapter.claimIntegrationDelivery(row, { ownerToken: "owner-c", nowMs: 2_500, leaseDurationMs: 1_000 })).status).toBe("busy");
+        const takeover = await adapter.claimIntegrationDelivery(row, { ownerToken: "owner-c", nowMs: 3_401, leaseDurationMs: 1_000 });
+        expect(takeover).toMatchObject({ status: "claimed", receivedAtMs: 1_000 });
+        expect(await adapter.renewIntegrationDeliveryClaim("linear", "evt-1", "owner-b", 3_500, 1_000)).toBe(false);
+        expect(await adapter.completeIntegrationDelivery("linear", "evt-1", "owner-b", 3_200)).toBe(false);
+        expect(await adapter.completeIntegrationDelivery("linear", "evt-1", "owner-c", 3_200)).toBe(true);
     });
 });
 

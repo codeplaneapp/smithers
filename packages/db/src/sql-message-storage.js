@@ -488,6 +488,10 @@ const CREATE_TABLE_STATEMENTS = [
     dedupe_key TEXT NOT NULL,
     event_name TEXT NOT NULL,
     received_at_ms INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed',
+    claim_token TEXT,
+    claim_expires_at_ms INTEGER,
+    completed_at_ms INTEGER,
     PRIMARY KEY (source_id, dedupe_key)
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_integration_cursors (

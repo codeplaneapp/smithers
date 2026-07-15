@@ -9,6 +9,7 @@
 /** @typedef {import("./EvalSuiteRow.ts").EvalSuiteRow} EvalSuiteRow */
 /** @typedef {import("./EventHistoryQuery.ts").EventHistoryQuery} EventHistoryQuery */
 /** @typedef {import("./HumanRequestRow.ts").HumanRequestRow} HumanRequestRow */
+/** @typedef {import("./IntegrationDeliveryClaim.ts").IntegrationDeliveryClaim} IntegrationDeliveryClaim */
 /** @typedef {import("./NodeRow.ts").NodeRow} NodeRow */
 /** @typedef {import("./PendingHumanRequestRow.ts").PendingHumanRequestRow} PendingHumanRequestRow */
 /** @typedef {import("./RunAncestryRow.ts").RunAncestryRow} RunAncestryRow */

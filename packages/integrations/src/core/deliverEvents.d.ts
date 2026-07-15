@@ -9,8 +9,9 @@ import './CursorStoreTypes.js';
  * Deliver ONE external event: dedupe against
  * `_smithers_integration_deliveries`, find runs parked on
  * `WaitForEvent(eventName, correlationId)`, and `signalRun` each with
- * `receivedBy: "integration:<source>"`. Per-run failures are retried then
- * logged — they never fail the returned effect, so the source stream lives on.
+ * `receivedBy: "integration:<source>"`. The ledger claim completes only after
+ * every matched run is signaled. A typed per-run failure does not block later
+ * matches, but it fails the event after fanout so polling cannot ack.
  *
  * @param {SmithersDb} adapter
  * @param {ExternalEvent} event
@@ -21,10 +22,13 @@ declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent): Effect
     runIds: string[];
 }, _smithers_orchestrator_errors_SmithersError.SmithersError>;
 /**
- * Drain an EventSource into the delivery pipeline. Per-event delivery errors
- * are logged and swallowed so a single bad event never kills the stream; a
- * stream-level error (e.g. a failing poll) surfaces to the caller, which is
- * expected to retry/restart (see IntegrationRuntime's supervision).
+ * Drain an EventSource into the delivery pipeline. Poll batches are delivered
+ * sequentially and acknowledged only after every event completes; an
+ * incomplete batch propagates to IntegrationRuntime supervision so its cursor
+ * stays uncommitted. Individual webhook events preserve the historical
+ * catch/log/continue behavior so later queued items are still attempted. A
+ * failed webhook claim remains retryable, but queue acceptance does not
+ * guarantee that the provider will send another copy.
  *
  * @param {SmithersDb} adapter
  * @param {EventSource} source

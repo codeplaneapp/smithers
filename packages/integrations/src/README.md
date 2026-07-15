@@ -11,10 +11,11 @@ over its subdirectory:
 - `telegram.js` → `telegram/` — Telegram Bot API client, long-poll source,
   components, approvals, Mini App initData verification.
 
-How events flow: service sources (webhook or polling) emit ExternalEvents →
-core `deliverEvents` dedupes and signals runs parked on `WaitForEvent`;
-components render `WaitForEvent` listeners (inbound) and compute-Task API
-calls (outbound).
+How events flow: webhook sources emit individual ExternalEvents, while polling
+sources emit acknowledged EventBatches. Core `deliverEvents` claims each event,
+signals runs parked on `WaitForEvent`, and completes the claim after full
+fanout; only then does a polling batch commit its proposed cursor. Components
+render `WaitForEvent` listeners (inbound) and compute-Task API calls (outbound).
 
 Conventions: implementation is `.js` with JSDoc types; type-only `.ts`
 sidecars (e.g. `GitHubConfig.ts`) hold the shapes. The

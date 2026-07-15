@@ -8,8 +8,21 @@ import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError"
  */
 export type EventSource = {
   id: string;
-  events: Stream.Stream<ExternalEvent, SmithersError>;
+  events: Stream.Stream<EventSourceItem, SmithersError>;
 };
+
+/** One polling turn held behind a delivery acknowledgement. */
+export type EventBatch = {
+  _tag: "EventBatch";
+  events: readonly ExternalEvent[];
+  /** Cursor proposed by this poll turn; undefined keeps the current cursor. */
+  proposedCursor?: string | null;
+  /** Persist the proposed cursor after every event is durably delivered. */
+  ack: import("effect").Effect.Effect<void, SmithersError>;
+};
+
+/** Webhooks emit individual events; polling sources emit acknowledged batches. */
+export type EventSourceItem = ExternalEvent | EventBatch;
 
 /**
  * The raw webhook request handed to a webhook source's `offer`: the

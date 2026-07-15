@@ -10,8 +10,19 @@ import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
  */
 type EventSource = {
     id: string;
-    events: Stream.Stream<ExternalEvent, SmithersError>;
+    events: Stream.Stream<EventSourceItem, SmithersError>;
 };
+/** One polling turn held behind a delivery acknowledgement. */
+type EventBatch = {
+    _tag: "EventBatch";
+    events: readonly ExternalEvent[];
+    /** Cursor proposed by this poll turn; undefined keeps the current cursor. */
+    proposedCursor?: string | null;
+    /** Persist the proposed cursor after every event is durably delivered. */
+    ack: effect.Effect.Effect<void, SmithersError>;
+};
+/** Webhooks emit individual events; polling sources emit acknowledged batches. */
+type EventSourceItem = ExternalEvent | EventBatch;
 /**
  * The raw webhook request handed to a webhook source's `offer`: the
  * already-read raw body (needed for HMAC verification) plus headers.
@@ -52,4 +63,4 @@ type MakePollingSourceOptions = {
     cursorStore?: CursorStore;
 };
 
-export type { EventSource, MakePollingSourceOptions, MakeWebhookSourceOptions, PollResult, WebhookRequest, WebhookSource };
+export type { EventBatch, EventSource, EventSourceItem, MakePollingSourceOptions, MakeWebhookSourceOptions, PollResult, WebhookRequest, WebhookSource };

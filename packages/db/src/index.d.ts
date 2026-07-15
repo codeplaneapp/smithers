@@ -118,6 +118,20 @@ type StaleRunRecord$1 = {
     status: string;
 };
 
+/** Durable outcome of claiming one integration event for delivery. */
+type IntegrationDeliveryClaim$1 = {
+    status: "claimed";
+    receivedAtMs: number;
+    leaseExpiresAtMs: number;
+} | {
+    status: "completed";
+    receivedAtMs: number;
+} | {
+    status: "busy";
+    receivedAtMs: number;
+    leaseExpiresAtMs: number | null;
+};
+
 type SignalRow$1 = {
     runId: string;
     seq: number;
@@ -1435,6 +1449,29 @@ declare class SmithersDb {
         receivedAtMs: number;
     }): RunnableEffect<boolean, SmithersError$1>;
     /**
+   * Atomically claim an integration delivery. The first insert preserves the
+   * canonical `receivedAtMs`; replays return that timestamp even when the
+   * provider decoder stamped a newer one. Completed rows dedupe permanently,
+   * active leases return `busy`, and expired or released pending rows can be
+   * reclaimed.
+   */
+    claimIntegrationDelivery(row: {
+        sourceId: string;
+        dedupeKey: string;
+        eventName: string;
+        receivedAtMs: number;
+    }, options: {
+        ownerToken: string;
+        nowMs?: number;
+        leaseDurationMs?: number;
+    }): RunnableEffect<IntegrationDeliveryClaim$1, SmithersError$1>;
+    /** Extend a pending delivery lease while `ownerToken` still owns it. */
+    renewIntegrationDeliveryClaim(sourceId: string, dedupeKey: string, ownerToken: string, nowMs?: number, leaseDurationMs?: number): RunnableEffect<boolean, SmithersError$1>;
+    /** Mark a pending delivery completed while `ownerToken` still owns it. */
+    completeIntegrationDelivery(sourceId: string, dedupeKey: string, ownerToken: string, completedAtMs?: number): RunnableEffect<boolean, SmithersError$1>;
+    /** Release a live pending claim while retaining its canonical ledger row. */
+    releaseIntegrationDeliveryClaim(sourceId: string, dedupeKey: string, ownerToken: string): RunnableEffect<boolean, SmithersError$1>;
+    /**
    * Read a polling source's persisted cursor. Returns `undefined` when the
    * source never persisted one; a stored NULL cursor comes back as `null`.
    * @param {string} sourceId
@@ -1681,6 +1718,7 @@ type BunSQLiteDatabase$2 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type Table = drizzle_orm.Table;
 type EventHistoryQuery = EventHistoryQuery$1;
 type HumanRequestRow = HumanRequestRow$1;
+type IntegrationDeliveryClaim = IntegrationDeliveryClaim$1;
 type OutputKey = OutputKey$1;
 type RunnableEffect<A, E> = Effect.Effect<A, E> & PromiseLike<A>;
 type SignalQuery = SignalQuery$1;
@@ -3533,9 +3571,8 @@ declare const smithersDocs: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
 /**
  * `_smithers_integration_deliveries` — dedupe ledger for external integration
  * events (webhooks, polling sources). Before an event is fanned out to waiting
- * runs via `signalRun`, the delivery pipeline attempts an insert-if-new on
- * `(source_id, dedupe_key)`; a redelivery (same webhook retried, same update
- * polled twice) hits the primary key and is dropped.
+ * runs via `signalRun`, the delivery pipeline acquires a leased pending claim
+ * on `(source_id, dedupe_key)` and marks it completed only after fan-out.
  *
  *  - `sourceId`      the integration event source (e.g. `github`, `telegram`,
  *                    or a generic webhook source id).
@@ -3543,6 +3580,10 @@ declare const smithersDocs: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
  *                    Telegram update_id, payload hash for generic webhooks).
  *  - `eventName`     the smithers signal name (`integration:<service>:<event>`).
  *  - `receivedAtMs`  when the event was first accepted (Unix epoch ms).
+ *  - `status`        pending while an owner may deliver; completed after fan-out.
+ *  - `claimToken`    current delivery owner (NULL when pending but unclaimed).
+ *  - `claimExpiresAtMs` lease deadline for crash recovery.
+ *  - `completedAtMs` when fan-out completed (Unix epoch ms).
  */
 declare const smithersIntegrationDeliveries: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_integration_deliveries";
@@ -3622,6 +3663,78 @@ declare const smithersIntegrationDeliveries: drizzle_orm_sqlite_core.SQLiteTable
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        status: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "status";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        claimToken: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "claim_token";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        claimExpiresAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "claim_expires_at_ms";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        completedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "completed_at_ms";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
     };
     dialect: "sqlite";
 }>;
@@ -3629,8 +3742,9 @@ declare const smithersIntegrationDeliveries: drizzle_orm_sqlite_core.SQLiteTable
 /**
  * `_smithers_integration_cursors` — durable per-source cursors for polling
  * integration sources (e.g. the Telegram long-poll `offset`). A polling source
- * loads its cursor on start and persists it after each successful poll so a
- * process restart resumes where it left off instead of re-delivering.
+ * loads its cursor on start and persists a poll's proposed cursor only after
+ * that poll's event batch is fully delivered. A process restart therefore
+ * safely re-polls interrupted batches and resumes after acknowledged ones.
  *
  *  - `sourceId`      the integration event source id (PK).
  *  - `cursor`        opaque cursor string (NULL until the first poll lands).
@@ -7757,4 +7871,4 @@ declare function camelToSnake(str: string): string;
 
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
 
-export { type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersTimeTravelAudit, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };
+export { type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersTimeTravelAudit, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };

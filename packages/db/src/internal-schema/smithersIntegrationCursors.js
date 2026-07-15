@@ -3,8 +3,9 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 /**
  * `_smithers_integration_cursors` — durable per-source cursors for polling
  * integration sources (e.g. the Telegram long-poll `offset`). A polling source
- * loads its cursor on start and persists it after each successful poll so a
- * process restart resumes where it left off instead of re-delivering.
+ * loads its cursor on start and persists a poll's proposed cursor only after
+ * that poll's event batch is fully delivered. A process restart therefore
+ * safely re-polls interrupted batches and resumes after acknowledged ones.
  *
  *  - `sourceId`      the integration event source id (PK).
  *  - `cursor`        opaque cursor string (NULL until the first poll lands).

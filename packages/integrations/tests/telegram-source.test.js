@@ -111,7 +111,8 @@ describe("makeTelegramSource (long-poll against real fixture)", () => {
         const { fixture, makeSource } = makeFixture();
         const updateId = fixture.pushUpdate(messageUpdate(42, "hello"));
         const before = fixture.calls("getUpdates").length;
-        const events = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-a" }).events, 1))));
+        const [batch] = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-a" }).events, 1))));
+        const events = batch.events;
         expect(events[0]).toMatchObject({
             eventName: TELEGRAM_MESSAGE_EVENT,
             correlationId: "chat:42",
@@ -122,28 +123,34 @@ describe("makeTelegramSource (long-poll against real fixture)", () => {
         expect(polls[0].body.offset).toBeUndefined();
         expect(polls[0].body.timeout).toBe(1);
         expect(polls[0].body.allowed_updates).toEqual(["message", "edited_message", "callback_query"]);
+        await Effect.runPromise(batch.ack);
     });
     test("allowedChatIds gates non-allowed chats but still acknowledges them", async () => {
         const { fixture, makeSource } = makeFixture();
         fixture.pushUpdate(messageUpdate(666, "spam"));
         const okId = fixture.pushUpdate(messageUpdate(42, "legit"));
-        const events = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-gate", allowedChatIds: [42] }).events, 1))));
+        const [batch] = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-gate", allowedChatIds: [42] }).events, 1))));
+        const events = batch.events;
         expect(events).toHaveLength(1);
         expect(events[0].correlationId).toBe("chat:42");
         expect(events[0].dedupeKey).toBe(`update:${okId}`);
+        await Effect.runPromise(batch.ack);
     });
     test("cursor persists across a simulated restart: no re-delivery, offset resumes", async () => {
         const { fixture, makeSource } = makeFixture();
         const { adapter } = createTestAdapter();
         const cursorStore = makeDbCursorStore(adapter);
         const firstId = fixture.pushUpdate(messageUpdate(42, "before restart"));
-        const run1 = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-restart", cursorStore }).events, 1))));
-        expect(run1[0].dedupeKey).toBe(`update:${firstId}`);
+        const [firstBatch] = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-restart", cursorStore }).events, 1))));
+        expect(firstBatch.events[0].dedupeKey).toBe(`update:${firstId}`);
+        expect(await adapter.getIntegrationCursor("tg-restart")).toBeUndefined();
+        await Effect.runPromise(firstBatch.ack);
         expect(await adapter.getIntegrationCursor("tg-restart")).toBe(String(firstId + 1));
         // "Restart": a brand-new source instance over the same db cursor store.
         const secondId = fixture.pushUpdate(messageUpdate(42, "after restart"));
         const beforePolls = fixture.calls("getUpdates").length;
-        const run2 = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-restart", cursorStore }).events, 1))));
+        const [secondBatch] = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-restart", cursorStore }).events, 1))));
+        const run2 = secondBatch.events;
         const resumedPoll = fixture.calls("getUpdates").slice(beforePolls)[0];
         // Resumes from the persisted offset — Telegram discards the acked
         // update, so only the new one is delivered.
@@ -151,6 +158,7 @@ describe("makeTelegramSource (long-poll against real fixture)", () => {
         expect(run2).toHaveLength(1);
         expect(run2[0].dedupeKey).toBe(`update:${secondId}`);
         expect(/** @type {any} */ (run2[0].payload).text).toBe("after restart");
+        await Effect.runPromise(secondBatch.ack);
         expect(await adapter.getIntegrationCursor("tg-restart")).toBe(String(secondId + 1));
     });
 });

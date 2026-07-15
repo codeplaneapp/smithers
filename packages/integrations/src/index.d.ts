@@ -1,6 +1,6 @@
 export { CursorStore, makeDbCursorStore, makeInMemoryCursorStore } from './core/CursorStore.js';
 export { deliverEvent, deliverEvents } from './core/deliverEvents.js';
-export { MakePollingSourceOptions, MakeWebhookSourceOptions, PollResult, WebhookRequest, WebhookSource, makePollingSource, makeWebhookSource } from './core/EventSource.js';
+export { EventBatch, EventSourceItem, MakePollingSourceOptions, MakeWebhookSourceOptions, PollResult, WebhookRequest, WebhookSource, makePollingSource, makeWebhookSource } from './core/EventSource.js';
 export { ExternalEventSchema, decodeExternalEvent } from './core/ExternalEvent.js';
 export { IntegrationError, IntegrationErrorReason, isIntegrationError } from './core/IntegrationError.js';
 export { IntegrationRuntime, MakeIntegrationRuntimeOptions, makeIntegrationRuntime } from './core/IntegrationRuntime.js';

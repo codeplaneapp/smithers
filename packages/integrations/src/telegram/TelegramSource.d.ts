@@ -39,9 +39,11 @@ declare function telegramUpdateToEvents(sourceId: string, update: Record<string,
 /**
  * Build a Telegram EventSource: getUpdates long-polling (Bot API semantics —
  * offset = last update_id + 1, server-side `timeout` hold, `allowed_updates`
- * filter) on top of the core polling source, with the offset persisted via
- * the CursorStore so a restarted process resumes without re-delivering.
- * Non-allowed chats are dropped but still acknowledged (offset advances).
+ * filter) on top of the core polling source. The offset is persisted via the
+ * CursorStore only after every event derived from the getUpdates response is
+ * delivered, so a restarted process safely re-polls an interrupted batch.
+ * Non-allowed chats are dropped but still acknowledged after the remaining
+ * batch delivers (offset advances).
  *
  * @param {MakeTelegramSourceOptions} options
  * @returns {import("../core/EventSourceTypes.ts").EventSource}

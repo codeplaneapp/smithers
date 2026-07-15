@@ -4,6 +4,7 @@
 /** @typedef {import("./adapter/CacheRow.ts").CacheRow} CacheRow */
 /** @typedef {import("./adapter/EvalCaseResultRow.ts").EvalCaseResultRow} EvalCaseResultRow */
 /** @typedef {import("./adapter/EvalSuiteRow.ts").EvalSuiteRow} EvalSuiteRow */
+/** @typedef {import("./adapter/IntegrationDeliveryClaim.ts").IntegrationDeliveryClaim} IntegrationDeliveryClaim */
 /** @typedef {import("./adapter/NodeRow.ts").NodeRow} NodeRow */
 /** @typedef {import("./adapter/PendingHumanRequestRow.ts").PendingHumanRequestRow} PendingHumanRequestRow */
 /** @typedef {import("./adapter/RunAncestryRow.ts").RunAncestryRow} RunAncestryRow */
@@ -3478,6 +3479,116 @@ export class SmithersDb {
             sourceId: row.sourceId,
             eventName: row.eventName,
         })));
+    }
+    /**
+   * Atomically claim an integration delivery. The first insert preserves the
+   * canonical `receivedAtMs`; replays return that timestamp even when the
+   * provider decoder stamped a newer one. Completed rows dedupe permanently,
+   * active leases return `busy`, and expired or released pending rows can be
+   * reclaimed.
+   * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
+   * @param {{ ownerToken: string; nowMs?: number; leaseDurationMs?: number }} options
+   * @returns {RunnableEffect<IntegrationDeliveryClaim, SmithersError>}
+   */
+    claimIntegrationDelivery(row, options) {
+        const self = this;
+        const nowMs = options.nowMs ?? Date.now();
+        const leaseDurationMs = Math.max(1, Math.floor(options.leaseDurationMs ?? 30_000));
+        const leaseExpiresAtMs = nowMs + leaseDurationMs;
+        return runnableEffect(this.withTransactionEffect(`claim integration delivery ${row.sourceId}`, Effect.gen(function* () {
+            yield* self.write(`insert pending integration delivery ${row.sourceId}`, () => self.internalStorage.insertIgnore("_smithers_integration_deliveries", {
+                sourceId: row.sourceId,
+                dedupeKey: row.dedupeKey,
+                eventName: row.eventName,
+                receivedAtMs: row.receivedAtMs,
+                status: "pending",
+                claimToken: options.ownerToken,
+                claimExpiresAtMs: leaseExpiresAtMs,
+                completedAtMs: null,
+            }));
+            const readClaim = () => self.read(`get integration delivery claim ${row.sourceId}`, () => self.internalStorage.queryOne(`SELECT status, received_at_ms, claim_token, claim_expires_at_ms
+             FROM _smithers_integration_deliveries
+             WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey]));
+            let existing = yield* readClaim();
+            if (!existing) {
+                return yield* Effect.fail(toSmithersError(new Error("Integration delivery claim disappeared after insert."), `claim integration delivery ${row.sourceId}`, {
+                    code: "DB_WRITE_FAILED",
+                    details: { sourceId: row.sourceId, dedupeKey: row.dedupeKey },
+                }));
+            }
+            const receivedAtMs = Number(existing.receivedAtMs);
+            if (existing.status === "completed") {
+                return { status: "completed", receivedAtMs };
+            }
+            const updated = yield* self.write(`take integration delivery claim ${row.sourceId}`, () => self.internalStorage.updateWhere("_smithers_integration_deliveries", {
+                claimToken: options.ownerToken,
+                claimExpiresAtMs: leaseExpiresAtMs,
+            }, `source_id = ? AND dedupe_key = ? AND status = 'pending'
+               AND (claim_token = ? OR claim_token IS NULL OR claim_expires_at_ms IS NULL OR claim_expires_at_ms <= ?)`, [row.sourceId, row.dedupeKey, options.ownerToken, nowMs]));
+            if (updated > 0) {
+                return { status: "claimed", receivedAtMs, leaseExpiresAtMs };
+            }
+            existing = yield* readClaim();
+            if (existing?.status === "completed") {
+                return { status: "completed", receivedAtMs: Number(existing.receivedAtMs) };
+            }
+            return {
+                status: "busy",
+                receivedAtMs: Number(existing?.receivedAtMs ?? receivedAtMs),
+                leaseExpiresAtMs: existing?.claimExpiresAtMs == null ? null : Number(existing.claimExpiresAtMs),
+            };
+        })).pipe(Effect.annotateLogs({
+            sourceId: row.sourceId,
+            eventName: row.eventName,
+        })));
+    }
+    /**
+   * Extend a pending delivery lease while `ownerToken` still owns it. Lease
+   * renewal is an owner-CAS so a worker that lost the claim to stale takeover
+   * cannot revive or complete it.
+   * @param {string} sourceId
+   * @param {string} dedupeKey
+   * @param {string} ownerToken
+   * @param {number} [nowMs]
+   * @param {number} [leaseDurationMs]
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    renewIntegrationDeliveryClaim(sourceId, dedupeKey, ownerToken, nowMs = Date.now(), leaseDurationMs = 30_000) {
+        const leaseExpiresAtMs = nowMs + Math.max(1, Math.floor(leaseDurationMs));
+        return runnableEffect(this.write(`renew integration delivery ${sourceId}`, () => this.internalStorage.updateWhere("_smithers_integration_deliveries", {
+            claimExpiresAtMs: leaseExpiresAtMs,
+        }, "source_id = ? AND dedupe_key = ? AND status = 'pending' AND claim_token = ?", [sourceId, dedupeKey, ownerToken]).then((count) => count > 0)));
+    }
+    /**
+   * Mark a pending integration delivery completed if `ownerToken` still owns
+   * the claim. Returns false after lease takeover or prior completion.
+   * @param {string} sourceId
+   * @param {string} dedupeKey
+   * @param {string} ownerToken
+   * @param {number} [completedAtMs]
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    completeIntegrationDelivery(sourceId, dedupeKey, ownerToken, completedAtMs = Date.now()) {
+        return runnableEffect(this.write(`complete integration delivery ${sourceId}`, () => this.internalStorage.updateWhere("_smithers_integration_deliveries", {
+            status: "completed",
+            claimToken: null,
+            claimExpiresAtMs: null,
+            completedAtMs,
+        }, "source_id = ? AND dedupe_key = ? AND status = 'pending' AND claim_token = ?", [sourceId, dedupeKey, ownerToken]).then((count) => count > 0)));
+    }
+    /**
+   * Release a live pending claim after an ordinary failure or interruption.
+   * The ledger row and canonical timestamp remain for immediate retry.
+   * @param {string} sourceId
+   * @param {string} dedupeKey
+   * @param {string} ownerToken
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    releaseIntegrationDeliveryClaim(sourceId, dedupeKey, ownerToken) {
+        return runnableEffect(this.write(`release integration delivery ${sourceId}`, () => this.internalStorage.updateWhere("_smithers_integration_deliveries", {
+            claimToken: null,
+            claimExpiresAtMs: null,
+        }, "source_id = ? AND dedupe_key = ? AND status = 'pending' AND claim_token = ?", [sourceId, dedupeKey, ownerToken]).then((count) => count > 0)));
     }
     /**
    * Read a polling source's persisted cursor. Returns `undefined` when the

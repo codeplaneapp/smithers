@@ -374,6 +374,76 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(events[0].payloadJson).toContain('"build_step"');
     });
 
+    test("integration delivery claims coordinate across independent postgres adapters", async () => {
+        const peer = await connectPeerClient();
+        try {
+            // PGlite's wire server serializes open transactions, while real
+            // PostgreSQL overlaps these two promises. Both paths exercise two
+            // independent adapters and the same database claim/CAS contract.
+            const first = postgresAdapter(client);
+            const second = postgresAdapter(peer);
+            const row = {
+                sourceId: "pg-claim-race",
+                dedupeKey: "delivery-1",
+                eventName: "integration:pg:test",
+                receivedAtMs: 1_000,
+            };
+            const participants = await Promise.all([
+                first.claimIntegrationDelivery(row, { ownerToken: "owner-a", nowMs: 2_000, leaseDurationMs: 1_000 })
+                    .then((claim) => ({ adapter: first, ownerToken: "owner-a", claim })),
+                second.claimIntegrationDelivery(row, { ownerToken: "owner-b", nowMs: 2_000, leaseDurationMs: 1_000 })
+                    .then((claim) => ({ adapter: second, ownerToken: "owner-b", claim })),
+            ]);
+            expect(participants.map(({ claim }) => claim.status).sort()).toEqual(["busy", "claimed"]);
+            expect(participants.every(({ claim }) => claim.receivedAtMs === 1_000)).toBe(true);
+
+            const winner = participants.find(({ claim }) => claim.status === "claimed");
+            const peerOwner = participants.find(({ claim }) => claim.status === "busy");
+            if (!winner || !peerOwner) throw new Error("Expected one claimed owner and one busy peer.");
+
+            expect(await peerOwner.adapter.completeIntegrationDelivery(row.sourceId, row.dedupeKey, peerOwner.ownerToken, 2_050)).toBe(false);
+            expect(await winner.adapter.releaseIntegrationDeliveryClaim(row.sourceId, row.dedupeKey, winner.ownerToken)).toBe(true);
+            expect(await peerOwner.adapter.claimIntegrationDelivery({ ...row, receivedAtMs: 9_999 }, {
+                ownerToken: peerOwner.ownerToken,
+                nowMs: 2_100,
+                leaseDurationMs: 1_000,
+            })).toMatchObject({ status: "claimed", receivedAtMs: 1_000 });
+            expect(await peerOwner.adapter.renewIntegrationDeliveryClaim(row.sourceId, row.dedupeKey, peerOwner.ownerToken, 2_200, 1_000)).toBe(true);
+            expect((await winner.adapter.claimIntegrationDelivery(row, {
+                ownerToken: winner.ownerToken,
+                nowMs: 2_500,
+                leaseDurationMs: 1_000,
+            })).status).toBe("busy");
+
+            expect(await winner.adapter.claimIntegrationDelivery(row, {
+                ownerToken: winner.ownerToken,
+                nowMs: 3_201,
+                leaseDurationMs: 1_000,
+            })).toMatchObject({ status: "claimed", receivedAtMs: 1_000 });
+            expect(await peerOwner.adapter.completeIntegrationDelivery(row.sourceId, row.dedupeKey, peerOwner.ownerToken, 3_250)).toBe(false);
+            expect(await winner.adapter.completeIntegrationDelivery(row.sourceId, row.dedupeKey, winner.ownerToken, 3_300)).toBe(true);
+            expect(await peerOwner.adapter.claimIntegrationDelivery({ ...row, receivedAtMs: 20_000 }, {
+                ownerToken: peerOwner.ownerToken,
+                nowMs: 4_000,
+            })).toMatchObject({ status: "completed", receivedAtMs: 1_000 });
+
+            const persisted = await storage.queryOne(`SELECT received_at_ms, status, claim_token, claim_expires_at_ms, completed_at_ms
+                FROM _smithers_integration_deliveries
+                WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey]);
+            expect(persisted).toEqual({
+                receivedAtMs: 1_000,
+                status: "completed",
+                claimToken: null,
+                claimExpiresAtMs: null,
+                completedAtMs: 3_300,
+            });
+            expect(typeof persisted.completedAtMs).toBe("number");
+        }
+        finally {
+            await peer.end().catch(() => {});
+        }
+    }, 60_000);
+
     test("independent postgres adapters allocate and persist every event seq", async () => {
         const runId = "pg-cross-adapter-event-race";
         await storage.upsert(

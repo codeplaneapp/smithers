@@ -181,7 +181,7 @@ describe("migrateSmithersStore targets and receipts", () => {
     }
 
     const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite" });
-    expect(result.schemaVersion).toBe("0028");
+    expect(result.schemaVersion).toBe("0029");
 
     // The migration itself upgraded the source schema before copying.
     sqlite = new Database(dbPath, { readonly: true });

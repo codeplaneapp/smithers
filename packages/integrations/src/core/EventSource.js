@@ -1,5 +1,7 @@
 // @smithers-type-exports-begin
 /** @typedef {import("./EventSourceTypes.ts").EventSource} EventSource */
+/** @typedef {import("./EventSourceTypes.ts").EventBatch} EventBatch */
+/** @typedef {import("./EventSourceTypes.ts").EventSourceItem} EventSourceItem */
 /** @typedef {import("./EventSourceTypes.ts").MakePollingSourceOptions} MakePollingSourceOptions */
 /** @typedef {import("./EventSourceTypes.ts").MakeWebhookSourceOptions} MakeWebhookSourceOptions */
 /** @typedef {import("./EventSourceTypes.ts").PollResult} PollResult */
@@ -83,8 +85,8 @@ export function makeWebhookSource(options) {
 
 /**
  * Build a polling EventSource: repeatedly runs `poll(cursor)` on `schedule`
- * (first poll immediately), persists the returned cursor through the
- * CursorStore, and emits the polled events one by one.
+ * (first poll immediately) and emits an acknowledged batch. The returned
+ * cursor reaches the CursorStore only after delivery acknowledges that batch.
  *
  * @param {MakePollingSourceOptions} options
  * @returns {EventSource}
@@ -98,15 +100,27 @@ export function makePollingSource(options) {
             const cursor = yield* Ref.get(cursorRef);
             const result = yield* poll(cursor);
             const polled = result?.events ?? [];
-            if (result && result.cursor !== undefined && result.cursor !== cursor) {
-                yield* Ref.set(cursorRef, result.cursor);
-                if (cursorStore) {
-                    yield* cursorStore.set(id, result.cursor);
-                }
-            }
-            return polled;
+            const proposedCursor = result?.cursor;
+            const ack = proposedCursor !== undefined && proposedCursor !== cursor
+                ? Effect.gen(function* () {
+                    // Durable state moves first. Interruption between these writes
+                    // can only cause a safe re-poll; the inverse can skip events.
+                    if (cursorStore) {
+                        yield* cursorStore.set(id, proposedCursor);
+                    }
+                    yield* Ref.set(cursorRef, proposedCursor);
+                })
+                : Effect.void;
+            /** @type {EventBatch} */
+            const batch = {
+                _tag: "EventBatch",
+                events: polled,
+                ...(proposedCursor !== undefined ? { proposedCursor } : {}),
+                ack,
+            };
+            return batch;
         });
-        return Stream.repeatEffectWithSchedule(pollOnce, schedule).pipe(Stream.flatMap((batch) => Stream.fromIterable(batch)));
+        return Stream.repeatEffectWithSchedule(pollOnce, schedule);
     }));
     return { id, events };
 }

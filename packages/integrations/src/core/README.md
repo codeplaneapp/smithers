@@ -4,10 +4,14 @@ The service-agnostic integration pipeline every service builds on:
 
 - `EventSource.js` — `makeWebhookSource` (bounded-Queue-backed; ingress calls
   `offer(request)` per HTTP request) and `makePollingSource` (repeat
-  `poll(cursor)` on a schedule, cursor persisted via CursorStore).
-- `deliverEvents.js` — dedupe each event against
+  `poll(cursor)` on a schedule and emit an acknowledged `EventBatch`). A
+  proposed cursor reaches the CursorStore only after the whole batch delivers.
+- `deliverEvents.js` — acquire a leased pending claim in
   `_smithers_integration_deliveries`, then `signalRun` every run parked on
-  `WaitForEvent(eventName, correlationId)`.
+  `WaitForEvent(eventName, correlationId)`. A typed signal failure is recorded
+  while later matching runs are still attempted. The claim becomes completed
+  only after the full fanout succeeds; failures and interruptions release it
+  for immediate replay, while stale leases remain reclaimable after a crash.
 - `IntegrationRuntime.js` — the process-wide supervisor: one restart-forever
   fiber per source on a dedicated ManagedRuntime, a promise-based
   `handleWebhook` seam for the node HTTP server, graceful `shutdown`.
@@ -25,6 +29,12 @@ Utilities: `verifySignature.js` (constant-time HMAC-SHA256; hex, base64, and
 `sha256=`-prefixed digests) and `readJsonPath.js` (dot-path reads, also used
 by packages/server).
 
-Gotcha: per-run signal failures are retried then swallowed — the source
-stream must live on. A stream-level failure surfaces so IntegrationRuntime's
-supervision restarts the source with capped exponential backoff.
+Gotcha: individual webhook delivery failures are logged and swallowed by the
+drain so later queued items still run. The failed claim remains retryable by a
+later duplicate or explicit replay; accepting the HTTP request does not
+guarantee that the provider sends another copy. Polling batches have a
+different contract: a signal or delivery failure propagates without running
+the batch acknowledgement, so IntegrationRuntime restarts the source from its
+last committed cursor. Replay uses the ledger's first `receivedAtMs`, making a
+signal already inserted just before a crash dedupe to the exact same row while
+the wait-resolution bridge finishes.

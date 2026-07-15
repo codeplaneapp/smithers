@@ -5,8 +5,9 @@ import '@smithers-orchestrator/errors/SmithersError';
 
 /**
  * Options for `makeTelegramSource`: a getUpdates long-poll EventSource whose
- * offset cursor is persisted through a CursorStore so restarts never
- * re-deliver already-seen updates.
+ * offset cursor is persisted through a CursorStore only after the returned
+ * event batch is fully delivered. Restarts re-poll interrupted batches and
+ * resume after acknowledged ones.
  */
 type MakeTelegramSourceOptions = TelegramClientConfig & {
     /** EventSource id (also the cursor key + dedupe scope). @default "telegram" */
@@ -25,7 +26,7 @@ type MakeTelegramSourceOptions = TelegramClientConfig & {
     allowedUpdates?: string[];
     /**
      * When set, updates from chats not in this list are dropped (the offset
-     * still advances so they are acknowledged, not re-polled).
+     * still advances after the rest of the batch delivers).
      */
     allowedChatIds?: Array<number | string>;
 };

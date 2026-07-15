@@ -1141,6 +1141,53 @@ function buildMigrations(context) {
                 return { table: "_smithers_sandboxes", addedColumns: added ? ["heartbeat_at_ms"] : [] };
             },
         },
+        {
+            id: "0029_integration_delivery_claims",
+            name: "Add retryable integration delivery claims",
+            checksum: "packages/db/migrations/0029_add_integration_delivery_claims.sql",
+            isApplied: (sqlite) => {
+                const columns = tableColumnNames(sqlite, "_smithers_integration_deliveries");
+                return columns.has("status") && columns.has("claim_token") &&
+                    columns.has("claim_expires_at_ms") && columns.has("completed_at_ms");
+            },
+            isAppliedPostgres: async (pgConn) => {
+                const columns = await tableColumnNamesPostgres(pgConn, "_smithers_integration_deliveries");
+                return columns.has("status") && columns.has("claim_token") &&
+                    columns.has("claim_expires_at_ms") && columns.has("completed_at_ms");
+            },
+            up: (sqlite) => {
+                const addedColumns = [];
+                if (addColumnIfMissing(sqlite, "_smithers_integration_deliveries", "status", "status TEXT NOT NULL DEFAULT 'completed'")) {
+                    addedColumns.push("status");
+                }
+                if (addColumnIfMissing(sqlite, "_smithers_integration_deliveries", "claim_token", "claim_token TEXT")) {
+                    addedColumns.push("claim_token");
+                }
+                if (addColumnIfMissing(sqlite, "_smithers_integration_deliveries", "claim_expires_at_ms", "claim_expires_at_ms INTEGER")) {
+                    addedColumns.push("claim_expires_at_ms");
+                }
+                if (addColumnIfMissing(sqlite, "_smithers_integration_deliveries", "completed_at_ms", "completed_at_ms INTEGER")) {
+                    addedColumns.push("completed_at_ms");
+                }
+                return { table: "_smithers_integration_deliveries", addedColumns };
+            },
+            upPostgres: async (pgConn) => {
+                const addedColumns = [];
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_integration_deliveries", "status", "status TEXT NOT NULL DEFAULT 'completed'")) {
+                    addedColumns.push("status");
+                }
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_integration_deliveries", "claim_token", "claim_token TEXT")) {
+                    addedColumns.push("claim_token");
+                }
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_integration_deliveries", "claim_expires_at_ms", "claim_expires_at_ms INTEGER")) {
+                    addedColumns.push("claim_expires_at_ms");
+                }
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_integration_deliveries", "completed_at_ms", "completed_at_ms INTEGER")) {
+                    addedColumns.push("completed_at_ms");
+                }
+                return { table: "_smithers_integration_deliveries", addedColumns };
+            },
+        },
     ];
 }
 
