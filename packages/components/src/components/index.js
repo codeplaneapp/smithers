@@ -113,6 +113,7 @@
  */
 /** @typedef {import("./TimerProps.ts").TimerProps} TimerProps */
 /** @typedef {import("./TryCatchFinallyProps.ts").TryCatchFinallyProps} TryCatchFinallyProps */
+/** @typedef {import("./delegation-v2/TrellisProps.ts").TrellisProps} TrellisProps */
 /** @typedef {import("./UIProps.ts").TUIProps} TUIProps */
 /** @typedef {import("./UIProps.ts").UIProps} UIProps */
 /** @typedef {import("./UIProps.ts").WorkflowViewBootProps} WorkflowViewBootProps */
@@ -180,3 +181,28 @@ export { delegationSchemas, tierSchema, estimateSchema, gateSchema, devPreviewKi
 export * as delegationPrompts from "./delegation/delegationPrompts.js";
 export { withCommitRange, captureWorkingCopyCommit } from "./delegation/withCommitRange.js";
 export { foldPlans, nodeIndex, frontierLeaves, unplannedChunks, planningComplete, foldGates, dependentsOf, planOwnerOf, triggerTargetOf, leavesUnder, probeIdFor, probesRequested, pendingTriggers, chunkGateFailures, replanCountFor, actualTotals, physicalId, devPreviewNodeId, splitGates, leafAttemptState, leafComplete, executionComplete, synthesizeDelegationEvents, agentForTier, } from "./delegation/delegationState.js";
+// --- Trellis (dynamic delegation v2) ---
+export { Trellis } from "./delegation-v2/Trellis.js";
+export {
+	delegationV2Schemas,
+	DELEGATION_V2_PROTOCOL_VERSION,
+	DELEGATION_V2_PROGRAM_VERSION,
+	DELEGATION_V2_REGISTRY_VERSION,
+} from "./delegation-v2/delegationV2Schemas.ts";
+export { validateWorkflowProgram, DEFAULT_DELEGATION_V2_LIMITS } from "./delegation-v2/delegationV2Validate.js";
+export {
+	compileDelegationV2Program,
+	DELEGATION_V2_COMPILER_VERSION,
+} from "./delegation-v2/delegationV2Compiler.js";
+export { delegationV2ProgramDigest } from "./delegation-v2/delegationV2Validate.js";
+export {
+	enforceDelegationV2AuthorFuel,
+	partitionDelegationV2AuthorFuel,
+} from "./delegation-v2/delegationV2Fuel.js";
+export {
+	delegationV2AssignmentDigest,
+	settleDelegationV2Envelope,
+	DELEGATION_V2_RUNTIME_VERSION,
+	DELEGATION_V2_SETTLEMENT_VERSION,
+} from "./delegation-v2/delegationV2Settlement.js";
+export * as trellisPrompts from "./delegation-v2/delegationV2Prompts.js";

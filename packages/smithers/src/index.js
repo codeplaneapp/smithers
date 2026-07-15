@@ -160,6 +160,7 @@
 /** @typedef {import("@smithers-orchestrator/time-travel/timetravel").TimeTravelOptions} TimeTravelOptions */
 /** @typedef {import("@smithers-orchestrator/time-travel/timetravel").TimeTravelResult} TimeTravelResult */
 /** @typedef {import("@smithers-orchestrator/components").TryCatchFinallyProps} TryCatchFinallyProps */
+/** @typedef {import("@smithers-orchestrator/components").TrellisProps} TrellisProps */
 /** @typedef {import("@smithers-orchestrator/components").TUIProps} TUIProps */
 /** @typedef {import("@smithers-orchestrator/components").UIProps} UIProps */
 /** @typedef {import("@smithers-orchestrator/components").WaitForEventProps} WaitForEventProps */
@@ -190,6 +191,26 @@ export { knownSmithersErrorCodes } from "@smithers-orchestrator/errors/knownSmit
 export { Approval, ApprovalGate, Aspects, Branch, CheckSuite, ClassifyAndRoute, ContentPipeline, ContinueAsNew, Debate, DecisionTable, DriftDetector, EscalationChain, GatherAndSynthesize, HumanTask, Kanban, Loop, MergeQueue, Optimizer, Panel, Parallel, Poller, Ralph, ReviewLoop, Runbook, Saga, SagaStep, Sandbox, ScanFixVerify, Sequence, Sidecar, Signal, Subflow, SuperSmithers, Supervisor, TUI, Task, Timer, TryCatchFinally, UI, WaitForEvent, Workflow, Worktree, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, computeSidecarDelta, continueAsNew, } from "@smithers-orchestrator/components";
 // Delegation chain
 export { BackpressurePlanning, DelegationChain, DelegationEditListener, DelegationExecution, DelegationPlanning, DelegationPreview, DelegationScoring, DeriskLoop, GoalRefinement, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER, captureWorkingCopyCommit, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, devPreviewKindSchema, estimateSchema, gateSchema, tierSchema, withCommitRange, } from "@smithers-orchestrator/components";
+// Trellis dynamic delegation
+export {
+  Trellis,
+  delegationV2Schemas,
+  validateWorkflowProgram,
+  delegationV2ProgramDigest,
+  compileDelegationV2Program,
+  partitionDelegationV2AuthorFuel,
+  enforceDelegationV2AuthorFuel,
+  delegationV2AssignmentDigest,
+  settleDelegationV2Envelope,
+  DEFAULT_DELEGATION_V2_LIMITS,
+  DELEGATION_V2_COMPILER_VERSION,
+  DELEGATION_V2_PROGRAM_VERSION,
+  DELEGATION_V2_PROTOCOL_VERSION,
+  DELEGATION_V2_REGISTRY_VERSION,
+  DELEGATION_V2_RUNTIME_VERSION,
+  DELEGATION_V2_SETTLEMENT_VERSION,
+  trellisPrompts,
+} from "@smithers-orchestrator/components";
 // Agents
 export { AnthropicAgent, OpenAIAgent, HermesAgent, HermesCliAgent, OpenClawAgent, AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent, VibeAgent, OpenCodeAgent, createHttpTool, } from "@smithers-orchestrator/agents";
 // VCS

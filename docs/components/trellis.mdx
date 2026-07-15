@@ -34,7 +34,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 const sol = new CodexAgent({ model: "gpt-5.6-sol" });
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const terra = new CodexAgent({ model: "gpt-5.6-terra" });
-const luna = new CodexAgent({ model: "gpt-5.6-luna" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
 
 export default smithers((ctx) => (
   <Workflow name="adaptive-work">
