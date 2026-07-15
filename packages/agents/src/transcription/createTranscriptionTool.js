@@ -1,5 +1,9 @@
 import { isIP } from "node:net";
 import { dynamicTool, jsonSchema } from "ai";
+import { createPinnedAudioTransport } from "./createPinnedAudioTransport.js";
+import { guardedAudioDownload } from "./guardedAudioDownload.js";
+
+const defaultPinnedAudioTransport = createPinnedAudioTransport();
 
 const transcriptionInputSchema = {
   type: "object",
@@ -50,11 +54,14 @@ export function createTranscriptionTool(options) {
       const signal = executionOptions?.abortSignal;
       signal?.throwIfAborted();
       const request = normalizeInput(input);
-      if (request.audioUrl) assertSafeAudioUrl(request.audioUrl, options);
       if (provider === "whisper") {
         return transcribeWithWhisper(options, request, fetchImpl, signal);
       }
       if (provider === "deepgram") {
+        // Deepgram receives the URL as JSON and downloads it server-side. Keep
+        // its existing literal-host policy without running the local resolver
+        // or pinned transport.
+        if (request.audioUrl) assertSafeAudioUrl(request.audioUrl, options);
         return transcribeWithDeepgram(options, request, fetchImpl, signal);
       }
       throw new Error(`Unsupported transcription provider: ${provider}`);
@@ -199,7 +206,16 @@ async function transcribeWithWhisper(options, input, fetchImpl, signal) {
   if (input.audioBase64) {
     form.set("file", base64ToFile(input.audioBase64, input.mimeType ?? "application/octet-stream"));
   } else if (input.audioUrl) {
-    const audioResponse = await fetchImpl(input.audioUrl, { signal });
+    const audioResponse = await guardedAudioDownload(input.audioUrl, {
+      transport: options.audioUrlTransport ?? defaultPinnedAudioTransport,
+      ...(options.audioUrlResolver ? { resolver: options.audioUrlResolver } : {}),
+      ...(options.audioUrlMaxRedirects !== undefined ? { maxRedirects: options.audioUrlMaxRedirects } : {}),
+      ...(options.allowedAudioHosts ? { allowedAudioHosts: options.allowedAudioHosts } : {}),
+      ...(options.allowPrivateAudioUrl !== undefined
+        ? { allowPrivateAudioUrl: options.allowPrivateAudioUrl }
+        : {}),
+      ...(signal ? { signal } : {}),
+    });
     await assertOk(audioResponse, "download audio for Whisper transcription");
     const blob = await audioResponse.blob();
     form.set("file", new File([blob], filenameForMime(input.mimeType ?? blob.type), { type: input.mimeType ?? blob.type }));

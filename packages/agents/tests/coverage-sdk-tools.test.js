@@ -305,15 +305,14 @@ describe("createTranscriptionTool error handling", () => {
       provider: "whisper",
       apiKey: "k",
       allowedAudioHosts: ["cdn.example"],
-      fetch: async (url) => {
-        if (String(url) === "https://cdn.example/a.mp3") {
-          downloaded = true;
-          return new Response(new Blob([Buffer.from("a")]), {
-            headers: { "content-type": "audio/mpeg" },
-          });
-        }
-        return Response.json({ text: "allowlisted transcript" });
+      audioUrlResolver: async () => [{ address: "93.184.216.34", family: 4 }],
+      audioUrlTransport: async (request) => {
+        downloaded = request.url.href === "https://cdn.example/a.mp3";
+        return new Response(new Blob([Buffer.from("a")]), {
+          headers: { "content-type": "audio/mpeg" },
+        });
       },
+      fetch: async () => Response.json({ text: "allowlisted transcript" }),
     });
     const result = await tool.execute({ audioUrl: "https://cdn.example/a.mp3" }, callOptions);
     expect(downloaded).toBe(true);
@@ -325,15 +324,13 @@ describe("createTranscriptionTool error handling", () => {
     const tool = createTranscriptionTool({
       provider: "whisper",
       apiKey: "k",
-      fetch: async (url) => {
-        if (String(url) === "http://8.8.8.8/a.mp3") {
-          downloaded = true;
-          return new Response(new Blob([Buffer.from("a")]), {
-            headers: { "content-type": "audio/mpeg" },
-          });
-        }
-        return Response.json({ text: "public ipv4 transcript" });
+      audioUrlTransport: async (request) => {
+        downloaded = request.url.href === "http://8.8.8.8/a.mp3" && request.address === "8.8.8.8";
+        return new Response(new Blob([Buffer.from("a")]), {
+          headers: { "content-type": "audio/mpeg" },
+        });
       },
+      fetch: async () => Response.json({ text: "public ipv4 transcript" }),
     });
     const result = await tool.execute({ audioUrl: "http://8.8.8.8/a.mp3" }, callOptions);
     expect(downloaded).toBe(true);
@@ -345,17 +342,20 @@ describe("createTranscriptionTool error handling", () => {
     const tool = createTranscriptionTool({
       provider: "whisper",
       apiKey: "k",
-      fetch: async (url) => {
-        if (String(url) === "http://[2606:4700::1]/a.mp3") {
-          downloaded = true;
-          return new Response(new Blob([Buffer.from("audio")]), {
-            headers: { "content-type": "audio/mpeg" },
-          });
-        }
-        return Response.json({ text: "public ipv6 transcript", language: "en", duration: 2 });
+      audioUrlTransport: async (request) => {
+        downloaded =
+          request.url.href === "http://[2606:4700:808:808:8:808:808:808]/a.mp3" &&
+          request.address === "2606:4700:808:808:8:808:808:808";
+        return new Response(new Blob([Buffer.from("audio")]), {
+          headers: { "content-type": "audio/mpeg" },
+        });
       },
+      fetch: async () => Response.json({ text: "public ipv6 transcript", language: "en", duration: 2 }),
     });
-    const result = await tool.execute({ audioUrl: "http://[2606:4700::1]/a.mp3" }, callOptions);
+    const result = await tool.execute(
+      { audioUrl: "http://[2606:4700:808:808:8:808:808:808]/a.mp3" },
+      callOptions,
+    );
     expect(downloaded).toBe(true);
     expect(result.text).toBe("public ipv6 transcript");
   });

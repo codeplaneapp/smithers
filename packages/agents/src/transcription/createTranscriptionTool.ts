@@ -17,12 +17,34 @@ export type TranscriptionToolResult = {
   provider: TranscriptionProvider;
 };
 
+export type ResolvedAudioAddress = {
+  address: string;
+  family?: 4 | 6;
+};
+
+export type AudioHostResolver = (
+  hostname: string,
+  options: { signal?: AbortSignal },
+) => Promise<ResolvedAudioAddress[]> | ResolvedAudioAddress[];
+
+export type PinnedAudioTransportRequest = {
+  url: URL;
+  address: string;
+  family: 4 | 6;
+  signal?: AbortSignal;
+};
+
+export type PinnedAudioTransport = (
+  request: PinnedAudioTransportRequest,
+) => Promise<Response> | Response;
+
 export type CreateTranscriptionToolOptions = {
   provider: TranscriptionProvider;
   apiKey: string;
   model?: string;
   baseUrl?: string;
   description?: string;
+  /** Provider API fetch implementation. Never used for local Whisper audio downloads. */
   fetch?: typeof fetch;
   /**
    * Hosts an agent-supplied `audioUrl` may use. When set, only these hosts are
@@ -31,10 +53,26 @@ export type CreateTranscriptionToolOptions = {
    */
   allowedAudioHosts?: string[];
   /**
-   * Opt out of the SSRF guard entirely and let `audioUrl` name any http(s)
-   * host, including private/loopback addresses. Off by default.
+   * Bypass the host/address policy and let `audioUrl` name private or loopback
+   * addresses. HTTP(S) scheme checks, per-hop address pinning, redirect limits,
+   * and abort handling remain enforced. Off by default.
    */
   allowPrivateAudioUrl?: boolean;
+  /**
+   * Trusted DNS seam for local Whisper `audioUrl` downloads. The resolver must
+   * return every A and AAAA answer. Smithers validates the entire result set
+   * and pins one accepted address into `audioUrlTransport`.
+   */
+  audioUrlResolver?: AudioHostResolver;
+  /**
+   * Trusted transport seam for local Whisper `audioUrl` downloads. A custom
+   * transport must connect only to `request.address`, preserve the URL host for
+   * HTTP Host and TLS SNI/certificate checks, disable pooling, follow no
+   * redirects, and honor `request.signal`.
+   */
+  audioUrlTransport?: PinnedAudioTransport;
+  /** Maximum local Whisper download redirects. Defaults to 5; maximum 20. */
+  audioUrlMaxRedirects?: number;
 };
 
 export declare function createTranscriptionTool(options: CreateTranscriptionToolOptions): Tool;

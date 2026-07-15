@@ -1,10 +1,76 @@
-import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$d, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$e } from './index-C4oaZr4x.js';
 import * as ai from 'ai';
-import { ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent, Tool as Tool$1 } from 'ai';
+import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
+import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$d, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$e } from './index-C4oaZr4x.js';
 import * as zod from 'zod';
 import '@smithers-orchestrator/errors/SmithersError';
 import 'effect';
 import 'node:child_process';
+
+type TranscriptionProvider$1 = "whisper" | "deepgram";
+type TranscriptionToolInput$1 = {
+    audioUrl?: string;
+    audioBase64?: string;
+    mimeType?: string;
+    language?: string;
+    prompt?: string;
+};
+type TranscriptionToolResult$1 = {
+    text: string;
+    language?: string;
+    durationSeconds?: number;
+    provider: TranscriptionProvider$1;
+};
+type ResolvedAudioAddress$1 = {
+    address: string;
+    family?: 4 | 6;
+};
+type AudioHostResolver$1 = (hostname: string, options: {
+    signal?: AbortSignal;
+}) => Promise<ResolvedAudioAddress$1[]> | ResolvedAudioAddress$1[];
+type PinnedAudioTransportRequest$1 = {
+    url: URL;
+    address: string;
+    family: 4 | 6;
+    signal?: AbortSignal;
+};
+type PinnedAudioTransport$1 = (request: PinnedAudioTransportRequest$1) => Promise<Response> | Response;
+type CreateTranscriptionToolOptions$1 = {
+    provider: TranscriptionProvider$1;
+    apiKey: string;
+    model?: string;
+    baseUrl?: string;
+    description?: string;
+    /** Provider API fetch implementation. Never used for local Whisper audio downloads. */
+    fetch?: typeof fetch;
+    /**
+     * Hosts an agent-supplied `audioUrl` may use. When set, only these hosts are
+     * allowed and the private/loopback guard is bypassed for them. Use to permit
+     * an internal audio store on purpose.
+     */
+    allowedAudioHosts?: string[];
+    /**
+     * Bypass the host/address policy and let `audioUrl` name private or loopback
+     * addresses. HTTP(S) scheme checks, per-hop address pinning, redirect limits,
+     * and abort handling remain enforced. Off by default.
+     */
+    allowPrivateAudioUrl?: boolean;
+    /**
+     * Trusted DNS seam for local Whisper `audioUrl` downloads. The resolver must
+     * return every A and AAAA answer. Smithers validates the entire result set
+     * and pins one accepted address into `audioUrlTransport`.
+     */
+    audioUrlResolver?: AudioHostResolver$1;
+    /**
+     * Trusted transport seam for local Whisper `audioUrl` downloads. A custom
+     * transport must connect only to `request.address`, preserve the URL host for
+     * HTTP Host and TLS SNI/certificate checks, disable pooling, follow no
+     * redirects, and honor `request.signal`.
+     */
+    audioUrlTransport?: PinnedAudioTransport$1;
+    /** Maximum local Whisper download redirects. Defaults to 5; maximum 20. */
+    audioUrlMaxRedirects?: number;
+};
+declare function createTranscriptionTool(options: CreateTranscriptionToolOptions$1): Tool$1;
 
 type HttpToolOutput$1 = {
     ok: boolean;
@@ -1304,28 +1370,6 @@ declare function zodToOpenAISchema(zodSchema: zod.ZodTypeAny): Promise<Record<st
  */
 declare function sanitizeForOpenAI(node: unknown): void;
 
-type TranscriptionProvider = "whisper" | "deepgram";
-type CreateTranscriptionToolOptions = {
-    provider: TranscriptionProvider;
-    apiKey: string;
-    model?: string;
-    baseUrl?: string;
-    description?: string;
-    fetch?: typeof fetch;
-    /**
-     * Hosts an agent-supplied `audioUrl` may use. When set, only these hosts are
-     * allowed and the private/loopback guard is bypassed for them. Use to permit
-     * an internal audio store on purpose.
-     */
-    allowedAudioHosts?: string[];
-    /**
-     * Opt out of the SSRF guard entirely and let `audioUrl` name any http(s)
-     * host, including private/loopback addresses. Off by default.
-     */
-    allowPrivateAudioUrl?: boolean;
-};
-declare function createTranscriptionTool(options: CreateTranscriptionToolOptions): Tool$1;
-
 type ElevenLabsTextToSpeechToolOptions = {
     apiKey: string;
     defaultVoiceId?: string;
@@ -1662,5 +1706,13 @@ type CreateHttpToolOptions = CreateHttpToolOptions$2;
 type HttpToolAuth = HttpToolAuth$1;
 type HttpToolInput = HttpToolInput$1;
 type HttpToolOutput = HttpToolOutput$1;
+type AudioHostResolver = AudioHostResolver$1;
+type CreateTranscriptionToolOptions = CreateTranscriptionToolOptions$1;
+type PinnedAudioTransport = PinnedAudioTransport$1;
+type PinnedAudioTransportRequest = PinnedAudioTransportRequest$1;
+type ResolvedAudioAddress = ResolvedAudioAddress$1;
+type TranscriptionProvider = TranscriptionProvider$1;
+type TranscriptionToolInput = TranscriptionToolInput$1;
+type TranscriptionToolResult = TranscriptionToolResult$1;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, PoolAgent, type PoolAgentOptions, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

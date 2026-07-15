@@ -65,7 +65,8 @@
   ],
   "scripts": {
     "test": "bun test --timeout=60000 --max-concurrency=1 tests",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm typecheck:package-export",
+    "typecheck:package-export": "tsc -p tests/type-consumer/tsconfig.json --noEmit",
     "build": "rm -f src/index.d.ts src/index-*.d.ts src/BaseCliAgent/index.d.ts && tsup --dts-only"
   },
   "dependencies": {

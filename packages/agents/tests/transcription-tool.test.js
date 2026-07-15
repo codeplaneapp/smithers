@@ -30,9 +30,18 @@ describe("createTranscriptionTool", () => {
 
   test("posts audio URLs to Deepgram and normalizes the first alternative", async () => {
     const requests = [];
+    let localDownloadCalled = false;
     const transcription = createTranscriptionTool({
       provider: "deepgram",
       apiKey: "deepgram-test-key",
+      audioUrlResolver: async () => {
+        localDownloadCalled = true;
+        throw new Error("Deepgram URL handoff must not resolve locally");
+      },
+      audioUrlTransport: () => {
+        localDownloadCalled = true;
+        throw new Error("Deepgram URL handoff must not download locally");
+      },
       fetch: async (url, init) => {
         requests.push({ url, init });
         return Response.json({
@@ -48,6 +57,7 @@ describe("createTranscriptionTool", () => {
     expect(requests[0].url).toBe("https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true");
     expect(requests[0].init.headers.Authorization).toBe("Token deepgram-test-key");
     expect(JSON.parse(requests[0].init.body)).toEqual({ url: "https://example.com/audio.mp3" });
+    expect(localDownloadCalled).toBe(false);
   });
 
   const ssrfAudioUrls = [
@@ -95,17 +105,20 @@ describe("createTranscriptionTool", () => {
   });
 
   test("still downloads and transcribes a legitimate public audioUrl", async () => {
-    const requests = [];
+    const providerRequests = [];
+    const downloadRequests = [];
     const transcription = createTranscriptionTool({
       provider: "whisper",
       apiKey: "openai-test-key",
+      audioUrlResolver: async () => [{ address: "93.184.216.34", family: 4 }],
+      audioUrlTransport: async (request) => {
+        downloadRequests.push(request);
+        return new Response(new Blob([Buffer.from("audio bytes")]), {
+          headers: { "content-type": "audio/mpeg" },
+        });
+      },
       fetch: async (url, init) => {
-        requests.push(String(url));
-        if (String(url) === "https://cdn.example.com/audio.mp3") {
-          return new Response(new Blob([Buffer.from("audio bytes")]), {
-            headers: { "content-type": "audio/mpeg" },
-          });
-        }
+        providerRequests.push({ url: String(url), init });
         return Response.json({ text: "public transcript", language: "en", duration: 3 });
       },
     });
@@ -113,23 +126,34 @@ describe("createTranscriptionTool", () => {
     const result = await transcription.execute({ audioUrl: "https://cdn.example.com/audio.mp3" }, callOptions);
 
     expect(result).toEqual({ text: "public transcript", language: "en", durationSeconds: 3, provider: "whisper" });
-    expect(requests[0]).toBe("https://cdn.example.com/audio.mp3");
-    expect(requests[1]).toBe("https://api.openai.com/v1/audio/transcriptions");
+    expect(downloadRequests).toHaveLength(1);
+    expect(downloadRequests[0].url.href).toBe("https://cdn.example.com/audio.mp3");
+    expect(downloadRequests[0].address).toBe("93.184.216.34");
+    expect(providerRequests).toHaveLength(1);
+    expect(providerRequests[0].url).toBe("https://api.openai.com/v1/audio/transcriptions");
+    expect(providerRequests[0].init.method).toBe("POST");
   });
 
   test("forwards the tool-call abortSignal to the Whisper download and transcription fetches", async () => {
-    const signals = [];
+    const resolverSignals = [];
+    const downloadSignals = [];
+    const providerSignals = [];
     const controller = new AbortController();
     const transcription = createTranscriptionTool({
       provider: "whisper",
       apiKey: "openai-test-key",
-      fetch: async (url, init) => {
-        signals.push(init?.signal);
-        if (String(url) === "https://cdn.example.com/audio.mp3") {
-          return new Response(new Blob([Buffer.from("audio bytes")]), {
-            headers: { "content-type": "audio/mpeg" },
-          });
-        }
+      audioUrlResolver: async (_hostname, options) => {
+        resolverSignals.push(options.signal);
+        return [{ address: "93.184.216.34", family: 4 }];
+      },
+      audioUrlTransport: async (request) => {
+        downloadSignals.push(request.signal);
+        return new Response(new Blob([Buffer.from("audio bytes")]), {
+          headers: { "content-type": "audio/mpeg" },
+        });
+      },
+      fetch: async (_url, init) => {
+        providerSignals.push(init?.signal);
         return Response.json({ text: "ok" });
       },
     });
@@ -139,7 +163,9 @@ describe("createTranscriptionTool", () => {
       { ...callOptions, abortSignal: controller.signal },
     );
 
-    expect(signals).toEqual([controller.signal, controller.signal]);
+    expect(resolverSignals).toEqual([controller.signal]);
+    expect(downloadSignals).toEqual([controller.signal]);
+    expect(providerSignals).toEqual([controller.signal]);
   });
 
   test("forwards the tool-call abortSignal to the Deepgram fetch", async () => {
@@ -188,17 +214,19 @@ describe("createTranscriptionTool", () => {
 
   test("allowedAudioHosts opts a private host back in on purpose", async () => {
     let downloaded = false;
+    const providerRequests = [];
     const transcription = createTranscriptionTool({
       provider: "whisper",
       apiKey: "openai-test-key",
       allowedAudioHosts: ["127.0.0.1"],
+      audioUrlTransport: async (request) => {
+        downloaded = request.url.href === "http://127.0.0.1:9000/audio.mp3" && request.address === "127.0.0.1";
+        return new Response(new Blob([Buffer.from("audio bytes")]), {
+          headers: { "content-type": "audio/mpeg" },
+        });
+      },
       fetch: async (url) => {
-        if (String(url) === "http://127.0.0.1:9000/audio.mp3") {
-          downloaded = true;
-          return new Response(new Blob([Buffer.from("audio bytes")]), {
-            headers: { "content-type": "audio/mpeg" },
-          });
-        }
+        providerRequests.push(String(url));
         return Response.json({ text: "internal transcript" });
       },
     });
@@ -207,7 +235,88 @@ describe("createTranscriptionTool", () => {
 
     expect(downloaded).toBe(true);
     expect(result.text).toBe("internal transcript");
+    expect(providerRequests).toEqual(["https://api.openai.com/v1/audio/transcriptions"]);
   });
+
+  test("blocks a DNS name resolving to a real loopback server before any connection", async () => {
+    const serverRequests = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        serverRequests.push(request.url);
+        return new Response("should not connect");
+      },
+    });
+    let providerRequests = 0;
+    try {
+      const transcription = createTranscriptionTool({
+        provider: "whisper",
+        apiKey: "openai-test-key",
+        audioUrlResolver: async (hostname) => {
+          expect(hostname).toBe("attacker.test");
+          return [{ address: "127.0.0.1", family: 4 }];
+        },
+        fetch: async () => {
+          providerRequests += 1;
+          return Response.json({ text: "leaked" });
+        },
+      });
+
+      await expect(
+        transcription.execute({ audioUrl: `http://attacker.test:${server.port}/secret` }, callOptions),
+      ).rejects.toThrow(/private, loopback, or link-local address/i);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(serverRequests).toHaveLength(0);
+      expect(providerRequests).toBe(0);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  for (const [label, policy] of [
+    ["strict allowlist", { allowedAudioHosts: ["audio.test"] }],
+    ["private-network opt-in", { allowPrivateAudioUrl: true }],
+  ]) {
+    test(`${label} connects to the pinned address while retaining Host, path, and query`, async () => {
+      const observed = [];
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(request) {
+          const url = new URL(request.url);
+          observed.push({ host: request.headers.get("host"), path: url.pathname, query: url.search });
+          return new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } });
+        },
+      });
+      const providerRequests = [];
+      try {
+        const transcription = createTranscriptionTool({
+          provider: "whisper",
+          apiKey: "openai-test-key",
+          ...policy,
+          audioUrlResolver: async () => [{ address: "127.0.0.1", family: 4 }],
+          fetch: async (url) => {
+            providerRequests.push(String(url));
+            return Response.json({ text: "pinned transcript" });
+          },
+        });
+
+        const result = await transcription.execute(
+          { audioUrl: `http://audio.test:${server.port}/clips/input.mp3?token=abc` },
+          callOptions,
+        );
+
+        expect(result.text).toBe("pinned transcript");
+        expect(observed).toEqual([
+          { host: `audio.test:${server.port}`, path: "/clips/input.mp3", query: "?token=abc" },
+        ]);
+        expect(providerRequests).toEqual(["https://api.openai.com/v1/audio/transcriptions"]);
+      } finally {
+        server.stop(true);
+      }
+    });
+  }
 });
 
 describe("createTranscriptionTool cancellation against real servers", () => {

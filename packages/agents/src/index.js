@@ -48,6 +48,14 @@
 /** @typedef {import("./http/HttpToolAuth.ts").HttpToolAuth} HttpToolAuth */
 /** @typedef {import("./http/HttpToolInput.ts").HttpToolInput} HttpToolInput */
 /** @typedef {import("./http/HttpToolOutput.ts").HttpToolOutput} HttpToolOutput */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").AudioHostResolver} AudioHostResolver */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").CreateTranscriptionToolOptions} CreateTranscriptionToolOptions */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").PinnedAudioTransport} PinnedAudioTransport */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").PinnedAudioTransportRequest} PinnedAudioTransportRequest */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").ResolvedAudioAddress} ResolvedAudioAddress */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").TranscriptionProvider} TranscriptionProvider */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").TranscriptionToolInput} TranscriptionToolInput */
+/** @typedef {import("./transcription/createTranscriptionTool.ts").TranscriptionToolResult} TranscriptionToolResult */
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
