@@ -624,7 +624,32 @@ export const GATEWAY_RPC_DEFINITIONS = [
     transport: "http+websocket",
     requiredScope: "run:read",
     requestSchema: objectSchema({ runId }, ["runId"]),
-    responseSchema: objectSchema({}, [], "Final run DiffBundle or an oversized marker.", true),
+    responseSchema: {
+      oneOf: [
+        objectSchema({
+          seq: integerSchema("Terminal diff sequence.", 0),
+          baseRef: stringSchema("Immutable run base commit.") ,
+          patches: arraySchema({
+            type: "object",
+            properties: {
+              path: stringSchema("Changed file path."),
+              operation: { type: "string", enum: ["add", "modify", "delete"] },
+              diff: stringSchema("Unified patch text."),
+              binaryContent: { type: ["string", "null"], description: "Base64 binary content when applicable." },
+            },
+            required: ["path", "operation", "diff"],
+            additionalProperties: false,
+          }, "Changed files."),
+        }, ["seq", "baseRef", "patches"], "Final run DiffBundle."),
+        objectSchema({
+          status: { type: "string", enum: ["oversized"] },
+          baseRef: stringSchema("Immutable run base commit."),
+          terminalRef: stringSchema("Terminal commit, or multiple when lanes were merged."),
+          sizeBytes: integerSchema("Serialized response size.", 0),
+          maxBytes: integerSchema("Maximum response size.", 1),
+        }, ["status", "baseRef", "terminalRef", "sizeBytes", "maxBytes"], "Explicit oversized marker."),
+      ],
+    },
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "VcsError", "Internal"],
     exampleRequest: { runId: "run_01" },
     exampleResponse: { seq: 3, baseRef: "abc123", patches: [] },

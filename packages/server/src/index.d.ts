@@ -19,6 +19,7 @@ import * as _smithers_orchestrator_devtools_snapshotSerializer from '@smithers-o
 import * as _smithers_orchestrator_protocol_devtools from '@smithers-orchestrator/protocol/devtools';
 import * as _smithers_orchestrator_engine_effect_DiffBundle from '@smithers-orchestrator/engine/effect/DiffBundle';
 import { DiffBundle } from '@smithers-orchestrator/engine/effect/DiffBundle';
+import { computeDiffBundleBetweenRefs } from '@smithers-orchestrator/engine/effect/diff-bundle';
 import { selectOutputRow } from '@smithers-orchestrator/db/output';
 import * as _smithers_orchestrator_time_travel_jumpToFrame from '@smithers-orchestrator/time-travel/jumpToFrame';
 export { JumpToFrameError } from '@smithers-orchestrator/time-travel/jumpToFrame';
@@ -328,7 +329,22 @@ type GatewayOptions$1 = {
     defaults?: GatewayDefaults$1;
     maxBodyBytes?: number;
     maxPayload?: number;
+    /**
+     * Cap on authenticated WebSocket connections. Pre-authenticated sockets do
+     * not count against this pool — they are bounded separately by
+     * `maxPreAuthConnections` and only consume authenticated capacity once a
+     * successful `connect` promotes them.
+     * @default 1000
+     */
     maxConnections?: number;
+    /**
+     * Cap on upgraded WebSocket connections that have not yet completed a
+     * successful `connect` RPC. Keeps a pool of idle unauthenticated sockets
+     * from exhausting `maxConnections` authenticated capacity; the slot is
+     * released on promotion, close, or failed authentication.
+     * @default 64
+     */
+    maxPreAuthConnections?: number;
     /**
      * Per-run replay window for Gateway run event streams.
      * @default 10000
@@ -357,6 +373,15 @@ type GatewayOptions$1 = {
      * @default 60000
      */
     requestTimeout?: number;
+    /**
+     * Maximum time (in milliseconds) a WebSocket connection may stay
+     * unauthenticated after upgrade. Sockets hold a `maxConnections` slot from
+     * the moment of upgrade but only authenticate via the `connect` RPC, so a
+     * silent socket is terminated once this deadline elapses, releasing its
+     * slot.
+     * @default 10000
+     */
+    authDeadlineMs?: number;
 };
 
 type ConnectRequest$1 = {
@@ -660,11 +685,13 @@ declare class Gateway {
     maxBodyBytes: number;
     maxPayload: number;
     maxConnections: number;
+    maxPreAuthConnections: number;
     eventWindowSize: number;
     outOfProcessEventBridge: boolean;
     outOfProcessEventBridgePollMs: number;
     headersTimeout: number;
     requestTimeout: number;
+    authDeadlineMs: number;
     auth: GatewayAuthConfig$1 | undefined;
     ui: ResolvedGatewayUiConfig | null;
     operatorUi: ResolvedGatewayUiConfig | null;
@@ -683,6 +710,14 @@ declare class Gateway {
     workspaceRoot: string | null;
     workflows: Map<any, any>;
     connections: Set<any>;
+    /**
+     * Subset of `connections` still awaiting a successful `connect` RPC.
+     * Pre-auth sockets hold a slot in this bounded pool instead of consuming
+     * authenticated `maxConnections` capacity; a successful `connect` promotes
+     * them out and close / failed authentication releases the slot (#1008).
+     * @type {Set<Record<string, unknown>>}
+     */
+    preAuthConnections: Set<Record<string, unknown>>;
     runRegistry: Map<any, any>;
     activeRuns: Map<any, any>;
     inflightRuns: Map<any, any>;
@@ -698,6 +733,15 @@ declare class Gateway {
     apiStreamPendingCollections: Set<any>;
     apiStreamPendingResolvers: any[];
     apiStreamFlushTimer: null;
+    apiStreamMaxSubscribers: number;
+    apiStreamMaxSubscribersPerUser: number;
+    apiStreamMaxSubscribersPerConnection: number;
+    /** Active SSE subscriber count per user identity (userId ?? tokenId ?? role). @type {Map<string, number>} */
+    apiStreamSubscribersByUser: Map<string, number>;
+    /** Active SSE subscriber count per declared connection id (`x-request-id`). @type {Map<string, number>} */
+    apiStreamSubscribersByConnection: Map<string, number>;
+    /** One shared heartbeat interval for every SSE subscriber (never one per subscriber). */
+    apiStreamHeartbeatTimer: null;
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts: Map<any, any>;
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -750,6 +794,7 @@ declare class Gateway {
     idleFired: boolean;
     hasActiveCrons: boolean;
     hasPendingTimers: boolean;
+    cronSweepInFlight: boolean;
     trustAnyHost: boolean;
     whatHappenedNarrator: any;
     /** @type {Map<string, { payload: Record<string, unknown> }>} */
@@ -990,6 +1035,19 @@ declare class Gateway {
    */
     registerRunEventSubscriber(connection: ConnectionState, streamId: string, runId: string, replayPending?: boolean): () => void;
     /**
+   * Start the connection's shared run-event heartbeat timer. Each WebSocket
+   * connection owns at most ONE heartbeat interval no matter how many run
+   * event streams it registers; every tick emits one `run.heartbeat` frame
+   * per active stream. No-op while the timer is already running; the timer
+   * stops when the last stream unregisters (or the connection tears down).
+   * @param {ConnectionState} connection
+   */
+    startRunEventHeartbeat(connection: ConnectionState): void;
+    /**
+   * @param {ConnectionState} connection
+   */
+    stopRunEventHeartbeat(connection: ConnectionState): void;
+    /**
    * @param {ConnectionState} connection
    * @param {string} streamId
    */
@@ -1123,6 +1181,20 @@ declare class Gateway {
      */
     queueApiInvalidation(collections: string[]): Promise<number>;
     flushApiInvalidation(): void;
+    /**
+     * First cap an SSE subscription would violate, or null when it fits.
+     * Checked before headers are written so rejected requests get a real
+     * 429 JSON body instead of a half-open stream.
+     * @param {string} userKey
+     * @param {string} connectionKey
+     * @returns {{ scope: "global" | "user" | "connection"; limit: number } | null}
+     */
+    apiStreamCapViolation(userKey: string, connectionKey: string): {
+        scope: "global" | "user" | "connection";
+        limit: number;
+    } | null;
+    ensureApiStreamHeartbeat(): void;
+    stopApiStreamHeartbeatIfIdle(): void;
     /**
      * @param {IncomingMessage} req
      * @param {ServerResponse} res
@@ -1318,6 +1390,14 @@ declare class Gateway {
    */
     resumeRunInBackground(runId: string, workflowKey: string, adapter: SmithersDb$4, auth: RunStartAuthContext): void;
     /**
+   * Authenticated WS connection count. `connections` holds every open RPC
+   * websocket while `preAuthConnections` tracks the subset still awaiting a
+   * successful `connect`, so the difference is the authenticated pool that
+   * `maxConnections` bounds (#1008).
+   * @returns {number}
+   */
+    authenticatedConnectionCount(): number;
+    /**
    * @param {WebSocket} ws
    * @param {IncomingMessage} req
    */
@@ -1426,6 +1506,51 @@ declare class Gateway {
    * @param {unknown} [payload]
    */
     sendEvent(connection: ConnectionState, event: string, payload?: unknown, stateVersion?: number): void;
+    /**
+   * @param {ConnectionState} connection
+   * @returns {ConnectionEventWriterState}
+   */
+    getConnectionEventWriter(connection: ConnectionState): ConnectionEventWriterState;
+    /**
+   * Observable buffered event bytes for a connection: what the socket itself
+   * reports (bufferedAmount) plus what the bounded writer is still holding.
+   * @param {ConnectionState} connection
+   * @returns {number}
+   */
+    getConnectionBufferedEventBytes(connection: ConnectionState): number;
+    /**
+   * The single byte-bounded writer every event frame for a connection goes
+   * through — the generic broadcast copy AND the dedicated run-event stream
+   * frames (whose per-stream queues drain into sendEvent) both land here, so
+   * neither can bypass backpressure. On a healthy socket frames are written
+   * straight through; once the socket's observable bufferedAmount crosses the
+   * high-water mark frames queue here — bounded by bytes — and drain when the
+   * socket recovers. Overflow disconnects the connection.
+   * @param {ConnectionState} connection
+   * @param {ConnectionEventWriterState} writer
+   * @param {string} data
+   * @param {string} event
+   */
+    writeConnectionEventFrame(connection: ConnectionState, writer: ConnectionEventWriterState, data: string, event: string): void;
+    /**
+   * Drain the connection writer's queue against the socket's buffered bytes.
+   * Mirrors drainRunEventStream: a congested socket re-arms a short retry
+   * instead of dropping frames; the byte cap (enforced at enqueue time) is
+   * what bounds memory and trips the per-connection disconnect.
+   * @param {ConnectionState} connection
+   * @param {ConnectionEventWriterState} writer
+   */
+    drainConnectionEventWriter(connection: ConnectionState, writer: ConnectionEventWriterState): void;
+    /**
+   * Per-connection overflow behavior: a consumer that stays congested past the
+   * socket high-water mark AND fills the byte-bounded queue is disconnected
+   * outright (close 1013 Try Again Later) — the socket's close handler tears
+   * down every stream on the connection, and nothing further buffers for it.
+   * @param {ConnectionState} connection
+   * @param {ConnectionEventWriterState} writer
+   * @param {string} event
+   */
+    disconnectConnectionForEventBackpressure(connection: ConnectionState, writer: ConnectionEventWriterState, event: string): void;
     /**
    * @param {string} event
    * @param {unknown} [payload]
@@ -1811,6 +1936,7 @@ type ApprovalRequestRecord = {
     }>;
     allowedScopes: string[];
     allowedUsers: string[];
+    restrictionError: string | null;
     autoApprove: Record<string, unknown> | null;
 };
 type EventFrame = EventFrame$1;
@@ -1829,6 +1955,16 @@ type RunEventStreamState = {
     flushPending: boolean;
     backpressureDisconnected: boolean;
     replayPending: boolean;
+};
+type ConnectionEventWriterState = {
+    queue: Array<{
+        data: string;
+        bytes: number;
+        event: string;
+    }>;
+    queuedBytes: number;
+    flushPending: boolean;
+    disconnected: boolean;
 };
 type GatewayAuthConfig = GatewayAuthConfig$1;
 type GatewayOperatorUiConfig = GatewayOperatorUiConfig$1;
@@ -1859,8 +1995,10 @@ type ConnectionState = {
     userId: string | null;
     subscribedRuns?: Set<string>;
     heartbeat?: unknown;
+    runEventHeartbeatTimer?: ReturnType<typeof setInterval> | null;
     lastActivity?: number;
     closed?: boolean;
+    eventWriter?: ConnectionEventWriterState | null;
 } & Record<string, unknown>;
 type RunStartAuthContext = {
     role: string;
@@ -2134,6 +2272,12 @@ type GetNodeDiffRouteResult$1 = {
 };
 
 /**
+ * @param {string} pointer
+ * @param {string} cwd
+ * @returns {Promise<string | null>}
+ */
+declare function resolveCommitPointer(pointer: string, cwd: string): Promise<string | null>;
+/**
  * @param {{
  *   runId: unknown;
  *   nodeId: unknown;
@@ -2188,6 +2332,44 @@ declare function summarizeBundle(bundle: {
         diff?: string;
     }>;
 }): DiffSummary;
+
+/**
+ * Compute the final run diff directly between the run base and terminal VCS
+ * revisions. This deliberately does not concatenate per-node patches: retries
+ * and reverted work must be represented by the terminal tree.
+ */
+declare function getRunDiffRoute({ runId: rawRunId, resolveRun, computeDiffBundleBetweenRefsImpl, resolveCommitPointerImpl, }: {
+    runId: any;
+    resolveRun: any;
+    computeDiffBundleBetweenRefsImpl?: typeof computeDiffBundleBetweenRefs | undefined;
+    resolveCommitPointerImpl?: typeof resolveCommitPointer | undefined;
+}): Promise<{
+    ok: boolean;
+    payload: {
+        seq: number;
+        baseRef: any;
+        patches: any[];
+    };
+    error?: undefined;
+} | {
+    ok: boolean;
+    payload: {
+        status: string;
+        baseRef: any;
+        terminalRef: string | null;
+        sizeBytes: number;
+        maxBytes: number;
+    };
+    error?: undefined;
+} | {
+    ok: boolean;
+    error: {
+        code: any;
+        message: string;
+    };
+    payload?: undefined;
+}>;
+declare const RUN_DIFF_MAX_BYTES: number;
 
 type NodeOutputResponse$1 = {
     status: "produced" | "pending" | "failed";
@@ -2389,4 +2571,4 @@ declare function scheduleRunCleanup(runRegistry: Map<string, RunRecord>, runId: 
  */
 declare function clearRunCleanupTimer(record: RunRecord | undefined): void;
 
-export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

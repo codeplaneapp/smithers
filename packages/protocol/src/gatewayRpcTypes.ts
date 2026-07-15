@@ -167,10 +167,9 @@ export type GetRunRequest = {
 
 export type GatewayDiffPatch = {
   path: string;
+  operation: "add" | "modify" | "delete";
   diff: string;
-  additions?: number;
-  deletions?: number;
-  binary?: boolean;
+  binaryContent?: string;
 };
 
 export type GatewayDiffBundle = {

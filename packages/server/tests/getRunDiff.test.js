@@ -4,7 +4,7 @@ import { getRunDiffRoute, RUN_DIFF_MAX_BYTES } from "../src/gatewayRoutes/getRun
 function setup({ attempts = [], run = {} } = {}) {
   const calls = [];
   const adapter = {
-    async getRun() { return { vcsType: "jj", vcsRevision: "base", ...run }; },
+    async getRun() { return { vcsType: "jj", vcsRevision: "base", status: "finished", ...run }; },
     async listAttemptsForRun() { return attempts; },
   };
   return {
@@ -14,6 +14,7 @@ function setup({ attempts = [], run = {} } = {}) {
       calls.push({ base, terminal, cwd, seq });
       return { seq, baseRef: base, patches: [] };
     },
+    resolveCommitPointerImpl: async (pointer) => pointer,
   };
 }
 

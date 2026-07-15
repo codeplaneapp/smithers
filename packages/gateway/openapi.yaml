@@ -8390,11 +8390,80 @@ paths:
                   apiVersion:
                     const: v1
                   payload:
-                    type: object
-                    description: "Final run DiffBundle or an oversized marker."
-                    properties: {}
-                    required: []
-                    additionalProperties: true
+                    oneOf:
+                      -
+                        type: object
+                        description: "Final run DiffBundle."
+                        properties:
+                          seq:
+                            type: integer
+                            minimum: 0
+                            description: "Terminal diff sequence."
+                          baseRef:
+                            type: string
+                            description: "Immutable run base commit."
+                          patches:
+                            type: array
+                            description: "Changed files."
+                            items:
+                              type: object
+                              properties:
+                                path:
+                                  type: string
+                                  description: "Changed file path."
+                                operation:
+                                  type: string
+                                  enum:
+                                    - add
+                                    - modify
+                                    - delete
+                                diff:
+                                  type: string
+                                  description: "Unified patch text."
+                                binaryContent:
+                                  type:
+                                    - string
+                                    - "null"
+                                  description: "Base64 binary content when applicable."
+                              required:
+                                - path
+                                - operation
+                                - diff
+                              additionalProperties: false
+                        required:
+                          - seq
+                          - baseRef
+                          - patches
+                        additionalProperties: false
+                      -
+                        type: object
+                        description: "Explicit oversized marker."
+                        properties:
+                          status:
+                            type: string
+                            enum:
+                              - oversized
+                          baseRef:
+                            type: string
+                            description: "Immutable run base commit."
+                          terminalRef:
+                            type: string
+                            description: "Terminal commit, or multiple when lanes were merged."
+                          sizeBytes:
+                            type: integer
+                            minimum: 0
+                            description: "Serialized response size."
+                          maxBytes:
+                            type: integer
+                            minimum: 1
+                            description: "Maximum response size."
+                        required:
+                          - status
+                          - baseRef
+                          - terminalRef
+                          - sizeBytes
+                          - maxBytes
+                        additionalProperties: false
               example:
                 type: res
                 id: getRunDiff-1

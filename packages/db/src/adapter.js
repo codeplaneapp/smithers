@@ -3121,6 +3121,16 @@ export class SmithersDb {
          LIMIT 1`, [runId, nodeId, iteration, baseRef]));
     }
     /**
+     * @param {string} runId
+     * @returns {RunnableEffect<NodeDiffCacheRow[], SmithersError>}
+     */
+    listNodeDiffCache(runId) {
+        return this.read(`list node diffs ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_node_diffs
+         WHERE run_id = ?
+         ORDER BY computed_at_ms ASC, node_id ASC, iteration ASC`, [runId]));
+    }
+    /**
    * @param {string} [runId]
    * @returns {RunnableEffect<number, SmithersError>}
    */

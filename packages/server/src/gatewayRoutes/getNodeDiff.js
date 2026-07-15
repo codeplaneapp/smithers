@@ -148,7 +148,7 @@ function runJj(cwd, args) {
  * @param {string} cwd
  * @returns {Promise<string | null>}
  */
-async function resolveCommitPointer(pointer, cwd) {
+export async function resolveCommitPointer(pointer, cwd) {
     const res = await runJj(cwd, ["log", "-r", pointer, "--no-graph", "--template", "commit_id"]);
     if (res.code !== 0) {
         return null;

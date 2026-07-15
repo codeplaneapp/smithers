@@ -281,6 +281,26 @@ declare function useGatewayNodeOutput(params: {
     refetch: () => Promise<void>;
 };
 
+declare function useGatewayRunDiff(params: {
+    runId: string | undefined;
+}): GatewayAsyncState<{
+    seq: number;
+    baseRef: string;
+    patches: {
+        path: string;
+        diff: string;
+        additions?: number;
+        deletions?: number;
+        binary?: boolean;
+    }[];
+} | {
+    status: "oversized";
+    baseRef: string;
+    terminalRef: string;
+    sizeBytes: number;
+    maxBytes: number;
+}>;
+
 declare function useGatewayRpc<Method extends GatewayRpcMethod>(method: Method, params: GatewayRpcParams<Method>, options?: {
     enabled?: boolean;
     deps?: readonly unknown[];
@@ -817,4 +837,4 @@ declare function useDelegationChain(params: {
     runId: string | undefined;
 }): UseDelegationChainResult;
 
-export { DELEGATION_TIERS, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcGatesRow, type DcGoalRow, type DcPlanChild, type DcPlanRisk, type DcPlanRow, type DcPollAnswer, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcSkipRow, type DelegationApprovalRecord, type DelegationEdge, type DelegationFoldIssue, type DelegationGraph, type DelegationNodeKind, type DelegationNodeState, type DelegationNodeStatus, type DelegationOutputRecord, type DelegationPhase, type DelegationRecord, type DelegationVersionSnapshot, type DevPreviewKind, type Estimate, type FoldDelegationOptions, type Gate, type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type NodeStatus, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type Tier, type UseDelegationChainResult, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, createGatewayReactRoot, delegationTableForNodeId, foldDelegation, isDcDevPreviewRow, isDcEditRow, isDcExecRow, isDcGatesRow, isDcGoalRow, isDcPlanChild, isDcPlanRow, isDcPollRow, isDcPreviewRow, isDcProbeRow, isDcQuestionRow, isDcReplanRow, isDcReviewRow, isDcSkipRow, isDelegationApprovalRecord, isDevPreviewKind, isEstimate, isGate, isTier, parseDelegationNodeId, useDelegationChain, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunEvents, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayWorkflows, useSmithersCollections, useSmithersGateway };
+export { DELEGATION_TIERS, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcGatesRow, type DcGoalRow, type DcPlanChild, type DcPlanRisk, type DcPlanRow, type DcPollAnswer, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcSkipRow, type DelegationApprovalRecord, type DelegationEdge, type DelegationFoldIssue, type DelegationGraph, type DelegationNodeKind, type DelegationNodeState, type DelegationNodeStatus, type DelegationOutputRecord, type DelegationPhase, type DelegationRecord, type DelegationVersionSnapshot, type DevPreviewKind, type Estimate, type FoldDelegationOptions, type Gate, type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type NodeStatus, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type Tier, type UseDelegationChainResult, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, createGatewayReactRoot, delegationTableForNodeId, foldDelegation, isDcDevPreviewRow, isDcEditRow, isDcExecRow, isDcGatesRow, isDcGoalRow, isDcPlanChild, isDcPlanRow, isDcPollRow, isDcPreviewRow, isDcProbeRow, isDcQuestionRow, isDcReplanRow, isDcReviewRow, isDcSkipRow, isDelegationApprovalRecord, isDevPreviewKind, isEstimate, isGate, isTier, parseDelegationNodeId, useDelegationChain, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunDiff, useGatewayRunEvents, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayWorkflows, useSmithersCollections, useSmithersGateway };

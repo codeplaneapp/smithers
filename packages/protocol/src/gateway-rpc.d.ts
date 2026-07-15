@@ -91,10 +91,9 @@ type GetRunRequest$1 = {
 };
 type GatewayDiffPatch$1 = {
     path: string;
+    operation: "add" | "modify" | "delete";
     diff: string;
-    additions?: number;
-    deletions?: number;
-    binary?: boolean;
+    binaryContent?: string;
 };
 type GatewayDiffBundle$1 = {
     seq: number;
