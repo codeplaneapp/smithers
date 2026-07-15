@@ -5,7 +5,9 @@ export type RuntimeConformanceResult = {
   stored: { status?: string } | undefined;
   outputs: Record<string, unknown[]> | undefined;
   generateCalls: number;
-  schemaEnforced: boolean;
+  finishedSaveCount: number;
+  runIds: string[];
+  schemaRejection: { rejected: boolean; engineOwned: boolean };
   capabilityProof: Record<string, { runtime: string; capability: string; operation: string }>;
   host: Record<string, unknown>;
 };
@@ -29,10 +31,16 @@ export function assertRuntimeConformance(
   expect(proof.stored?.status === "finished", "terminal run state was not persisted");
   expect(proof.result.output && (proof.result.output as { answer?: unknown }).answer === 43, "dependent output was not propagated");
   expect(proof.generateCalls === 1, `agent was called ${proof.generateCalls} times`);
-  expect(proof.schemaEnforced === true, "agent output schema was not enforced");
   expect(proof.outputs?.agent_output?.[0] && (proof.outputs.agent_output[0] as { answer?: unknown }).answer === 42, "agent output was not persisted");
   expect(proof.outputs?.dependent_output?.[0] && (proof.outputs.dependent_output[0] as { answer?: unknown }).answer === 43, "dependent output was not persisted");
-  expect(/^run_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(proof.result.runId), "run id is not UUID-shaped");
+  expect(proof.finishedSaveCount === 1, `run persisted "finished" state ${proof.finishedSaveCount} times, expected exactly once`);
+  expect(Array.isArray(proof.runIds) && proof.runIds.length >= 2, "expected run ids from at least two independent runs");
+  for (const runId of proof.runIds) {
+    expect(/^run_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(runId), `run id "${runId}" is not UUID-shaped`);
+  }
+  expect(new Set(proof.runIds).size === proof.runIds.length, "generated run ids were not unique across independent runs");
+  expect(proof.schemaRejection?.rejected === true, "engine did not reject agent output that failed its outputSchema");
+  expect(proof.schemaRejection?.engineOwned === true, "schema rejection was not attributable to engine-owned OUTPUT_SCHEMA_VALIDATION_FAILED enforcement");
 
   for (const capability of ["filesystem", "subprocess", "sandbox", "worktree"]) {
     const details = proof.capabilityProof[capability];

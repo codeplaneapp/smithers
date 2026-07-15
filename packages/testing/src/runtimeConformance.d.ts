@@ -10,7 +10,12 @@ type RuntimeConformanceResult = {
     } | undefined;
     outputs: Record<string, unknown[]> | undefined;
     generateCalls: number;
-    schemaEnforced: boolean;
+    finishedSaveCount: number;
+    runIds: string[];
+    schemaRejection: {
+        rejected: boolean;
+        engineOwned: boolean;
+    };
     capabilityProof: Record<string, {
         runtime: string;
         capability: string;

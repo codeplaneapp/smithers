@@ -53,7 +53,7 @@ export declare function Task(props: {
   needs?: Record<string, string>;
   deps?: Record<string, unknown>;
   depsOptional?: boolean;
-  children?: React.ReactNode | ((deps: Record<string, unknown>) => React.ReactNode);
+  children?: React.ReactNode | ((deps: Record<string, unknown>) => unknown);
   [key: string]: unknown;
 }): React.ReactElement | null;
 
