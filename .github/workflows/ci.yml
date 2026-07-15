@@ -276,16 +276,22 @@ jobs:
       - name: Run Postgres-gated tests
         env:
           SMITHERS_TEST_PG_URL: postgresql://smithers:smithers_pw@127.0.0.1:54329/smithers
-        # Three bun invocations: the CLI postgres tests, migrate-store suites,
-        # and engine time-travel tests each get their own process, keeping headroom under bun's
-        # ~2GB WASM plateau (PGlite instances are >1GB live and closed ones
-        # reclaim only lazily). If the migrate suites ever need finer
-        # process isolation again, migrateStoreKit.js's chunkedTest honors
-        # SMITHERS_MIGRATE_CHUNKS/SMITHERS_MIGRATE_CHUNK (out-of-chunk tests
-        # report as skipped, never silently lost).
+        # Give every migrate-store test its own bun process. A live PGlite uses
+        # >1GB of WASM memory and bun reclaims closed instances lazily, so even
+        # sequential tests in one process can exhaust the ~2GB runner ceiling.
+        # Each file currently has at most 13 chunked tests; running every chunk
+        # for every file preserves coverage while bounding each process to one.
         run: |
           bun test apps/cli/tests/*postgres*
-          bun test packages/smithers/tests/migrateSmithersStore.test.js packages/smithers/tests/migrateSmithersStoreReverse.test.js packages/smithers/tests/migrateSmithersStoreReceipts.test.js packages/smithers/tests/migrateSmithersStorePostgres.test.js
+          for test_file in \
+            packages/smithers/tests/migrateSmithersStore.test.js \
+            packages/smithers/tests/migrateSmithersStoreReverse.test.js \
+            packages/smithers/tests/migrateSmithersStoreReceipts.test.js \
+            packages/smithers/tests/migrateSmithersStorePostgres.test.js; do
+            for chunk in {0..12}; do
+              SMITHERS_MIGRATE_CHUNKS=13 SMITHERS_MIGRATE_CHUNK="$chunk" bun test "$test_file"
+            done
+          done
           bun test packages/engine/tests/time-travel-postgres.test.js
 
       - name: Stop Postgres
