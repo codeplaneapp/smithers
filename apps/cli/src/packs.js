@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { constants as fsConstants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync, lstatSync, realpathSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
+import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
 import { loadManifest, parseManifest, renderManifest } from "./manifest.js";
@@ -34,8 +34,8 @@ export function parsePackSpec(spec) {
   throw new Error(`Unsupported pack spec: ${raw}`);
 }
 
-function packRoot(from, global) {
-  if (global) return join(process.env.SMITHERS_HOME || join(homedir(), ".smithers"), "packs");
+function packRoot(from, global, env = process.env) {
+  if (global) return join(accountsRoot(env), "packs");
   let dir = resolve(from);
   while (true) {
     const candidate = join(dir, ".smithers");
@@ -46,7 +46,7 @@ function packRoot(from, global) {
   }
 }
 
-export function packDirs(from = process.cwd(), global = false) { return packRoot(from, global); }
+export function packDirs(from = process.cwd(), global = false, env = process.env) { return packRoot(from, global, env); }
 // The lock lives BESIDE the packs dir (.smithers/packs.lock.toon), not inside
 // it — the packs dir holds only installed pack contents.
 export function lockPath(root) { return join(dirname(root), "packs.lock.toon"); }
@@ -158,7 +158,7 @@ export function scanPackImports(root) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       const file = join(dir, entry.name);
       if (entry.isDirectory()) visit(file);
-      else if (/\.(?:ts|tsx)$/.test(entry.name)) files.push(file);
+      else if (/\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/.test(entry.name)) files.push(file);
     }
   };
   visit(root);

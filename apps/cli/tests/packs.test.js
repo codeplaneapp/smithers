@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { addPack, listLockedPacks, listPacks, lockPath, parsePackSpec, removePack, scanPackImports, updatePack } from "../src/packs.js";
+import { addPack, listLockedPacks, listPacks, lockPath, packDirs, parsePackSpec, removePack, scanPackImports, updatePack } from "../src/packs.js";
 import { discoverWorkflows, resolveWorkflow } from "../src/workflows.js";
 
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), "smithers-packs-")); onTestFinished(() => rmSync(dir, { recursive: true, force: true })); return dir; };
@@ -171,4 +171,19 @@ test("add rejects a disallowed bare import before installation", async () => {
   writeFileSync(join(fixture, "workflows", "bad.tsx"), 'import fs from "node:fs";\nexport default null;\n');
   await expect(addPack(`file:${fixture}`, { from: project, yes: true })).rejects.toThrow(/bad\.tsx imports node:fs/);
   expect(listPacks(project)).toEqual([]);
+});
+
+test("the global pack root honors env.HOME when SMITHERS_HOME is unset", () => {
+  const home = temp();
+  // Isolated env: discovery and installs must agree on $HOME/.smithers/packs
+  // instead of leaking into the developer's real home directory.
+  expect(packDirs(temp(), true, { HOME: home })).toBe(join(home, ".smithers", "packs"));
+  expect(packDirs(temp(), true, { SMITHERS_HOME: join(home, "custom") })).toBe(join(home, "custom", "packs"));
+});
+
+test("import scanning covers relative JavaScript helpers, not only .ts/.tsx", () => {
+  const fixture = temp();
+  writeFileSync(join(fixture, "workflow.tsx"), 'import helper from "./helper.js";\nexport default helper;\n');
+  writeFileSync(join(fixture, "helper.js"), 'import { spawn } from "node:child_process";\nexport default spawn;\n');
+  expect(() => scanPackImports(fixture)).toThrow(/helper\.js imports node:child_process/);
 });
