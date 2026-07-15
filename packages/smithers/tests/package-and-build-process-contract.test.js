@@ -112,6 +112,7 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
         "smithers-orchestrator/control-plane",
         "smithers-orchestrator/cloudflare",
         "smithers-orchestrator/daytona",
+        "smithers-orchestrator/microsandbox",
         "smithers-orchestrator/vercel",
         "smithers-orchestrator/aws",
         "smithers-orchestrator/gcp",

@@ -115,6 +115,11 @@
       "import": "./src/daytona.js",
       "default": "./src/daytona.js"
     },
+    "./microsandbox": {
+      "types": "./src/microsandbox.d.ts",
+      "import": "./src/microsandbox.js",
+      "default": "./src/microsandbox.js"
+    },
     "./vercel": {
       "types": "./src/vercel.d.ts",
       "import": "./src/vercel.js",
@@ -179,6 +184,7 @@
     "@smithers-orchestrator/gcp": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/memory": "workspace:*",
+    "@smithers-orchestrator/microsandbox": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/openapi": "workspace:*",
     "@smithers-orchestrator/react-reconciler": "workspace:*",

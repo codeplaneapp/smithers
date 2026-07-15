@@ -87,6 +87,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "./control-plane",
       "./cloudflare",
       "./daytona",
+      "./microsandbox",
       "./vercel",
       "./aws",
       "./gcp",

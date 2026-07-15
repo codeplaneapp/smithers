@@ -30,6 +30,11 @@ describe("public re-export barrels", () => {
     expect(gcp.GCP_SANDBOX_PROVIDER_ID).toBe("gcp-sandbox");
     expect(typeof gcp.createGcpSandboxProvider).toBe("function");
 
+    const microsandbox = await importBarrel("../src/microsandbox.js");
+    expect(microsandbox.MICROSANDBOX_PROVIDER_ID).toBe("microsandbox");
+    expect(typeof microsandbox.createMicrosandboxSandboxProvider).toBe("function");
+    expect(typeof microsandbox.registerMicrosandboxSandboxProvider).toBe("function");
+
     const sandbox = await importBarrel("../src/sandbox.js");
     // The sandbox core barrel exposes the shared provider-kit surface.
     expect(Object.keys(sandbox).length).toBeGreaterThan(0);

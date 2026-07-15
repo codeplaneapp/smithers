@@ -40,6 +40,7 @@
         "@smithers-orchestrator/graph": "workspace:*",
         "@smithers-orchestrator/integrations": "workspace:*",
         "@smithers-orchestrator/memory": "workspace:*",
+        "@smithers-orchestrator/microsandbox": "workspace:*",
         "@smithers-orchestrator/observability": "workspace:*",
         "@smithers-orchestrator/openapi": "workspace:*",
         "@smithers-orchestrator/pi-plugin": "workspace:*",
@@ -816,6 +817,21 @@
         "typescript": "~6.0.3",
       },
     },
+    "packages/microsandbox": {
+      "name": "@smithers-orchestrator/microsandbox",
+      "version": "0.28.0",
+      "dependencies": {
+        "@smithers-orchestrator/errors": "workspace:*",
+        "@smithers-orchestrator/sandbox": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "~6.0.3",
+      },
+      "optionalDependencies": {
+        "microsandbox": "0.6.6",
+      },
+    },
     "packages/openapi": {
       "name": "@smithers-orchestrator/openapi",
       "version": "0.29.0",
@@ -991,6 +1007,7 @@
         "@smithers-orchestrator/gcp": "workspace:*",
         "@smithers-orchestrator/graph": "workspace:*",
         "@smithers-orchestrator/memory": "workspace:*",
+        "@smithers-orchestrator/microsandbox": "workspace:*",
         "@smithers-orchestrator/observability": "workspace:*",
         "@smithers-orchestrator/openapi": "workspace:*",
         "@smithers-orchestrator/react-reconciler": "workspace:*",
@@ -2303,6 +2320,8 @@
 
     "@smithers-orchestrator/memory": ["@smithers-orchestrator/memory@workspace:packages/memory"],
 
+    "@smithers-orchestrator/microsandbox": ["@smithers-orchestrator/microsandbox@workspace:packages/microsandbox"],
+
     "@smithers-orchestrator/monitor-site": ["@smithers-orchestrator/monitor-site@workspace:apps/monitor-site"],
 
     "@smithers-orchestrator/observability": ["@smithers-orchestrator/observability@workspace:apps/observability"],
@@ -2450,6 +2469,16 @@
     "@speed-highlight/core": ["@speed-highlight/core@1.2.15", "", {}, "sha512-BMq1K3DsElxDWawkX6eLg9+CKJrTVGCBAWVuHXVUV2u0s2711qiChLSId6ikYPfxhdYocLNt3wWwSvDiTvFabw=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
+
+    "@superradcompany/microsandbox-darwin-arm64": ["@superradcompany/microsandbox-darwin-arm64@0.6.6", "", { "os": "darwin", "cpu": "arm64" }, "sha512-rw7cg0G9mj1c9/14K/K6PMg78H11rGRA5tDzRbx67kAeoKWpAJnFsIYLvOCHcD+6aM0Xdxote90FVVlt1Kknjw=="],
+
+    "@superradcompany/microsandbox-linux-arm64-gnu": ["@superradcompany/microsandbox-linux-arm64-gnu@0.6.6", "", { "os": "linux", "cpu": "arm64" }, "sha512-y4CdSPkSOtCwBNbG8Yhkahxg9yh/jpp4cBMOItCOj0JshU7luE2r4+6ceIrPNAkb8sF0fX7tNTXMDK4fJA8iFA=="],
+
+    "@superradcompany/microsandbox-linux-x64-gnu": ["@superradcompany/microsandbox-linux-x64-gnu@0.6.6", "", { "os": "linux", "cpu": "x64" }, "sha512-9yo6/G454L8ebzZP1qMxjIXRD3zJqQ68w2p9Ust7B7MOj5hr+VyuVZ0kYjSJAc4GSI0fno2xQe5z2tp5ynk78A=="],
+
+    "@superradcompany/microsandbox-win32-arm64-msvc": ["@superradcompany/microsandbox-win32-arm64-msvc@0.6.6", "", { "os": "win32", "cpu": "arm64" }, "sha512-q22t1DVlB8FR90adjBxTf0i//f3yzm7QYsKbsar29zoUAHC/24h6R4LE6YfIDWtPKB8jvTSpCeMehFoyXyLN1Q=="],
+
+    "@superradcompany/microsandbox-win32-x64-msvc": ["@superradcompany/microsandbox-win32-x64-msvc@0.6.6", "", { "os": "win32", "cpu": "x64" }, "sha512-m2ir3DNw+Sc7i2DEg1kgY9bFmFHCFt2KamnXzJMUL9qtkE2n11GqIUhQJtKXwcWyM7nH0AxooMmnbx7UDMG8Ww=="],
 
     "@tanstack/ai": ["@tanstack/ai@0.39.0", "", { "dependencies": { "@ag-ui/core": "^0.0.52", "@standard-schema/spec": "^1.1.0", "@tanstack/ai-event-client": "0.6.8", "@tanstack/ai-utils": "0.3.1", "partial-json": "^0.1.7" }, "peerDependencies": { "@opentelemetry/api": ">=1.9.0" }, "optionalPeers": ["@opentelemetry/api"] }, "sha512-UxqvTMwhGeUCafX/4nzFJfi1iT8uNJ4rqtB482Fc3knbmuKBO+C8d0CRxHqnPjZqc9r+lCmrv/AwqpeKfZMkaQ=="],
 
@@ -3533,6 +3562,8 @@
 
     "micromatch": ["micromatch@4.0.8", "", { "dependencies": { "braces": "^3.0.3", "picomatch": "^2.3.1" } }, "sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA=="],
 
+    "microsandbox": ["microsandbox@0.6.6", "", { "optionalDependencies": { "@superradcompany/microsandbox-darwin-arm64": "0.6.6", "@superradcompany/microsandbox-linux-arm64-gnu": "0.6.6", "@superradcompany/microsandbox-linux-x64-gnu": "0.6.6", "@superradcompany/microsandbox-win32-arm64-msvc": "0.6.6", "@superradcompany/microsandbox-win32-x64-msvc": "0.6.6" }, "bin": { "microsandbox": "bin/microsandbox.cjs", "msb": "bin/microsandbox.cjs" } }, "sha512-KF1HcZH61qw3QUEDQouIbtaS6LcrKIYf5fJOyauje+8sqzUcjcMZVqwngligNhEyLCH1+TtHnZbIOp9Ndf7k7g=="],
+
     "miller-rabin": ["miller-rabin@4.0.1", "", { "dependencies": { "bn.js": "^4.0.0", "brorand": "^1.0.1" }, "bin": { "miller-rabin": "bin/miller-rabin" } }, "sha512-115fLhvZVqWwHPbClyntxEVfVDfl9DLLTuJvq3g2O/Oxi8AiNouAHvDSzHS0viUJc+V5vm3eq91Xwqn9dp4jRA=="],
 
     "mime": ["mime@3.0.0", "", { "bin": { "mime": "cli.js" } }, "sha512-jSCU7/VB1loIWBZe14aEYHU/+1UMEHoaO7qxCOVJOw9GgH72VAWppxNcjU+x9a2k3GSIBXNKxXQFqRvvZ7vr3A=="],
@@ -4520,6 +4551,8 @@
     "@smithers-orchestrator/integrations/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
     "@smithers-orchestrator/memory/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
+
+    "@smithers-orchestrator/microsandbox/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
     "@smithers-orchestrator/observability/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 

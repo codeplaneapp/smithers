@@ -58,6 +58,11 @@
       "import": "./packages/smithers/src/daytona.js",
       "default": "./packages/smithers/src/daytona.js"
     },
+    "./microsandbox": {
+      "types": "./packages/smithers/src/microsandbox.d.ts",
+      "import": "./packages/smithers/src/microsandbox.js",
+      "default": "./packages/smithers/src/microsandbox.js"
+    },
     "./gcp": {
       "types": "./packages/smithers/src/gcp.d.ts",
       "import": "./packages/smithers/src/gcp.js",
@@ -188,6 +193,7 @@
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/integrations": "workspace:*",
     "@smithers-orchestrator/memory": "workspace:*",
+    "@smithers-orchestrator/microsandbox": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/openapi": "workspace:*",
     "@smithers-orchestrator/pi-plugin": "workspace:*",

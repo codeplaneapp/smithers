@@ -41,6 +41,7 @@ export const DEFAULT_DECLARATION_PACKAGES = [
   "packages/gateway",
   "packages/graph",
   "packages/integrations",
+  "packages/microsandbox",
   "packages/smithers",
 ];
 
