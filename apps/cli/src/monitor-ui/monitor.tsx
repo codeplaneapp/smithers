@@ -3560,6 +3560,28 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-metric-label.tone-failed, .mon-metric-value.tone-failed { color: var(--err); }
 .mon-metric-value { font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 
+/* Overview has three deliberate layouts: a persistent rail on desktop, a
+   narrower rail beside the table on tablet, and vertically stacked controls,
+   rail, and table on phones. The table keeps its own horizontal scrollport
+   at the smallest width so the shell itself never needs to overflow. */
+@media (max-width: 760px) {
+  .mon-shell { height: auto; min-height: 100vh; overflow: visible; }
+  .mon-topbar { align-items: stretch; padding: var(--sp-3); }
+  .mon-brand { flex-wrap: wrap; }
+  .mon-toolbar { width: 100%; }
+  .mon-filter-input { flex: 1 1 100%; min-width: 0; }
+  .mon-toolbar [data-slot="select-trigger"] { flex: 1 1 140px; min-width: 0; }
+  .mon-body { display: block; overflow: visible; }
+  .mon-rail { max-height: 30vh; overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: var(--sp-3); }
+  .mon-main { overflow: visible; padding: var(--sp-3); }
+  .mon-overview { height: auto; }
+  .mon-overview .mon-runs-table-panel { min-height: 320px; }
+  .mon-runs-scroll { overflow: auto; }
+  .mon-runs-pagination { align-items: flex-start; }
+  .mon-runs-pagination-controls { flex-wrap: wrap; }
+  .mon-crons-panel { max-width: 100%; }
+}
+
 @keyframes mon-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes mon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) {
