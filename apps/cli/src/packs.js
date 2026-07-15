@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { constants as fsConstants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { constants as fsConstants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync, lstatSync, realpathSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
@@ -60,6 +60,35 @@ function readLock(root) {
 }
 function writeLock(root, value) { mkdirSync(dirname(lockPath(root)), { recursive: true }); rmSync(join(root, "packs.lock.toon"), { force: true }); writeFileSync(lockPath(root), `${encode(value)}\n`); }
 
+function assertNoInstalledSymlinks(root) {
+  try { if (lstatSync(root).isSymbolicLink()) throw new Error(`Installed pack contains an unsupported symlink: ${root}`); }
+  catch (error) { if (error?.code !== "ENOENT") throw error; return; }
+  const visit = (current) => {
+    const info = lstatSync(current);
+    if (info.isSymbolicLink()) throw new Error(`Installed pack contains an unsupported symlink: ${current}`);
+    if (!info.isDirectory()) return;
+    for (const entry of readdirSync(current, { withFileTypes: true })) visit(join(current, entry.name));
+  };
+  visit(root);
+}
+
+function overlayTree(source, target) {
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const incoming = join(source, entry.name);
+    const destination = join(target, entry.name);
+    if (entry.isDirectory()) {
+      if (existsSync(destination) && !lstatSync(destination).isDirectory()) rmSync(destination, { force: true });
+      mkdirSync(destination, { recursive: true });
+      overlayTree(incoming, destination);
+    } else {
+      if (existsSync(destination) || lstatSyncSafe(destination)) rmSync(destination, { recursive: true, force: true });
+      cpSync(incoming, destination, { recursive: true });
+    }
+  }
+}
+
+function lstatSyncSafe(path) { try { lstatSync(path); return true; } catch { return false; } }
+
 /** Lock entries for both scopes, for `packs update` (the lock — not the set of
  * currently-intact pack dirs — is the source of truth for what to update). */
 export function listLockedPacks(from = process.cwd()) {
@@ -109,6 +138,7 @@ function moduleImports(file, source) {
 }
 
 function assertNoSymlinks(root) {
+  if (lstatSync(root).isSymbolicLink()) throw new Error(`Pack contains an unsupported symlink: ${root}`);
   const visit = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const file = join(dir, entry.name);
@@ -218,6 +248,10 @@ async function fetchPack(parsed, staging) {
 
 export async function addPack(spec, { from = process.cwd(), global = false, yes = false, subdir = "" } = {}) {
   const parsed = parsePackSpec(spec);
+  if (parsed.kind === "file") {
+    try { if (lstatSync(parsed.path).isSymbolicLink()) throw new Error(`Pack contains an unsupported symlink: ${parsed.path}`); }
+    catch (error) { if (error?.code !== "ENOENT") throw error; }
+  }
   // file: archives have no spec-embedded subdir; allow callers to name one.
   if (subdir && !parsed.subdir) parsed.subdir = subdir;
   const temp = mkdtempSync(join(resolve(from), ".smithers-pack-")); const staging = join(temp, "pack");
@@ -277,8 +311,32 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
       rl.close();
       if (answer !== "y" && answer !== "yes") throw new Error("Pack installation cancelled");
     }
-    const root = packRoot(from, global); const target = join(root, manifest.name); rmSync(target, { recursive: true, force: true }); mkdirSync(root, { recursive: true }); cpSync(sourceRoot, target, { recursive: true });
-    const lock = readLock(root); lock[manifest.name] = { spec, ...(parsed.subdir ? { subdir: parsed.subdir } : {}), resolved: fetched.resolved, version: manifest.version, integrity: fetched.integrity }; writeLock(root, lock);
+    const root = packRoot(from, global); const target = join(root, manifest.name);
+    assertNoInstalledSymlinks(target);
+    mkdirSync(root, { recursive: true });
+    const merged = join(root, `.${manifest.name}.staging-${process.pid}-${Date.now()}`);
+    const backup = join(root, `.${manifest.name}.backup-${process.pid}-${Date.now()}`);
+    rmSync(merged, { recursive: true, force: true }); rmSync(backup, { recursive: true, force: true });
+    try {
+      if (existsSync(target)) cpSync(target, merged, { recursive: true }); else mkdirSync(merged, { recursive: true });
+      overlayTree(sourceRoot, merged);
+      if (existsSync(target)) {
+        rmSync(backup, { recursive: true, force: true });
+        // The backup and replacement are siblings, so the swap is same-filesystem.
+        renameSync(target, backup);
+      }
+      try { renameSync(merged, target); }
+      catch (error) {
+        if (existsSync(backup)) renameSync(backup, target);
+        throw error;
+      }
+      const lock = readLock(root); lock[manifest.name] = { spec, ...(parsed.subdir ? { subdir: parsed.subdir } : {}), resolved: fetched.resolved, version: manifest.version, integrity: fetched.integrity }; writeLock(root, lock);
+      rmSync(backup, { recursive: true, force: true });
+    } catch (error) {
+      if (lstatSyncSafe(target)) rmSync(target, { recursive: true, force: true });
+      if (existsSync(backup)) renameSync(backup, target);
+      throw error;
+    } finally { rmSync(merged, { recursive: true, force: true }); rmSync(backup, { recursive: true, force: true }); }
     return { name: manifest.name, manifest, report, scope: global ? "global" : "local", path: target };
   } finally { rmSync(temp, { recursive: true, force: true }); }
 }
