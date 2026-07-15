@@ -38,7 +38,7 @@ export class WatchTree {
     polling = false;
     pollingDisabled = false;
     currentPollIntervalMs = MIN_POLL_MS;
-    waitResolve = null;
+    waitResolves = new Set();
     closed = false;
     /**
    * @param {string} rootDir
@@ -81,10 +81,13 @@ export class WatchTree {
             catch { }
         }
         this.watchers = [];
-        // Resolve any pending wait with empty array
-        if (this.waitResolve) {
-            this.waitResolve([]);
-            this.waitResolve = null;
+        // Resolve any pending waits with empty arrays
+        if (this.waitResolves.size > 0) {
+            const waitResolves = [...this.waitResolves];
+            this.waitResolves.clear();
+            for (const resolve of waitResolves) {
+                resolve([]);
+            }
         }
         logInfo("closed hot watch tree", {
             rootDir: this.rootDir,
@@ -131,13 +134,12 @@ export class WatchTree {
                 resume(Effect.succeed(files));
                 return;
             }
-            this.waitResolve = (files) => {
+            const waitResolve = (files) => {
                 resume(Effect.succeed(files));
             };
+            this.waitResolves.add(waitResolve);
             return Effect.sync(() => {
-                if (this.waitResolve) {
-                    this.waitResolve = null;
-                }
+                this.waitResolves.delete(waitResolve);
             });
         }).pipe(Effect.annotateLogs({
             rootDir: this.rootDir,
@@ -329,9 +331,12 @@ export class WatchTree {
             changedFileCount: files.length,
             changedFiles: files.join(","),
         }, "hot:watch");
-        if (this.waitResolve) {
-            this.waitResolve(files);
-            this.waitResolve = null;
+        if (this.waitResolves.size > 0) {
+            const waitResolves = [...this.waitResolves];
+            this.waitResolves.clear();
+            for (const resolve of waitResolves) {
+                resolve(files);
+            }
         }
     }
 }

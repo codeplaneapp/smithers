@@ -36,17 +36,37 @@ describe("WatchTree", () => {
         const result = await waitPromise;
         expect(result).toEqual([]);
     });
-    test("interrupting waitEffect clears the pending resolver", async () => {
+    test("interrupting waitEffect removes only its resolver", async () => {
         const dir = makeTempDir();
         cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
         const tree = new WatchTree(dir);
-        const fiber = Effect.runFork(tree.waitEffect());
-        for (let i = 0; i < 10 && tree.waitResolve === null; i += 1) {
+        const interrupted = Effect.runFork(tree.waitEffect());
+        const remaining = Effect.runFork(tree.waitEffect());
+        for (let i = 0; i < 10 && tree.waitResolves.size < 2; i += 1) {
             await Bun.sleep(0);
         }
-        expect(tree.waitResolve).toBeFunction();
-        await Effect.runPromise(Fiber.interrupt(fiber));
-        expect(tree.waitResolve).toBeNull();
+        expect(tree.waitResolves.size).toBe(2);
+        await Effect.runPromise(Fiber.interrupt(interrupted));
+        expect(tree.waitResolves.size).toBe(1);
+        tree.onFileChange(join(dir, "changed.ts"));
+        tree.flush();
+        expect(await Effect.runPromise(Fiber.join(remaining))).toEqual([join(dir, "changed.ts")]);
+    });
+    test("flush resolves all concurrent waiters", async () => {
+        const dir = makeTempDir();
+        cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+        const tree = new WatchTree(dir);
+        const first = Effect.runFork(tree.waitEffect());
+        const second = Effect.runFork(tree.waitEffect());
+        for (let i = 0; i < 10 && tree.waitResolves.size < 2; i += 1) {
+            await Bun.sleep(0);
+        }
+        expect(tree.waitResolves.size).toBe(2);
+        tree.onFileChange(join(dir, "changed.ts"));
+        tree.flush();
+        const expected = [join(dir, "changed.ts")];
+        expect(await Effect.runPromise(Fiber.join(first))).toEqual(expected);
+        expect(await Effect.runPromise(Fiber.join(second))).toEqual(expected);
     });
     test("detects file changes", async () => {
         const dir = makeTempDir();
