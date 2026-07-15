@@ -1350,6 +1350,10 @@ importers:
         version: 6.0.3
 
   packages/gateway:
+    dependencies:
+      '@smithers-orchestrator/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -1366,6 +1370,9 @@ importers:
       '@smithers-orchestrator/gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@smithers-orchestrator/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@tanstack/db':
         specifier: 0.6.13
         version: 0.6.13(typescript@6.0.3)
@@ -1394,9 +1401,6 @@ importers:
 
   packages/gateway-react:
     dependencies:
-      '@smithers-orchestrator/gateway':
-        specifier: workspace:*
-        version: link:../gateway
       '@smithers-orchestrator/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
