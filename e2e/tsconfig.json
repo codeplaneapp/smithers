@@ -13,6 +13,9 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "browser/fixture.js",
+    "browser/consumer.ts",
+    "runtime/cloudflare-worker.js"
   ]
 }

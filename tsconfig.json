@@ -41,7 +41,7 @@
         "./packages/smithers/src/cloudflare.js"
       ],
       "smithers-orchestrator/browser": [
-        "./packages/smithers/src/browser.js"
+        "./packages/smithers/src/browser.d.ts"
       ],
       "smithers-orchestrator/*": [
         "./packages/smithers/src/*.js",
