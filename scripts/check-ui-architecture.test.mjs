@@ -105,6 +105,15 @@ for (const [name, mutate, expected] of [
     "components-non-visual",
   ],
   [
+    "CSS-in-JS visual declarations in packages/components",
+    (root) => write(
+      root,
+      "packages/components/src/Visual.tsx",
+      'import styled from "styled-components"; export const Visual = styled.section`display: grid; color: red;`;\n',
+    ),
+    "components-non-visual",
+  ],
+  [
     "intrinsic visual JSX in packages/components",
     (root) => write(root, "packages/components/src/Visual.tsx", "export function Visual() { return <strong />; }\n"),
     "components-non-visual",
@@ -247,6 +256,22 @@ for (const [name, mutate, expected] of [
         main: "index.cjs",
       });
       write(root, "packages/data/index.cjs", "module.exports.useData = function useData() { return null; };\n");
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "a public hook hidden behind an export-star entry",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        exports: { ".": "./index.js" },
+      });
+      write(root, "packages/data/index.js", "export * from './hooks.js';\n");
+      write(
+        root,
+        "packages/data/hooks.js",
+        "export * from './index.js';\nexport function useSecret() { return 'secret'; }\nexport function useData() { return null; }\n",
+      );
     },
     "single-public-hook-package",
   ],

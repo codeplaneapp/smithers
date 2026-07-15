@@ -405,6 +405,31 @@ function intrinsicVisualTags(source, path) {
   return sorted(tags);
 }
 
+function cssInJsVisualTags(source, path) {
+  const file = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    path.endsWith(".tsx") || path.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const tags = [];
+  const templateText = (template) => {
+    if (ts.isNoSubstitutionTemplateLiteral(template)) return template.text;
+    return [template.head.text, ...template.templateSpans.map((span) => span.literal.text)].join(" ");
+  };
+  const visit = (node) => {
+    if (ts.isTaggedTemplateExpression(node)) {
+      const css = templateText(node.template);
+      const hasCssDeclaration = /(?:^|[;{\s])(?:--[\w-]+|[a-z][\w-]*)\s*:\s*[^;\n}]+(?:[;}]|$)/i.test(css);
+      if (hasCssDeclaration) tags.push(node.tag.getText(file));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return sorted(tags);
+}
+
 function formatViolation(rule, detail) {
   return `${rule} :: ${detail}`;
 }
@@ -505,6 +530,44 @@ function hasPublicHookExport(source) {
   return false;
 }
 
+function relativeExportStarSpecifiers(source) {
+  const tokens = lexModules(source);
+  const specifiers = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index].value !== "export" || tokens[index + 1]?.value !== "*") continue;
+    for (let cursor = index + 2; cursor < Math.min(tokens.length, index + 80); cursor += 1) {
+      if (tokens[cursor].value === ";") break;
+      if (
+        tokens[cursor].value === "from" &&
+        tokens[cursor + 1]?.kind === "string" &&
+        tokens[cursor + 1].value.startsWith(".")
+      ) {
+        specifiers.push(tokens[cursor + 1].value);
+        break;
+      }
+    }
+  }
+  return sorted(specifiers);
+}
+
+function publicEntryExportsHook(entryPath, files, sources) {
+  const pending = [entryPath];
+  const visited = new Set();
+  while (pending.length > 0) {
+    const path = pending.pop();
+    if (!path || visited.has(path)) continue;
+    visited.add(path);
+    const source = sources.get(path);
+    if (source === undefined) continue;
+    if (hasPublicHookExport(source)) return true;
+    for (const specifier of relativeExportStarSpecifiers(source)) {
+      const target = resolveRelativeSource(path, specifier, files);
+      if (target && !visited.has(target)) pending.push(target);
+    }
+  }
+  return false;
+}
+
 function uiLayer(path) {
   const prefix = "packages/ui/src/";
   if (!path.startsWith(prefix)) return null;
@@ -532,11 +595,13 @@ function importedUiLayer(file, specifier) {
 function resolveRelativeSource(file, specifier, files) {
   if (!specifier.startsWith(".")) return null;
   const base = posix.normalize(posix.join(posix.dirname(file), specifier));
-  const candidates = [
+  const extension = extname(base);
+  const stem = extension ? base.slice(0, -extension.length) : base;
+  const candidates = [...new Set([
     base,
-    ...[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].map((extension) => `${base}${extension}`),
+    ...[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].map((candidateExtension) => `${stem}${candidateExtension}`),
     ...[".ts", ".tsx", ".js", ".jsx"].map((extension) => `${base}/index${extension}`),
-  ];
+  ])];
   return candidates.find((candidate) => files.includes(candidate)) ?? null;
 }
 
@@ -779,6 +844,9 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         for (const tag of intrinsicVisualTags(sources.get(path), path)) {
           violations.push(formatViolation("components-non-visual", `${path} renders intrinsic <${tag}>`));
         }
+        for (const tag of cssInJsVisualTags(sources.get(path), path)) {
+          violations.push(formatViolation("components-non-visual", `${path} declares CSS-in-JS with ${tag}`));
+        }
       }
       if (
         path.startsWith("packages/ui/src/") &&
@@ -892,7 +960,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     if (kind === "smithers" && manifest.name !== "@smithers-orchestrator/gateway-react") {
       for (const entryPath of publicEntryPaths(absoluteRoot, path, manifest)) {
         const entrySource = readFileSync(join(absoluteRoot, entryPath), "utf8");
-        if (hasPublicHookExport(entrySource)) {
+        if (publicEntryExportsHook(entryPath, files, sources)) {
           violations.push(formatViolation("single-public-hook-package", `${path} root entry ${entryPath} exports a React-style hook`));
         }
         for (const specifier of parseModuleSpecifiers(entrySource)) {
