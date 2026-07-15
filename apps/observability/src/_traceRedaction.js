@@ -59,36 +59,78 @@ function isSensitiveKey(key) {
 /**
  * @param {unknown} value
  * @param {Set<string>} applied
+ * @param {WeakSet<object>} ancestors
+ * @param {string} key
  * @returns {unknown}
  */
-function redactStructuredFields(value, applied) {
-    if (Array.isArray(value)) {
-        let next = value;
-        for (let index = 0; index < value.length; index++) {
-            const redacted = redactStructuredFields(value[index], applied);
-            if (redacted === value[index]) continue;
-            if (next === value) next = [...value];
-            next[index] = redacted;
+function redactStructuredFields(value, applied, ancestors = new WeakSet(), key = "") {
+    if (value === null || typeof value !== "object") return value;
+    if (ancestors.has(value)) return "[Circular]";
+
+    ancestors.add(value);
+    try {
+        // JSON.stringify invokes toJSON before it visits object fields. Materialize
+        // that result here so sensitive fields introduced by a custom serializer are
+        // still seen by the structural redactor.
+        let skipOwnToJSON = false;
+        try {
+            const toJSON = /** @type {{ toJSON?: unknown }} */ (value).toJSON;
+            if (typeof toJSON === "function") {
+                let jsonValue;
+                try {
+                    jsonValue = toJSON.call(value, key);
+                } catch {
+                    // Fall back to enumerable fields, but remove the throwing
+                    // serializer from the copied object so JSON.stringify cannot
+                    // invoke it again later.
+                    skipOwnToJSON = true;
+                }
+                if (!skipOwnToJSON) {
+                    return redactStructuredFields(jsonValue, applied, ancestors, key);
+                }
+            }
+        } catch {
+            // A throwing toJSON getter should be treated the same way as a
+            // throwing serializer: preserve the remaining enumerable fields.
+            skipOwnToJSON = true;
+        }
+
+        if (Array.isArray(value)) {
+            let next = value;
+            for (let index = 0; index < value.length; index++) {
+                const redacted = redactStructuredFields(value[index], applied, ancestors, String(index));
+                if (redacted === value[index]) continue;
+                if (next === value) next = [...value];
+                next[index] = redacted;
+            }
+            if (skipOwnToJSON && next === value) return [...value];
+            return next;
+        }
+
+        const record = /** @type {Record<string, unknown>} */ (value);
+        const entries = Object.keys(record)
+            .filter((fieldKey) => !(skipOwnToJSON && fieldKey === "toJSON"))
+            .map((fieldKey) => [fieldKey, record[fieldKey]]);
+        let next = record;
+        for (const [fieldKey, fieldValue] of entries) {
+            let redacted = fieldValue;
+            if (isSensitiveKey(fieldKey)) {
+                redacted = "[REDACTED]";
+                applied.add("sensitive-field");
+            } else {
+                redacted = redactStructuredFields(fieldValue, applied, ancestors, fieldKey);
+            }
+            if (redacted === fieldValue) continue;
+            if (next === record) next = Object.fromEntries(entries);
+            next[fieldKey] = redacted;
+        }
+        if (skipOwnToJSON && next === record) {
+            next = Object.fromEntries(entries);
         }
         return next;
+    } finally {
+        ancestors.delete(value);
     }
-    if (value === null || typeof value !== "object") return value;
-
-    const record = /** @type {Record<string, unknown>} */ (value);
-    let next = record;
-    for (const [key, fieldValue] of Object.entries(record)) {
-        let redacted = fieldValue;
-        if (isSensitiveKey(key)) {
-            redacted = "[REDACTED]";
-            applied.add("sensitive-field");
-        } else {
-            redacted = redactStructuredFields(fieldValue, applied);
-        }
-        if (redacted === fieldValue) continue;
-        if (next === record) next = Object.fromEntries(Object.entries(record));
-        next[key] = redacted;
-    }
-    return next;
 }
 
 /**
@@ -99,7 +141,7 @@ export function redactValue(value) {
     /** @type {Set<string>} */
     const applied = new Set();
     const structured = redactStructuredFields(value, applied);
-    const input = typeof structured === "string" ? structured : JSON.stringify(structured ?? null);
+    const input = typeof structured === "string" ? structured : (JSON.stringify(structured ?? null) ?? "null");
     let next = input;
     for (const rule of rules) {
         next = next.replace(rule.pattern, (match) => {
@@ -115,7 +157,7 @@ export function redactValue(value) {
             return rule.replace ?? "[REDACTED]";
         });
     }
-    if (applied.size === 0) return { value, applied: false, ruleIds: [] };
+    if (applied.size === 0) return { value: structured, applied: false, ruleIds: [] };
     if (typeof structured === "string") {
         return { value: next, applied: true, ruleIds: [...applied] };
     }

@@ -190,6 +190,30 @@ describe("@smithers-orchestrator/telegram", () => {
     expect(diagnostics).not.toContain(`https://telegram.example/bot${token}/getMe`);
   });
 
+  test("redacts bot tokens from AbortError diagnostics without changing abort semantics", async () => {
+    const token = "123456:live_abort-token";
+    const client = createTelegramClient({
+      botToken: token,
+      apiRoot: "https://telegram.example",
+      maxRetries: 0,
+      fetch: async (url) => {
+        throw new DOMException(`request aborted for ${url}`, "AbortError");
+      },
+    });
+
+    const error = await client.getMe().catch((cause) => cause);
+    expect(error.name).toBe("AbortError");
+    const diagnostics = JSON.stringify({
+      name: error.name,
+      message: error.message,
+      cause: error.cause,
+      stack: error.stack,
+    });
+    expect(diagnostics).toContain("<redacted>");
+    expect(diagnostics).not.toContain(token);
+    expect(diagnostics).not.toContain(`https://telegram.example/bot${token}/getMe`);
+  });
+
   test("does not retry permanent Bot API errors", async () => {
     const client = createTelegramClient({
       botToken: "bad",

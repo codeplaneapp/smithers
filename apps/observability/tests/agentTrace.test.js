@@ -293,6 +293,40 @@ describe("redactValue", () => {
         });
         expect(credentials.headers["x-api-key"]).toBe("opaque-provider-key");
     });
+    test("redacts sensitive fields returned from own and prototype toJSON methods", () => {
+        const ownToJSON = {
+            toJSON() {
+                return { apiKey: "own-to-json-secret", source: "own" };
+            },
+        };
+        class PrototypeToJSON {
+            toJSON() {
+                return { apiKey: "prototype-to-json-secret", source: "prototype" };
+            }
+        }
+
+        for (const value of [ownToJSON, new PrototypeToJSON()]) {
+            const r = redactValue(value);
+
+            expect(r.applied).toBe(true);
+            expect(r.ruleIds).toContain("sensitive-field");
+            expect(r.value).toEqual({ apiKey: "[REDACTED]", source: expect.any(String) });
+        }
+    });
+    test("continues redaction when toJSON throws", () => {
+        const value = {
+            apiKey: "secret-hidden-behind-a-throwing-serializer",
+            toJSON() {
+                throw new Error("serializer failed");
+            },
+        };
+
+        expect(() => redactValue(value)).not.toThrow();
+        const r = redactValue(value);
+        expect(r.applied).toBe(true);
+        expect(r.ruleIds).toContain("sensitive-field");
+        expect(r.value).toEqual({ apiKey: "[REDACTED]" });
+    });
     // Regression: the api-key rule previously required an underscore after
     // sk/pk (Stripe-style) and so missed the hyphenated provider keys Smithers
     // actually drives (OpenAI sk-/sk-proj-, Anthropic sk-ant-), and the

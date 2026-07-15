@@ -102,8 +102,16 @@ function sanitizeTelegramNetworkCause(cause, botToken, requestUrl) {
       .split(botToken)
       .join("<redacted>")
       .replace(/\/bot\d+:[A-Za-z0-9_-]+/g, "/bot<redacted>");
-  const sanitized = new Error(redact(cause instanceof Error ? cause.message : cause));
-  sanitized.name = redact(cause instanceof Error ? cause.name : "Error");
+  const message =
+    cause instanceof Error || (isRecord(cause) && typeof cause.message === "string")
+      ? cause.message
+      : cause;
+  const name =
+    cause instanceof Error || (isRecord(cause) && typeof cause.name === "string")
+      ? cause.name
+      : "Error";
+  const sanitized = new Error(redact(message));
+  sanitized.name = redact(name);
   if (isRecord(cause) && (typeof cause.code === "string" || typeof cause.code === "number")) {
     sanitized.code = redact(cause.code);
   }
@@ -289,7 +297,9 @@ export function createTelegramClient(options) {
             signal: init.signal,
           });
         } catch (error) {
-          if (init.signal?.aborted || error?.name === "AbortError") throw error;
+          if (init.signal?.aborted || error?.name === "AbortError") {
+            throw sanitizeTelegramNetworkCause(error, token, requestUrl);
+          }
           throw new TelegramNetworkError(method, sanitizeTelegramNetworkCause(error, token, requestUrl));
         }
 
