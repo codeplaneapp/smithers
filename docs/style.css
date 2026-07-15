@@ -1,7 +1,7 @@
 /* ============================================================================
    Smithers docs — Brass Lieutenant theme layer
-   Adapted from the Next.js landing page (apps/landing-page). Dark editorial:
-   near-black canvas, brass accent, serif display (Newsreader) + DM Sans body.
+   Adapted from the Next.js landing page (apps/landing-page). Warm editorial:
+   paper or near-black canvas, brass accent, serif display (Newsreader) + DM Sans body.
    Kept intentionally light-touch — colors/fonts/appearance come from docs.json;
    this file adds the brand accents and the custom landing-page styling.
    Mintlify auto-loads any .css in the content dir. Selectors use the documented
@@ -27,21 +27,40 @@
 /* ── Landing page (index.mdx, mode: "custom") ───────────────────────────── */
 
 .landing-root {
+  --l-canvas: #faf8f4;
+  --l-surface: #eee8df;
+  --l-ink: #2b251f;
+  --l-ink-muted: #6b6258;
+  --l-brass: #735f26;
+  --l-brass-muted: #7a6a47;
+  --l-volatile: #8c4a32;
+  --l-fluid: #796027;
+  --l-line: #d8d0c4;
+  --l-action-ink: #fffdf9;
+  --l-preview-surface: #fffdf9;
+  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  color: var(--l-ink);
+  background: var(--l-canvas);
+  position: relative;
+  isolation: isolate;
+}
+
+.dark .landing-root {
   --l-canvas: #0c0a09;
   --l-surface: #161310;
   --l-ink: #f2ede4;
   --l-ink-muted: #9a9288;
   --l-brass: #cab16a;
   --l-brass-muted: #8a7a52;
+  --l-volatile: #c98b6b;
+  --l-fluid: #c9a86b;
   --l-line: #2a2620;
-  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  color: var(--l-ink);
-  position: relative;
-  isolation: isolate;
+  --l-action-ink: #0c0a09;
+  --l-preview-surface: #0e0b09;
 }
 
-/* Full-bleed dark canvas behind the whole landing, in both light and dark
-   docs modes — the landing is a dark editorial page by brand. */
+/* Full-bleed canvas behind the whole landing, matched to the active docs
+   color mode. The root background also prevents gaps in full-page captures. */
 .landing-root::before {
   content: "";
   position: fixed;
@@ -117,7 +136,7 @@
   font-size: 0.95rem;
   text-decoration: none;
   background: var(--l-brass);
-  color: #0c0a09 !important;
+  color: var(--l-action-ink) !important;
   border: 1px solid var(--l-brass);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
@@ -220,7 +239,7 @@
   font-weight: 600;
   font-size: 0.95rem;
   color: var(--l-ink);
-  background: #0e0b09;
+  background: var(--l-preview-surface);
 }
 
 /* Clickable recipe chips — the nerdsnipe. Mono, sharp, brass on hover. */
