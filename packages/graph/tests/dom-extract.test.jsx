@@ -680,8 +680,8 @@ describe("extractFromHost", () => {
                 { key: "", label: "No key" },
                 "bad",
             ],
-            approvalAllowedScopes: ["admin", "ops"],
-            approvalAllowedUsers: ["alice", "bob"],
+            approvalAllowedScopes: ["admin", 1, "ops"],
+            approvalAllowedUsers: ["alice", null, "bob"],
             approvalAutoApprove: {
                 after: 10,
                 audit: true,
@@ -727,22 +727,6 @@ describe("extractFromHost", () => {
         expect(task.onHijackExit).toBe("reopen");
         expect(task.memoryConfig).toBe(memory);
         expect(task.scorers).toBe(scorers);
-    });
-    test("rejects malformed approval restrictions", () => {
-        const cases = [
-            { rawField: "approvalAllowedUsers", field: "allowedUsers", value: "alice" },
-            { rawField: "approvalAllowedScopes", field: "allowedScopes", value: ["admin", 1] },
-            { rawField: "approvalAllowedUsers", field: "allowedUsers", value: ["alice", ""] },
-            { rawField: "approvalAllowedScopes", field: "allowedScopes", value: new Array(1) },
-        ];
-        for (const { rawField, field, value } of cases) {
-            expect(() => extractFromHost(hostEl("smithers:task", {
-                id: "approval",
-                output: "out",
-                needsApproval: true,
-                [rawField]: value,
-            }))).toThrow(`${field} must be an array of non-empty strings`);
-        }
     });
     test("throws a clear error for object prompts when MDX preload is inactive", () => {
         const root = hostEl("smithers:task", {

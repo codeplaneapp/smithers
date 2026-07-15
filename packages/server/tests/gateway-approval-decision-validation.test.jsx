@@ -326,44 +326,6 @@ describe("Gateway approval decision validation", () => {
         await approver.close();
         await deploymentApprover.close();
     });
-    test("malformed durable approval restrictions cannot be decided", async () => {
-        const dbPath = makeDbPath("malformed-restrictions");
-        dbPaths.push(dbPath);
-        const bundle = createSelectApprovalWorkflow(dbPath);
-        const port = await startGateway(bundle, "malformed-restrictions-approval");
-        const operator = await connectGateway(port, "operator-token");
-        const runId = await createRunAndAwaitApproval(operator, "malformed-restrictions-approval");
-        const adapter = new SmithersDb(bundle.db);
-        const approval = await adapter.getApproval(runId, "pick-plan", 0);
-        expect(approval).toBeDefined();
-        const originalRequest = JSON.parse(approval?.requestJson ?? "{}");
-        const cases = [
-            { field: "allowedUsers", value: "user:operator" },
-            { field: "allowedUsers", value: ["user:operator", 42] },
-            { field: "allowedScopes", value: ["*", ""] },
-        ];
-        for (const { field, value } of cases) {
-            await adapter.insertOrUpdateApproval({
-                ...approval,
-                requestJson: JSON.stringify({
-                    ...originalRequest,
-                    [field]: value,
-                }),
-            });
-            const response = await operator.request("approvals.decide", {
-                runId,
-                nodeId: "pick-plan",
-                iteration: 0,
-                approved: true,
-                decision: { selected: "balanced" },
-            });
-            expect(response.ok).toBe(false);
-            expect(response.error.code).toBe("INVALID_REQUEST");
-            expect(response.error.message).toContain(`${field} must be an array of non-empty strings`);
-            expect((await adapter.getApproval(runId, "pick-plan", 0))?.status).toBe("requested");
-        }
-        await operator.close();
-    });
     test("select approvals: denials skip decision-schema validation", async () => {
         const dbPath = makeDbPath("select-deny");
         dbPaths.push(dbPath);

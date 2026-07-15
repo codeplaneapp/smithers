@@ -202,21 +202,6 @@ function strings(value) {
 }
 /**
  * @param {unknown} value
- * @param {"allowedScopes" | "allowedUsers"} field
- * @param {string} nodeId
- * @returns {string[] | undefined}
- */
-function approvalRestriction(value, field, nodeId) {
-    if (value === undefined) {
-        return undefined;
-    }
-    if (!Array.isArray(value) || Array.from(value).some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
-        throw new SmithersError("INVALID_INPUT", `Approval ${nodeId} ${field} must be an array of non-empty strings.`);
-    }
-    return value;
-}
-/**
- * @param {unknown} value
  * @returns {Record<string, string> | undefined}
  */
 function needs(value) {
@@ -742,8 +727,6 @@ export function extractGraph(root, opts) {
                 raw.approvalOnDeny === "fail"
                 ? raw.approvalOnDeny
                 : undefined;
-            const approvalAllowedScopes = approvalRestriction(raw.approvalAllowedScopes, "allowedScopes", logicalNodeId);
-            const approvalAllowedUsers = approvalRestriction(raw.approvalAllowedUsers, "allowedUsers", logicalNodeId);
             const kind = raw.__smithersKind;
             if (kind === "human" &&
                 typeof raw.retries === "number" &&
@@ -779,8 +762,8 @@ export function extractGraph(root, opts) {
                 approvalMode,
                 approvalOnDeny,
                 approvalOptions: approvalOptions(raw.approvalOptions),
-                approvalAllowedScopes,
-                approvalAllowedUsers,
+                approvalAllowedScopes: strings(raw.approvalAllowedScopes),
+                approvalAllowedUsers: strings(raw.approvalAllowedUsers),
                 approvalAutoApprove: approvalAutoApprove(raw.approvalAutoApprove),
                 skipIf: Boolean(raw.skipIf),
                 retries,

@@ -119,21 +119,6 @@ function normalizeOptions(options) {
     }));
 }
 /**
- * @param {unknown} value
- * @param {"allowedScopes" | "allowedUsers"} field
- * @param {string} id
- * @returns {string[] | undefined}
- */
-function validateApprovalRestriction(value, field, id) {
-    if (value === undefined) {
-        return undefined;
-    }
-    if (!Array.isArray(value) || Array.from(value).some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
-        throw new SmithersError("INVALID_INPUT", `Approval ${id} ${field} must be an array of non-empty strings.`);
-    }
-    return value;
-}
-/**
  * @param {ApprovalAutoApprove[keyof ApprovalAutoApprove]} callback
  * @param {import("@smithers-orchestrator/driver").SmithersCtx<unknown> | null} ctx
  * @returns {boolean | undefined}
@@ -157,8 +142,6 @@ export function Approval(props) {
     const mode = props.mode ?? "approve";
     const approvalMode = normalizeMode(mode);
     const options = normalizeOptions(props.options);
-    const allowedScopes = validateApprovalRestriction(props.allowedScopes, "allowedScopes", props.id);
-    const allowedUsers = validateApprovalRestriction(props.allowedUsers, "allowedUsers", props.id);
     const outputSchema = props.outputSchema ??
         (isZodObject(props.output) ? props.output : defaultSchemaForMode(mode));
     if ((mode === "select" || mode === "rank") && (!options || options.length === 0)) {
@@ -182,8 +165,8 @@ export function Approval(props) {
         requestTitle: props.request.title,
         ...(props.request.summary ? { requestSummary: props.request.summary } : {}),
         ...(options ? { approvalOptions: options } : {}),
-        ...(allowedScopes?.length ? { approvalAllowedScopes: allowedScopes } : {}),
-        ...(allowedUsers?.length ? { approvalAllowedUsers: allowedUsers } : {}),
+        ...(props.allowedScopes?.length ? { approvalAllowedScopes: props.allowedScopes } : {}),
+        ...(props.allowedUsers?.length ? { approvalAllowedUsers: props.allowedUsers } : {}),
         ...(autoApprove ? { approvalAutoApprove: autoApprove } : {}),
         ...props.request.metadata,
         ...props.meta,
@@ -231,8 +214,8 @@ export function Approval(props) {
         approvalMode,
         approvalOnDeny: props.onDeny,
         approvalOptions: options,
-        approvalAllowedScopes: allowedScopes,
-        approvalAllowedUsers: allowedUsers,
+        approvalAllowedScopes: props.allowedScopes,
+        approvalAllowedUsers: props.allowedUsers,
         approvalAutoApprove: autoApprove,
         timeoutMs: props.timeoutMs,
         heartbeatTimeoutMs: props.heartbeatTimeoutMs,
