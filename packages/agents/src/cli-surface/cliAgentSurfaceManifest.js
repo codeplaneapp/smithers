@@ -485,6 +485,39 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
       notes: "Smithers sends prompts through `openclaw agent --session-id <id>` when a session id is supplied.",
     },
   },
+  {
+    id: "pool",
+    displayName: "Pool",
+    binary: "pool",
+    packageExport: "PoolAgent",
+    defaultOutputFormat: "stream-json",
+    docsUrls: ["https://poolside.ai/docs"],
+    emittedFlags: [
+      "exec",
+      "-o",
+      "-d",
+      "--unsafe-auto-allow",
+      "-m",
+      "-a",
+      "-r",
+      "--continue",
+      "--sandbox",
+      "-p",
+    ],
+    supportedFlags: [],
+    unsupportedFlags: [],
+    optionMappings: [
+      { option: "agentName", flag: "-a" },
+      { option: "resumeSession", flag: "-r" },
+      { option: "resume", flag: "-r" },
+      { option: "continue", flag: "--continue" },
+    ],
+    resume: {
+      kind: "flag",
+      emitted: ["-r"],
+      notes: "Smithers persists the Pool session id and reuses it through -r for headless continuation.",
+    },
+  },
 ];
 
 /**

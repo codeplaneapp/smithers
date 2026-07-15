@@ -787,6 +787,40 @@ const ampStrategy = {
     ],
 };
 // ---------------------------------------------------------------------------
+// Pool strategy
+// ---------------------------------------------------------------------------
+const poolAuthSkip = {
+    id: "api_key_valid",
+    run: async () => {
+        return {
+            id: "api_key_valid",
+            status: "skip",
+            message: "Pool uses its own auth — run `pool login` to authenticate.",
+            durationMs: 0,
+        };
+    },
+};
+const poolRateLimitSkip = {
+    id: "rate_limit_status",
+    run: async () => {
+        return {
+            id: "rate_limit_status",
+            status: "skip",
+            message: "Pool rate limits are checked by the CLI at runtime.",
+            durationMs: 0,
+        };
+    },
+};
+const poolStrategy = {
+    agentId: "pool",
+    command: "pool",
+    checks: [
+        checkCliInstalled("pool", "Pool"),
+        poolAuthSkip,
+        poolRateLimitSkip,
+    ],
+};
+// ---------------------------------------------------------------------------
 // Strategy registry
 // ---------------------------------------------------------------------------
 const strategies = {
@@ -795,6 +829,7 @@ const strategies = {
     antigravity: antigravityStrategy,
     agy: antigravityStrategy,
     amp: ampStrategy,
+    pool: poolStrategy,
 };
 /**
  * @param {string} command

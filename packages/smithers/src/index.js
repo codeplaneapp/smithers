@@ -98,6 +98,7 @@
 /** @typedef {import("@smithers-orchestrator/agents").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("@smithers-orchestrator/agents").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("@smithers-orchestrator/agents").OpenCodeAgentOptions} OpenCodeAgentOptions */
+/** @typedef {import("@smithers-orchestrator/agents").PoolAgentOptions} PoolAgentOptions */
 /** @typedef {import("@smithers-orchestrator/agents").VibeAgentOptions} VibeAgentOptions */
 /** @typedef {import("@smithers-orchestrator/components").PollerProps} PollerProps */
 /** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
@@ -212,7 +213,7 @@ export {
   trellisPrompts,
 } from "@smithers-orchestrator/components";
 // Agents
-export { AnthropicAgent, OpenAIAgent, HermesAgent, HermesCliAgent, OpenClawAgent, AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent, VibeAgent, OpenCodeAgent, createHttpTool, } from "@smithers-orchestrator/agents";
+export { AnthropicAgent, OpenAIAgent, HermesAgent, HermesCliAgent, OpenClawAgent, AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent, VibeAgent, OpenCodeAgent, PoolAgent, createHttpTool, } from "@smithers-orchestrator/agents";
 // VCS
 export { runJj, getJjPointer, revertToJjPointer, isJjRepo, workspaceAdd, workspaceList, workspaceClose, } from "@smithers-orchestrator/vcs/jj";
 // Core API
