@@ -258,9 +258,13 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "node scripts/check-llms.mjs",
       "node scripts/check-smithers-test-script.mjs",
       "node scripts/check-dts.mjs",
-      "pnpm -r --no-bail test",
       "pnpm -C .smithers test:ddd",
+      // Linux and Windows both run the weighted shard balancer; Linux package
+      // shards use the generous per-package timeout, the extras lane (shard 0)
+      // owns the serial gates.
       "node scripts/run-workspace-tests.mjs --shard",
+      "--timeout-minutes 20",
+      "matrix.shard == 0",
       "bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts",
       "bun test --timeout=120000 apps/cli/tests/tui-zmux.e2e.test.js",
       "run: pnpm coverage",
