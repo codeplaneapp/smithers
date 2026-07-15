@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 
 type ControlPlaneSqlite = Database | {
   exec(sql: string): unknown;
+  transaction<T>(callback: () => T): () => T;
   query(sql: string): {
     run(...params: unknown[]): unknown;
     get(...params: unknown[]): Record<string, unknown> | null;

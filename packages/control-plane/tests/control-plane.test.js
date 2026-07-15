@@ -609,6 +609,63 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
     }
   });
 
+  test("rolls back every audited mutation when the audit write fails", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_atomic", slug: "atomic", name: "Atomic", createdAtMs: 1 });
+      store.createTeam({ orgId: "org_atomic", teamId: "team_atomic", slug: "atomic", name: "Atomic", createdAtMs: 2 });
+      store.addTeamMember({ orgId: "org_atomic", teamId: "team_atomic", userId: "user_atomic", role: "member", createdAtMs: 3 });
+      store.createProject({ orgId: "org_atomic", projectId: "project_atomic", slug: "atomic", name: "Atomic", createdAtMs: 4 });
+      store.addProjectTeam({ orgId: "org_atomic", projectId: "project_atomic", teamId: "team_atomic", role: "viewer", createdAtMs: 5 });
+      store.upsertBillingAccount({ orgId: "org_atomic", plan: "starter", billingCustomerId: "cus_atomic", status: "active", updatedAtMs: 6 });
+      store.upsertIdentityProvider({ orgId: "org_atomic", providerId: "idp_atomic", type: "oidc", issuer: "https://before.test", metadata: { version: 1 }, createdAtMs: 7, updatedAtMs: 7 });
+      store.setUsageLimit({ orgId: "org_atomic", projectId: "project_atomic", metric: "requests", unit: "count", period: "daily", limitQuantity: 10, updatedAtMs: 8 });
+      store.putSecretRef({ orgId: "org_atomic", projectId: "project_atomic", name: "token", provider: "vault", ref: "vault://before", createdBy: "user_atomic", createdAtMs: 9 });
+
+      const before = {
+        member: sqlite.query("SELECT * FROM _smithers_cp_team_members").all(),
+        projectTeam: sqlite.query("SELECT * FROM _smithers_cp_project_teams").all(),
+        billing: sqlite.query("SELECT * FROM _smithers_cp_billing_accounts").all(),
+        provider: sqlite.query("SELECT * FROM _smithers_cp_identity_providers").all(),
+        limit: sqlite.query("SELECT * FROM _smithers_cp_usage_limits").all(),
+        secret: sqlite.query("SELECT * FROM _smithers_cp_secret_refs").all(),
+      };
+      const auditCount = sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_audit_events").get().count;
+      sqlite.exec(`
+        CREATE TRIGGER fail_control_plane_audit
+        BEFORE INSERT ON _smithers_cp_audit_events
+        BEGIN
+          SELECT RAISE(ABORT, 'forced audit failure');
+        END;
+      `);
+
+      const expectAuditFailure = (operation) => expect(operation).toThrow("forced audit failure");
+      expectAuditFailure(() => store.createOrg({ orgId: "org_new", slug: "new", name: "New", createdAtMs: 10 }));
+      expectAuditFailure(() => store.createTeam({ orgId: "org_atomic", teamId: "team_new", slug: "new", name: "New", createdAtMs: 11 }));
+      expectAuditFailure(() => store.addTeamMember({ orgId: "org_atomic", teamId: "team_atomic", userId: "user_atomic", role: "admin", createdAtMs: 12 }));
+      expectAuditFailure(() => store.createProject({ orgId: "org_atomic", projectId: "project_new", slug: "new", name: "New", createdAtMs: 13 }));
+      expectAuditFailure(() => store.addProjectTeam({ orgId: "org_atomic", projectId: "project_atomic", teamId: "team_atomic", role: "admin", createdAtMs: 14 }));
+      expectAuditFailure(() => store.upsertBillingAccount({ orgId: "org_atomic", plan: "business", billingCustomerId: "cus_new", status: "trialing", updatedAtMs: 15 }));
+      expectAuditFailure(() => store.upsertIdentityProvider({ orgId: "org_atomic", providerId: "idp_atomic", type: "saml", issuer: "https://after.test", metadata: { version: 2 }, createdAtMs: 16, updatedAtMs: 16 }));
+      expectAuditFailure(() => store.setUsageLimit({ orgId: "org_atomic", projectId: "project_atomic", metric: "requests", unit: "count", period: "daily", limitQuantity: 99, updatedAtMs: 17 }));
+      expectAuditFailure(() => store.putSecretRef({ orgId: "org_atomic", projectId: "project_atomic", name: "token", provider: "other", ref: "vault://after", createdBy: "user_atomic", createdAtMs: 18 }));
+
+      expect(sqlite.query("SELECT * FROM _smithers_cp_orgs WHERE org_id = 'org_new'").all()).toEqual([]);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_teams WHERE team_id = 'team_new'").all()).toEqual([]);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_projects WHERE project_id = 'project_new'").all()).toEqual([]);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_team_members").all()).toEqual(before.member);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_project_teams").all()).toEqual(before.projectTeam);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_billing_accounts").all()).toEqual(before.billing);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_identity_providers").all()).toEqual(before.provider);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_usage_limits").all()).toEqual(before.limit);
+      expect(sqlite.query("SELECT * FROM _smithers_cp_secret_refs").all()).toEqual(before.secret);
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_audit_events").get().count).toBe(auditCount);
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
   test("recovers secret refs from a crash mid project_key migration (legacy table left behind)", () => {
     const sqlite = new Database(":memory:");
     try {

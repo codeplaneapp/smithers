@@ -586,10 +586,20 @@ export class ControlPlaneStore {
         const orgSlug = slug("slug", input.slug);
         const createdAtMs = timestamp(input.createdAtMs);
         try {
-            this.sqlite.query(`
+            this.sqlite.transaction(() => {
+                this.sqlite.query(`
 INSERT INTO _smithers_cp_orgs (org_id, slug, name, created_at_ms)
 VALUES (?, ?, ?, ?)
-`).run(orgId, orgSlug, nonEmptyString("name", input.name), createdAtMs);
+                `).run(orgId, orgSlug, nonEmptyString("name", input.name), createdAtMs);
+                this.recordAuditEvent({
+                    orgId,
+                    actorId: "system",
+                    action: "org.create",
+                    targetType: "org",
+                    targetId: orgId,
+                    occurredAtMs: createdAtMs,
+                });
+            })();
         }
         catch (error) {
             if (isUniqueConstraintError(error, "_smithers_cp_orgs.slug")) {
@@ -597,14 +607,6 @@ VALUES (?, ?, ?, ?)
             }
             throw error;
         }
-        this.recordAuditEvent({
-            orgId,
-            actorId: "system",
-            action: "org.create",
-            targetType: "org",
-            targetId: orgId,
-            occurredAtMs: createdAtMs,
-        });
         return this.getOrg(orgId);
     }
 
@@ -632,10 +634,19 @@ LIMIT 1
         const teamSlug = slug("slug", input.slug);
         const createdAtMs = timestamp(input.createdAtMs);
         try {
-            this.sqlite.query(`
+            this.sqlite.transaction(() => {
+                this.sqlite.query(`
 INSERT INTO _smithers_cp_teams (org_id, team_id, slug, name, created_at_ms)
 VALUES (?, ?, ?, ?, ?)
-`).run(orgId, teamId, teamSlug, nonEmptyString("name", input.name), createdAtMs);
+                `).run(orgId, teamId, teamSlug, nonEmptyString("name", input.name), createdAtMs);
+                this.recordAuditEvent({
+                    orgId,
+                    action: "team.create",
+                    targetType: "team",
+                    targetId: teamId,
+                    occurredAtMs: createdAtMs,
+                });
+            })();
         }
         catch (error) {
             if (isUniqueConstraintError(error, "_smithers_cp_teams.org_id, _smithers_cp_teams.slug")) {
@@ -643,13 +654,6 @@ VALUES (?, ?, ?, ?, ?)
             }
             throw error;
         }
-        this.recordAuditEvent({
-            orgId,
-            action: "team.create",
-            targetType: "team",
-            targetId: teamId,
-            occurredAtMs: createdAtMs,
-        });
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, team_id AS teamId, slug, name, created_at_ms AS createdAtMs
 FROM _smithers_cp_teams
@@ -668,12 +672,13 @@ LIMIT 1
         const userId = requiredId("userId", input.userId);
         const role = nonEmptyString("role", input.role ?? "member");
         const createdAtMs = timestamp(input.createdAtMs);
-        this.sqlite.query(`
+        this.sqlite.transaction(() => {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_team_members (org_id, team_id, user_id, role, created_at_ms)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(org_id, team_id, user_id) DO UPDATE SET role = excluded.role
-`).run(orgId, teamId, userId, role, createdAtMs);
-        this.recordAuditEvent({
+            `).run(orgId, teamId, userId, role, createdAtMs);
+            this.recordAuditEvent({
             orgId,
             actorId: userId,
             action: "team.member.upsert",
@@ -681,7 +686,8 @@ ON CONFLICT(org_id, team_id, user_id) DO UPDATE SET role = excluded.role
             targetId: teamId,
             occurredAtMs: createdAtMs,
             metadata: { role },
-        });
+            });
+        })();
     }
 
     /**
@@ -695,10 +701,20 @@ ON CONFLICT(org_id, team_id, user_id) DO UPDATE SET role = excluded.role
         const metadata = jsonObject(input.metadata);
         const createdAtMs = timestamp(input.createdAtMs);
         try {
-            this.sqlite.query(`
+            this.sqlite.transaction(() => {
+                this.sqlite.query(`
 INSERT INTO _smithers_cp_projects (org_id, project_id, slug, name, metadata_json, created_at_ms)
 VALUES (?, ?, ?, ?, ?, ?)
-`).run(orgId, projectId, projectSlug, nonEmptyString("name", input.name), JSON.stringify(metadata), createdAtMs);
+                `).run(orgId, projectId, projectSlug, nonEmptyString("name", input.name), JSON.stringify(metadata), createdAtMs);
+                this.recordAuditEvent({
+                    orgId,
+                    projectId,
+                    action: "project.create",
+                    targetType: "project",
+                    targetId: projectId,
+                    occurredAtMs: createdAtMs,
+                });
+            })();
         }
         catch (error) {
             if (isUniqueConstraintError(error, "_smithers_cp_projects.org_id, _smithers_cp_projects.slug")) {
@@ -706,14 +722,6 @@ VALUES (?, ?, ?, ?, ?, ?)
             }
             throw error;
         }
-        this.recordAuditEvent({
-            orgId,
-            projectId,
-            action: "project.create",
-            targetType: "project",
-            targetId: projectId,
-            occurredAtMs: createdAtMs,
-        });
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, project_id AS projectId, slug, name, metadata_json AS metadataJson, created_at_ms AS createdAtMs
 FROM _smithers_cp_projects
@@ -732,12 +740,13 @@ LIMIT 1
         const teamId = requiredId("teamId", input.teamId);
         const role = nonEmptyString("role", input.role ?? "viewer");
         const createdAtMs = timestamp(input.createdAtMs);
-        this.sqlite.query(`
+        this.sqlite.transaction(() => {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_project_teams (org_id, project_id, team_id, role, created_at_ms)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(org_id, project_id, team_id) DO UPDATE SET role = excluded.role
-`).run(orgId, projectId, teamId, role, createdAtMs);
-        this.recordAuditEvent({
+            `).run(orgId, projectId, teamId, role, createdAtMs);
+            this.recordAuditEvent({
             orgId,
             projectId,
             action: "project.team.upsert",
@@ -745,7 +754,8 @@ ON CONFLICT(org_id, project_id, team_id) DO UPDATE SET role = excluded.role
             targetId: teamId,
             occurredAtMs: createdAtMs,
             metadata: { role },
-        });
+            });
+        })();
     }
 
     /**
@@ -756,7 +766,8 @@ ON CONFLICT(org_id, project_id, team_id) DO UPDATE SET role = excluded.role
         const orgId = requiredId("orgId", input.orgId);
         const updatedAtMs = timestamp(input.updatedAtMs);
         const status = nonEmptyString("status", input.status ?? "active");
-        this.sqlite.query(`
+        this.sqlite.transaction(() => {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_billing_accounts (org_id, plan, billing_customer_id, status, updated_at_ms)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(org_id) DO UPDATE SET
@@ -764,15 +775,16 @@ ON CONFLICT(org_id) DO UPDATE SET
   billing_customer_id = excluded.billing_customer_id,
   status = excluded.status,
   updated_at_ms = excluded.updated_at_ms
-`).run(orgId, nonEmptyString("plan", input.plan), input.billingCustomerId ?? null, status, updatedAtMs);
-        this.recordAuditEvent({
+            `).run(orgId, nonEmptyString("plan", input.plan), input.billingCustomerId ?? null, status, updatedAtMs);
+            this.recordAuditEvent({
             orgId,
             action: "billing.account.upsert",
             targetType: "billing_account",
             targetId: orgId,
             occurredAtMs: updatedAtMs,
             metadata: { plan: input.plan, status },
-        });
+            });
+        })();
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, plan, billing_customer_id AS billingCustomerId, status, updated_at_ms AS updatedAtMs
 FROM _smithers_cp_billing_accounts
@@ -793,7 +805,8 @@ LIMIT 1
         const updatedAtMs = timestamp(input.updatedAtMs);
         const createdAtMs = timestamp(input.createdAtMs ?? updatedAtMs);
         const status = nonEmptyString("status", input.status ?? "active");
-        this.sqlite.query(`
+        this.sqlite.transaction(() => {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_identity_providers (
   org_id, provider_id, type, issuer, sso_url, certificate_ref, status, metadata_json, created_at_ms, updated_at_ms
 )
@@ -806,7 +819,7 @@ ON CONFLICT(org_id, provider_id) DO UPDATE SET
   status = excluded.status,
   metadata_json = excluded.metadata_json,
   updated_at_ms = excluded.updated_at_ms
-`).run(
+            `).run(
             orgId,
             providerId,
             nonEmptyString("type", input.type),
@@ -817,15 +830,16 @@ ON CONFLICT(org_id, provider_id) DO UPDATE SET
             JSON.stringify(metadata),
             createdAtMs,
             updatedAtMs,
-        );
-        this.recordAuditEvent({
+            );
+            this.recordAuditEvent({
             orgId,
             action: "identity_provider.upsert",
             targetType: "identity_provider",
             targetId: providerId,
             occurredAtMs: updatedAtMs,
             metadata: { type: input.type, status },
-        });
+            });
+        })();
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, provider_id AS providerId, type, issuer, sso_url AS ssoUrl, certificate_ref AS certificateRef, status, metadata_json AS metadataJson, created_at_ms AS createdAtMs, updated_at_ms AS updatedAtMs
 FROM _smithers_cp_identity_providers
@@ -935,15 +949,16 @@ ORDER BY metric, unit
         const period = usageLimitPeriod(input.period ?? "monthly");
         const limitValue = quantity(input.limitQuantity);
         const updatedAtMs = timestamp(input.updatedAtMs);
-        this.sqlite.query(`
+        this.sqlite.transaction(() => {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_usage_limits (org_id, project_key, project_id, metric, unit, period, limit_quantity, updated_at_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(org_id, project_key, metric, unit, period) DO UPDATE SET
   project_id = excluded.project_id,
   limit_quantity = excluded.limit_quantity,
   updated_at_ms = excluded.updated_at_ms
-`).run(orgId, projectKey(projectId), projectId, metric, unit, period, limitValue, updatedAtMs);
-        this.recordAuditEvent({
+            `).run(orgId, projectKey(projectId), projectId, metric, unit, period, limitValue, updatedAtMs);
+            this.recordAuditEvent({
             orgId,
             projectId,
             action: "usage_limit.upsert",
@@ -951,7 +966,8 @@ ON CONFLICT(org_id, project_key, metric, unit, period) DO UPDATE SET
             targetId: projectId ?? orgId,
             occurredAtMs: updatedAtMs,
             metadata: { metric, unit, period, limitQuantity: limitValue },
-        });
+            });
+        })();
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, project_id AS projectId, metric, unit, period, limit_quantity AS limitQuantity, updated_at_ms AS updatedAtMs
 FROM _smithers_cp_usage_limits
@@ -1031,7 +1047,8 @@ WHERE org_id = ? AND metric = ? AND unit = ? AND observed_at_ms >= ? AND observe
         // Atomic upsert (matches every other replace-on-write method). The prior
         // DELETE-then-INSERT was two statements: a crash between them destroyed the
         // existing secret ref outright.
-        this.sqlite.query(`
+        this.sqlite.transaction(() => {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_secret_refs (org_id, project_key, project_id, name, provider, ref, created_by, created_at_ms, rotated_at_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(org_id, project_key, name) DO UPDATE SET
@@ -1041,7 +1058,7 @@ ON CONFLICT(org_id, project_key, name) DO UPDATE SET
   created_by = excluded.created_by,
   created_at_ms = excluded.created_at_ms,
   rotated_at_ms = excluded.rotated_at_ms
-`).run(
+            `).run(
             orgId,
             secretProjectKey,
             projectId,
@@ -1051,8 +1068,8 @@ ON CONFLICT(org_id, project_key, name) DO UPDATE SET
             createdBy,
             createdAtMs,
             rotatedAtMs,
-        );
-        this.recordAuditEvent({
+            );
+            this.recordAuditEvent({
             orgId,
             projectId,
             actorId: createdBy,
@@ -1061,7 +1078,8 @@ ON CONFLICT(org_id, project_key, name) DO UPDATE SET
             targetId: name,
             occurredAtMs: rotatedAtMs ?? createdAtMs,
             metadata: { provider },
-        });
+            });
+        })();
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, project_id AS projectId, name, provider, ref, created_by AS createdBy, created_at_ms AS createdAtMs, rotated_at_ms AS rotatedAtMs
 FROM _smithers_cp_secret_refs

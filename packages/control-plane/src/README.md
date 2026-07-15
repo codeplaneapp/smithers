@@ -3,7 +3,7 @@
 Single-module package. `index.js` exports `ensureControlPlaneTables(sqlite)` and
 `ControlPlaneStore`: durable org/team/project, billing-account, identity-provider,
 usage + quota, secret-reference, and audit primitives over an injected minimal
-sqlite handle (`bun:sqlite` `Database`, or any object with `exec`/`query`).
+sqlite handle (`bun:sqlite` `Database`, or any object with `exec`/`query`/`transaction`).
 All tables are prefixed `_smithers_cp_`, and every mutation except
 `recordUsage` (which only appends a `_smithers_cp_usage_events` row) also
 writes an audit event.
