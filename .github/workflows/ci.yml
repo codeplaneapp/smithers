@@ -156,15 +156,21 @@ jobs:
 
       - name: Run test gates
         if: (runner.os == 'Linux' && matrix.shard == 0) || (runner.os == 'Windows' && matrix.shard == 1)
+        # Every gate runs even after a failure so one drift cannot hide the
+        # next; the step fails at the end with the full list.
+        shell: bash
         run: |
-          node scripts/check-single-effect-version.mjs
-          node scripts/check-dependency-boundaries.mjs
-          node scripts/check-ui-architecture.mjs
-          node --test scripts/check-ui-architecture.test.mjs
-          node scripts/check-docs.mjs
-          node scripts/check-llms.mjs
-          node scripts/check-smithers-test-script.mjs
-          bun test scripts/publish-next.test.mjs scripts/run-workspace-tests-timeout.test.mjs
+          failed=()
+          gate() { echo "::group::$*"; if "$@"; then echo "::endgroup::"; else echo "::endgroup::"; echo "::error title=Gate failed::$*"; failed+=("$*"); fi; }
+          gate node scripts/check-single-effect-version.mjs
+          gate node scripts/check-dependency-boundaries.mjs
+          gate node scripts/check-ui-architecture.mjs
+          gate node --test scripts/check-ui-architecture.test.mjs
+          gate node scripts/check-docs.mjs
+          gate node scripts/check-llms.mjs
+          gate node scripts/check-smithers-test-script.mjs
+          gate bun test scripts/publish-next.test.mjs scripts/run-workspace-tests-timeout.test.mjs
+          if [ "${#failed[@]}" -gt 0 ]; then printf 'Failed gates:\n'; printf '  %s\n' "${failed[@]}"; exit 1; fi
 
       - name: Run d.ts freshness gate (Linux)
         if: runner.os == 'Linux' && matrix.shard == 0
