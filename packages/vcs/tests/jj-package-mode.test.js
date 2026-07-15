@@ -138,5 +138,7 @@ describe("bundled jj package executable mode", () => {
 				await fs.rm(temp, { recursive: true, force: true });
 			}
 		},
+		// npm pack shells out for real; a loaded CI runner regularly blows a 5s budget.
+		60_000,
 	);
 });
