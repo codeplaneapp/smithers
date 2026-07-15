@@ -19,7 +19,7 @@ const staged = (frame: Frame, nodeId: string, value: Record<string, unknown>, it
 
 async function withFakeCli<T>(inspect: string, fn: (root: string) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), "smithers-seeded-onboarding-"));
-  const old = { cwd: process.cwd(), home: process.env.HOME, path: process.env.PATH };
+  const old = { cwd: process.cwd(), home: process.env.HOME, path: process.env.PATH, bunx: process.env.SMITHERS_BUNX };
   try {
     const bin = join(root, "bin");
     await mkdir(bin, { recursive: true });
@@ -37,11 +37,17 @@ async function withFakeCli<T>(inspect: string, fn: (root: string) => Promise<T>)
     process.chdir(root);
     process.env.HOME = root;
     process.env.PATH = `${bin}${process.platform === "win32" ? ";" : ":"}${old.path ?? ""}`;
+    // The PATH prepend alone does not intercept on Windows: a bare `bunx` in
+    // a Bun shell command does not resolve the fake .cmd, so the real bunx
+    // runs and hangs the test to its timeout. The workflow honors an explicit
+    // SMITHERS_BUNX launcher path instead (same seam as create-workflow).
+    process.env.SMITHERS_BUNX = cli;
     return await fn(root);
   } finally {
     process.chdir(old.cwd);
     if (old.home === undefined) delete process.env.HOME; else process.env.HOME = old.home;
     if (old.path === undefined) delete process.env.PATH; else process.env.PATH = old.path;
+    if (old.bunx === undefined) delete process.env.SMITHERS_BUNX; else process.env.SMITHERS_BUNX = old.bunx;
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
   }
 }

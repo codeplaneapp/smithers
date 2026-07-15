@@ -120,7 +120,9 @@ async function isolated(
 }
 
 afterAll(async () => {
-  await Promise.all(temporaryRoots.map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
+  // Best-effort: Windows can hold EBUSY on a former child cwd past any sane
+  // backoff, and a leaked temp dir on an ephemeral runner must not fail the suite.
+  await Promise.all(temporaryRoots.map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined)));
 });
 
 const check = (passed = true) => ({

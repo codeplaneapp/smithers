@@ -14,6 +14,7 @@ const sorted = (values: Iterable<string>) => [...values].sort((a, b) => a.locale
 
 const workflowOwners = {
   "./tests/curated-authoring-workflows.test.tsx": ["create-skill.tsx", "create-workflow.tsx"],
+  "./tests/issue-blitz.test.ts": ["issue-blitz.tsx"],
   "./tests/curated-ddd-eval-workflows.test.tsx": ["docs-driven-development.tsx", "eval-suite-run.tsx"],
   "./tests/curated-system-workflows.test.tsx": ["init.tsx", "post-failure.tsx", "upgrade.tsx"],
   "./tests/seeded-pack-workflows.test.tsx": ["add.tsx", "share-pack.tsx"],

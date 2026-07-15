@@ -561,7 +561,9 @@ describe("codex issue merge watchdog", () => {
     });
   }, 30_000);
 
-  test("terminates a stuck Smithers command at its deadline", () => {
+  // bun spawnSync `timeout` enforcement is unreliable on Windows (observed
+  // ~14s past a 50ms deadline); the watchdog runs on POSIX infra only.
+  test.skipIf(process.platform === "win32")("terminates a stuck Smithers command at its deadline", () => {
     const root = mkdtempSync(join(tmpdir(), "smithers-watchdog-command-"));
     const source = join(root, "stuck-smithers.ts");
     const binary = join(root, process.platform === "win32" ? "stuck-smithers.exe" : "stuck-smithers");

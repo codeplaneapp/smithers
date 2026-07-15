@@ -356,7 +356,9 @@ export function hasApprovedMarketingContent(version: string, artifactDir: unknow
   const baseDir = typeof artifactDir === "string" && artifactDir.trim()
     ? artifactDir
     : DEFAULT_ARTIFACT_DIR;
-  const markerPath = join(baseDir, `approved-${version}.json`);
+  // Repo-relative marker paths surface in messages and downstream tooling;
+  // keep them forward-slashed on every platform (join still resolves them).
+  const markerPath = join(baseDir, `approved-${version}.json`).split(sep).join("/");
   const abs = safeJoin(root, markerPath);
   if (!existsSync(abs)) {
     return {

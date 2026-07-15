@@ -220,7 +220,9 @@ describe("riskless GitHub issue sweep production graph", () => {
     await expect(runTask(frame.tasks[0])).resolves.toMatchObject({ laneConcurrency: 16, reviewIterations: 3, landingRetries: 3, excludeNumbers: [] });
   });
 
-  test("renders two concrete current-iteration correction lanes and one complete serial landing queue", async () => {
+  // pinnedCodexConfigDirectory fail-closes on win32 (POSIX mode/sticky-bit
+  // invariants), so agent models resolve to the deterministic placeholder.
+  test.skipIf(process.platform === "win32")("renders two concrete current-iteration correction lanes and one complete serial landing queue", async () => {
     const outputs = lateOutputs(); const iterations = { "i42:correction-loop": 1, "i43:correction-loop": 1, "i42:landing-loop": 2, "i43:landing-loop": 2 };
     const frame = await renderWorkflow(workflow, { input, outputs, iterations, workflowPath: ".smithers/workflows/riskless-github-issue-sweep.tsx" });
     const expectedAgents = ["i42:classify", "i42:adjudicate", "i42:sol-implement", "i42:luna-proposal", "i42:fable-review", "i42:landing-sol-implement", "i42:landing-luna-proposal", "i42:landing-review", "i42:close-proposal", "i43:classify", "i43:adjudicate", "i43:sol-implement", "i43:luna-proposal", "i43:fable-review", "i43:landing-sol-implement", "i43:landing-luna-proposal", "i43:landing-review"];
@@ -401,7 +403,8 @@ describe("riskless GitHub issue sweep production graph", () => {
     } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
-  test("pins GitHub mutations and rejects ambiguous remotes and non-exact remote tips", () => {
+  // Fixture gh is a #!/bin/sh shim and the config checks assert POSIX modes.
+  test.skipIf(process.platform === "win32")("pins GitHub mutations and rejects ambiguous remotes and non-exact remote tips", () => {
     const fixture = mkdtempSync(join(tmpdir(), "riskless-pinned-boundaries-")); const git = (...args: string[]) => spawnSync("git", args, { cwd: fixture, encoding: "utf8" });
     try {
       expect(git("init", "-q").status).toBe(0); expect(git("config", "user.name", "Test").status).toBe(0); expect(git("config", "user.email", "test@example.com").status).toBe(0);
@@ -532,7 +535,8 @@ describe("riskless GitHub issue sweep production graph", () => {
     const boundary = { issueState: "open" as const, collisionQueryOk: true, collisions: [], provenanceMatches: true, canonicalRemote: true, proposalValid: true, proposalDecision: "propose" as const, stagePaths: [] }; expect(publicationBoundaryAuthorized({ ...boundary, issueState: "closed" })).toBe(false); expect(publicationBoundaryAuthorized({ ...boundary, collisionQueryOk: false })).toBe(false); expect(publicationBoundaryAuthorized({ ...boundary, proposalDecision: "defer" })).toBe(false); expect(publicationBoundaryAuthorized(boundary)).toBe(true);
   });
 
-  test("treats a registered missing worktree as uncertain collision evidence", () => {
+  // The child probe is spawned with a POSIX-delimited PATH fixture.
+  test.skipIf(process.platform === "win32")("treats a registered missing worktree as uncertain collision evidence", () => {
     const fixture = mkdtempSync(join(tmpdir(), "riskless-missing-worktree-")); const peer = join(fixture, "peer"); const git = (...args: string[]) => spawnSync("git", args, { cwd: fixture, encoding: "utf8" });
     try {
       expect(git("init", "-q").status).toBe(0); expect(git("config", "user.name", "Test").status).toBe(0); expect(git("config", "user.email", "test@example.com").status).toBe(0); writeFileSync(join(fixture, "x.txt"), "base\n"); expect(git("add", "--", "x.txt").status).toBe(0); expect(git("commit", "-qm", "base").status).toBe(0); expect(git("worktree", "add", "--detach", peer, "HEAD").status).toBe(0); rmSync(peer, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

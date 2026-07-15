@@ -3,7 +3,7 @@ import "../preload.ts";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { devNull, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderPrompt, renderWorkflow, runTask, simulate, type RenderedWorkflow } from "smithers-orchestrator/testing";
 
@@ -87,7 +87,12 @@ describe("real stack and release workflow owner coverage", () => {
     const oldCwd = process.cwd();
     const oldGitConfig = process.env.GIT_CONFIG_GLOBAL;
     try {
-      process.env.GIT_CONFIG_GLOBAL = devNull;
+      // devNull is "\\\\.\\nul" on Windows, which git rejects with "unable to
+      // access": point at a real empty file instead so no global config leaks
+      // into the fixture on any platform.
+      const emptyGitConfig = join(root, "empty-gitconfig");
+      writeFileSync(emptyGitConfig, "");
+      process.env.GIT_CONFIG_GLOBAL = emptyGitConfig;
       mkdirSync(join(root, "packages", "demo"), { recursive: true });
       writeFileSync(join(root, "package.json"), JSON.stringify({ name: "release-fixture", version: "1.0.0" }));
       writeFileSync(join(root, "packages/demo/feature.ts"), "export const feature = 1;\n");

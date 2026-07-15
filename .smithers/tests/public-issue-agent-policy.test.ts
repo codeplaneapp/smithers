@@ -374,7 +374,9 @@ describe("public issue agent policy", () => {
     expect(combined.codex.extraArgs).not.toBe(PUBLIC_ISSUE_CODEX_EXTRA_ARGS);
   });
 
-  test("reopens only the exact package for a pnpm-managed project-version binary", async () => {
+  // The toolchain/Homebrew read-path resolvers encode POSIX layouts (shell
+  // shims, otool dylib closures); their fixtures cannot exist on win32.
+  test.skipIf(process.platform === "win32")("reopens only the exact package for a pnpm-managed project-version binary", async () => {
     const pnpmHome = await mkdtemp(join(tmpdir(), "smithers-pnpm-policy-"));
     const versionRoot = join(pnpmHome, ".tools", "pnpm", "10.6.1");
     const packageRoot = join(versionRoot, "node_modules", "pnpm");
@@ -407,7 +409,7 @@ describe("public issue agent policy", () => {
     }
   });
 
-  test("adds only Homebrew opt traversal and exact linked Cellar roots", async () => {
+  test.skipIf(process.platform === "win32")("adds only Homebrew opt traversal and exact linked Cellar roots", async () => {
     const prefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-policy-"));
     const llhttpCellarRoot = join(prefix, "Cellar", "llhttp", "9.3.1");
     const llhttpLibrary = join(llhttpCellarRoot, "lib", "libllhttp.9.3.dylib");
@@ -476,7 +478,7 @@ describe("public issue agent policy", () => {
     }
   });
 
-  test("walks transitive Homebrew dylibs once even when the graph cycles", async () => {
+  test.skipIf(process.platform === "win32")("walks transitive Homebrew dylibs once even when the graph cycles", async () => {
     const temporaryPrefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-closure-"));
     try {
       const prefix = await realpath(temporaryPrefix);

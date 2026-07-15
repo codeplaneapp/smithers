@@ -119,7 +119,9 @@ export function VerifiableGoals({ ctx, source, prompt, ticketsDir, agents }: Ver
               ``,
             ].join("\n");
             fs.writeFileSync(file, body, "utf8");
-            files.push(path.relative(process.cwd(), file));
+            // Repo-relative ticket paths flow into prompts and downstream
+            // consumers; keep them forward-slashed on every platform.
+            files.push(path.relative(process.cwd(), file).split(path.sep).join("/"));
           });
           return { dir: ticketsDir, files };
         }}

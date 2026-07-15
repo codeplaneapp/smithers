@@ -1,7 +1,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import "../preload.ts";
 import { describe, expect, mock, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -91,11 +91,17 @@ async function isolated<T>(prefix: string, body: (root: string, bin: string) => 
     // the scoped child_process mock pins PATH to OPS_PATH for spawns inside
     // this fixture root. process.env.PATH stays untouched so concurrently
     // running test files keep resolving real git.
+    // Register the realpath too: on macOS tmpdir() returns /var/... while
+    // process.cwd() resolves the symlink to /private/var/..., and a prefix
+    // miss here silently de-sandboxes every fixture spawn (real npm/git run
+    // against the network and hang the suite).
     hermeticRoots.add(root);
+    hermeticRoots.add(realpathSync(root));
     process.env.OPS_PATH = bin;
     return await body(root, bin);
   } finally {
     hermeticRoots.delete(root);
+    try { hermeticRoots.delete(realpathSync(root)); } catch { /* root already removed */ }
     process.chdir(cwd);
     for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
     Object.assign(process.env, env);

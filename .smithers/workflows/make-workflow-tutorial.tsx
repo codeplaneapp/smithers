@@ -13,6 +13,10 @@ import { join } from "node:path";
 import { HumanTask, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
+
+// The test harness intercepts CLI calls by pointing SMITHERS_BUNX at a fake
+// launcher; a bare `bunx` PATH lookup does not resolve .cmd fakes on Windows.
+const smithersBunx = () => process.env.SMITHERS_BUNX ?? "bunx";
 import DiveDeeperPrompt from "../prompts/make-workflow-tutorial-dive-deeper.mdx";
 import MonitorReportPrompt from "../prompts/make-workflow-tutorial-monitor-report.mdx";
 import PickPrompt from "../prompts/make-workflow-tutorial-pick.mdx";
@@ -149,7 +153,7 @@ async function readRepoContext() {
   parts.push("\n=== RECENT GIT COMMITS ===", (log.stdout?.toString() ?? "").trim());
 
   // Smithers concise doc index — tells the recommender what workflows exist
-  const docs = await $`bunx smithers-orchestrator docs`.nothrow().quiet();
+  const docs = await $`${smithersBunx()} smithers-orchestrator docs`.nothrow().quiet();
   const smithersDocs = (docs.stdout?.toString() ?? "").slice(0, 25_000);
 
   return {
@@ -266,14 +270,14 @@ async function launchBuild(
     uiNote;
   const input = JSON.stringify({ prompt, review: false });
 
-  let res = await $`bunx smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --input ${input} --detach`
+  let res = await $`${smithersBunx()} smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --input ${input} --detach`
     .nothrow()
     .quiet();
   let tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
 
   if (res.exitCode !== 0 && /ALREADY[_ ]?EXISTS/i.test(tail)) {
     res =
-      await $`bunx smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --resume true --force --detach`
+      await $`${smithersBunx()} smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --resume true --force --detach`
         .nothrow()
         .quiet();
     tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
@@ -288,7 +292,7 @@ async function launchBuild(
 
 async function pollBuild(childRunId: string) {
   const res =
-    await $`bunx smithers-orchestrator inspect ${childRunId} --format json --full-output`
+    await $`${smithersBunx()} smithers-orchestrator inspect ${childRunId} --format json --full-output`
       .nothrow()
       .quiet();
   const raw = res.stdout?.toString() ?? "";
@@ -304,7 +308,7 @@ async function pollBuild(childRunId: string) {
   let resumed = false;
   if (stale) {
     const r =
-      await $`bunx smithers-orchestrator up ${BUILD_WF} --run-id ${childRunId} --resume true --force --detach`
+      await $`${smithersBunx()} smithers-orchestrator up ${BUILD_WF} --run-id ${childRunId} --resume true --force --detach`
         .nothrow()
         .quiet();
     resumed = r.exitCode === 0;
@@ -356,7 +360,7 @@ async function gatherDiveDeeperDocs() {
   } catch {
     // User repos usually do not include smithers.sh human docs; fall through.
   }
-  const res = await $`bunx smithers-orchestrator docs`.nothrow().quiet();
+  const res = await $`${smithersBunx()} smithers-orchestrator docs`.nothrow().quiet();
   return { docs: (res.stdout?.toString() ?? "").slice(0, 50_000) };
 }
 
