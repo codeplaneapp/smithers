@@ -295,7 +295,6 @@
     "single-public-hook-package :: packages/engine/package.json root entry packages/engine/src/effect/versioning.js exports a React-style hook",
     "single-public-hook-package :: packages/engine/package.json root entry packages/engine/src/index.js exports a React-style hook",
     "single-public-hook-package :: packages/smithers/package.json root entry packages/smithers/src/index.js exports a React-style hook",
-    "single-public-hook-package :: packages/ui/package.json root entry packages/ui/src/index.ts exports a React-style hook",
     "single-visual-package :: packages/tui/package.json dependencies contains @opentui/core",
     "single-visual-package :: packages/tui/package.json dependencies contains @opentui/react",
     "single-visual-package :: packages/tui/src/App.tsx imports @opentui/react",

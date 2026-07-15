@@ -48,7 +48,6 @@ export {
 export {
   SmithersUiStyles,
   composeSmithersUiStyles,
-  useInjectUiCss,
   smithersUiCss,
   SMITHERS_UI_STYLE_ATTR,
   type SmithersUiStylesProps,

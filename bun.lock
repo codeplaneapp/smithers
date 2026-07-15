@@ -658,7 +658,6 @@
       "version": "0.28.0",
       "dependencies": {
         "@smithers-orchestrator/gateway-client": "workspace:*",
-        "@tanstack/query-db-collection": "1.0.45",
         "@tanstack/react-db": "0.1.91",
         "@tanstack/react-query": "5.101.2",
         "effect": "3.21.4",
@@ -667,7 +666,6 @@
         "@happy-dom/global-registrator": "^20.10.6",
         "@smithers-orchestrator/db": "workspace:*",
         "@smithers-orchestrator/server": "workspace:*",
-        "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
         "@types/bun": "latest",
         "@types/react": "^19.2.17",
         "@types/react-dom": "^19.2.3",
@@ -2432,8 +2430,6 @@
     "@smithy/uuid": ["@smithy/uuid@1.1.2", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-O/IEdcCUKkubz60tFbGA7ceITTAJsty+lBjNoorP4Z6XRqaFb/OjQjZODophEcuq68nKm6/0r+6/lLQ+XVpk8g=="],
 
     "@speed-highlight/core": ["@speed-highlight/core@1.2.15", "", {}, "sha512-BMq1K3DsElxDWawkX6eLg9+CKJrTVGCBAWVuHXVUV2u0s2711qiChLSId6ikYPfxhdYocLNt3wWwSvDiTvFabw=="],
-
-    "@sqlite.org/sqlite-wasm": ["@sqlite.org/sqlite-wasm@3.53.0-build1", "", {}, "sha512-PfWPWN2n+/37doa8oh2/oUXk4OOsRYZsxc1W1sDXIGb/Pu5Yrb+f2eyYpgQMGITVX7HVgxhs9P18Rc6I97ym/g=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
