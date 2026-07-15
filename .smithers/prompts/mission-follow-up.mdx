@@ -7,15 +7,10 @@ MISSION GOAL:
 {props.missionGoal}
 
 MILESTONE:
-```json
-{JSON.stringify(props.milestone, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.milestone, null, 2), "```"].join("\n")}</pre>
 
 VALIDATION RESULT:
-```json
-{JSON.stringify(props.validation, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.validation, null, 2), "```"].join("\n")}</pre>
 
 REQUIRED OUTPUT:
 {props.schema}
-

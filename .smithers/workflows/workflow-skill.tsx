@@ -172,7 +172,7 @@ export default smithers((ctx) => {
             defaultSkillDir: DEFAULT_SKILL_DIR,
             workflows,
             existingSkills: readExistingSkills(root),
-            prompt: ctx.input.prompt,
+            prompt: ctx.input.prompt ?? "",
           };
         }}
       </Task>

@@ -7,7 +7,7 @@
 // runs four milestone ValidationLoops (implement → validate → review panel)
 // against the spec at .smithers/specs/run-on-plue.md.
 //
-//   M1  smithers4: plue SandboxProvider + run-on-plue workflow + demo child
+//   M1  smithers:  plue SandboxProvider + run-on-plue workflow + demo child
 //   M2  plue:      CLI `workspace exec` + codex auth seeding + dispatch fix
 //   M3  plue:      npm package `plue` (bin `plue`) + Go CLI repo extraction
 //   M4  both:      docs + llms bundle regeneration
@@ -21,66 +21,54 @@ import {
   ValidationLoop,
   implementOutputSchema,
   validateOutputSchema,
+  validationLoopState,
 } from "../components/ValidationLoop";
 import {
   reviewOutputSchema,
   reviewSynthesisSchema,
-  reviewGate,
 } from "../components/Review";
 
-const SPEC = "/Users/williamcory/smithers4/.smithers/specs/run-on-plue.md";
-const SMITHERS_REPO = "/Users/williamcory/smithers4";
-const PLUE_REPO = "/Users/williamcory/plue";
+const SPEC = ".smithers/specs/run-on-plue.md";
+const SMITHERS_REPO = ".";
+const PLUE_REPO = "../plue";
 
 const summarySchema = z.object({
   summary: z.string(),
   artifacts: z.array(z.string()).default([]),
   followUps: z.array(z.string()).default([]),
 });
+const failureSchema = z.object({ error: z.string() });
+const milestoneCompleteSchema = z.object({ milestone: z.string() });
 
-const inputSchema = z.object({
-  plueCliBin: z
-    .string()
-    .default(
-      "/private/tmp/claude-501/-Users-williamcory-smithers4/5e1a1e3e-e382-404c-a23e-a83354f8cb59/scratchpad/plue-smithers",
-    ),
+export const inputSchema = z.object({
+  plueCliBin: z.string().trim().min(1).max(4_096).default("plue"),
+  maxIterations: z.number().int().min(1).max(10).default(3),
 });
 
-const { Workflow, Task, Sequence, smithers } = createSmithers({
+const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
   input: inputSchema,
   implement: implementOutputSchema,
   validate: validateOutputSchema,
   review: reviewOutputSchema,
   reviewSynthesis: reviewSynthesisSchema,
   summary: summarySchema,
+  failure: failureSchema,
+  milestoneComplete: milestoneCompleteSchema,
 });
 
 const SHARED_CONTEXT = `
 CONTEXT YOU MUST LOAD FIRST:
-- Read the spec: ${SPEC} (ground truth, verified 2026-07-01; includes the
-  post-research adjustments section — the architecture decisions there are
-  FINAL for this build).
+- Read the spec: ${SPEC}; its architecture decisions are the ground truth.
 - The two repos: smithers-orchestrator at ${SMITHERS_REPO} (jj colocated repo;
   see its CLAUDE.md), plue at ${PLUE_REPO} (Go monorepo, jj-native product).
 
-LIVE INFRA AVAILABLE TO YOU (real, no mocks — use it to verify your work):
-- plue dev stack is running: API http://localhost:4000 (readyz is green),
-  seeded user alice, token smithers_deadbeefdeadbeefdeadbeefdeadbeefdeadbeef.
-- A built plue CLI binary (already logged in as alice against localhost) is
-  available; its path arrives in the milestone prompt. \`workspace\` and
-  \`repo\` commands work for real: repo alice/smoke-test exists, and workspace
-  de356d2c-a67a-4bc1-b834-7f0f9505b764 (repo alice/smoke-test) is a RUNNING
-  real Freestyle VM. Mint SSH via \`<cli> workspace view <id> --repo
-  alice/smoke-test --format json\` (the .ssh.command field), then run
-  commands non-interactively with
-  \`ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new <target> '<cmd>'\`.
-  Verified from inside that VM: node/git/jj present, bun ABSENT, egress to
-  api.anthropic.com and api.openai.com OPEN. Creating VMs costs real money —
-  prefer reusing that workspace for experiments; delete any extra ones you
-  create.
-- ANTHROPIC_API_KEY, OPENAI_API_KEY, FREESTYLE_API_KEY are set in the
-  environment. ~/.codex/auth.json exists on this host. NEVER print, log, or
-  commit secret values; never bake them into snapshots or committed files.
+EXECUTION ENVIRONMENT:
+- No live Plue service, authenticated account, workspace, token, or local agent
+  credential is assumed. Verify each prerequisite before any integration check.
+- Use operator-provided fixtures or existing workspaces where available. Never
+  create billable infrastructure merely to satisfy this workflow.
+- NEVER print, log, or commit secret values; never bake them into snapshots or
+  committed files.
 
 HOUSE RULES (both repos):
 - No mocks in product code or e2e paths. Unit tests of pure functions are
@@ -93,7 +81,7 @@ HOUSE RULES (both repos):
 `;
 
 const M1_PROMPT = `${SHARED_CONTEXT}
-MILESTONE 1 — smithers4: the plue sandbox provider and the runner workflow.
+MILESTONE 1 — smithers: the plue sandbox provider and the runner workflow.
 
 Work in ${SMITHERS_REPO}. Deliverables:
 
@@ -167,9 +155,9 @@ VALIDATION (what the validate step will re-run — make these pass):
   .smithers/workflows/run-on-plue.tsx exits 0, and the same for
   .smithers/workflows/plue-demo-child.tsx
 - bunx tsc --noEmit -p ${SMITHERS_REPO}/.smithers/tsconfig.json exits 0
-- OPTIONAL but strongly encouraged: exercise provider steps a-d for real
-  against the live workspace listed above (SSH round-trip, bootstrap
-  idempotence, claude --version + codex --version inside the VM).
+- OPTIONAL: when the operator has supplied an existing workspace, exercise
+  provider steps a-d against it (SSH round-trip, bootstrap idempotence, and
+  agent CLI version checks). Otherwise report the integration check as skipped.
 Commit (explicit pathspecs): the three new files + tests, message like
 "✨ feat(smithers-pack): plue sandbox provider + run-on-plue workflow".`;
 
@@ -218,10 +206,10 @@ VALIDATION (make these pass):
 - go test ./internal/services/ -run 'WorkflowCommand|WorkflowSandbox' -count=1
   (scope to what runs without external services; if a needed test requires
   postgres, guard or scope accordingly and say so)
-- Real check: use the live workspace (see context) to run
-  \`go run ./cmd/smithers workspace exec <id> --repo alice/smoke-test
-  --command 'echo exec-works && node --version'\` against localhost:4000 and
-  include the output in your summary.
+- Optional real check: when the operator supplies a workspace and repository,
+  run \`go run ./cmd/smithers workspace exec <id> --repo <owner/repo>
+  --command 'echo exec-works && node --version'\` and include the output. If no
+  workspace is available, report the check as skipped rather than inventing it.
 Commit per logical change with explicit pathspecs (e.g.
 "✨ feat(cli): workspace exec + codex auth seeding",
 "🐛 fix(workflows): dispatch smithers up instead of removed run command").`;
@@ -302,34 +290,30 @@ one commit per repo).`;
 function milestoneState(
   ctx: Parameters<Parameters<typeof smithers>[0]>[0],
   prefix: string,
+  maxIterations: number,
 ) {
-  const validate = ctx.outputMaybe("validate", { nodeId: `${prefix}:validate` });
-  const gate = reviewGate(ctx, `${prefix}:review-moderator`);
-  const validationPassed = validate !== undefined && validate.allPassed !== false;
-  const done = validationPassed && gate.approved;
-  const feedbackParts: string[] = [];
-  if (validate && !validationPassed && validate.failingSummary) {
-    feedbackParts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
-  }
-  if (gate.feedback) {
-    feedbackParts.push(`REVIEW PANEL REJECTED:\n${gate.feedback}`);
-  }
-  return { done, feedback: feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null };
+  return validationLoopState(ctx, { prefix, maxIterations });
 }
 
 export default smithers((ctx) => {
   const plueCliBin = ctx.input?.plueCliBin ?? "plue";
+  const maxIterations = ctx.input?.maxIterations ?? 3;
   const withBin = (prompt: string) =>
-    `${prompt}\n\nPLUE CLI BINARY (built, logged in as alice against http://localhost:4000): ${plueCliBin}`;
+    `${prompt}\n\nPLUE CLI COMMAND: ${plueCliBin}. Verify it is available and authenticated before any external check.`;
 
-  const m1 = milestoneState(ctx, "m1");
-  const m2 = milestoneState(ctx, "m2");
-  const m3 = milestoneState(ctx, "m3");
-  const m4 = milestoneState(ctx, "m4");
+  const milestones = [
+    { prefix: "m1", prompt: M1_PROMPT },
+    { prefix: "m2", prompt: M2_PROMPT },
+    { prefix: "m3", prompt: M3_PROMPT },
+    { prefix: "m4", prompt: M4_PROMPT },
+  ].map((milestone) => ({
+    ...milestone,
+    state: milestoneState(ctx, milestone.prefix, maxIterations),
+  }));
+  const allDone = milestones.every(({ state }) => state.done);
 
   const summaryPrompt = `All four milestones of the plue-runner build have run
-(see the spec at ${SPEC}). Milestone states: m1 done=${m1.done}, m2
-done=${m2.done}, m3 done=${m3.done}, m4 done=${m4.done}. Inspect both repos'
+  (see the spec at ${SPEC}). Milestone states: ${milestones.map(({ prefix, state }) => `${prefix} done=${state.done}`).join(", ")}. Inspect both repos'
 working trees and recent commits (jj log in each) and produce: a summary of
 what was built, the list of artifact paths (files created/changed, both
 repos), and concrete followUps for anything not finished (including the
@@ -339,58 +323,47 @@ run-on-plue with the demo child).`;
   return (
     <Workflow name="implement-plue-runner">
       <Sequence>
-        <ValidationLoop
-          idPrefix="m1"
-          prompt={withBin(M1_PROMPT)}
-          implementAgents={implementer}
-          validateAgents={agents.midTier}
-          reviewAgents={panelists}
-          synthesizeReview
-          feedback={m1.feedback}
-          done={m1.done}
-          maxIterations={3}
-        />
-        <ValidationLoop
-          idPrefix="m2"
-          prompt={withBin(M2_PROMPT)}
-          implementAgents={implementer}
-          validateAgents={agents.midTier}
-          reviewAgents={panelists}
-          synthesizeReview
-          feedback={m2.feedback}
-          done={m2.done}
-          maxIterations={3}
-        />
-        <ValidationLoop
-          idPrefix="m3"
-          prompt={withBin(M3_PROMPT)}
-          implementAgents={implementer}
-          validateAgents={agents.midTier}
-          reviewAgents={panelists}
-          synthesizeReview
-          feedback={m3.feedback}
-          done={m3.done}
-          maxIterations={3}
-        />
-        <ValidationLoop
-          idPrefix="m4"
-          prompt={withBin(M4_PROMPT)}
-          implementAgents={implementer}
-          validateAgents={agents.midTier}
-          reviewAgents={panelists}
-          synthesizeReview
-          feedback={m4.feedback}
-          done={m4.done}
-          maxIterations={3}
-        />
-        <Task
-          id="final-summary"
-          output={summarySchema}
-          agent={agents.orchestrator}
-          timeoutMs={900_000}
-        >
-          {summaryPrompt}
-        </Task>
+        {milestones.map(({ prefix, prompt, state }, index) => {
+          const previousComplete = index > 0 ? `${milestones[index - 1]!.prefix}:complete` : undefined;
+          return (
+            <Sequence key={prefix}>
+              <ValidationLoop
+                idPrefix={prefix}
+                prompt={withBin(prompt)}
+                implementAgents={implementer}
+                validateAgents={agents.midTier}
+                reviewAgents={panelists}
+                synthesizeReview
+                startAfter={previousComplete ? [previousComplete] : undefined}
+                reviewWhen={state.validationPassed}
+                feedback={state.feedback}
+                done={state.done}
+                maxIterations={maxIterations}
+              />
+              {state.done ? (
+                <Task id={`${prefix}:complete`} output={outputs.milestoneComplete} retries={0}>
+                  {() => ({ milestone: prefix })}
+                </Task>
+              ) : null}
+              {state.exhausted ? (
+                <Task id={`${prefix}:exhausted`} output={outputs.failure} retries={0}>
+                  {() => { throw new Error(`Implement Plue Runner exhausted ${prefix} after ${maxIterations} attempts`); }}
+                </Task>
+              ) : null}
+            </Sequence>
+          );
+        })}
+        {allDone ? (
+          <Task
+            id="final-summary"
+            output={summarySchema}
+            agent={agents.orchestrator}
+            dependsOn={["m4:complete"]}
+            timeoutMs={900_000}
+          >
+            {summaryPrompt}
+          </Task>
+        ) : null}
       </Sequence>
     </Workflow>
   );

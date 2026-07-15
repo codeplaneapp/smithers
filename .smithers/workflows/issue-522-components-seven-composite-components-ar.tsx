@@ -5,8 +5,8 @@ import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 
 // Issue #522 (umbrella): seven built-in composite components pass `needs`
 // (cache-key context only) WITHOUT `deps`, so downstream agents never receive
@@ -17,7 +17,7 @@ import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../compon
 // behavior that does not exist. (ReviewLoop/Optimizer/Supervisor already derive
 // `until` from ctx on main — only their deps wiring is missing.) TDD-first.
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   spec: z.string().default(
     `Fix GitHub issue #522 in packages/components: seven composite components pass \`needs\` without
 \`deps\`, so downstream agents run blind. Follow the PANEL PRECEDENT exactly
@@ -133,22 +133,9 @@ const { Workflow, smithers, outputs } = createSmithers({
 
 export default smithers((ctx) => {
   const spec = ctx.input.spec ?? "";
-  const plan = ctx.outputMaybe("plan", { nodeId: "p522:plan" });
+  const plan = ctx.latest("plan", "p522:plan");
 
-  const validate = ctx.outputMaybe("validate", { nodeId: "p522:impl:validate" });
-  const hasValidated = validate !== undefined;
-  const validationPassed = hasValidated && validate.allPassed !== false;
-  const gate = reviewGate(ctx, "p522:impl:review-moderator");
-  const done = validationPassed && gate.approved;
-
-  const feedbackParts: string[] = [];
-  if (validate && !validationPassed && validate.failingSummary) {
-    feedbackParts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
-  }
-  if (gate.feedback) {
-    feedbackParts.push(`REVIEW PANEL REJECTED:\n${gate.feedback}`);
-  }
-  const feedback = feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null;
+  const state = validationLoopState(ctx, { prefix: "p522:impl" });
 
   const implementPrompt = plan
     ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}`
@@ -180,8 +167,9 @@ ${spec}`}
             reviewAgents={panelists}
             synthesizeReview
             reviewModerator={synthesizer}
-            feedback={feedback}
-            done={done}
+            reviewWhen={state.validationPassed}
+            feedback={state.feedback}
+            done={state.done}
             maxIterations={3}
           />
         ) : null}

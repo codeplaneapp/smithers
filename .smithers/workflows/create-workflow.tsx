@@ -47,6 +47,7 @@ const inputSchema = z.object({
     .describe("Plain-English description of the workflow you want Smithers to build."),
   name: z
     .string()
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
     .nullable()
     .default(null)
     .describe("Desired kebab-case workflow id. Null lets the clarify/design steps choose one."),
@@ -154,7 +155,7 @@ const designSchema = z.looseObject({
 });
 
 // Durable human approval decision (matches the Approval component's output shape).
-const approvalSchema = z.object({
+const approvalSchema = z.looseObject({
   approved: z.boolean(),
   note: z.string().nullable(),
   decidedBy: z.string().nullable(),
@@ -244,9 +245,13 @@ export default smithers((ctx) => {
   const provision = ctx.outputMaybe("provision", { nodeId: "provision" });
   const design = ctx.outputMaybe("design", { nodeId: "design" });
   const approval = ctx.outputMaybe("approval", { nodeId: "approve-design" });
-  const scaffold = ctx.outputMaybe("scaffold", { nodeId: "scaffold" });
-  const documentation = ctx.outputMaybe("document", { nodeId: "document" });
-  const skillVerification = ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
+
+  // Select latest output rows by node id at top level
+  const scaffoldRows = ctx.outputs.scaffold ?? [];
+  const fixRows = scaffoldRows.filter((r) => r.nodeId === "fix");
+  const scaffold = fixRows.at(-1) ?? scaffoldRows.find((r) => r.nodeId === "scaffold");
+  const documentation = ctx.latest(outputs.document, "document-retry") ?? ctx.outputMaybe("document", { nodeId: "document" });
+  const skillVerification = ctx.latest(outputs.skillVerification, "skill-verification-retry") ?? ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
   const skillReady = skillVerification?.exists === true && skillVerification.containsWorkflowMetadata === true;
 
   const designed = design !== undefined;
@@ -261,13 +266,15 @@ export default smithers((ctx) => {
 
   // Verify-loop bookkeeping: re-render `until` against the latest verify output.
   const verifyOutputs = ctx.outputs.verify ?? [];
-  const lastVerify = verifyOutputs.at(-1);
+  const lastVerify = ctx.latest(outputs.verify, "verify");
   const verifyPassed = lastVerify?.passed === true;
   const verifyFailed = lastVerify !== undefined && lastVerify.passed === false;
+  const failedVerifyCount = verifyOutputs.filter((r) => r.nodeId === "verify" && r.passed === false).length;
+  const shouldFix = verifyFailed && fixRows.length < failedVerifyCount;
 
   // Terminal summary surfaced as the run's printed output. Pulled straight from
   // the steps above — never invented.
-  const filesWritten = (scaffold?.filesWritten ?? []).map((f) => f.path);
+  const filesWritten = [...new Set(scaffoldRows.flatMap((row) => (row.filesWritten ?? []).map((file) => file.path)))];
   const terminalStatus =
     documentation && verifyPassed && skillVerification?.exists && skillVerification.containsWorkflowMetadata
       ? "built"
@@ -329,6 +336,7 @@ export default smithers((ctx) => {
           then={
             <Approval
               id="approve-design"
+              onDeny="continue"
               output={outputs.approval}
               request={{
                 title: `Approve design for "${workflowName}"`,
@@ -366,40 +374,8 @@ export default smithers((ctx) => {
         {proceed && scaffold ? (
           <Loop id="verify:loop" until={verifyPassed} maxIterations={3} onMaxReached="return-last">
             <Sequence>
-              <Task id="verify" output={outputs.verify}>
-                {async () => {
-                  const errors: string[] = [];
-                  const graphCmd = `bunx smithers-orchestrator graph ${workflowFile}`;
-                  const res = await $`bunx smithers-orchestrator graph ${workflowFile}`.nothrow().quiet();
-                  if (res.exitCode !== 0) {
-                    const errText = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
-                    errors.push(`[graph] ${errText.slice(0, 6000)}`);
-                  }
-                  // If a custom UI was scaffolded, it must at least transpile.
-                  const uiExists = await Bun.file(uiFile).exists();
-                  let command = graphCmd;
-                  if (uiExists) {
-                    command = `${graphCmd} && bun build --no-bundle ${uiFile}`;
-                    const uiRes = await $`bun build --no-bundle ${uiFile}`.nothrow().quiet();
-                    if (uiRes.exitCode !== 0) {
-                      const uiErr = `${uiRes.stderr?.toString() ?? ""}\n${uiRes.stdout?.toString() ?? ""}`.trim();
-                      errors.push(`[ui] ${uiFile}: ${uiErr.slice(0, 6000)}`);
-                    }
-                  }
-                  const passed = errors.length === 0;
-                  return {
-                    passed,
-                    command,
-                    errors,
-                    notes: passed
-                      ? `${workflowName} loads, its graph renders without executing${uiExists ? `, and ${uiFile} transpiles` : ""}.`
-                      : `verification failed for ${workflowName}; see errors.`,
-                  };
-                }}
-              </Task>
-
               <Branch
-                if={verifyFailed}
+                if={shouldFix}
                 then={
                   <Task
                     id="fix"
@@ -421,6 +397,44 @@ export default smithers((ctx) => {
                 }
                 else={null}
               />
+              <Task id="verify" output={outputs.verify} dependsOn={shouldFix ? ["fix"] : []}>
+                {async () => {
+                  const activeScaffold = ctx.latest(outputs.scaffold, "fix") ?? scaffold;
+                  const activeWorkflowName = activeScaffold?.workflowName ?? workflowName;
+                  const activeWorkflowFile = `${WORKFLOWS_DIR}/${activeWorkflowName}.tsx`;
+                  const activeUiFile = `${UI_DIR}/${activeWorkflowName}.tsx`;
+                  const bunx = process.env.SMITHERS_BUNX ?? "bunx";
+                  const bun = process.env.SMITHERS_BUN ?? "bun";
+
+                  const errors: string[] = [];
+                  const graphCmd = `${bunx} smithers-orchestrator graph ${activeWorkflowFile}`;
+                  const res = await $`${bunx} smithers-orchestrator graph ${activeWorkflowFile}`.nothrow().quiet();
+                  if (res.exitCode !== 0) {
+                    const errText = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
+                    errors.push(`[graph] ${errText.slice(0, 6000)}`);
+                  }
+                  // If a custom UI was scaffolded, it must at least transpile.
+                  const uiExists = await Bun.file(activeUiFile).exists();
+                  let command = graphCmd;
+                  if (uiExists) {
+                    command = `${graphCmd} && ${bun} build --no-bundle ${activeUiFile}`;
+                    const uiRes = await $`${bun} build --no-bundle ${activeUiFile}`.nothrow().quiet();
+                    if (uiRes.exitCode !== 0) {
+                      const uiErr = `${uiRes.stderr?.toString() ?? ""}\n${uiRes.stdout?.toString() ?? ""}`.trim();
+                      errors.push(`[ui] ${activeUiFile}: ${uiErr.slice(0, 6000)}`);
+                    }
+                  }
+                  const passed = errors.length === 0;
+                  return {
+                    passed,
+                    command,
+                    errors,
+                    notes: passed
+                      ? `${activeWorkflowName} loads, its graph renders without executing${uiExists ? `, and ${activeUiFile} transpiles` : ""}.`
+                      : `verification failed for ${activeWorkflowName}; see errors.`,
+                  };
+                }}
+              </Task>
             </Sequence>
           </Loop>
         ) : null}
@@ -429,34 +443,50 @@ export default smithers((ctx) => {
             This is a bounded retry loop: a missing or malformed companion skill
             keeps the workflow from reaching its terminal success summary. */}
         {proceed && verifyPassed ? (
-          <Loop id="skill:loop" until={skillReady} maxIterations={3} onMaxReached="fail">
-            <Sequence>
-              <Task id="document" output={outputs.document} agent={agents.cheapFast}>
-                <DocumentPrompt
-                  workflowName={workflowName}
-                  design={design}
-                  skillsDir={SKILLS_DIR}
-                  workflowFile={workflowFile}
-                  uiFile={uiFile}
-                />
-              </Task>
+          <Sequence>
+            <Task id="document" output={outputs.document} agent={agents.cheapFast}>
+              <DocumentPrompt
+                workflowName={workflowName}
+                design={design}
+                skillsDir={SKILLS_DIR}
+                workflowFile={workflowFile}
+                uiFile={uiFile}
+              />
+            </Task>
 
-              <Task id="skill-verification" output={outputs.skillVerification} dependsOn={["document"]}>
-                {async () => {
-                  const latest = ctx.outputMaybe("document", { nodeId: "document" });
-                  const skillPath = latest?.skillPath ?? "";
-                  const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
-                  const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
-                  const contents = exists ? await Bun.file(expectedPath).text() : "";
-                  return {
-                    skillPath: exists ? expectedPath : skillPath,
-                    exists,
-                    containsWorkflowMetadata: exists && validSkillDocument(contents, workflowName),
-                  };
-                }}
-              </Task>
-            </Sequence>
-          </Loop>
+            <Task id="skill-verification" output={outputs.skillVerification} dependsOn={["document"]}>
+              {async () => {
+                const latest = ctx.latest(outputs.document, "document") ?? ctx.outputMaybe("document", { nodeId: "document" });
+                const skillPath = latest?.skillPath ?? "";
+                const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
+                const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
+                const contents = exists ? await Bun.file(expectedPath).text() : "";
+                return {
+                  skillPath: exists ? expectedPath : skillPath,
+                  exists,
+                  containsWorkflowMetadata: exists && validSkillDocument(contents, workflowName),
+                };
+              }}
+            </Task>
+
+            {skillVerification !== undefined && !skillReady ? (
+              <Sequence>
+                <Task id="document-retry" output={outputs.document} agent={agents.cheapFast} dependsOn={["skill-verification"]}>
+                  <DocumentPrompt workflowName={workflowName} design={design} skillsDir={SKILLS_DIR} workflowFile={workflowFile} uiFile={uiFile} />
+                </Task>
+                <Task id="skill-verification-retry" output={outputs.skillVerification} dependsOn={["document-retry"]}>
+                  {async () => {
+                    const latest = ctx.latest(outputs.document, "document-retry");
+                    const skillPath = latest?.skillPath ?? "";
+                    const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
+                    const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
+                    const contents = exists ? await Bun.file(expectedPath).text() : "";
+                    return { skillPath: exists ? expectedPath : skillPath, exists, containsWorkflowMetadata: exists && validSkillDocument(contents, workflowName) };
+                  }}
+                </Task>
+              </Sequence>
+            ) : null}
+          </Sequence>
         ) : null}
 
         {/* 8 — Terminal summary: aggregate the useful results so the run prints

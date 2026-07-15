@@ -48,7 +48,7 @@ const stages: Stage[] = [
   },
   {
     id: "fanout",
-    title: "Fan Out Review",
+    title: "Fan Out",
     steps: [
       { id: "docs-pass", title: "Docs Pass", summary: "Check documentation structure and headings." },
       { id: "tests-pass", title: "Tests Pass", summary: "Check existing test coverage targets." },
@@ -58,7 +58,7 @@ const stages: Stage[] = [
   },
   {
     id: "narrow",
-    title: "Narrow Focus",
+    title: "Narrow",
     steps: [
       { id: "risk-summary", title: "Risk Summary", summary: "Collapse the fan-out into the highest signal risks." },
     ],

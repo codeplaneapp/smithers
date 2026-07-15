@@ -149,7 +149,7 @@ const inputSchema = z.object({
   /** Markdown audit report to parse the backlog from (ignored if `findings` is set). */
   reportPath: z.string().default(DEFAULT_REPORT),
   /** Explicit findings, bypassing the report parse. */
-  findings: z.array(findingSchema).default([]),
+  findings: z.array(findingSchema).optional(),
   /** Keep only these severities (empty = all). */
   severities: z.array(z.enum(["critical", "high", "medium", "low"])).default([]),
   /** Cap how many findings to work this run (0 = all). Smoke-test with 1. */
@@ -303,7 +303,7 @@ function discoverFindings(input: z.infer<typeof inputSchema>): { findings: Findi
   const maxItems = input.maxItems ?? 0;
   let findings: Finding[] = input.findings ?? [];
   let source = "input.findings";
-  if (findings.length === 0) {
+  if (input.findings === undefined) {
     source = reportPath;
     const text = readReport(reportPath);
     findings = text ? parseBacklog(text) : [];
@@ -319,8 +319,12 @@ function discoverFindings(input: z.infer<typeof inputSchema>): { findings: Findi
 }
 
 function buildWorkItems(findings: Finding[], branchPrefix: string): WorkItem[] {
+  const seen = new Map<string, number>();
   return findings.map((finding, idx) => {
-    const key = `f${finding.priority || idx + 1}-${slugify(finding.title)}`;
+    const base = `f${finding.priority || idx + 1}-${slugify(finding.title)}`;
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    const key = count === 1 ? base : `${base}-${count}`;
     return {
       workItemId: key,
       finding,
@@ -334,7 +338,7 @@ function buildWorkItems(findings: Finding[], branchPrefix: string): WorkItem[] {
 function itemDone(ctx: any, key: string): boolean {
   const impl = latestForItem<Implement>(ctx.outputs.implement, key);
   const rev = latestForItem<Review>(ctx.outputs.review, key);
-  return impl?.status === "implemented" && rev?.approved === true;
+  return impl?.status === "implemented" && impl.allTestsPassing === true && rev?.approved === true && (impl as any).iteration === (rev as any).iteration;
 }
 
 function itemMerged(ctx: any, key: string): boolean {
@@ -600,7 +604,7 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* ── Phase 4: rebase local main onto origin/main and PUSH (gated) ──────── */}
-        {input.push !== false && landed.length > 0 ? (
+        {input.landToMain !== false && input.push !== false && landed.length > 0 ? (
           <Task
             id="push"
             output={outputs.push}

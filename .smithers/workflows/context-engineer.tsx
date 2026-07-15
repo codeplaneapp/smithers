@@ -174,6 +174,7 @@ const outputSchema = z.object({
   artifacts: z.array(z.string()).describe("Files written, outputs produced, or workflows dispatched."),
   gateCount: z.number().describe("Total backpressure gates defined."),
   blockingGateCount: z.number().describe("How many of those gates are blocking."),
+  iterationCount: z.number().int().nonnegative().describe("Number of execute iterations attempted."),
   summary: z.string().describe("One-line summary of the whole run."),
 });
 
@@ -207,16 +208,20 @@ export default smithers((ctx) => {
   const grills = ctx.outputs.grill ?? [];
   const lastGrill = grills.at(-1);
   const grillResolved = lastGrill?.resolved === true;
+  const grillExhausted = grills.length >= 5 && !grillResolved;
 
   // The contract is "designed" once it has been drafted and grilling has settled.
-  const designed = contract !== undefined && backpressure !== undefined;
-  const approved = !review || approval?.approved === true;
+  const designed = contract !== undefined && grillResolved && route !== undefined && backpressure !== undefined;
+  const approved = !review && !grillExhausted || approval?.approved === true;
   const proceed = designed && approved;
 
   // Execute-loop bookkeeping: re-render the `until` against the latest execute output.
   const executeOutputs = ctx.outputs.execute ?? [];
   const lastExecute = executeOutputs.at(-1);
   const executed = lastExecute?.done === true;
+  const approvalDenied = review && approval?.approved === false;
+  const executeExhausted = executeOutputs.length >= 3 && !executed;
+  const terminal = Boolean(report) || approvalDenied || grillExhausted || executeExhausted;
 
   return (
     <Workflow name="context-engineer">
@@ -259,7 +264,7 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* 4 — Route the contracted work: single task, skills, durable workflow, or human. */}
-        {contract ? (
+        {contract && grillResolved ? (
           <Task id="route" output={outputs.route} agent={agents.smart}>
             <RoutePrompt
               prompt={prompt}
@@ -272,7 +277,7 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* 5 — Turn the success criteria into a backpressure gate matrix. */}
-        {route ? (
+        {route && grillResolved ? (
           <Task id="build-backpressure" output={outputs.backpressure} agent={agents.planning}>
             <BackpressurePrompt prompt={prompt} contract={contract} route={route} />
           </Task>
@@ -333,7 +338,7 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* 9 — Surface a concise, deterministic summary as the run's printed output. */}
-        {report ? (
+        {terminal ? (
           <Task id="output" output={outputs.output}>
             {() => ({
               goal: contract?.goal ?? prompt,
@@ -347,6 +352,7 @@ export default smithers((ctx) => {
               artifacts: lastExecute?.artifacts ?? [],
               gateCount: backpressure?.gates?.length ?? 0,
               blockingGateCount: (backpressure?.gates ?? []).filter((g) => g.gateType === "blocking").length,
+              iterationCount: executeOutputs.length,
               summary: report?.summary ?? "",
             })}
           </Task>

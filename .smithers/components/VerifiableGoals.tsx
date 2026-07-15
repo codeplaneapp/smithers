@@ -6,18 +6,30 @@ import { z } from "zod/v4";
 // One verifiable goal per ticket: small enough to research→plan→implement in a
 // single focused pass, with an e2e-test spec that is its definition of done.
 export const ticketSchema = z.object({
-  slug: z.string(),
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "slug must be kebab-case"),
   title: z.string(),
   goal: z.string(),
   spec: z.string(),
   e2eVerification: z.string(),
   acceptanceCriteria: z.array(z.string()).default([]),
-  dependsOn: z.array(z.string()).default([]),
+  dependsOn: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "dependsOn must contain kebab-case slugs")).default([]),
 });
 
 export const goalsSchema = z.looseObject({
   summary: z.string(),
   tickets: z.array(ticketSchema).default([]),
+}).superRefine((goals, issue) => {
+  const slugs = new Set<string>();
+  for (const ticket of goals.tickets) {
+    if (slugs.has(ticket.slug)) issue.addIssue({ code: "custom", path: ["tickets"], message: `duplicate ticket slug: ${ticket.slug}` });
+    slugs.add(ticket.slug);
+    for (const dependency of ticket.dependsOn) {
+      if (!slugs.has(dependency)) issue.addIssue({ code: "custom", path: ["tickets"], message: `dependsOn must reference an earlier ticket: ${dependency}` });
+    }
+    if (new Set(ticket.dependsOn).size !== ticket.dependsOn.length) {
+      issue.addIssue({ code: "custom", path: ["tickets"], message: `dependsOn entries must be unique: ${ticket.slug}` });
+    }
+  }
 });
 
 export const writtenSchema = z.object({
@@ -76,10 +88,12 @@ export function VerifiableGoals({ ctx, source, prompt, ticketsDir, agents }: Ver
           const path = await import("node:path");
           const current = ctx.outputMaybe("goals", { nodeId: "goals" });
           if (!current) throw new Error("goals task produced no output");
+          const parsed = goalsSchema.safeParse(current);
+          if (!parsed.success) throw new Error(`invalid goals output: ${parsed.error.message}`);
           const dir = path.resolve(process.cwd(), ticketsDir);
           fs.mkdirSync(dir, { recursive: true });
           const files: string[] = [];
-          current.tickets.forEach((t: any, i: number) => {
+          parsed.data.tickets.forEach((t: any, i: number) => {
             const index = String(i + 1).padStart(4, "0");
             const file = path.join(dir, `${index}-${t.slug}.md`);
             const body = [

@@ -23,35 +23,38 @@ export class SqlitePromptCache implements PromptCache {
   constructor(opts: SqlitePromptCacheOptions = {}) {
     this.dbPath = resolve(opts.path ?? ".smithers/cache/prompts.db");
     this.table = opts.table ?? "extract_prompt_cache";
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(this.table)) {
+      throw new Error(`invalid table name: ${this.table}`);
+    }
   }
 
   async get(key: string): Promise<CachedPrompt | undefined> {
     const db = await this.db();
     const row = db
-      .query(`SELECT json FROM ${this.table} WHERE key = ? LIMIT 1`)
+      .query(`SELECT json FROM ${quotedTable(this.table)} WHERE key = ? LIMIT 1`)
       .get(key) as { json: string } | null;
     if (!row) return undefined;
-    return JSON.parse(row.json) as CachedPrompt;
+    return { ...(JSON.parse(row.json) as CachedPrompt), key };
   }
 
   async set(key: string, value: CachedPrompt): Promise<void> {
     const db = await this.db();
     db.run(
-      `INSERT INTO ${this.table} (key, json, created_at_ms)
+      `INSERT INTO ${quotedTable(this.table)} (key, json, created_at_ms)
        VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET json = excluded.json, created_at_ms = excluded.created_at_ms`,
-      [key, JSON.stringify(value), Date.now()],
+      [key, JSON.stringify({ ...value, key }), Date.now()],
     );
   }
 
   async delete(key: string): Promise<void> {
     const db = await this.db();
-    db.run(`DELETE FROM ${this.table} WHERE key = ?`, [key]);
+    db.run(`DELETE FROM ${quotedTable(this.table)} WHERE key = ?`, [key]);
   }
 
   async keys(): Promise<string[]> {
     const db = await this.db();
-    const rows = db.query(`SELECT key FROM ${this.table}`).all() as { key: string }[];
+    const rows = db.query(`SELECT key FROM ${quotedTable(this.table)} ORDER BY key`).all() as { key: string }[];
     return rows.map((r) => r.key);
   }
 
@@ -66,7 +69,7 @@ export class SqlitePromptCache implements PromptCache {
       await mkdir(dirname(this.dbPath), { recursive: true });
     }
     const db = new Database(this.dbPath);
-    db.run(`CREATE TABLE IF NOT EXISTS ${this.table} (
+    db.run(`CREATE TABLE IF NOT EXISTS ${quotedTable(this.table)} (
       key TEXT PRIMARY KEY,
       json TEXT NOT NULL,
       created_at_ms INTEGER NOT NULL
@@ -74,4 +77,8 @@ export class SqlitePromptCache implements PromptCache {
     this.dbInstance = db;
     return db;
   }
+}
+
+function quotedTable(table: string): string {
+  return `"${table.replaceAll('"', '""')}"`;
 }

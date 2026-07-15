@@ -11,17 +11,12 @@ MISSION GOAL:
 {props.missionGoal}
 
 MILESTONE:
-```json
-{JSON.stringify(props.milestone, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.milestone, null, 2), "```"].join("\n")}</pre>
 
 INTEGRATION RESULT:
-```json
-{JSON.stringify(props.integration, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.integration, null, 2), "```"].join("\n")}</pre>
 
 {props.followUp ? `FOLLOW-UP RESULT:\n${JSON.stringify(props.followUp, null, 2)}` : ""}
 
 REQUIRED OUTPUT:
 {props.schema}
-

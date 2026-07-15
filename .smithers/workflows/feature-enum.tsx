@@ -8,7 +8,7 @@ import { agents } from "../agents";
 import { FeatureEnum, featureEnumOutputSchema } from "../components/FeatureEnum";
 
 const inputSchema = z.object({
-  refineIterations: z.number().int().default(1),
+  refineIterations: z.number().int().min(1).max(20).default(1),
   existingFeatures: z.record(z.string(), z.array(z.string())).nullable().default(null),
   lastCommitHash: z.string().nullable().default(null),
   additionalContext: z.string().default(""),

@@ -10,7 +10,7 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { Approval, Loop, Sequence, approvalDecisionSchema, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -19,7 +19,7 @@ import { agents } from "../agents";
 const inputSchema = z.object({
   spec: z.string().default(".smithers/specs/smithers-review-cloud.md"),
   serviceUrl: z.string().default("https://review.jjhub.tech"),
-  maxFixRounds: z.number().int().default(3),
+  maxFixRounds: z.number().int().min(0).max(10).default(3),
   dogfood: z.boolean().default(true),
 });
 
@@ -47,7 +47,6 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   report: z.object({ summary: z.string() }),
 });
 
-const REPO_ROOT = process.cwd();
 const CONFIG_PATH = path.join(homedir(), ".smithers-review.json");
 
 function tail(text: string, max = 6000): string {
@@ -58,7 +57,7 @@ function tail(text: string, max = 6000): string {
 function sh(cmd: string[], env?: Record<string, string>): { ok: boolean; log: string } {
   try {
     const out = execFileSync(cmd[0], cmd.slice(1), {
-      cwd: REPO_ROOT,
+      cwd: process.cwd(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 64 * 1024 * 1024,
@@ -148,12 +147,21 @@ Steps, in order:
 Final answer JSON: {"status": "merged"|"blocked-on-funding"|"failed", "prUrl": string|null, "notes": "what happened, run URLs, errors"}.
 `;
 
+export { inputSchema };
+
 export default smithers((ctx) => {
   const spec = ctx.input.spec ?? ".smithers/specs/smithers-review-cloud.md";
   const serviceUrl = (ctx.input.serviceUrl ?? "https://review.jjhub.tech").replace(/\/$/, "");
   const maxFixRounds = ctx.input.maxFixRounds ?? 3;
   const latestVerify = ctx.latest("verify", "verify");
+  const completedVerifyCount = (ctx.outputs.verify ?? []).length;
   const approval = ctx.outputMaybe(outputs.deployApproval, { nodeId: "approve-deploy" });
+  const runKey = ctx.runId.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 80) || "run";
+  const dogfoodWorktree = path.join(tmpdir(), `review-cloud-dogfood-${runKey}`);
+  const renderedDogfoodPrompt = dogfoodPrompt.replaceAll(
+    "/tmp/review-cloud-dogfood",
+    dogfoodWorktree,
+  );
 
   return (
     <Workflow name="review-cloud-ship" cache>
@@ -188,7 +196,10 @@ export default smithers((ctx) => {
             id="fix-round"
             output={outputs.fixRound}
             agent={agents.implement}
-            skipIf={ctx.latest("verify", "verify")?.pass === true}
+            skipIf={
+              latestVerify?.pass === true ||
+              completedVerifyCount > maxFixRounds
+            }
             timeoutMs={45 * 60 * 1000}
             retries={2}
           >
@@ -201,17 +212,19 @@ Final answer JSON: {"summary": "what you fixed"}.`}
         </Sequence>
       </Loop>
 
-      <Approval
-        id="approve-deploy"
-        output={outputs.deployApproval}
-        onDeny="fail"
-        request={{
-          title: "Deploy smithers review cloud to review.jjhub.tech?",
-          summary: `Verification: ${latestVerify?.pass ? "green" : "pending"}. Worker: ${
-            ctx.outputMaybe(outputs.implementWorker, { nodeId: "implement-worker" })?.summary ?? "pending"
-          }. Action: ${ctx.outputMaybe(outputs.implementAction, { nodeId: "implement-action" })?.summary ?? "pending"}. Approving pushes apps/review to main, deploys the worker (D1 + proxy + metrics), registers smithersai/smithers, and opens a dogfood PR.`,
-        }}
-      />
+      {latestVerify?.pass === true ? (
+        <Approval
+          id="approve-deploy"
+          output={outputs.deployApproval}
+          onDeny="fail"
+          request={{
+            title: "Deploy smithers review cloud to review.jjhub.tech?",
+            summary: `Verification: green. Worker: ${
+              ctx.outputMaybe(outputs.implementWorker, { nodeId: "implement-worker" })?.summary ?? "pending"
+            }. Action: ${ctx.outputMaybe(outputs.implementAction, { nodeId: "implement-action" })?.summary ?? "pending"}. Approving pushes apps/review to main, deploys the worker (D1 + proxy + metrics), registers smithersai/smithers, and opens a dogfood PR.`,
+          }}
+        />
+      ) : null}
 
       {approval?.approved ? (
         <Sequence>
@@ -227,6 +240,7 @@ Final answer JSON: {"summary": "what you fixed"}.`}
                 "✨ feat(review): smithers review cloud — OIDC sessions, metered proxy, quota, /metrics, zero-secret action\n\nImplements .smithers/specs/smithers-review-cloud.md.\n\nCo-Authored-By: Codex <noreply@openai.com>",
                 "--",
                 "apps/review",
+                ".smithers/specs/smithers-review-cloud.md",
               ]);
               const committed = commit.ok || commit.log.includes("nothing to commit");
               if (!committed) throw new Error(`git commit failed:\n${commit.log}`);
@@ -245,7 +259,12 @@ Final answer JSON: {"summary": "what you fixed"}.`}
             }}
           </Task>
 
-          <Task id="deploy" output={outputs.deploy} dependsOn={["push-main"]}>
+          <Task
+            id="deploy"
+            output={outputs.deploy}
+            dependsOn={["push-main"]}
+            skipIf={ctx.latest("pushMain", "push-main")?.ok !== true}
+          >
             {() => {
               const tokens = ensureOperatorTokens();
               if (!tokens.publishToken) throw new Error("publishToken missing from ~/.smithers-review.json");
@@ -262,7 +281,12 @@ Final answer JSON: {"summary": "what you fixed"}.`}
             }}
           </Task>
 
-          <Task id="register-dogfood" output={outputs.registerDogfood} dependsOn={["deploy"]}>
+          <Task
+            id="register-dogfood"
+            output={outputs.registerDogfood}
+            dependsOn={["deploy"]}
+            skipIf={ctx.latest("deploy", "deploy")?.ok !== true}
+          >
             {async () => {
               const { adminToken } = ensureOperatorTokens();
               const res = await fetch(`${serviceUrl}/api/admin/repos`, {
@@ -274,7 +298,12 @@ Final answer JSON: {"summary": "what you fixed"}.`}
             }}
           </Task>
 
-          <Task id="smoke" output={outputs.smoke} dependsOn={["register-dogfood"]}>
+          <Task
+            id="smoke"
+            output={outputs.smoke}
+            dependsOn={["register-dogfood"]}
+            skipIf={ctx.latest("registerDogfood", "register-dogfood")?.ok !== true}
+          >
             {async () => {
               const { adminToken, metricsToken } = ensureOperatorTokens();
               const checks: string[] = [];
@@ -312,26 +341,30 @@ Final answer JSON: {"summary": "what you fixed"}.`}
             output={outputs.dogfood}
             agent={agents.implement}
             dependsOn={["smoke"]}
-            skipIf={(ctx.input.dogfood ?? true) === false}
+            skipIf={
+              (ctx.input.dogfood ?? true) === false ||
+              ctx.latest("smoke", "smoke")?.ok !== true
+            }
             timeoutMs={60 * 60 * 1000}
             retries={1}
             continueOnFail
           >
-            {dogfoodPrompt}
+            {renderedDogfoodPrompt}
           </Task>
 
           <Task id="report" output={outputs.report} dependsOn={["dogfood-pr"]}>
             {() => {
-              const push = ctx.outputMaybe(outputs.pushMain, { nodeId: "push-main" });
-              const deploy = ctx.outputMaybe(outputs.deploy, { nodeId: "deploy" });
-              const smoke = ctx.outputMaybe(outputs.smoke, { nodeId: "smoke" });
-              const dogfood = ctx.outputMaybe(outputs.dogfood, { nodeId: "dogfood-pr" });
+              const push = ctx.latest("pushMain", "push-main");
+              const deploy = ctx.latest("deploy", "deploy");
+              const smoke = ctx.latest("smoke", "smoke");
+              const dogfood = ctx.latest("dogfood", "dogfood-pr");
+              const dogfoodEnabled = ctx.input.dogfood ?? true;
               return {
                 summary: [
-                  `push-main: ${push?.ok ? `ok @ ${push.sha}` : "FAILED"}`,
-                  `deploy: ${deploy?.ok ? "ok" : "FAILED"}`,
-                  `smoke:\n${smoke?.detail ?? "missing"}`,
-                  `dogfood: ${dogfood?.status ?? "missing"} ${dogfood?.prUrl ?? ""}\n${dogfood?.notes ?? ""}`,
+                  `push-main: ${push?.ok ? `ok @ ${push.sha}` : "FAILED or missing"}`,
+                  `deploy: ${deploy?.ok ? "ok" : "FAILED or missing"}`,
+                  `smoke:\n${smoke?.ok ? "ok" : "FAILED or missing"}\n${smoke?.detail ?? ""}`,
+                  `dogfood: ${!dogfoodEnabled ? "skipped" : (dogfood?.status ?? "FAILED or missing")} ${dogfood?.prUrl ?? ""}\n${dogfood?.notes ?? ""}`,
                 ].join("\n\n"),
               };
             }}

@@ -877,7 +877,11 @@ export default smithers((ctx) => {
             ready: ready.length,
             merged: merged.length,
             closed: closed.length,
-            successful: publication?.status === (input.dryRun ? "dry-run" : "published") && merged.length === selected.length,
+            successful: selected.length > 0
+              && merged.length > 0
+              && merged.length === selected.length
+              && publication?.gatePassed === true
+              && publication.status === (input.dryRun ? "dry-run" : "published"),
             planningScores: scoreTally(plans),
             reviewScores: scoreTally(reviews),
             summary: [

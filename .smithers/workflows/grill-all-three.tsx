@@ -19,7 +19,7 @@ const WORKFLOW_ID = "grill-all-three";
 const { Workflow, Task, smithers, outputs } = createSmithers({
   input: z.object({
     docsDir: z.string().default(".smithers/specs"),
-    maxIterations: z.number().int().default(24),
+    maxIterations: z.number().int().min(1).max(100).default(24),
   }),
   grill: grillOutputSchema,
 });

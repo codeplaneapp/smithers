@@ -16,7 +16,7 @@ import {
   type FeatureWorkItem,
 } from "../components/TestFortress";
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   /** Only cover these feature groups (by name). Empty = all groups. */
   groups: z.array(z.string()).default([]),
   /** Cap the number of feature groups per track (0 = no cap / all). */
@@ -30,7 +30,7 @@ const inputSchema = z.object({
   /** Max Codex review↔fix rounds before returning last. */
   codexRounds: z.number().int().min(1).max(10).default(5),
   /** Which test tracks to run. */
-  tracks: z.array(z.enum(["unit", "e2e"])).default(["unit", "e2e"]),
+  tracks: z.array(z.enum(["unit", "e2e"])).min(1).refine((value) => new Set(value).size === value.length, "tracks must be unique").default(["unit", "e2e"]),
   /** Skip the features.ts discovery swarm (jump straight to hardening). */
   skipDiscovery: z.boolean().default(false),
 });
@@ -72,6 +72,14 @@ const codexFixSchema = z.object({
   noop: z.boolean().default(false),
 });
 
+export const fortressResultSchema = z.object({
+  complete: z.boolean(),
+  trackComplete: z.boolean(),
+  codexApproved: z.boolean(),
+  exhausted: z.boolean(),
+  summary: z.string(),
+});
+
 const { Workflow, smithers, outputs } = createSmithers({
   input: inputSchema,
   discovery: discoverySchema,
@@ -82,6 +90,7 @@ const { Workflow, smithers, outputs } = createSmithers({
   tfVerdict: tfVerdictSchema,
   codexReview: codexReviewSchema,
   codexFix: codexFixSchema,
+  fortressResult: fortressResultSchema,
 });
 
 // Luna discovers and implements; Sol handles every review/judgment pass.
@@ -203,6 +212,15 @@ function codexReviewPrompt(): string {
   ].join("\n");
 }
 
+function featureSlug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "item";
+}
+
+function rawRows(ctx: any, channel: string): Array<Record<string, unknown>> {
+  const rows = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
+  return Array.isArray(rows) ? rows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null) : [];
+}
+
 export default smithers((ctx) => {
   const input = ctx.input;
   const requested = new Set(input.groups ?? []);
@@ -214,11 +232,17 @@ export default smithers((ctx) => {
   const tracks = input.tracks ?? ["unit", "e2e"];
   const skipDiscovery = input.skipDiscovery ?? false;
 
-  const allGroups: FeatureWorkItem[] = Object.entries(
+  const groupMap = new Map<string, string[]>(Object.entries(
     FeatureGroups as Record<string, readonly string[]>,
   )
     .filter(([, features]) => Array.isArray(features) && features.length > 0)
-    .map(([name, features]) => ({ name, features: [...features] }));
+    .map(([name, features]) => [name, [...features]] as [string, string[]]));
+  const discoveryMerge = ctx.latest(outputs.merge, "tf:discover:merge") as z.infer<typeof mergeSchema> | undefined;
+  for (const addition of discoveryMerge?.addedFeatures ?? []) {
+    const existing = groupMap.get(addition.group) ?? [];
+    groupMap.set(addition.group, [...new Set([...existing, ...addition.features])]);
+  }
+  const allGroups: FeatureWorkItem[] = [...groupMap].map(([name, features]) => ({ name, features }));
 
   const selected = allGroups.filter(
     (g) => requested.size === 0 || requested.has(g.name),
@@ -237,10 +261,21 @@ export default smithers((ctx) => {
       | undefined,
   );
 
-  const latestReview = ctx.outputMaybe(outputs.codexReview, {
-    nodeId: "tf:codex:review",
-  }) as z.infer<typeof codexReviewSchema> | undefined;
+  const latestReview = ctx.latest(outputs.codexReview, "tf:codex:review") as z.infer<typeof codexReviewSchema> | undefined;
   const codexApproved = latestReview?.lgtm === true;
+  const verdictRows = rawRows(ctx, "tfVerdict");
+  const selectedTracks = tracks.filter((track): track is "unit" | "e2e" => track === "unit" || track === "e2e");
+  const verdictStates = selectedTracks.flatMap((track) => groups.map((group) => {
+    const nodeId = `tf:${track}:${featureSlug(group.name)}:judge`;
+    const rows = verdictRows.filter((row) => row.nodeId === nodeId);
+    const current = rows.at(-1);
+    return { trivial: current?.verdict === "trivial", exhausted: rows.length >= maxRounds && current?.verdict !== "trivial" };
+  }));
+  const selectionResolved = requested.size === 0 || [...requested].every((name) => groupMap.has(name));
+  const trackComplete = selectionResolved && (verdictStates.length === 0 || verdictStates.every((state) => state.trivial));
+  const codexAttempts = rawRows(ctx, "codexReview").filter((row) => row.nodeId === "tf:codex:review").length;
+  const complete = trackComplete && codexApproved;
+  const exhausted = !complete && (verdictStates.some((state) => state.exhausted) || codexAttempts >= codexRounds);
 
   return (
     <Workflow name="test-fortress">
@@ -338,6 +373,18 @@ export default smithers((ctx) => {
             </Task>
           </Sequence>
         </Loop>
+
+        <Task id="tf:result" output={outputs.fortressResult}>
+          {{
+            complete,
+            trackComplete,
+            codexApproved,
+            exhausted,
+            summary: complete
+              ? `All ${verdictStates.length} selected track/group verdicts are trivial and Codex approved the current tree.`
+              : `trackComplete=${trackComplete}; codexApproved=${codexApproved}; exhausted=${exhausted}.`,
+          }}
+        </Task>
       </Sequence>
     </Workflow>
   );

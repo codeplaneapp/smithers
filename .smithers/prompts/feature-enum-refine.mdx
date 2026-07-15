@@ -6,6 +6,8 @@ unless there is a strong repo-backed reason to reorganize it.
 
 Iteration: {props.iteration}
 
+{props.additionalContext ? `ADDITIONAL CONTEXT:\n${props.additionalContext}\n` : ""}
+
 {props.lastCommitHash ? `A previous inventory exists. Inspect repo deltas with:\ngit log --oneline ${props.lastCommitHash}..HEAD\n` : ""}
 
 CURRENT FEATURE GROUPS:

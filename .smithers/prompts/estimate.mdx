@@ -6,17 +6,15 @@ many **tokens** this workflow will spend. Your forecast is recorded and later
 
 ## What you are estimating
 
-Workflow key: `{props.workflowKey}`
+Workflow key: <code>{props.workflowKey}</code>
 
 Run input (this determines scope):
 
-```json
-{props.input}
-```
+<pre>{props.input}</pre>
 
 ## How to estimate
 
-1. Read the workflow source at `.smithers/workflows/{props.workflowKey}.tsx` and
+1. Read the workflow source at <code>.smithers/workflows/{props.workflowKey}.tsx</code> and
    any components it pulls from `.smithers/components/`. Identify every **agent
    task** (`<Task agent=...>`) and every **loop** (`<Loop>` / `<Ralph>`).
 2. For each agent task, estimate the **tokens for ONE execution**
@@ -42,9 +40,7 @@ measures it live. Estimate **tokens only** — wall-clock is derived downstream.
 
 Return the forecast in this exact shape:
 
-```json
-{props.schema}
-```
+<pre>{props.schema}</pre>
 
 `perTask` lists one entry per agent task with `nodeId`, single-execution
 `tokens`, expected `iterations` (>= 1), and optionally the `model`. Set

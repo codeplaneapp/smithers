@@ -1,6 +1,9 @@
 // smithers-display-name: Sync Features
 /** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence } from "smithers-orchestrator";
+import { createSmithers } from "smithers-orchestrator";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import SyncFeaturesScanPrompt from "../prompts/sync-features-scan.mdx";
@@ -37,6 +40,25 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   writeResult: writeResultSchema,
 });
 
+function filesBelow(root: string, accept: (path: string) => boolean): string[] {
+  if (!existsSync(root)) return [];
+  const files: string[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) files.push(...filesBelow(path, accept));
+    else if (entry.isFile() && accept(path)) files.push(path);
+  }
+  return files.sort();
+}
+
+function repoPaths(cwd: string, files: string[], limit = Number.POSITIVE_INFINITY): string {
+  return files
+    .slice(0, limit)
+    .map((file) => relative(cwd, file).split(sep).join("/"))
+    .join("\n");
+}
+
 export default smithers((ctx) => {
   const bootstrap = ctx.outputMaybe("bootstrap", { nodeId: "bootstrap" });
 
@@ -45,17 +67,13 @@ export default smithers((ctx) => {
       {/* Step 1: Gather codebase state via compute — no LLM needed */}
       <Task id="bootstrap" output={outputs.bootstrap}>
         {async () => {
-          const fs = await import("node:fs");
-          const { execSync } = await import("node:child_process");
-          const path = await import("node:path");
-
           const cwd = process.cwd();
-         const featuresPath = path.resolve(cwd, ".smithers/specs/features.ts");
-          const exists = fs.existsSync(featuresPath);
+          const featuresPath = resolve(cwd, ".smithers/specs/features.ts");
+          const exists = existsSync(featuresPath);
 
           let existingFeatures: Record<string, string[]> | null = null;
           if (exists) {
-            const content = fs.readFileSync(featuresPath, "utf-8");
+            const content = readFileSync(featuresPath, "utf-8");
             existingFeatures = {};
             const groupRegex = /(\w+):\s*\[([^\]]*)\]/gs;
             let match;
@@ -71,117 +89,62 @@ export default smithers((ctx) => {
             }
           }
 
-          const currentHead = execSync("git rev-parse HEAD", { cwd })
-            .toString()
-            .trim();
+          const currentHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
 
           // Build a codebase summary for the agent to analyze
           const parts: string[] = [];
 
           // Source tree structure
-          const tree = execSync(
-            "find src -type f -name '*.ts' -not -path '*/node_modules/*' | sort",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const tree = repoPaths(cwd, filesBelow(join(cwd, "src"), (file) => file.endsWith(".ts")));
           parts.push("=== SOURCE FILES (src/) ===", tree);
 
           // Components
-          const components = execSync(
-            "find src/components -type f -name '*.ts' 2>/dev/null | sort",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const components = repoPaths(cwd, filesBelow(join(cwd, "src/components"), (file) => file.endsWith(".ts")));
           if (components) parts.push("\n=== COMPONENTS ===", components);
 
           // Agents
-          const agentFiles = execSync(
-            "find src/agents -type f -name '*.ts' 2>/dev/null | sort",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const agentFiles = repoPaths(cwd, filesBelow(join(cwd, "src/agents"), (file) => file.endsWith(".ts")));
           if (agentFiles) parts.push("\n=== AGENTS ===", agentFiles);
 
           // CLI commands
-          const cliFiles = execSync(
-            "find src/cli -type f -name '*.ts' 2>/dev/null | sort",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const cliFiles = repoPaths(cwd, filesBelow(join(cwd, "src/cli"), (file) => file.endsWith(".ts")));
           if (cliFiles) parts.push("\n=== CLI ===", cliFiles);
 
           // Memory
-          const memoryFiles = execSync(
-            "find src/memory -type f -name '*.ts' 2>/dev/null | sort",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const memoryFiles = repoPaths(cwd, filesBelow(join(cwd, "src/memory"), (file) => file.endsWith(".ts")));
           if (memoryFiles) parts.push("\n=== MEMORY ===", memoryFiles);
 
           // Exports from index
-          const indexExports = execSync(
-            "grep -E '^export' src/index.ts 2>/dev/null || true",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const indexPath = join(cwd, "src/index.ts");
+          const indexExports = existsSync(indexPath)
+            ? readFileSync(indexPath, "utf8").split(/\r?\n/).filter((line) => line.startsWith("export")).join("\n")
+            : "";
           if (indexExports) parts.push("\n=== PUBLIC API (src/index.ts) ===", indexExports);
 
           // Examples
-          const examples = execSync(
-            "ls examples/*.tsx 2>/dev/null | head -20 || true",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const examples = repoPaths(cwd, filesBelow(join(cwd, "examples"), (file) => file.endsWith(".tsx")), 20);
           if (examples) parts.push("\n=== EXAMPLES ===", examples);
 
           // Workflows
-          const workflows = execSync(
-            "ls .smithers/workflows/*.tsx 2>/dev/null || true",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const workflows = repoPaths(cwd, filesBelow(join(cwd, ".smithers/workflows"), (file) => file.endsWith(".tsx")));
           if (workflows)
             parts.push("\n=== WORKFLOW PACK (.smithers/workflows/) ===", workflows);
 
           // Reusable components
-          const wfComponents = execSync(
-            "ls .smithers/components/*.tsx 2>/dev/null || true",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const wfComponents = repoPaths(cwd, filesBelow(join(cwd, ".smithers/components"), (file) => file.endsWith(".tsx")));
           if (wfComponents) parts.push("\n=== WORKFLOW COMPONENTS ===", wfComponents);
 
           // Docs
-          const docs = execSync(
-            "find docs -name '*.mdx' -type f 2>/dev/null | sort | head -40 || true",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const docs = repoPaths(cwd, filesBelow(join(cwd, "docs"), (file) => file.endsWith(".mdx")), 40);
           if (docs) parts.push("\n=== DOCUMENTATION ===", docs);
 
           // Tests
-          const tests = execSync(
-            "find tests -type f -name '*.test.*' 2>/dev/null | sort | head -30 || true",
-            { cwd },
-          )
-            .toString()
-            .trim();
+          const tests = repoPaths(cwd, filesBelow(join(cwd, "tests"), (file) => /\.test\.[^/\\]+$/.test(file)), 30);
           if (tests) parts.push("\n=== TESTS ===", tests);
 
           // package.json
-          const pkg = execSync("cat package.json 2>/dev/null || true", { cwd })
-            .toString()
-            .trim();
+          const packagePath = join(cwd, "package.json");
+          const pkg = existsSync(packagePath) ? readFileSync(packagePath, "utf8").trim() : "";
           if (pkg) parts.push("\n=== PACKAGE.JSON ===", pkg);
 
           // Recent commits (for delta mode)

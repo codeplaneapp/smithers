@@ -316,15 +316,12 @@ async function pollImplementationRun(implRunId: string) {
   let status = "unknown";
   let runState = "unknown";
   try {
-    const j: any = JSON.parse(raw);
+    const j: any = parseFirstJsonObject(raw);
     status = j?.run?.status ?? j?.status ?? "unknown";
     // runState is the derived liveness view ("stale"/"orphaned" when the owner's
     // heartbeat expired) — inspect emits NO raw heartbeat field.
     runState = j?.runState?.state ?? status;
-  } catch {
-    const m = raw.match(/status[":\s]+([a-z-]+)/i);
-    if (m) status = m[1];
-  }
+  } catch { /* malformed inspect output remains unknown */ }
   const terminal = ["finished", "failed", "cancelled", "continued"].includes(status);
   const stale = runState === "stale" || runState === "orphaned";
   let resumed = false;
@@ -338,6 +335,27 @@ async function pollImplementationRun(implRunId: string) {
   const needsAttention =
     (stale && !resumed) || status === "waiting-approval" || status === "failed";
   return { status, terminal, needsAttention, resumed, detail: raw.slice(0, 4000) };
+}
+
+function parseFirstJsonObject(raw: string): Record<string, any> {
+  const start = raw.indexOf("{");
+  if (start < 0) throw new Error("No JSON object found");
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const char = raw[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && --depth === 0) return JSON.parse(raw.slice(start, i + 1));
+  }
+  throw new Error("Unbalanced JSON object");
 }
 
 async function gatherReportInputs(implRunId: string) {
@@ -916,7 +934,11 @@ export default smithers((ctx) => {
 
   const launchApproved = wfReady && smokeCleared && gatePassed("gate:launch");
   const launch = (ctx as any).outputMaybe("launch", { nodeId: "launch", iteration: 0 });
-  const launched = launch?.launched === true;
+  const implChildRunId = typeof launch?.childRunId === "string" && launch.childRunId.trim()
+    ? launch.childRunId
+    : null;
+  const launched = launch?.launched === true && implChildRunId !== null;
+  const launchFailed = Boolean(launch) && !launched;
 
   const lastPoll = (ctx as any).latest("monitorPoll", "monitor:poll");
   const lastTriage = (ctx as any).latest("monitorTriage", "monitor:triage");
@@ -1477,6 +1499,16 @@ export default smithers((ctx) => {
         {launchApproved && !launch ? (
           <Task id="launch" output={outputs.launch}>
             {() => launchImplementationRun(implRunId)}
+          </Task>
+        ) : null}
+
+        {launchFailed ? (
+          <Task id="cancelled:launch-failed" output={outputs.finalReport}>
+            {{
+              status: "cancelled" as const,
+              artifactPath: null,
+              summary: "Launch failed: no implementation child run was created.",
+            }}
           </Task>
         ) : null}
 

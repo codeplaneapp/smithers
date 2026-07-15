@@ -14,7 +14,7 @@ const inputSchema = z.object({
   features: z.record(z.string(), z.array(z.string())).default({}),
   focus: z.string().default("code review"),
   additionalContext: z.string().nullable().default(null),
-  maxConcurrency: z.number().int().default(5),
+  maxConcurrency: z.number().int().min(1).max(32).default(5),
   agentTier: agentTierSchema.nullable().default(null),
 });
 

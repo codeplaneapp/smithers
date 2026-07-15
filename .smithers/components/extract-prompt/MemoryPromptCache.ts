@@ -11,7 +11,7 @@ export class MemoryPromptCache implements PromptCache {
   }
 
   async set(key: string, value: CachedPrompt): Promise<void> {
-    this.store.set(key, value);
+    this.store.set(key, { ...value, key });
   }
 
   async delete(key: string): Promise<void> {

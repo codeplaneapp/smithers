@@ -2,11 +2,12 @@
 // smithers-display-name: Validated Implement
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Loop } from "smithers-orchestrator";
+import { spawnSync } from "node:child_process";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { implementer, panelists } from "../components/roles";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 import { PlanPanel } from "../components/PlanPanel";
 
 /**
@@ -37,12 +38,16 @@ const researchSchema = z.looseObject({
   dependencies: z.array(z.string()).default([]),
 });
 
-const depgateSchema = z.looseObject({
+export const depgateSchema = z.looseObject({
   needsValidation: z.boolean().default(false),
   rationale: z.string().default(""),
   assumptions: z.array(z.string()).default([]),
   testFiles: z.array(z.string()).default([]),
   testCommand: z.string().default(""),
+}).superRefine((value, issue) => {
+  if (value.needsValidation && !value.testCommand.trim()) {
+    issue.addIssue({ code: "custom", path: ["testCommand"], message: "testCommand is required when needsValidation is true" });
+  }
 });
 
 const depvalidateSchema = z.object({
@@ -74,14 +79,14 @@ const planSynthesisSchema = z.looseObject({
   risks: z.array(z.string()).default([]),
 });
 
-const inputSchema = z.object({
-  ticketId: z.string().default("ticket"),
-  title: z.string().default("Untitled ticket"),
-  brief: z.string().default("Implement the requested change."),
+export const inputSchema = z.object({
+  ticketId: z.string().trim().min(1).default("ticket"),
+  title: z.string().trim().min(1).default("Untitled ticket"),
+  brief: z.string().trim().min(1).default("Implement the requested change."),
   context: z.string().default(""),
   tdd: z.boolean().default(false),
-  maxReviewIterations: z.number().int().default(3),
-  maxValidationAttempts: z.number().int().default(4),
+  maxReviewIterations: z.number().int().min(1).max(10).default(3),
+  maxValidationAttempts: z.number().int().min(1).max(10).default(4),
 });
 
 const { Workflow, Task, Approval, smithers, outputs } = createSmithers({
@@ -99,6 +104,28 @@ const { Workflow, Task, Approval, smithers, outputs } = createSmithers({
 });
 
 type DepValidate = z.infer<typeof depvalidateSchema>;
+
+function rawRows(ctx: any, channel: string): Array<Record<string, unknown>> {
+  const rows = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
+  return Array.isArray(rows) ? rows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null) : [];
+}
+
+export function runDependencyCommand(command: string): DepValidate {
+  const trimmed = command.trim();
+  if (!trimmed) throw new Error("dependency validation requires a non-blank test command");
+  const shell = process.platform === "win32" ? (process.env.ComSpec || "cmd.exe") : (process.env.SHELL || "/bin/sh");
+  const args = process.platform === "win32" ? ["/d", "/s", "/c", trimmed] : ["-lc", trimmed];
+  const res = spawnSync(shell, args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 600_000,
+    maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, SMITHERS_DEV_E2E: "1" },
+  });
+  const combined = `${res.stdout ?? ""}\n${res.stderr ?? res.error?.message ?? ""}`.trim();
+  const exitCode = typeof res.status === "number" ? res.status : null;
+  return { ran: true, passed: exitCode === 0, command: trimmed, exitCode, output: combined.slice(-12000) };
+}
 
 const bullets = (items: string[]): string => (items.length ? items.map((s) => `- ${s}`).join("\n") : "- (none)");
 const numbered = (items: string[]): string => items.map((s, i) => `${i + 1}. ${s}`).join("\n");
@@ -131,19 +158,22 @@ export default smithers((ctx) => {
     .filter(Boolean)
     .join("\n\n---\n");
 
-  const research = ctx.outputMaybe(outputs.research, { nodeId: "research" });
-  const depgate = ctx.outputMaybe(outputs.depgate, { nodeId: "depgate" });
+  const research = ctx.latest(outputs.research, "research");
+  const depgate = ctx.latest(outputs.depgate, "depgate");
   // The plan is the synthesized output of the plan panel's moderator.
-  const plan = ctx.outputMaybe(outputs.planSynthesis, { nodeId: "plan-moderator" });
+  const plan = ctx.latest(outputs.planSynthesis, "plan-moderator");
 
-  const needsValidation = depgate?.needsValidation === true && (depgate?.testCommand ?? "").trim().length > 0;
+  const requiresValidation = depgate?.needsValidation === true;
+  const invalidDependencyConfig = requiresValidation && !(depgate?.testCommand ?? "").trim();
 
   // ── dependency-validation loop state ──────────────────────────────────────
-  const validations = (ctx.outputs.depvalidate ?? []) as DepValidate[];
-  const latestValidation = validations.length ? validations[validations.length - 1] : undefined;
-  const validationPassed = needsValidation ? latestValidation?.passed === true : true;
+  const validations = rawRows(ctx, "depvalidate").filter((row) => row.nodeId === "depvalidate:run") as Array<DepValidate & Record<string, unknown>>;
+  const latestValidation = ctx.latest(outputs.depvalidate, "depvalidate:run") as DepValidate | undefined;
+  const validationPassed = requiresValidation ? latestValidation?.passed === true : true;
+  const dependencyExhausted = requiresValidation && !invalidDependencyConfig && latestValidation?.passed === false && validations.length >= maxValidationAttempts;
+  const dependencyReady = depgate !== undefined && !invalidDependencyConfig && !dependencyExhausted && validationPassed;
   // mount the ask-a-human gate only when the most recent real run failed
-  const latestRunFailed = needsValidation && latestValidation !== undefined && latestValidation.passed !== true;
+  const latestRunFailed = requiresValidation && latestValidation !== undefined && latestValidation.passed !== true;
 
   const depHelpSummary = latestValidation
     ? [
@@ -157,7 +187,7 @@ export default smithers((ctx) => {
         ``,
         `To unblock: fix the environment, then APPROVE to re-run the tests. Likely fixes:`,
         `  • Start Docker Desktop (docker info must succeed)`,
-        `  • Clone Plue and export PLUE_DIR (default /Users/williamcory/plue), boot its compose`,
+        `  • If the ticket uses Plue, clone it and export PLUE_DIR, then boot its compose`,
         `  • Boot the gateway (smithers up) so /health responds`,
         `  • Provide a valid Plue auth token for the seeded/dev user`,
         ``,
@@ -169,21 +199,11 @@ export default smithers((ctx) => {
     : "Assumption-validation tests have not produced output yet.";
 
   // ── implement-loop convergence (mirrors research-plan-implement) ──────────
-  const validateOut = ctx.outputMaybe(outputs.validate, { nodeId: "impl:validate" });
-  const implValidationPassed = validateOut !== undefined && validateOut.allPassed !== false;
-  const gate = reviewGate(ctx, "impl:review-moderator");
-  const done = implValidationPassed && gate.approved;
-  const implIterations = (ctx.outputs.validate ?? []).length;
-  const loopExhausted = !done && implIterations >= maxReviewIterations;
-
-  const feedbackParts: string[] = [];
-  if (validateOut && !implValidationPassed && validateOut.failingSummary) {
-    feedbackParts.push(`VALIDATION FAILED:\n${validateOut.failingSummary}`);
-  }
-  if (gate.feedback) {
-    feedbackParts.push(`REVIEW PANEL REJECTED:\n${gate.feedback}`);
-  }
-  const feedback = feedbackParts.length ? feedbackParts.join("\n\n") : null;
+  const implState = validationLoopState(ctx, { prefix: "impl", maxIterations: maxReviewIterations });
+  const done = implState.done;
+  const implIterations = implState.attempts;
+  const loopExhausted = implState.exhausted;
+  const feedback = implState.feedback;
 
   // ── prompts ───────────────────────────────────────────────────────────────
   const researchPrompt = `You are the RESEARCH stage for one ticket. Read the real code, docs, and the dossier below. Do not write any production code yet.
@@ -205,16 +225,16 @@ ${researchBlock(research) ?? "(research not available)"}
 
 Rules:
 - If the ticket is self-contained (no external infra/3rd-party dep), set needsValidation=false and stop.
-- Otherwise set needsValidation=true and WRITE real test file(s) into the project's existing test suite (prefer apps/smithers/tests/assumptions/${ticketId}.assumptions.test.ts). The tests MUST hit the real dependency — NO mocks, no route fabrication, no hardcoded stand-ins. Examples that fit this repo: Plue's API on :4000 returns 401 on GET /api/user without a token; a seeded/dev token makes GET /api/user return a user; the gateway on :7331 returns ok from /health.
+- Otherwise set needsValidation=true and WRITE real test file(s) into the owning package's existing suite (or \`.smithers/tests/assumptions/${ticketId}.assumptions.test.ts\` for workflow-pack behavior). The tests MUST hit the real dependency — NO mocks, no route fabrication, no hardcoded stand-ins.
 - Guard live assertions behind an env flag (e.g. process.env.SMITHERS_DEV_E2E === "1") so the suite SKIPS (not fails) in CI where the infra is absent — this is conditional execution against real infra, not a mock. The validation command below WILL set that flag so the tests really run now.
-- Return testFiles (paths you wrote) and testCommand: a single shell command, runnable from the repo root, that sets the env flag and runs exactly those tests (e.g. \`SMITHERS_DEV_E2E=1 bun test apps/smithers/tests/assumptions/${ticketId}.assumptions.test.ts\`). assumptions: a short list of the concrete facts the tests prove.
+- Return testFiles (paths you wrote) and testCommand: a single shell command, runnable from the repo root, that runs exactly those tests. The workflow supplies \`SMITHERS_DEV_E2E=1\` in the child environment. assumptions: a short list of the concrete facts the tests prove.
 - Actually create the files on disk now. Keep them small and deterministic.`;
 
   const planPromptParts = [
     `You are the PLAN stage for ticket "${ticketId}". Produce an implementation plan informed by the research and the validated assumptions.`,
     ticketBlock,
     researchBlock(research),
-    needsValidation && depgate
+    requiresValidation && depgate
       ? `VALIDATED ASSUMPTIONS (already proven green — the plan may rely on these):\n${bullets(depgate.assumptions)}\nTest command kept green: ${depgate.testCommand}`
       : null,
     tdd ? "Follow test-driven development: the plan MUST start with test steps before implementation steps." : null,
@@ -227,11 +247,11 @@ Rules:
     ticketBlock,
     researchBlock(research),
     plan ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${numbered(plan.steps)}\n\nRisks:\n${bullets(plan.risks)}` : null,
-    needsValidation && depgate
+    requiresValidation && depgate
       ? `ASSUMPTION-VALIDATION TESTS — these prove the external dependencies and MUST STAY GREEN. Run them as part of your work and do not weaken or mock them:\nFiles: ${depgate.testFiles.join(", ") || "(see suite)"}\nCommand: ${depgate.testCommand}`
       : null,
     tdd ? "Follow the plan's test-first approach: write/adjust tests before production code." : null,
-    `Follow repo conventions in CLAUDE.md (work on main, atomic commits, no mocks, apps/smithers React style). Update docs before code where the ticket defines a contract.`,
+    `Follow repo conventions in CLAUDE.md (work on main, atomic commits, no mocks, and the owning package's conventions). Update docs before code where the ticket defines a contract.`,
   ]
     .filter(Boolean)
     .join("\n\n---\n");
@@ -247,35 +267,17 @@ Rules:
           {depgatePrompt}
         </Task>
 
-        {needsValidation ? (
+        {invalidDependencyConfig ? (
+          <Task id="depvalidate:configuration-error" output={outputs.depvalidate}>
+            {() => {
+              throw new Error(`dependency gate for ticket "${ticketId}" requires a non-blank testCommand`);
+            }}
+          </Task>
+        ) : requiresValidation && !dependencyExhausted ? (
           <Loop id="depvalidate:loop" until={validationPassed} maxIterations={maxValidationAttempts} onMaxReached="return-last">
             <Sequence>
               <Task id="depvalidate:run" output={outputs.depvalidate}>
-                {async () => {
-                  const { spawnSync } = await import("node:child_process");
-                  const command = (depgate?.testCommand ?? "").trim();
-                  if (!command) {
-                    return { ran: false, passed: true, command: "", exitCode: null, output: "no testCommand provided; nothing to validate" };
-                  }
-                  const res = spawnSync("bash", ["-lc", command], {
-                    cwd: process.cwd(),
-                    encoding: "utf8",
-                    timeout: 600_000,
-                    maxBuffer: 64 * 1024 * 1024,
-                    env: { ...process.env, SMITHERS_DEV_E2E: "1" },
-                  });
-                  const stdout = res.stdout ?? "";
-                  const stderr = res.stderr ?? "";
-                  const combined = `${stdout}\n${stderr}`.trim();
-                  const exitCode = typeof res.status === "number" ? res.status : null;
-                  return {
-                    ran: true,
-                    passed: exitCode === 0,
-                    command,
-                    exitCode,
-                    output: combined.slice(-12000),
-                  };
-                }}
+                {() => runDependencyCommand(depgate?.testCommand ?? "")}
               </Task>
               {latestRunFailed ? (
                 <Approval
@@ -291,40 +293,51 @@ Rules:
               ) : null}
             </Sequence>
           </Loop>
+        ) : dependencyExhausted ? (
+          <Task id="depvalidate:exhausted" output={outputs.depvalidate}>
+            {() => {
+              throw new Error(`dependency validation for ticket "${ticketId}" remained red after ${maxValidationAttempts} attempt(s)`);
+            }}
+          </Task>
         ) : null}
 
-        <PlanPanel idPrefix="plan" prompt={planPrompt} panelistOutput={planSchema} synthesisOutput={planSynthesisSchema} />
+        {dependencyReady ? (
+          <>
+            <PlanPanel idPrefix="plan" prompt={planPrompt} panelistOutput={planSchema} synthesisOutput={planSynthesisSchema} />
 
-        <ValidationLoop
-          idPrefix="impl"
-          prompt={implementPrompt}
-          implementAgents={implementer}
-          validateAgents={agents.midTier}
-          reviewAgents={panelists}
-          synthesizeReview
-          feedback={feedback}
-          done={done}
-          maxIterations={maxReviewIterations}
-        />
+            <ValidationLoop
+              idPrefix="impl"
+              prompt={implementPrompt}
+              implementAgents={implementer}
+              validateAgents={agents.midTier}
+              reviewAgents={panelists}
+              synthesizeReview
+              reviewWhen={implState.validationPassed}
+              feedback={feedback}
+              done={done}
+              maxIterations={maxReviewIterations}
+            />
 
-        {loopExhausted ? (
-          <Approval
-            id="escalate"
-            output={outputs.approval}
-            request={{
-              title: `Ticket "${ticketId}" did not converge after ${maxReviewIterations} review iterations`,
-              summary: [
-                `The implement → validate → review loop ran ${implIterations} time(s) without a green validation + synthesized review approval.`,
-                ``,
-                `Latest blocking feedback:`,
-                feedback ?? "(no structured feedback captured)",
-                ``,
-                `APPROVE to accept the current state and finish the run, or DENY to abort for manual takeover.`,
-              ].join("\n"),
-              metadata: { ticketId, implIterations, done },
-            }}
-            onDeny="fail"
-          />
+            {loopExhausted ? (
+              <Approval
+                id="escalate"
+                output={outputs.approval}
+                request={{
+                  title: `Ticket "${ticketId}" did not converge after ${maxReviewIterations} review iterations`,
+                  summary: [
+                    `The implement → validate → review loop ran ${implIterations} time(s) without a current green validation + same-iteration synthesized review approval.`,
+                    ``,
+                    `Latest blocking feedback:`,
+                    feedback ?? "(no structured feedback captured)",
+                    ``,
+                    `APPROVE to accept the current state and finish the run, or DENY to abort for manual takeover.`,
+                  ].join("\n"),
+                  metadata: { ticketId, implIterations, done },
+                }}
+                onDeny="fail"
+              />
+            ) : null}
+          </>
         ) : null}
       </Sequence>
     </Workflow>

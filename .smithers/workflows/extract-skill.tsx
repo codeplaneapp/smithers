@@ -16,6 +16,7 @@ const SKILLS_DIR = ".smithers/skills";
 
 const DEFAULT_PROMPT =
   "Describe the pattern or run you want to harvest into a reusable skill, workflow, or memory.";
+const kebabCaseId = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "must be kebab-case");
 
 const inputSchema = z.object({
   // Named targetRunId (not runId): the engine reserves input.runId for the
@@ -53,7 +54,7 @@ const analyzeSchema = z.looseObject({
 const proposeSchema = z.looseObject({
   proposedSkill: z
     .object({
-      name: z.string().describe("kebab-case skill id, used as the file name."),
+      name: kebabCaseId.describe("kebab-case skill id, used as the file name."),
       description: z.string().describe("One line: what it does and when to reach for it."),
       body: z.string().describe("Markdown body of the skill doc, ready to write to disk."),
     })
@@ -61,7 +62,7 @@ const proposeSchema = z.looseObject({
     .default(null),
   proposedWorkflow: z
     .object({
-      id: z.string().describe("kebab-case workflow id."),
+      id: kebabCaseId.describe("kebab-case workflow id."),
       sketch: z.string().describe("A short prose sketch of the workflow graph and its stages."),
     })
     .nullable()
@@ -69,7 +70,7 @@ const proposeSchema = z.looseObject({
   memoryToPersist: z
     .array(z.string())
     .default([])
-    .describe("Final, polished memory facts to persist."),
+    .describe("Final, polished memory facts proposed for persistence; this workflow does not write a memory database."),
 });
 
 // 3. The skill file actually written to disk when the pattern is reusable as a skill.
@@ -87,7 +88,7 @@ const outputSchema = z.object({
   proposedSkill: z.string().nullable().describe("kebab-case id of the proposed skill, if any."),
   proposedWorkflow: z.string().nullable().describe("kebab-case id of the proposed workflow, if any."),
   skillPath: z.string().nullable().describe("Path of the skill file written to disk, if any."),
-  memoryFactsCount: z.number().describe("Number of durable memory facts to persist."),
+  memoryFactsCount: z.number().describe("Number of durable memory facts proposed for persistence."),
   summary: z.string().describe("Human-readable one-liner of what this run produced."),
 });
 
@@ -166,7 +167,7 @@ export default smithers((ctx) => {
                     ? `Proposed skill: ${skillName}`
                     : null,
                 workflowId ? `Proposed workflow: ${workflowId}` : null,
-                `${memoryFactsCount} memory fact(s) to persist`,
+                `${memoryFactsCount} memory fact(s) proposed for persistence`,
               ]
                 .filter(Boolean)
                 .join("; ");

@@ -9,7 +9,7 @@ import { z } from "zod/v4";
 // an `answer` string, so the TUI/`smithers human` answer must be valid JSON like
 // {"answer":"<text>"}.
 const askSchema = z.object({
-  answer: z.string(),
+  answer: z.string().trim().min(1),
 });
 
 const consumedOutputSchema = z.object({

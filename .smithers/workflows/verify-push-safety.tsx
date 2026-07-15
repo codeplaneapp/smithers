@@ -72,7 +72,8 @@ export default smithers((ctx) => {
     gate.originHasBurndownBranches === false &&
     gate.mainInSync === true &&
     gate.typecheckGreen === true &&
-    gate.lintGreen === true;
+    gate.lintGreen === true &&
+    gate.cleanWorkingTree === true;
 
   return (
     <Workflow name="verify-push-safety">

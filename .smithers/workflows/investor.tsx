@@ -22,10 +22,6 @@
  * downloads API and the GitHub stargazers/contributors API on 2026-06-17.
  * Update the DATA block below before each pitch — see refreshData() notes.
  *
- * One slide (LIVE PROOF) runs a REAL nested `smithers up` against the stage
- * workflow at `.smithers/workflows/demo-stage/sample.tsx` to prove crash +
- * resume durability live. It degrades gracefully if the stage is missing.
- *
  * Usage (from repo root):
  *   ./.smithers/scripts/run-investor.sh
  *   ./.smithers/scripts/run-investor.sh --silent
@@ -35,14 +31,21 @@
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   silent: z.boolean().default(false),
-  voice: z.string().default("Ava (Premium)"),
-  rate: z.number().int().default(190),
-  startAt: z.number().int().default(0),
+  voice: z.string().trim().min(1).max(128).default("Ava (Premium)"),
+  rate: z.number().int().min(1).max(500).default(190),
+  startAt: z.number().int().min(0).max(10_000).default(0),
   auto: z.boolean().default(false),
-  autoMs: z.number().int().default(9000),
+  autoMs: z.number().int().min(0).max(600_000).default(9000),
 });
+
+export type InvestorInput = z.infer<typeof inputSchema>;
+
+/** Apply the same validation and defaults whether called by the CLI or a test renderer. */
+export function normalizeInvestorInput(raw: unknown): InvestorInput {
+  return inputSchema.parse(raw ?? {});
+}
 
 const doneSchema = z.object({ finished: z.boolean() });
 
@@ -149,27 +152,69 @@ function barChart(
 
 // ─── audio (with cancellation) ───────────────────────────────────────────────
 
-type Ctx = { silent: boolean; voice: string; rate: number; muted: boolean; auto: boolean; autoMs: number };
+type Ctx = InvestorInput & { muted: boolean };
 
-let activeSay: { kill: () => void } | null = null;
+type ActiveNarration = {
+  child: import("node:child_process").ChildProcess;
+  exited: Promise<void>;
+};
+
+let activeNarration: ActiveNarration | null = null;
 
 async function speakStart(text: string, ctx: Ctx) {
-  speakStop();
+  await speakStop();
   if (ctx.silent || ctx.muted || !text) return;
+
+  // `say` is a macOS facility, not a runtime dependency. Other platforms run
+  // the complete deck without narration unless a future native adapter is
+  // added for them.
+  if (process.platform !== "darwin") return;
+
   const { spawn } = await import("node:child_process");
-  const p = spawn("say", ["-v", ctx.voice, "-r", String(ctx.rate), text], {
+  const child = spawn("say", ["-v", ctx.voice, "-r", String(ctx.rate), text], {
     stdio: "ignore",
   });
-  activeSay = { kill: () => { try { p.kill("SIGTERM"); } catch {} } };
-  p.on("close", () => {
-    if (activeSay && p.killed === false) activeSay = null;
+
+  const exited = new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    child.once("close", finish);
+    child.once("error", finish);
+  });
+
+  const narration = { child, exited };
+  activeNarration = narration;
+  void exited.then(() => {
+    if (activeNarration === narration) activeNarration = null;
   });
 }
 
-function speakStop() {
-  if (activeSay) {
-    activeSay.kill();
-    activeSay = null;
+async function speakStop() {
+  const narration = activeNarration;
+  activeNarration = null;
+  if (!narration) return;
+
+  try {
+    if (narration.child.exitCode === null && narration.child.signalCode === null) {
+      narration.child.kill("SIGTERM");
+    }
+  } catch {}
+
+  let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+  if (narration.child.exitCode === null && narration.child.signalCode === null) {
+    forceKillTimer = setTimeout(() => {
+      try { narration.child.kill("SIGKILL"); } catch {}
+    }, 1_000);
+  }
+
+  try {
+    await narration.exited;
+  } finally {
+    if (forceKillTimer) clearTimeout(forceKillTimer);
   }
 }
 
@@ -197,9 +242,36 @@ function footer() {
 
 // ─── keyboard input ──────────────────────────────────────────────────────────
 
-type Key = "next" | "prev" | "replay" | "mute" | "quit" | "skip";
+export type InvestorKey = "next" | "prev" | "replay" | "mute" | "quit" | "skip";
 
-function startKeyboard(onKey: (k: Key) => void): () => void {
+const INVESTOR_KEYS = new Map<string, InvestorKey>([
+  ["\x1b[C", "next"],
+  ["\x1b[B", "next"],
+  [" ", "next"],
+  ["\r", "next"],
+  ["\n", "next"],
+  ["\r\n", "next"],
+  ["j", "next"],
+  ["l", "next"],
+  ["\x1b[D", "prev"],
+  ["\x1b[A", "prev"],
+  ["h", "prev"],
+  ["k", "prev"],
+  ["r", "replay"],
+  ["m", "mute"],
+  ["s", "skip"],
+  ["q", "quit"],
+  ["\x1b", "quit"],
+  ["\x03", "quit"],
+]);
+
+/** Convert one raw-mode stdin chunk into a deck action. */
+export function parseInvestorKey(chunk: string): InvestorKey | null {
+  const normalized = chunk.length === 1 ? chunk.toLowerCase() : chunk;
+  return INVESTOR_KEYS.get(normalized) ?? null;
+}
+
+function startKeyboard(onKey: (k: InvestorKey) => void): () => void {
   const stdin = process.stdin;
   if (!stdin.isTTY) return () => {};
   stdin.setRawMode?.(true);
@@ -207,12 +279,8 @@ function startKeyboard(onKey: (k: Key) => void): () => void {
   stdin.setEncoding("utf8");
 
   const handler = (chunk: string) => {
-    if (chunk === "\x1b[C" || chunk === "\x1b[B" || chunk === " " || chunk === "\r" || chunk === "\n" || chunk === "j" || chunk === "l") onKey("next");
-    else if (chunk === "\x1b[D" || chunk === "\x1b[A" || chunk === "h" || chunk === "k") onKey("prev");
-    else if (chunk === "r") onKey("replay");
-    else if (chunk === "m") onKey("mute");
-    else if (chunk === "s") onKey("skip");
-    else if (chunk === "q" || chunk === "\x1b" || chunk === "\x03") onKey("quit");
+    const key = parseInvestorKey(chunk);
+    if (key) onKey(key);
   };
   stdin.on("data", handler);
 
@@ -918,7 +986,7 @@ const SLIDES: Slide[] = [
 
 async function renderSlide(slide: Slide, idx: number, ctx: Ctx) {
   header(slide.title, slide.subtitle ?? "", idx + 1, SLIDES.length);
-  speakStart(slide.narration, ctx);
+  await speakStart(slide.narration, ctx);
   await slide.render(ctx);
   footer();
 }
@@ -928,39 +996,55 @@ async function runSlideshow(ctx: Ctx, startAt: number) {
   let dirty = true;
   let pendingNav: "next" | "prev" | "replay" | null = null;
   let quit = false;
+  let autoTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearAutoTimer = () => {
+    if (autoTimer !== null) clearTimeout(autoTimer);
+    autoTimer = null;
+  };
 
   const isTTY = !!process.stdin.isTTY;
   const auto = ctx.auto || !isTTY;
 
-  const stopKeyboard = startKeyboard((key) => {
-    if (key === "quit") { quit = true; speakStop(); return; }
-    if (key === "mute") { ctx.muted = !ctx.muted; speakStop(); pendingNav = "replay"; return; }
-    if (key === "replay") { pendingNav = "replay"; speakStop(); return; }
-    if (key === "next" || key === "skip") { pendingNav = "next"; speakStop(); return; }
-    if (key === "prev") { pendingNav = "prev"; speakStop(); return; }
-  });
+  let stopKeyboard = () => {};
 
   try {
+    stopKeyboard = startKeyboard((key) => {
+      clearAutoTimer();
+      if (key === "quit") { quit = true; return; }
+      if (key === "mute") { ctx.muted = !ctx.muted; pendingNav = "replay"; return; }
+      if (key === "replay") { pendingNav = "replay"; return; }
+      if (key === "next" || key === "skip") { pendingNav = "next"; return; }
+      if (key === "prev") { pendingNav = "prev"; return; }
+    });
+
     while (!quit) {
       if (dirty) {
         const slide = SLIDES[idx];
         await renderSlide(slide, idx, ctx);
         dirty = false;
         if (auto) {
-          setTimeout(() => { if (!pendingNav) pendingNav = "next"; }, ctx.autoMs);
+          clearAutoTimer();
+          autoTimer = setTimeout(() => {
+            autoTimer = null;
+            if (!pendingNav) pendingNav = "next";
+          }, ctx.autoMs);
         }
       }
       while (!pendingNav && !quit) await sleep(50);
       if (quit) break;
       const nav = pendingNav;
       pendingNav = null;
+      clearAutoTimer();
+      await speakStop();
       if (nav === "next" && idx < SLIDES.length - 1) { idx++; dirty = true; }
       else if (nav === "next" && idx === SLIDES.length - 1) { quit = true; }
       else if (nav === "prev" && idx > 0) { idx--; dirty = true; }
       else if (nav === "replay") { dirty = true; }
     }
   } finally {
-    speakStop();
+    clearAutoTimer();
+    await speakStop();
     stopKeyboard();
     showCursor();
     write(`\n${C.dim}        — investor deck ended —${C.reset}\n\n`);
@@ -970,20 +1054,17 @@ async function runSlideshow(ctx: Ctx, startAt: number) {
 // ─── workflow ────────────────────────────────────────────────────────────────
 
 export default smithers((ctx) => {
+  const input = normalizeInvestorInput(ctx.input);
   const userCtx: Ctx = {
-    silent: ctx.input.silent,
-    voice: ctx.input.voice,
-    rate: ctx.input.rate,
+    ...input,
     muted: false,
-    auto: ctx.input.auto,
-    autoMs: ctx.input.autoMs,
   };
 
   return (
     <Workflow name="investor">
       <Task id="slideshow" output={outputs.slideshow}>
         {async () => {
-          await runSlideshow(userCtx, ctx.input.startAt);
+          await runSlideshow(userCtx, input.startAt);
           return { finished: true };
         }}
       </Task>

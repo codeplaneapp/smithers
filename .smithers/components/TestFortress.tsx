@@ -31,7 +31,7 @@ const LOOP_RETRY_POLICY = { backoff: "exponential", initialDelayMs: 10_000 } as 
  * `maxRounds` is reached. This is the {@link file://examples/debate.jsx} pattern
  * used as the stop condition for a coverage loop.
  *
- * Data flows between steps via `ctx.outputMaybe` (latest row) rather than
+ * Data flows between steps via `ctx.latest` (latest row) rather than
  * `needs`/`deps`. `<Sequence>` guarantees ordering; the workflow re-renders each
  * frame, so each task's prompt is rebuilt with the freshest upstream output
  * before it runs. This deliberately avoids `needs`/`deps` so a `continueOnFail`
@@ -87,7 +87,7 @@ type FortressOutputs = {
 };
 
 type FortressCtx = {
-  outputMaybe: (channel: unknown, opts: { nodeId: string }) => unknown;
+  latest: (channel: unknown, nodeId: string) => unknown;
 };
 
 export type FeatureWorkItem = { name: string; features: string[] };
@@ -113,6 +113,17 @@ function slug(value: string) {
       .replace(/^-+|-+$/g, "")
       .slice(0, 48) || "item"
   );
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return (hash >>> 0).toString(36).slice(0, 8);
+}
+
+function bounded(value: number | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
 }
 
 function trackFocus(track: TrackKind): string {
@@ -257,29 +268,41 @@ export function TestFortressTrack({
   reviewAgent,
   debateAgent,
   judgeAgent,
-  maxRounds = 3,
+  maxRounds = 4,
   maxConcurrency = 3,
 }: TestFortressTrackProps) {
+  const rounds = bounded(maxRounds, 4);
+  const concurrency = bounded(maxConcurrency, 3);
+  const usedIds = new Set<string>();
   return (
-    <Parallel maxConcurrency={maxConcurrency}>
+    <Parallel maxConcurrency={concurrency}>
       {groups.map((group) => {
-        const base = `tf:${track}:${slug(group.name)}`;
+        const normalized = slug(group.name);
+        let groupId = normalized;
+        if (usedIds.has(groupId)) {
+          const stem = `${normalized}-${stableHash(group.name)}`;
+          groupId = stem;
+          let disambiguator = 2;
+          while (usedIds.has(groupId)) groupId = `${stem}-${disambiguator++}`;
+        }
+        usedIds.add(groupId);
+        const base = `tf:${track}:${groupId}`;
         const hardenNode = `${base}:harden`;
         const gapNode = `${base}:gap`;
         const forNode = `${base}:for`;
         const againstNode = `${base}:against`;
         const judgeNode = `${base}:judge`;
 
-        const gap = ctx.outputMaybe(outputs.tfGap, { nodeId: gapNode }) as
+        const gap = ctx.latest(outputs.tfGap, gapNode) as
           | z.infer<typeof tfGapSchema>
           | undefined;
-        const forArg = ctx.outputMaybe(outputs.tfArg, { nodeId: forNode }) as
+        const forArg = ctx.latest(outputs.tfArg, forNode) as
           | z.infer<typeof tfArgSchema>
           | undefined;
-        const againstArg = ctx.outputMaybe(outputs.tfArg, { nodeId: againstNode }) as
+        const againstArg = ctx.latest(outputs.tfArg, againstNode) as
           | z.infer<typeof tfArgSchema>
           | undefined;
-        const verdict = ctx.outputMaybe(outputs.tfVerdict, { nodeId: judgeNode }) as
+        const verdict = ctx.latest(outputs.tfVerdict, judgeNode) as
           | z.infer<typeof tfVerdictSchema>
           | undefined;
         const trivial = verdict?.verdict === "trivial";
@@ -289,7 +312,7 @@ export function TestFortressTrack({
             key={base}
             id={`${base}:loop`}
             until={trivial}
-            maxIterations={maxRounds}
+            maxIterations={rounds}
             onMaxReached="return-last"
           >
             <Sequence>

@@ -7,6 +7,7 @@ import { createSmithers, Task, Sequence } from 'smithers-orchestrator';
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod/v4';
 import { agents } from '../agents';
+import { resolveJjBinary } from '@smithers-orchestrator/vcs/resolveJjBinary';
 
 const NL = String.fromCharCode(10);
 
@@ -68,10 +69,11 @@ const { Workflow, smithers } = createSmithers({
   rebasePlan: rebasePlanSchema,
 });
 
-// --- Deterministic git/jj readers: the hardcoded path, no agent involved. ---
+// --- Deterministic git/jj readers: resolved executables, no agent involved. ---
 function run(tool: string, args: string[]): { ok: boolean; out: string } {
   try {
-    const out = execFileSync(tool, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const executable = tool === 'jj' ? resolveJjBinary().path : tool;
+    const out = execFileSync(executable, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     return { ok: true, out };
   } catch (err: unknown) {
     const stdout = (err as { stdout?: unknown })?.stdout;

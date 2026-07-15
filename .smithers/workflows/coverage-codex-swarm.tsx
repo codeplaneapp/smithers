@@ -21,12 +21,18 @@ const packageStats = [
 ] as const;
 
 const inputSchema = z.object({
-  coverageThreshold: z.number().min(0).max(100).default(99),
+  coverageThreshold: z.number().min(0).max(100).optional(),
   n: z.number().min(0).max(100).optional(),
   maxConcurrency: z.number().int().min(1).max(8).default(4),
   packages: z.array(z.string()).optional(),
   packageInstructions: z.record(z.string(), z.string()).optional(),
   includeAlreadyCovered: z.boolean().default(false),
+}).superRefine((input, ctx) => {
+  for (const requested of input.packages ?? []) {
+    if (!packageStats.some((item) => item.path === requested)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["packages"], message: `Unknown package: ${requested}` });
+    }
+  }
 });
 
 const coverageResultSchema = z.object({
@@ -83,11 +89,7 @@ Required output:
 
 export default smithers((ctx) => {
   const input = ctx.input;
-  const targetPercent = typeof input.coverageThreshold === "number"
-    ? input.coverageThreshold
-    : typeof input.n === "number"
-      ? input.n
-      : 99;
+  const targetPercent = input.coverageThreshold ?? input.n ?? 99;
   const maxConcurrency = typeof input.maxConcurrency === "number" ? input.maxConcurrency : 4;
   const includeAlreadyCovered = input.includeAlreadyCovered === true;
   const packageInstructions = input.packageInstructions ?? {};

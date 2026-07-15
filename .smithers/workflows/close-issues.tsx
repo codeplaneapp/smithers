@@ -142,7 +142,7 @@ function latestForIssue<T extends { issueNumber: number }>(rows: T[] | undefined
 function issueDone(ctx: any, n: number): boolean {
   const impl = latestForIssue<Implementation>(ctx.outputs.implementation, n);
   const review = latestForIssue<Review>(ctx.outputs.review, n);
-  return impl?.status === "implemented" && review?.approved === true;
+  return impl?.status === "implemented" && review?.approved === true && (impl as any).iteration === (review as any).iteration;
 }
 function issueFeedback(ctx: any, n: number): string {
   const impl = latestForIssue<Implementation>(ctx.outputs.implementation, n);
@@ -331,7 +331,7 @@ export default smithers((ctx) => {
   const denied = approval !== undefined && approval.approved === false;
 
   // Every discovered issue has produced a PR row (prepared or skipped) → ready to gate.
-  const allSettled = issues.length > 0 && issues.every((i) => latestForIssue(prRows, i.number) !== undefined);
+  const allSettled = issues.every((i) => latestForIssue(prRows, i.number) !== undefined);
   const preparedPrs = issues
     .map((i) => latestForIssue(prRows, i.number))
     .filter((p): p is Pr => !!p && p.prepared && p.prNumber !== null);
@@ -390,7 +390,7 @@ export default smithers((ctx) => {
           </Parallel>
         ) : null}
 
-        {allSettled && !approval ? (
+        {allSettled && issues.length > 0 && !approval ? (
           <Approval
             id="approve-landing"
             output={outputs.landingApproval}
@@ -403,6 +403,12 @@ export default smithers((ctx) => {
             }}
             onDeny="skip"
           />
+        ) : null}
+
+        {allSettled && issues.length === 0 && !approval ? (
+          <Task id="landing-skipped" output={outputs.merge} timeoutMs={60_000}>
+            {{ issueNumber: 0, prNumber: null, merged: false, summary: "No open issues were discovered; nothing to land." }}
+          </Task>
         ) : null}
 
         {allSettled && approved && preparedPrs.length > 0 ? (

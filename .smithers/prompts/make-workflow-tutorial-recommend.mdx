@@ -9,14 +9,10 @@ should build — ranked from most to least useful for their specific situation.
 {props.hint || "(none — infer from codebase and history below)"}
 
 ### Their codebase
-```
-{props.codebaseSummary}
-```
+<pre>{["```", props.codebaseSummary, "```"].join("\n")}</pre>
 
 ### Their recent agent conversations
-```
-{props.sessionContext || "(no external session data found)"}
-```
+<pre>{["```", props.sessionContext || "(no external session data found)", "```"].join("\n")}</pre>
 Session scan: {props.sessionSummary}
 
 ### Smithers capabilities (concise index)

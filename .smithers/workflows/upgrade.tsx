@@ -76,14 +76,28 @@ function boolInput(value: unknown): boolean {
   return value === true || value === "true" || value === "1";
 }
 
+// Single source of truth for "does this attempt have a blocker": trims
+// whitespace-only needsHelp to blank so it never masquerades as a real
+// blocker, and is reused for both the escalation decision and the final
+// output so the two can never disagree (they used to: escalation trimmed,
+// the final success check did not, so a whitespace-only needsHelp flipped a
+// successful attempt to success=false in the terminal output).
+function normalizedBlocker(attempt: { needsHelp?: unknown } | undefined): string {
+  return typeof attempt?.needsHelp === "string" ? attempt.needsHelp.trim() : "";
+}
+
 export default smithers((ctx) => {
   const rawInput = ctx.input as Record<string, unknown>;
   const dryRun = boolInput(rawInput.dryRun);
   const gather = ctx.outputMaybe("gather", { nodeId: "gather" });
   const cheap = ctx.outputMaybe("cheapUpgrade", { nodeId: "cheap-upgrade" });
   const smart = ctx.outputMaybe("smartUpgrade", { nodeId: "smart-upgrade" });
-  const needsSmart = Boolean(cheap?.needsHelp && String(cheap.needsHelp).trim().length > 0);
+  // Escalate when the cheap attempt failed outright OR left a real (non-blank)
+  // blocker — success=false with an empty needsHelp is still a failure to
+  // escalate on, not a silent stop.
+  const needsSmart = Boolean(cheap) && (cheap!.success === false || normalizedBlocker(cheap).length > 0);
   const finalAttempt = needsSmart ? smart : cheap;
+  const finalBlocker = normalizedBlocker(finalAttempt);
 
   return (
     <Workflow name="upgrade">
@@ -186,8 +200,8 @@ Return the same shape: success, needsHelp, summary, commands, details, versionAf
         {gather && finalAttempt ? (
           <Task id="output" output={outputs.output}>
             {() => ({
-              success: finalAttempt.success === true && !finalAttempt.needsHelp,
-              needsHelp: String(finalAttempt.needsHelp ?? ""),
+              success: finalAttempt.success === true && finalBlocker.length === 0,
+              needsHelp: finalBlocker,
               current: gather.current,
               latest: gather.latest,
               updateAvailable: gather.updateAvailable,

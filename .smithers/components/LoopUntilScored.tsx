@@ -3,6 +3,7 @@
 import { Loop } from "smithers-orchestrator";
 
 export type LoopUntilScoredProps = {
+  key?: string;
   idPrefix: string;
   /**
    * The current score for whatever the loop body produces, read by the

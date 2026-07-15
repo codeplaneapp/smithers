@@ -5,12 +5,13 @@
 // smithers-tags: ops, debugging
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
-import { $ } from "bun";
+import { execFileSync } from "node:child_process";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import DiagnosePrompt from "../prompts/triage-run-diagnose.mdx";
 import RecommendPrompt from "../prompts/triage-run-recommend.mdx";
+import { parseFirstJsonObject } from "../lib/parse-first-json-value";
 
 const inputSchema = z.object({
   // Named targetRunId (not runId): the engine reserves input.runId for the
@@ -110,41 +111,6 @@ function tailLines(text: string, max: number): string[] {
     .slice(-max);
 }
 
-// CLI commands append a CTA payload after the JSON document, so a bare
-// JSON.parse of the full stdout fails. Parse just the first top-level object.
-function parseFirstJsonObject(text: string): Record<string, unknown> | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth += 1;
-    else if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        try {
-          const parsed: unknown = JSON.parse(text.slice(start, i + 1));
-          return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-            ? (parsed as Record<string, unknown>)
-            : null;
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -167,15 +133,13 @@ export default smithers((ctx) => {
         {/* 1 — Deterministically pull run state + the recent event log. */}
         <Task id="gather" output={outputs.gather}>
           {async () => {
-            const inspectRes = await $`bunx smithers-orchestrator inspect ${runId} --format json`
-              .nothrow()
-              .quiet();
-            const eventsRes = await $`bunx smithers-orchestrator events ${runId}`
-              .nothrow()
-              .quiet();
-
-            const inspectText = inspectRes.stdout?.toString() ?? "";
-            const eventsText = `${eventsRes.stdout?.toString() ?? ""}\n${eventsRes.stderr?.toString() ?? ""}`;
+            let inspectText = "";
+            let inspectExitCode = 0;
+            try { inspectText = execFileSync(process.env.SMITHERS_CLI ?? "smithers", ["inspect", runId, "--format", "json"], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }); }
+            catch (error) { inspectExitCode = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 1; inspectText = String((error as { stdout?: unknown }).stdout ?? ""); }
+            let eventsText = "";
+            try { eventsText = execFileSync(process.env.SMITHERS_CLI ?? "smithers", ["events", runId], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }); }
+            catch (error) { eventsText = `${String((error as { stdout?: unknown }).stdout ?? "")}\n${String((error as { stderr?: unknown }).stderr ?? "")}`; }
 
             let state = "unknown";
             let runError = "";
@@ -222,7 +186,7 @@ export default smithers((ctx) => {
             }
 
             const lastEvents = tailLines(eventsText, MAX_EVENT_LINES);
-            const ok = inspectRes.exitCode === 0 && state !== "unknown";
+            const ok = inspectExitCode === 0 && state !== "unknown";
 
             const summary = ok
               ? `Run ${runId} is "${state}" with ${failingNodes.length} failing/stuck node(s), ${pendingApprovals.length} pending approval(s), and ${lastEvents.length} recent event line(s).`

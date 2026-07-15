@@ -11,6 +11,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";
+import { parseFirstJsonValue } from "../lib/parse-first-json-value";
 
 const repoRoot = (() => {
   try {
@@ -52,7 +53,7 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
 });
 
 function smithersCli(args: string[]): string {
-  return execFileSync("smithers", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 120_000 }).trim();
+  return execFileSync(process.env.SMITHERS_CLI ?? "smithers", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 120_000 }).trim();
 }
 function scanForFleetRun(): Scan {
   let raw = "";
@@ -61,19 +62,19 @@ function scanForFleetRun(): Scan {
   } catch (error) {
     return { found: false, watchedRunId: "", watchedStatus: "", psSnapshot: "", summary: "smithers ps failed: " + String(error).slice(0, 500) };
   }
-  // The CLI may append a CTA after the JSON; parse the first JSON value.
-  let rows: any = [];
-  try {
-    rows = JSON.parse(raw.slice(raw.indexOf("[") === -1 ? raw.indexOf("{") : raw.indexOf("[")));
-  } catch {
+  // The CLI may append a CTA after the JSON; parse the first balanced value.
+  const rows = parseFirstJsonValue(raw);
+  if (rows === null) {
     return { found: false, watchedRunId: "", watchedStatus: "", psSnapshot: raw.slice(0, 4_000), summary: "Could not parse smithers ps output." };
   }
-  const list: any[] = Array.isArray(rows) ? rows : Array.isArray(rows?.runs) ? rows.runs : Array.isArray(rows?.data) ? rows.data : [];
+  const envelope = typeof rows === "object" && rows !== null ? rows as Record<string, unknown> : {};
+  const list: any[] = Array.isArray(rows) ? rows : Array.isArray(envelope.runs) ? envelope.runs : Array.isArray(envelope.data) ? envelope.data : [];
   const fleet = list.filter((row) => {
     const name = String(row?.workflowName ?? row?.workflow ?? row?.name ?? "");
     const key = String(row?.workflowKey ?? row?.key ?? "");
-    return name.includes("ticket-fleet") || key.includes("ticket-fleet");
-  }).filter((row) => !String(row?.workflowName ?? row?.workflowKey ?? "").includes("monitor"));
+    return (name.includes("ticket-fleet") || key.includes("ticket-fleet")) &&
+      !name.includes("monitor") && !key.includes("monitor");
+  });
   if (!fleet.length) {
     return { found: false, watchedRunId: "", watchedStatus: "", psSnapshot: raw.slice(0, 4_000), summary: "No ticket-fleet run found; nothing to monitor." };
   }

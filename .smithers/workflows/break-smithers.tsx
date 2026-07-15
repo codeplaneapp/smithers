@@ -5,7 +5,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { createSmithers, UI } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -42,10 +42,6 @@ import { agents } from "../agents";
  *   smithers ps ; smithers logs <run> --follow
  */
 
-const ROOT = process.cwd();
-const SUITES_DIR = join(ROOT, "evals", "suites");
-const CURATED = join(ROOT, "evals/_inventory/curated-tasks.jsonl");
-
 const researchAgent = agents.research;
 const implementationAgent = agents.implement;
 
@@ -66,7 +62,10 @@ function spawnAsync(
 ): Promise<SpawnResult> {
   const maxBuffer = opts.maxBuffer ?? 1024 * 1024;
   return new Promise<SpawnResult>((resolve) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(cmd),
+    });
     let stdout = "";
     let stderr = "";
     let overflowed = false;
@@ -111,17 +110,22 @@ function spawnAsync(
   });
 }
 
-function haikuSuites(): string[] {
-  if (!existsSync(SUITES_DIR)) return [];
-  return readdirSync(SUITES_DIR, { withFileTypes: true })
+function workflowRoot(): string {
+  return resolve(process.env.SMITHERS_BREAK_ROOT?.trim() || process.cwd());
+}
+
+function haikuSuites(root: string): string[] {
+  const suitesDir = join(root, "evals", "suites");
+  if (!existsSync(suitesDir)) return [];
+  return readdirSync(suitesDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
-    .filter((name) => existsSync(join(SUITES_DIR, name, "eval.tsx")) && existsSync(join(SUITES_DIR, name, "cases.jsonl")))
+    .filter((name) => existsSync(join(suitesDir, name, "eval.tsx")) && existsSync(join(suitesDir, name, "cases.jsonl")))
     .filter((name) => {
       // Keep only suites that actually have a haiku case, so a rotation slot
       // never wastes an iteration on a suite haiku never runs.
       try {
-        const lines = readFileSync(join(SUITES_DIR, name, "cases.jsonl"), "utf8").split(/\r?\n/);
+        const lines = readFileSync(join(suitesDir, name, "cases.jsonl"), "utf8").split(/\r?\n/);
         return lines.some((l) => {
           try {
             return JSON.parse(l)?.input?.model === "haiku";
@@ -138,11 +142,24 @@ function haikuSuites(): string[] {
 
 const inputSchema = z.object({
   deadlineIso: z
-    .string()
+    .string().datetime({ offset: true })
     .describe("Stop the loop once wall-clock time passes this ISO timestamp (e.g. 2026-07-06T22:00:00-04:00)."),
-  maxIterations: z.number().default(500).describe("Hard cap on loop iterations (deadline usually stops it first)."),
-  maxCasesPerSuite: z.number().default(4).describe("Cap haiku cases run per suite each iteration (keeps rounds bounded)."),
+  maxIterations: z.number().int().min(1).default(500).describe("Hard cap on loop iterations (deadline usually stops it first)."),
+  maxCasesPerSuite: z.number().int().min(1).default(4).describe("Cap haiku cases run per suite each iteration (keeps rounds bounded)."),
 });
+
+function containedRepoPaths(root: string, paths: string[]): string[] {
+  const out: string[] = [];
+  for (const raw of paths) {
+    const candidate = raw.trim();
+    if (!candidate || candidate.includes("\0") || isAbsolute(candidate)) continue;
+    const normalized = normalize(candidate);
+    const rel = relative(root, resolve(root, normalized));
+    if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`)) continue;
+    if (!out.includes(rel)) out.push(rel);
+  }
+  return out;
+}
 
 const clockSchema = z.object({
   round: z.number(),
@@ -263,11 +280,13 @@ const FIX_PROMPT = (friction: z.infer<typeof frictionSchema>, authored: z.infer<
   ].join("\n");
 
 export default smithers((ctx) => {
+  const root = workflowRoot();
+  const curated = join(root, "evals/_inventory/curated-tasks.jsonl");
   const deadlineIso = ctx.input.deadlineIso;
   const maxIterations = ctx.input.maxIterations ?? 500;
   const maxCases = ctx.input.maxCasesPerSuite ?? 4;
 
-  const SUITES = haikuSuites();
+  const SUITES = haikuSuites(root);
   // Iteration index = how many eval rounds have completed. Drives suite rotation.
   const doneRounds = (ctx.outputs.evalRun ?? []).length;
   const suite = SUITES.length ? SUITES[doneRounds % SUITES.length] : "authoring-workflows";
@@ -305,12 +324,12 @@ export default smithers((ctx) => {
           <Task id="run-haiku" output={outputs.evalRun} continueOnFail>
             {async () => {
               const res = await spawnAsync(
-                "bun",
-                [join(ROOT, "evals/harness/run-suite.ts"), suite, "--only-model", "haiku", "--max-cases", String(maxCases), "-j", "4"],
-                { cwd: ROOT, timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 },
+                process.env.SMITHERS_BREAK_BUN?.trim() || "bun",
+                [join(root, "evals/harness/run-suite.ts"), suite, "--only-model", "haiku", "--max-cases", String(maxCases), "-j", "4"],
+                { cwd: root, timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 },
               );
               const out = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
-              const reportPath = join(ROOT, "evals/harness/.report", `${suite}.json`);
+              const reportPath = join(root, "evals/harness/.report", `${suite}.json`);
               return {
                 suite,
                 exitCode: res.status ?? -1,
@@ -351,8 +370,8 @@ export default smithers((ctx) => {
                   source: "break-smithers",
                 };
                 let already = false;
-                if (existsSync(CURATED)) {
-                  already = readFileSync(CURATED, "utf8")
+                if (existsSync(curated)) {
+                  already = readFileSync(curated, "utf8")
                     .split(/\r?\n/)
                     .some((l) => {
                       try {
@@ -364,9 +383,13 @@ export default smithers((ctx) => {
                 }
                 if (!already) {
                   const { appendFileSync } = require("node:fs");
-                  appendFileSync(CURATED, `${JSON.stringify(task)}\n`);
+                  appendFileSync(curated, `${JSON.stringify(task)}\n`);
                 }
-                const gen = await spawnAsync("bun", [join(ROOT, "evals/harness/generate-cases.ts")], { cwd: ROOT, timeout: 5 * 60_000 });
+                const gen = await spawnAsync(
+                  process.env.SMITHERS_BREAK_BUN?.trim() || "bun",
+                  [join(root, "evals/harness/generate-cases.ts")],
+                  { cwd: root, timeout: 5 * 60_000 },
+                );
                 return {
                   appended: !already,
                   suite: friction?.area ?? "real-usage",
@@ -389,11 +412,11 @@ export default smithers((ctx) => {
           {fixed ? (
             <Task id="commit" output={outputs.committed} continueOnFail>
               {async () => {
-                const paths = [
+                const paths = containedRepoPaths(root, [
                   "evals/_inventory/curated-tasks.jsonl",
                   "evals/suites",
                   ...(fixed.files ?? []),
-                ].filter((p) => p && existsSync(join(ROOT, p.split(" ")[0])));
+                ]).filter((p) => existsSync(join(root, p)));
                 if (paths.length === 0) {
                   return { committed: false, message: "", note: "Nothing to commit." };
                 }
@@ -402,7 +425,7 @@ export default smithers((ctx) => {
                 // Pathspec commit: stages+commits ONLY these paths, leaving other
                 // agents' unstaged work untouched. No push/pull on the shared tree.
                 const res = await spawnAsync("git", ["commit", "-m", message, "--", ...paths], {
-                  cwd: ROOT,
+                  cwd: root,
                   timeout: 3 * 60_000,
                 });
                 const combined = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;

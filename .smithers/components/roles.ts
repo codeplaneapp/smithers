@@ -26,7 +26,9 @@ export const IMPLEMENTER_MODEL =
   process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "gpt-5.6-luna";
 
 const testAgentPath = process.env.SMITHERS_TEST_AGENT_PATH?.trim();
-const testAgentEnv = testAgentPath ? { PATH: testAgentPath } : undefined;
+const testAgentEnv = testAgentPath
+  ? { ...process.env, PATH: testAgentPath }
+  : undefined;
 
 function commandExists(command: string): boolean {
   const searchPath = testAgentPath || process.env.PATH || "";
@@ -90,6 +92,15 @@ export const validator: AgentLike[] = codexFirst(terraOptions, implementationFal
 const solFallbacks: AgentLike[] = [
   ...(hasClaude ? [fable, opus] : []),
   ...(hasKimi ? [kimi] : []),
+];
+
+/** Fable-first author chain; Sol takes over only when Claude is unavailable. */
+export const fableAuthor: AgentLike[] = [
+  ...(hasClaude ? [fable] : []),
+  ...codexFirst(solOptions, [
+    ...(hasClaude ? [opus] : []),
+    ...(hasKimi ? [kimi] : []),
+  ]),
 ];
 
 /**

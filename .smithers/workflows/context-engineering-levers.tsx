@@ -206,9 +206,9 @@ function runGate(cwd: string, cmds: string[][], timeoutMs = 30 * 60_000) {
 }
 
 // ---- prompt builders (point agents at the spec; keep them in the smart zone) ----
-function planPrompt(deliverable: "docs" | "sidecar" | "speed"): string {
+function planPrompt(deliverable: "docs" | "sidecar" | "speed", specPath: string): string {
   return [
-    `Read the spec first: ${SPEC} (the section "Deliverable ${deliverable === "docs" ? "1 — Docs" : deliverable === "sidecar" ? "2 — <Sidecar>" : "3 — Re-render trigger: explicit + observable contract"}", plus "The philosophy to encode", "Decisions already made", and "Ground-truth API facts").`,
+    `Read the spec first: ${specPath} (the section "Deliverable ${deliverable === "docs" ? "1 — Docs" : deliverable === "sidecar" ? "2 — <Sidecar>" : "3 — Re-render trigger: explicit + observable contract"}", plus "The philosophy to encode", "Decisions already made", and "Ground-truth API facts").`,
     `Produce a PLAN for the "${deliverable}" deliverable ONLY. Planning only — do not edit, create, or delete any files.`,
     "Ground the plan in the real codebase: read the modules/files involved before proposing edits.",
     "Return: approach (a few sentences), steps (ordered, concrete edits), filesToChange (real paths), tests (the e2e + unit tests that will prove it works — name them and the assertion), risks (cross-file hazards, observability gaps).",
@@ -216,9 +216,9 @@ function planPrompt(deliverable: "docs" | "sidecar" | "speed"): string {
   ].join("\n\n");
 }
 
-function buildPrompt(deliverable: "docs" | "sidecar" | "speed", plan: string, feedback: string, inWorktree: boolean): string {
+function buildPrompt(deliverable: "docs" | "sidecar" | "speed", specPath: string, plan: string, feedback: string, inWorktree: boolean): string {
   const base = [
-    `Read the spec: ${SPEC}. Implement the "${deliverable}" deliverable to its acceptance criteria.`,
+    `Read the spec: ${specPath}. Implement the "${deliverable}" deliverable to its acceptance criteria.`,
     plan ? `Approved plan to follow:\n${plan}` : "",
     inWorktree ? "You are in an isolated worktree. Make ALL edits here; do not touch the main checkout." : "",
     deliverable === "docs"
@@ -234,9 +234,9 @@ function buildPrompt(deliverable: "docs" | "sidecar" | "speed", plan: string, fe
   return base.filter(Boolean).join("\n\n");
 }
 
-function reviewPrompt(deliverable: "docs" | "sidecar" | "speed", validation: string): string {
+function reviewPrompt(deliverable: "docs" | "sidecar" | "speed", specPath: string, validation: string): string {
   return [
-    `You are the exacting reviewer for the "${deliverable}" deliverable. Read the spec: ${SPEC}. Run "git diff" (and "jj diff") to see the changes. Do not edit files.`,
+    `You are the exacting reviewer for the "${deliverable}" deliverable. Read the spec: ${specPath}. Run "git diff" (and "jj diff") to see the changes. Do not edit files.`,
     `Deterministic gate result:\n${validation || "(not yet run)"}`,
     "Judge against the acceptance criteria. Approve ONLY if: the work fully realizes the spec, the e2e test exists and genuinely proves the behavior, observability is adequate for a future agent to debug, and the deterministic gate passed. For docs, also confirm no em-dashes were added and the stale <Aspects> line is gone.",
     "Do not approve partial, speculative, or test-deleting work. Put every must-fix in blockingIssues with actionable feedback.",
@@ -260,7 +260,9 @@ function approvedGate(ctx: any, nodeId: string): boolean {
 function buildDone(ctx: any, d: Del): boolean {
   const v = lastFor(ctx.outputs.validation, d);
   const r = lastFor(ctx.outputs.review, d);
-  return Boolean(v?.allPassed && r?.approved);
+  const vIteration = Number(v?.iteration ?? 0);
+  const rIteration = Number(r?.iteration ?? 0);
+  return Boolean(v?.allPassed && r?.approved && vIteration === rIteration);
 }
 function buildFeedback(ctx: any, d: Del): string {
   const v = lastFor(ctx.outputs.validation, d);
@@ -287,19 +289,19 @@ function planSummary(ctx: any, d: Del): string {
 }
 
 // A build/validate/review loop for one deliverable. cwd is "main" or the worktree.
-function BuildLoop({ ctx, d, cwd, inWorktree, gateCmds }: { ctx: any; d: Del; cwd: string; inWorktree: boolean; gateCmds: string[][] }) {
+function BuildLoop({ ctx, d, cwd, inWorktree, gateCmds, specPath }: { ctx: any; d: Del; cwd: string; inWorktree: boolean; gateCmds: string[][]; specPath: string }) {
   return (
     <Loop id={`${d}-loop`} until={buildDone(ctx, d)} maxIterations={ctx.input?.maxBuildIterations ?? 3} onMaxReached="return-last">
       <Sequence>
         <Task id={`${d}-build`} output={outputs.build} agent={d === "docs" ? docsAgent : codeAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
-          {buildPrompt(d, planText(ctx, d), buildFeedback(ctx, d), inWorktree)}
+          {buildPrompt(d, specPath, planText(ctx, d), buildFeedback(ctx, d), inWorktree)}
         </Task>
         <Task id={`${d}-validate`} output={outputs.validation}>
           {() => ({ deliverable: d, ...runGate(cwd, gateCmds) })}
         </Task>
-        <Task id={`${d}-review`} output={outputs.review} agent={reviewAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
-          {reviewPrompt(d, JSON.stringify(lastFor(ctx.outputs.validation, d) ?? {}, null, 2))}
-        </Task>
+        {lastFor(ctx.outputs.validation, d)?.allPassed === true ? <Task id={`${d}-review`} output={outputs.review} agent={reviewAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
+          {reviewPrompt(d, specPath, JSON.stringify(lastFor(ctx.outputs.validation, d) ?? {}, null, 2))}
+        </Task> : null}
       </Sequence>
     </Loop>
   );
@@ -310,6 +312,8 @@ export default smithers((ctx: any) => {
   const includeSidecar = ctx.input?.includeSidecar ?? true;
   const includeSpeed = ctx.input?.includeSpeed ?? true;
   const docsCwd = repoRoot();
+  const specPath = ctx.input?.specPath ?? SPEC;
+  const specReady = existsSync(specPath) && ctx.outputMaybe(outputs.prepare, { nodeId: "prepare" })?.specFound === true;
 
   return (
     <Workflow name="context-engineering-levers">
@@ -322,33 +326,33 @@ export default smithers((ctx: any) => {
         </Task>
 
         {/* ============ DELIVERABLE 1: DOCS ============ */}
-        {includeDocs ? (
+        {includeDocs && specReady ? (
           <Sequence>
             <Task id="plan-docs" output={outputs.plan} agent={planningAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
-              {planPrompt("docs")}
+            {planPrompt("docs", specPath)}
             </Task>
             <Approval id="approve-docs" output={outputs.approval} onDeny="skip" request={{ title: "Approve the DOCS plan?", summary: planSummary(ctx, "docs") }} />
-            {approvedGate(ctx, "approve-docs") ? (
-              <BuildLoop ctx={ctx} d="docs" cwd={docsCwd} inWorktree={false} gateCmds={[["pnpm", "typecheck"], ["pnpm", "docs:llms"]]} />
+            {specReady && approvedGate(ctx, "approve-docs") ? (
+              <BuildLoop ctx={ctx} d="docs" cwd={docsCwd} inWorktree={false} gateCmds={[["pnpm", "typecheck"], ["pnpm", "docs:llms"]]} specPath={specPath} />
             ) : null}
           </Sequence>
         ) : null}
 
         {/* ============ DELIVERABLE 2: SIDECAR ============ */}
-        {includeSidecar ? (
+        {includeSidecar && specReady ? (
           <Sequence>
             <Task id="plan-sidecar" output={outputs.plan} agent={planningAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
-              {planPrompt("sidecar")}
+            {planPrompt("sidecar", specPath)}
             </Task>
             <Approval id="approve-sidecar" output={outputs.approval} onDeny="skip" request={{ title: "Approve the <Sidecar> plan?", summary: planSummary(ctx, "sidecar") }} />
-            {approvedGate(ctx, "approve-sidecar") ? (
-              <BuildLoop ctx={ctx} d="sidecar" cwd={docsCwd} inWorktree={false} gateCmds={[["pnpm", "typecheck"], ["pnpm", "-C", "packages/components", "test"]]} />
+            {specReady && approvedGate(ctx, "approve-sidecar") ? (
+              <BuildLoop ctx={ctx} d="sidecar" cwd={docsCwd} inWorktree={false} gateCmds={[["pnpm", "typecheck"], ["pnpm", "-C", "packages/components", "test"]]} specPath={specPath} />
             ) : null}
           </Sequence>
         ) : null}
 
         {/* ============ DELIVERABLE 3: SPEED (worktree + PR) ============ */}
-        {includeSpeed ? (
+        {includeSpeed && specReady ? (
           <Sequence>
             <Panel
               id="plan-speed-obs"
@@ -359,13 +363,13 @@ export default smithers((ctx: any) => {
               strategy="synthesize"
               maxConcurrency={2}
             >
-              {planPrompt("speed")}
+              {planPrompt("speed", specPath)}
             </Panel>
             <Approval id="approve-speed-obs" output={outputs.approval} onDeny="skip" request={{ title: "Approve the RE-RENDER OBSERVABILITY plan? (opens a PR)", summary: planSummary(ctx, "speed") }} />
-            {approvedGate(ctx, "approve-speed-obs") ? (
+            {specReady && approvedGate(ctx, "approve-speed-obs") ? (
               <Worktree path={SPEED_WORKTREE} branch={SPEED_BRANCH} baseBranch={jjCommit()}>
                 <Sequence>
-                  <BuildLoop ctx={ctx} d="speed" cwd={SPEED_WORKTREE} inWorktree={true} gateCmds={[["pnpm", "typecheck"], ["pnpm", "-C", "packages/scheduler", "test"], ["pnpm", "-C", "packages/engine", "test"]]} />
+                  <BuildLoop ctx={ctx} d="speed" cwd={SPEED_WORKTREE} inWorktree={true} gateCmds={[["pnpm", "typecheck"], ["pnpm", "-C", "packages/scheduler", "test"], ["pnpm", "-C", "packages/engine", "test"]]} specPath={specPath} />
                   {buildDone(ctx, "speed") ? (
                     <Task id="speed-pr" output={outputs.pr} timeoutMs={10 * 60_000}>
                       {() => {

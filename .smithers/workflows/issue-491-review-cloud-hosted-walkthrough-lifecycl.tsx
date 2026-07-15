@@ -5,8 +5,8 @@ import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 
 // Codex role split: Sol plans/reviews, Luna implements, Terra validates.
 // The shared role chains retain Claude/Gemini as no-Codex fallbacks.
@@ -20,7 +20,7 @@ import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../compon
 // bullet: `landingPage.ts` is a bare stub that does not onboard. This workflow
 // finishes #491 by making the landing page onboard — TDD-first.
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   spec: z.string().default(
     `Finish issue #491 by making the smithers review cloud landing page (apps/review) actually onboard a
 new user. Today apps/review/src/server/landingPage.ts is a bare stub: it names the product and shows one
@@ -79,22 +79,9 @@ const { Workflow, smithers, outputs } = createSmithers({
 
 export default smithers((ctx) => {
   const spec = ctx.input.spec ?? "";
-  const plan = ctx.outputMaybe("plan", { nodeId: "p491:plan" });
+  const plan = ctx.latest("plan", "p491:plan");
 
-  const validate = ctx.outputMaybe("validate", { nodeId: "p491:impl:validate" });
-  const hasValidated = validate !== undefined;
-  const validationPassed = hasValidated && validate.allPassed !== false;
-  const gate = reviewGate(ctx, "p491:impl:review-moderator");
-  const done = validationPassed && gate.approved;
-
-  const feedbackParts: string[] = [];
-  if (validate && !validationPassed && validate.failingSummary) {
-    feedbackParts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
-  }
-  if (gate.feedback) {
-    feedbackParts.push(`REVIEW PANEL REJECTED:\n${gate.feedback}`);
-  }
-  const feedback = feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null;
+  const state = validationLoopState(ctx, { prefix: "p491:impl" });
 
   const implementPrompt = plan
     ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}`
@@ -123,8 +110,9 @@ ${spec}`}
             reviewAgents={panelists}
             synthesizeReview
             reviewModerator={synthesizer}
-            feedback={feedback}
-            done={done}
+            reviewWhen={state.validationPassed}
+            feedback={state.feedback}
+            done={state.done}
             maxIterations={3}
           />
         ) : null}

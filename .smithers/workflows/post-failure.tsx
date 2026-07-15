@@ -12,7 +12,11 @@ import { agents } from "../agents";
 const inputSchema = z.object({
   // Named targetRunId (not runId): the engine reserves input.runId for this
   // run's own id; we are inspecting ANOTHER (failed) run.
-  targetRunId: z.string().describe("The id of the failed run to autopsy."),
+  targetRunId: z
+    .string()
+    .trim()
+    .min(1, "targetRunId must not be empty")
+    .describe("The id of the failed run to autopsy."),
   workflowPath: z
     .string()
     .nullable()
@@ -86,6 +90,7 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
 
 const MAX_EVENT_LINES = 80;
 const MAX_SOURCE_CHARS = 20_000;
+const cliRunner = process.env.SMITHERS_BUNX ?? "bunx";
 
 function tailLines(text: string, max: number): string[] {
   return text
@@ -96,7 +101,7 @@ function tailLines(text: string, max: number): string[] {
 }
 
 export default smithers((ctx) => {
-  const targetRunId = ctx.input.targetRunId;
+  const targetRunId = ctx.input.targetRunId.trim();
   const workflowPath = ctx.input.workflowPath ?? null;
 
   const gather = ctx.outputMaybe("gather", { nodeId: "gather" });
@@ -117,25 +122,38 @@ export default smithers((ctx) => {
         {/* 1 — Deterministically pull the failed run's state, events, and source. */}
         <Task id="gather" output={outputs.gather}>
           {async () => {
-            const inspectRes = await $`bunx smithers-orchestrator inspect ${targetRunId} --format json`
+            const inspectRes = await $`${cliRunner} smithers-orchestrator inspect ${targetRunId} --format json`
               .nothrow()
               .quiet();
-            const eventsRes = await $`bunx smithers-orchestrator events ${targetRunId}`.nothrow().quiet();
-            const versionRes = await $`bunx smithers-orchestrator --version`.nothrow().quiet();
+            const eventsRes = await $`${cliRunner} smithers-orchestrator events ${targetRunId}`.nothrow().quiet();
+            const versionRes = await $`${cliRunner} smithers-orchestrator --version`.nothrow().quiet();
 
             const inspectText = inspectRes.stdout?.toString() ?? "";
             const eventsText = `${eventsRes.stdout?.toString() ?? ""}\n${eventsRes.stderr?.toString() ?? ""}`;
 
             let state = "unknown";
             let runError = "";
-            const stateMatch = inspectText.match(/"status"\s*:\s*"([^"]+)"/);
-            if (stateMatch?.[1]) state = stateMatch[1];
-            const errorMatch = inspectText.match(/"error"\s*:\s*("(?:[^"\\]|\\.)*")/);
-            if (errorMatch?.[1]) {
-              try {
-                runError = JSON.parse(errorMatch[1]) as string;
-              } catch {
-                runError = errorMatch[1];
+            try {
+              const inspected = JSON.parse(inspectText) as {
+                status?: unknown;
+                error?: unknown;
+                run?: { status?: unknown; error?: unknown; failure?: { error?: unknown } };
+              };
+              const nested = inspected.run;
+              const status = nested?.status ?? inspected.status;
+              if (typeof status === "string") state = status;
+              const error = nested?.failure?.error ?? nested?.error ?? inspected.error;
+              if (typeof error === "string") runError = error;
+            } catch {
+              const stateMatch = inspectText.match(/"status"\s*:\s*"([^"]+)"/);
+              if (stateMatch?.[1]) state = stateMatch[1];
+              const errorMatch = inspectText.match(/"error"\s*:\s*("(?:[^"\\]|\\.)*")/);
+              if (errorMatch?.[1]) {
+                try {
+                  runError = JSON.parse(errorMatch[1]) as string;
+                } catch {
+                  runError = errorMatch[1];
+                }
               }
             }
 
@@ -204,7 +222,7 @@ If (and only if) failureClass is "smithers-bug", also write \`bugTitle\` (one li
           <Approval
             id="approve-bug-report"
             output={outputs.bugApproval}
-            onDeny="skip"
+            onDeny="continue"
             request={{
               title: "Autopsy suspects a bug in smithers itself — report it to bug.smithers.sh?",
               summary: `While investigating failed run ${targetRunId}, the autopsy concluded (confidence: ${investigate.confidence}) this looks like a smithers bug, not a workflow or environment problem.\n\n${investigate.rootCause}\n\nProposed report: "${investigate.bugTitle}"\n\nApprove to file it via \`smithers bug\`; deny to skip reporting (the autopsy verdict is kept either way).`,
@@ -216,7 +234,7 @@ If (and only if) failureClass is "smithers-bug", also write \`bugTitle\` (one li
         {investigate && isSmithersBug && bugApproval?.approved ? (
           <Task id="report-bug" output={outputs.bugReport}>
             {async () => {
-              const res = await $`bunx smithers-orchestrator bug --run ${targetRunId} --title ${investigate.bugTitle || "Smithers failure detected by post-failure autopsy"} --body ${investigate.bugBody || investigate.rootCause} --json`
+              const res = await $`${cliRunner} smithers-orchestrator bug --run ${targetRunId} --title ${investigate.bugTitle || "Smithers failure detected by post-failure autopsy"} --body ${investigate.bugBody || investigate.rootCause} --json`
                 .nothrow()
                 .quiet();
               const text = res.stdout?.toString() ?? "";

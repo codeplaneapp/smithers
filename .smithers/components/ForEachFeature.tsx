@@ -19,6 +19,7 @@ export const forEachFeatureMergeSchema = z.looseObject({
 });
 
 type ForEachFeatureProps = {
+  key?: React.Key;
   idPrefix: string;
   agent: AgentLike | AgentLike[];
   features: Record<string, string[]>;
@@ -114,6 +115,7 @@ export function ForEachFeature({
         agent={mergeAgent ?? agent}
         needs={mergeNeeds}
         deps={mergeDeps}
+        depsOptional
       >
         {(deps) => {
           const results = workItems.map((_, index) => deps[`item${index}`]);

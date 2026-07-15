@@ -18,10 +18,13 @@ const SKILLS_DIR = ".smithers/skills";
 const inputSchema = z.object({
   prompt: z
     .string()
+    .trim()
+    .min(1, "Prompt must not be empty.")
     .default("Describe the agent skill you want to create, in plain English.")
     .describe("Plain-English description of the agent skill you want Smithers to author."),
   name: z
     .string()
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Name must be kebab-case.")
     .nullable()
     .default(null)
     .describe("Desired kebab-case skill id. Null lets the clarify/design steps choose one."),
@@ -75,7 +78,7 @@ const designSchema = z.looseObject({
 });
 
 // Durable human approval decision (matches the Approval component's output shape).
-const approvalSchema = z.object({
+const approvalSchema = z.looseObject({
   approved: z.boolean(),
   note: z.string().nullable(),
   decidedBy: z.string().nullable(),
@@ -130,7 +133,8 @@ export default smithers((ctx) => {
   const clarify = ctx.outputMaybe("clarify", { nodeId: "clarify" });
   const design = ctx.outputMaybe("design", { nodeId: "design" });
   const approval = ctx.outputMaybe("approval", { nodeId: "approve-design" });
-  const scaffold = ctx.outputMaybe("scaffold", { nodeId: "scaffold" });
+  const scaffoldRows = ctx.outputs.scaffold ?? [];
+  const scaffold = scaffoldRows.at(-1);
   const document = ctx.outputMaybe("document", { nodeId: "document" });
 
   const designed = design !== undefined;
@@ -201,7 +205,7 @@ export default smithers((ctx) => {
         {document ? (
           <Task id="output" output={outputs.output}>
             {() => {
-              const files = (scaffold?.filesWritten ?? []).map((f) => f.path);
+              const files = [...new Set(scaffoldRows.flatMap((row) => (row.filesWritten ?? []).map((f) => f.path)))];
               return {
                 skillName,
                 skillPath: document.skillPath ?? null,

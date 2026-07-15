@@ -10,8 +10,27 @@ import { z } from "zod/v4";
 import { agents } from "../agents";
 
 const inputSchema = z.object({
-  targetWorkflow: z.string(),
-  gatewayUrl: z.string().default("http://127.0.0.1:7331"),
+  targetWorkflow: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "targetWorkflow must be a safe workflow slug")),
+  gatewayUrl: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(
+      z
+        .string()
+        .url()
+        .refine((value) => {
+          try {
+            const parsed = new URL(value);
+            return (parsed.protocol === "http:" || parsed.protocol === "https:") && !/[\\'"`;$(){}<>\n\r]/.test(value);
+          } catch {
+            return false;
+          }
+        }, "gatewayUrl must be a safe HTTP(S) URL"),
+    )
+    .default("http://127.0.0.1:7331"),
   exampleRunId: z.string().default(""),
 });
 

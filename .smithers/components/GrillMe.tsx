@@ -36,7 +36,7 @@ export function GrillMe({
 }: GrillMeProps) {
   return (
     <Sequence>
-      <Loop until={until} maxIterations={maxIterations}>
+      <Loop id={`${idPrefix}:loop`} until={until} maxIterations={maxIterations}>
         <Task id={`${idPrefix}:grill`} output={output} agent={agent}>
           <GrillMeSkill />
           <AskUserInstructions />

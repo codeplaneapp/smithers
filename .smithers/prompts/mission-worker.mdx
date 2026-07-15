@@ -12,17 +12,12 @@ MISSION GOAL:
 {props.missionGoal}
 
 MILESTONE:
-```json
-{JSON.stringify(props.milestone, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.milestone, null, 2), "```"].join("\n")}</pre>
 
 FEATURE:
-```json
-{JSON.stringify(props.feature, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.feature, null, 2), "```"].join("\n")}</pre>
 
 {props.previousSummary ? `PREVIOUS MILESTONE SUMMARY:\n${props.previousSummary}` : ""}
 
 REQUIRED OUTPUT:
 {props.schema}
-

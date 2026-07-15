@@ -3,8 +3,8 @@
 /** @jsxImportSource smithers-orchestrator */
 import { ClaudeCodeAgent, createSmithers, Sequence, Task, UI, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 import { codexFirst } from "../lib/codexAccounts";
 
 // Codex-first role pools: Sol plans/reviews, Luna implements, Terra validates.
@@ -21,7 +21,7 @@ const terraPool: AgentLike[] = codexFirst({ model: "gpt-5.6-terra", skipGitRepoC
 // a PKCE challenge and supports per-tenant scoping — TDD-first. It is one
 // self-contained checkbox-worth of progress, not the whole epic.
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   spec: z.string().default(
     `Add a pure, network-free OAuth 2.0 authorization-code request URL builder to
 \`packages/accounts\`, the next brick of issue #222's delegated per-user OAuth
@@ -103,22 +103,9 @@ const { Workflow, smithers, outputs } = createSmithers({
 
 export default smithers((ctx) => {
   const spec = ctx.input.spec ?? "";
-  const plan = ctx.outputMaybe("plan", { nodeId: "i222:plan" });
+  const plan = ctx.latest("plan", "i222:plan");
 
-  const validate = ctx.outputMaybe("validate", { nodeId: "i222:impl:validate" });
-  const hasValidated = validate !== undefined;
-  const validationPassed = hasValidated && validate.allPassed !== false;
-  const gate = reviewGate(ctx, "i222:impl:review-moderator");
-  const done = validationPassed && gate.approved;
-
-  const feedbackParts: string[] = [];
-  if (validate && !validationPassed && validate.failingSummary) {
-    feedbackParts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
-  }
-  if (gate.feedback) {
-    feedbackParts.push(`REVIEW PANEL REJECTED:\n${gate.feedback}`);
-  }
-  const feedback = feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null;
+  const state = validationLoopState(ctx, { prefix: "i222:impl" });
 
   const implementPrompt = plan
     ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}`
@@ -147,8 +134,9 @@ ${spec}`}
             reviewAgents={[solPool]}
             reviewModerator={solPool}
             synthesizeReview
-            feedback={feedback}
-            done={done}
+            reviewWhen={state.validationPassed}
+            feedback={state.feedback}
+            done={state.done}
             maxIterations={3}
           />
         ) : null}

@@ -8,14 +8,19 @@ import {
   ValidationLoop,
   implementOutputSchema,
   validateOutputSchema,
+  validationLoopState,
 } from "../components/ValidationLoop";
 import { reviewOutputSchema } from "../components/Review";
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   planDoc: z
     .string()
+    .trim()
+    .min(1)
+    .max(4_096)
     .default("research/packs-share-workflows-like-skills.md")
     .describe("Repo-relative path to the approved packs design doc"),
+  maxIterations: z.number().int().min(1).max(10).default(3),
 });
 
 const polishSchema = z.object({
@@ -23,6 +28,8 @@ const polishSchema = z.object({
   changesMade: z.array(z.string()).default([]),
   summary: z.string(),
 });
+const failureSchema = z.object({ error: z.string() });
+const phaseCompleteSchema = z.object({ phase: z.string() });
 
 const { Workflow, smithers, outputs } = createSmithers({
   input: inputSchema,
@@ -30,6 +37,8 @@ const { Workflow, smithers, outputs } = createSmithers({
   validate: validateOutputSchema,
   review: reviewOutputSchema,
   polish: polishSchema,
+  failure: failureSchema,
+  phaseComplete: phaseCompleteSchema,
 });
 
 const GROUND_RULES = `
@@ -118,52 +127,22 @@ Implement exactly the "Track A — messaging" section of the spec:
   ];
 }
 
-type GateState = {
-  validated: boolean;
-  approved: boolean;
-  done: boolean;
-  feedback: string | null;
-};
-
 export default smithers((ctx) => {
   // Zod input defaults are not applied in every render context (e.g. `smithers
   // graph` renders with an empty input), so fall back explicitly.
   const planDoc = ctx.input.planDoc ?? "research/packs-share-workflows-like-skills.md";
-  const phases = buildPhases(planDoc);
+  const maxIterations = ctx.input.maxIterations ?? 3;
+  const phases = buildPhases(planDoc).map((phase) => ({
+    ...phase,
+    state: validationLoopState(ctx, {
+      prefix: phase.key,
+      reviewChannel: "review",
+      reviewNodeId: `${phase.key}:review:0`,
+      maxIterations,
+    }),
+  }));
 
-  const gates: GateState[] = phases.map((phase) => {
-    const validate = ctx.latest("validate", `${phase.key}:validate`) as
-      | z.infer<typeof validateOutputSchema>
-      | undefined;
-    const review = ctx.latest("review", `${phase.key}:review:0`) as
-      | z.infer<typeof reviewOutputSchema>
-      | undefined;
-
-    const validated = validate !== undefined && validate.allPassed !== false;
-    const approved = review?.approved === true;
-
-    const feedbackParts: string[] = [];
-    if (validate && validate.allPassed === false && validate.failingSummary) {
-      feedbackParts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
-    }
-    if (review && review.approved === false) {
-      feedbackParts.push(`REVIEWER REJECTED:\n${review.feedback}`);
-      for (const issue of review.issues ?? []) {
-        feedbackParts.push(
-          `  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`,
-        );
-      }
-    }
-
-    return {
-      validated,
-      approved,
-      done: validated && approved,
-      feedback: feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null,
-    };
-  });
-
-  const allDone = gates.every((gate) => gate.done);
+  const allDone = phases.every(({ state }) => state.done);
 
   return (
     <Workflow name="implement-packs">
@@ -172,29 +151,41 @@ export default smithers((ctx) => {
         {phases.map((phase, index) => {
           // A phase mounts only once every earlier phase is approved, so a
           // stuck phase halts the run visibly instead of building on sand.
-          const previousDone = gates.slice(0, index).every((gate) => gate.done);
+          const previousDone = phases.slice(0, index).every(({ state }) => state.done);
           if (!previousDone) return null;
-          const gate = gates[index]!;
+          const previousComplete = index > 0 ? `${phases[index - 1]!.key}:complete` : undefined;
           return (
-            <ValidationLoop
-              key={phase.key}
-              idPrefix={phase.key}
-              prompt={phase.prompt}
-              implementAgents={implementer}
-              validateAgents={validator}
-              // Recovery hatches when the codex-first failover ladder is
-              // saturated (quota): pin review to a fresh single-agent chain so
-              // a retry can't land on a dead rung.
-              reviewAgents={process.env.PACKS_REVIEW_FORCE_SOL === "1"
-                ? [new CodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true })]
-                : process.env.PACKS_REVIEW_FORCE_FABLE === "1"
-                  ? [new ClaudeCodeAgent({ model: "claude-fable-5" })]
-                  : [panelists[0]!]}
-              reviewWhen={gate.validated && !gate.approved}
-              feedback={gate.feedback}
-              done={gate.done}
-              maxIterations={3}
-            />
+            <Sequence key={phase.key}>
+              <ValidationLoop
+                idPrefix={phase.key}
+                prompt={phase.prompt}
+                implementAgents={implementer}
+                validateAgents={validator}
+                startAfter={previousComplete ? [previousComplete] : undefined}
+                // Recovery hatches when the codex-first failover ladder is
+                // saturated (quota): pin review to a fresh single-agent chain so
+                // a retry can't land on a dead rung.
+                reviewAgents={process.env.PACKS_REVIEW_FORCE_SOL === "1"
+                  ? [new CodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true })]
+                  : process.env.PACKS_REVIEW_FORCE_FABLE === "1"
+                    ? [new ClaudeCodeAgent({ model: "claude-fable-5" })]
+                    : [panelists[0]!]}
+                reviewWhen={phase.state.validationPassed && !phase.state.reviewApproved}
+                feedback={phase.state.feedback}
+                done={phase.state.done}
+                maxIterations={maxIterations}
+              />
+              {phase.state.done ? (
+                <Task id={`${phase.key}:complete`} output={outputs.phaseComplete} retries={0}>
+                  {() => ({ phase: phase.key })}
+                </Task>
+              ) : null}
+              {phase.state.exhausted ? (
+                <Task id={`${phase.key}:exhausted`} output={outputs.failure} retries={0}>
+                  {() => { throw new Error(`Implement Packs exhausted ${phase.title} after ${maxIterations} attempts`); }}
+                </Task>
+              ) : null}
+            </Sequence>
           );
         })}
 

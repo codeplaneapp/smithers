@@ -115,13 +115,13 @@ const approvalSchema = z.object({
 
 const inputSchema = z.object({
   /** How many small items to work per outer iteration. */
-  batchSize: z.number().int().default(4),
+  batchSize: z.number().int().min(1).default(4),
   /** How many worktrees run in parallel within a batch. */
-  maxConcurrency: z.number().int().default(2),
+  maxConcurrency: z.number().int().min(1).default(2),
   /** Cap on outer iterations (high — this is meant to run for weeks). */
-  maxOuterIterations: z.number().int().default(200),
+  maxOuterIterations: z.number().int().min(1).default(200),
   /** Per-item implement→validate→review loop cap. */
-  maxItemIterations: z.number().int().default(3),
+  maxItemIterations: z.number().int().min(1).default(3),
   /** Run the heavy full `pnpm typecheck && pnpm test` in the oracle (authoritative). */
   runFullGate: z.boolean().default(true),
   /** Glob-ish ticket-id prefixes to target (e.g. ["0052","0047"]); empty = all. */
@@ -230,10 +230,15 @@ function itemPrompt(item: BatchItem): string {
 
 /** Per-item done = validation passed AND a reviewer approved (mirrors ValidationLoop semantics). */
 function itemDone(ctx: any, idPrefix: string): { done: boolean; feedback: string | null } {
-  const validate = ctx.outputMaybe(outputs.validate, { nodeId: `${idPrefix}:validate` });
+  const validate = ctx.latest("validate", `${idPrefix}:validate`) ?? ctx.outputMaybe(outputs.validate, { nodeId: `${idPrefix}:validate` });
   const reviews = (ctx.outputs.review ?? []) as Array<z.infer<typeof reviewOutputSchema> & { nodeId?: string }>;
-  const mine = reviews.filter((r) => typeof r.nodeId === "string" && r.nodeId.startsWith(`${idPrefix}:review:`));
-  const validationPassed = validate !== undefined && validate.allPassed !== false;
+  const validationIteration = (validate as { iteration?: number } | undefined)?.iteration;
+  const mine = reviews.filter((r) =>
+    typeof r.nodeId === "string" &&
+    r.nodeId.startsWith(`${idPrefix}:review:`) &&
+    (r as { iteration?: number }).iteration === validationIteration,
+  );
+  const validationPassed = validate?.allPassed === true;
   const anyApproved = mine.length > 0 && mine.some((r) => r.approved === true);
   const done = validationPassed && anyApproved;
   if (validate === undefined) return { done: false, feedback: null };
@@ -284,8 +289,9 @@ export default smithers((ctx) => {
       <Task id="baseline" output={outputs.baseline}>
         {async () => {
           const { spawnSync } = await import("node:child_process");
-          spawnSync("bash", ["-lc", "git fetch -q origin main"], { cwd: process.cwd(), encoding: "utf8", timeout: 120_000 });
-          const res = spawnSync("bash", ["-lc", "git rev-parse origin/main"], { cwd: process.cwd(), encoding: "utf8", timeout: 60_000 });
+          const git = process.platform === "win32" ? "git.exe" : "git";
+          spawnSync(git, ["fetch", "-q", "origin", "main"], { cwd: resolve(process.cwd()), encoding: "utf8", timeout: 120_000 });
+          const res = spawnSync(git, ["rev-parse", "origin/main"], { cwd: resolve(process.cwd()), encoding: "utf8", timeout: 60_000 });
           return { originMainSha: (res.stdout ?? "").trim(), capturedAt: new Date().toISOString() };
         }}
       </Task>
@@ -309,8 +315,9 @@ export default smithers((ctx) => {
             {items.map((item) => {
               const idPrefix = `bd-${item.slug}`;
               const { done, feedback } = itemDone(ctx, idPrefix);
+              const validation = ctx.latest("validate", `${idPrefix}:validate`) ?? ctx.outputMaybe(outputs.validate, { nodeId: `${idPrefix}:validate` });
               return (
-                <Worktree key={item.slug} path={`.worktrees/burndown-${item.slug}`} branch={`burndown/${item.slug}`}>
+                  <Worktree key={item.slug} path={resolve(process.cwd(), `.worktrees/burndown-${item.slug}`)} branch={`burndown/${item.slug}`}>
                   <Sequence>
                     <ValidationLoop
                       idPrefix={idPrefix}
@@ -320,6 +327,7 @@ export default smithers((ctx) => {
                       reviewAgents={[agents.review]}
                       feedback={feedback}
                       done={done}
+                      reviewWhen={validation?.allPassed === true}
                       maxIterations={maxItemIterations}
                     />
                     <Task id={`result-${item.slug}`} output={outputs.itemResult} continueOnFail>
@@ -346,7 +354,7 @@ export default smithers((ctx) => {
               `🚫 ABSOLUTE PUSH BAN: NEVER run \`git push\`, \`git push --force\`, or anything that writes to origin/remote. Pushing to shared \`main\` is forbidden and corrupts everyone's tree. A human pushes out-of-band after reviewing; your job ends at the local merge.`,
               ``,
               `Batch results:`,
-              ticketResults.map((r) => `- ${r.slug} [${r.status}] branch "${r.branch}" — ${r.summary}`).join("\n") || "(none)",
+              ticketResults.filter((r) => items.some((item) => item.slug === r.slug)).map((r) => `- ${r.slug} [${r.status}] branch "${r.branch}" — ${r.summary}`).join("\n") || "(none)",
               ``,
               `Rules:`,
               `- Only merge branches whose status is "success". Skip "partial"/"failed" and list them in \`skipped\`.`,
@@ -365,8 +373,10 @@ export default smithers((ctx) => {
               const openBefore = batch?.openCount ?? 0;
               const remaining = discoverActionableItems(ticketPrefixes);
               const openAfter = remaining.length;
-              const run = (cmd: string) => {
-                const res = spawnSync("bash", ["-lc", cmd], {
+              const git = process.platform === "win32" ? "git.exe" : "git";
+              const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+              const run = (command: string, args: string[]) => {
+                const res = spawnSync(command, args, {
                   cwd: process.cwd(),
                   encoding: "utf8",
                   timeout: 1_800_000,
@@ -378,9 +388,9 @@ export default smithers((ctx) => {
               };
               // ── PUSH FENCE ── the workflow never pushes, so any origin movement
               // or any burndown/* branch on origin means an agent pushed. Detect + halt.
-              run("git fetch -q origin main");
-              const remoteBurndown = run("git ls-remote --heads origin 'burndown/*'").out.trim();
-              const currentOriginSha = run("git rev-parse origin/main").out.trim();
+              run(git, ["fetch", "-q", "origin", "main"]);
+              const remoteBurndown = run(git, ["ls-remote", "--heads", "origin", "burndown/*"]).out.trim();
+              const currentOriginSha = run(git, ["rev-parse", "origin/main"]).out.trim();
               const originMoved = baselineSha.length > 0 && currentOriginSha.length > 0 && currentOriginSha !== baselineSha;
               const roguePushDetected = remoteBurndown.length > 0 || originMoved;
               const roguePushDetail = roguePushDetected
@@ -393,11 +403,11 @@ export default smithers((ctx) => {
               let testGreen = true;
               let tail = "";
               if (runFullGate) {
-                const tc = run("pnpm typecheck");
+                const tc = run(pnpm, ["typecheck"]);
                 typecheckGreen = tc.code === 0;
                 tail += `\n=== pnpm typecheck (exit ${tc.code}) ===\n${tc.out.slice(-4000)}`;
                 if (typecheckGreen) {
-                  const t = run("pnpm test");
+                  const t = run(pnpm, ["test"]);
                   testGreen = t.code === 0;
                   tail += `\n=== pnpm test (exit ${t.code}) ===\n${t.out.slice(-6000)}`;
                 } else {

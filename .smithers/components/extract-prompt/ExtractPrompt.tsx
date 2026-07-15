@@ -147,7 +147,7 @@ function emitCached(cached: CachedPrompt): RctfPromptOutput {
     nextPrinciple: "none",
     resolved: true,
     overridden: cached.overridden,
-    overrideReason: null,
+    overrideReason: cached.overrideReason ?? null,
   };
 }
 

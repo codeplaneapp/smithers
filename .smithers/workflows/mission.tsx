@@ -271,12 +271,27 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
   const validationId = milestoneValidationId(milestoneIndex);
   const validation = ctx.outputMaybe("milestoneValidation", { nodeId: validationId });
   const needsFollowUp = Boolean(validation && validation.passed === false);
+  const waves: any[] = [];
+  for (const feature of features) {
+    const parallel = feature.canRunInParallel === true;
+    const previous = waves[waves.length - 1];
+    if (parallel && previous?.parallel === true) previous.features.push(feature);
+    else waves.push({ parallel, features: [feature] });
+  }
 
   return (
     <Sequence>
-      <Parallel maxConcurrency={Math.min(ctx.input.maxConcurrency ?? 3, features.length)}>
-        {features.map((feature: any) => renderFeatureWorker(ctx, plan, milestone, milestoneIndex, feature))}
-      </Parallel>
+      {waves.map((wave, index) => wave.parallel ? (
+        <Sequence key={`wave-${index}`}>
+          <Parallel maxConcurrency={Math.min(ctx.input.maxConcurrency ?? 3, wave.features.length)}>
+            {wave.features.map((feature: any) => renderFeatureWorker(ctx, plan, milestone, milestoneIndex, feature))}
+          </Parallel>
+        </Sequence>
+      ) : (
+        <Sequence key={`wave-${index}`}>
+          {wave.features.map((feature: any) => renderFeatureWorker(ctx, plan, milestone, milestoneIndex, feature))}
+        </Sequence>
+      ))}
       <Task
         id={integrationId}
         output={outputs.milestoneIntegration}

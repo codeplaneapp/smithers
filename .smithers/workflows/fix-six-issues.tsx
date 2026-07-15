@@ -182,7 +182,17 @@ function branchForIssue(n: number) {
   return `fix/issue-${n}`;
 }
 function latest<T>(rows: T[] | undefined): T | undefined {
-  return rows && rows.length > 0 ? rows[rows.length - 1] : undefined;
+  if (!rows || rows.length === 0) return undefined;
+  let selected = rows[0];
+  let selectedIteration = iterationOf(selected);
+  for (const row of rows.slice(1)) {
+    const iteration = iterationOf(row);
+    if (iteration >= selectedIteration) {
+      selected = row;
+      selectedIteration = iteration;
+    }
+  }
+  return selected;
 }
 function rowsForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number): T[] {
   return (rows ?? []).filter((r) => r.issueNumber === n);
@@ -190,14 +200,28 @@ function rowsForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, 
 function latestForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number): T | undefined {
   return latest(rowsForIssue(rows, n));
 }
+function iterationOf(row: unknown): number {
+  const iteration = Number((row as { iteration?: unknown } | undefined)?.iteration);
+  return Number.isFinite(iteration) ? iteration : 0;
+}
+function latestIssueIteration(ctx: any, n: number): number | undefined {
+  const impl = latestForIssue<Implementation>(ctx.outputs.implementation, n);
+  return impl ? iterationOf(impl) : undefined;
+}
+function latestReviewForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number, iteration: number): T | undefined {
+  return latest(rowsForIssue(rows, n).filter((r) => iterationOf(r) === iteration));
+}
 function issueDone(ctx: any, n: number): boolean {
   const impl = latestForIssue<Implementation>(ctx.outputs.implementation, n);
-  const opusReview = latestForIssue<Review>(ctx.outputs.reviewOpus, n);
-  const codexReview = latestForIssue<Review>(ctx.outputs.reviewCodex, n);
-  return impl?.status === "implemented" && opusReview?.approved === true && codexReview?.approved === true;
+  const iteration = latestIssueIteration(ctx, n);
+  if (!impl || iteration === undefined) return false;
+  const opusReview = latestReviewForIssue<Review>(ctx.outputs.reviewOpus, n, iteration);
+  const codexReview = latestReviewForIssue<Review>(ctx.outputs.reviewCodex, n, iteration);
+  return impl.status === "implemented" && opusReview?.approved === true && codexReview?.approved === true;
 }
 function issueFeedback(ctx: any, n: number): string {
   const impl = latestForIssue<Implementation>(ctx.outputs.implementation, n);
+  const iteration = latestIssueIteration(ctx, n);
   const parts: string[] = [];
   if (impl && impl.status !== "implemented") {
     parts.push(`IMPLEMENTATION SELF-REPORTED ${impl.status.toUpperCase()}:\n${impl.summary}`);
@@ -206,7 +230,7 @@ function issueFeedback(ctx: any, n: number): string {
     ["CODEX SOL REVIEWER A", ctx.outputs.reviewOpus],
     ["CODEX SOL REVIEWER B", ctx.outputs.reviewCodex],
   ] as const) {
-    const review = latestForIssue<Review>(rows, n);
+    const review = iteration === undefined ? undefined : latestReviewForIssue<Review>(rows, n, iteration);
     if (review && !review.approved) {
       parts.push(`${who} REJECTED:\n${review.feedback}`);
       for (const issue of review.issues ?? []) {
@@ -235,6 +259,23 @@ function fetchIssues() {
 }
 
 /** Commit the worktree changes, push the branch, open (or reuse) a PR that closes the issue. */
+export function parsePorcelainPaths(status: string): string[] {
+  const records = status.split("\0");
+  const paths: string[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    const path = record.length >= 4 ? record.slice(3) : "";
+    if (path) paths.push(path);
+    const statusCode = record.slice(0, 2);
+    if ((statusCode.includes("R") || statusCode.includes("C")) && records[index + 1]) {
+      paths.push(records[index + 1]);
+      index += 1;
+    }
+  }
+  return paths;
+}
+
 function openPr(issue: Issue, worktreePath: string, branch: string, done: boolean, impl: Implementation | undefined): Pr {
   const base: Pr = {
     issueNumber: issue.number,
@@ -258,7 +299,8 @@ function openPr(issue: Issue, worktreePath: string, branch: string, done: boolea
     }
     const subject = (impl?.commitMessage ?? "").trim().split("\n")[0]?.slice(0, 100) || `🐛 fix: ${issue.title}`.slice(0, 100);
     if (dirty) {
-      git(["add", "-A"]);
+      const paths = parsePorcelainPaths(git(["status", "--porcelain=v1", "-z"]));
+      if (paths.length > 0) git(["add", "--", ...paths]);
       git([
         "commit",
         "-m",

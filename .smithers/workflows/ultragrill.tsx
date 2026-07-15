@@ -2,7 +2,7 @@
 // smithers-display-name: UltraGrill
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
-import { createSmithers, Loop, Parallel, Task, WaitForEvent } from "smithers-orchestrator";
+import { createSmithers, Loop, Parallel, Sequence, Task, WaitForEvent } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -39,14 +39,14 @@ const utteranceSchema = z.object({
 const workSchema = z.object({
   summary: z.string(),
   artifact: z.string().default(""),
-  questions: z.array(z.string()).default([]),
+  questions: z.array(z.string().trim().min(1)).max(4).default([]),
 });
 
-const inputSchema = z.object({
-  goal: z.string().default("Collaborate with me in real time."),
-  artifactPath: z.string().default(".smithers/artifacts/ultragrill-spec.md"),
-  turnTimeoutMs: z.number().int().default(120_000),
-  maxTurns: z.number().int().default(50),
+export const inputSchema = z.object({
+  goal: z.string().trim().min(1).default("Collaborate with me in real time."),
+  artifactPath: z.string().trim().min(1).default(".smithers/artifacts/ultragrill-spec.md"),
+  turnTimeoutMs: z.number().int().min(1).max(3_600_000).default(120_000),
+  maxTurns: z.number().int().min(1).max(1_000).default(50),
 });
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -56,7 +56,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 });
 
 type Utterance = z.infer<typeof utteranceSchema>;
-type Work = z.infer<typeof workSchema>;
+type Work = z.infer<typeof workSchema> & { nodeId?: string; iteration?: number };
 
 function workerPrompt(opts: {
   goal: string;
@@ -82,40 +82,58 @@ Do this, then return your result:
 }
 
 export default smithers((ctx) => {
+  const goal = ctx.input.goal ?? "Collaborate with me in real time.";
+  const artifactPath = ctx.input.artifactPath ?? ".smithers/artifacts/ultragrill-spec.md";
+  const maxTurns = ctx.input.maxTurns ?? 50;
+  const turnTimeoutMs = ctx.input.turnTimeoutMs ?? 120_000;
   const utterances = (ctx.outputs.utterance ?? []) as Utterance[];
-  const directives = utterances.filter((u) => !u.end);
-  const ended = utterances.some((u) => u.end === true);
+  const endIndex = utterances.findIndex((u) => u.end === true);
+  const accepted = endIndex >= 0 ? utterances.slice(0, endIndex) : utterances;
+  const directives = accepted.filter((u) => !u.end && u.text.trim().length > 0);
+  const ended = endIndex >= 0;
   const works = (ctx.outputs.work ?? []) as Work[];
-  const priorArtifact = works.length ? works[works.length - 1].artifact : "";
+  const artifactBefore = (index: number) => {
+    if (index <= 0) return "";
+    const prior = works.filter((work) => work.nodeId === `worker:${index - 1}`).at(-1);
+    return prior?.artifact ?? "";
+  };
 
   return (
     <Workflow name="ultragrill">
       <UI entry="../ui/ultragrill.tsx" title={"UltraGrill"} />
       <Parallel>
         {/* ── intake plane: drain utterances until the user ends the session ── */}
-        <Loop id="intake" until={ended} maxIterations={ctx.input.maxTurns}>
+        <Loop id="intake" until={ended} maxIterations={maxTurns}>
           <WaitForEvent
             id="utterance"
             event="utterance"
             correlationId="utterance"
             output={outputs.utterance}
-            timeoutMs={ctx.input.turnTimeoutMs}
+            timeoutMs={turnTimeoutMs}
             onTimeout="continue"
           />
         </Loop>
 
         {/* ── worker plane: one worker per directive (dynamic dispatch) ────── */}
-        {directives.map((u, i) => (
-          <Task key={`worker-${i}`} id={`worker:${i}`} output={outputs.work} agent={agents.implement}>
-            {workerPrompt({
-              goal: ctx.input.goal,
-              artifactPath: ctx.input.artifactPath,
-              utterance: u.text,
-              index: i,
-              priorArtifact,
-            })}
-          </Task>
-        ))}
+        <Sequence>
+          {directives.map((u, i) => (
+            <Task
+              key={`worker-${i}`}
+              id={`worker:${i}`}
+              output={outputs.work}
+              agent={agents.implement}
+              dependsOn={i > 0 ? [`worker:${i - 1}`] : undefined}
+            >
+              {workerPrompt({
+                goal,
+                artifactPath,
+                utterance: u.text,
+                index: i,
+                priorArtifact: artifactBefore(i),
+              })}
+            </Task>
+          ))}
+        </Sequence>
       </Parallel>
     </Workflow>
   );

@@ -2,7 +2,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { Sequence, Task, Worktree, type AgentLike } from "smithers-orchestrator";
 import { readdirSync, readFileSync } from "node:fs";
-import { resolve, relative } from "node:path";
+import { resolve, relative, join } from "node:path";
 import { z } from "zod/v4";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "./ValidationLoop";
 import { reviewOutputSchema } from "./Review";
@@ -47,11 +47,22 @@ export type ShipTicketsAgents = {
 
 /** Pull a human title from a ticket's frontmatter or first H1, falling back to the slug. */
 function parseTitle(content: string, fallback: string): string {
-  const fm = content.match(/^title:\s*(.+)$/m);
-  if (fm) return fm[1].replace(/^["']|["']$/g, "").trim();
+  const fm = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\s*\r?\n|\s*$)/);
+  const title = fm?.[1].match(/^title:\s*(.+)$/m);
+  if (title) return title[1].replace(/^["']|["']$/g, "").trim();
   const h1 = content.match(/^#\s+(.+)$/m);
   if (h1) return h1[1].trim();
   return fallback;
+}
+
+function safeSlug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "ticket";
+}
+
+function pathHash(value: string): string {
+  let hash = 2166136261;
+  for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return (hash >>> 0).toString(36).padStart(7, "0").slice(0, 8);
 }
 
 function discoverTickets(ticketsDir: string): Array<{ id: string; slug: string; title: string; content: string }> {
@@ -75,39 +86,76 @@ function discoverTickets(ticketsDir: string): Array<{ id: string; slug: string; 
       if (!e.isFile() || !e.name.endsWith(".md")) continue;
       if (e.name.toLowerCase() === "readme.md") continue;
       const rel = relative(ticketsDir, full);
-      const slug = rel.replace(/\.md$/, "").replace(/[/\\]/g, "__");
+      const slug = safeSlug(rel.replace(/\.md$/, "").replace(/[/\\]/g, "-"));
       const content = readFileSync(full, "utf8");
       out.push({ id: relative(process.cwd(), full), slug, title: parseTitle(content, slug), content });
     }
   }
 
   walk(ticketsDir, 0);
-  return out.sort((a, b) => a.id.localeCompare(b.id));
+  out.sort((a, b) => a.id.localeCompare(b.id));
+  const seen = new Set<string>();
+  for (const ticket of out) {
+    if (seen.has(ticket.slug)) {
+      const stem = `${ticket.slug}-${pathHash(ticket.id)}`;
+      ticket.slug = stem;
+      let disambiguator = 2;
+      while (seen.has(ticket.slug)) ticket.slug = `${stem}-${disambiguator++}`;
+    }
+    seen.add(ticket.slug);
+  }
+  return out;
 }
 
-/** Per-ticket done/feedback, scoped by slug — review rows share one table. */
+function rawRows(ctx: any, table: string): any[] {
+  const rows = typeof ctx.outputs === "function" ? ctx.outputs(table) : ctx.outputs?.[table];
+  return Array.isArray(rows) ? rows : [];
+}
+
+type RawIteration = { iteration: number; iterationCount: number };
+
+function rawIteration(row: any): RawIteration {
+  const iteration = Number.isFinite(Number(row?.iteration)) ? Number(row.iteration) : 0;
+  const iterationCount = Number.isFinite(Number(row?.iterationCount))
+    ? Number(row.iterationCount)
+    : iteration;
+  return { iteration, iterationCount };
+}
+
+function latestRaw(rows: any[], nodeId: string): any | undefined {
+  return rows.filter((row) => row?.nodeId === nodeId).reduce((best, row) => {
+    if (!best) return row;
+    const current = rawIteration(row);
+    const previous = rawIteration(best);
+    return current.iterationCount > previous.iterationCount ||
+      (current.iterationCount === previous.iterationCount && current.iteration >= previous.iteration)
+      ? row
+      : best;
+  }, undefined);
+}
+
+/** Per-ticket done/feedback, scoped by slug and paired by current iteration. */
 function buildFeedback(ctx: any, slug: string): { feedback: string | null; done: boolean } {
-  const validate = ctx.outputMaybe("validate", { nodeId: `${slug}:validate` });
-  const reviews = (ctx.outputs.review ?? []).filter(
-    (r: any) => typeof r.nodeId === "string" && r.nodeId.startsWith(`${slug}:review:`),
-  );
+  const validate = latestRaw(rawRows(ctx, "validate"), `${slug}:validate`);
+  const review = latestRaw(rawRows(ctx, "review"), `${slug}:review:0`);
+  const validateVersion = validate ? rawIteration(validate) : null;
+  const reviewVersion = review ? rawIteration(review) : null;
+  const sameIteration = validateVersion !== null && reviewVersion !== null &&
+    validateVersion.iteration === reviewVersion.iteration &&
+    validateVersion.iterationCount === reviewVersion.iterationCount;
 
-  const validationPassed = validate !== undefined && validate.allPassed !== false;
-  const anyReviewApproved = reviews.length > 0 && reviews.some((r: any) => r.approved === true);
-  const done = validationPassed && anyReviewApproved;
-
-  if (validate === undefined) return { feedback: null, done: false };
+  const validationPassed = sameIteration && validate?.allPassed === true;
+  const reviewApproved = sameIteration && review?.approved === true;
+  const done = validationPassed && reviewApproved;
 
   const parts: string[] = [];
-  if (!validationPassed && validate.failingSummary) {
+  if (validate?.allPassed === false && validate.failingSummary) {
     parts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
   }
-  for (const review of reviews) {
-    if (review.approved === false) {
-      parts.push(`REVIEWER REJECTED:\n${review.feedback}`);
-      for (const issue of review.issues ?? []) {
-        parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
-      }
+  if (sameIteration && review?.approved === false) {
+    parts.push(`REVIEWER REJECTED:\n${review.feedback}`);
+    for (const issue of review.issues ?? []) {
+      parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
     }
   }
   return { feedback: parts.length > 0 ? parts.join("\n\n") : null, done };
@@ -116,11 +164,11 @@ function buildFeedback(ctx: any, slug: string): { feedback: string | null; done:
 const mergePrompt = (slug: string, ticketId: string, baseBranch: string) =>
   `You are landing ONE ticket's work onto ${baseBranch} with a commit-then-merge cadence.
 
-Worktree: .worktrees/ship-${slug}  (branch: ship/${slug})
+Worktree: ${join(process.cwd(), ".worktrees", `ship-${slug}`)}  (branch: ship/${slug})
 Ticket file: ${ticketId}
 
-Do exactly this, using bash:
-1. cd into the worktree (.worktrees/ship-${slug}) and run \`git add -A\`. If there is nothing to commit, set status "skipped" and stop. Otherwise commit with the repo's emoji + conventional-commit style — e.g. "✨ feat(ultragrill): <ticket title>" — ending with the Co-Authored-By trailer.
+Do exactly this:
+1. Inspect the changed paths in the worktree (${join(process.cwd(), ".worktrees", `ship-${slug}`)}) and stage only the intended ticket files with explicit \`git add -- <path>...\`; never use \`git add -A\` or blanket staging. If there is nothing to commit, set status "skipped" and stop. Otherwise commit with the repo's emoji + conventional-commit style — e.g. "✨ feat(ultragrill): <ticket title>" — ending with the Co-Authored-By trailer. Preserve unrelated shared changes.
 2. Return to the main repo root, ensure ${baseBranch} is checked out and clean, and merge ship/${slug} into ${baseBranch} (fast-forward if possible, otherwise --no-ff).
 3. If there are conflicts, resolve them favoring correctness and the ticket's intent.
 4. Keep the gate green: run \`pnpm typecheck\` plus any directly relevant tests, and fix anything the merge broke before finishing.
@@ -161,7 +209,7 @@ function renderTicket(
 
   return (
     <Sequence key={slug}>
-      <Worktree path={`.worktrees/ship-${slug}`} branch={`ship/${slug}`} baseBranch={baseBranch}>
+      <Worktree path={join(process.cwd(), ".worktrees", `ship-${slug}`)} branch={`ship/${slug}`} baseBranch={baseBranch}>
         <Sequence>
           <Task id={`${slug}:research`} output={researchOutputSchema} agent={agents.research}>
             <ResearchPrompt prompt={base} />
@@ -182,10 +230,11 @@ function renderTicket(
         </Sequence>
       </Worktree>
 
-      {/* Outside the worktree: commit the branch and merge it into the base branch. */}
-      <Task id={`${slug}:merge`} output={shipResultSchema} agent={agents.implement} continueOnFail>
-        {mergePrompt(slug, ticket.id, baseBranch)}
-      </Task>
+      {done && (
+        <Task id={`${slug}:merge`} output={shipResultSchema} agent={agents.implement} continueOnFail>
+          {mergePrompt(slug, ticket.id, baseBranch)}
+        </Task>
+      )}
     </Sequence>
   );
 }

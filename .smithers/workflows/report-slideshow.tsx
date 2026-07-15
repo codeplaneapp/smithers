@@ -5,10 +5,11 @@
 // smithers-tags: ops, reporting
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
-import { $ } from "bun";
+import { execFileSync } from "node:child_process";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
+import { parseFirstJsonObject } from "../lib/parse-first-json-value";
 import RenderPrompt from "../prompts/report-slideshow-render.mdx";
 
 const inputSchema = z.object({
@@ -120,20 +121,24 @@ export default smithers((ctx) => {
         {/* 1 — Deterministically capture the run state, nodes, and a summary. */}
         <Task id="gather" output={outputs.gather}>
           {async () => {
-            const res = await $`bunx smithers-orchestrator inspect ${runId} --format json --full-output`
-              .nothrow()
-              .quiet();
-            const stdout = res.stdout?.toString() ?? "";
-            const stderr = res.stderr?.toString() ?? "";
+            let stdout = "";
+            let stderr = "";
+            let exitCode = 0;
+            try {
+              stdout = execFileSync(process.env.SMITHERS_CLI ?? "smithers", ["inspect", runId, "--format", "json", "--full-output"], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+            } catch (error) {
+              exitCode = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 1;
+              stdout = String((error as { stdout?: unknown }).stdout ?? "");
+              stderr = String((error as { stderr?: unknown }).stderr ?? "");
+            }
 
             let envelope: Record<string, unknown> = {};
             let ok = false;
-            if (res.exitCode === 0 && stdout.trim().length > 0) {
-              try {
-                envelope = JSON.parse(stdout) as Record<string, unknown>;
+            if (exitCode === 0 && stdout.trim().length > 0) {
+              const parsedEnvelope = parseFirstJsonObject(stdout);
+              if (parsedEnvelope) {
+                envelope = parsedEnvelope;
                 ok = true;
-              } catch {
-                ok = false;
               }
             }
 

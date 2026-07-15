@@ -118,10 +118,11 @@ const DIMENSIONS: readonly AuditDimension[] = [
       "Non-deterministic behavior is proven by eval suites and/or scorers (`.smithers/evals`, `packages/scorers`), not just deterministic tests. Good = regressions in agent/LLM behavior are caught by a scored, seeded eval.",
   },
 ] as const;
+const DIMENSION_KEYS = DIMENSIONS.map((d) => d.key) as [string, ...string[]];
 
 const dimensionResultSchema = z.object({
   /** Matches an {@link AuditDimension.key}. */
-  key: z.string(),
+  key: z.enum(DIMENSION_KEYS),
   title: z.string(),
   /** 0 = absent, 100 = exemplary. */
   score: z.number().min(0).max(100),
@@ -143,6 +144,11 @@ const groupAuditSchema = z.looseObject({
   /** The 3–5 highest-leverage fixes for this group across all dimensions. */
   topGaps: z.array(z.string()).default([]),
   summary: z.string(),
+}).superRefine((value, ctx) => {
+  const keys = value.dimensions.map((d) => d.key);
+  if (new Set(keys).size !== DIMENSION_KEYS.length || DIMENSION_KEYS.some((key) => !keys.includes(key))) {
+    ctx.addIssue({ code: "custom", path: ["dimensions"], message: "exactly one result is required for each audit dimension" });
+  }
 });
 
 const backlogItemSchema = z.object({
@@ -183,7 +189,7 @@ const inputSchema = z.object({
   /** Extra grounding context handed to every audit agent. */
   additionalContext: z.string().nullable().default(null),
   /** How many group audits run in parallel. */
-  maxConcurrency: z.number().int().default(5),
+  maxConcurrency: z.number().int().min(1).max(10).default(5),
   /** Dimensions scoring below this land in the prioritized backlog. */
   minScoreToFlag: z.number().int().min(0).max(100).default(70),
   /** Write the assembled report to `reportDir/bulletproof-audit.md`. */

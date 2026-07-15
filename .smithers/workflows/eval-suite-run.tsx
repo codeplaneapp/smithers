@@ -57,7 +57,7 @@ const evalCaseInputSchema = z.object({
 });
 
 const suiteSchema = z.object({
-    suiteId: z.string(),
+    suiteId: z.string().trim().min(1),
     name: z.string(),
     workflowKey: z.string(),
     workflowPath: z.string(),
@@ -79,7 +79,7 @@ const verdictSchema = z.object({
 });
 
 const inputSchema = z.object({
-    suiteId: z.string(),
+    suiteId: z.string().trim().min(1),
     maxConcurrency: z.number().int().min(1).max(16).optional(),
 });
 

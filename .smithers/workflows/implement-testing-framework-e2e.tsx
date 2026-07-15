@@ -26,9 +26,13 @@ const ROOT = process.cwd();
 const LONG = 1_800_000;
 const HEARTBEAT = 600_000;
 const AGENT_RETRIES = 2;
-const CHECK_TIMEOUT_MS = 3_600_000;
+const CHECK_TIMEOUT_MS = 7_200_000;
 const CHECK_KILL_GRACE_MS = 10_000;
 const OUTPUT_TAIL = 8_000;
+const MAX_OBJECTIVE_CHARS = 100_000;
+const MAX_FOCUSED_COMMANDS = 64;
+const MAX_FOCUSED_COMMAND_CHARS = 1_000;
+const MAX_REUSED_RUN_ID_CHARS = 256;
 const SNAPSHOT_PATHS = [
   "packages/testing",
   "packages/smithers/src/testing.js",
@@ -36,6 +40,7 @@ const SNAPSHOT_PATHS = [
   "packages/smithers/tests/barrels.test.js",
   "packages/smithers/tests/package-and-build-process-contract.test.js",
   "e2e/package.json",
+  "e2e/faults/case31-real-engine-kill-resume.test.ts",
   "e2e/harness/engineChildRunner.ts",
   "e2e/testing-framework",
   "pnpm-lock.yaml",
@@ -94,11 +99,14 @@ the concrete proof obligations above.
 `.trim();
 
 const input = z.object({
-  objective: z.string().nullable().default(null),
+  objective: z.string().trim().min(1).max(MAX_OBJECTIVE_CHARS).nullable().default(null),
   maxRounds: z.number().int().min(1).max(8).nullable().default(null),
   verificationProfile: z.enum(["focused", "ci", "full"]).nullable().default(null),
-  focusedTestCommands: z.array(z.string()).nullable().default(null),
-  reusePlanRunId: z.string().nullable().default(null),
+  focusedTestCommands: z.array(
+    z.string().trim().min(1).max(MAX_FOCUSED_COMMAND_CHARS)
+      .refine((command) => !command.includes("\n") && !command.includes("\0"), "commands must be single-line and NUL-free"),
+  ).max(MAX_FOCUSED_COMMANDS).nullable().default(null),
+  reusePlanRunId: z.string().trim().min(1).max(MAX_REUSED_RUN_ID_CHARS).nullable().default(null),
 });
 
 const text = z.string().default("");
@@ -335,6 +343,7 @@ function tail(value: string): string {
 function run(command: string, args: string[], maxBuffer = 256 * 1024 * 1024): string {
   return execFileSync(command, args, {
     cwd: ROOT,
+    env: { ...globalThis.process.env },
     encoding: "utf8",
     maxBuffer,
     stdio: ["ignore", "pipe", "pipe"],
@@ -349,7 +358,7 @@ function runJj(args: string[], maxBuffer = 256 * 1024 * 1024): string {
     } catch (error) {
       lastError = error;
       const details = `${String(error)}\n${String((error as { stderr?: unknown })?.stderr ?? "")}`;
-      if (!/index\.lock|Could not acquire lock|Failed to reset Git HEAD state/i.test(details)) throw error;
+      if (!/index\.lock|packed-refs\.lock|packed-ref file|Failed to import refs from underlying Git repo|Could not acquire lock|Failed to reset Git HEAD state/i.test(details)) throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(1_000, 100 * (attempt + 1)));
     }
   }
@@ -360,10 +369,33 @@ function gitHead(): string {
   return run("git", ["rev-parse", "HEAD"]).trim();
 }
 
-function snapshot() {
+function snapshot(baselineGitHead: string) {
   const paths = ["--", ...SNAPSHOT_PATHS];
-  const diff = runJj(["diff", "--git", "--color=never", ...paths]);
-  const summary = runJj(["diff", "--summary", "--color=never", ...paths]);
+  // Hash the complete target tree rather than the working-copy diff. This identity is stable if
+  // the exact same files are committed while checks are running, and jj's normal working-copy
+  // snapshot includes both tracked and newly-created files in the selected paths.
+  const fullContentDiff = runJj([
+    "diff",
+    "--from",
+    "root()",
+    "--to",
+    "@",
+    "--git",
+    "--color=never",
+    ...paths,
+  ]);
+  // Reviewer context remains relative to the HEAD captured by validation. Consequently a target
+  // change committed after validation is still listed instead of disappearing from `jj diff -r @`.
+  const summary = runJj([
+    "diff",
+    "--from",
+    baselineGitHead,
+    "--to",
+    "@",
+    "--summary",
+    "--color=never",
+    ...paths,
+  ]);
   const changedFiles = summary
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -373,10 +405,10 @@ function snapshot() {
     .sort();
   return {
     status: summary.trim()
-      ? `Target-scoped working-copy changes:\n${summary.trim()}`
-      : "No target-scoped working-copy changes.",
+      ? `Target-scoped changes since validation baseline ${baselineGitHead}:\n${summary.trim()}`
+      : `No target-scoped changes since validation baseline ${baselineGitHead}.`,
     changedFiles,
-    diffDigest: createHash("sha256").update(diff).digest("hex"),
+    diffDigest: createHash("sha256").update(fullContentDiff).digest("hex"),
   };
 }
 
@@ -497,12 +529,17 @@ async function runCheck(kind: CheckKind, command: string): Promise<CheckResult> 
       signalProcessGroup("SIGTERM");
       killTimer = setTimeout(() => signalProcessGroup("SIGKILL"), CHECK_KILL_GRACE_MS);
     }, CHECK_TIMEOUT_MS);
-    const { code, signal } = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", (code, signal) => resolve({ code, signal }));
-    });
-    clearTimeout(timer);
-    if (killTimer) clearTimeout(killTimer);
+    let code: number | null;
+    let signal: NodeJS.Signals | null;
+    try {
+      ({ code, signal } = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (closedCode, closedSignal) => resolve({ code: closedCode, signal: closedSignal }));
+      }));
+    } finally {
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+    }
     const exitCode = code ?? (signal ? -1 : 0);
     const passed = exitCode === 0 && signal === null && !timedOut && fatalSignature === null;
     const evidenceNote = fatalSignature
@@ -561,19 +598,12 @@ function verificationCommands(
 }
 
 function scopeViolations(
-  baseline: Validation,
   current: ReturnType<typeof snapshot>,
   beforeCheckDiffDigest: string,
 ): string[] {
   const violations: string[] = [];
-  const currentHead = gitHead();
-  if (targetChangedBetweenHeads(baseline.baselineGitHead, currentHead)) {
-    violations.push(
-      `git HEAD moved and committed target-scope content changed between ${baseline.baselineGitHead} and ${currentHead}`,
-    );
-  }
   if (beforeCheckDiffDigest !== current.diffDigest) {
-    violations.push("verification commands changed target-scoped tracked files; test evidence is not snapshot-stable");
+    violations.push("verification commands changed target-scoped content; test evidence is not snapshot-stable");
   }
   return violations;
 }
@@ -584,13 +614,13 @@ async function captureEvidence(args: {
   round: number;
   baseline: Validation;
 }): Promise<z.infer<typeof evidence>> {
-  const before = snapshot();
+  const before = snapshot(args.baseline.baselineGitHead);
   const checks: CheckResult[] = [];
   for (const entry of verificationCommands(args.baseline.verificationProfile, args.baseline.focusedTestCommands)) {
     checks.push(await runCheck(entry.kind, entry.command));
   }
-  const after = snapshot();
-  const violations = scopeViolations(args.baseline, after, before.diffDigest);
+  const after = snapshot(args.baseline.baselineGitHead);
+  const violations = scopeViolations(after, before.diffDigest);
   const baselineFiles = new Set(args.baseline.baselineChangedFiles);
   const newChangedFiles = after.changedFiles.filter((file) => !baselineFiles.has(file));
   const allRequiredChecksPassed = checks.length > 0 && checks.every((result) => result.passed) && violations.length === 0;
@@ -650,10 +680,13 @@ export default smithers((ctx) => {
     initialReview.iterationId === initialEvidence.iterationId &&
     initialReview.reviewedDiffDigest === initialEvidence.diffDigest,
   );
+  const initialReviewHasBlockingIssues = Boolean(
+    initialReview?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"),
+  );
   const initialNeedsFix = Boolean(
     initialEvidence &&
     initialReview &&
-    (!initialEvidence.allRequiredChecksPassed || !initialReview.lgtm || !initialReviewCurrent),
+    (!initialEvidence.allRequiredChecksPassed || !initialReview.lgtm || !initialReviewCurrent || initialReviewHasBlockingIssues),
   );
 
   const consensusEvidence = ctx.latest(outputs.evidence, "capture-consensus-iteration");
@@ -679,7 +712,8 @@ export default smithers((ctx) => {
           {() => {
             requireExecutable("codex");
             requireExecutable("claude");
-            const starting = snapshot();
+            const baselineGitHead = gitHead();
+            const starting = snapshot(baselineGitHead);
             return {
               objective,
               effectiveMaxRounds: maxRounds,
@@ -687,7 +721,7 @@ export default smithers((ctx) => {
               focusedTestCommands,
               baselineDiffDigest: starting.diffDigest,
               baselineChangedFiles: starting.changedFiles,
-              baselineGitHead: gitHead(),
+              baselineGitHead,
               snapshotPaths: [...SNAPSHOT_PATHS],
               reusedPlanRunId: reusePlanRunId,
               acceptanceContract: DEFAULT_OBJECTIVE.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("-")),
@@ -781,16 +815,16 @@ export default smithers((ctx) => {
             <Task id="verify-sol-readiness-snapshot" output={outputs.snapshotVerification} noRetry>
               {() => {
                 const expected = ctx.latest(outputs.evidence, "capture-sol-readiness");
-                const current = snapshot();
+                if (!expected) throw new Error("Sol readiness snapshot verification requires captured evidence.");
+                const current = snapshot(expected.baselineGitHead);
                 const currentGitHead = gitHead();
                 const unchanged = Boolean(
-                  expected &&
                   expected.diffDigest === current.diffDigest &&
                   !targetChangedBetweenHeads(expected.currentGitHead, currentGitHead),
                 );
                 return {
-                  iterationId: expected?.iterationId ?? "",
-                  expectedDiffDigest: expected?.diffDigest ?? "",
+                  iterationId: expected.iterationId,
+                  expectedDiffDigest: expected.diffDigest,
                   actualDiffDigest: current.diffDigest,
                   unchanged,
                   changedFiles: current.changedFiles,
@@ -821,9 +855,11 @@ export default smithers((ctx) => {
                   currentSnapshot.actualDiffDigest === currentEvidence.diffDigest,
                 );
                 const artifactsComplete = Boolean(currentEvidence && currentSol && currentSnapshot && currentEvidence.checks.length > 0);
+                const hasBlockingIssues = Boolean(currentSol?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"));
                 if (!checksPassed) reasons.push("deterministic verification checks or scope checks failed");
                 if (!solCurrent) reasons.push("Sol review does not identify the current iteration and diff digest");
                 if (!currentSol?.lgtm) reasons.push("Sol requested changes");
+                if (hasBlockingIssues) reasons.push("Sol reported critical or major issues");
                 if (!snapshotUnchanged) reasons.push("the working-copy diff changed during review");
                 if (!artifactsComplete) reasons.push("required readiness evidence or review artifacts are missing");
                 const approved = reasons.length === 0;
@@ -846,7 +882,7 @@ export default smithers((ctx) => {
             </Task>
 
             <Branch
-              if={solNeedsImprovement}
+              if={solNeedsImprovement && nextReadinessRound <= maxRounds}
               then={
                 <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                   <ConsensusImprovementPrompt
@@ -894,16 +930,16 @@ export default smithers((ctx) => {
             <Task id="verify-review-snapshot" output={outputs.snapshotVerification} noRetry>
               {() => {
                 const expected = ctx.latest(outputs.evidence, "capture-consensus-iteration");
-                const current = snapshot();
+                if (!expected) throw new Error("Consensus snapshot verification requires captured evidence.");
+                const current = snapshot(expected.baselineGitHead);
                 const currentGitHead = gitHead();
                 const unchanged = Boolean(
-                  expected &&
                   expected.diffDigest === current.diffDigest &&
                   !targetChangedBetweenHeads(expected.currentGitHead, currentGitHead),
                 );
                 return {
-                  iterationId: expected?.iterationId ?? "",
-                  expectedDiffDigest: expected?.diffDigest ?? "",
+                  iterationId: expected.iterationId,
+                  expectedDiffDigest: expected.diffDigest,
                   actualDiffDigest: current.diffDigest,
                   unchanged,
                   changedFiles: current.changedFiles,
@@ -941,11 +977,15 @@ export default smithers((ctx) => {
                   currentSnapshot.actualDiffDigest === currentEvidence.diffDigest,
                 );
                 const artifactsComplete = Boolean(currentEvidence && currentSol && currentFable && currentSnapshot && currentEvidence.checks.length > 0);
+                const solHasBlockingIssues = Boolean(currentSol?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"));
+                const fableHasBlockingIssues = Boolean(currentFable?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"));
                 if (!checksPassed) reasons.push("deterministic verification checks or scope checks failed");
                 if (!solCurrent) reasons.push("Sol review does not identify the current iteration and diff digest");
                 if (!fableCurrent) reasons.push("Fable review does not identify the current iteration and diff digest");
                 if (!currentSol?.lgtm) reasons.push("Sol requested changes");
                 if (!currentFable?.lgtm) reasons.push("Fable requested changes");
+                if (solHasBlockingIssues) reasons.push("Sol reported critical or major issues");
+                if (fableHasBlockingIssues) reasons.push("Fable reported critical or major issues");
                 if (!snapshotUnchanged) reasons.push("the working-copy diff changed during review");
                 if (!artifactsComplete) reasons.push("required evidence or review artifacts are missing");
                 const approved = reasons.length === 0;
@@ -969,7 +1009,7 @@ export default smithers((ctx) => {
             </Task>
 
             <Branch
-              if={consensusNeedsImprovement}
+              if={consensusNeedsImprovement && nextConsensusRound <= maxRounds}
               then={
                 <Sequence>
                   <Task id="consensus-luna-improvement" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
@@ -995,10 +1035,21 @@ export default smithers((ctx) => {
           {() => {
             const assessment = ctx.latest(outputs.consensus, "assess-consensus");
             const finalEvidence = ctx.latest(outputs.evidence, "capture-consensus-iteration");
-            const finalSnapshot = snapshot();
-            if (!assessment?.approved || !finalEvidence) {
+            if (
+              !assessment?.approved ||
+              !assessment.solCurrent ||
+              !assessment.fableCurrent ||
+              !assessment.checksPassed ||
+              !assessment.snapshotUnchanged ||
+              !assessment.artifactsComplete ||
+              !finalEvidence
+            ) {
               throw new Error("Finalization attempted without deterministic dual-review consensus.");
             }
+            if (assessment.iterationId !== finalEvidence.iterationId || assessment.diffDigest !== finalEvidence.diffDigest) {
+              throw new Error("Final consensus assessment does not match the latest evidence iteration and diff digest.");
+            }
+            const finalSnapshot = snapshot(finalEvidence.baselineGitHead);
             if (assessment.diffDigest !== finalSnapshot.diffDigest || finalEvidence.diffDigest !== finalSnapshot.diffDigest) {
               throw new Error("The working-copy diff changed after consensus; final approval is stale.");
             }

@@ -13,6 +13,7 @@ export const featureEnumOutputSchema = z.looseObject({
 });
 
 type FeatureEnumProps = {
+  key?: string;
   idPrefix: string;
   agent: AgentLike | AgentLike[];
   refineIterations?: number;
@@ -32,7 +33,10 @@ export function FeatureEnum({
   additionalContext = "",
 }: FeatureEnumProps) {
   const isFirstRun = !existingFeatures;
-  const totalRefineIterations = Math.max(1, refineIterations ?? (isFirstRun ? 5 : 1));
+  const requestedIterations = refineIterations ?? (isFirstRun ? 5 : 1);
+  const totalRefineIterations = Number.isFinite(requestedIterations)
+    ? Math.max(1, Math.floor(requestedIterations))
+    : 1;
   const scanTaskId = `${idPrefix}:scan`;
   const refineTaskIds = Array.from({ length: totalRefineIterations }, (_, index) => `${idPrefix}:refine:${index + 1}`);
   const finalTaskId = `${idPrefix}:result`;
@@ -86,6 +90,7 @@ export function FeatureEnum({
                   existingFeatures={deps.previous.featureGroups}
                   lastCommitHash={deps.previous.lastCommitHash ?? lastCommitHash}
                   iteration={index + 1}
+                  additionalContext={additionalContext}
                 />
               )}
             </Task>
@@ -114,6 +119,7 @@ export function FeatureEnum({
               existingFeatures={existingFeatures ?? {}}
               lastCommitHash={lastCommitHash}
               iteration={index + 1}
+              additionalContext={additionalContext}
             />
           </Task>
         );

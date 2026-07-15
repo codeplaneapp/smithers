@@ -14,7 +14,7 @@ import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../
 // product-path test that drives genuine smithers runs into a real SmithersDb and
 // computes state exactly as the gateway inspector does (computeRunStateFromRow).
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   prompt: z.string().default(DEFAULT_PROMPT()),
 });
 
@@ -52,22 +52,31 @@ function DEFAULT_PROMPT(): string {
   ].join("\n");
 }
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   input: inputSchema,
   implement: implementOutputSchema,
   validate: validateOutputSchema,
 });
 
-export default smithers((ctx) => (
-  <Workflow name="issue-306-audit-test-coverage-gaps-apps-gateway-ui">
-    <ValidationLoop
-      idPrefix="issue-306-cov"
-      prompt={ctx.input.prompt ?? DEFAULT_PROMPT()}
-      implementAgents={agents.implement}
-      validateAgents={agents.midTier}
-      reviewAgents={[agents.review]}
-      reviewWhen={false}
-      maxIterations={2}
-    />
-  </Workflow>
-));
+export default smithers((ctx) => {
+  const validate = ctx.latest(outputs.validate, "issue-306-cov:validate");
+  const done = validate?.allPassed === true;
+  const feedback = validate && !done
+    ? `VALIDATION FAILED:\n${validate.failingSummary ?? validate.summary}`
+    : null;
+  return (
+    <Workflow name="issue-306-audit-test-coverage-gaps-apps-gateway-ui">
+      <ValidationLoop
+        idPrefix="issue-306-cov"
+        prompt={ctx.input.prompt ?? DEFAULT_PROMPT()}
+        implementAgents={agents.implement}
+        validateAgents={agents.midTier}
+        reviewAgents={[agents.review]}
+        reviewWhen={false}
+        feedback={feedback}
+        done={done}
+        maxIterations={2}
+      />
+    </Workflow>
+  );
+});

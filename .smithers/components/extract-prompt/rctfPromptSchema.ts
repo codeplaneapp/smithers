@@ -47,6 +47,10 @@ export const rctfPromptSchema = z.looseObject({
   overridden: z.boolean().default(false),
   /** If overridden, why (verbatim from the user). */
   overrideReason: z.string().nullable().default(null),
+}).superRefine((value, ctx) => {
+  if (value.overridden && (!value.overrideReason || value.overrideReason.trim() === "")) {
+    ctx.addIssue({ code: "custom", path: ["overrideReason"], message: "overrideReason is required when overridden is true" });
+  }
 });
 
 export type RctfPromptOutput = z.infer<typeof rctfPromptSchema>;

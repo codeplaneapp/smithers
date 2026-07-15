@@ -39,7 +39,7 @@
 //   ... --input '{"numbers":[611,612],"defaultStrategy":"fable-sandwich"}'
 /** @jsxImportSource smithers-orchestrator */
 import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
@@ -47,15 +47,16 @@ import { codexFirst } from "../lib/codexAccounts";
 // ── Constants ────────────────────────────────────────────────────────────────
 const REPO = "smithersai/smithers";
 
-// Absolute repo root, resolved once. Worktree paths MUST be absolute: a relative
-// <Worktree path> silently anchors to the launch root (issue #297).
-const repoRoot = (() => {
+// Worktree paths MUST be absolute: a relative <Worktree path> silently anchors
+// to the launch root (issue #297). Resolve per render so importing this workflow
+// from another cwd does not permanently pin every later run to that directory.
+export function resolveRepoRoot(): string {
   try {
     return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() || process.cwd();
   } catch {
     return process.cwd();
   }
-})();
+}
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const issueSchema = z.object({
@@ -122,7 +123,7 @@ type Review = z.infer<typeof reviewSchema>;
 
 // The merge-queue result for one item. `status: "merged"` + `verified: true` is the ONLY
 // combination that counts as landed on main; every other state leaves the item for a rerun.
-const mergeSchema = z.object({
+export const mergeSchema = z.object({
   issueNumber: z.number().int(),
   branch: z.string().default(""),
   status: z.enum(["merged", "conflict", "tests-failed", "nothing-to-ship", "error"]).default("error"),
@@ -131,8 +132,21 @@ const mergeSchema = z.object({
   gatePassed: z.boolean().default(false),
   verified: z.boolean().default(false), // deterministically confirmed on main (NOT self-reported)
   summary: z.string().default(""),
+}).superRefine((value, issue) => {
+  if (value.status !== "merged") return;
+  if (!value.gatePassed) issue.addIssue({ code: "custom", path: ["gatePassed"], message: "a merged result requires a passing gate" });
+  if (!value.mergeSha?.trim()) issue.addIssue({ code: "custom", path: ["mergeSha"], message: "a merged result requires mergeSha" });
 });
 type Merge = z.infer<typeof mergeSchema>;
+
+export const landingVerificationSchema = z.object({
+  issueNumber: z.number().int(),
+  mergeSha: z.string().nullable().default(null),
+  remoteMainSha: z.string().nullable().default(null),
+  landed: z.boolean().default(false),
+  summary: z.string().default(""),
+});
+type LandingVerification = z.infer<typeof landingVerificationSchema>;
 
 const itemResultSchema = z.object({
   issueNumber: z.number().int(),
@@ -159,7 +173,7 @@ const runSummarySchema = z.object({
   summary: z.string().default(""),
 });
 
-const inputSchema = z.object({
+export const inputSchema = z.object({
   // Filters (empty = every open issue). `numbers` restricts, `excludeNumbers` drops.
   labels: z.array(z.string()).default([]),
   numbers: z.array(z.number().int()).default([]),
@@ -189,6 +203,7 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, MergeQueue, smithers
   fix: fixSchema,
   review: reviewSchema,
   merge: mergeSchema,
+  landingVerification: landingVerificationSchema,
   itemResult: itemResultSchema,
   consolidate: consolidateSchema,
   runSummary: runSummarySchema,
@@ -223,6 +238,25 @@ const HEARTBEAT_MS = 10 * 60_000;
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 function latest<T>(rows: T[] | undefined): T | undefined {
   return rows && rows.length > 0 ? rows[rows.length - 1] : undefined;
+}
+
+type RawRow = Record<string, unknown>;
+function rawRows(ctx: any, table: string): RawRow[] {
+  const value = typeof ctx.outputs === "function" ? ctx.outputs(table) : ctx.outputs?.[table];
+  return Array.isArray(value) ? value.filter((row): row is RawRow => typeof row === "object" && row !== null) : [];
+}
+function rowVersion(row: RawRow): [number, number] {
+  const iteration = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
+  const iterationCount = Number.isFinite(Number(row.iterationCount)) ? Number(row.iterationCount) : iteration;
+  return [iterationCount, iteration];
+}
+function latestRaw(ctx: any, table: string, nodeId: string): RawRow | undefined {
+  return rawRows(ctx, table).filter((row) => row.nodeId === nodeId).reduce<RawRow | undefined>((best, row) => {
+    if (!best) return row;
+    const current = rowVersion(row);
+    const previous = rowVersion(best);
+    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+  }, undefined);
 }
 function latestForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number): T | undefined {
   return latest((rows ?? []).filter((r) => r.issueNumber === n));
@@ -265,7 +299,7 @@ function effectiveStrategy(route: Route | undefined, fallback: string): Strategy
   return route.strategy === "no-directive" ? (fallback as Strategy) : route.strategy;
 }
 
-function buildWorkItems(ctx: any, issues: Issue[], fallback: string): WorkItem[] {
+function buildWorkItems(ctx: any, issues: Issue[], fallback: string, repoRoot: string, runSlug: string): WorkItem[] {
   const out: WorkItem[] = [];
   for (const issue of issues) {
     const route = latestForIssue<Route>(ctx.outputs.route, issue.number);
@@ -278,23 +312,52 @@ function buildWorkItems(ctx: any, issues: Issue[], fallback: string): WorkItem[]
       bodyExcerpt: issue.bodyExcerpt,
       url: issue.url,
       strategy,
-      branch: `issue/${issue.number}-${slugify(issue.title)}`,
-      worktreePath: join(repoRoot, ".smithers", "workflows", ".worktrees", `issue-${issue.number}`),
+      branch: `issue/${runSlug}/${issue.number}-${slugify(issue.title)}`,
+      worktreePath: join(repoRoot, ".smithers", "workflows", ".worktrees", runSlug, `issue-${issue.number}`),
     });
   }
   return out;
 }
 
-function itemApproved(ctx: any, n: number): boolean {
-  const fix = latestForIssue<Fix>(ctx.outputs.fix, n);
-  const review = latestForIssue<Review>(ctx.outputs.review, n);
-  return fix?.status === "implemented" && review?.approved === true;
+export function itemApproved(ctx: any, n: number): boolean {
+  const fix = latestRaw(ctx, "fix", `i${n}:implement`);
+  const review = latestRaw(ctx, "review", `i${n}:review`);
+  if (!fix || !review) return false;
+  const fixVersion = rowVersion(fix);
+  const reviewVersion = rowVersion(review);
+  const paired = fixVersion[0] === reviewVersion[0] && fixVersion[1] === reviewVersion[1];
+  return paired && fix.status === "implemented" && review.approved === true;
 }
 
-// Landed = the merge agent reported "merged" AND deterministically verified it on main.
-function itemLanded(ctx: any, n: number): boolean {
-  const m = latestForIssue<Merge>(ctx.outputs.merge, n);
-  return m?.status === "merged" && m?.verified === true;
+// Landed truth comes only from the deterministic compute task below; the merge
+// agent's own `verified` claim is retained as diagnostic context, never as truth.
+export function itemLanded(ctx: any, n: number): boolean {
+  const result = latestForIssue<LandingVerification>(ctx.outputs.landingVerification, n);
+  return result?.landed === true && Boolean(result.mergeSha?.trim());
+}
+
+/** Verify a claimed land against the fetched remote branch using real git ancestry. */
+export function verifyLandedCommit(merge: Merge | undefined, cwd = process.cwd()): LandingVerification {
+  const issueNumber = merge?.issueNumber ?? 0;
+  const mergeSha = merge?.mergeSha?.trim() || null;
+  if (merge?.status !== "merged" || !merge.gatePassed || !mergeSha) {
+    return { issueNumber, mergeSha, remoteMainSha: null, landed: false, summary: "merge claim was not gate-passed with a commit sha" };
+  }
+  const fetch = spawnSync("git", ["fetch", "origin", "main"], { cwd, encoding: "utf8" });
+  if (fetch.status !== 0) {
+    return { issueNumber, mergeSha, remoteMainSha: null, landed: false, summary: `git fetch origin main failed: ${(fetch.stderr ?? fetch.error?.message ?? "").trim()}` };
+  }
+  const remote = spawnSync("git", ["rev-parse", "origin/main"], { cwd, encoding: "utf8" });
+  const remoteMainSha = remote.status === 0 ? remote.stdout.trim() || null : null;
+  const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", mergeSha, "origin/main"], { cwd, encoding: "utf8" });
+  const landed = remote.status === 0 && ancestry.status === 0;
+  return {
+    issueNumber,
+    mergeSha,
+    remoteMainSha,
+    landed,
+    summary: landed ? `${mergeSha} is an ancestor of origin/main` : `${mergeSha} is not an ancestor of origin/main`,
+  };
 }
 
 function itemFeedback(ctx: any, n: number): string {
@@ -535,6 +598,8 @@ function consolidatePrompt(gateCommand: string) {
 
 // ── Workflow ─────────────────────────────────────────────────────────────────
 export default smithers((ctx) => {
+  const repoRoot = resolveRepoRoot();
+  const runSlug = slugify(String((ctx as any).runId ?? "route-and-merge")).slice(0, 48);
   const rawInput = (ctx.input ?? {}) as Partial<z.infer<typeof inputSchema>>;
   const input = {
     labels: asArray<string>(rawInput.labels),
@@ -550,7 +615,7 @@ export default smithers((ctx) => {
 
   const discovery = latest(ctx.outputs.discovery);
   const issues = (discovery?.issues ?? []) as Issue[];
-  const items = buildWorkItems(ctx, issues, input.defaultStrategy);
+  const items = buildWorkItems(ctx, issues, input.defaultStrategy, repoRoot, runSlug);
   const skippedCount = issues.filter((i) => {
     const route = latestForIssue<Route>(ctx.outputs.route, i.number);
     if (!route) return false;
@@ -678,18 +743,29 @@ export default smithers((ctx) => {
               const fix = latestForIssue<Fix>(ctx.outputs.fix, item.issueNumber);
               return (
                 <Worktree key={`i${item.issueNumber}:merge-wt`} path={item.worktreePath} branch={item.branch} baseBranch="main">
-                  <Task
-                    id={`i${item.issueNumber}:merge`}
-                    output={outputs.merge}
-                    agent={terraChain}
-                    retries={1}
-                    timeoutMs={MERGE_TIMEOUT_MS}
-                    heartbeatTimeoutMs={HEARTBEAT_MS}
-                    continueOnFail
-                    skipIf={itemLanded(ctx, item.issueNumber)}
-                  >
-                    {mergePrompt(item, fix, input.gateCommand)}
-                  </Task>
+                  <Sequence>
+                    <Task
+                      id={`i${item.issueNumber}:merge`}
+                      output={outputs.merge}
+                      agent={terraChain}
+                      retries={1}
+                      timeoutMs={MERGE_TIMEOUT_MS}
+                      heartbeatTimeoutMs={HEARTBEAT_MS}
+                      continueOnFail
+                      skipIf={itemLanded(ctx, item.issueNumber)}
+                    >
+                      {mergePrompt(item, fix, input.gateCommand)}
+                    </Task>
+                    <Task
+                      id={`i${item.issueNumber}:verify-land`}
+                      output={outputs.landingVerification}
+                      skipIf={itemLanded(ctx, item.issueNumber)}
+                      needs={{ merge: `i${item.issueNumber}:merge` }}
+                      deps={{ merge: outputs.merge }}
+                    >
+                      {(deps: { merge?: Merge }) => verifyLandedCommit(deps.merge)}
+                    </Task>
+                  </Sequence>
                 </Worktree>
               );
             })}
@@ -700,8 +776,8 @@ export default smithers((ctx) => {
         {input.consolidate && landedCount > 0 ? (
           <Worktree
             key="consolidate"
-            path={join(repoRoot, ".smithers", "workflows", ".worktrees", "consolidate")}
-            branch="chore/issue-merge-consolidate"
+            path={join(repoRoot, ".smithers", "workflows", ".worktrees", runSlug, "consolidate")}
+            branch={`chore/${runSlug}/issue-merge-consolidate`}
             baseBranch="main"
           >
             <Task

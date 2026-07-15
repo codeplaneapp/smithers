@@ -828,6 +828,7 @@ export default smithers((ctx) => {
     | undefined;
   const preflightOk = Boolean(pf?.ok);
   const preflightBad = pf !== undefined && !pf.ok;
+  const humanEnv = ctx.latest("humanEnv", "preflight:fix") as Record<string, unknown> | undefined;
   const impl = implementers;
 
   // ---- per-ticket state ----
@@ -911,16 +912,16 @@ export default smithers((ctx) => {
                 maxAttempts={10}
                 prompt={`The real-stack-e2e run is blocked on missing prerequisites:\n\n  ${pf?.missing}\n\n(${pf?.detail})\n\nPlease answer with JSON: {"cerebrasApiKey": string|null, "geminiApiKey": string|null, "claudeOauthToken": string|null, "anthropicApiKey": string|null, "skipCodex": boolean|null, "note": string|null}.\n- geminiApiKey: from https://aistudio.google.com — powers real /api/chat via Gemini Flash until Cerebras is set up.\n- cerebrasApiKey: from https://cloud.cerebras.ai — takes precedence over Gemini once supplied.\n- First repair Codex out-of-band (for example, run \`codex login\` or register another Codex/OpenAI account); all Codex credentials are tried before any backup.\n- claudeOauthToken: ONLY when every Codex credential is unavailable and the Claude fallback probe also failed — run \`claude setup-token\` and paste, or fix out-of-band with \`claude /login\` and answer null.\n- skipCodex: true = explicitly skip Codex probing and permit the Claude fallback for this run.\n- Provide null for anything you fixed out-of-band and say so in note.\nValues are written only to ${ENV_FILE} (gitignored, chmod 600).`}
               />
-              <Task
-                id="preflight:apply"
-                output={outputs.envApply}
-                noRetry
-                deps={{ "preflight:fix": outputs.humanEnv }}
-              >
-                {(deps: Record<string, unknown>) =>
-                  applyHumanEnv(deps["preflight:fix"] as Record<string, unknown>)
-                }
-              </Task>
+              {humanEnv ? (
+                <Task
+                  id="preflight:apply"
+                  output={outputs.envApply}
+                  noRetry
+                  dependsOn={["preflight:fix"]}
+                >
+                  {() => applyHumanEnv(humanEnv)}
+                </Task>
+              ) : null}
             </>
           ) : null}
         </Sequence>

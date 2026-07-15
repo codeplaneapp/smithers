@@ -71,7 +71,7 @@ const fixSchema = z.object({
   summary: z.string().default(""),
   filesChanged: z.array(z.string()).default([]),
   testAdded: z.string().default(""),
-  allTestsPassing: z.boolean().default(true),
+  allTestsPassing: z.boolean().default(false),
   commitMessage: z.string().default(""),
 });
 type Fix = z.infer<typeof fixSchema>;
@@ -174,13 +174,34 @@ type WorkItem = {
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 function latest<T>(rows: T[] | undefined): T | undefined {
-  return rows && rows.length > 0 ? rows[rows.length - 1] : undefined;
+  if (!rows || rows.length === 0) return undefined;
+  let selected = rows[0];
+  let selectedIteration = iterationOf(selected);
+  for (const row of rows.slice(1)) {
+    const iteration = iterationOf(row);
+    if (iteration >= selectedIteration) {
+      selected = row;
+      selectedIteration = iteration;
+    }
+  }
+  return selected;
 }
 function latestForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number): T | undefined {
   return latest((rows ?? []).filter((r) => r.issueNumber === n));
 }
 function latestForItem<T extends { workItemId: string }>(rows: T[] | undefined, id: string): T | undefined {
   return latest((rows ?? []).filter((r) => r.workItemId === id));
+}
+function iterationOf(row: unknown): number {
+  const iteration = Number((row as { iteration?: unknown } | undefined)?.iteration);
+  return Number.isFinite(iteration) ? iteration : 0;
+}
+function latestItemIteration(ctx: any, key: string): number | undefined {
+  const fix = latestForItem<Fix>(ctx.outputs.fix, key);
+  return fix ? iterationOf(fix) : undefined;
+}
+function latestReviewForItem<T extends { workItemId: string }>(rows: T[] | undefined, id: string, iteration: number): T | undefined {
+  return latest((rows ?? []).filter((r) => r.workItemId === id && iterationOf(r) === iteration));
 }
 function slugify(s: string): string {
   return (
@@ -222,13 +243,16 @@ function buildWorkItems(ctx: any, issues: Issue[], cap: number): WorkItem[] {
 
 function itemDone(ctx: any, key: string): boolean {
   const fix = latestForItem<Fix>(ctx.outputs.fix, key);
-  const rc = latestForItem<Review>(ctx.outputs.reviewClaude, key);
-  const rx = latestForItem<Review>(ctx.outputs.reviewCodex, key);
-  return fix?.status === "implemented" && rc?.approved === true && rx?.approved === true;
+  const iteration = latestItemIteration(ctx, key);
+  if (!fix || iteration === undefined) return false;
+  const rc = latestReviewForItem<Review>(ctx.outputs.reviewClaude, key, iteration);
+  const rx = latestReviewForItem<Review>(ctx.outputs.reviewCodex, key, iteration);
+  return fix.status === "implemented" && fix.allTestsPassing === true && rc?.approved === true && rx?.approved === true;
 }
 
 function itemFeedback(ctx: any, key: string): string {
   const fix = latestForItem<Fix>(ctx.outputs.fix, key);
+  const iteration = latestItemIteration(ctx, key);
   const parts: string[] = [];
   if (fix && fix.status !== "implemented") {
     parts.push(`PRIOR ATTEMPT SELF-REPORTED ${fix.status.toUpperCase()}:\n${fix.summary}`);
@@ -237,7 +261,7 @@ function itemFeedback(ctx: any, key: string): string {
     ["CODEX SOL REVIEWER A", ctx.outputs.reviewClaude],
     ["CODEX SOL REVIEWER B", ctx.outputs.reviewCodex],
   ] as const) {
-    const r = latestForItem<Review>(rows, key);
+    const r = iteration === undefined ? undefined : latestReviewForItem<Review>(rows, key, iteration);
     if (r && !r.approved) {
       parts.push(`${who} REJECTED:\n${r.feedback}`);
       for (const i of r.issues ?? []) {
@@ -388,7 +412,7 @@ function prPrompt(wi: WorkItem, commitMessage: string, linkage: string) {
     "Open EXACTLY ONE pull request for THIS work item using git + the gh CLI from the current directory. Steps, in order:",
     "",
     "1. Confirm there are changes: `git status --porcelain` and `git diff origin/main...HEAD`. If there is genuinely nothing to ship, return prepared=false with that reason.",
-    `2. If there are uncommitted changes, stage and commit them: \`git add -A\` then commit with subject EXACTLY:\n   ${commitMessage}\n   and a body that includes the line "${linkage}" and the trailer "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>".`,
+    `2. If there are uncommitted changes, enumerate the changed paths from \`git status --porcelain\`, then stage only those exact paths with \`git add -- <pathspec>...\`; do not use broad repository staging. Commit with subject EXACTLY:\n   ${commitMessage}\n   and a body that includes the line "${linkage}" and the trailer "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>".`,
     `3. Push the branch: \`git push -u origin ${wi.branch} --force-with-lease\`.`,
     `4. Open the PR: \`gh pr create --repo ${REPO} --head ${wi.branch} --base main --title "${commitMessage}" --body <body>\`. The body MUST start with "${linkage}", then concisely explain WHAT was fixed and HOW (root cause + approach, naming the key files), note that Codex implemented it via TDD and Codex + Claude Opus both approved in review, and end with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".`,
     `   - If a PR for branch ${wi.branch} already exists, do NOT create a duplicate — reuse it via \`gh pr view ${wi.branch} --repo ${REPO} --json number,url\`.`,

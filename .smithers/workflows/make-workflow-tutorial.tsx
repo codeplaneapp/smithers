@@ -295,13 +295,10 @@ async function pollBuild(childRunId: string) {
   let status = "unknown";
   let runState = "unknown";
   try {
-    const j: any = JSON.parse(raw);
+    const j: any = parseFirstJsonObject(raw);
     status = j?.run?.status ?? j?.status ?? "unknown";
     runState = j?.runState?.state ?? status;
-  } catch {
-    const m = raw.match(/status[":\s]+([a-z-]+)/i);
-    if (m) status = m[1];
-  }
+  } catch { /* malformed inspect output remains unknown */ }
   const terminal = ["finished", "failed", "cancelled", "continued"].includes(status);
   const stale = runState === "stale" || runState === "orphaned";
   let resumed = false;
@@ -315,6 +312,27 @@ async function pollBuild(childRunId: string) {
   const needsAttention =
     (stale && !resumed) || status === "waiting-approval" || status === "failed";
   return { status, terminal, needsAttention, resumed, detail: raw.slice(0, 3_000) };
+}
+
+function parseFirstJsonObject(raw: string): Record<string, any> {
+  const start = raw.indexOf("{");
+  if (start < 0) throw new Error("No JSON object found");
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const char = raw[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && --depth === 0) return JSON.parse(raw.slice(start, i + 1));
+  }
+  throw new Error("Unbalanced JSON object");
 }
 
 async function gatherDiveDeeperDocs() {
@@ -473,8 +491,11 @@ export default smithers((ctx) => {
   const pick = ctx.outputMaybe("pick", { nodeId: "pick" });
   const buildLaunch = ctx.outputMaybe("buildLaunch", { nodeId: "build-launch" });
 
-  const launched = buildLaunch?.launched === true;
-  const childRunId = buildLaunch?.childRunId ?? null;
+  const childRunId = typeof buildLaunch?.childRunId === "string" && buildLaunch.childRunId.trim()
+    ? buildLaunch.childRunId
+    : null;
+  const launched = buildLaunch?.launched === true && childRunId !== null;
+  const launchFailed = Boolean(buildLaunch) && !launched;
 
   const lastPoll = (ctx as any).latest("monitorPoll", "monitor-poll");
   const buildEnded = lastPoll?.terminal === true;
@@ -591,25 +612,39 @@ export default smithers((ctx) => {
 
         {/* ── 7. Dive deeper: gather docs + show 5-8 other features ── */}
         {launched && monitorStopped ? (
-          <Task id="dive-deeper-docs" output={outputs.diveDeeperDocs}>
-            {gatherDiveDeeperDocs}
-          </Task>
+          <Sequence>
+            <Task id="dive-deeper-docs" output={outputs.diveDeeperDocs}>
+              {gatherDiveDeeperDocs}
+            </Task>
+            {ctx.outputMaybe("diveDeeperDocs", { nodeId: "dive-deeper-docs" }) ? (
+              <Task
+                id="dive-deeper"
+                output={outputs.diveDeeper}
+                agent={agents.research}
+                needs={{ diveDeeperDocs: "dive-deeper-docs" }}
+                deps={{ diveDeeperDocs: outputs.diveDeeperDocs }}
+              >
+                {(deps) => (
+                  <DiveDeeperPrompt
+                    builtWorkflow={pick?.workflowName ?? "your-workflow"}
+                    docs={deps.diveDeeperDocs.docs}
+                  />
+                )}
+              </Task>
+            ) : null}
+          </Sequence>
         ) : null}
 
-        <Task
-          id="dive-deeper"
-          output={outputs.diveDeeper}
-          agent={agents.research}
-          needs={{ diveDeeperDocs: "dive-deeper-docs" }}
-          deps={{ diveDeeperDocs: outputs.diveDeeperDocs }}
-        >
-          {(deps) => (
-            <DiveDeeperPrompt
-              builtWorkflow={pick?.workflowName ?? "your-workflow"}
-              docs={deps.diveDeeperDocs.docs}
-            />
-          )}
-        </Task>
+        {launchFailed ? (
+          <Task id="output" output={outputs.output}>
+            {{
+              workflowName: pick?.workflowName ?? "",
+              status: "launch-failed",
+              summary: "Tutorial launch failed: create-workflow did not start.",
+              childRunId: null,
+            }}
+          </Task>
+        ) : null}
 
         {/* ── 8. Terminal output ── */}
         {diveDeeper ? (

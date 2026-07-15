@@ -11,6 +11,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
@@ -106,9 +107,36 @@ function commitWorktree(path: string, branch: string, subject: string) {
   const base = { branch, committed: false, sha: null as string | null, summary: "" };
   try {
     const tip = git(["rev-parse", "HEAD"]).trim();
-    const baseTip = git(["rev-parse", BASE_BRANCH]).trim();
-    if (tip === baseTip) return { ...base, sha: tip, summary: "No commit beyond base yet." };
-    return { ...base, committed: true, sha: tip, summary: `${branch} @ ${tip.slice(0, 10)} (work committed in-worktree).` };
+    const status = git(["status", "--porcelain", "-z"]);
+    const records = status.split("\0");
+    const changed: string[] = [];
+    const alreadyStaged = new Set<string>();
+    for (let index = 0; index < records.length; index += 1) {
+      const entry = records[index];
+      if (!entry) continue;
+      const code = entry.slice(0, 2);
+      const path = entry.slice(3);
+      if (!path) continue;
+      changed.push(path);
+      if (code.includes("R") || code.includes("C")) {
+        // With porcelain -z, the first pathname is the destination and the
+        // paired pathname is the source. An index-staged rename already has
+        // both sides staged, so only retain the source for an unstaged rename.
+        const source = records[++index];
+        if (source) {
+          changed.push(source);
+          if (code[0] !== " ") alreadyStaged.add(source);
+        }
+      }
+    }
+    if (!changed.length) return { ...base, sha: tip, summary: "No changes to commit." };
+    const present = changed.filter((relativePath) => existsSync(join(path, relativePath)));
+    const removed = changed.filter((relativePath) => !existsSync(join(path, relativePath)) && !alreadyStaged.has(relativePath));
+    if (present.length) git(["add", "--", ...present]);
+    if (removed.length) git(["add", "-u", "--", ...removed]);
+    git(["commit", "-m", `🔧 chore(consolidation): ${subject}`, "-m", "Co-Authored-By: Codex <noreply@openai.com>", "--", ...changed]);
+    const sha = git(["rev-parse", "HEAD"]).trim();
+    return { ...base, committed: true, sha, summary: `${branch} @ ${sha.slice(0, 10)} committed with explicit pathspecs.` };
   } catch (err) {
     return { ...base, summary: `Commit check failed: ${String(err instanceof Error ? err.message : err).slice(0, 400)}` };
   }
@@ -214,6 +242,12 @@ export default smithers((ctx) => {
   const prevConsolidate = latest(ctx.outputs.consolidate);
   const verify = latest(ctx.outputs.verify);
   const green = verify?.green === true;
+  const review = latest(ctx.outputs.review);
+  const reviewReady = review?.approved === true
+    && review.migrationIntact === true
+    && (review.strayWorkRemaining ?? []).length === 0
+    && Number((review as unknown as { iteration?: unknown }).iteration ?? 0)
+      === Number((verify as unknown as { iteration?: unknown })?.iteration ?? 0);
 
   return (
     <Workflow name="consolidate-tanstack-db">
@@ -228,12 +262,12 @@ export default smithers((ctx) => {
                 {verifyPrompt()}
               </Task>
             </Loop>
-            <Task id="review" output={outputs.review} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            {green ? <Task id="review" output={outputs.review} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
               {reviewPrompt()}
-            </Task>
-            <Task id="commit" output={outputs.commit} timeoutMs={5 * 60_000}>
+            </Task> : null}
+            {green && reviewReady ? <Task id="commit" output={outputs.commit} timeoutMs={5 * 60_000}>
               {() => commitWorktree(WT, WORK_BRANCH, "consolidate 06-07 product work onto TanStack DB")}
-            </Task>
+            </Task> : null}
           </Sequence>
         </Worktree>
       </Sequence>

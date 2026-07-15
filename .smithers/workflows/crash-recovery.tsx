@@ -91,7 +91,7 @@ Lane "tsync": In /Users/williamcory/smithers the tsync orchestrator (TanStack sy
             />
           ) : null}
 
-          {tsyncApproval?.approved && tsyncPlan ? (
+          {tsyncApproval?.approved && tsyncPlan?.ok ? (
             <Task id="tsync-push" output={outputs.report} agent={agents.implement} timeoutMs={20 * 60_000}>
               {`${COMMON}
 

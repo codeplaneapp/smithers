@@ -77,6 +77,10 @@ const verifySchema = z.object({
     .array(z.string())
     .default([])
     .describe("Blocking gates whose verificationMethod is manual_check with no named checker."),
+  invalidGates: z
+    .array(z.string())
+    .default([])
+    .describe("Criteria whose gates violate the gate contract."),
   summary: z.string(),
 });
 
@@ -89,6 +93,7 @@ const outputSchema = z.object({
   blockingGates: z.number().describe("Gates that stop the run on failure."),
   humanApprovals: z.number().describe("Gates that require a durable human approval."),
   missing: z.array(z.string()).describe("Criteria with no matching gate."),
+  invalidGates: z.array(z.string()).describe("Criteria whose gates violate the gate contract."),
   summary: z.string().describe("Plain-English overview of the backpressure plan and its verdict."),
 });
 
@@ -156,16 +161,28 @@ export default smithers((ctx) => {
               const unverifiedBlocking = gateList
                 .filter((gate) => gate.gateType === "blocking" && gate.verificationMethod === "manual_check" && gate.checkedBy.trim().length === 0)
                 .map((gate) => gate.criterion);
-              const match = orderedMatch && unverifiedBlocking.length === 0;
+              const invalidGates = gateList
+                .filter((gate) => {
+                  const checkedBy = gate.checkedBy.trim();
+                  const documentedChecker = /^(task|scorer|human|tool):\S+$/.test(checkedBy);
+                  const validEvidence = gate.evidenceRequired.some((evidence) => evidence.trim().length > 0);
+                  const validFailureAction = gate.failureAction.trim().length > 0;
+                  const approvalParity =
+                    gate.verificationMethod === "approval" ? gate.humanApprovalRequired : !gate.humanApprovalRequired;
+                  return !documentedChecker || !validEvidence || !validFailureAction || !approvalParity;
+                })
+                .map((gate) => gate.criterion);
+              const match = orderedMatch && unverifiedBlocking.length === 0 && invalidGates.length === 0;
               const summary = match
                 ? `All ${wanted.length} criteria are covered by one gate each, in order.`
-                : `Gate matrix mismatch: ${missing.length} criteria missing, ${produced.length}/${wanted.length} gates, ${unverifiedBlocking.length} unverified blocking gate(s).`;
+                : `Gate matrix mismatch: ${missing.length} criteria missing, ${produced.length}/${wanted.length} gates, ${unverifiedBlocking.length} unverified blocking gate(s), ${invalidGates.length} invalid gate(s).`;
               return {
                 match,
                 criteriaCount: wanted.length,
                 gateCount: produced.length,
                 missing,
                 unverifiedBlocking,
+                invalidGates,
                 summary,
               };
             }}
@@ -190,6 +207,7 @@ export default smithers((ctx) => {
                 blockingGates,
                 humanApprovals,
                 missing: verify.missing,
+                invalidGates: verify.invalidGates,
                 summary: summary.length > 0 ? summary : verify.summary,
               };
             }}

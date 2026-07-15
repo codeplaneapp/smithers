@@ -61,7 +61,7 @@ export default smithers((ctx) => {
   ].filter(Boolean).join("\n\n---\n");
 
   // Validation loop feedback
-  const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });
+  const validate = ctx.latest("validate", "impl:validate");
 
   const hasValidated = validate !== undefined;
   const validationPassed = hasValidated && validate.allPassed !== false;

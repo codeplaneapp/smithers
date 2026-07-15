@@ -6,14 +6,15 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 
 const inputSchema = z.object({
-  runLabel: z.string().default(() => new Date().toISOString().slice(0, 10)),
-  summaryPath: z.string().default("/tmp/smithers-daily-research-summary.md"),
-  sotaSummaryPath: z.string().default("/tmp/sota-research-summary.md"),
+  runLabel: z.string().default(new Date().toISOString().slice(0, 10)),
+  summaryPath: z.string().default(() => join(tmpdir(), "smithers-daily-research-summary.md")),
+  sotaSummaryPath: z.string().default(() => join(tmpdir(), "sota-research-summary.md")),
   runSotaResearch: z.boolean().default(true),
   runBenchmarkSmoke: z.boolean().default(true),
   runEvalSmoke: z.boolean().default(true),
@@ -140,8 +141,8 @@ export default smithers((ctx) => {
   const smoke = ctx.outputMaybe(outputs.smoke, { nodeId: "run-existing-benchmarks-and-evals" });
   const research = ctx.outputMaybe(outputs.benchmarkResearch, { nodeId: "research-benchmark-updates" });
   const runLabel = ctx.input.runLabel ?? new Date().toISOString().slice(0, 10);
-  const summaryPath = ctx.input.summaryPath ?? "/tmp/smithers-daily-research-summary.md";
-  const sotaSummaryPath = ctx.input.sotaSummaryPath ?? "/tmp/sota-research-summary.md";
+  const summaryPath = (ctx.input.summaryPath ?? "").trim() || join(tmpdir(), "smithers-daily-research-summary.md");
+  const sotaSummaryPath = (ctx.input.sotaSummaryPath ?? "").trim() || join(tmpdir(), "sota-research-summary.md");
   const runSotaResearch = ctx.input.runSotaResearch ?? true;
   const runBenchmarkSmoke = ctx.input.runBenchmarkSmoke ?? true;
   const runEvalSmoke = ctx.input.runEvalSmoke ?? true;
@@ -179,7 +180,7 @@ export default smithers((ctx) => {
           </Task>
         ) : null}
 
-        {inventory && (runBenchmarkSmoke || runEvalSmoke) ? (
+        {inventory ? (
           <Task id="run-existing-benchmarks-and-evals" output={outputs.smoke} retries={0}>
             {() => {
               const commands: z.infer<typeof commandSchema>[] = [];
@@ -205,7 +206,9 @@ export default smithers((ctx) => {
                 ok: failed.length === 0,
                 commands,
                 summary:
-                  failed.length === 0
+                  commands.length === 0
+                    ? "Benchmark/eval smoke skipped."
+                    : failed.length === 0
                     ? `Ran ${commands.length} benchmark/eval smoke command(s).`
                     : `${failed.length}/${commands.length} benchmark/eval smoke command(s) failed.`,
               };

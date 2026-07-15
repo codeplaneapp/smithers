@@ -227,6 +227,7 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
   const passed = issues.filter((i) => i.severity === "ok").length;
   const errors = issues.filter((i) => i.severity === "error").length;
   const warnings = issues.filter((i) => i.severity === "warning").length;
+  const infos = issues.filter((i) => i.severity === "info").length;
   const score = total === 0 ? 100 : Math.round((passed / total) * 100);
 
   const summary =
@@ -234,7 +235,9 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
       ? errors + " error(s) and " + warnings + " warning(s) — contract is incomplete (score " + score + "/100)."
       : warnings > 0
         ? warnings + " warning(s) — contract is usable but could be tightened (score " + score + "/100)."
-        : "Contract passes every check (score " + score + "/100).";
+        : infos > 0
+          ? infos + " informational finding(s) — contract checks passed with reporting guidance noted (score " + score + "/100)."
+          : "Contract passes every check (score " + score + "/100).";
 
   return { issues, summary, score };
 }

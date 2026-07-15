@@ -8,15 +8,10 @@ MISSION GOAL:
 {props.missionGoal}
 
 MILESTONE:
-```json
-{JSON.stringify(props.milestone, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.milestone, null, 2), "```"].join("\n")}</pre>
 
 FEATURE RESULTS:
-```json
-{JSON.stringify(props.results, null, 2)}
-```
+<pre>{["```json", JSON.stringify(props.results, null, 2), "```"].join("\n")}</pre>
 
 REQUIRED OUTPUT:
 {props.schema}
-

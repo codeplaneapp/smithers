@@ -4,8 +4,9 @@
 // smithers-system: true
 /** @jsxImportSource smithers-orchestrator */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { homedir, tmpdir } from "node:os";
 import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
@@ -98,6 +99,7 @@ const ROOT = resolve(import.meta.dir, "../..");
 const MAX_OUTPUT = 18_000;
 const MEMORY_NAMESPACE = "workflow:daily-canary";
 const MEMORY_KEY = "test-lru";
+const OWNERSHIP_MARKER = ".smithers-canary-owned";
 
 const smartBugHunter = codexFirst({
   model: "gpt-5.6-sol",
@@ -120,7 +122,8 @@ function run(
   timeoutMs = 12 * 60_000,
 ): z.infer<typeof commandSchema> {
   const started = Date.now();
-  const res = spawnSync(command, args, {
+  const executable = command === "bun" ? (process.env.SMITHERS_CANARY_BUN || command) : command;
+  const res = spawnSync(executable, args, {
     cwd,
     encoding: "utf8",
     env: {
@@ -188,7 +191,20 @@ function workspaceDir(input: z.infer<typeof inputSchema>): string {
 }
 
 function prepareWorkspace(mode: string, dir: string): void {
-  if (mode === "fresh") rmSync(dir, { recursive: true, force: true });
+  if (mode === "fresh") {
+    const resolved = resolve(dir);
+    const protectedPaths = new Set([resolve(ROOT), resolve(homedir()), parse(resolve(dir)).root]);
+    if (protectedPaths.has(resolved)) throw new Error(`Refusing to fresh-reset protected path: ${resolved}`);
+    if (existsSync(resolved)) {
+      const marker = join(resolved, OWNERSHIP_MARKER);
+      if (readMaybe(marker).trim() !== `smithers-daily-canary:${resolved}`) {
+        throw new Error(`Refusing to fresh-reset unowned path: ${resolved}`);
+      }
+    }
+    rmSync(resolved, { recursive: true, force: true });
+    mkdirSync(resolved, { recursive: true });
+    writeFileSync(join(resolved, OWNERSHIP_MARKER), `smithers-daily-canary:${resolved}\n`);
+  }
   mkdirSync(dir, { recursive: true });
   if (!existsSync(join(dir, ".git"))) run("git", ["init"], dir);
   run("git", ["config", "user.email", "canary@smithers.sh"], dir);
@@ -236,7 +252,6 @@ export default smithers((ctx) => {
           <Task id="run-canary" output={outputs.canary} retries={0}>
             {() => {
               const commands: z.infer<typeof commandSchema>[] = [];
-              commands.push(run("git", ["status", "--short"], prepare.workspaceDir));
               commands.push(
                 run("bun", [prepare.cliPath, "init", "--yes", "--no-skill", "--format", "json"], prepare.workspaceDir, {}, 20 * 60_000),
               );
@@ -419,7 +434,7 @@ Return JSON:
             {() => {
               const summaryPath =
                 (ctx.input.summaryPath ?? "").trim() ||
-                join("/tmp", `smithers-canary-${prepare.mode}-${prepare.runLabel}.md`);
+                join(tmpdir(), `smithers-canary-${prepare.mode}-${prepare.runLabel}.md`);
               mkdirSync(dirname(summaryPath), { recursive: true });
               const summary = [
                 `# Smithers ${prepare.mode} canary: ${prepare.runLabel}`,

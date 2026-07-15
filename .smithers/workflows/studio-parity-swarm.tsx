@@ -1,57 +1,46 @@
-// smithers-display-name: Smithers Studio Parity Swarm
+// smithers-display-name: Smithers UI Parity Swarm
 /** @jsxImportSource smithers-orchestrator */
-import {
-  AntigravityAgent,
-  ClaudeCodeAgent,
-  KimiAgent,
-  MergeQueue,
-  Parallel,
-  Sequence,
-  Task,
-  Worktree,
-  createSmithers,
-  type AgentLike,
-} from "smithers-orchestrator";
+import { MergeQueue, Parallel, Sequence, Task, Worktree, createSmithers } from "smithers-orchestrator";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { codexFirst } from "../lib/codexAccounts";
+import { agents } from "../agents";
 
-const ticketKindSchema = z.enum([
-  "feature",
-  "ui",
-  "terminal",
-  "test-only",
-  "review-existing",
-  "gateway",
-  "ci",
-  "bugfix",
-]);
-
+const ticketKindSchema = z.enum(["feature", "ui", "test-only", "review-existing", "gateway", "ci", "bugfix"]);
 const difficultySchema = z.enum(["easy", "medium", "hard", "critical"]);
 
-const parityTicketSchema = z.object({
-  id: z.string(),
-  title: z.string(),
+export const parityTicketSchema = z.object({
+  id: z.string().trim().min(1),
+  title: z.string().trim().min(1),
   kind: ticketKindSchema,
   difficulty: difficultySchema,
   priority: z.number().min(0).max(100),
   requiresUi: z.boolean().default(false),
   testsOnly: z.boolean().default(false),
-  summary: z.string(),
+  summary: z.string().trim().min(1),
   acceptanceCriteria: z.array(z.string()).default([]),
   filesLikely: z.array(z.string()).default([]),
   testPlan: z.array(z.string()).default([]),
 });
 
-const discoverySchema = z.object({
+export const discoverySchema = z.object({
+  batchKey: z.string().trim().min(1),
   complete: z.boolean().default(false),
   rationale: z.string(),
   tickets: z.array(parityTicketSchema).max(16).default([]),
+}).superRefine((value, issue) => {
+  const ids = value.tickets.map((ticket) => ticket.id);
+  if (new Set(ids).size !== ids.length) issue.addIssue({ code: "custom", path: ["tickets"], message: "ticket ids must be unique within a batch" });
 });
 
-const ticketImplementationSchema = z.object({
-  ticketId: z.string(),
+const correlated = {
+  ticketId: z.string().trim().min(1),
+  batchKey: z.string().trim().min(1),
+  candidateId: z.string().trim().min(1),
+};
+
+export const ticketImplementationSchema = z.object({
+  ...correlated,
   status: z.enum(["implemented", "partial", "blocked"]).default("implemented"),
   summary: z.string(),
   researchNotes: z.array(z.string()).default([]),
@@ -61,16 +50,16 @@ const ticketImplementationSchema = z.object({
   commandsRun: z.array(z.string()).default([]),
 });
 
-const ticketValidationSchema = z.object({
-  ticketId: z.string(),
+export const ticketValidationSchema = z.object({
+  ...correlated,
   allPassed: z.boolean(),
   summary: z.string(),
   commandsRun: z.array(z.string()).default([]),
   failingSummary: z.string().nullable().default(null),
 });
 
-const ticketReviewSchema = z.object({
-  ticketId: z.string(),
+export const ticketReviewSchema = z.object({
+  ...correlated,
   approved: z.boolean(),
   reviewer: z.string(),
   feedback: z.string(),
@@ -82,16 +71,17 @@ const ticketReviewSchema = z.object({
   })).default([]),
 });
 
-const ticketResultSchema = z.object({
-  ticketId: z.string(),
+export const ticketResultSchema = z.object({
+  ...correlated,
   branch: z.string(),
   worktreePath: z.string(),
   lgtm: z.boolean(),
+  exhausted: z.boolean(),
   summary: z.string(),
 });
 
-const mergeResultSchema = z.object({
-  ticketId: z.string(),
+export const mergeResultSchema = z.object({
+  ...correlated,
   mergedToMain: z.boolean(),
   branch: z.string(),
   summary: z.string(),
@@ -99,7 +89,8 @@ const mergeResultSchema = z.object({
   commandsRun: z.array(z.string()).default([]),
 });
 
-const ciResultSchema = z.object({
+export const ciResultSchema = z.object({
+  batchKey: z.string().trim().min(1),
   allPassed: z.boolean(),
   summary: z.string(),
   commands: z.array(z.object({
@@ -110,31 +101,20 @@ const ciResultSchema = z.object({
   })).default([]),
 });
 
-const finalAuditSchema = z.object({
+export const finalAuditSchema = z.object({
+  batchKey: z.string().trim().min(1),
   complete: z.boolean(),
   summary: z.string(),
   remainingTickets: z.array(z.string()).default([]),
   evidence: z.array(z.string()).default([]),
 });
 
-function currentJjCommit(): string | null {
-  const result = spawnSync("jj", ["log", "-r", "@", "--no-graph", "--template", "commit_id ++ \"\\n\""], {
-    encoding: "utf8",
-  });
-  if (result.status !== 0) {
-    return null;
-  }
-  return result.stdout.trim() || null;
-}
-
-const defaultWorktreeBase = process.env.SMITHERS_STUDIO_BASE_BRANCH?.trim() || currentJjCommit() || "main";
-
-const inputSchema = z.object({
-  maxConcurrency: z.number().int().min(1).max(16).default(16),
+export const inputSchema = z.object({
+  maxConcurrency: z.number().int().min(1).max(16).default(8),
   maxBatches: z.number().int().min(1).max(12).default(6),
-  perTicketIterations: z.number().int().min(1).max(8).default(5),
-  runFullE2E: z.boolean().default(true),
-  baseBranch: z.string().min(1).default(defaultWorktreeBase),
+  perTicketIterations: z.number().int().min(1).max(8).default(4),
+  runFullE2E: z.boolean().default(false),
+  baseBranch: z.string().trim().min(1).default("main"),
 });
 
 const { Workflow, Loop, smithers, outputs } = createSmithers({
@@ -149,468 +129,245 @@ const { Workflow, Loop, smithers, outputs } = createSmithers({
   finalAudit: finalAuditSchema,
 });
 
-const legacyCodexModel = process.env.SMITHERS_STUDIO_CODEX_MODEL?.trim();
-const lunaOptions = {
-  model: process.env.SMITHERS_STUDIO_LUNA_MODEL?.trim() || legacyCodexModel || "gpt-5.6-luna",
-  config: { model_reasoning_effort: "medium" },
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-} as const;
-const terraOptions = {
-  model: process.env.SMITHERS_STUDIO_TERRA_MODEL?.trim() || legacyCodexModel || "gpt-5.6-terra",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-} as const;
-const solOptions = {
-  model: process.env.SMITHERS_STUDIO_SOL_MODEL?.trim() || legacyCodexModel || "gpt-5.6-sol",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-} as const;
-const claude = new ClaudeCodeAgent({
-  model: process.env.SMITHERS_STUDIO_CLAUDE_MODEL ?? "claude-sonnet-5",
-  permissionMode: "bypassPermissions",
-  dangerouslySkipPermissions: true,
-});
-const antigravity = new AntigravityAgent({
-  model: process.env.SMITHERS_STUDIO_ANTIGRAVITY_MODEL ?? "gemini-3.5-flash",
-  yolo: true,
-  dangerouslySkipPermissions: true,
-});
-const kimi = new KimiAgent({
-  finalMessageOnly: true,
-  quiet: true,
-});
-
-function commandExists(command: string): boolean {
-  const probe = process.platform === "win32"
-    ? spawnSync("where", [command], { stdio: "ignore" })
-    : spawnSync("which", [command], { stdio: "ignore" });
-  return probe.status === 0;
-}
-
-const availableAgents = {
-  antigravity: commandExists("agy"),
-  claude: commandExists("claude"),
-  codex: commandExists("codex"),
-  kimi: process.env.SMITHERS_STUDIO_ENABLE_KIMI === "1" && commandExists("kimi"),
-};
-
-function availableFallbacks(entries: Array<[keyof typeof availableAgents, AgentLike]>): AgentLike[] {
-  return entries
-    .filter(([name]) => availableAgents[name])
-    .map(([, agent]) => agent);
-}
-
-const nonCodexFallbacks: Array<[keyof typeof availableAgents, AgentLike]> = [
-  ["claude", claude],
-  ["antigravity", antigravity],
-  ["kimi", kimi],
-];
-const activeFallbacks = availableFallbacks(nonCodexFallbacks);
-const lunaChain = availableAgents.codex || activeFallbacks.length === 0
-  ? codexFirst(lunaOptions, activeFallbacks)
-  : activeFallbacks;
-const terraChain = availableAgents.codex || activeFallbacks.length === 0
-  ? codexFirst(terraOptions, activeFallbacks)
-  : activeFallbacks;
-const solChain = availableAgents.codex || activeFallbacks.length === 0
-  ? codexFirst(solOptions, activeFallbacks)
-  : activeFallbacks;
-const agentTaskRetries = 3;
-const repoRootProbe = spawnSync("jj", ["root"], { encoding: "utf8" });
-const repoRoot = repoRootProbe.status === 0 ? repoRootProbe.stdout.trim() : process.cwd();
-
 type ParityTicket = z.infer<typeof parityTicketSchema>;
-type TicketImplementation = z.infer<typeof ticketImplementationSchema>;
-type TicketValidation = z.infer<typeof ticketValidationSchema>;
-type TicketReview = z.infer<typeof ticketReviewSchema>;
+type RawRow = Record<string, unknown>;
 
-function latestForTicket<T extends { ticketId: string }>(rows: T[] | undefined, ticketId: string): T | undefined {
-  return [...(rows ?? [])].reverse().find((row) => row.ticketId === ticketId);
+function slug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
 }
 
-function latest<T>(rows: T[] | undefined): T | undefined {
-  return rows && rows.length > 0 ? rows[rows.length - 1] : undefined;
+export function resolveRepoRoot(): string {
+  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : process.cwd();
 }
 
-function latestLgtmResults(results: Array<z.infer<typeof ticketResultSchema>>) {
-  const byTicket = new Map<string, z.infer<typeof ticketResultSchema>>();
-  for (const result of results) {
-    if (result.lgtm) {
-      byTicket.set(result.ticketId, result);
-    }
-  }
-  return [...byTicket.values()];
+function rawRows(ctx: any, channel: string): RawRow[] {
+  const rows = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
+  return Array.isArray(rows) ? rows.filter((row): row is RawRow => typeof row === "object" && row !== null) : [];
 }
 
-function slug(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "ticket";
+function rowVersion(row: RawRow): [number, number] {
+  const iteration = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
+  const iterationCount = Number.isFinite(Number(row.iterationCount)) ? Number(row.iterationCount) : iteration;
+  return [iterationCount, iteration];
 }
 
-function worktreeForTicket(ticketId: string) {
-  return join(repoRoot, ".smithers", "workflows", ".worktrees", `studio-parity-${slug(ticketId)}`);
+function baseNodeId(row: RawRow): string {
+  return String(row.nodeId ?? "").split("@@", 1)[0] ?? "";
 }
 
-function worktreeBase(ctx: any) {
-  return process.env.SMITHERS_STUDIO_BASE_BRANCH?.trim() || currentJjCommit() || ctx.input.baseBranch;
+function latestRaw(rows: RawRow[], nodeId: string): RawRow | undefined {
+  return rows.filter((row) => baseNodeId(row) === nodeId).reduce<RawRow | undefined>((best, row) => {
+    if (!best) return row;
+    const current = rowVersion(row);
+    const previous = rowVersion(best);
+    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+  }, undefined);
 }
 
-function ticketScopedPorts(ticketId: string) {
-  const suffix = Number(ticketId.match(/(\d+)$/)?.[1] ?? "0");
-  const offset = Number.isFinite(suffix) ? suffix : Math.abs(hashString(ticketId) % 400);
+function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boolean {
+  if (!left || !right) return false;
+  const a = rowVersion(left);
+  const b = rowVersion(right);
+  return a[0] === b[0] && a[1] === b[1];
+}
+
+function matches(row: RawRow | undefined, ticketId: string, batchKey: string, candidateId: string): boolean {
+  return row?.ticketId === ticketId && row.batchKey === batchKey && row.candidateId === candidateId;
+}
+
+export function ticketState(ctx: any, ticketId: string, ticketSlug: string, batchKey: string, candidateId: string, maxIterations: number) {
+  const implementationRows = rawRows(ctx, "implementation").filter((row) => baseNodeId(row) === `ticket-${ticketSlug}-implement` && matches(row, ticketId, batchKey, candidateId));
+  const implementation = latestRaw(implementationRows, `ticket-${ticketSlug}-implement`);
+  const validation = latestRaw(rawRows(ctx, "validation").filter((row) => matches(row, ticketId, batchKey, candidateId)), `ticket-${ticketSlug}-validate`);
+  const review = latestRaw(rawRows(ctx, "review").filter((row) => matches(row, ticketId, batchKey, candidateId)), `ticket-${ticketSlug}-review`);
+  const validationCurrent = sameVersion(implementation, validation);
+  const reviewCurrent = validationCurrent && sameVersion(validation, review);
+  const done = implementation?.status === "implemented" && validationCurrent && validation?.allPassed === true && reviewCurrent && review?.approved === true;
+  const finalAttemptComplete = validationCurrent && (validation?.allPassed === false || reviewCurrent);
   return {
-    appPort: 5500 + offset,
-    gatewayPort: 7400 + offset,
+    implementation,
+    validation,
+    review,
+    validationCurrent,
+    reviewCurrent,
+    done,
+    attempts: implementationRows.length,
+    exhausted: !done && implementationRows.length >= maxIterations && finalAttemptComplete,
   };
 }
 
-function hashString(value: string) {
-  let hash = 0;
-  for (const char of value) {
-    hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  }
-  return hash;
-}
-
-function agentForTicket(ticket: ParityTicket, index: number): AgentLike[] {
-  void ticket;
-  void index;
-  return lunaChain;
-}
-
-function ticketDone(ticketId: string, ctx: any) {
-  const implementation = latestForTicket<TicketImplementation>(ctx.outputs.implementation, ticketId);
-  const validation = latestForTicket<TicketValidation>(ctx.outputs.validation, ticketId);
-  const review = latestForTicket<TicketReview>(ctx.outputs.review, ticketId);
-  return Boolean(implementation?.status === "implemented" && validation?.allPassed && review?.approved);
-}
-
-function ticketFeedback(ticketId: string, ctx: any) {
-  const implementation = latestForTicket<TicketImplementation>(ctx.outputs.implementation, ticketId);
-  const validation = latestForTicket<TicketValidation>(ctx.outputs.validation, ticketId);
-  const review = latestForTicket<TicketReview>(ctx.outputs.review, ticketId);
+function ticketFeedback(state: ReturnType<typeof ticketState>): string {
   const parts: string[] = [];
-  if (implementation && implementation.status !== "implemented") {
-    parts.push([
-      `IMPLEMENTATION SELF-CHECK ${implementation.status.toUpperCase()}:`,
-      implementation.summary,
-      implementation.commandsRun?.length ? `Commands run:\n${implementation.commandsRun.map((command) => `- ${command}`).join("\n")}` : "",
-    ].filter(Boolean).join("\n"));
-  }
-  if (validation && !validation.allPassed) {
-    parts.push(`VALIDATION FAILED:\n${validation.failingSummary ?? validation.summary}`);
-  }
-  if (review && !review.approved) {
-    parts.push(`REVIEW NOT LGTM:\n${review.feedback}`);
-    for (const issue of review.issues ?? []) {
-      parts.push(`- [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
-    }
-  }
+  if (state.implementation && state.implementation.status !== "implemented") parts.push(`IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`);
+  if (state.validationCurrent && state.validation?.allPassed === false) parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
+  if (state.reviewCurrent && state.review?.approved === false) parts.push(`REVIEW NOT LGTM:\n${String(state.review.feedback ?? "")}`);
   return parts.join("\n\n");
 }
 
-function parityBacklogBrief() {
-  return [
-    "Active app: apps/smithers-studio-2 is the new Studio UI being built. Preserve it and move parity work into it when the ticket touches the new UI shell.",
-    "Runtime: no UI-only mock data; Vite and Electrobun must hit the same workspace backend and Smithers Gateway contracts.",
-    "Fixture realism: Playwright fixtures are fine only when data flows through Gateway RPC/SSE, filesystem, SQLite, CLI, and workspace routes.",
-    "Terminal: replace generic terminal rendering with a libghostty-backed React/web terminal. Research @wterm/ghostty and @wterm/react first.",
-    "Chat: provider/model selection, supervised/full-access runtime mode, branching/regeneration, transcript search, markdown/syntax highlighting, real attachments, web-search toggle, structured /diff, streaming auto-scroll.",
-    "Slash commands: full inventory, route side effects, robust key-value parser, dynamic conflicts, real fuzzy matching or explicit substring contract.",
-    "Workflows/prompts/approvals: unsaved prompt preview, dynamic inputs, launch validation, iteration-aware approvals, adaptive layouts.",
-    "Runs/dashboard/inspection: iteration-safe approve/deny, progress for approval runs, active elapsed timer, cancelled/failed semantics, source error surfacing, snapshots/fork/replay.",
-    "Landings/issues/workspaces: JJHub state filters, unified diffs, complete issue CRUD, workspace restore naming/selection.",
-    "Scores/memory/search: scoped metrics, stale async protection, discontiguous line numbers, recall metadata.",
-    "Transport/platform: production SSE parser tests, CLI timeout kill path, unknown status preservation, explicit approval decoding.",
-    "All accepted work needs tests: Playwright for visible behavior, backend/unit tests for transport/parser/model invariants.",
-  ].join("\n- ");
+function hashString(value: string): number {
+  let hash = 2166136261;
+  for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  return hash >>> 0;
 }
 
-function discoveryPrompt(previousResults: unknown[], previousAudit: unknown) {
-  return [
-    "You are the primary Codex discovery agent for Smithers Studio parity. Use the configured Codex model; if SMITHERS_STUDIO_CODEX_MODEL is set, it is expected to point at the user's requested Codex 5.5-class model.",
-    "Pick the 16 best next tickets to run in parallel. Do not plan a separate phase; each ticket assignee must research, plan, implement, and test in one task.",
-    "Include past unreviewed Studio features in the backlog: existing work must be code-reviewed and updated until LGTM.",
-    "Important: apps/smithers-studio-2 is active user work for the new Studio version. Never delete it, remove its package references, or treat it as a disposable static sibling app.",
-    "Prioritize high-leverage work that moves the active Studio UI, apps/smithers-studio-2, toward the user's exact goal: real data, Gateway, .smithers detection, GUI parity, and Playwright coverage. Use apps/smithers-studio as existing implementation context when useful, but do not erase the v2 app.",
-    "Use realistic E2E fixtures. Do not ask agents to add static React mocks or fake UI state.",
-    "Classify UI and terminal work as requiresUi. Classify tests-only work as testsOnly.",
-    "",
-    "Known backlog:",
-    `- ${parityBacklogBrief()}`,
-    "",
-    "Previous ticket results:",
-    JSON.stringify(previousResults, null, 2),
-    "",
-    "Previous final audit:",
-    JSON.stringify(previousAudit ?? null, null, 2),
-    "",
-    "Return complete=true only if there are no meaningful parity, test, review, fixture-realism, merge, or CI gaps left.",
-  ].join("\n");
+export function ticketScopedPorts(ticketId: string) {
+  const offset = hashString(ticketId) % 1000;
+  return { appPort: 45_000 + offset, gatewayPort: 47_000 + offset };
 }
 
-function implementationPrompt(ticket: ParityTicket, feedback: string) {
+function discoveryPrompt(previousResults: RawRow[], previousAudit: RawRow | undefined, batchKey: string): string {
+  return [
+    "Discover the next highest-value parity tickets for Smithers' shipped custom workflow UI surface.",
+    "The only UI targets in this repository are `.smithers/ui/*.tsx`, `packages/gateway-react`, and `packages/components`.",
+    "Inspect real Gateway-backed behavior, loading/error/stale-data handling, accessibility, and focused browser or component coverage. Do not fabricate Gateway responses.",
+    `Return batchKey=${batchKey} exactly. Return at most 16 independent tickets; complete=true only when no meaningful shipped-surface gap remains.`,
+    `Previous results:\n${JSON.stringify(previousResults, null, 2)}`,
+    `Previous audit:\n${JSON.stringify(previousAudit ?? null, null, 2)}`,
+  ].join("\n\n");
+}
+
+function implementationPrompt(ticket: ParityTicket, batchKey: string, candidateId: string, feedback: string): string {
   const ports = ticketScopedPorts(ticket.id);
   return [
-    `Ticket ${ticket.id}: ${ticket.title}`,
+    `Implement ticket ${ticket.id}: ${ticket.title}`,
     ticket.summary,
-    "",
-    "Research, plan, implement, and test this ticket in one pass. Do not stop after a plan.",
-    `Return ticketId exactly "${ticket.id}". If you cannot do that, return status=blocked with the reason.`,
-    "You are working toward Smithers Studio parity for the active new Studio UI in apps/smithers-studio-2. Existing apps/smithers-studio code may be used as implementation context, but do not erase or bypass the v2 app.",
-    "Respect current code style. Avoid unrelated refactors. Do not remove user work.",
-    "Protect apps/smithers-studio-2. It is active user work for the new Studio version, not reference code and not a mock. Do not delete it, remove it from the workspace, remove root scripts that point at it, or satisfy gates by making it disappear.",
-    "Runtime code must use real workspace/Gateway/CLI/filesystem/SQLite paths. Tests may use realistic fixtures, but not UI-only mock data.",
-    "If this touches terminal UI, use the Ghostty/libghostty React path: research @wterm/ghostty plus @wterm/react and wire the app toward that rather than xterm.js or plain text.",
-    "If this is UI work, use Playwright screenshots/assertions where relevant.",
-    "If this is tests-only work, add/repair tests that prove existing real behavior through backend or E2E contracts.",
-    "",
-    "Before returning status=implemented, run your own review/CI gate:",
-    "- Re-read the acceptance criteria and any previous validation/review feedback.",
-    "- Explicitly fix every previous review issue or explain why the issue is no longer applicable in summary.",
-    "- Inspect package.json and run real package-owned scripts; do not invent missing commands.",
-    "- Run typecheck/build plus focused backend or Playwright checks for touched behavior.",
-    "- Treat validation, review, merge, and final CI as predictable gates: your work must pass the validationPrompt checks, survive strict code review, merge cleanly, and not break shared CI.",
-    `- For Playwright or Gateway fixture checks in this ticket, avoid shared ports: use SMITHERS_STUDIO_TEST_PORT=${ports.appPort} SMITHERS_STUDIO_GATEWAY_TEST_PORT=${ports.gatewayPort}.`,
-    "- Post-merge CI currently runs Studio 2 preservation/typecheck/build, plus legacy Studio parity checks: pnpm --dir apps/smithers-studio-2 run typecheck; pnpm --dir apps/smithers-studio-2 run build; pnpm --dir apps/smithers-studio run typecheck; pnpm --dir apps/smithers-studio run build:web; pnpm --dir apps/smithers-studio run test:backend; and, when full E2E is enabled, pnpm --dir apps/smithers-studio exec playwright test tests/connected-gateway.spec.ts --reporter=line.",
-    "- At minimum for apps/smithers-studio-2 or apps/smithers-studio changes, run the relevant subset of those CI commands plus any focused package tests for the files you touched.",
-    "- If package.json has test or test:mock-data-guard and your change touches runtime, fixtures, tests, or app routing, run those scripts too.",
-    "- If you changed Gateway/client/server packages, also run their package-owned focused tests after inspecting package.json.",
-    "- Before finishing, inspect your diff for unresolved TODO shortcuts, TypeScript scope errors, fixture paths missing from the worktree, static mock data, and UI behavior that is only hard-coded for tests.",
-    "- If Playwright depends on fixture workflow frontends, verify required files such as tests/fixtures/workspace/.smithers/workflows/*/manifest.json and frontend dist/index.html exist in your worktree.",
-    "- Include the exact commands you ran and what remains unverified in commandsRun/summary.",
-    "- If a relevant check fails, a required script is missing in your worktree, or a check was not run, return status=partial or blocked with the exact command and failure.",
-    "- Do not add hard-coded route mocks, runtime mock data, or UI-only shortcuts. Do not delete or hide apps/smithers-studio-2.",
-    "- Fixtures are allowed only when they exercise realistic filesystem, SQLite, Gateway, SSE, CLI, or browser behavior.",
-    "",
-    "Acceptance criteria:",
-    ticket.acceptanceCriteria.map((item) => `- ${item}`).join("\n"),
-    "",
-    "Likely files:",
-    ticket.filesLikely.map((item) => `- ${item}`).join("\n"),
-    "",
-    "Test plan:",
-    ticket.testPlan.map((item) => `- ${item}`).join("\n"),
-    feedback ? `\nPrevious loop feedback to fix:\n${feedback}` : "",
-  ].join("\n");
+    `Return ticketId=${ticket.id}, batchKey=${batchKey}, and candidateId=${candidateId} exactly.`,
+    "Research, plan, implement, and test the smallest complete change. The shipped targets are `.smithers/ui/*.tsx`, `packages/gateway-react`, and `packages/components`.",
+    "Use real Gateway/client/component behavior and deterministic fixtures at process boundaries; do not fabricate the behavior under test.",
+    `Parallel browser/process checks may use app port ${ports.appPort} and gateway port ${ports.gatewayPort}; both are ticket-scoped and valid TCP ports.`,
+    `Acceptance criteria:\n${ticket.acceptanceCriteria.map((item) => `- ${item}`).join("\n") || "- Prove the ticket's stated behavior."}`,
+    `Suggested tests:\n${ticket.testPlan.map((item) => `- ${item}`).join("\n") || "- Run the owning package's focused test command."}`,
+    feedback ? `Current same-candidate feedback:\n${feedback}` : "",
+    "Return implemented only when focused checks pass; otherwise return partial or blocked truthfully.",
+  ].filter(Boolean).join("\n\n");
 }
 
-function validationPrompt(ticket: ParityTicket, implementation?: z.infer<typeof ticketImplementationSchema>) {
-  const ports = ticketScopedPorts(ticket.id);
+function validationPrompt(ticket: ParityTicket, batchKey: string, candidateId: string, implementation: RawRow | undefined): string {
   return [
-    `Validate ticket ${ticket.id}: ${ticket.title}`,
-    `Return ticketId exactly "${ticket.id}". Never substitute an inferred id such as "unknown" or a package name.`,
-    implementation
-      ? `Implementation self-report:\n${JSON.stringify({
-        status: implementation.status,
-        summary: implementation.summary,
-        commandsRun: implementation.commandsRun,
-      }, null, 2)}`
-      : "No implementation self-report is available yet; inspect the worktree directly.",
-    "Run the most relevant commands. Prefer real backend/unit tests plus focused Playwright for visible behavior.",
-    "Do not approve by inspection only. Return allPassed=false with failingSummary if anything relevant fails or was not run.",
-    "If the implementation self-report is partial or blocked, return allPassed=false unless you independently verify the named gap is now resolved.",
-    `Use ticket-scoped ports for Playwright/Gateway fixture commands: SMITHERS_STUDIO_TEST_PORT=${ports.appPort} SMITHERS_STUDIO_GATEWAY_TEST_PORT=${ports.gatewayPort}. Do not use shared default ports in parallel validation.`,
-    "If those ticket-scoped ports are busy, rerun once with another unused SMITHERS_STUDIO_TEST_PORT and SMITHERS_STUDIO_GATEWAY_TEST_PORT pair before failing on a port conflict.",
-    "Do not set allPassed=true unless acceptance-relevant behavior was exercised through production code and package-owned scripts, including test:mock-data-guard when present.",
-    "For apps/smithers-studio, inspect package.json first. Common commands currently include:",
-    "- pnpm --dir apps/smithers-studio-2 run typecheck",
-    "- pnpm --dir apps/smithers-studio-2 run build",
-    "- pnpm --dir apps/smithers-studio run typecheck",
-    "- pnpm --dir apps/smithers-studio run build:web",
-    "- pnpm --dir apps/smithers-studio run test:backend",
-    `- SMITHERS_STUDIO_TEST_PORT=${ports.appPort} SMITHERS_STUDIO_GATEWAY_TEST_PORT=${ports.gatewayPort} pnpm --dir apps/smithers-studio exec playwright test tests/connected-gateway.spec.ts --reporter=line`,
-  ].join("\n");
+    `Validate ticket ${ticket.id} against the real shipped UI code and acceptance criteria.`,
+    `Return ticketId=${ticket.id}, batchKey=${batchKey}, and candidateId=${candidateId} exactly.`,
+    `Implementation report:\n${JSON.stringify(implementation ?? null, null, 2)}`,
+    "Run the owning package's focused tests. Set allPassed=false if the report is partial/blocked, a relevant check is missing, or any check fails.",
+  ].join("\n\n");
 }
 
-function reviewPrompt(
-  ticket: ParityTicket,
-  implementation?: z.infer<typeof ticketImplementationSchema>,
-  validation?: z.infer<typeof ticketValidationSchema>,
-) {
+function reviewPrompt(ticket: ParityTicket, batchKey: string, candidateId: string, implementation: RawRow | undefined, validation: RawRow | undefined): string {
   return [
-    `Review ticket ${ticket.id}: ${ticket.title}`,
-    `Return ticketId exactly "${ticket.id}".`,
-    implementation
-      ? `Implementation self-report:\n${JSON.stringify({
-        status: implementation.status,
-        summary: implementation.summary,
-        commandsRun: implementation.commandsRun,
-      }, null, 2)}`
-      : "No implementation self-report is available yet; inspect the worktree directly.",
-    validation
-      ? `Validation result:\n${JSON.stringify({
-        allPassed: validation.allPassed,
-        summary: validation.summary,
-        failingSummary: validation.failingSummary,
-        commandsRun: validation.commandsRun,
-      }, null, 2)}`
-      : "No validation result is available yet; inspect the worktree directly.",
-    "You are the mandatory reviewer. Do not edit files.",
-    "Review the current worktree against the user goal and the ticket acceptance criteria.",
-    "Reject any change that deletes apps/smithers-studio-2, removes its package/workspace references, or treats it as a forbidden static sibling app.",
-    "Reject if implementation status is partial/blocked, validation failed, validation was too shallow, used the wrong ticketId, skipped relevant package-owned tests, or only asserted local test copies/static shortcuts.",
-    "Return approved=true only when the code is LGTM, tests are meaningful, fixture data remains realistic E2E data, and no static UI mock shortcuts were added.",
-    "For terminal work, reject unless the implementation clearly uses or is intentionally staged toward @wterm/ghostty/@wterm/react/libghostty.",
-    "Findings should include severity, title, file, and description.",
-  ].join("\n");
+    `Strictly review the current green candidate for ticket ${ticket.id}. Do not edit files.`,
+    `Return ticketId=${ticket.id}, batchKey=${batchKey}, and candidateId=${candidateId} exactly.`,
+    `Implementation:\n${JSON.stringify(implementation ?? null, null, 2)}`,
+    `Validation:\n${JSON.stringify(validation ?? null, null, 2)}`,
+    "Approve only if the current candidate is complete, minimal, exercises real production behavior, and has meaningful focused coverage.",
+  ].join("\n\n");
 }
 
-function mergePrompt(result: z.infer<typeof ticketResultSchema>) {
+function mergePrompt(result: z.infer<typeof ticketResultSchema>, baseBranch: string): string {
   return [
-    `Merge ticket ${result.ticketId} back into the main working tree.`,
+    `Merge ticket ${result.ticketId} candidate ${result.candidateId} from batch ${result.batchKey} into ${baseBranch}.`,
     `Source worktree: ${result.worktreePath}`,
     `Source branch: ${result.branch}`,
-    "",
-    "Use the repo's VCS safely. Prefer jj/git merge mechanics when possible; otherwise carefully apply the source worktree diff.",
-    "Do not discard unrelated current working-tree changes.",
-    "Never merge deletions of apps/smithers-studio-2 or package/lockfile changes whose purpose is to remove that app. It is active user work.",
-    "Resolve conflicts if possible. If not possible, report mergedToMain=false and list conflicts.",
-    "After merging, run focused checks relevant to the ticket. Full CI runs later.",
+    "Preserve unrelated shared changes, use explicit path staging, resolve conflicts only within scope, and run focused checks after merging.",
+    `Return ticketId=${result.ticketId}, batchKey=${result.batchKey}, candidateId=${result.candidateId}, and branch=${result.branch} exactly.`,
   ].join("\n");
 }
 
-function runCommand(command: string, args: string[], timeoutMs: number) {
-  const result = spawnSync(command, args, {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    env: { ...process.env },
-    timeout: timeoutMs,
-  });
+function runCommand(cwd: string, command: string, args: string[], timeoutMs: number) {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", env: { ...process.env }, timeout: timeoutMs });
   return {
     command: [command, ...args].join(" "),
-    exitCode: result.status,
+    exitCode: typeof result.status === "number" ? result.status : null,
     stdout: (result.stdout ?? "").slice(-20_000),
     stderr: (result.stderr ?? result.error?.message ?? "").slice(-20_000),
   };
 }
 
-function runCi(runFullE2E: boolean) {
-  const commands = [
-    ["pnpm", ["--dir", "apps/smithers-studio-2", "run", "typecheck"]],
-    ["pnpm", ["--dir", "apps/smithers-studio-2", "run", "build"]],
-    ["pnpm", ["--dir", "apps/smithers-studio", "run", "typecheck"]],
-    ["pnpm", ["--dir", "apps/smithers-studio", "run", "build:web"]],
-    ["pnpm", ["--dir", "apps/smithers-studio", "run", "test:backend"]],
-  ] as const;
-  const results = commands.map(([command, args]) => runCommand(command, [...args], 20 * 60_000));
-  if (runFullE2E) {
-    results.push(runCommand(
-      "pnpm",
-      ["--dir", "apps/smithers-studio", "exec", "playwright", "test", "tests/connected-gateway.spec.ts", "--reporter=line"],
-      6 * 60_000,
-    ));
-  }
+export function runCi(batchKey: string, runFullE2E: boolean, cwd = process.cwd()) {
+  const commands: Array<[string, string[], number]> = [
+    ["pnpm", ["--dir", ".smithers", "typecheck"], 20 * 60_000],
+    ["pnpm", ["-C", "packages/gateway-react", "test"], 20 * 60_000],
+    ["pnpm", ["-C", "packages/components", "test"], 20 * 60_000],
+  ];
+  if (runFullE2E) commands.push(["pnpm", ["-C", "e2e", "test"], 60 * 60_000]);
+  const results = commands.map(([command, args, timeout]) => runCommand(cwd, command, args, timeout));
   const failed = results.filter((result) => result.exitCode !== 0);
-  return {
-    allPassed: failed.length === 0,
-    summary: failed.length === 0
-      ? "All configured Smithers Studio CI commands passed."
-      : `${failed.length} configured CI command(s) failed.`,
-    commands: results,
-  };
+  return { batchKey, allPassed: failed.length === 0, summary: failed.length === 0 ? "All shipped UI checks passed." : `${failed.length} shipped UI check(s) failed.`, commands: results };
 }
 
-function finalAuditPrompt(ci: unknown, merges: unknown[], results: unknown[]) {
+function finalAuditPrompt(batchKey: string, ci: RawRow | undefined, merges: RawRow[], results: RawRow[]) {
   return [
-    "Audit Smithers Studio against the full user goal. Be strict.",
-    "Goal: no runtime mock data; real Smithers Gateway/data; .smithers detection; Vite and Electrobun modes; 100% parity with attempted ../gui features; Playwright tests for all features.",
-    "Do not mark complete unless every requirement is proven by current code and verification.",
-    "",
-    "Known backlog:",
-    `- ${parityBacklogBrief()}`,
-    "",
-    "Ticket results:",
-    JSON.stringify(results, null, 2),
-    "",
-    "Merge results:",
-    JSON.stringify(merges, null, 2),
-    "",
-    "CI result:",
-    JSON.stringify(ci, null, 2),
-    "",
-    "Return complete=false with remainingTickets unless the app is genuinely at the requested end state.",
-  ].join("\n");
+    "Audit the shipped Smithers custom workflow UI surface only: `.smithers/ui/*.tsx`, `packages/gateway-react`, and `packages/components`.",
+    `Return batchKey=${batchKey} exactly. complete=true only when this batch's tickets are LGTM, merged, and the current CI row is green, with no remaining shipped-surface gaps.`,
+    `Ticket results:\n${JSON.stringify(results, null, 2)}`,
+    `Merge results:\n${JSON.stringify(merges, null, 2)}`,
+    `CI:\n${JSON.stringify(ci ?? null, null, 2)}`,
+  ].join("\n\n");
 }
 
 export default smithers((ctx) => {
-  const discovered = latest(ctx.outputs.discovery);
-  const finalAudit = latest(ctx.outputs.finalAudit);
-  const ticketResults = ctx.outputs.ticketResult ?? [];
-  const mergeResults = ctx.outputs.merge ?? [];
-  const latestCi = latest(ctx.outputs.ci);
-  const done = finalAudit?.complete === true;
-  const tickets = discovered?.tickets ?? [];
+  const input = inputSchema.parse({
+    maxConcurrency: ctx.input.maxConcurrency ?? 8,
+    maxBatches: ctx.input.maxBatches ?? 6,
+    perTicketIterations: ctx.input.perTicketIterations ?? 4,
+    runFullE2E: ctx.input.runFullE2E ?? false,
+    baseBranch: ctx.input.baseBranch ?? "main",
+  });
+  const repoRoot = resolveRepoRoot();
+  const runSlug = slug(String((ctx as any).runId ?? "studio-parity"));
+  const batchKey = `${runSlug}:${ctx.iteration}`;
+  const discoveryRows = rawRows(ctx, "discovery");
+  const discovered = discoveryRows.filter((row) => row.nodeId === "discover-next-16" && row.batchKey === batchKey).at(-1);
+  const tickets = Array.isArray(discovered?.tickets) ? discovered.tickets as ParityTicket[] : [];
+  const previousAudit = rawRows(ctx, "finalAudit").at(-1);
+  const historicalResults = rawRows(ctx, "ticketResult");
+  const currentResultsByTicket = new Map<string, RawRow>();
+  for (const row of historicalResults) if (row.batchKey === batchKey && typeof row.ticketId === "string") currentResultsByTicket.set(row.ticketId, row);
+  const currentResults = [...currentResultsByTicket.values()];
+  const currentMerges = rawRows(ctx, "merge").filter((row) => row.batchKey === batchKey);
+  const currentCi = rawRows(ctx, "ci").filter((row) => row.nodeId === "studio-parity-ci" && row.batchKey === batchKey).at(-1);
+  const currentAudit = rawRows(ctx, "finalAudit").filter((row) => row.nodeId === "studio-parity-final-audit" && row.batchKey === batchKey).at(-1);
+  const allTicketsSettled = tickets.length === currentResults.length && tickets.every((ticket) => currentResultsByTicket.has(ticket.id));
+  const allTicketsLgtm = allTicketsSettled && currentResults.every((result) => result.lgtm === true && result.exhausted === false);
+  const allMerged = currentResults.filter((result) => result.lgtm === true).every((result) => currentMerges.some((merge) => merge.ticketId === result.ticketId && merge.candidateId === result.candidateId && merge.mergedToMain === true));
+  const done = discovered?.complete === true && currentAudit?.complete === true && currentCi?.allPassed === true && allTicketsLgtm && allMerged;
 
   return (
     <Workflow name="studio-parity-swarm">
-      <Loop id="studio-parity-batches" until={done} maxIterations={ctx.input.maxBatches} onMaxReached="return-last">
+      <Loop id="studio-parity-batches" until={done} maxIterations={input.maxBatches} onMaxReached="return-last">
         <Sequence>
-          <Task id="discover-next-16" output={outputs.discovery} agent={lunaChain} retries={agentTaskRetries} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
-            {discoveryPrompt(ticketResults, finalAudit)}
+          <Task id="discover-next-16" output={outputs.discovery} agent={agents.research} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            {discoveryPrompt(historicalResults, previousAudit, batchKey)}
           </Task>
 
           {tickets.length > 0 ? (
-            <Parallel maxConcurrency={ctx.input.maxConcurrency}>
-              {tickets.map((ticket, index) => {
+            <Parallel maxConcurrency={input.maxConcurrency}>
+              {tickets.map((ticket) => {
                 const ticketSlug = slug(ticket.id);
-                const worktreePath = worktreeForTicket(ticket.id);
-                const branch = `studio-parity/${ticketSlug}`;
-                const feedback = ticketFeedback(ticket.id, ctx);
-                const lgtm = ticketDone(ticket.id, ctx);
-                const implementation = latestForTicket(ctx.outputs.implementation, ticket.id);
-                const validation = latestForTicket(ctx.outputs.validation, ticket.id);
+                const candidateId = `${batchKey}:${ticketSlug}`;
+                const branch = `studio-parity/${runSlug}/${ctx.iteration}/${ticketSlug}`;
+                const worktreePath = join(repoRoot, ".smithers", "workflows", ".worktrees", runSlug, `batch-${ctx.iteration}`, ticketSlug);
+                const state = ticketState(ctx, ticket.id, ticketSlug, batchKey, candidateId, input.perTicketIterations);
                 return (
-                  <Worktree key={ticket.id} path={worktreePath} branch={branch} baseBranch={worktreeBase(ctx)}>
+                  <Worktree key={ticket.id} path={worktreePath} branch={branch} baseBranch={input.baseBranch}>
                     <Sequence>
-                      <Loop id={`ticket-${ticketSlug}-review-loop`} until={lgtm} maxIterations={ctx.input.perTicketIterations} onMaxReached="return-last">
+                      <Loop id={`ticket-${ticketSlug}-review-loop`} until={state.done} maxIterations={input.perTicketIterations} onMaxReached="return-last">
                         <Sequence>
-                          <Task
-                            id={`ticket-${ticketSlug}-implement`}
-                            output={outputs.implementation}
-                            agent={agentForTicket(ticket, index)}
-                            retries={agentTaskRetries}
-                            timeoutMs={60 * 60_000}
-                            heartbeatTimeoutMs={10 * 60_000}
-                          >
-                            {implementationPrompt(ticket, feedback)}
+                          <Task id={`ticket-${ticketSlug}-implement`} output={outputs.implementation} agent={agents.implement} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                            {implementationPrompt(ticket, batchKey, candidateId, ticketFeedback(state))}
                           </Task>
-                          <Task
-                            id={`ticket-${ticketSlug}-validate`}
-                            output={outputs.validation}
-                            agent={terraChain}
-                            retries={agentTaskRetries}
-                            timeoutMs={35 * 60_000}
-                            heartbeatTimeoutMs={10 * 60_000}
-                          >
-                            {validationPrompt(ticket, implementation)}
+                          <Task id={`ticket-${ticketSlug}-validate`} output={outputs.validation} agent={agents.midTier} retries={2} timeoutMs={35 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                            {validationPrompt(ticket, batchKey, candidateId, state.implementation)}
                           </Task>
-                          <Task
-                            id={`ticket-${ticketSlug}-review`}
-                            output={outputs.review}
-                            agent={solChain}
-                            retries={agentTaskRetries}
-                            timeoutMs={35 * 60_000}
-                            heartbeatTimeoutMs={10 * 60_000}
-                          >
-                            {reviewPrompt(ticket, implementation, validation)}
-                          </Task>
-                          {ticketDone(ticket.id, ctx) ? (
-                            <Task id={`ticket-${ticketSlug}-result`} output={outputs.ticketResult}>
-                              {{
-                                ticketId: ticket.id,
-                                branch,
-                                worktreePath,
-                                lgtm: true,
-                                summary: `Ticket ${ticket.id} reached validation + review LGTM.`,
-                              }}
+                          {state.validationCurrent && state.validation?.allPassed === true ? (
+                            <Task id={`ticket-${ticketSlug}-review`} output={outputs.review} agent={agents.review} retries={2} timeoutMs={35 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                              {reviewPrompt(ticket, batchKey, candidateId, state.implementation, state.validation)}
                             </Task>
                           ) : null}
                         </Sequence>
                       </Loop>
+                      <Task id={`ticket-${ticketSlug}-result`} output={outputs.ticketResult}>
+                        {{ ticketId: ticket.id, batchKey, candidateId, branch, worktreePath, lgtm: state.done, exhausted: state.exhausted, summary: state.done ? `Ticket ${ticket.id} is current-candidate LGTM.` : `Ticket ${ticket.id} settled without LGTM after ${state.attempts} attempt(s).` }}
+                      </Task>
                     </Sequence>
                   </Worktree>
                 );
@@ -619,34 +376,19 @@ export default smithers((ctx) => {
           ) : null}
 
           <MergeQueue id="studio-parity-merge-queue" maxConcurrency={1}>
-            {latestLgtmResults(ticketResults).map((result) => (
-              <Task
-                key={result.ticketId}
-                id={`merge-${slug(result.ticketId)}`}
-                output={outputs.merge}
-                agent={lunaChain}
-                retries={agentTaskRetries}
-                timeoutMs={45 * 60_000}
-                heartbeatTimeoutMs={10 * 60_000}
-              >
-                {mergePrompt(result)}
+            {currentResults.filter((result) => result.lgtm === true && !currentMerges.some((merge) => merge.ticketId === result.ticketId && merge.candidateId === result.candidateId && merge.mergedToMain === true)).map((result) => (
+              <Task key={String(result.ticketId)} id={`merge-${slug(String(result.ticketId))}`} output={outputs.merge} agent={agents.implement} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                {mergePrompt(result as z.infer<typeof ticketResultSchema>, input.baseBranch)}
               </Task>
             ))}
           </MergeQueue>
 
           <Task id="studio-parity-ci" output={outputs.ci} timeoutMs={90 * 60_000}>
-            {() => runCi(ctx.input.runFullE2E)}
+            {() => runCi(batchKey, input.runFullE2E, repoRoot)}
           </Task>
 
-          <Task
-            id="studio-parity-final-audit"
-            output={outputs.finalAudit}
-            agent={solChain}
-            retries={agentTaskRetries}
-            timeoutMs={45 * 60_000}
-            heartbeatTimeoutMs={10 * 60_000}
-          >
-            {finalAuditPrompt(latestCi, mergeResults, ticketResults)}
+          <Task id="studio-parity-final-audit" output={outputs.finalAudit} agent={agents.review} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            {finalAuditPrompt(batchKey, currentCi, currentMerges, currentResults)}
           </Task>
         </Sequence>
       </Loop>

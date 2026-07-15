@@ -20,6 +20,8 @@ export type CachedPrompt = {
   source: "extracted" | "manual";
   /** True if the human shipped despite score < threshold. */
   overridden: boolean;
+  /** If overridden, why (verbatim from the user). */
+  overrideReason?: string | null;
 };
 
 /**

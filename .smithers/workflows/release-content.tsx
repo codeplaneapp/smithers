@@ -560,7 +560,7 @@ export default smithers((rawCtx) => {
             id="commit-release-content"
             output={outputs.commitResult}
             agent={agents.midTier}
-            skipIf={input.skip.autoCommit}
+            skipIf={input.skip.autoCommit || input.dryRun || !publishResult.published}
             heartbeatTimeoutMs={300_000}
           >
             {`Commit any release-content files created by this workflow run.

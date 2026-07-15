@@ -122,10 +122,10 @@ a fake agent / a seeded local Gateway and must not require a real model.
 // directory; a <Worktree> put compute tasks in the launch root while agents ran
 // in the worktree, so the oracle checked the wrong copy and agents got confused
 // into copying files into main).
-const MAIN_GUIDANCE = `
+const MAIN_GUIDANCE = (pkg: string) => `
 WORKING DIRECTORY — READ FIRST:
 You are working DIRECTLY on the \`main\` branch at the smithers repo root
-(${PKG} resolves from there). The package "${PKG}" ALREADY EXISTS with a working
+(${pkg} resolves from there). The package "${pkg}" ALREADY EXISTS with a working
 foundation (Bun entry + provider stack, App shell + mode router, header, keymap
 context, the gateway data adapter) AND the Tree mode fully built — it passes
 \`pnpm -C ${PKG} typecheck\` and \`bun test\` (treeUtils unit tests). Build ON TOP
@@ -304,7 +304,7 @@ export default smithers((ctx) => {
 buildable engineering spec to "${specPath}" (create the directory if needed).
 
 Anchor the spec to THIS exact design contract — do not invent a different UI:
-${DESIGN_CONTRACT}
+${DESIGN_CONTRACT.replaceAll(PKG, pkg).replaceAll(SPEC_PATH, specPath)}
 
 The spec must include, in order:
 1. Goal + how it ships (replaces \`smithers up --interactive\`).
@@ -356,7 +356,7 @@ summary, the mode ids, and any open questions.`}
                   shell, mode router, keymap context, header, and the headless
                   gateway data-layer adapter. No mode screens yet. */}
               <Task id="scaffold" output={outputs.scaffold} agent={agents.implement} heartbeatTimeoutMs={900_000}>
-                {`${MAIN_GUIDANCE}
+                {`${MAIN_GUIDANCE(pkg)}
 
 VERIFY the ${pkg} foundation against the spec at "${specPath}" and fill any gaps.
 The package is already scaffolded and passing typecheck — do NOT rewrite working
@@ -405,7 +405,7 @@ per mode is fine for now. Do NOT push. Report files written and the bin command.
                         agent={agents.implement}
                         heartbeatTimeoutMs={900_000}
                       >
-                        {`${MAIN_GUIDANCE}
+                        {`${MAIN_GUIDANCE(pkg)}
 
 Implement the "${m.title}" mode of the monitor TUI in ${pkg},
 following the spec at "${specPath}" and this design contract:
@@ -438,7 +438,7 @@ Report { mode: "${m.id}", summary, files }.`}
               {/* 3c — Ship it: replace `up --interactive` with the monitor. */}
               {allModesBuilt ? (
                 <Task id="wire-cli" output={outputs.wiring} agent={agents.implement} heartbeatTimeoutMs={600_000}>
-                  {`${MAIN_GUIDANCE}
+                  {`${MAIN_GUIDANCE(pkg)}
 
 Wire the monitor into the CLI so it SHIPS. In apps/cli, make
 \`smithers up --interactive\` launch the new ${pkg} full-screen monitor instead of
@@ -463,7 +463,7 @@ Report a summary and the files changed.`}
                   <Sequence>
                     <Task id="verify-check" output={outputs.verify}>
                       {async () => {
-                        const cmd = `bun run typecheck && bun test`;
+                        const cmd = `cd ${pkg} && bun run typecheck && bun test`;
                         const res = await $`cd ${pkg} && bun run typecheck && bun test`.nothrow().quiet();
                         const out = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`;
                         const errors = out
@@ -475,7 +475,7 @@ Report a summary and the files changed.`}
                     </Task>
                     {(ctx.latest("verify", "verify-check") as { passed?: boolean } | undefined)?.passed === false ? (
                       <Task id="verify-fix" output={outputs.mode} agent={agents.implement} heartbeatTimeoutMs={900_000}>
-                        {`${MAIN_GUIDANCE}
+                        {`${MAIN_GUIDANCE(pkg)}
 
 The ${pkg} gate (\`bun run typecheck && bun test\`) is RED.
 Failing output (truncated):
