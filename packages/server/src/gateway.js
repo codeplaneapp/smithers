@@ -35,6 +35,7 @@ import { diffRawSnapshots } from "@smithers-orchestrator/time-travel/diff";
 import { getNodeOutputRoute } from "./gatewayRoutes/getNodeOutput.js";
 import { NodeOutputRouteError } from "./gatewayRoutes/NodeOutputRouteError.js";
 import { getNodeDiffRoute } from "./gatewayRoutes/getNodeDiff.js";
+import { getRunDiffRoute } from "./gatewayRoutes/getRunDiff.js";
 import { WhatHappenedRouteError, whatHappenedRoute } from "./gatewayRoutes/whatHappened.js";
 import { DevToolsRouteError, getDevToolsSnapshotRoute, validateFrameNoInput, validateFromSeqInput, validateRunId } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
@@ -7722,6 +7723,14 @@ a { color: var(--brand); }</style>
                 if (!result.ok) {
                     return responseError(frame.id, result.error.code, result.error.message);
                 }
+                return responseOk(frame.id, result.payload);
+            }
+            case "getRunDiff": {
+                const result = await getRunDiffRoute({
+                    runId: params.runId,
+                    resolveRun: this.resolveRun.bind(this),
+                });
+                if (!result.ok) return responseError(frame.id, result.error.code, result.error.message);
                 return responseOk(frame.id, result.payload);
             }
             case "whatHappened": {

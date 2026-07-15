@@ -79,6 +79,9 @@ describe("SmithersGatewayClient", () => {
     expect(calls[1].url).toBe("http://gateway.test/v1/rpc/pauseRun");
     expect(calls[1].init.method).toBe("POST");
     expect(JSON.parse(String(calls[1].init.body))).toEqual({ runId: "run-1" });
+
+    await client.getRunDiff({ runId: "run-1" });
+    expect(calls[2].url).toBe("http://gateway.test/v1/rpc/getRunDiff");
   });
 
   test("installs an unavailable-fetch stub when neither an option nor a global fetch exists", async () => {

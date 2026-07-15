@@ -7,7 +7,7 @@
  */
 type SmithersApiVersion$1 = "v1";
 type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "ScoreNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal";
-type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listScoresForRuns" | "getScoreDetail" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
+type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "getRunDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listScoresForRuns" | "getScoreDetail" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
 type LaunchRunRequest$1 = {
     workflow: string;
     input?: Record<string, unknown>;
@@ -89,6 +89,29 @@ type SubmitSignalRequest$1 = {
 type GetRunRequest$1 = {
     runId: string;
 };
+type GatewayDiffPatch$1 = {
+    path: string;
+    diff: string;
+    additions?: number;
+    deletions?: number;
+    binary?: boolean;
+};
+type GatewayDiffBundle$1 = {
+    seq: number;
+    baseRef: string;
+    patches: GatewayDiffPatch$1[];
+};
+type GetRunDiffRequest$1 = {
+    runId: string;
+};
+type GetRunDiffOversizedResponse$1 = {
+    status: "oversized";
+    baseRef: string;
+    terminalRef: string;
+    sizeBytes: number;
+    maxBytes: number;
+};
+type GetRunDiffResponse$1 = GatewayDiffBundle$1 | GetRunDiffOversizedResponse$1;
 type ListRunsRequest$1 = {
     filter?: {
         status?: string;
@@ -400,6 +423,11 @@ type SubmitApprovalRequest = SubmitApprovalRequest$1;
 type SubmitApprovalResponse = SubmitApprovalResponse$1;
 type SubmitSignalRequest = SubmitSignalRequest$1;
 type GetRunRequest = GetRunRequest$1;
+type GetRunDiffRequest = GetRunDiffRequest$1;
+type GetRunDiffResponse = GetRunDiffResponse$1;
+type GetRunDiffOversizedResponse = GetRunDiffOversizedResponse$1;
+type GatewayDiffBundle = GatewayDiffBundle$1;
+type GatewayDiffPatch = GatewayDiffPatch$1;
 type ListRunsRequest = ListRunsRequest$1;
 type GetSchemaSignatureRequest = GetSchemaSignatureRequest$1;
 type GetSchemaSignatureResponse = GetSchemaSignatureResponse$1;
@@ -452,4 +480,4 @@ type DeleteTicketRequest = DeleteTicketRequest$1;
 type GatewayEventFrame<Payload = unknown> = GatewayEventFrame$1<Payload>;
 type GatewayResponseFrame<Payload = unknown> = GatewayResponseFrame$1<Payload>;
 
-export type { CancelRunRequest, CancelRunResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, DeleteTicketRequest, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };
+export type { CancelRunRequest, CancelRunResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, DeleteTicketRequest, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };

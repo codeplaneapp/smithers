@@ -13,6 +13,7 @@ export { useGatewayPrompts } from "./useGatewayPrompts.ts";
 export { useGatewayScores } from "./useGatewayScores.ts";
 export { useGatewayTickets } from "./useGatewayTickets.ts";
 export { useGatewayNodeOutput } from "./useGatewayNodeOutput.ts";
+export { useGatewayRunDiff } from "./useGatewayRunDiff.ts";
 export { useGatewayRpc } from "./useGatewayRpc.ts";
 export { useGatewayRun } from "./useGatewayRun.ts";
 export { useGatewayRunEvents } from "./useGatewayRunEvents.ts";

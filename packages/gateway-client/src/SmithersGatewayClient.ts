@@ -527,6 +527,10 @@ export class SmithersGatewayClient {
     return this.rpc("getNodeDiff", params);
   }
 
+  getRunDiff(params: GatewayRpcParams<"getRunDiff">) {
+    return this.rpc("getRunDiff", params);
+  }
+
   whatHappened(params: GatewayRpcParams<"whatHappened">) {
     return this.rpc("whatHappened", params);
   }

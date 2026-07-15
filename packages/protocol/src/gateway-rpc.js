@@ -17,6 +17,11 @@
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunRequest} GetRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffRequest} GetRunDiffRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffResponse} GetRunDiffResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffOversizedResponse} GetRunDiffOversizedResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayDiffBundle} GatewayDiffBundle */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayDiffPatch} GatewayDiffPatch */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunsRequest} ListRunsRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureRequest} GetSchemaSignatureRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureResponse} GetSchemaSignatureResponse */

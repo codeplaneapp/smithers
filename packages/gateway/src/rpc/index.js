@@ -20,6 +20,11 @@
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunRequest} GetRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffRequest} GetRunDiffRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffResponse} GetRunDiffResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffOversizedResponse} GetRunDiffOversizedResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayDiffBundle} GatewayDiffBundle */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayDiffPatch} GatewayDiffPatch */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunsRequest} ListRunsRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureRequest} GetSchemaSignatureRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureResponse} GetSchemaSignatureResponse */
@@ -609,6 +614,20 @@ export const GATEWAY_RPC_DEFINITIONS = [
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "NodeNotFound", "IterationNotFound", "PayloadTooLarge", "VcsError", "Internal"],
     exampleRequest: { runId: "run_01", nodeId: "task", iteration: 0 },
     exampleResponse: { summary: { filesChanged: 1 }, files: [] },
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "getRunDiff",
+    title: "Get Run Diff",
+    description: "Fetch the final base-to-terminal DiffBundle for a run. An oversized result is returned as an explicit marker.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "run:read",
+    requestSchema: objectSchema({ runId }, ["runId"]),
+    responseSchema: objectSchema({}, [], "Final run DiffBundle or an oversized marker.", true),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "VcsError", "Internal"],
+    exampleRequest: { runId: "run_01" },
+    exampleResponse: { seq: 3, baseRef: "abc123", patches: [] },
   },
   {
     version: SMITHERS_API_VERSION,

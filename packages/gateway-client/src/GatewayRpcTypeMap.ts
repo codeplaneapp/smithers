@@ -47,6 +47,8 @@ import type {
   WhatHappenedRequest,
   WhatHappenedResponse,
   GetRunRequest,
+  GetRunDiffRequest,
+  GetRunDiffResponse,
   GetDevToolsSnapshotRequest,
   GetDevToolsSnapshotResponse,
   GetSchemaSignatureRequest,
@@ -75,6 +77,7 @@ export type GatewayRpcRequestMap = {
   getDevToolsSnapshot: GetDevToolsSnapshotRequest;
   getNodeOutput: NodeRequest;
   getNodeDiff: NodeRequest;
+  getRunDiff: GetRunDiffRequest;
   whatHappened: WhatHappenedRequest;
   cronList: CronListRequest;
   cronCreate: CronCreateRequest;
@@ -112,6 +115,7 @@ export type GatewayRpcResponseMap = {
   getDevToolsSnapshot: GetDevToolsSnapshotResponse;
   getNodeOutput: Record<string, unknown>;
   getNodeDiff: Record<string, unknown>;
+  getRunDiff: GetRunDiffResponse;
   whatHappened: WhatHappenedResponse;
   cronList: GatewayCronRow[];
   cronCreate: Record<string, unknown>;

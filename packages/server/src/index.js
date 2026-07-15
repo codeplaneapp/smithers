@@ -35,6 +35,7 @@ export * from "./gatewayRoutes/NODE_OUTPUT_WARN_BYTES.js";
 export * from "./gatewayRoutes/NodeOutputRouteError.js";
 export * from "./gatewayRoutes/getDevToolsSnapshot.js";
 export * from "./gatewayRoutes/getNodeDiff.js";
+export * from "./gatewayRoutes/getRunDiff.js";
 export * from "./gatewayRoutes/getNodeOutput.js";
 export * from "./gatewayRoutes/jumpToFrame.js";
 export * from "./gatewayRoutes/streamDevTools.js";

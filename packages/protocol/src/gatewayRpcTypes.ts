@@ -52,6 +52,7 @@ export type GatewayRpcMethod =
   | "getDevToolsSnapshot"
   | "getNodeOutput"
   | "getNodeDiff"
+  | "getRunDiff"
   | "whatHappened"
   | "cronList"
   | "cronCreate"
@@ -163,6 +164,34 @@ export type SubmitSignalRequest = {
 export type GetRunRequest = {
   runId: string;
 };
+
+export type GatewayDiffPatch = {
+  path: string;
+  diff: string;
+  additions?: number;
+  deletions?: number;
+  binary?: boolean;
+};
+
+export type GatewayDiffBundle = {
+  seq: number;
+  baseRef: string;
+  patches: GatewayDiffPatch[];
+};
+
+export type GetRunDiffRequest = {
+  runId: string;
+};
+
+export type GetRunDiffOversizedResponse = {
+  status: "oversized";
+  baseRef: string;
+  terminalRef: string;
+  sizeBytes: number;
+  maxBytes: number;
+};
+
+export type GetRunDiffResponse = GatewayDiffBundle | GetRunDiffOversizedResponse;
 
 export type ListRunsRequest = {
   filter?: {
