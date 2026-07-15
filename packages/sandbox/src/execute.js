@@ -463,6 +463,7 @@ async function finalizeSandboxBundle(params) {
         containerId: params.containerId,
         configJson,
         status: validated.manifest.status,
+        heartbeatAtMs: nowMs(),
         shippedAtMs: params.shippedAtMs ?? params.createdAtMs,
         completedAtMs: nowMs(),
         bundlePath: validated.bundlePath,
@@ -566,6 +567,7 @@ export async function executeSandbox(options) {
             containerId: null,
             configJson,
             status: "pending",
+            heartbeatAtMs: createdAtMs,
             shippedAtMs: null,
             completedAtMs: null,
             bundlePath: null,
@@ -617,6 +619,7 @@ export async function executeSandbox(options) {
                 configJson,
                 status: "shipped",
                 shippedAtMs: (shippedAtMs = nowMs()),
+                heartbeatAtMs: shippedAtMs,
                 completedAtMs: null,
                 bundlePath: null,
             });
@@ -642,7 +645,18 @@ export async function executeSandbox(options) {
                 egress,
                 config: rawConfig,
                 signal: runtime.signal,
-                heartbeat: runtime.heartbeat,
+                heartbeat: (data) => {
+                    runtime.heartbeat(data);
+                    void Effect.runPromise(adapter.heartbeatSandbox(runtime.runId, options.sandboxId, nowMs()))
+                        .catch((error) => {
+                            logWarning("sandbox heartbeat persistence failed", {
+                                runId: runtime.runId,
+                                sandboxId: options.sandboxId,
+                                runtime: selectedRuntime,
+                                error: errorToJson(error),
+                            });
+                        });
+                },
             };
             const providerResult = await runSandboxProvider(provider, providerRequest);
             const materialized = await materializeProviderResult(providerResult, providerRequest.resultBundlePath, options.rootDir);
@@ -706,6 +720,7 @@ export async function executeSandbox(options) {
             configJson,
             status: "shipped",
             shippedAtMs: (shippedAtMs = nowMs()),
+            heartbeatAtMs: shippedAtMs,
             completedAtMs: null,
             bundlePath: null,
         });
@@ -743,13 +758,15 @@ export async function executeSandbox(options) {
             childRunId: child.runId,
             childStatus: child.status,
         });
+        const sandboxHeartbeatAtMs = nowMs();
+        await adapter.heartbeatSandbox(runtime.runId, options.sandboxId, sandboxHeartbeatAtMs);
         await emitSandboxEvent(runtimeDb, {
             type: "SandboxHeartbeat",
             runId: runtime.runId,
             sandboxId: options.sandboxId,
             remoteRunId: child.runId,
             progress: 1,
-            timestampMs: nowMs(),
+            timestampMs: sandboxHeartbeatAtMs,
         });
         await writeSandboxBundle({
             bundlePath: sandboxHandle.resultPath,
@@ -793,6 +810,7 @@ export async function executeSandbox(options) {
                 containerId: handle?.containerId ?? null,
                 configJson,
                 status: "failed",
+                heartbeatAtMs: nowMs(),
                 shippedAtMs: shippedAtMs ?? createdAtMs,
                 completedAtMs: nowMs(),
                 bundlePath: handle?.resultPath ?? null,

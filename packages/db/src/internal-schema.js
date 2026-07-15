@@ -192,6 +192,7 @@ export const smithersSandboxes = sqliteTable("_smithers_sandboxes", {
     containerId: text("container_id"),
     configJson: text("config_json").notNull(),
     status: text("status").notNull().default("pending"),
+    heartbeatAtMs: integer("heartbeat_at_ms"),
     shippedAtMs: integer("shipped_at_ms"),
     completedAtMs: integer("completed_at_ms"),
     bundlePath: text("bundle_path"),

@@ -18,6 +18,7 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
     let pendingTimer = null;
     let pendingEvent = null;
     let parkedEventBlock = null;
+    let sandboxHeartbeats = [];
 
     if (run.status === "waiting-approval") {
         pendingApproval = await loadPendingApproval(adapter, run.runId);
@@ -28,6 +29,12 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
         if (pendingEvent == null) {
             parkedEventBlock = await loadParkedEventBlock(adapter, run.runId);
         }
+    } else if (run.status === "running" && typeof adapter.listSandboxes === "function") {
+        const sandboxes = await adapter.listSandboxes(run.runId);
+        sandboxHeartbeats = sandboxes
+            .filter((sandbox) => isActiveSandbox(sandbox?.status))
+            .map((sandbox) => sandbox?.heartbeatAtMs)
+            .filter((heartbeatAtMs) => typeof heartbeatAtMs === "number");
     }
 
     return deriveRunState({
@@ -36,9 +43,20 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
         pendingTimer,
         pendingEvent,
         parkedEventBlock,
+        sandboxHeartbeats,
         now: options.now,
         staleThresholdMs: options.staleThresholdMs,
     });
+}
+
+/**
+ * @param {unknown} status
+ */
+function isActiveSandbox(status) {
+    return typeof status === "string" &&
+        status !== "finished" &&
+        status !== "failed" &&
+        status !== "cancelled";
 }
 
 /**

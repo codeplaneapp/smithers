@@ -16,6 +16,7 @@ export function deriveRunState(input) {
         pendingTimer = null,
         pendingEvent = null,
         parkedEventBlock = null,
+        sandboxHeartbeats = [],
         now = Date.now(),
         staleThresholdMs = RUN_STATE_HEARTBEAT_STALE_MS,
         timerOverdueGraceMs = RUN_STATE_TIMER_OVERDUE_GRACE_MS,
@@ -95,7 +96,7 @@ export function deriveRunState(input) {
             };
         }
         case "running":
-            return classifyRunning(run, now, staleThresholdMs, base, isOwnerPidAlive);
+            return classifyRunning(run, sandboxHeartbeats, now, staleThresholdMs, base, isOwnerPidAlive);
         default:
             return { ...base, state: "unknown" };
     }
@@ -138,13 +139,14 @@ function timerRunState(base, pendingTimer, now, graceMs) {
 
 /**
  * @param {import("../adapter/RunRow.ts").RunRow} run
+ * @param {readonly number[]} sandboxHeartbeats
  * @param {number} now
  * @param {number} staleThresholdMs
  * @param {{ runId: string; computedAt: string }} base
  * @param {(pid: number) => boolean} isOwnerPidAlive
  * @returns {RunStateView}
  */
-function classifyRunning(run, now, staleThresholdMs, base, isOwnerPidAlive) {
+function classifyRunning(run, sandboxHeartbeats, now, staleThresholdMs, base, isOwnerPidAlive) {
     const heartbeat =
         typeof run.heartbeatAtMs === "number" ? run.heartbeatAtMs : null;
     const startedAt =
@@ -158,6 +160,14 @@ function classifyRunning(run, now, staleThresholdMs, base, isOwnerPidAlive) {
     }
 
     if (now - lastAlive <= staleThresholdMs) {
+        if (sandboxHeartbeats.some((heartbeatAtMs) =>
+            typeof heartbeatAtMs === "number" && now - heartbeatAtMs > staleThresholdMs)) {
+            return {
+                ...base,
+                state: "running",
+                unhealthy: { kind: "sandbox-unreachable" },
+            };
+        }
         return { ...base, state: "running" };
     }
 

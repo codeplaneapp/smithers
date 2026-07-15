@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { computeRunState } from "@smithers-orchestrator/db/runState/computeRunState";
 import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunState";
 import { RUN_STATE_HEARTBEAT_STALE_MS } from "@smithers-orchestrator/db/runState/RUN_STATE_HEARTBEAT_STALE_MS";
 import type { SandboxHandle } from "@smithers-orchestrator/sandbox/SandboxHandle";
@@ -151,13 +152,34 @@ describe("case02 kill-sandbox-engine-alive", () => {
     }
   });
 
-  test.skip(
-    "fresh engine heartbeat + stale sandbox heartbeat → unhealthy reason points at sandbox (blocked: dual-heartbeat schema absent; ticket 0016)",
-    () => {
-      // When ticket 0016's sandbox-heartbeat surface lands and
-      // computeRunState distinguishes the two streams, this asserts
-      // an alive engine + dead sandbox produces unhealthy with a
-      // sandbox-specific reason rather than engine-heartbeat-stale.
-    },
-  );
+  test("fresh engine heartbeat + stale sandbox heartbeat → sandbox-specific unhealthy reason", async () => {
+    const runId = "case02-fresh-engine-stale-sandbox";
+    const { adapter, sqlite } = createDb();
+    try {
+      const now = Date.now();
+      await seedRunningRun(adapter, runId, now);
+      await adapter.updateRun(runId, { runtimeOwnerId: `pid:${process.pid}:engine-alive` });
+      await adapter.upsertSandbox({
+        runId,
+        sandboxId: "stale-sandbox",
+        runtime: "bubblewrap",
+        remoteRunId: null,
+        workspaceId: null,
+        containerId: null,
+        configJson: "{}",
+        status: "shipped",
+        heartbeatAtMs: now - RUN_STATE_HEARTBEAT_STALE_MS - 1,
+        shippedAtMs: now - RUN_STATE_HEARTBEAT_STALE_MS - 1,
+        completedAtMs: null,
+        bundlePath: null,
+      });
+
+      const view = await computeRunState(adapter, runId, { now });
+      expect(view.state).toBe("running");
+      expect(view.unhealthy).toEqual({ kind: "sandbox-unreachable" });
+      expect(view.unhealthy?.kind).not.toBe("engine-heartbeat-stale");
+    } finally {
+      sqlite.close();
+    }
+  });
 });

@@ -9,6 +9,8 @@ export type DeriveRunStateInput = {
     | { kind: "approval-decided-resume-required"; nodeId: string }
     | { kind: "external-trigger" }
     | null;
+  /** Heartbeats from active sandboxes associated with the run. */
+  sandboxHeartbeats?: ReadonlyArray<number>;
   now?: number;
   staleThresholdMs?: number;
   /** Grace window (ms) past a timer's wake time before it is flagged overdue. */

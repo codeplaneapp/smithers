@@ -1120,6 +1120,27 @@ function buildMigrations(context) {
                 return { table: "_smithers_rewind_leases" };
             },
         },
+        {
+            id: "0028_sandbox_heartbeat_column",
+            name: "Add sandbox heartbeat timestamp",
+            checksum: "packages/db/migrations/0028_add_sandbox_heartbeat.sql",
+            isApplied: (sqlite) => tableColumnNames(sqlite, "_smithers_sandboxes").has("heartbeat_at_ms"),
+            isAppliedPostgres: async (pgConn) => (await tableColumnNamesPostgres(pgConn, "_smithers_sandboxes")).has("heartbeat_at_ms"),
+            up: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_sandboxes")) {
+                    return { table: "_smithers_sandboxes", addedColumns: [], skipped: "missing_table" };
+                }
+                const added = addColumnIfMissing(sqlite, "_smithers_sandboxes", "heartbeat_at_ms", "heartbeat_at_ms INTEGER");
+                return { table: "_smithers_sandboxes", addedColumns: added ? ["heartbeat_at_ms"] : [] };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_sandboxes"))) {
+                    return { table: "_smithers_sandboxes", addedColumns: [], skipped: "missing_table" };
+                }
+                const added = await addColumnIfMissingPostgres(pgConn, "_smithers_sandboxes", "heartbeat_at_ms", "heartbeat_at_ms INTEGER");
+                return { table: "_smithers_sandboxes", addedColumns: added ? ["heartbeat_at_ms"] : [] };
+            },
+        },
     ];
 }
 

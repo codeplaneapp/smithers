@@ -1098,7 +1098,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {Record<string, unknown>} patch
-   * @returns {RunnableEffect<void, SmithersError>}
+    * @returns {RunnableEffect<void, SmithersError>}
    */
     updateRun(runId, patch) {
         validateRunPatch(patch);
@@ -2130,7 +2130,7 @@ export class SmithersDb {
     }
     /**
     * @param {number} [nowMs]
-    * @returns {RunnableEffect<void, SmithersError>}
+   * @returns {RunnableEffect<void, SmithersError>}
     */
     expireStaleHumanRequests(nowMs = Date.now()) {
         return this.write(`expire stale human requests before ${nowMs}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
@@ -2529,6 +2529,21 @@ export class SmithersDb {
    */
     upsertSandbox(row) {
         return this.write(`upsert sandbox ${row.sandboxId}`, () => this.internalStorage.upsert("_smithers_sandboxes", row, ["runId", "sandboxId"]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} sandboxId
+   * @param {number} heartbeatAtMs
+    * @returns {RunnableEffect<void, SmithersError>}
+   */
+    heartbeatSandbox(runId, sandboxId, heartbeatAtMs) {
+        return this.write(`heartbeat sandbox ${sandboxId}`, () =>
+            this.internalStorage.updateWhere(
+                "_smithers_sandboxes",
+                { heartbeatAtMs },
+                "run_id = ? AND sandbox_id = ? AND status NOT IN (?, ?, ?) AND (heartbeat_at_ms IS NULL OR heartbeat_at_ms <= ?)",
+                [runId, sandboxId, "finished", "failed", "cancelled", heartbeatAtMs],
+            ));
     }
     /**
    * @param {string} runId

@@ -244,6 +244,7 @@ const CREATE_TABLE_STATEMENTS = [
     container_id TEXT,
     config_json TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
+    heartbeat_at_ms INTEGER,
     shipped_at_ms INTEGER,
     completed_at_ms INTEGER,
     bundle_path TEXT,
