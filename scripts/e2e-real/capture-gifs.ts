@@ -43,7 +43,7 @@ type ReportAttachment = {
   path?: string;
 };
 
-type PassedCapture = {
+export type PassedCapture = {
   title: string;
   spec: string;
   video: string;
@@ -75,7 +75,7 @@ function run(command: string, args: string[], options: { cwd?: string } = {}) {
   });
 }
 
-function slugify(value: string) {
+export function slugify(value: string) {
   return value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -83,6 +83,45 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-")
     .toLowerCase();
+}
+
+export function gifSlugForCapture(capture: Pick<PassedCapture, "spec" | "title">) {
+  const specBase = basename(capture.spec, extname(capture.spec));
+  return slugify(`${specBase}--${capture.title}`);
+}
+
+export function assertUniqueGifSlugs(
+  captures: readonly Pick<PassedCapture, "spec" | "title">[],
+) {
+  const firstCaptureBySlug = new Map<string, Pick<PassedCapture, "spec" | "title">>();
+  const collisions = new Map<string, string[]>();
+
+  for (const capture of captures) {
+    const slug = gifSlugForCapture(capture);
+    const firstCapture = firstCaptureBySlug.get(slug);
+    if (!firstCapture) {
+      firstCaptureBySlug.set(slug, capture);
+      continue;
+    }
+
+    const entries = collisions.get(slug) ?? [
+      `${firstCapture.spec} :: ${firstCapture.title}`,
+    ];
+    entries.push(`${capture.spec} :: ${capture.title}`);
+    collisions.set(slug, entries);
+  }
+
+  if (collisions.size === 0) return;
+
+  const details = [...collisions.entries()]
+    .map(
+      ([slug, entries]) =>
+        `  ${slug || "<empty>"}:\n${entries.map((entry) => `    ${entry}`).join("\n")}`,
+    )
+    .join("\n");
+  throw new Error(
+    `GIF slug collision(s) detected; refusing to overwrite output files:\n${details}`,
+  );
 }
 
 function collectPassedCaptures(report: JsonReport) {
@@ -149,8 +188,7 @@ function convertToGif(capture: PassedCapture): ManifestEntry {
     throw new Error(`Video attachment does not exist: ${capture.video}`);
   }
 
-  const specBase = basename(capture.spec, extname(capture.spec));
-  const slug = slugify(`${specBase}--${capture.title}`);
+  const slug = gifSlugForCapture(capture);
   const gifPath = join(gifsDir, `${slug}.gif`);
   const palettePath = join(gifsDir, `${slug}.palette.png`);
   const vf = "fps=10,scale=960:-1:flags=lanczos";
@@ -204,45 +242,59 @@ function convertToGif(capture: PassedCapture): ManifestEntry {
   };
 }
 
-rmSync(resolve(appRoot, "capture-results"), { recursive: true, force: true });
-rmSync(resolve(appRoot, "capture-report"), { recursive: true, force: true });
-rmSync(artifactRoot, { recursive: true, force: true });
-mkdirSync(gifsDir, { recursive: true });
-mkdirSync(dirname(reportPath), { recursive: true });
+function main() {
+  rmSync(resolve(appRoot, "capture-results"), { recursive: true, force: true });
+  rmSync(resolve(appRoot, "capture-report"), { recursive: true, force: true });
+  rmSync(artifactRoot, { recursive: true, force: true });
+  mkdirSync(gifsDir, { recursive: true });
+  mkdirSync(dirname(reportPath), { recursive: true });
 
-const ffmpeg = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
-if (ffmpeg.status !== 0) {
-  throw new Error("Host ffmpeg is required for gif capture conversion.");
+  const ffmpeg = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
+  if (ffmpeg.status !== 0) {
+    throw new Error("Host ffmpeg is required for gif capture conversion.");
+  }
+
+  const playwright = run("pnpm", [
+    "-C",
+    "apps/smithers",
+    "exec",
+    "playwright",
+    "test",
+    "--config",
+    "playwright.capture.config.ts",
+  ]);
+
+  if (playwright.status !== 0) {
+    throw new Error(`Playwright capture run failed with exit code ${playwright.status ?? "unknown"}`);
+  }
+
+  if (!existsSync(reportPath)) {
+    throw new Error(`Playwright JSON report was not written: ${reportPath}`);
+  }
+
+  const report = JSON.parse(readFileSync(reportPath, "utf8")) as JsonReport;
+  const captures = collectPassedCaptures(report);
+  assertUniqueGifSlugs(captures);
+  const manifest = captures.map(convertToGif).sort((a, b) => {
+    const specOrder = a.spec.localeCompare(b.spec);
+    return specOrder === 0 ? a.title.localeCompare(b.title) : specOrder;
+  });
+  const distinctGifs = new Set(manifest.map((entry) => entry.gif));
+
+  if (distinctGifs.size !== manifest.length) {
+    throw new Error(
+      `Manifest contains duplicate gif paths: ${manifest.length} entries reference ${distinctGifs.size} files`,
+    );
+  }
+
+  if (distinctGifs.size < 8) {
+    throw new Error(`Expected at least 8 feature gifs, produced ${distinctGifs.size}`);
+  }
+
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`[capture-gifs] wrote ${manifest.length} gifs and ${relative(repoRoot, manifestPath)}`);
 }
 
-const playwright = run("pnpm", [
-  "-C",
-  "apps/smithers",
-  "exec",
-  "playwright",
-  "test",
-  "--config",
-  "playwright.capture.config.ts",
-]);
-
-if (playwright.status !== 0) {
-  throw new Error(`Playwright capture run failed with exit code ${playwright.status ?? "unknown"}`);
+if (import.meta.main) {
+  main();
 }
-
-if (!existsSync(reportPath)) {
-  throw new Error(`Playwright JSON report was not written: ${reportPath}`);
-}
-
-const report = JSON.parse(readFileSync(reportPath, "utf8")) as JsonReport;
-const captures = collectPassedCaptures(report);
-const manifest = captures.map(convertToGif).sort((a, b) => {
-  const specOrder = a.spec.localeCompare(b.spec);
-  return specOrder === 0 ? a.title.localeCompare(b.title) : specOrder;
-});
-
-if (manifest.length < 8) {
-  throw new Error(`Expected at least 8 feature gifs, produced ${manifest.length}`);
-}
-
-writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`[capture-gifs] wrote ${manifest.length} gifs and ${relative(repoRoot, manifestPath)}`);
