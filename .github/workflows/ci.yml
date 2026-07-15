@@ -145,6 +145,7 @@ jobs:
           node scripts/check-docs.mjs
           node scripts/check-llms.mjs
           node scripts/check-smithers-test-script.mjs
+          bun test scripts/publish-next.test.mjs
 
       - name: Run d.ts freshness gate (Linux)
         if: runner.os == 'Linux'

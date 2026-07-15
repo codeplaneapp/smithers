@@ -243,7 +243,7 @@ Defined in the root `package.json` for development:
 | `generate:init-pack` | `bun scripts/generate-workflow-pack.ts` | Regenerate the local workflow pack used by `bunx smithers-orchestrator init` |
 | `sota:gen` | `bun scripts/generate-sota.ts` | Render the SOTA model registry (`docs/data/sota-models.json`) into its docs page and CLI module |
 | `sota:research` | `bun scripts/sota-research.ts` | Research whether new SOTA models shipped and rewrite the registry if so (used by the daily cron) |
-| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && pnpm -r --no-bail test` | Run docs/config guards, dependency guards, direct DB access guard, llms guards, SOTA registry guard, per-file declaration freshness, and each package test script (no-bail so every failing package is reported) |
+| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && bun test scripts/publish-next.test.mjs && pnpm -r --no-bail test` | Run docs/config guards, dependency guards, direct DB access guard, llms guards, SOTA registry guard, per-file declaration freshness, the next-channel release helper tests, and each package test script (no-bail so every failing package is reported) |
 | `coverage` | `node scripts/coverage.mjs` | Generate a test coverage report across the workspace |
 | `check:effect` | `node scripts/check-single-effect-version.mjs` | Verify the workspace resolves a single Effect version |
 | `check:deps` | `node scripts/check-dependency-boundaries.mjs` | Verify package dependency boundaries |
@@ -265,6 +265,7 @@ Defined in the root `package.json` for development:
 | `marketing:thread:write` | `bunx smithers-orchestrator up .smithers/workflows/release-content.tsx --input '{"dryRun":false,"publish":true,"allowUnreviewedPublish":true,"channels":{"changelog":false,"tweetThread":true,"blogPost":false},"skip":{"changelog":true,"blogPost":true,"approval":true,"publishX":true,"publishBlog":true,"publishChangelog":true}}'` | Generate and publish just the tweet thread, skipping changelog, blog, and the approval gate |
 | `version` | `node scripts/bump.mjs` | Bump package versions using the release helper |
 | `release` | `node scripts/publish.mjs` | Publish packages using the release helper |
+| `release:next` | `node scripts/publish-next.mjs` | Publish the current commit as a next-channel npm snapshot (dist-tag `next`); CI runs this for every fully green commit on main, and `latest` is never touched |
 | `sandbox:up` | `bun scripts/sandbox.ts up` | Create a disposable GCP sandbox VM and open an SSH session into it |
 | `sandbox:down` | `bun scripts/sandbox.ts down` | Delete the sandbox VM created by `sandbox:up` |
 
