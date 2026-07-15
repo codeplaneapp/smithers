@@ -175,50 +175,65 @@ describe("time-travel + resume (postgres)", () => {
         const { db, adapter, close } = await bootPg([]);
         const capturePeer = await openPgPeer(db);
         const deletePeer = await openPgPeer(db);
+        const captureStorage = capturePeer.adapter.internalStorage;
+        const hadOwnQueryOne = Object.hasOwn(captureStorage, "queryOne");
+        const originalQueryOne = captureStorage.queryOne;
+        let oldRunIdToDelete = null;
+        let forcedDeletions = 0;
+        captureStorage.queryOne = async function (statement, params, options) {
+            if (oldRunIdToDelete !== null && statement.includes("_smithers_snapshot_contents")) {
+                const runId = oldRunIdToDelete;
+                oldRunIdToDelete = null;
+                await deletePeer.adapter.internalStorage.deleteWhere("_smithers_snapshots", "run_id = ?", [runId]);
+                const remaining = await deletePeer.adapter.internalStorage.queryOne(
+                    "SELECT COUNT(*) AS count FROM _smithers_snapshots WHERE run_id = ?",
+                    [runId],
+                );
+                expect(Number(remaining.count), `expected the old snapshot ${runId} to be deleted`).toBe(0);
+                forcedDeletions += 1;
+            }
+            return await originalQueryOne.call(this, statement, params, options);
+        };
         try {
             const testId = uniqueRunId("last-reference-race-content");
-            for (let round = 0; round < 4; round += 1) {
-                const marker = `${testId}-${round}`;
-                const data = sharedSnapshotData(marker);
-                const oldRunId = uniqueRunId(`pg-race-old-${round}`);
-                const newRunId = uniqueRunId(`pg-race-new-${round}`);
-                const original = await captureSnapshot(adapter, oldRunId, 0, data);
-                let release;
-                const start = new Promise((resolve) => {
-                    release = resolve;
-                });
-                const capturePromise = (async () => {
-                    await start;
-                    return await captureSnapshot(capturePeer.adapter, newRunId, 0, data);
-                })();
-                const deletePromise = (async () => {
-                    await start;
-                    return await deletePeer.adapter.internalStorage.deleteWhere("_smithers_snapshots", "run_id = ?", [oldRunId]);
-                })();
-                release();
-                const [replacement] = await within(
-                    Promise.all([capturePromise, deletePromise]),
-                    `last-reference delete/capture race round ${round}`,
-                );
+            const data = sharedSnapshotData(testId);
+            const oldRunId = uniqueRunId("pg-race-old");
+            const newRunId = uniqueRunId("pg-race-new");
+            const original = await captureSnapshot(adapter, oldRunId, 0, data);
+            // Delete the last reference at capture's first content-row read.
+            // Before the atomic Postgres upsert, this falls between
+            // INSERT DO NOTHING and SELECT FOR UPDATE. The capture must
+            // recreate and lock the content without reporting corruption.
+            oldRunIdToDelete = oldRunId;
+            const replacement = await within(
+                captureSnapshot(capturePeer.adapter, newRunId, 0, data),
+                "last-reference delete/capture boundary",
+            );
 
-                expect(replacement.contentHash).toBe(original.contentHash);
-                const content = await adapter.internalStorage.queryOne(
-                    "SELECT COUNT(*) AS count, MAX(ref_count) AS ref_count FROM _smithers_snapshot_contents WHERE content_hash = ?",
-                    [original.contentHash],
-                );
-                const refs = await adapter.internalStorage.queryOne(
-                    "SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs WHERE content_hash = ?",
-                    [original.contentHash],
-                );
-                expect(Number(content.count)).toBe(1);
-                expect(Number(content.refCount)).toBe(1);
-                expect(Number(refs.count)).toBe(1);
-                expect(await loadSnapshot(adapter, oldRunId, 0)).toBeUndefined();
-                const parsed = parseSnapshot(await loadSnapshot(capturePeer.adapter, newRunId, 0));
-                expect(parsed.outputs.out).toEqual([{ text: marker }]);
-            }
+            expect(replacement.contentHash).toBe(original.contentHash);
+            const content = await adapter.internalStorage.queryOne(
+                "SELECT COUNT(*) AS count, MAX(ref_count) AS ref_count FROM _smithers_snapshot_contents WHERE content_hash = ?",
+                [original.contentHash],
+            );
+            const refs = await adapter.internalStorage.queryOne(
+                "SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs WHERE content_hash = ?",
+                [original.contentHash],
+            );
+            expect(Number(content.count)).toBe(1);
+            expect(Number(content.refCount)).toBe(1);
+            expect(Number(refs.count)).toBe(1);
+            expect(await loadSnapshot(adapter, oldRunId, 0)).toBeUndefined();
+            const parsed = parseSnapshot(await loadSnapshot(capturePeer.adapter, newRunId, 0));
+            expect(parsed.outputs.out).toEqual([{ text: testId }]);
+            expect(forcedDeletions).toBe(1);
         }
         finally {
+            if (hadOwnQueryOne) {
+                captureStorage.queryOne = originalQueryOne;
+            }
+            else {
+                delete captureStorage.queryOne;
+            }
             await deletePeer.close();
             await capturePeer.close();
             await close();

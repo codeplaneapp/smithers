@@ -46,27 +46,49 @@ async function persistSnapshotRowUnsafe(adapter, row) {
         inputJson: row.inputJson,
         refCount: 0,
     };
-    // The hash is only an address. Always re-read after INSERT ... DO NOTHING
-    // and compare exact bytes so a collision/corrupt row cannot be referenced.
-    // PostgreSQL keeps the referenced content row exclusively locked until the
-    // enclosing transaction commits. A key-share lock is insufficient here:
-    // last-reference cleanup updates ref_count before deleting the row, which
-    // can deadlock with a concurrent insert that later increments ref_count.
-    // SQLite serializes the entire writer transaction.
-    await adapter.internalStorage.execute(
-        `INSERT INTO _smithers_snapshot_contents
-         (content_hash, nodes_json, outputs_json, ralph_json, input_json, ref_count)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT (content_hash) DO NOTHING`,
-        [content.contentHash, content.nodesJson, content.outputsJson, content.ralphJson, content.inputJson, content.refCount],
-    );
-    const existing = await adapter.internalStorage.queryOne(
-        `SELECT nodes_json, outputs_json, ralph_json, input_json
-         FROM _smithers_snapshot_contents
-         WHERE content_hash = ?
-         LIMIT 1${isPostgres(adapter) ? " FOR UPDATE" : ""}`,
-        [row.contentHash],
-    );
+    // The hash is only an address. Return and compare the exact stored bytes so
+    // a collision or corrupt row cannot be referenced. PostgreSQL must resolve
+    // the conflict and lock the content row in one statement. At READ COMMITTED,
+    // INSERT DO NOTHING followed by SELECT FOR UPDATE leaves a statement gap
+    // where last-reference cleanup can delete the row. The no-op update takes
+    // the row lock, and RETURNING reads the locked version. SQLite serializes
+    // the writer transaction, so its existing insert and read path is safe.
+    const contentParams = [
+        content.contentHash,
+        content.nodesJson,
+        content.outputsJson,
+        content.ralphJson,
+        content.inputJson,
+        content.refCount,
+    ];
+    let existing;
+    if (isPostgres(adapter)) {
+        existing = await adapter.internalStorage.queryOne(
+            `INSERT INTO _smithers_snapshot_contents
+             (content_hash, nodes_json, outputs_json, ralph_json, input_json, ref_count)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (content_hash) DO UPDATE
+             SET ref_count = _smithers_snapshot_contents.ref_count
+             RETURNING nodes_json, outputs_json, ralph_json, input_json`,
+            contentParams,
+        );
+    }
+    else {
+        await adapter.internalStorage.execute(
+            `INSERT INTO _smithers_snapshot_contents
+             (content_hash, nodes_json, outputs_json, ralph_json, input_json, ref_count)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (content_hash) DO NOTHING`,
+            contentParams,
+        );
+        existing = await adapter.internalStorage.queryOne(
+            `SELECT nodes_json, outputs_json, ralph_json, input_json
+             FROM _smithers_snapshot_contents
+             WHERE content_hash = ?
+             LIMIT 1`,
+            [row.contentHash],
+        );
+    }
     if (!existing || existing.nodesJson !== content.nodesJson || existing.outputsJson !== content.outputsJson || existing.ralphJson !== content.ralphJson || existing.inputJson !== content.inputJson) {
         throw new Error(`Snapshot content hash collision or corruption: ${row.contentHash}`);
     }
