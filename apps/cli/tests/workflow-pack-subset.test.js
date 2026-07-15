@@ -6,6 +6,7 @@ import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smi
 import {
   CURATED_PUBLIC_WORKFLOW_IDS,
   CURATED_SYSTEM_WORKFLOW_IDS,
+  UI_WORKFLOW_IDS,
   initWorkflowPack,
 } from "../src/workflow-pack.js";
 import { discoverWorkflows, resolveWorkflow } from "../src/workflows.js";
@@ -45,7 +46,9 @@ test("fresh init installs exactly the curated public and hidden system workflows
   const gateway = readFileSync(join(pack, "gateway.ts"), "utf8");
   const mounted = [...gateway.matchAll(/await mountWorkflow\("([^"]+)"/g)].map((match) => match[1]);
   // Hidden system workflows may still own UIs that are directly addressable.
-  expect(mounted).toEqual([...CURATED_PUBLIC_WORKFLOW_IDS, "share-pack"]);
+  expect(mounted).toEqual(UI_WORKFLOW_IDS);
+  const installedWorkflowIds = [...CURATED_PUBLIC_WORKFLOW_IDS, ...CURATED_SYSTEM_WORKFLOW_IDS];
+  expect(UI_WORKFLOW_IDS.filter((id) => !installedWorkflowIds.includes(id))).toEqual([]);
 }, 30_000);
 
 test("the curated contract cannot be narrowed by a removed selectedWorkflows option", () => {

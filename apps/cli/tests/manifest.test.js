@@ -3,7 +3,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildDefaultManifest, loadManifest, parseManifest, renderManifest } from "../src/manifest.js";
-import { initWorkflowPack } from "../src/workflow-pack.js";
+import {
+    CURATED_PUBLIC_WORKFLOW_IDS,
+    CURATED_SYSTEM_WORKFLOW_IDS,
+    UI_WORKFLOW_IDS,
+    initWorkflowPack,
+} from "../src/workflow-pack.js";
 import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 function seededAgentEnv() {
@@ -75,16 +80,8 @@ test("init scaffolds a manifest enumerating the generated workflows and UIs", ()
     const manifest = loadManifest(path);
     expect(manifest.name).toBe(basename(root));
     expect(manifest.version).toBe("0.0.0");
-    expect(manifest.contents.workflows).toEqual([
-        "create-skill",
-        "create-workflow",
-        "docs-driven-development",
-        "eval-suite-run",
-        "init",
-        "post-failure",
-        "upgrade",
-    ]);
-    expect(manifest.contents.ui).toEqual(["create-skill", "create-workflow", "docs-driven-development"]);
+    expect(manifest.contents.workflows).toEqual([...CURATED_PUBLIC_WORKFLOW_IDS, ...CURATED_SYSTEM_WORKFLOW_IDS].sort());
+    expect(manifest.contents.ui).toEqual([...UI_WORKFLOW_IDS].sort());
 }, 30_000);
 
 test("re-init reports drift for a customized manifest", () => {

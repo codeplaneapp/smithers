@@ -250,8 +250,8 @@ export default smithers((ctx) => {
   const scaffoldRows = ctx.outputs.scaffold ?? [];
   const fixRows = scaffoldRows.filter((r) => r.nodeId === "fix");
   const scaffold = fixRows.at(-1) ?? scaffoldRows.find((r) => r.nodeId === "scaffold");
-  const documentation = ctx.latest(outputs.document, "document-retry") ?? ctx.outputMaybe("document", { nodeId: "document" });
-  const skillVerification = ctx.latest(outputs.skillVerification, "skill-verification-retry") ?? ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
+  const documentation = ctx.latest(outputs.document, "document") ?? ctx.outputMaybe("document", { nodeId: "document" });
+  const skillVerification = ctx.latest(outputs.skillVerification, "skill-verification") ?? ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
   const skillReady = skillVerification?.exists === true && skillVerification.containsWorkflowMetadata === true;
 
   const designed = design !== undefined;
@@ -443,50 +443,34 @@ export default smithers((ctx) => {
             This is a bounded retry loop: a missing or malformed companion skill
             keeps the workflow from reaching its terminal success summary. */}
         {proceed && verifyPassed ? (
-          <Sequence>
-            <Task id="document" output={outputs.document} agent={agents.cheapFast}>
-              <DocumentPrompt
-                workflowName={workflowName}
-                design={design}
-                skillsDir={SKILLS_DIR}
-                workflowFile={workflowFile}
-                uiFile={uiFile}
-              />
-            </Task>
+          <Loop id="skill:loop" until={skillReady} maxIterations={3} onMaxReached="fail">
+            <Sequence>
+              <Task id="document" output={outputs.document} agent={agents.cheapFast}>
+                <DocumentPrompt
+                  workflowName={workflowName}
+                  design={design}
+                  skillsDir={SKILLS_DIR}
+                  workflowFile={workflowFile}
+                  uiFile={uiFile}
+                />
+              </Task>
 
-            <Task id="skill-verification" output={outputs.skillVerification} dependsOn={["document"]}>
-              {async () => {
-                const latest = ctx.latest(outputs.document, "document") ?? ctx.outputMaybe("document", { nodeId: "document" });
-                const skillPath = latest?.skillPath ?? "";
-                const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
-                const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
-                const contents = exists ? await Bun.file(expectedPath).text() : "";
-                return {
-                  skillPath: exists ? expectedPath : skillPath,
-                  exists,
-                  containsWorkflowMetadata: exists && validSkillDocument(contents, workflowName),
-                };
-              }}
-            </Task>
-
-            {skillVerification !== undefined && !skillReady ? (
-              <Sequence>
-                <Task id="document-retry" output={outputs.document} agent={agents.cheapFast} dependsOn={["skill-verification"]}>
-                  <DocumentPrompt workflowName={workflowName} design={design} skillsDir={SKILLS_DIR} workflowFile={workflowFile} uiFile={uiFile} />
-                </Task>
-                <Task id="skill-verification-retry" output={outputs.skillVerification} dependsOn={["document-retry"]}>
-                  {async () => {
-                    const latest = ctx.latest(outputs.document, "document-retry");
-                    const skillPath = latest?.skillPath ?? "";
-                    const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
-                    const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
-                    const contents = exists ? await Bun.file(expectedPath).text() : "";
-                    return { skillPath: exists ? expectedPath : skillPath, exists, containsWorkflowMetadata: exists && validSkillDocument(contents, workflowName) };
-                  }}
-                </Task>
-              </Sequence>
-            ) : null}
-          </Sequence>
+              <Task id="skill-verification" output={outputs.skillVerification} dependsOn={["document"]}>
+                {async () => {
+                  const latest = ctx.latest(outputs.document, "document") ?? ctx.outputMaybe("document", { nodeId: "document" });
+                  const skillPath = latest?.skillPath ?? "";
+                  const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
+                  const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
+                  const contents = exists ? await Bun.file(expectedPath).text() : "";
+                  return {
+                    skillPath: exists ? expectedPath : skillPath,
+                    exists,
+                    containsWorkflowMetadata: exists && validSkillDocument(contents, workflowName),
+                  };
+                }}
+              </Task>
+            </Sequence>
+          </Loop>
         ) : null}
 
         {/* 8 — Terminal summary: aggregate the useful results so the run prints

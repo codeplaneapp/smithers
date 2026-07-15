@@ -374,6 +374,7 @@ const UI_WORKFLOWS = [
     { key: "docs-driven-development", title: "Docs Driven Development" },
     { key: "share-pack", title: "Share Pack" },
 ];
+export const UI_WORKFLOW_IDS = UI_WORKFLOWS.map((workflow) => workflow.key);
 function renderGatewayFile() {
     const mounts = UI_WORKFLOWS.map(
         (w) => `await mountWorkflow(${JSON.stringify(w.key)}, ${JSON.stringify(w.title)});`,
