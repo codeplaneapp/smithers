@@ -8,7 +8,9 @@ import { z } from "zod";
 
 const httpToolInputSchema = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]).optional().default("GET"),
-  url: z.string().url(),
+  url: z.url().refine((value) => isHttpUrl(new URL(value)), {
+    message: "URL protocol must be http or https",
+  }),
   headers: z.record(z.string(), z.string()).optional(),
   query: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.undefined()])).optional(),
   body: z.unknown().optional(),
@@ -57,6 +59,7 @@ const MAX_REDIRECTS = 20;
 async function executeHttpRequest(input, options, abortSignal) {
   abortSignal?.throwIfAborted();
   const url = new URL(input.url);
+  assertHttpUrl(url);
   for (const [key, value] of Object.entries(input.query ?? {})) {
     if (value !== null && value !== undefined) {
       url.searchParams.set(key, String(value));
@@ -119,6 +122,18 @@ async function executeHttpRequest(input, options, abortSignal) {
       clearTimeout(timeout);
     }
   }
+}
+
+/** @param {URL} url */
+function assertHttpUrl(url) {
+  if (!isHttpUrl(url)) {
+    throw new TypeError(`HTTP tool does not support URL protocol "${url.protocol}"`);
+  }
+}
+
+/** @param {URL} url */
+function isHttpUrl(url) {
+  return url.protocol === "http:" || url.protocol === "https:";
 }
 
 /**

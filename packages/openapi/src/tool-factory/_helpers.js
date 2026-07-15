@@ -101,6 +101,7 @@ export function buildUrl(baseUrl, path, pathParams, queryParams, options) {
     // path component (e.g. https://api.example.com/v2) is preserved. Passing an
     // absolute path to `new URL` would otherwise discard the base path.
     const fullUrl = new URL(baseUrl);
+    assertHttpUrl(fullUrl);
     const basePath = fullUrl.pathname.replace(/\/+$/, "");
     const opPath = url.replace(/^\/+/, "");
     fullUrl.pathname = opPath ? `${basePath}/${opPath}` : basePath || "/";
@@ -286,6 +287,7 @@ async function fetchWithRedirectValidation(url, method, headers, body, options, 
     let currentHeaders = headers;
     let currentBody = body;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        assertHttpUrl(new URL(currentUrl));
         /** @type {RequestInit} */
         const init = { method: currentMethod, headers: currentHeaders, redirect: "manual" };
         if (currentBody !== undefined) {
@@ -304,6 +306,7 @@ async function fetchWithRedirectValidation(url, method, headers, body, options, 
         }
         const nextUrl = new URL(location, currentUrl);
         await response.body?.cancel();
+        assertHttpUrl(nextUrl);
         if (!allowedOrigins.has(nextUrl.origin)) {
             // Name only origins — the full request URL can carry an
             // apiKey-in-query credential and must never reach the error
@@ -321,6 +324,13 @@ async function fetchWithRedirectValidation(url, method, headers, body, options, 
         currentUrl = nextUrl.toString();
     }
     throw new Error(`OpenAPI request exceeded ${MAX_REDIRECTS} redirects.`);
+}
+
+/** @param {URL} url */
+function assertHttpUrl(url) {
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new TypeError(`OpenAPI request does not support URL protocol "${url.protocol}"`);
+    }
 }
 /**
  * @param {ParsedOperation} operation
