@@ -52,8 +52,7 @@ The `<CheckSuite>` implementation and the files it imports, straight from the pa
 // @smithers-type-exports-end
 
 import React from "react";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { getTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { Sequence } from "./Sequence.js";
@@ -61,8 +60,77 @@ import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";
 /** @typedef {import("./CheckConfig.ts").CheckConfig} CheckConfig */
 
-const execAsync = promisify(exec);
 const COMMAND_MAX_BUFFER = 16 * 1024 * 1024;
+
+/**
+ * Keep the most recent bytes from a process stream without retaining the
+ * entire output in memory. The child process must keep running after the cap
+ * is reached so its eventual exit code remains trustworthy.
+ * @param {number} maxBytes
+ * @returns {{append: (chunk: Uint8Array | string) => void, toString: () => string, truncated: boolean}}
+ */
+function createTailBuffer(maxBytes) {
+    const buffer = Buffer.allocUnsafe(maxBytes);
+    let start = 0;
+    let length = 0;
+    let totalBytes = 0;
+    let truncated = false;
+
+    return {
+        append(chunk) {
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            totalBytes += bytes.length;
+            if (bytes.length === 0)
+                return;
+            if (maxBytes === 0) {
+                truncated = true;
+                return;
+            }
+            if (bytes.length >= maxBytes) {
+                bytes.subarray(bytes.length - maxBytes).copy(buffer);
+                start = 0;
+                length = maxBytes;
+                if (totalBytes > maxBytes)
+                    truncated = true;
+                return;
+            }
+            const writeAt = (start + length) % maxBytes;
+            const firstLength = Math.min(bytes.length, maxBytes - writeAt);
+            bytes.copy(buffer, writeAt, 0, firstLength);
+            if (firstLength < bytes.length)
+                bytes.copy(buffer, 0, firstLength);
+            if (length + bytes.length > maxBytes) {
+                start = (start + length + bytes.length - maxBytes) % maxBytes;
+                length = maxBytes;
+                truncated = true;
+            }
+            else {
+                length += bytes.length;
+            }
+            if (totalBytes > maxBytes)
+                truncated = true;
+        },
+        toString() {
+            if (length === 0)
+                return "";
+            const output = Buffer.allocUnsafe(length);
+            const firstLength = Math.min(length, maxBytes - start);
+            buffer.copy(output, 0, start, start + firstLength);
+            if (firstLength < length)
+                buffer.copy(output, firstLength, 0, length - firstLength);
+            // A byte stream can be cut at an arbitrary UTF-8 boundary when the
+            // tail rolls over. Drop continuation bytes at the front rather
+            // than returning a replacement character for a partial codepoint.
+            let boundary = 0;
+            while (boundary < output.length && (output[boundary] & 0xc0) === 0x80)
+                boundary++;
+            return output.subarray(boundary).toString("utf8");
+        },
+        get truncated() {
+            return truncated;
+        },
+    };
+}
 
 /**
  * Whether a single check's output row counts as a pass. A missing row (the
@@ -119,42 +187,65 @@ function normalizeChecks(checks) {
  */
 async function runCommandCheck(command) {
     const cwd = getTaskRuntime()?.rootDir ?? process.cwd();
-    try {
-        const result = await execAsync(command, { cwd, maxBuffer: COMMAND_MAX_BUFFER });
-        return {
-            passed: true,
-            ok: true,
-            command,
-            exitCode: 0,
-            stdout: result.stdout,
-            stderr: result.stderr,
-        };
-    }
-    catch (error) {
-        const err = /** @type {Error & { code?: unknown; signal?: unknown; stdout?: unknown; stderr?: unknown }} */ (error);
-        if (err.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
-            return {
-                passed: true,
-                ok: true,
-                command,
-                exitCode: 0,
-                stdout: typeof err.stdout === "string" ? err.stdout : "",
-                stderr: typeof err.stderr === "string" ? err.stderr : "",
-                truncated: true,
-                diagnostic: `Command output exceeded the ${COMMAND_MAX_BUFFER}-byte capture limit and was truncated`,
-            };
+    return await new Promise((resolve) => {
+        const stdout = createTailBuffer(COMMAND_MAX_BUFFER);
+        const stderr = createTailBuffer(COMMAND_MAX_BUFFER);
+        let child;
+        try {
+            child = spawn(command, {
+                cwd,
+                shell: true,
+                stdio: ["ignore", "pipe", "pipe"],
+            });
         }
-        return {
-            passed: false,
-            ok: false,
-            command,
-            exitCode: typeof err.code === "number" ? err.code : null,
-            signal: typeof err.signal === "string" ? err.signal : null,
-            stdout: typeof err.stdout === "string" ? err.stdout : "",
-            stderr: typeof err.stderr === "string" ? err.stderr : "",
-            error: err.message,
-        };
-    }
+        catch (error) {
+            const err = /** @type {Error} */ (error);
+            resolve({
+                passed: false,
+                ok: false,
+                command,
+                exitCode: null,
+                signal: null,
+                stdout: "",
+                stderr: "",
+                error: err.message,
+            });
+            return;
+        }
+        let spawnError = null;
+        child.stdout?.on("data", (chunk) => stdout.append(chunk));
+        child.stderr?.on("data", (chunk) => stderr.append(chunk));
+        child.on("error", (error) => {
+            spawnError = /** @type {Error} */ (error);
+        });
+        child.on("close", (exitCode, signal) => {
+            const actualExitCode = typeof exitCode === "number" ? exitCode : null;
+            const actualSignal = typeof signal === "string" ? signal : null;
+            const passed = spawnError == null && actualExitCode === 0 && actualSignal == null;
+            const result = {
+                passed,
+                ok: passed,
+                command,
+                exitCode: actualExitCode,
+                signal: actualSignal,
+                stdout: stdout.toString(),
+                stderr: stderr.toString(),
+            };
+            if (spawnError) {
+                result.error = spawnError.message;
+            }
+            else if (!passed) {
+                result.error = actualSignal
+                    ? `Command terminated by ${actualSignal}`
+                    : `Command exited with code ${actualExitCode ?? "unknown"}`;
+            }
+            if (stdout.truncated || stderr.truncated) {
+                result.truncated = true;
+                result.diagnostic = `Command output exceeded the ${COMMAND_MAX_BUFFER}-byte capture limit; only the tail was retained`;
+            }
+            resolve(result);
+        });
+    });
 }
 /**
  * <CheckSuite> — Parallel checks with auto-aggregated pass/fail verdict.
