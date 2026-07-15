@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packages = ["packages/graph", "packages/integrations"];
+const packages = ["packages/graph", "packages/integrations", "packages/cloudflare"];
 
 /**
  * Snapshot every `.d.ts` under `srcDir` as a rel-path → content map.

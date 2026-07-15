@@ -325,7 +325,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expectText("scripts/generate-sota.ts", ["SOTA_REGISTRY_VERSION", "SOTA_ROLE_MODELS", "SOTA_DEPRECATED_MODELS"]);
     expectText("scripts/sota-research.ts", ["scripts/generate-sota.ts", 'pnpm", ["docs:llms"]', 'pnpm", ["generate:init-pack"]']);
     expectText("scripts/check-dts.mjs", [
-      'const packages = ["packages/graph", "packages/integrations"];',
+      'const packages = ["packages/graph", "packages/integrations", "packages/cloudflare"];',
       "restoreDeclarations(srcDir, committed)",
       'pnpm", ["-C", pkg, "run", "build"]',
     ]);
