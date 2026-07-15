@@ -128,8 +128,8 @@ beforeAll(async () => {
 afterAll(() => {
   if (!CHROMIUM) return;
   try { proc?.kill("SIGTERM"); } catch {}
-  try { rmSync(tempRepo, { recursive: true, force: true }); } catch {}
-  try { rmSync(binDir, { recursive: true, force: true }); } catch {}
+  try { rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
+  try { rmSync(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 });
 
 browserTest("a real UltraGrill session: say something → worker works → spec + questions → end", async () => {

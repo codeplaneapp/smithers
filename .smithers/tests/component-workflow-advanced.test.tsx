@@ -69,7 +69,7 @@ describe("ShipTickets", () => {
       const frame = await renderWorkflow(harness((ctx) => <ShipTickets ctx={ctx} ticketsDir={dir} baseBranch="main" tdd={false} agents={agents} />));
       await expect(runTask(task(frame, "manifest"))).resolves.toEqual({ ticketsDir: dir, tickets: [] });
       expect(ids(frame)).toEqual(["manifest"]);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   caseTest("discovers tickets with exact worktrees and serial XML hierarchy", 20_000, async () => {
@@ -101,7 +101,7 @@ describe("ShipTickets", () => {
       const collisionTickets = (await runTask(task(collision, "manifest")) as any).tickets as any[];
       expect(new Set(collisionTickets.map((ticket: any) => ticket.slug)).size).toBe(collisionTickets.length);
       expect(collisionTickets.every((ticket: any) => /^[a-z0-9-]+$/.test(ticket.slug))).toBe(true);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   caseTest("feeds slug-scoped feedback and gates validation/review completion", 30_000, async () => {
@@ -119,7 +119,7 @@ describe("ShipTickets", () => {
       expect(prompt(passed, "one:merge")).toContain("never use `git add -A`");
       expect(prompt(passed, "one:merge")).not.toContain("git push");
       expect(task(passed, "one:merge").continueOnFail).toBe(true);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
   caseTest("pairs validation and approval by the current raw iteration", 30_000, async () => {
     const dir = tempDir("ship-iterations-");
@@ -142,7 +142,7 @@ describe("ShipTickets", () => {
         review: [{ nodeId: "one:review:0", iteration: 1, approved: true, feedback: "approved", issues: [] }],
       } } as any);
       expect(ids(approved)).toContain("one:merge");
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
   caseTest("requires the raw iterationCount to also match, not just iteration", 30_000, async () => {
     const dir = tempDir("ship-iterationcount-");
@@ -158,7 +158,7 @@ describe("ShipTickets", () => {
         review: [{ nodeId: "one:review:0", iteration: 1, iterationCount: 5, approved: true, feedback: "approved", issues: [] }],
       } } as any);
       expect(ids(matchedCount)).toContain("one:merge");
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
   caseTest("propagates schema-valid research and plan outputs, with TDD phrases opt-in", 30_000, async () => {
     const dir = tempDir("ship-propagation-");
@@ -172,7 +172,7 @@ describe("ShipTickets", () => {
       const off = await renderWorkflow(harness((ctx) => <ShipTickets ctx={ctx} ticketsDir={dir} baseBranch="main" tdd={false} agents={agents} />));
       expect(prompt(off, "one:plan")).not.toContain("Write tests FIRST");
       expect(prompt(off, "one:implement")).not.toContain("test-first approach");
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 });
 
@@ -261,7 +261,7 @@ describe("VerifiableGoals", () => {
       const simulated = simulate(harness(<VerifiableGoals ctx={{ outputMaybe: () => goals }} source="proposal.md" prompt="ship" ticketsDir={dir} agents={[agent]} />), { mocks: { goals } });
       await simulated.run();
       expect(simulated.executed).toEqual(["goals", "write"]);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
   test("writes numbered frontmatter, dependencies, acceptance criteria, and E2E sections in an isolated dir", async () => {
     const dir = tempDir("goals-files-"); const goals = { summary: "two goals", tickets: [{ slug: "first", title: "First", goal: "build first", spec: "real code", e2eVerification: "drive backend", acceptanceCriteria: ["works", "safe"], dependsOn: [] }, { slug: "second", title: "Second", goal: "build second", spec: "follow first", e2eVerification: "drive backend twice", acceptanceCriteria: ["ships"], dependsOn: ["first"] }] };
@@ -278,7 +278,7 @@ describe("VerifiableGoals", () => {
       const produced = simulate(harness((ctx) => <VerifiableGoals ctx={ctx} source="proposal.md" prompt="ship" ticketsDir={dir} agents={[]} />), { mocks: { goals } });
       await produced.run();
       expect(readFileSync(join(dir, "0001-first.md"), "utf8")).toContain("slug: first");
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 });
 

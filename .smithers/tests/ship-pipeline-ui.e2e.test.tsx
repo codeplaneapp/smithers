@@ -183,7 +183,7 @@ afterAll(async () => {
   try {
     await gateway.close();
   } catch {}
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmSync(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 test("ship-pipeline UI renders a real completed run end-to-end", async () => {

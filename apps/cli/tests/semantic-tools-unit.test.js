@@ -449,6 +449,16 @@ function makePostgresTimeTravelStorage({ snapshots = [], branches = [], contents
             throw new Error(`unexpected queryAll: ${sql}`);
         },
         queryOne: async (sql, params) => {
+            if (sql.includes("INSERT INTO _smithers_snapshot_contents")) {
+                // Postgres path: upsert-lock in one statement, RETURNING the stored bytes.
+                const [contentHash, nodesJson, outputsJson, ralphJson, inputJson, refCount] = params;
+                let row = contents.find((content) => content.contentHash === contentHash);
+                if (!row) {
+                    row = { contentHash, nodesJson, outputsJson, ralphJson, inputJson, refCount };
+                    contents.push(row);
+                }
+                return { nodesJson: row.nodesJson, outputsJson: row.outputsJson, ralphJson: row.ralphJson, inputJson: row.inputJson };
+            }
             if (sql.includes("FROM _smithers_snapshot_contents")) {
                 const [contentHash] = params;
                 return contents.find((content) => content.contentHash === contentHash) ?? null;

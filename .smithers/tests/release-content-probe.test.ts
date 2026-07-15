@@ -33,7 +33,7 @@ beforeAll(() => {
 
 afterAll(() => {
   process.chdir(previousCwd);
-  rmSync(repoDir, { recursive: true, force: true });
+  rmSync(repoDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe("probeRelease version resolution", () => {

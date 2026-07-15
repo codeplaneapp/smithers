@@ -278,7 +278,7 @@ describe("riskless GitHub issue sweep production graph", () => {
       const base = git("rev-parse", "HEAD").stdout.trim(); writeFileSync(join(fixture, "file.txt"), "candidate\n"); expect(git("add", "--", "file.txt").status).toBe(0); writeFileSync(join(fixture, "untracked.poison"), "poison\n"); writeFileSync(join(fixture, "ignored.poison"), "poison\n");
       const result = commitCandidate(42, "identity-42", base, fixture, { issueNumber: 42, issueIdentitySha256: "identity-42", baseSha: base, headSha: base, diffSha256: "wrong", patchId: "wrong", approvalPhase: "candidate-commit", sourceProofId: "wrong", approvalIteration: 0, envelope: ["file.txt"], decision: "propose", valid: true, stagePaths: ["file.txt"], changedPaths: ["file.txt"], commitMessage: "🐛 fix: candidate\n\nFixes #42\nCo-Authored-By: Test <test@example.com>" }, "candidate-commit", 0, ["file.txt"]);
       expect(result.decision).toBe("reject"); expect(result.clean).toBe(true); expect(git("rev-parse", "HEAD").stdout.trim()).toBe(base); expect(git("status", "--porcelain", "--ignored=matching").stdout).toBe("");
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 30_000);
 
   test("successful commit removes ignored residue and preserves the exact committed tuple", () => {
@@ -288,7 +288,7 @@ describe("riskless GitHub issue sweep production graph", () => {
       const proposal = { issueNumber: 42, issueIdentitySha256: "identity-42", baseSha: base, headSha: base, diffSha256: candidate.diffSha256, patchId, approvalPhase: "candidate-commit", sourceProofId: candidateProofId({ number: 42, identitySha256: "identity-42" }, candidate, ["file.txt"], "candidate-commit", 0), approvalIteration: 0, decision: "propose", valid: true, stagePaths: ["file.txt"], changedPaths: ["file.txt"], envelope: ["file.txt"], commitMessage: message };
       const result = commitCandidate(42, "identity-42", base, fixture, proposal, "candidate-commit", 0, ["file.txt"]);
       expect(result.decision).toBe("committed"); expect(result.proofId).toBe(commitProofId(result)); expect(result.sourceApprovalId).toBe(lunaApprovalId(proposal)); expect(result.changedPaths).toEqual(["file.txt"]); expect(git("status", "--porcelain", "--ignored=matching").stdout).toBe(""); expect(git("log", "-1", "--format=%B").stdout.trimEnd()).toBe(message);
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 30_000);
 
   test("disables repository hooks while creating the Luna-approved commit", () => {
@@ -298,7 +298,7 @@ describe("riskless GitHub issue sweep production graph", () => {
       const hook = join(fixture, ".git", "hooks", "pre-commit"); writeFileSync(hook, "#!/bin/sh\nprintf 'hook mutation\\n' >> file.txt\ngit add -- file.txt\n"); chmodSync(hook, 0o755);
       const result = commitCandidate(42, "identity-42", base, fixture, proposal, "candidate-commit", 0, ["file.txt"]);
       expect(result.decision).toBe("committed"); expect(result.proofId).toBe(commitProofId(result)); expect(result.clean).toBe(true); expect(git("rev-parse", "HEAD").stdout.trim()).not.toBe(base); expect(readFileSync(join(fixture, "file.txt"), "utf8")).toBe("candidate\n"); expect(git("status", "--porcelain", "--ignored=matching").stdout).toBe("");
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 30_000);
 
   test("ignores stale correction and landing rows for immediate authorization", async () => {
@@ -367,7 +367,7 @@ describe("riskless GitHub issue sweep production graph", () => {
       writeFileSync(join(fixture, "packages/new-root/package.json"), JSON.stringify({ scripts: { typecheck: "tsc" } })); expect(focusedCommands(fixture, ["packages/new-root/package.json"])[0]).toEqual(["pnpm", "-C", "packages/new-root", "typecheck"]);
       expect(focusedCommands(fixture, ["packages/deleted/package.json"])[0]).toEqual(["pnpm", "typecheck"]);
       expect(focusedCommands(fixture, ["scripts/deleted.mjs"])[0]).toEqual(["pnpm", "typecheck"]);
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test("binds Sol and Luna only to a private outside-workspace Codex auth directory", () => {
@@ -398,7 +398,7 @@ describe("riskless GitHub issue sweep production graph", () => {
         rmSync(auth); symlinkSync(join(inside, "auth.json"), auth);
         expect(pinnedCodexConfigDirectory(config, workspace)).toBe("");
       }
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test("pins GitHub mutations and rejects ambiguous remotes and non-exact remote tips", () => {
@@ -425,7 +425,7 @@ describe("riskless GitHub issue sweep production graph", () => {
         expect(pinnedGithubConfiguration(fixture, { ...sourceEnv, GH_CONFIG_DIR: unsafeConfig }).ok).toBe(false);
       }
       const socketEnv = { ...sourceEnv, FAKE_GH_SOCKET: join(fixture, "attacker.sock") }; expect(pinnedGithubConfiguration(fixture, socketEnv).ok).toBe(false); expect(runPinnedGithub(["issue", "close", "42"], fixture, socketEnv).ok).toBe(false); expect(readFileSync(recorder, "utf8")).toBe(recorded);
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 30_000);
 
   test("rejects empty admission envelopes and missing role rows with explicit evidence", async () => {
@@ -535,18 +535,18 @@ describe("riskless GitHub issue sweep production graph", () => {
   test("treats a registered missing worktree as uncertain collision evidence", () => {
     const fixture = mkdtempSync(join(tmpdir(), "riskless-missing-worktree-")); const peer = join(fixture, "peer"); const git = (...args: string[]) => spawnSync("git", args, { cwd: fixture, encoding: "utf8" });
     try {
-      expect(git("init", "-q").status).toBe(0); expect(git("config", "user.name", "Test").status).toBe(0); expect(git("config", "user.email", "test@example.com").status).toBe(0); writeFileSync(join(fixture, "x.txt"), "base\n"); expect(git("add", "--", "x.txt").status).toBe(0); expect(git("commit", "-qm", "base").status).toBe(0); expect(git("worktree", "add", "--detach", peer, "HEAD").status).toBe(0); rmSync(peer, { recursive: true, force: true });
+      expect(git("init", "-q").status).toBe(0); expect(git("config", "user.name", "Test").status).toBe(0); expect(git("config", "user.email", "test@example.com").status).toBe(0); writeFileSync(join(fixture, "x.txt"), "base\n"); expect(git("add", "--", "x.txt").status).toBe(0); expect(git("commit", "-qm", "base").status).toBe(0); expect(git("worktree", "add", "--detach", peer, "HEAD").status).toBe(0); rmSync(peer, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       const orchestratorUrl = import.meta.resolve("smithers-orchestrator"); const workflowUrl = `${pathToFileURL(join(import.meta.dir, "..", "workflows", "riskless-github-issue-sweep.tsx")).href}?missing-worktree-test=${Date.now()}`;
       const script = `import { mdxPlugin } from ${JSON.stringify(orchestratorUrl)}; mdxPlugin(); const { activeCollisionPaths } = await import(${JSON.stringify(workflowUrl)}); console.log(JSON.stringify(activeCollisionPaths(["x.txt"], ${JSON.stringify(fixture)})));`;
       const child = spawnSync(process.execPath, ["-e", script], { cwd: fixture, encoding: "utf8", timeout: 30_000, env: { ...process.env, PATH: `${dirname(process.execPath)}:/usr/bin:/bin` } }); expect(child.status, child.stderr).toBe(0); const lines = child.stdout.trim().split(/\r?\n/); const result = JSON.parse(lines.at(-1)!); expect(result.ok).toBe(false); expect(result.collisions.some((entry: string) => entry.includes("uncertain:missing-worktree:"))).toBe(true);
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 30_000);
 
   test("proves real stable patch equivalence and blocks failed Git queries", () => {
     const fixture = mkdtempSync(join(tmpdir(), "riskless-patch-id-")); const git = (...args: string[]) => spawnSync("git", args, { cwd: fixture, encoding: "utf8" });
     try {
       expect(git("init", "-q").status).toBe(0); expect(git("config", "user.name", "Test").status).toBe(0); expect(git("config", "user.email", "test@example.com").status).toBe(0); writeFileSync(join(fixture, "x.txt"), "base\n"); expect(git("add", "x.txt").status).toBe(0); expect(git("commit", "-qm", "base").status).toBe(0); const base = git("rev-parse", "HEAD").stdout.trim(); writeFileSync(join(fixture, "x.txt"), "same patch\n"); expect(git("commit", "-qam", "one").status).toBe(0); const one = git("rev-parse", "HEAD").stdout.trim(); expect(git("checkout", "-q", "--detach", base).status).toBe(0); writeFileSync(join(fixture, "x.txt"), "same patch\n"); expect(git("commit", "-qam", "two").status).toBe(0); const two = git("rev-parse", "HEAD").stdout.trim(); expect(one).not.toBe(two); expect(commitPatchId(fixture, one)).toBe(commitPatchId(fixture, two)); expect(() => commitPatchId(fixture, "missing")).toThrow("git show failed");
-    } finally { rmSync(fixture, { recursive: true, force: true }); }
+    } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 30_000);
 
   test("computes truthful fixpoints for exclusions, landings, missing outputs, and no-safe-work", () => {
@@ -612,7 +612,7 @@ describe("riskless GitHub issue sweep production graph", () => {
           else sibling.once("close", () => resolve());
         });
       }
-      rmSync(fixture, { recursive: true, force: true });
+      rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 90_000);
 });

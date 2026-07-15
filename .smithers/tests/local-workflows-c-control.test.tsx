@@ -52,7 +52,7 @@ async function isolated<T>(prefix: string, body: (root: string) => Promise<T>): 
     if (path === undefined) delete process.env.PATH; else process.env.PATH = path;
     if (state === undefined) delete process.env.SMITHERS_TEST_PNPM_STATE; else process.env.SMITHERS_TEST_PNPM_STATE = state;
     if (failures === undefined) delete process.env.SMITHERS_TEST_FAIL_TYPECHECKS; else process.env.SMITHERS_TEST_FAIL_TYPECHECKS = failures;
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

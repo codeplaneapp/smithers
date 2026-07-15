@@ -21,7 +21,7 @@ import * as barrel from "../components/extract-prompt/index";
 const roots: string[] = [];
 const repoRoot = join(import.meta.dir, "../..");
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function tempRoot(prefix: string): string {
@@ -182,7 +182,7 @@ describe("init-pack prompt caches", () => {
       rmSync(join(root, "bad-close.md"));
       writeFileSync(join(root, "bad-json.md"), "---\nkey: bad-json\nstructured: {bad\n---\nbody\n");
       expect(() => cache.getSync("bad-json")).toThrow();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test("memory cache implements roundtrip, missing, update/delete, and key enumeration", async () => {
@@ -256,7 +256,7 @@ describe("init-pack sqlite prompt cache", () => {
       const corruptCache = new SqlitePromptCache({ path, table: "custom_prompts" });
       await expect(corruptCache.get("corrupt")).rejects.toThrow();
       corruptCache.close();
-    } finally { cache?.close(); reopened?.close(); defaultCache?.close(); db?.close(); rmSync(root, { recursive: true, force: true }); }
+    } finally { cache?.close(); reopened?.close(); defaultCache?.close(); db?.close(); rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 });
 
@@ -338,7 +338,7 @@ describe("score and stakes helpers", () => {
       expect(await readLatestScore({ runId: "r", nodeId: "n", scorerName: "other", dbPath: path })).toEqual({ status: "pending" });
       expect(await readLatestScore({ runId: "r", nodeId: "n", scorerName: "s", iteration: 2, dbPath: path })).toEqual({ status: "pending" });
       expect(await readLatestScore({ runId: "r", nodeId: "n", scorerName: "s", dbPath: join(missingRoot, "none.db") })).toEqual({ status: "missing" });
-    } finally { db?.close(); rmSync(root, { recursive: true, force: true }); rmSync(missingRoot, { recursive: true, force: true }); }
+    } finally { db?.close(); rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); rmSync(missingRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test("stakes map every public value to its documented threshold", () => {
@@ -488,6 +488,6 @@ describe("extract-prompt barrel and roles", () => {
       expect(fallback.fableAuthor).toEqual(fallbackSol);
       expect(fallback.polishReviewer).toEqual(fallbackSol);
       expect(fallback.panelists).toEqual([fallbackSol, fallbackSol]);
-    } finally { await killLiveChildren(); rmSync(root, { recursive: true, force: true }); }
+    } finally { await killLiveChildren(); rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, { timeout: 120_000 });
 });

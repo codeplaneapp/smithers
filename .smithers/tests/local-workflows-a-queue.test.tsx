@@ -174,7 +174,7 @@ describe("Local-A causal queue and recovery workflows", () => {
       expect(message).toContain("🔧 chore(consolidation): consolidate 06-07 product work onto TanStack DB");
       expect(message).toContain("Co-Authored-By: Codex <noreply@openai.com>");
       expect(execFileSync("git", ["show", "--format=", "--name-status", "HEAD"], { cwd: worktree, encoding: "utf8" })).toContain("R");
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test("context levers honor a mounted spec, pair current validation/review, and cap failed loops", async () => {
@@ -201,7 +201,7 @@ describe("Local-A causal queue and recovery workflows", () => {
       absent(denied, "docs-build"); absent(denied, "sidecar-build"); absent(denied, "speed-pr");
       const greenPair = await render("context-engineering-levers.tsx", { specPath, includeDocs: true, includeSidecar: false, includeSpeed: false }, { prepare: row("prepare", { specFound: true }), plan: row("plan-docs", plan), approval: row("approve-docs", { approved: true }), validation: row("docs-validate", { deliverable: "docs", allPassed: true, summary: "green", failing: "", iteration: 3 }), review: row("docs-review", { deliverable: "docs", approved: true, feedback: "", blockingIssues: [], iteration: 3 }) });
       expect(greenPair.tasks.some((item: any) => item.nodeId === "docs-review")).toBe(true);
-    } finally { rmSync(spec, { recursive: true, force: true }); }
+    } finally { rmSync(spec, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test("coverage validates package boundaries, honors n alias and instructions, and simulates a real fake-agent task", async () => {

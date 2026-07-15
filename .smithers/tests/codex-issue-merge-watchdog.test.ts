@@ -97,7 +97,7 @@ async function runWatchdogProcess(
     if (!result) throw new Error("At least one watchdog fixture tick is required.");
     return result;
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -434,7 +434,7 @@ describe("codex issue merge watchdog", () => {
       releaseLeaseLock(first!);
       expect(existsSync(lockPath)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -450,7 +450,7 @@ describe("codex issue merge watchdog", () => {
       expect(existsSync(lockPath)).toBe(true);
       releaseLeaseLock(replacement!);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -464,7 +464,7 @@ describe("codex issue merge watchdog", () => {
       expect(replacement).not.toBeNull();
       releaseLeaseLock(replacement!);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -574,7 +574,7 @@ describe("codex issue merge watchdog", () => {
       expect(Date.now() - startedAt).toBeLessThan(2_000);
       expect(result.output).toContain("ETIMEDOUT");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 15_000);
 });

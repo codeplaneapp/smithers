@@ -114,7 +114,7 @@ beforeAll(async () => {
 afterAll(() => {
   if (!CHROMIUM) return;
   try { proc?.kill("SIGTERM"); } catch {}
-  try { rmSync(tempRepo, { recursive: true, force: true }); } catch {}
+  try { rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 });
 
 browserTest("Open Code Review UI renders a real workflow run", async () => {

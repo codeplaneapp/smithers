@@ -33,7 +33,7 @@ afterEach(async () => {
 async function removeTempDir(dir: string) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       return;
     } catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
