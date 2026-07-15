@@ -5,55 +5,53 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathS
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-// Bound before mock.module installs, so the mock can delegate to the real module.
-import * as realChildProcess from "node:child_process";
+import { createRequire } from "node:module";
 import { renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
 import type { RenderedWorkflow } from "smithers-orchestrator/testing";
 import type { TaskDescriptor } from "smithers-orchestrator/graph";
 import { parseFirstJsonObject } from "../lib/parse-first-json-value";
 
 // Bun resolves child-process commands against the process-start PATH. Keep
-// release's string-command subprocesses hermetic by routing both child APIs
-// through the per-test bin directory, whose executables are still real files.
-// mock.module() mutates a process-wide registry and bun interleaves test
-// FILES in one process, so the mock must stay transparent for every caller
-// outside this file's active fixture roots or concurrent suites lose git.
+// release's string-command subprocesses hermetic by routing execSync through
+// the per-test bin directory, whose executables are still real files. Two
+// hard-won constraints shape this mock: (1) mock.module() mutates a
+// process-wide registry, so the interception must stay transparent for every
+// caller outside this file's active fixture roots or concurrent suites lose
+// git; (2) in bun 1.3.14, overriding execFileSync in the factory deadlocks
+// the whole run with zero output as soon as a later test file imports
+// execFileSync, so only execSync is wrapped and execFileSync passes through
+// real (fixture CLIs are invoked by absolute path, so they need no PATH
+// sandbox). CJS monkey-patching instead of mock.module does not work either:
+// ESM importers bind the original functions, not the patched properties.
+const realChildProcess = createRequire(import.meta.url)("node:child_process") as typeof import("node:child_process");
+const realExecSync = realChildProcess.execSync;
 const hermeticRoots = new Set<string>();
 const inHermeticRoot = (cwd: unknown) => {
   const effective = typeof cwd === "string" && cwd ? cwd : process.cwd();
   for (const root of hermeticRoots) if (effective.startsWith(root)) return true;
   return false;
 };
-mock.module("node:child_process", () => {
-  const run = (argv: string[], options: { cwd?: string; encoding?: string; stdio?: unknown } = {}) => {
-    const result = Bun.spawnSync(argv, {
-      cwd: options.cwd,
-      env: { ...process.env, PATH: process.env.OPS_PATH ?? process.env.PATH ?? "" },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+mock.module("node:child_process", () => ({
+  ...realChildProcess,
+  execSync: (command: string, options?: { cwd?: string; encoding?: string; stdio?: unknown }) => {
+    if (!inHermeticRoot(options?.cwd)) return realExecSync(command, options as never);
+    const result = Bun.spawnSync(
+      process.platform === "win32"
+        ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", command]
+        : ["/bin/sh", "-c", command],
+      {
+        cwd: options?.cwd,
+        env: { ...process.env, PATH: process.env.OPS_PATH ?? process.env.PATH ?? "" },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
     const stdout = new TextDecoder().decode(result.stdout);
     const stderr = new TextDecoder().decode(result.stderr);
     if (result.exitCode !== 0) throw Object.assign(new Error(stderr), { status: result.exitCode, stdout, stderr });
-    return options.encoding === "utf8" ? stdout : Buffer.from(stdout);
-  };
-  return {
-    ...realChildProcess,
-    execSync: (command: string, options?: { cwd?: string; encoding?: string; stdio?: unknown }) => {
-      if (!inHermeticRoot(options?.cwd)) return realChildProcess.execSync(command, options as never);
-      return run(
-        process.platform === "win32"
-          ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", command]
-          : ["/bin/sh", "-c", command],
-        options,
-      );
-    },
-    execFileSync: (file: string, args: string[], options?: { cwd?: string; encoding?: string; stdio?: unknown }) => {
-      if (!inHermeticRoot(options?.cwd)) return realChildProcess.execFileSync(file, args, options as never);
-      return run([file, ...args], options);
-    },
-  };
-});
+    return options?.encoding === "utf8" ? stdout : Buffer.from(stdout);
+  },
+}));
 
 setDefaultTimeout(30_000);
 let importNonce = 0;
