@@ -375,6 +375,33 @@ describe("discoverWorkflows — skill-parity spec", () => {
         expect(wf.scope).toBe("curated");
     });
 
+    test("discovers curated workflows in installed packs and gives them curated precedence", () => {
+        const { root } = seed({
+            "dup.tsx": "// smithers-description: root plain version.\nexport default {};",
+        });
+        const installedPack = join(root, ".smithers", "packs", "example");
+        const installedWorkflows = join(installedPack, "workflows");
+        const installedCurated = join(installedWorkflows, "curated", "active");
+        mkdirSync(installedCurated, { recursive: true });
+        writeFileSync(join(installedPack, "smithers.toon"), "name: example\nversion: 1.0.0\n");
+        writeFileSync(join(installedWorkflows, "dup.tsx"), "// smithers-description: installed plain version.\nexport default {};");
+        writeFileSync(join(installedCurated, "dup.tsx"), "// smithers-description: installed curated version.\nexport default {};");
+        writeFileSync(join(installedCurated, "curated-only.tsx"), "export default {};\n");
+
+        const resolved = resolveWorkflowDirs(root);
+        expect(resolved).toContainEqual({
+            scope: "curated",
+            dir: installedCurated,
+            packDir: installedPack,
+        });
+        const workflows = discoverWorkflows(root);
+        expect(workflows.find((workflow) => workflow.id === "curated-only")).toMatchObject({
+            scope: "curated",
+            packDir: installedPack,
+        });
+        expect(workflows.find((workflow) => workflow.id === "dup")?.description).toBe("installed curated version.");
+    });
+
     test("explicit SMITHERS_WORKFLOW_PATHS tier has highest precedence", () => {
         const { root } = seed({
             "dup.tsx": "// smithers-description: local version.\nexport default {};",

@@ -534,9 +534,9 @@ const CURATED_SUBDIR = join("curated", "active");
  * (parallel to eliza skills' discovery precedence):
  *
  *   1. explicit  — `$SMITHERS_WORKFLOW_PATHS` (colon/`;`-separated dirs)
- *   2. curated   — `<pack>/workflows/curated/active` (local pack, then global)
- *   3. local     — nearest `.smithers/workflows`
- *   4. global    — `~/.smithers/workflows`
+ *   2. curated   — every root/installed pack's `workflows/curated/active`
+ *   3. local     — nearest `.smithers/workflows` plus installed local packs
+ *   4. global    — `~/.smithers/workflows` plus installed global packs
  *
  * First occurrence of an id wins; later (lower-precedence) tiers are shadowed.
  *
@@ -560,21 +560,15 @@ export function resolveWorkflowDirs(from = process.cwd(), env = process.env) {
         if (trimmed)
             dirs.push({ scope: "explicit", dir: resolve(trimmed) });
     }
-    for (const { packDir } of resolvePackDirs(from, env)) {
+    const packs = resolvePackDirs(from, env).flatMap(({ scope, packDir }) => [
+        { scope, packDir },
+        ...installedPackDirs(join(packDir, "packs")).map((installed) => ({ scope, packDir: installed })),
+    ]);
+    for (const { packDir } of packs) {
         dirs.push({ scope: "curated", dir: join(workflowsDirForPack(packDir), CURATED_SUBDIR), packDir });
     }
-    const global = globalPackDir(env);
-    const local = findLocalPackDir(from);
-    // A home-dir workspace resolves its local pack to the global pack; collapse
-    // the tiers so the pack is enumerated once, labeled global, mirroring the
-    // local==global collapse resolvePackDirs applies to the curated tier.
-    if (local && resolve(local) !== resolve(global)) {
-        dirs.push({ scope: "local", dir: workflowsDirForPack(local), packDir: local });
-        for (const packDir of installedPackDirs(join(local, "packs"))) dirs.push({ scope: "local", dir: workflowsDirForPack(packDir), packDir });
-    }
-    if (existsSync(global)) dirs.push({ scope: "global", dir: workflowsDirForPack(global), packDir: global });
-    for (const packDir of installedPackDirs(join(global, "packs"))) {
-        dirs.push({ scope: "global", dir: workflowsDirForPack(packDir), packDir });
+    for (const { scope, packDir } of packs) {
+        dirs.push({ scope, dir: workflowsDirForPack(packDir), packDir });
     }
     return dirs;
 }

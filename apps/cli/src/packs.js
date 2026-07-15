@@ -155,7 +155,7 @@ export function scanPackImports(root) {
   const files = [];
   const visit = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      if (entry.name === "node_modules" || entry.name === ".git" || entry.name === ".jj") continue;
       const file = join(dir, entry.name);
       if (entry.isDirectory()) visit(file);
       else if (/\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/.test(entry.name)) files.push(file);

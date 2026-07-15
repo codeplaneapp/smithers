@@ -1,6 +1,6 @@
 import { expect, onTestFinished, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { addPack, listLockedPacks, listPacks, lockPath, packDirs, parsePackSpec, removePack, scanPackImports, updatePack } from "../src/packs.js";
@@ -186,4 +186,44 @@ test("import scanning covers relative JavaScript helpers, not only .ts/.tsx", ()
   writeFileSync(join(fixture, "workflow.tsx"), 'import helper from "./helper.js";\nexport default helper;\n');
   writeFileSync(join(fixture, "helper.js"), 'import { spawn } from "node:child_process";\nexport default spawn;\n');
   expect(() => scanPackImports(fixture)).toThrow(/helper\.js imports node:child_process/);
+});
+
+test("import scanning catches dynamic imports and dot-prefixed helpers", () => {
+  const dynamicFixture = temp();
+  writeFileSync(join(dynamicFixture, "workflow.tsx"), 'export default import("node:child_process");\n');
+  expect(() => scanPackImports(dynamicFixture)).toThrow(/workflow\.tsx imports node:child_process/);
+
+  const dotFixture = temp();
+  writeFileSync(join(dotFixture, "workflow.tsx"), 'import helper from "./.helper.js";\nexport default helper;\n');
+  writeFileSync(join(dotFixture, ".helper.js"), 'import { spawn } from "node:child_process";\nexport default spawn;\n');
+  expect(() => scanPackImports(dotFixture)).toThrow(/\.helper\.js imports node:child_process/);
+});
+
+test("add rejects manifest path traversal before mutating the install root", async () => {
+  const project = temp();
+  const victim = join(project, "victim");
+  mkdirSync(victim);
+  writeFileSync(join(victim, "sentinel.txt"), "owned by the caller\n");
+  const fixture = temp();
+  writeFileSync(join(fixture, "smithers.toon"), "name: ../../victim\nversion: 1.0.0\n");
+
+  await expect(addPack(`file:${fixture}`, { from: project, yes: true })).rejects.toThrow(/Invalid smithers pack name/);
+
+  expect(readFileSync(join(victim, "sentinel.txt"), "utf8")).toBe("owned by the caller\n");
+  expect(existsSync(join(project, ".smithers"))).toBe(false);
+});
+
+test("sequential installs preserve the complete pack lock inventory", async () => {
+  const project = temp();
+  mkdirSync(join(project, ".smithers"));
+  const first = temp();
+  const second = temp();
+  writeFileSync(join(first, "smithers.toon"), "name: first-pack\nversion: 1.0.0\n");
+  writeFileSync(join(second, "smithers.toon"), "name: second-pack\nversion: 2.0.0\n");
+
+  await addPack(`file:${first}`, { from: project, yes: true });
+  await addPack(`file:${second}`, { from: project, yes: true });
+
+  expect(listLockedPacks(project).filter((pack) => pack.scope === "local").map((pack) => pack.name).sort())
+    .toEqual(["first-pack", "second-pack"]);
 });
