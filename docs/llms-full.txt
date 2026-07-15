@@ -13270,7 +13270,7 @@ Rewind a run to a previous frame, deleting later frames and invalidating derived
 
 ### restore_checkpoint
 
-Restore the worktree to a durability checkpoint for a node. If `seq` is omitted, the latest matching checkpoint is used.
+Restore the worktree to a durability checkpoint for a node. If `seq` is omitted, the latest matching checkpoint is used. This destructive operation requires `confirm: true`.
 
 **Input:**
 
@@ -13280,6 +13280,7 @@ Restore the worktree to a durability checkpoint for a node. If `seq` is omitted,
 | `nodeId` | `string` | Node whose checkpoint should be restored |
 | `iteration` | `number` | Optional loop iteration |
 | `seq` | `number` | Optional checkpoint sequence |
+| `confirm` | `boolean` | Must be `true` |
 
 **Output:** `{ runId, nodeId, iteration, seq, commitId, cwd, success, error? }`
 
@@ -13312,7 +13313,7 @@ Return the time-travel timeline for a run, optionally including all child forks 
 
 ### time_travel
 
-Reset a run back to a prior node attempt and optionally restore VCS state. If the run is still marked running, pass `force: true`.
+Reset a run back to a prior node attempt and optionally restore VCS state. This destructive operation requires `confirm: true`. If the run is still marked running, also pass `force: true`.
 
 **Input:**
 
@@ -13325,6 +13326,7 @@ Reset a run back to a prior node attempt and optionally restore VCS state. If th
 | `restoreVcs` | `boolean` | `true` | Restore filesystem state |
 | `resetDependents` | `boolean` | `true` | Reset dependent nodes too |
 | `force` | `boolean` | `false` | Allow time travel when the run is still running |
+| `confirm` | `boolean` | `false` | Confirm the destructive operation; must be `true` |
 
 **Output:** `{ result, run }`
 

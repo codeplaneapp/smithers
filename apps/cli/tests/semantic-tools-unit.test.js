@@ -1283,8 +1283,17 @@ describe("semantic tool definitions", () => {
             nodeId: "artifact-node",
         });
         expect(blocked.isError).toBe(true);
-        expect(blocked.structuredContent.error.code).toBe("RUN_STILL_RUNNING");
-        expect(blocked.structuredContent.error.message).toContain("Pass force=true");
+        expect(blocked.structuredContent.error.code).toBe("INVALID_INPUT");
+        expect(blocked.structuredContent.error.message).toContain("confirm=true");
+
+        const forceBlocked = await harness.call("time_travel", {
+            runId: "running-run",
+            nodeId: "artifact-node",
+            confirm: true,
+        });
+        expect(forceBlocked.isError).toBe(true);
+        expect(forceBlocked.structuredContent.error.code).toBe("RUN_STILL_RUNNING");
+        expect(forceBlocked.structuredContent.error.message).toContain("Pass force=true");
     });
 
     test("get_timeline tree reports cyclic fork graphs without revisiting runs", async () => {
@@ -1375,6 +1384,7 @@ describe("semantic tool definitions", () => {
         const restore = await harness.call("restore_checkpoint", {
             runId: "run-1",
             nodeId: "artifact-node",
+            confirm: true,
         });
         expect(restore.structuredContent.ok).toBe(true);
         expect(restore.structuredContent.data).toMatchObject({
@@ -1412,6 +1422,7 @@ describe("semantic tool definitions", () => {
         const restore = await harness.call("restore_checkpoint", {
             runId: "run-1",
             nodeId: "artifact-node",
+            confirm: true,
         });
 
         expect(reads).toBe(1);
@@ -1422,6 +1433,31 @@ describe("semantic tool definitions", () => {
             commitId: "commit-1",
             cwd: "/tmp/work",
         });
+    });
+
+    test("restore_checkpoint requires confirmation before reading checkpoints", async () => {
+        let reads = 0;
+        const harness = makeHarness({
+            listWorkspaceCheckpoints: async () => {
+                reads += 1;
+                return [];
+            },
+        });
+
+        const omitted = await harness.call("restore_checkpoint", {
+            runId: "run-1",
+            nodeId: "artifact-node",
+        });
+        expect(omitted.structuredContent.error.code).toBe("INVALID_INPUT");
+        expect(omitted.structuredContent.error.message).toContain("confirm=true");
+
+        const explicitFalse = await harness.call("restore_checkpoint", {
+            runId: "run-1",
+            nodeId: "artifact-node",
+            confirm: false,
+        });
+        expect(explicitFalse.structuredContent.error.code).toBe("INVALID_INPUT");
+        expect(reads).toBe(0);
     });
 
     test("returns structured errors for missing and ambiguous operations", async () => {

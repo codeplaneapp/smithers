@@ -460,6 +460,7 @@ const restoreCheckpointInputSchema = z.object({
     nodeId: z.string(),
     iteration: z.number().int().min(0).optional(),
     seq: z.number().int().min(0).optional(),
+    confirm: z.boolean().default(false),
 });
 const restoreCheckpointDataSchema = z.object({
     runId: z.string(),
@@ -504,6 +505,7 @@ const timeTravelInputSchema = z.object({
     restoreVcs: z.boolean().default(true),
     resetDependents: z.boolean().default(true),
     force: z.boolean().default(false),
+    confirm: z.boolean().default(false),
 });
 const timeTravelDataSchema = z.object({
     result: z.unknown(),
@@ -1576,7 +1578,7 @@ export function createSemanticToolDefinitions(options = {}) {
         },
         {
             name: "restore_checkpoint",
-            description: "Destructive: restore the worktree to a durability checkpoint for a node, selecting the latest matching checkpoint unless seq is provided.",
+            description: "Destructive: restore the worktree to a durability checkpoint for a node, selecting the latest matching checkpoint unless seq is provided. Requires confirm=true.",
             inputSchema: restoreCheckpointInputSchema,
             outputSchema: resultSchema(restoreCheckpointDataSchema),
             annotations: {
@@ -1585,6 +1587,12 @@ export function createSemanticToolDefinitions(options = {}) {
                 idempotentHint: false,
             },
             handler: (input) => executeSemanticTool("restore_checkpoint", async () => withDb(context, async (adapter) => {
+                if (!input.confirm) {
+                    throw new SmithersError("INVALID_INPUT", "restore_checkpoint requires confirm=true because it is destructive.", {
+                        runId: input.runId,
+                        nodeId: input.nodeId,
+                    });
+                }
                 const checkpoints = await adapter.listWorkspaceCheckpoints(input.runId);
                 const target = pickTargetCheckpoint(checkpoints, {
                     nodeId: input.nodeId,
@@ -1671,7 +1679,7 @@ export function createSemanticToolDefinitions(options = {}) {
         },
         {
             name: "time_travel",
-            description: "Destructive: reset a run back to a prior node attempt and optionally restore VCS state. Requires force=true when the run is still running.",
+            description: "Destructive: reset a run back to a prior node attempt and optionally restore VCS state. Requires confirm=true; running runs additionally require force=true.",
             inputSchema: timeTravelInputSchema,
             outputSchema: resultSchema(timeTravelDataSchema),
             annotations: {
@@ -1680,6 +1688,12 @@ export function createSemanticToolDefinitions(options = {}) {
                 idempotentHint: false,
             },
             handler: (input) => executeSemanticTool("time_travel", async () => withDb(context, async (adapter) => {
+                if (!input.confirm) {
+                    throw new SmithersError("INVALID_INPUT", "time_travel requires confirm=true because it is destructive.", {
+                        runId: input.runId,
+                        nodeId: input.nodeId,
+                    });
+                }
                 const run = await adapter.getRun(input.runId);
                 if (run?.status === "running" && !input.force) {
                     throw new SmithersError("RUN_STILL_RUNNING", `Run ${input.runId} is still marked running. Pass force=true to time-travel it anyway.`, {

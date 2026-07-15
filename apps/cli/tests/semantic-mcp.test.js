@@ -142,6 +142,18 @@ async function seedSemanticDb(cwd) {
             finishedAtMs: null,
             heartbeatAtMs: now - 200,
         }));
+        await Effect.runPromise(adapter.insertRun({
+            runId: "failed-run",
+            workflowName: "deploy-flow",
+            workflowPath: join(cwd, ".smithers", "workflows", "deploy-flow.tsx"),
+            parentRunId: null,
+            status: "failed",
+            createdAtMs: now - 15_000,
+            startedAtMs: now - 14_000,
+            finishedAtMs: now - 13_000,
+            heartbeatAtMs: now - 13_000,
+            errorJson: JSON.stringify({ message: "deployment failed" }),
+        }));
         await Effect.runPromise(adapter.insertNode({
             runId: "semantic-run",
             nodeId: "approval-gate",
@@ -369,6 +381,10 @@ describe("semantic MCP surface", () => {
         const { tools } = await client.listTools();
         const names = tools.map((tool) => tool.name).sort();
         expect(names).toEqual([...SEMANTIC_TOOL_NAMES].sort());
+        const restore = tools.find((tool) => tool.name === "restore_checkpoint");
+        const travel = tools.find((tool) => tool.name === "time_travel");
+        expect(restore.inputSchema.properties.confirm).toMatchObject({ type: "boolean", default: false });
+        expect(travel.inputSchema.properties.confirm).toMatchObject({ type: "boolean", default: false });
     });
 
     test("can scope outbound discovery to explicitly allowed read-only semantic tools", async () => {
@@ -836,6 +852,7 @@ describe("semantic MCP surface", () => {
                 "restore_checkpoint",
                 "list_snapshots",
                 "get_timeline",
+                "get_run",
                 "time_travel",
             ]);
 
@@ -865,6 +882,7 @@ describe("semantic MCP surface", () => {
                     runId: "semantic-run",
                     nodeId: "artifact-node",
                     seq: 0,
+                    confirm: true,
                 },
             }));
             expect(restore).toMatchObject({
@@ -956,8 +974,66 @@ describe("semantic MCP surface", () => {
                     nodeId: "artifact-node",
                 },
             });
-            const error = expectToolError(blocked, "RUN_STILL_RUNNING");
-            expect(error.message).toContain("Pass force=true");
+            const error = expectToolError(blocked, "INVALID_INPUT");
+            expect(error.message).toContain("confirm=true");
+
+            const forceBlocked = await client.callTool({
+                name: "time_travel",
+                arguments: {
+                    runId: "running-run",
+                    nodeId: "artifact-node",
+                    confirm: true,
+                },
+            });
+            const runningError = expectToolError(forceBlocked, "RUN_STILL_RUNNING");
+            expect(runningError.message).toContain("Pass force=true");
+
+            const finishedBefore = expectToolOk(await client.callTool({
+                name: "get_run",
+                arguments: { runId: "finished-run" },
+            }));
+            const finishedBlocked = await client.callTool({
+                name: "time_travel",
+                arguments: {
+                    runId: "finished-run",
+                    nodeId: "done",
+                },
+            });
+            const finishedError = expectToolError(finishedBlocked, "INVALID_INPUT");
+            expect(finishedError.message).toContain("confirm=true");
+            expect(expectToolOk(await client.callTool({
+                name: "get_run",
+                arguments: { runId: "finished-run" },
+            }))).toEqual(finishedBefore);
+
+            const failedBefore = expectToolOk(await client.callTool({
+                name: "get_run",
+                arguments: { runId: "failed-run" },
+            }));
+            const failedBlocked = await client.callTool({
+                name: "time_travel",
+                arguments: {
+                    runId: "failed-run",
+                    nodeId: "done",
+                },
+            });
+            const failedError = expectToolError(failedBlocked, "INVALID_INPUT");
+            expect(failedError.message).toContain("confirm=true");
+            expect(expectToolOk(await client.callTool({
+                name: "get_run",
+                arguments: { runId: "failed-run" },
+            }))).toEqual(failedBefore);
+
+            const travelled = expectToolOk(await client.callTool({
+                name: "time_travel",
+                arguments: {
+                    runId: "finished-run",
+                    nodeId: "done",
+                    confirm: true,
+                    restoreVcs: false,
+                },
+            }));
+            expect(travelled.run.runId).toBe("finished-run");
         });
     }, 30_000);
 
