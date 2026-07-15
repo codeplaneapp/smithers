@@ -18,6 +18,7 @@
 
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createVersionedArtifactGuard } from "./llms-version-guard.ts";
 
 const DOCS = resolve(import.meta.dir, "../docs");
 // The `smithers` agent skill bundles a copy of the full docs so an installed
@@ -34,6 +35,7 @@ if (typeof PACKAGE_VERSION !== "string" || PACKAGE_VERSION.length === 0) {
   throw new Error("Could not resolve package version from package.json");
 }
 
+const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION);
 mkdirSync(PACKAGE_DOCS, { recursive: true });
 
 // -----------------------------------------------------------------------------
@@ -328,7 +330,10 @@ for (const b of builds) {
   ].join("\n");
   const fullContent = fullHeader + fragmentBodies.join("\n\n===============================================================================\n\n");
   writeFileSync(resolve(DOCS, "llms-full.txt"), fullContent);
-  writeFileSync(resolve(DOCS, `llms-full-v${PACKAGE_VERSION}.txt`), fullContent);
+  const versionedFullResult = versionedArtifacts.write(
+    resolve(DOCS, `llms-full-v${PACKAGE_VERSION}.txt`),
+    fullContent,
+  );
   writeFileSync(resolve(PACKAGE_DOCS, "llms-full.txt"), fullContent);
   const bytes = fullContent.length;
   console.log(`\n→ llms-full.txt (full concat)`);
@@ -349,7 +354,9 @@ for (const b of builds) {
   const skillMd = readFileSync(resolve(SKILL_DIR, "SKILL.md"), "utf8");
   writeFileSync(resolve(CLI_DOCS_DIR, "SKILL.md"), skillMd);
   console.log(`\n→ apps/cli/docs/SKILL.md (packaged CLI copy)`);
-  console.log(`→ llms-full-v${PACKAGE_VERSION}.txt (versioned full concat)`);
+  if (versionedFullResult === "written") {
+    console.log(`→ llms-full-v${PACKAGE_VERSION}.txt (versioned full concat)`);
+  }
   console.log(`→ packages/smithers/docs/llms-full.txt (npm bundle)`);
 }
 
@@ -414,10 +421,15 @@ Examples:
 `;
 
 writeFileSync(resolve(DOCS, "llms.txt"), indexContent);
-writeFileSync(resolve(DOCS, `llms-v${PACKAGE_VERSION}.txt`), indexContent);
+const versionedIndexResult = versionedArtifacts.write(
+  resolve(DOCS, `llms-v${PACKAGE_VERSION}.txt`),
+  indexContent,
+);
 writeFileSync(resolve(PACKAGE_DOCS, "llms.txt"), indexContent);
 console.log(`\n→ llms.txt (index)`);
-console.log(`→ llms-v${PACKAGE_VERSION}.txt (versioned index)`);
+if (versionedIndexResult === "written") {
+  console.log(`→ llms-v${PACKAGE_VERSION}.txt (versioned index)`);
+}
 console.log(`→ packages/smithers/docs/llms.txt (npm bundle)`);
 console.log(`  ${indexContent.length.toLocaleString()} bytes`);
 
@@ -427,3 +439,5 @@ console.log(`\n→ apps/cli/docs/llms.txt (packaged CLI copy)`);
 console.log(`  ${indexContent.length.toLocaleString()} bytes`);
 
 console.log(`\nTotal: ${totalBytes.toLocaleString()} bytes (~${Math.round(totalBytes / 4).toLocaleString()} tokens) across all fragments.`);
+
+versionedArtifacts.assertNoPublishedVersion();

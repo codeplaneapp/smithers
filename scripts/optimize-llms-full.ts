@@ -25,20 +25,19 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { createVersionedArtifactGuard } from "./llms-version-guard.ts";
 
 const TARGET = resolve(import.meta.dir, "../docs/llms-full.txt");
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(resolve(import.meta.dir, "../package.json"), "utf8"),
 ).version;
+const VERSIONED_MIRROR = resolve(import.meta.dir, `../docs/llms-full-v${PACKAGE_VERSION}.txt`);
 const MIRRORS = [
   resolve(import.meta.dir, "../skills/smithers/llms-full.txt"),
   resolve(import.meta.dir, "../apps/cli/docs/llms-full.txt"),
-  // Version-pinned + npm-bundled copies. generate-llms.ts emits these from the
-  // UN-optimized bundle, so they must be re-mirrored here or they ship docs that
-  // diverge from the canonical (optimized) docs/llms-full.txt.
-  resolve(import.meta.dir, `../docs/llms-full-v${PACKAGE_VERSION}.txt`),
   resolve(import.meta.dir, "../packages/smithers/docs/llms-full.txt"),
 ];
+const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION);
 const before = readFileSync(TARGET, "utf8");
 let text = before;
 
@@ -407,6 +406,13 @@ for (const mirror of MIRRORS) {
   mkdirSync(dirname(mirror), { recursive: true });
   writeFileSync(mirror, text);
 }
+// The release-pinned copy is protected because it becomes immutable once the
+// matching package version is published.
+const versionedMirrorResult = versionedArtifacts.write(VERSIONED_MIRROR, text);
+if (versionedMirrorResult === "written") {
+  console.log(`  mirrored: ${VERSIONED_MIRROR.replace(resolve(import.meta.dir, "..") + "/", "")}`);
+}
+versionedArtifacts.assertNoPublishedVersion();
 
 if (text === before) {
   console.log("No changes to docs/llms-full.txt; mirrors refreshed.");

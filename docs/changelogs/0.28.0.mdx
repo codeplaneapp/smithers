@@ -457,8 +457,9 @@ sandboxes.
   subprocess capture truncates on UTF-8 boundaries, idle-timeout errors report
   the effective timeout, duplicate inline subflows are rejected, numeric props
   are coerced consistently, CheckSuite commands use the run root, Poller uses a
-  durable timer, and seven composite components carry their dependency maps and
-  loop conditions through extraction.
+  durable timer, seven composite components carry their dependency maps and loop
+  conditions through extraction, and inactive MDX preloads are detected from
+  object children instead of stringified prompts.
 - **Memory and errors:** note side effects occur only after insertion, message
   re-saves retain their original ordering time, history order and limits are
   stable, summarizer failures retain Smithers error identity, top-level arrays
