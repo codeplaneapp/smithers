@@ -1,3 +1,5 @@
+import type { GatewayScoreRow as ProtocolGatewayScoreRow } from "@smithers-orchestrator/protocol/gateway-rpc";
+
 /**
  * One row of the `scores` collection — the live `listScores` RPC response shape.
  *
@@ -27,17 +29,4 @@
  * There is NO token/cost data in this table — those Metrics-tab tiles are
  * computed client-side from these rows and em-dashed when absent.
  */
-export type GatewayScoreRow = {
-  runId: string;
-  nodeId: string;
-  iteration: number;
-  attempt: number;
-  scorerId: string;
-  scorerName: string;
-  source: string;
-  score: number;
-  reason?: string | null;
-  scoredAtMs: number;
-  latencyMs?: number | null;
-  durationMs?: number | null;
-};
+export type GatewayScoreRow = ProtocolGatewayScoreRow;

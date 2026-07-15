@@ -1,3 +1,8 @@
+import type {
+  GatewayDocKind as ProtocolGatewayDocKind,
+  GatewayTicketRow as ProtocolGatewayTicketRow,
+} from "@smithers-orchestrator/protocol/gateway-rpc";
+
 /**
  * One row of the `tickets` collection — the live `listTickets` RPC response
  * shape (and the row `createTicket`/`updateTicket` return).
@@ -19,13 +24,6 @@
  *                     ticket's status survives reload — LOCKED Path A).
  *  - `updatedAtMs`  — `_smithers_docs.updated_at_ms`.
  */
-export type GatewayDocKind = "ticket" | "plan" | "spec" | "proposal";
+export type GatewayDocKind = ProtocolGatewayDocKind;
 
-export type GatewayTicketRow = {
-  path: string;
-  kind: GatewayDocKind;
-  content: string;
-  contentHash: string;
-  status?: string | null;
-  updatedAtMs: number;
-};
+export type GatewayTicketRow = ProtocolGatewayTicketRow;

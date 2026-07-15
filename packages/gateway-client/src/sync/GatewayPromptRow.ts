@@ -1,3 +1,5 @@
+import type { GatewayPrompt } from "@smithers-orchestrator/protocol/gateway-rpc";
+
 /**
  * One row of the `prompts` collection — the live `listPrompts` RPC response
  * shape.
@@ -22,10 +24,4 @@
  *  - `createdAtMs` — `fs.stat().birthtimeMs` (omitted when unavailable).
  *  - `updatedAtMs` — `fs.stat().mtimeMs` (omitted when unavailable).
  */
-export type GatewayPromptRow = {
-  id: string;
-  entryFile: string;
-  source: string;
-  createdAtMs?: number;
-  updatedAtMs?: number;
-};
+export type GatewayPromptRow = GatewayPrompt;

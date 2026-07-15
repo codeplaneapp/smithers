@@ -1,4 +1,4 @@
-import type { GatewayComparisonScoreRow } from "./GatewayComparisonScoreRow.ts";
+import type { GatewayScoreDetail as ProtocolGatewayScoreDetail } from "@smithers-orchestrator/protocol/gateway-rpc";
 
 /**
  * A single persisted score with its JSON payloads decoded by the gateway.
@@ -6,10 +6,4 @@ import type { GatewayComparisonScoreRow } from "./GatewayComparisonScoreRow.ts";
  * Each detail value is always present. SQL NULL and stored JSON null are both
  * represented as JavaScript `null` at the wire boundary.
  */
-export type GatewayScoreDetail = GatewayComparisonScoreRow & {
-  meta: unknown;
-  input: unknown;
-  output: unknown;
-  groundTruth: unknown;
-  context: unknown;
-};
+export type GatewayScoreDetail = ProtocolGatewayScoreDetail;

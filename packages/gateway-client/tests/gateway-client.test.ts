@@ -1,13 +1,65 @@
 import { describe, expect, test } from "bun:test";
 import { listGatewayRpcMethods } from "@smithers-orchestrator/gateway/rpc";
 import type { GatewayRpcMethod } from "@smithers-orchestrator/gateway-client/rpc";
+import type { GatewayAsyncState } from "@smithers-orchestrator/gateway-react/GatewayAsyncState";
+import type {
+  GatewayComparisonScoreRow as ProtocolGatewayComparisonScoreRow,
+  GatewayDocKind as ProtocolGatewayDocKind,
+  GatewayMemoryFact,
+  GatewayPrompt,
+  GatewayScoreDetail as ProtocolGatewayScoreDetail,
+  GatewayScoreRow as ProtocolGatewayScoreRow,
+  GatewayTicketRow as ProtocolGatewayTicketRow,
+  GetScoreDetailResponse,
+  ListMemoryFactsResponse,
+  ListPromptsResponse,
+  ListScoresForRunsResponse,
+  ListScoresResponse,
+  ListTicketsResponse,
+} from "@smithers-orchestrator/protocol/gateway-rpc";
 import {
   GATEWAY_EVENT_BACKPRESSURE_CODE,
   GatewayRpcError,
   SmithersGatewayClient,
   SmithersGatewayConnection,
 } from "../src/index.ts";
+import type {
+  GatewayComparisonScoreRow,
+  GatewayDocKind,
+  GatewayMemoryFactRow,
+  GatewayPromptRow,
+  GatewayScoreDetail,
+  GatewayScoreRow,
+  GatewayTicketRow,
+} from "../src/index.ts";
 import type { GatewayRpcRequestMap, GatewayRpcResponseMap } from "../src/GatewayRpcTypeMap.ts";
+
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
+    ? (<Value>() => Value extends Right ? 1 : 2) extends <Value>() => Value extends Left ? 1 : 2
+      ? true
+      : false
+    : false;
+type Expect<Value extends true> = Value;
+
+type _CanonicalGatewayWireAssertions = [
+  Expect<Equal<GatewayMemoryFactRow, GatewayMemoryFact>>,
+  Expect<Equal<GatewayPromptRow, GatewayPrompt>>,
+  Expect<Equal<GatewayScoreRow, ProtocolGatewayScoreRow>>,
+  Expect<Equal<GatewayComparisonScoreRow, ProtocolGatewayComparisonScoreRow>>,
+  Expect<Equal<GatewayScoreDetail, ProtocolGatewayScoreDetail>>,
+  Expect<Equal<GatewayDocKind, ProtocolGatewayDocKind>>,
+  Expect<Equal<GatewayTicketRow, ProtocolGatewayTicketRow>>,
+  Expect<Equal<GatewayRpcResponseMap["listMemoryFacts"], ListMemoryFactsResponse>>,
+  Expect<Equal<GatewayRpcResponseMap["listPrompts"], ListPromptsResponse>>,
+  Expect<Equal<GatewayRpcResponseMap["listScores"], ListScoresResponse>>,
+  Expect<Equal<GatewayRpcResponseMap["listScoresForRuns"], ListScoresForRunsResponse>>,
+  Expect<Equal<GatewayRpcResponseMap["getScoreDetail"], GetScoreDetailResponse>>,
+  Expect<Equal<GatewayRpcResponseMap["listTickets"], ListTicketsResponse>>,
+  Expect<Equal<GatewayRpcResponseMap["createTicket"], ProtocolGatewayTicketRow>>,
+  Expect<Equal<GatewayRpcResponseMap["updateTicket"], ProtocolGatewayTicketRow>>,
+  Expect<Equal<GatewayAsyncState<string>["data"], string | undefined>>,
+];
 
 type SentRequest = {
   type: "req";
@@ -131,6 +183,22 @@ async function waitForSent(ws: FakeWebSocket, count: number) {
 }
 
 describe("SmithersGatewayClient HTTP RPC", () => {
+  test("keeps the gateway-react legacy subpath facade without a direct gateway dependency", async () => {
+    const legacySubpath = await import("@smithers-orchestrator/gateway-react/useGatewayActions");
+    const manifest = (await Bun.file(new URL("../../gateway-react/package.json", import.meta.url)).json()) as {
+      exports?: Record<string, unknown>;
+      dependencies?: Record<string, string>;
+    };
+
+    expect(legacySubpath.useGatewayActions).toBeFunction();
+    expect(manifest.exports?.["./*"]).toEqual({
+      types: "./src/*.ts",
+      import: "./src/*.ts",
+      default: "./src/*.ts",
+    });
+    expect(manifest.dependencies?.["@smithers-orchestrator/gateway"]).toBeUndefined();
+  });
+
   test("typed RPC maps cover every stable gateway method", () => {
     expect(Object.keys(typedRpcRequestMethods).sort()).toEqual([...listGatewayRpcMethods()].sort());
     expect(Object.keys(typedRpcResponseMethods).sort()).toEqual([...listGatewayRpcMethods()].sort());

@@ -1,3 +1,5 @@
+import type { GatewayMemoryFact } from "@smithers-orchestrator/protocol/gateway-rpc";
+
 /**
  * One row of the `memoryFacts` collection — the live `listMemoryFacts` RPC
  * response shape.
@@ -20,12 +22,4 @@
  *  - `updatedAtMs`  — `_smithers_memory_facts.updated_at_ms`.
  *  - `ttlMs`        — `_smithers_memory_facts.ttl_ms` (null when non-expiring).
  */
-export type GatewayMemoryFactRow = {
-  namespace: string;
-  key: string;
-  valueJson: string;
-  schemaSig?: string | null;
-  createdAtMs: number;
-  updatedAtMs: number;
-  ttlMs?: number | null;
-};
+export type GatewayMemoryFactRow = GatewayMemoryFact;
