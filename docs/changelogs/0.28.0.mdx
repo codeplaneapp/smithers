@@ -1,114 +1,516 @@
 ---
 title: "0.28.0"
-description: "The Smithers Monitor grows into a full operations console with live transcripts, in-browser agent hijack, and one-click recovery; workflows declare their own UI/TUI views; delegation chains ship as first-class composites; the scheduler auto-raises concurrency on demand; and terminal cancellation becomes a single-owner durable claim."
+description: "Operate runs from a full Monitor console, install and share workflow packs, bind sensitive work to the exact evidence that authorized it, use fixed or adaptive delegation, keep durable knowledge across runs, and run the same workflow core in Node or the browser."
 ---
 
-Smithers 0.28.0 turns the Monitor into the place you operate runs from: it opens automatically when a run starts, diagnoses stuck runs on a live health strip with a one-click Resume, streams per-node agent transcripts, and can hand you the agent's actual session in an embedded terminal. Around that: `<UI>` and `<TUI>` primitives let a workflow declare its own views, delegation chains land as first-class composites with scorers, the scheduler raises `maxConcurrency` on demand instead of starving tasks, cancellation becomes a claim-based single-owner transition that can never leave ghost approval gates behind, and a long security pass hardens cross-origin credential handling across every integration.
+Smithers 0.28.0 makes long-running agent work easier to operate, distribute,
+and trust. The Monitor is now a full operations console. Workflow packs can be
+installed, updated, ejected for local editing, and shared. Provenance bindings
+stop a task when the approval or artifact that authorized it has changed.
+Delegation gains both a fixed `DelegationChain` and the experimental, adaptive
+`Trellis`. Durable memory notes turn observations into reviewable knowledge,
+and a new runtime adapter runs the real workflow driver in Node or a browser.
+
+This release also contains a broad reliability and security pass across the
+engine, Gateway, CLI, time travel, database backends, integrations, agents,
+sandbox providers, and the shipped workflow pack.
 
 ---
 
 ## Monitor: a full operations console
 
-The Monitor is no longer a read-only dashboard. It opens automatically when a run starts and gives you the tools to understand and unstick a run without leaving the browser.
+The Monitor is now where you understand and steer a run, rather than a page you
+open only to check whether it finished.
 
-- **Always-on health strip with live diagnosis** and a one-click Resume button for stalled or orphaned runs.
-- **Hijack a node's agent session in an embedded terminal.** A PTY websocket channel on the gateway surfaces per-node hijack candidates; the session opens in the Monitor itself.
-- **Streaming per-node transcripts** with readable per-field node output, plus a Create UI button for one-off run views.
-- **Activity event view and a frame-by-frame scrubber**, an interactive DevTools-style XML tree, a diff view, and a timeline tab with run/task controls.
-- **Scores, crons, ops stats, and `/metrics`** get first-class Monitor surfaces, alongside quota visibility and an embedded custom-UI modal.
-- **Container rollups, failure reasons, and a notable-events filter** make big fan-outs scannable; the landing view gains a paginated all-runs table.
-- **Embedded-guest mode:** `?embed=1` renders chrome-less views (pinned-run detail or rail-less overview) with fail-closed `postMessage` selection to an explicit host origin and `?theme=` stamping, so other apps can host the Monitor safely.
-- **Agent attribution everywhere:** devtools snapshots and the Monitor inspector show each task's declared agent, acting engine, model, chain position, and attempt history.
+- **Always-on run health** diagnoses stalled, stale, orphaned, quota-parked,
+  and terminal runs. A one-click Resume action handles recoverable runs.
+- **In-browser session hijack** opens a node's real agent session through a PTY
+  websocket channel, with per-node hijack candidates supplied by the Gateway.
+- **Live agent transcripts and structured output** open at the newest events
+  and keep streaming while a busy run produces more output.
+- **DevTools inspection** includes an interactive XML tree, frame scrubber,
+  activity feed, diff view, timeline, scores, crons, operations statistics,
+  quota state, and run or task controls.
+- **Large-run navigation** adds container rollups, failure reasons, notable
+  event filtering, and a paginated all-runs table.
+- **Agent attribution** follows every task through declared agent, acting
+  engine, model, failover position, and attempt history.
+- **Embedded guest mode** uses `?embed=1` for chrome-less run detail or
+  rail-less overview pages, fail-closed host-origin messaging, and explicit
+  `?theme=` parity. The iframe-safe cancel flow no longer depends on
+  `window.confirm`.
+- **Accessibility and responsiveness** now have keyboard, focus, reduced
+  motion, light/dark theme, authenticated recovery, and narrow-layout browser
+  coverage.
+
+The CLI opens the Monitor when a run starts. `bunx smithers-orchestrator
+monitor` remains the direct entry point for an existing run or workspace.
+
+## Workflow packs: install, update, edit, share, and remove
+
+Workflow packs are a complete lifecycle in 0.28.0.
+
+```bash
+bunx smithers-orchestrator add user/repository --yes
+bunx smithers-orchestrator packs list
+bunx smithers-orchestrator packs update
+bunx smithers-orchestrator eject pack-name:workflow-name
+bunx smithers-orchestrator share --dry-run
+bunx smithers-orchestrator remove pack-name
+```
+
+- **`smithers.toon` manifests** declare a pack's name, description,
+  repository, workflows, and UIs. `init` scaffolds the manifest, including an
+  agents-only initialization.
+- **Local and global discovery** finds installed packs, validates their
+  manifests and import closure, scans JavaScript pack modules, and reports
+  whether a workflow is eligible to run.
+- **Qualified names remove ambiguity.** A pack workflow can be addressed as
+  `pack-name:workflow-name`; an unqualified local workflow shadows the pack
+  copy.
+- **Updates are explicit.** `packs update NAME` refreshes one locked pack, and
+  bare `packs update` refreshes all of them without touching local files.
+- **Removal is explicit and scoped.** `remove NAME` uninstalls a local pack;
+  `remove NAME --global` removes its global installation. Ejected local files
+  are separate and remain yours.
+- **`eject` makes a workflow yours.** It copies the workflow plus its relative
+  UI, prompt, library, stylesheet, Sass closure, directory imports, aliases,
+  re-exports, and asset leaves into the local `.smithers` tree. Collision and
+  rollback checks prevent a partial local copy.
+- **Sharing is durable.** The seeded `share-pack` workflow validates and, when
+  necessary, completes the manifest before preparing a repository and registry
+  pull request. The `add` and `share-pack` system workflows make both sides of
+  the lifecycle runnable and inspectable.
+- **Pack writes are non-destructive.** Installs use a staged, symlink-safe,
+  same-filesystem swap. Publishing works from a staged copy, never the live
+  pack, strips local agent configuration, supports idempotent retries, and
+  cleans its temporary state on every terminal path.
+
+See [Workflow packs](/reference/packs), [`add`](/workflows/add), and
+[`share-pack`](/workflows/share-pack).
+
+## Provenance-bound execution
+
+Approving an artifact should authorize that artifact, not whatever happens to
+occupy the same output slot later. Provenance binding makes that rule part of
+the engine.
+
+```tsx
+const approval = ctx.prove("review", { nodeId: "lane:review" });
+
+<Task id="lane:publish" bind={approval} agent={publisher}>
+  Publish the reviewed artifact.
+</Task>
+```
+
+`ctx.prove()` captures a digest of the exact upstream row. `<Task bind>` checks
+that digest again at schedule time. If the row changed, the task parks as
+`BOUND_STALE` instead of acting on stale authority. The state is visible to
+workflow code through `ctx.boundStale("lane:publish")` and to operators through
+`bunx smithers-orchestrator why`, so a correction loop can produce and approve
+a new artifact without failing the run.
+
+Bindings are carried through graph extraction, scheduler state, persisted task
+metadata, DOM compatibility paths, and generated types. SHA-256 behavior is
+verified against standard vectors and the active platform crypto provider.
+
+See [Provenance binding](/concepts/provenance).
+
+## Fixed and adaptive delegation
+
+Smithers now ships two delegation models.
+
+- **`DelegationChain`** is the fixed, inspectable composite for goal
+  refinement, planning, preview, execution, review, scoring, and bounded
+  re-planning. Its workflow and multi-file UI ship in the pack, and
+  `gateway-react` exposes the durable delegation event fold.
+- **`Trellis`** is the experimental adaptive model. Sol or Fable authors a
+  bounded `agent | sequence | parallel` intermediate representation from
+  settled evidence; Smithers validates and compiles it into ordinary tasks in
+  the same run. Terra and Luna can complete bounded work but cannot author more
+  graph structure.
+
+The fixed chain includes probe-judgment, plan-solidity, estimate-accuracy,
+tier-fit, and human-poll scorers with weighted run aggregation. Shared token
+prices and `estimateCostUsd` keep cost forecasts consistent across the chain,
+review app, and workflow helpers.
+
+Trellis has deterministic program digests, immutable recursive fuel,
+depth/fan-out/prompt limits, one bounded semantic-repair turn, strict output
+contracts, canonical settlement, and explicit handling for runtime failure and
+fuel exhaustion. Direct Sol/Fable implementation is disabled unless the caller
+supplies a critical-execution policy with category, path, line, and independent
+review constraints. Its custom UI shows accepted and rejected generations,
+fuel allocation, real node outputs, events, and the final canonical outcome.
+
+Trellis is not part of the default init pack in this release. It is available
+as a repository workflow and public component for experimental use. See
+[`<Trellis>`](/components/trellis) and the [`trellis`](/workflows/trellis)
+workflow.
+
+Agent tasks also gain `maxSchemaRetries`, so workflow authors can budget or
+disable hidden structured-output correction calls. Exhausted delegation leaves
+now fail instead of being mistaken for completed work.
+
+## Durable knowledge across runs
+
+The memory package gains an append-only notes layer for knowledge that should
+survive one run without becoming mutable ambient state.
+
+- Facts, messages, and notes can carry explicit run, node, and iteration
+  provenance.
+- Notes are append-only and idempotent. A supersession junction records which
+  accepted note replaced which older observations without deleting history.
+- `pending`, `accepted`, and `rejected` status is the one mutable field. The
+  default read contract returns accepted notes that have not been superseded by
+  another accepted note.
+- Full-text search is opt-in and created lazily per namespace kind, so unused
+  namespaces pay no FTS write cost.
+- `saveNote`, `getNote`, `listNotes`, `setNoteStatus`, `enableNoteSearch`, and
+  `searchNotes` are published through both the store and Effect service APIs.
+- The `incident-runbook-memory` example shows ordinary tasks banking
+  provenance-stamped lessons, proposing a consolidated rule, waiting for human
+  approval, and serving that accepted rule to the next incident.
+
+The notes and FTS implementation is SQLite-only in 0.28.0 and fails with an
+explicit backend error on Postgres or PGlite. Facts and messages keep their
+existing backend support.
 
 ## Workflows declare their own views
 
-- **`<UI>` and `<TUI>` components** declare workflow-owned views inline; the gateway resolves them via the run's `entryFile`, and `ui/<key>.tsx` files are picked up by convention at request time.
-- **`@smithers-orchestrator/ui`** is a token-native component library (shadcn anatomy) shared by the seeded workflow UIs and the init pack templates, with pre-first-paint theming and production React in gateway UI bundles.
-- **The `create-ui` workflow** has one agent author and verify a custom UI for an existing workflow.
+- **`<UI>` and `<TUI>` components** let a workflow declare its browser and
+  terminal views inline. The Gateway resolves them through the run's
+  `entryFile`, while `ui/<key>.tsx` convention entries are discovered at
+  request time.
+- **`@smithers-orchestrator/ui`** is a token-native component library with
+  shadcn anatomy, shared by seeded workflow UIs and init templates. Gateway UI
+  bundles use production React and stamp the theme before first paint.
+- **`create-ui`** has one agent author and verify a custom UI for an existing
+  workflow. It is shipped as a curated system workflow, so the Monitor's
+  Create UI action works outside the Smithers development repository.
+- A UI architecture gate tracks package boundaries, shared primitive usage,
+  and shadcn provenance.
 
-## Delegation chains
+## Runtime portability and child workflows
 
-- **`DelegationChain` composites, schemas, and prompts** ship in `@smithers-orchestrator/components`, with a seeded `delegation-chain` workflow and multi-file UI in the init pack.
-- **Delegation scorers with weighted run aggregation** grade each hop; model token prices are centralized with a cost estimator.
+The workflow driver now runs behind a typed `RuntimeAdapter` for clock,
+storage, identifiers, task execution, files, subprocesses, worktrees, and
+sandboxes.
 
-## Engine and scheduler
+- **`smithers-orchestrator/browser`** runs the real `WorkflowDriver`, renderer,
+  graph extraction, and core workflow components in a browser. Unsupported
+  filesystem, subprocess, sandbox, or worktree operations fail with
+  `RUNTIME_CAPABILITY_UNAVAILABLE`.
+- **Node-compatible entry points** keep the same workflow core loadable without
+  pulling a static Bun SQLite dependency through the module graph.
+- **Five-runtime conformance coverage** exercises Node, Bun, browser,
+  Cloudflare Workers, and Vercel, including a real headless browser
+  and a packed npm consumer.
+- **`WorkflowFileRef`** lets `<Subflow>` run a workflow module generated at
+  runtime, with its file lifecycle linked to the child node.
+- **Child-run lineage** can be supplied from the CLI with `--parent-run-id` and
+  is persisted for inspection, cancellation, and MCP consumers.
+- **Prefer-resume fan-out** reuses a matching child run after a parent resume,
+  and runnable `childRun` references can expose workflows with several output
+  tables instead of only a conventional final table.
 
-- **Owned worktree lifecycle:** `smithers worktree list|prune` exposes the worktrees attached to runs and safely reclaims them. Completed-run worktrees are now reaped automatically by default; dirty worktrees and branches with unpushed commits are always preserved.
-- **Demand-driven `maxConcurrency` auto-raise:** the scheduler raises the ceiling when runnable tasks would otherwise starve, and warns once when tasks sit on the cap.
-- **Numeric node `priority`** orders concurrency-limited scheduling.
-- **`failurePolicy="quarantine"`** on containers isolates a failing child instead of failing the run.
-- **Claim-based terminal cancellation:** cancel is now a compare-and-set claim owned by exactly one caller. Every pending external wait (approvals, human requests, events, timers) resolves durably, so a cancelled run can never advertise an approval gate that cannot resume. Attempt heartbeats and completions verify run ownership, closing a family of races between concurrent engines, the gateway, and the CLI.
-- **Content-addressed snapshot payloads** deduplicate identical multi-megabyte states across frames.
-- **Quota-parked runs are hardened** against resets, workflow edits, and agent-chain demotion mid-failover.
+## Engine, scheduler, and time travel
 
-## Gateway and server
+- **Owned worktree lifecycle:** `bunx smithers-orchestrator worktree list` shows
+  the run that owns each worktree, and `bunx smithers-orchestrator worktree
+  prune` safely reclaims completed-run worktrees. Dirty worktrees and branches
+  with unpushed commits are always preserved.
+- **Demand-driven concurrency:** the scheduler derives a useful default from
+  declared parallel widths, raises `maxConcurrency` when runnable work would
+  otherwise starve, honors `subtreeConcurrency`, and emits one warning when a
+  pinned cap remains saturated.
+- **Numeric `priority`** orders tasks competing for a concurrency-limited slot.
+- **`failurePolicy="quarantine"`** lets a container isolate a failed child
+  without failing the whole run.
+- **Graceful pause:** `bunx smithers-orchestrator pause` and the `pauseRun` RPC
+  stop scheduling new work, allow in-flight tasks to finish, and park the run
+  in a resumable `paused` state.
+- **Single-owner terminal cancellation** uses a compare-and-set claim. Pending
+  approvals, human requests, events, and timers finalize durably, and surviving
+  owner processes are reaped by `cancel` and `down`.
+- **Quota parking** fails over to another agent before parking, keeps task and
+  workflow identity stable through resets, auto-wakes at the known reset time,
+  and can now be cancelled through the control plane.
+- **Replay-sensitive tools require approval.** The MCP contract marks replay
+  destructive, prompts before destructive time travel, and parks replay-unsafe
+  tool use behind an approval gate.
+- **Content-addressed snapshot payloads** deduplicate identical large states.
+  Rewinds are serialized behind durable leases, replay re-blesses the edited
+  workflow hash, and truncation is correct even when every retained frame is
+  newer than the target attempt.
+- **Schema defaults apply before validation.** Zod defaults in the workflow
+  input schema are now present in `ctx.input` on a new run.
+- **Structured-output correction is bounded** by `Task.maxSchemaRetries` and
+  retains the task root, output limit, task context, and retry policy.
+- Concurrent `WatchTree` waiters are supported, durable deferred resolutions
+  are bounded, malformed waiting timers keep an attempt-relative anchor, and
+  compute-task timers are cleared after completion.
 
-- **`pauseRun` RPC** for graceful pause: in-flight tasks finish, then the run parks resumably.
-- **Cross-run score comparison:** `listScoresForRuns` and `getScoreDetail` RPCs plus `GET /v1/api/scores/compare`.
-- **Evals extension:** save suites, list cases, and launch the seeded `eval-suite-run` system workflow, which fans a suite's dataset out as real child runs and grades each against its expected value or assertions.
-- **`retryTask` RPC and a node-states read route** round out run recovery over the wire.
+## Gateway, protocol, and control plane
+
+- **A protocol-owned Gateway RPC module** is now the wire-contract source of
+  truth. Gateway, gateway-client, gateway-react, and their generated
+  declarations consume the same method and row types through focused subpaths.
+- **Cross-run score comparison** adds `listScoresForRuns`, `getScoreDetail`,
+  and `GET /v1/api/scores/compare`.
+- **Saved eval suites** store cases and launch the hidden `eval-suite-run`
+  system workflow. Each case runs as a real child workflow and is graded
+  against an expected value or assertion specification.
+- **Run recovery over the wire** adds `retryTask`, node-state reads, graceful
+  pause, and the `whatHappened` summary route.
+- **Final run diffs over RPC** add `getRunDiff` plus gateway-client and React
+  bindings and a closed, generated response type. Terminal revisions are
+  resolved per checkout lane and merged, with durable node-diff cache fallback
+  after a checkout is reaped. The response preserves an honest empty patch
+  list and returns an explicit oversized marker instead of silently truncating
+  the result.
+- **Accessible control requests** use a real dialog with keyboard and focus
+  behavior rather than an inaccessible browser prompt.
+- **Control-plane mutations and audit records** commit atomically, project
+  usage limits cascade to their children, and quota-parked runs accept
+  cancellation.
+- **Run-event replay order and cron ownership** are stable under reconnects and
+  concurrent ticks. Multiplayer run forests preserve parentage while parked
+  streams recover.
 
 ## CLI
 
-- **`smithers what`:** a cheap fast agent narrates what happened in a run or node from the recorded facts.
-- **Run status, scoped supervision, and observability:** `bunx smithers-orchestrator supervise` watches a scope of runs and auto-resumes stale ones; status output is structured and consistent.
-- **`smithers upgrade`:** an agent-assisted upgrade workflow that reads changelogs, upgrades with a cheap agent, and escalates only when needed.
-- **Init redesign:** one agent question, then a hijacked tutorial session; the init pack is slimmed to focused authoring workflows with the old starters preserved under `examples/`; the global `~/.smithers` pack is served from the gateway.
-- **`up --dry-run` now redirects to `bunx smithers-orchestrator graph`**, the non-executing construct check.
-- **SOTA model registry:** a canonical model registry with benchmark results, a daily research cron, a drift check, and a CLI notice when a newer registry ships.
+- **`bunx smithers-orchestrator status RUN_ID`** gives a compact health verdict,
+  node counts, agent/model mix, throughput, and current blockers.
+- **`bunx smithers-orchestrator what RUN_ID [NODE_ID]`** uses a cheap agent to
+  narrate the recorded facts, with a deterministic fallback when no agent is
+  available.
+- **`bunx smithers-orchestrator review`** runs code review plus a story-form
+  HTML walkthrough for a repository or pull request.
+- **`bunx smithers-orchestrator upgrade`** reads the relevant changelogs,
+  upgrades with a cheap agent, and escalates only when necessary. Workflow
+  packs update separately through `packs update`.
+- **Scoped supervision** watches and resumes stale runs only when their recorded
+  owner process is verifiably dead.
+- **Init redesign** asks one agent-selection question, then opens a hijacked
+  tutorial session. The init pack is focused on authoring workflows, with older
+  starters kept under `examples/`.
+- **`up --dry-run`** redirects to `bunx smithers-orchestrator graph`, the
+  non-executing construct check.
+- **SOTA registry** publishes a canonical model table, benchmark results, a
+  daily research cron, a drift check, and a notice when a newer registry ships.
+- Global-pack root overrides, JavaScript pack modules, duplicate home workflow
+  directories, invalid subcommands, semantic MCP timeouts, and token-store
+  writes now have explicit, bounded behavior.
 
-## Agents and plugins
+## Agents, plugins, and sandbox providers
 
-- **Codex plugin: durable spawn-tool routing** via the Codex App Server, with crash-safe journaling, stale-lock reclaim, ABA-proof status transitions, and Windows launch fixes.
-- **Claude Code plugin:** the monitor scopes to session-subscribed runs, streams only actionable transitions, and never surfaces approval gates for terminal runs.
-- **Cross-provider agent failover** chains route around a failed provider preflight run-wide.
-- **Vercel joins the sandbox providers** as a first-class package, with a shared provider-kit extracted for all sandbox adapters.
+- **PoolAgent** wraps Poolside's `pool` CLI for headless Smithers tasks, with
+  capability detection, diagnostics, published types, and a main-package
+  export. It is available to configure explicitly and is not added to the
+  default workflow pack.
+- **Codex plugin routing** uses the Codex App Server with crash-safe journals,
+  stale-lock reclaim, ownership-aware recovery, ABA-proof state transitions,
+  and Windows-safe launch behavior.
+- **Claude Code mirroring** follows only runs subscribed by the current
+  session, emits actionable transitions, accepts workflow file paths, and
+  suppresses terminal-run approval ghosts.
+- **Cross-provider failover** advances through a task's agent chain when a
+  provider preflight or rate limit makes the current agent unavailable.
+- **Account and summarizer surfaces** add authorization-code PKCE helpers to
+  `@smithers-orchestrator/accounts` and an OpenAI provider to the Telegram
+  summary workflow. Unknown account providers survive unrelated account-file
+  rewrites, and Telegram windows undated messages by their persisted creation
+  time.
+- **AWS, GCP, Daytona, and Vercel** join the first-class sandbox-provider
+  surface. A shared provider kit supplies request/result files, command
+  deadlines, redaction, CA handling, contract tests, and mock environments for
+  adapter authors.
+- Provider-specific fixes align Cloud Run Jobs, ECS, CodeBuild, S3 transport,
+  CloudWatch logs, Daytona timeouts, Vercel deadlines, and Cloudflare process
+  results with their real SDK contracts.
 
-## Deterministic testing and coverage
+## Workflows, testing, and evals
 
-- **Deterministic scenario kernel in `@smithers-orchestrator/testing`:** seeded ready-set scheduling, replay bundles, strict control rendezvous, and real-database/real-process adapters make concurrency failures reproducible without replacing the systems under test. The kernel owns ready-set races and fails runs that leave scenario controls unused.
-- **Multi-segment LCOV coverage:** package test scripts such as `bun test && bun test` run as separate coverage segments whose LCOV output is merged into one report.
+- **`@smithers-orchestrator/testing`** ships a workflow simulator plus a
+  deterministic scenario kernel with seeded ready-set scheduling, strict
+  control rendezvous, replay bundles, cleanup scopes, trace collection, and
+  real-database/real-process adapters protected by nonce admission.
+- **Production-parity `simulate`** uses engine-owned output validation and real
+  task semantics. Files-only fake-agent wrappers preserve their filesystem
+  results, and invalid function wrappers fail explicitly.
+- **Authoring benchmark and rules** cover reserved columns, nested-loop shapes,
+  loop output lookup, real graph rendering in tests, and pack-test
+  registration. A deterministic phase-one suite establishes a repeatable
+  baseline for one-shot workflow authors.
+- **Docs-driven development** now ships in the init pack with a reproducible
+  feature-spec build gate, derived feature docs, a browser UI, bounded audit
+  inputs, ranked triage, materialized tickets, and an
+  audit-to-implement-to-review loop over the target repository.
+- **Workflow estimates** add a repository `<Estimate>` helper that lets a cheap
+  agent forecast per-task tokens and iterations while deterministic shared
+  pricing computes the total cost. It is designed to run beside real work
+  without blocking it.
+- **Benchmark infrastructure** adds the Kanban speed benchmark and concurrency
+  modes, a results site, a cloud benchmark-fleet package, model-registry
+  results, and repository workflows for daily benchmark maintenance and
+  canary runs.
+- **Multi-segment coverage** runs compound package test scripts and merges
+  their LCOV data instead of discarding later segments.
+- New repository workflows include `issue-blitz` with a live UI,
+  `riskless-github-issue-sweep`, `implement-packs`,
+  `implement-testing-framework-e2e`, `test-fortress`, `break-smithers`,
+  `pr-review-improve-merge`, `route-and-merge-issues`,
+  `codex-issue-merge-queue`, `serverless-refactor`, `ticket-fleet`, and
+  Trellis. These are repo-local or system workflows unless their individual
+  docs say they ship in the default init pack.
+
+## Docs and hosted review
+
+- **The Mintlify documentation site** gains an editorial landing page,
+  component-first workflow UI guidance, a generated CLI catalog, refreshed LLM
+  bundles, and a GitHub social-preview card.
+- **Hosted walkthrough lifecycle** adds an onboarding landing page,
+  `GET /api/plan`, walkthrough history management, seeded review evals, and
+  durable story-form review output.
+- **Review spending remains bounded** with repository, session, and API-key
+  caps. Token pricing is corrected, concurrent usage is recorded honestly, and
+  missing R2 bindings return explicit service errors instead of crashing a
+  walkthrough route.
 
 ## Security hardening
 
-- **Cross-origin credential defense across every integration:** redirects can no longer leak API keys or auth headers in the generic HTTP tool, OpenAPI tools, Exa and API-key search providers, ElevenLabs TTS, or the Anthropic review proxy.
-- **Abort-signal propagation end to end:** AI SDK abort signals now flow through HTTP tools, OpenAPI tools, MCP tool calls, document parsing (LlamaParse, Firecrawl, Mistral OCR), transcription, and the Telegram, Linear, and GitHub integrations, so cancelled tasks stop their network work immediately.
-- **Gateway websocket hardening:** a server-side authentication deadline, isolated unauthenticated connection capacity, capped run-event subscriptions, and one shared heartbeat scheduler per socket.
-- **Bounded response bodies** on HTTP, OpenAPI, and transcription tools.
-- **Credential-safe diagnostics:** observability recursively redacts structured credential fields, and Telegram network errors remove bot tokens before they reach durable error output.
-- **Trusted network destinations:** GitHub integrations reject foreign API URLs, while agents reject malformed or unsafe HTTP-tool base URLs.
-- **Authoritative request policy:** Electric proxy template-only shapes cannot override `whereTemplate`, and OpenAPI protected headers merge case-insensitively so alternate casing cannot replace credentials or policy headers.
-- **Hardened real-adapter admission:** the testing package binds database cut points to `SmithersDb` compare-and-set methods and challenges real-process adapters with adapter-owned nonces.
+- **Credentials stay on their origin.** Generic HTTP and OpenAPI tools, Exa
+  and API-key search providers, ElevenLabs TTS, the Anthropic review proxy,
+  and integrations drop sensitive headers before a cross-origin redirect.
+- **Network destinations are validated.** Agent HTTP tools reject malformed or
+  non-HTTP base URLs, GitHub integrations reject foreign API URLs, and provider
+  stream-log paths stay inside their realpath-confined root.
+- **Pack and token writes are atomic.** Pack installs and shares use staged,
+  symlink-safe copies; the CLI token store is written through a secure atomic
+  replacement.
+- **Approval restrictions fail closed.** Malformed access restrictions are
+  rejected, custom scopes match literally, destructive MCP time travel asks
+  for confirmation, and legacy RPC aliases cannot resolve prototype keys.
+- **Local UI proxies require a loopback Host.** Embedded cross-origin messages
+  also require the explicit host origin.
+- **Gateway websocket admission** has an authentication deadline, isolated
+  unauthenticated capacity, subscription caps, and one heartbeat scheduler per
+  socket.
+- **Structured secrets are recursively redacted** from observability data, and
+  Telegram removes bot tokens from network errors.
+- **OpenAPI protected headers are case-insensitive**, and Electric proxy shape
+  templates cannot be weakened by a caller-supplied `where` clause.
+- **Abort signals and response-size bounds** propagate through tools,
+  integrations, parsing, transcription, and provider calls.
 
-## Reliability
+## Performance
 
-- Hundreds of fixes across the engine, time travel, the DB layer, and the CLI, including: replay re-blesses workflow hashes so an edited replay resumes, `bunx smithers-orchestrator cancel` no longer cascade-cancels time-travel forks, PGlite upgraded to 0.5.4 with eager WASM memory reclamation, camelCase output keys resolve to snake_case physical tables in deletes, and stale schema-prototype triggers are dropped by migration.
-- **Gateway:** validates SSE cursors before streaming, accepts approval notes promised by its schema, preserves document-kind literals, and matches custom approval scopes literally.
-- **Gateway client:** bounds unread websocket events, pages local event tails, keeps approvals on the RPC path, represents paused runs as waiting, and preserves deny-shaped approval updates.
-- **Gateway React:** scopes collection invalidation, surfaces load failures, stabilizes run-event filtering, and gives cascade reaffirmations deterministic priority.
-- **Time travel:** serializes rewinds behind durable leases and correctly truncates frames and snapshots when every retained frame postdates the target attempt.
-- **Migration:** rolls back incomplete target copies instead of leaving partial destinations.
-- **React reconciler:** makes DevTools teardown order-safe, preserves the last good tree when a render returns null, and fixes fiber identity and package attribution sent to DevTools.
-- **Protocol and errors:** DevTools snapshots expose run state; durable error serialization retains top-level array values plus `Error.cause` and custom properties.
-- **Memory:** note effects run only after a successful insert, message re-saves preserve original ordering timestamps, backend guards protect thread deletion, and summarizer failures retain structured Smithers errors.
-- **Driver:** deadline waits respond to cancellation, only exact abort errors become cancellations, and idle-timeout errors report the effective timeout.
-- **Server:** isolates run registries, validates event cursors before opening SSE, bounds Electric write payloads, and de-duplicates crons shared across workflows.
-- **AWS:** aborts pending sandbox requests, avoids redundant build stops after natural completion, and retains failed S3 cleanup keys for retry.
-- **Engine:** rate limits fail over before parking, subtree concurrency participates in automatic slot-cap raises, compute timers are cleared, and JSON-repair retries retain task limits and context.
-- **Database:** external runs acquire runtime ownership and the scorer-context migration now applies on Postgres and PGlite.
-- **CLI:** supervision resumes only runs whose owner process is verifiably dead, and gateway health probes have an independent deadline.
-- **Review:** corrects Anthropic token prices, keeps overview chart segments on-track, returns a clean 503 when R2 is unavailable, and gives quiz generation the walkthrough story it tests.
-- **Scorers:** replay sampling is stable, empty delegation event payloads fall back to context, and event-bus failures no longer abort scoring.
-- **DevTools:** rejects null task updates rather than corrupting the current snapshot.
-- **Usage:** caches reports per account, reports Codex weekly quota when its five-hour window is absent, and surfaces failed Anthropic probes.
-- **Components and graph:** empty Git commit ranges no longer produce empty review gates, and legacy DOM-extracted subflows and sandboxes retain their node kinds.
-- **TUI:** the returned-session dialog no longer clips its dismiss action.
-- **Vercel, Cloudflare, and Daytona:** command deadlines use the provider SDK's real timeout field, malformed Cloudflare results produce guarded errors, and Daytona enforces per-tool client-side timeouts.
-- **Agent Eliza:** malformed frontmatter tags and aliases are validated before workflow formatting.
-- **Smithers:** hot schema validators refresh correctly, and grep tools safely accept dash-prefixed patterns.
+- Per-node event reads use one SQL pass, gateway-client invalidations coalesce
+  instead of causing refetch storms, and Monitor node inspection keeps loading
+  states honest while avoiding redundant reads.
+- Engine frame snapshots are incremental. Worktree fetches use a bounded TTL
+  cache, and patch-identical rebases skip needless work.
+- Gateway boot loads workflow modules concurrently, production UI bundles serve
+  production React, and the ticket-fleet pipeline can run wide sweeps with
+  separately bounded implementation lanes.
 
-## Behavior changes
+## Reliability by subsystem
 
-- **Completed-run worktrees are reaped by default.** Set `RunOptions.keepWorktrees` or `SMITHERS_KEEP_WORKTREES=1` to opt out. Worktrees with uncommitted changes or unpushed commits are always kept, regardless of this setting.
-- **`up --dry-run`** prints the graph via `bunx smithers-orchestrator graph` instead of partially booting a run.
-- **The init pack is curated:** fresh installs get the focused authoring workflows plus hidden system workflows (`eval-suite-run`, `init`, `post-failure`, `upgrade`); the old starter workflows live on as `examples/`.
+- **Database and migration:** SQLite transaction ownership is scoped and
+  `updateWhere` is serialized; malformed WAL/SHM sidecars fail with an
+  actionable error instead of crashing Bun; identical signals and events are
+  deduplicated; ancestry cycles are rejected; output-table names are normalized
+  on every backend; external runs claim runtime ownership; mounted approvals
+  surface correctly; scorer-context migration applies to Postgres/PGlite; and
+  a failed store migration rolls back the partial target.
+- **Engine and scheduler:** render and empty-prompt failures are typed; event
+  waiters skip terminal rows; retry walks are bounded; malformed cache rows are
+  misses; exact abort errors are distinguished from ordinary failures; timer
+  anchors survive continuations; `discardResumeSession` survives retry and
+  hijack-continuation resets; input schemas apply defaults; and retry repair
+  retains the original task execution context.
+- **Gateway and clients:** SSE cursors validate before headers are sent, event
+  tails page instead of growing without bound, unread websocket events are
+  capped, the first event is not dropped, paused runs render as waiting,
+  approval notes validate, approval updates preserve deny decisions, document
+  kind literals survive serialization, filtered multiplayer collections honor
+  run, approval, score, cron, document, and ticket filters, tombstones stay
+  hidden, collection load errors are visible, mutation invalidation is scoped,
+  cascade reaffirmations have stable priority, and approval pending semantics
+  remain on the RPC path.
+- **Monitor and DevTools:** unreachable and loading states are honest, live
+  output survives busy runs, settled-node reopen cannot park an active run,
+  cancellation removes stale gates, null task updates are rejected, teardown is
+  order-safe, fiber identity and package attribution stay stable, and the last
+  valid snapshot survives a null render.
+- **CLI and workflows:** global pack discovery is deterministic, seeded
+  workflows validate their real graphs and inputs, pack install/share/eject is
+  rollback-safe, `down` reaps surviving owners, daily cron defaults are computed
+  lazily, and graceful pauses exit as a successful parked state.
+- **Agents:** Claude session loss retries with a fresh session, diagnostics stop
+  after abort, quota banners avoid benign prose, MCP stderr is drained once,
+  isolated CLI environments are supported, Amp IDE flags are honored,
+  output-file usage is parsed from the right source, and published CLI agent
+  declarations include the complete option surface.
+- **Driver, graph, and components:** cancellation interrupts deadline waits,
+  subprocess capture truncates on UTF-8 boundaries, idle-timeout errors report
+  the effective timeout, duplicate inline subflows are rejected, numeric props
+  are coerced consistently, CheckSuite commands use the run root, Poller uses a
+  durable timer, and seven composite components carry their dependency maps and
+  loop conditions through extraction.
+- **Memory and errors:** note side effects occur only after insertion, message
+  re-saves retain their original ordering time, history order and limits are
+  stable, summarizer failures retain Smithers error identity, top-level arrays
+  serialize safely, and plain-object legacy causes are preserved.
+- **Time travel:** rewind locks are durable, state truncation is atomic,
+  snapshots are shape-checked, timeline recursion is bounded, and failed VCS
+  restores keep the selected workspace and target recoverable.
+- **Integrations and providers:** full webhook queues reject instead of dropping
+  silently; Telegram markdown, approval timestamps, and digest recovery are
+  correct; Linear outbound tasks retain Smithers context; GitHub retries avoid a
+  final sleep; Cloudflare unknown exits fail closed; and AWS cleanup retains
+  failed keys for retry.
+- **OpenAPI and parsing:** YAML specifications load under Node, unsupported
+  Swagger input fails explicitly, schema conversion is recursion-bounded,
+  request metadata survives parsing, protected headers remain protected, and
+  cancellation reaches LlamaParse, Firecrawl, Mistral OCR, Whisper, and
+  Deepgram work.
+- **Observability, usage, and scoring:** paused and quota-waiting states are in
+  metric unions, status labels and cache-token counts are retained, account
+  usage caches key by identity, missing Codex short windows still expose weekly
+  quota, failed Anthropic probes remain visible, replay sampling is stable, and
+  a throwing event bus cannot abort scoring.
+- **TUI and error surfaces:** large tree previews truncate, connector columns
+  size to their arrows, the returned-session dialog keeps its dismiss action,
+  Eliza validates frontmatter tags and aliases, grep accepts dash-prefixed
+  patterns, and malformed provider or plugin errors retain their typed cause.
+- **Build and release:** declaration builds are serialized, complete generated
+  types are drift-checked, release publishing verifies that the release tag
+  still points at HEAD, and every fully green main commit can publish to the npm
+  `next` channel without moving the manual `latest` release tag.
+
+## Behavior and upgrade notes
+
+- Completed-run worktrees are reaped by default. Set
+  `RunOptions.keepWorktrees` or `SMITHERS_KEEP_WORKTREES=1` to opt out. Dirty or
+  unpushed worktrees are always preserved.
+- `supervise` requires an explicit scope. It resumes only a run whose recorded
+  owner PID is verifiably dead.
+- Zod defaults in the input schema now apply before validation and are visible
+  through `ctx.input` on a new run.
+- Unsupported nested-loop lanes fail during graph extraction with both loop IDs
+  in the `NESTED_LOOP` error. Supported per-item correction loops behind a
+  `Parallel` or `Worktree` fork keep working.
+- `replay_run` is marked destructive in agent contracts, and replay-unsafe tool
+  use requires approval.
+- Installed pack workflows are read-only. Use `eject` to create an editable
+  local copy that shadows the installed workflow.
+- Memory notes and note search require SQLite in this release.
+- Trellis is experimental, is not in the default init pack, and requires the
+  workflow's `maxConcurrency` input to match the pinned run cap.
+- `PoolAgent` is exported but is not installed into the default agent config.
+- Browser workflows receive typed capability errors for Node-only operations.
+- `up --dry-run` prints the graph instead of partially starting a run.
+- Fresh init packs are intentionally smaller. Archived starter workflows remain
+  available under `examples/`.
