@@ -57,6 +57,11 @@ async function waitFor(label: string, predicate: () => Promise<boolean>, timeout
 }
 
 export default async function globalSetup(): Promise<void> {
+  if (process.env.CI) {
+    console.log("[e2e] browser coverage skipped in CI");
+    return;
+  }
+
   freePort(PORT);
   freePort(CONCIERGE_PORT);
 
