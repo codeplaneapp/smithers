@@ -137,6 +137,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Check Bun lockfile
+        if: runner.os == 'Linux'
+        run: bun install --frozen-lockfile --offline --lockfile-only
+
       - name: Run test gates
         if: runner.os != 'Windows' || matrix.shard == 1
         run: |

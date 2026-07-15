@@ -22,6 +22,7 @@ Durable agent-workflow runtime/control plane. Product UI: `../multi`. Hosted for
 
 ```sh
 pnpm install --frozen-lockfile
+bun install --frozen-lockfile --offline --lockfile-only
 pnpm typecheck
 pnpm lint
 pnpm -C packages/<package> test
@@ -33,5 +34,6 @@ pnpm docs:llms                  # after docs changes
 ## Invariants
 
 - Use `jj st`/`jj diff` for working-copy truth. Preserve unrelated concurrent changes; never blanket-stage.
+- Dependency and package-manifest changes must refresh both `pnpm-lock.yaml` and `bun.lock` in the same commit.
 - Product code and E2E tests use real backends/data, not mocked behavior.
 - Keep public exports/types and generated docs bundles synchronized; root checks enforce both.
