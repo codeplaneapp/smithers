@@ -53,13 +53,21 @@ describe("Task component", () => {
         expect(chain.length).toBe(3);
     });
     test("passes through retries, timeoutMs, heartbeatTimeoutMs, continueOnFail", async () => {
-        const result = await render(<Task id="t1" output="out" retries={3} timeoutMs={5000} heartbeatTimeoutMs={2000} continueOnFail>
+        const result = await render(<Task id="t1" output="out" retries={3} maxSchemaRetries={0} timeoutMs={5000} heartbeatTimeoutMs={2000} continueOnFail>
         {{ v: 1 }}
       </Task>);
         expect(result.tasks[0].retries).toBe(3);
+        expect(result.tasks[0].maxSchemaRetries).toBe(0);
         expect(result.tasks[0].timeoutMs).toBe(5000);
         expect(result.tasks[0].heartbeatTimeoutMs).toBe(2000);
         expect(result.tasks[0].continueOnFail).toBe(true);
+    });
+    test("rejects invalid maxSchemaRetries values", async () => {
+        for (const value of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+            await expect(render(<Task id="t1" output="out" maxSchemaRetries={value}>
+                {{ v: 1 }}
+            </Task>)).rejects.toThrow("maxSchemaRetries must be a non-negative safe integer");
+        }
     });
     test("noRetry maps to zero retries", async () => {
         const result = await render(<Task id="t1" output="out" noRetry>

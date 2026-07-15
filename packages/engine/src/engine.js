@@ -3438,6 +3438,9 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
 async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputTable, eventBus, toolConfig, workflowName, cacheEnabled, signal, disabledAgents, runAbortController, hijackState) {
     const taskStartMs = performance.now();
     const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
+    const maxSchemaRetries = Number.isSafeInteger(desc.maxSchemaRetries) && desc.maxSchemaRetries >= 0
+        ? desc.maxSchemaRetries
+        : 3;
     const previousHeartbeat = (() => {
         for (const attempt of attempts) {
             const parsed = parseAttemptHeartbeatData(attempt.heartbeatDataJson);
@@ -3692,6 +3695,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         outputTable: desc.outputTableName,
         needsApproval: desc.needsApproval,
         retries: desc.retries,
+        maxSchemaRetries,
+        schemaCorrectionAttempts: 0,
         timeoutMs: desc.timeoutMs,
         heartbeatTimeoutMs: desc.heartbeatTimeoutMs,
         lastHeartbeat: previousHeartbeat,
@@ -3750,6 +3755,10 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let effectiveChainIndex = null;
     let supportsNativeStructuredOutput = false;
     let structuredOutputAccessError;
+    // Shared by JSON-format recovery and schema-validation recovery. Every
+    // generate() after the initial agent call consumes one correction slot.
+    let schemaCorrectionAttempts = 0;
+    let schemaCorrectionMessages = [];
     // These callbacks are also used by schema-repair generations, which run
     // after the main agent-selection block has closed.
     let handleAgentEvent;
@@ -4991,8 +5000,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             }
                         }
                     }
-                    // If no JSON found, send a follow-up prompt asking for just the JSON with schema info
-                    if (output === undefined && desc.agent) {
+                    // If no JSON was found, spend one correction slot asking the
+                    // selected agent for structured output. A zero budget must
+                    // never make a second model call.
+                    if (output === undefined && desc.agent && schemaCorrectionAttempts < maxSchemaRetries) {
+                        schemaCorrectionAttempts += 1;
+                        attemptMeta.schemaCorrectionAttempts = schemaCorrectionAttempts;
                         const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
                         // Include a truncated summary of the original response so the model has context
                         const responseSummary = text.length > 2000
@@ -5026,6 +5039,15 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             ``,
                             `Output ONLY the raw JSON object, with no markdown fences or prose.`,
                         ].join("\n");
+                        logInfo("output format correction", {
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            attempt: attemptNo,
+                            schemaRetry: schemaCorrectionAttempts,
+                            maxSchemaRetries,
+                            correctionKind: "json-format",
+                        }, "engine:schema-retry");
                         const retryResult = await raceTaskAbort(effectiveAgent.generate({
                             options: undefined,
                             abortSignal: taskSignal,
@@ -5060,6 +5082,20 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         }));
                         const retryText = retryResult.text ?? "";
                         responseText = retryText || responseText;
+                        const originalResponseMessages = result?.response?.messages;
+                        const correctionResponseMessages = retryResult?.response?.messages;
+                        schemaCorrectionMessages = [
+                            { role: "user", content: desc.prompt ?? "" },
+                            ...(Array.isArray(originalResponseMessages) && originalResponseMessages.length > 0
+                                ? originalResponseMessages
+                                : [{ role: "assistant", content: text }]),
+                            { role: "user", content: jsonPrompt },
+                            ...(Array.isArray(correctionResponseMessages) && correctionResponseMessages.length > 0
+                                ? correctionResponseMessages
+                                : [{ role: "assistant", content: retryText }]),
+                        ];
+                        attemptMeta.agentConversation =
+                            cloneJsonValue(schemaCorrectionMessages) ?? schemaCorrectionMessages;
                         try {
                             const trimmed = retryText.replace(/^\uFEFF/, "").trim();
                             if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -5120,6 +5156,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         const errorDetails = {
                             attempt: attemptNo,
                             iteration: desc.iteration,
+                            schemaRetryAttempts: schemaCorrectionAttempts,
+                            maxSchemaRetries,
                         };
                         if (supportsNativeStructuredOutput && structuredOutputAccessError) {
                             throw makeStructuredOutputCompatibilityError(desc, structuredOutputAccessError, errorDetails);
@@ -5127,7 +5165,10 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         if (text.trim()) {
                             throw makePlainTextOutputError(desc, text, undefined, errorDetails);
                         }
-                        throw new SmithersError("INVALID_OUTPUT", `No valid JSON output found in agent response (finishReason=${finishReason}, textLength=${text.length}).${tailHint}`);
+                        throw new SmithersError("INVALID_OUTPUT", `No valid JSON output found in agent response (finishReason=${finishReason}, textLength=${text.length}).${tailHint}`, {
+                            nodeId: desc.nodeId,
+                            ...errorDetails,
+                        });
                     }
                 }
                 // Output should already be parsed, but handle string case
@@ -5139,6 +5180,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         throw makePlainTextOutputError(desc, output, error, {
                             attempt: attemptNo,
                             iteration: desc.iteration,
+                            schemaRetryAttempts: schemaCorrectionAttempts,
+                            maxSchemaRetries,
                         });
                     }
                 }
@@ -5210,6 +5253,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     attempt: attemptNo,
                     iteration: desc.iteration,
                     schemaRetryAttempts,
+                    maxSchemaRetries,
                 });
             }
             if (typeof payload === "string") {
@@ -5217,6 +5261,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     attempt: attemptNo,
                     iteration: desc.iteration,
                     schemaRetryAttempts,
+                    maxSchemaRetries,
                 });
             }
             const diagnostics = buildOutputValidationDiagnostics(cause, payload);
@@ -5226,6 +5271,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 iteration: desc.iteration,
                 outputTable: desc.outputTableName,
                 schemaRetryAttempts,
+                maxSchemaRetries,
                 issues: cause && typeof cause === "object" && "issues" in cause
                     ? cause.issues
                     : undefined,
@@ -5233,38 +5279,30 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 receivedDescription: diagnostics.receivedDescription,
             }, { cause });
         };
-        // Schema-validation retry: if the agent returned parseable JSON but it
-        // doesn't match the Zod schema, resume the SAME agent conversation with
-        // the validation error up to 3 times before giving up. These attempts
-        // are NOT counted as normal task retries — the agent did the work, it
-        // just formatted the output wrong.
-        const MAX_SCHEMA_RETRIES = 3;
-        let schemaRetry = 0;
-        // Build a conversation history so each schema-fix attempt resumes the
-        // same conversation instead of starting fresh. For SDK-based agents
-        // this means true multi-turn; for CLI agents `extractPrompt` will
-        // flatten the messages to text which is the best we can do.
-        let schemaRetryMessages = [];
-        if (!validation.ok && desc.agent && effectiveAgent) {
+        // If the parsed output misses the schema, use any correction budget
+        // left after format recovery to resume the same agent conversation.
+        // These calls are not normal task retries.
+        if (!validation.ok && desc.agent && effectiveAgent && schemaCorrectionMessages.length === 0) {
             // Seed from the original result when available
             const originalResponseMessages = agentResult?.response?.messages;
             if (Array.isArray(originalResponseMessages) && originalResponseMessages.length > 0) {
                 // Start with the original prompt as a user message
-                schemaRetryMessages = [
+                schemaCorrectionMessages = [
                     { role: "user", content: desc.prompt ?? "" },
                     ...originalResponseMessages,
                 ];
             }
             else {
                 // Fallback: reconstruct from the text we captured
-                schemaRetryMessages = [
+                schemaCorrectionMessages = [
                     { role: "user", content: desc.prompt ?? "" },
                     { role: "assistant", content: responseText ?? "" },
                 ];
             }
         }
-        while (!validation.ok && desc.agent && schemaRetry < MAX_SCHEMA_RETRIES) {
-            schemaRetry++;
+        while (!validation.ok && desc.agent && effectiveAgent && schemaCorrectionAttempts < maxSchemaRetries) {
+            schemaCorrectionAttempts += 1;
+            attemptMeta.schemaCorrectionAttempts = schemaCorrectionAttempts;
             structuredOutputAccessError = undefined;
             const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
             const zodIssues = validation.error?.issues
@@ -5294,13 +5332,14 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 nodeId: desc.nodeId,
                 iteration: desc.iteration,
                 attempt: attemptNo,
-                schemaRetry,
-                maxSchemaRetries: MAX_SCHEMA_RETRIES,
+                schemaRetry: schemaCorrectionAttempts,
+                maxSchemaRetries,
+                correctionKind: "schema-validation",
                 zodIssues,
             }, "engine:schema-retry");
             // Append the correction as a user message to the conversation
             const retryMessages = [
-                ...schemaRetryMessages,
+                ...schemaCorrectionMessages,
                 { role: "user", content: schemaRetryPrompt },
             ];
             const schemaRetryResult = await raceTaskAbort(effectiveAgent.generate({
@@ -5346,19 +5385,19 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             // Update conversation history for the next iteration
             const retryResponseMessages = schemaRetryResult?.response?.messages;
             if (Array.isArray(retryResponseMessages) && retryResponseMessages.length > 0) {
-                schemaRetryMessages = [
+                schemaCorrectionMessages = [
                     ...retryMessages,
                     ...retryResponseMessages,
                 ];
             }
             else {
-                schemaRetryMessages = [
+                schemaCorrectionMessages = [
                     ...retryMessages,
                     { role: "assistant", content: retryText },
                 ];
             }
             attemptMeta.agentConversation =
-                cloneJsonValue(schemaRetryMessages) ?? schemaRetryMessages;
+                cloneJsonValue(schemaCorrectionMessages) ?? schemaCorrectionMessages;
             // Try to parse the retry response
             let retryOutput;
             if (supportsNativeStructuredOutput) {
@@ -5427,7 +5466,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         nodeId: desc.nodeId,
                         iteration: desc.iteration,
                         attempt: attemptNo,
-                        schemaRetry,
+                        schemaRetry: schemaCorrectionAttempts,
+                        maxSchemaRetries,
                     }, "engine:schema-retry");
                 }
             }
@@ -5436,7 +5476,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             attemptMeta.failureRetryable = false;
         }
         if (!validation.ok) {
-            throw toInvalidOutputError(validation.error, schemaRetry);
+            throw toInvalidOutputError(validation.error, schemaCorrectionAttempts);
         }
         payload = validation.data;
         // A callback can resolve after the watchdog's abort boundary (for
@@ -7759,6 +7799,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
         });
         const result = await driver.run({
             ...opts,
+            maxConcurrency,
+            maxConcurrencyPinned: runConfig.maxConcurrencyPinned === true,
+            requireRerenderOnOutputChange: opts.requireRerenderOnOutputChange ?? true,
             runId,
             input: (activeInput ?? opts.input),
             initialOutputs: await loadOutputs(db, schema, runId),

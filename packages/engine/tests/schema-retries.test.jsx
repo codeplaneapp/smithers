@@ -7,9 +7,8 @@ import { z } from "zod";
 import { Effect } from "effect";
 import { dirname } from "node:path";
 
-// MAX_SCHEMA_RETRIES is hard-coded to 3 in engine.js. The retry mechanism
-// re-invokes the SAME agent with a corrective prompt up to 3 times before
-// giving up. These attempts are NOT counted as task retries.
+// Tasks default to three automatic output-format/schema correction calls.
+// Corrections re-invoke the same agent and do not count as task retries.
 const MAX_SCHEMA_RETRIES = 3;
 const TIMEOUT_MS = 30_000;
 
@@ -44,7 +43,109 @@ function makeFlakyAgent(failures) {
     return { agent, counter };
 }
 
-describe("MAX_SCHEMA_RETRIES (3) - schema-retry mechanism", () => {
+describe("maxSchemaRetries output-correction budget", () => {
+    test("zero disables every correction call, including malformed JSON recovery", async () => {
+        const { smithers, outputs, db, cleanup } = createTestSmithers({
+            out: z.object({ value: z.number() }),
+        });
+        let calls = 0;
+        const agent = {
+            id: "no-output-corrections",
+            tools: {},
+            generate: async () => {
+                calls += 1;
+                return { text: "completed the task without structured output" };
+            },
+        };
+        const workflow = smithers(() => (
+            <Workflow name="schema-corrections-disabled">
+                <Task
+                    id="t"
+                    output={outputs.out}
+                    agent={agent}
+                    maxSchemaRetries={0}
+                    noRetry
+                >
+                    do work
+                </Task>
+            </Workflow>
+        ));
+
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+
+        expect(result.status).toBe("failed");
+        expect(calls).toBe(1);
+        const adapter = new SmithersDb(db);
+        const attempts = await adapter.listAttempts(result.runId, "t", 0);
+        const finalAttempt = attempts[attempts.length - 1];
+        expect(JSON.parse(finalAttempt?.metaJson ?? "{}")).toMatchObject({
+            maxSchemaRetries: 0,
+            schemaCorrectionAttempts: 0,
+        });
+        expect(JSON.parse(finalAttempt?.errorJson ?? "{}")).toMatchObject({
+            code: "INVALID_OUTPUT",
+            details: {
+                maxSchemaRetries: 0,
+                schemaRetryAttempts: 0,
+            },
+        });
+        cleanup();
+    }, TIMEOUT_MS);
+
+    test("format and schema corrections consume one shared budget", async () => {
+        const { smithers, outputs, db, cleanup } = createTestSmithers({
+            out: z.object({ value: z.number() }),
+        });
+        let calls = 0;
+        const agent = {
+            id: "shared-output-correction-budget",
+            tools: {},
+            generate: async () => {
+                calls += 1;
+                if (calls === 1) {
+                    return { text: "completed the task without structured output" };
+                }
+                if (calls === 2) {
+                    return { text: '{"value":"still-wrong"}' };
+                }
+                return { text: '{"value":42}' };
+            },
+        };
+        const workflow = smithers(() => (
+            <Workflow name="shared-schema-correction-budget">
+                <Task
+                    id="t"
+                    output={outputs.out}
+                    agent={agent}
+                    maxSchemaRetries={1}
+                    noRetry
+                >
+                    do work
+                </Task>
+            </Workflow>
+        ));
+
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+
+        expect(result.status).toBe("failed");
+        expect(calls).toBe(2);
+        const adapter = new SmithersDb(db);
+        const attempts = await adapter.listAttempts(result.runId, "t", 0);
+        const finalAttempt = attempts[attempts.length - 1];
+        expect(JSON.parse(finalAttempt?.metaJson ?? "{}")).toMatchObject({
+            maxSchemaRetries: 1,
+            schemaCorrectionAttempts: 1,
+        });
+        expect(JSON.parse(finalAttempt?.errorJson ?? "{}")).toMatchObject({
+            code: "INVALID_OUTPUT",
+            details: {
+                maxSchemaRetries: 1,
+                schemaRetryAttempts: 1,
+            },
+        });
+        cleanup();
+    }, TIMEOUT_MS);
+
     test("repair and schema retries preserve task execution context", async () => {
         const { smithers, outputs, dbPath, cleanup } = createTestSmithers({
             out: z.object({ value: z.number() }),

@@ -201,6 +201,8 @@ export type TaskDescriptor = {
   };
   skipIf: boolean;
   retries: number;
+  /** Automatic output-format/schema correction calls; undefined uses the engine default. */
+  maxSchemaRetries?: number;
   retryPolicy?: RetryPolicy;
   timeoutMs: number | null;
   heartbeatTimeoutMs: number | null;

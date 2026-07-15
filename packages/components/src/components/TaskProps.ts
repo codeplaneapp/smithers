@@ -22,6 +22,8 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
 	 * Used for validation and to inject schema examples into MDX prompts.
 	 */
 	outputSchema?: z.ZodObject<z.ZodRawShape>;
+	/** Maximum automatic output-format/schema correction calls after the initial agent call. Set to 0 to disable corrections. Default: 3. */
+	maxSchemaRetries?: number;
 	/** Agent or array of agents [primary, fallback1, fallback2, ...]. Tries in order on retries. */
 	agent?: AgentLike | AgentLike[];
 	/** Convenience alias for a single retry fallback without exposing array syntax in JSX. */
