@@ -112,7 +112,43 @@ async function markWaitForEventResolved(adapter, runId, nodeId, iteration, signa
         await decrementAsyncEventWaitPending();
     }
 }
+/**
+ * Upper bound on cached durable-deferred resolutions. Resolutions can arrive
+ * just before a run is cancelled and never be consumed, so this cap prevents
+ * the module-level cache from growing without limit in a long-running gateway.
+ * Exported for tests.
+ * @type {number}
+ */
+export const DEFERRED_RESOLUTIONS_MAX = 4096;
+/**
+ * Insertion-ordered LRU cache of resolved durable deferreds keyed by execution
+ * id. A plain `Map` preserves insertion order, so the least-recently-used
+ * entry is always the first key.
+ * @type {Map<string, Exit.Exit<any, any>>}
+ */
 const deferredResolutions = new Map();
+/**
+ * Stores a resolution, evicting least-recently-used entries beyond the cap.
+ * @param {string} executionId
+ * @param {Exit.Exit<any, any>} exit
+ * @returns {void}
+ */
+const setDeferredResolution = (executionId, exit) => {
+    deferredResolutions.delete(executionId);
+    deferredResolutions.set(executionId, exit);
+    while (deferredResolutions.size > DEFERRED_RESOLUTIONS_MAX) {
+        const oldest = deferredResolutions.keys().next().value;
+        if (oldest === undefined) {
+            break;
+        }
+        deferredResolutions.delete(oldest);
+    }
+};
+/**
+ * Current number of cached durable-deferred resolutions. Exported for tests.
+ * @returns {number}
+ */
+export const deferredResolutionsSize = () => deferredResolutions.size;
 /**
  * @template Success, Error
  * @param {string} executionId
@@ -134,7 +170,7 @@ const awaitBridgeDeferred = async (executionId, _deferred) => {
  * @param {Exit.Exit<Success["Type"], Error["Type"]>} exit
  */
 const resolveBridgeDeferred = async (executionId, _deferred, exit) => {
-    deferredResolutions.set(executionId, exit);
+    setDeferredResolution(executionId, exit);
 };
 /**
  * @param {_SmithersDb} adapter
