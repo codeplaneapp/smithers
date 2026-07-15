@@ -69,7 +69,23 @@ async function connectSelectedSemanticTools(cwd, names) {
         version: "test",
         allowedTools: [],
     });
-    const definitions = createSemanticToolDefinitions({ cwd: () => cwd })
+    // The integration worktree itself lives below `.smithers/`, so normal
+    // workspace discovery intentionally ignores nested fixture anchors. Use
+    // the semantic surface's database seam to keep these real SQLite fixtures
+    // scoped to their own temporary workspace.
+    const definitions = createSemanticToolDefinitions({
+        cwd: () => cwd,
+        openDb: async () => {
+            const dbPath = join(cwd, "smithers.db");
+            const sqlite = new Database(dbPath);
+            const db = drizzle(sqlite);
+            return {
+                adapter: new SmithersDb(db),
+                dbPath,
+                cleanup: () => sqlite.close(),
+            };
+        },
+    })
         .filter((tool) => names.includes(tool.name));
     registerSemanticTools(server, definitions);
     servers.push(server);
