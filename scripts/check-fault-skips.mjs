@@ -7,7 +7,7 @@ const faultsDir = join(root, "e2e", "faults");
 
 const allowedSkips = new Map([
   ["e2e/faults/case01-kill-engine-mid-task.test.ts", 1],
-  ["e2e/faults/case02-kill-sandbox-engine-alive.test.ts", 1],
+  ["e2e/faults/case02-kill-sandbox-engine-alive.test.ts", 0],
   ["e2e/faults/case04-restart-waiting-event.test.ts", 1],
   ["e2e/faults/case05-restart-waiting-timer.test.ts", 1],
   ["e2e/faults/case07-continue-as-new-lineage.test.ts", 1],
