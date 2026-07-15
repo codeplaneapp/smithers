@@ -69,8 +69,9 @@ describe("case 30: Long-lived workspace runtime, repeated runs; stable behavior"
       const workspaceAgent = {
         id: "case30-workspace-writer",
         tools: {},
-        generate: async ({ prompt }: { prompt?: string }) => {
-          const match = prompt?.match(/artifact-(\d+)\.txt/);
+        generate: async ({ prompt }: { prompt?: unknown } = {}) => {
+          const promptText = typeof prompt === "string" ? prompt : "";
+          const match = promptText.match(/artifact-(\d+)\.txt/);
           if (!match)
             throw new Error(`Missing artifact index in prompt: ${prompt}`);
           const index = Number(match[1]);
@@ -138,7 +139,7 @@ describe("case 30: Long-lived workspace runtime, repeated runs; stable behavior"
         expect(rssGrowth).toBeLessThan(rssGrowthBudget);
       } finally {
         clearInterval(sampleHandle);
-        api.db.$client?.close?.();
+        (api.db as { $client?: { close?: () => void } }).$client?.close?.();
       }
     },
     RUN_COUNT >= 500 ? 7_200_000 : 120_000,
