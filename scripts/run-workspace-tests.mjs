@@ -115,7 +115,7 @@ function readWorkspaceTestPackages() {
 }
 
 const packageWeights = new Map([
-  [".smithers", 2],
+  [".smithers", 5],
   ["apps/cli", 8],
   ["apps/smithers", 5],
   ["packages/agents", 6],

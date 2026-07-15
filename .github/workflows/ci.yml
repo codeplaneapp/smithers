@@ -86,9 +86,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Ubuntu package shards use the same weighted balancer as Windows.
+          # Shard 0 is the extras lane: root gates, d.ts freshness, the DDD
+          # suite, examples, and the PTY e2e run there in parallel with the
+          # package shards instead of serially after a monolithic pass.
+          - os: ubuntu-latest
+            shard: 0
+            total_shards: 3
           - os: ubuntu-latest
             shard: 1
-            total_shards: 1
+            total_shards: 3
+          - os: ubuntu-latest
+            shard: 2
+            total_shards: 3
+          - os: ubuntu-latest
+            shard: 3
+            total_shards: 3
           - os: windows-latest
             shard: 1
             total_shards: 4
@@ -138,11 +151,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Check Bun lockfile
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 0
         run: bun install --frozen-lockfile --offline --lockfile-only
 
       - name: Run test gates
-        if: runner.os != 'Windows' || matrix.shard == 1
+        if: (runner.os == 'Linux' && matrix.shard == 0) || (runner.os == 'Windows' && matrix.shard == 1)
         run: |
           node scripts/check-single-effect-version.mjs
           node scripts/check-dependency-boundaries.mjs
@@ -154,15 +167,17 @@ jobs:
           bun test scripts/publish-next.test.mjs scripts/run-workspace-tests-timeout.test.mjs
 
       - name: Run d.ts freshness gate (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 0
         run: node scripts/check-dts.mjs
 
-      - name: Run workspace package tests
-        if: runner.os != 'Windows'
-        run: pnpm -r --no-bail test
+      - name: Run workspace package tests (Linux shard)
+        if: runner.os == 'Linux' && matrix.shard != 0
+        # Same weighted balancer as Windows, nothing excluded. The generous
+        # per-package timeout covers the real-backend migrate and e2e suites.
+        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 20
 
       - name: Run docs-driven-development suite
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 0
         timeout-minutes: 20
         run: pnpm -C .smithers test:ddd
 
@@ -184,7 +199,7 @@ jobs:
       # Aspects + TryCatchFinally + ContinueAsNew handoff embedded in the
       # context-engineering guide (graph render only, no agent CLIs needed).
       - name: Run examples bun tests
-        if: runner.os != 'Windows' || matrix.shard == 1
+        if: (runner.os == 'Linux' && matrix.shard == 0) || (runner.os == 'Windows' && matrix.shard == 1)
         run: bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts
 
       # Real-PTY TUI e2e (picker / input / approval) driven through zmux. These
@@ -194,7 +209,7 @@ jobs:
       # zmux only ships a Linux daemon, so this step is Linux-only; on Windows
       # the tests skip cleanly because ZMUXD is unset.
       - name: Download zmux daemon (linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 0
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -202,7 +217,7 @@ jobs:
           chmod +x zmuxd-linux-x64
 
       - name: Run TUI zmux PTY e2e
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 0
         env:
           ZMUXD: ${{ github.workspace }}/zmuxd-linux-x64
         run: bun test --timeout=120000 apps/cli/tests/tui-zmux.e2e.test.js
