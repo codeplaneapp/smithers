@@ -17,6 +17,7 @@ import { basename, join, relative } from "node:path";
 import { z } from "zod/v4";
 import { subscriptionCodexFirst } from "../lib/codexAccounts";
 import { protectedAutomationPaths } from "../lib/codexIssueMergeQueue";
+import { ticketFleetDisposition, type TicketFleetLaneFacts } from "../lib/ticketFleetDisposition";
 
 const DEFAULT_REPO = "smithersai/smithers";
 const SWEEP_CONCURRENCY = 32;
@@ -343,6 +344,12 @@ const trainStackSchema = z.object({
   summary: z.string(),
 });
 type TrainStack = z.infer<typeof trainStackSchema>;
+const trainLandedPairSchema = z.object({
+  issueNumber: z.number().int(),
+  sha: z.string(),
+  simulated: z.boolean().default(false),
+});
+type TrainLandedPair = z.infer<typeof trainLandedPairSchema>;
 const trainLandSchema = z.object({
   round: z.number().int(),
   landedIssues: z.array(z.number().int()).default([]),
@@ -350,9 +357,10 @@ const trainLandSchema = z.object({
   pushed: z.boolean(),
   requeued: z.array(z.number().int()).default([]),
   // Cumulative across rounds so render logic needs only the LATEST row:
-  // landedAll pins issue -> landed sha; evictedAllNumbers repeats a number
-  // once per eviction event, so counting occurrences gives strike counts.
-  landedAll: z.array(z.object({ issueNumber: z.number().int(), sha: z.string() })).default([]),
+  // landedAll pins issue -> settled sha and whether the landing was only
+  // simulated; evictedAllNumbers repeats a number once per eviction event,
+  // so counting occurrences gives strike counts.
+  landedAll: z.array(trainLandedPairSchema).default([]),
   evictedAllNumbers: z.array(z.number().int()).default([]),
   summary: z.string(),
 });
@@ -375,11 +383,25 @@ const baselineSchema = z.object({
   entries: z.array(z.string()).default([]),
   summary: z.string().default(""),
 });
+const summaryDispositionSchema = z.object({
+  issueNumber: z.number().int(),
+  kind: z.enum(["landed", "parked", "failed-readiness", "unlanded", "pending"]),
+  reason: z.string(),
+  terminal: z.boolean(),
+});
 const summarySchema = z.object({
   localTickets: z.number().int(),
   ghIssues: z.number().int(),
   triaged: z.number().int(),
   selected: z.number().int(),
+  accounted: z.number().int(),
+  terminal: z.number().int(),
+  landed: z.number().int(),
+  parked: z.number().int(),
+  failedReadiness: z.number().int(),
+  unlanded: z.number().int(),
+  pending: z.number().int(),
+  dispositions: z.array(summaryDispositionSchema),
   researched: z.number().int(),
   pocsLanded: z.number().int(),
   ready: z.number().int(),
@@ -719,6 +741,9 @@ function runGuard(ctx: any, phase: string): z.infer<typeof guardSchema> {
 
 // --- Row hydration (output rows come back DB-shaped) ---
 
+function asBool(value: unknown): boolean {
+  return value === true || value === 1 || value === "true" || value === "1";
+}
 function asStrArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String);
   if (typeof value === "string") {
@@ -742,6 +767,29 @@ function asObjArray<T>(value: unknown): T[] {
     }
   }
   return [];
+}
+function hydrateTrainLandedPair(value: unknown, dryRun: boolean): TrainLandedPair | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const issueNumber = Number(raw.issueNumber);
+  if (!Number.isInteger(issueNumber)) return undefined;
+  const sha = typeof raw.sha === "string" ? raw.sha : "";
+  const hasExplicitProvenance = Object.prototype.hasOwnProperty.call(raw, "simulated");
+  if (hasExplicitProvenance) {
+    return { issueNumber, sha, simulated: asBool(raw.simulated) };
+  }
+  if (!dryRun) return { issueNumber, sha, simulated: false };
+
+  // Legacy dry-run rows are ambiguous: old code wrote simulated green-prefix
+  // commits and adopted main commits into the same untagged ledger. Only an
+  // object that git can prove is on origin/main may hydrate as actual.
+  try {
+    const resolvedSha = git(["rev-parse", "--verify", sha + "^{commit}"]);
+    const mergeBase = git(["merge-base", resolvedSha, "origin/main"]);
+    return { issueNumber, sha, simulated: mergeBase !== resolvedSha };
+  } catch {
+    return { issueNumber, sha, simulated: true };
+  }
 }
 export function parseInput(raw: unknown): Input {
   const value: Record<string, unknown> = raw && typeof raw === "object" ? { ...(raw as Record<string, unknown>) } : {};
@@ -1661,7 +1709,7 @@ function landedOnMain(issueNumber: number, reviewedSha: string): string {
     return "";
   }
 }
-async function trainSnapshot(round: number, readyLanes: { issueNumber: number; sha: string }[], evictedAllNumbers: number[], landedAllNumbers: number[]): Promise<TrainSnapshot> {
+async function trainSnapshot(round: number, readyLanes: { issueNumber: number; sha: string }[], evictedAllNumbers: number[], settledAllNumbers: number[]): Promise<TrainSnapshot> {
   try { git(["fetch", "origin", "main"]); } catch { /* offline fetch; stale refs still work */ }
   const entries: TrainEntry[] = [];
   const skipped: string[] = [];
@@ -1669,7 +1717,7 @@ async function trainSnapshot(round: number, readyLanes: { issueNumber: number; s
   const strikes: number[] = [];
   for (const lane of readyLanes) {
     const n = lane.issueNumber;
-    if (landedAllNumbers.includes(n)) continue;
+    if (settledAllNumbers.includes(n)) continue;
     if (evictedAllNumbers.filter((x) => x === n).length >= TRAIN_MAX_EVICTIONS) { skipped.push(n + ":evicted-" + TRAIN_MAX_EVICTIONS + "x-parked"); continue; }
     try {
       // Board the EXACT sha the cross-model review and candidate gate
@@ -1797,13 +1845,30 @@ async function trainGate(n: number, key: string, baseSha: string, stackedSha: st
   }
 }
 async function trainLand(input: Input, round: number, snapshot: TrainSnapshot | undefined, stack: TrainStack | undefined, gates: Gate[], previous: TrainLand | undefined): Promise<TrainLand> {
-  const landedAll = previous ? asObjArray<{ issueNumber: number; sha: string }>(previous.landedAll).map((p) => ({ issueNumber: Number(p.issueNumber), sha: String(p.sha) })) : [];
+  const landedAll: TrainLandedPair[] = [];
+  const recordSettled = (issueNumber: number, sha: string, simulated: boolean) => {
+    const existing = landedAll.find((pair) => pair.issueNumber === issueNumber);
+    if (!existing) {
+      landedAll.push({ issueNumber, sha, simulated });
+      return;
+    }
+    // An actual landing always upgrades a simulated one; a later simulated
+    // row can never downgrade a commit already verified on main.
+    if (!simulated || existing.simulated) {
+      existing.sha = sha;
+      existing.simulated = simulated;
+    }
+  };
+  for (const rawPair of (previous ? asObjArray<unknown>(previous.landedAll) : [])) {
+    const pair = hydrateTrainLandedPair(rawPair, input.dryRun);
+    if (pair) recordSettled(pair.issueNumber, pair.sha, pair.simulated);
+  }
   const evictedAllNumbers = previous ? asStrArray(previous.evictedAllNumbers).map(Number) : [];
   // Adopt issues whose reviewed fix was already on main, and strike lanes the
   // snapshot found structurally unlandable, so both converge instead of
   // re-polling forever.
   for (const pair of (snapshot ? asObjArray<{ issueNumber: number; sha: string }>(snapshot.adopted) : [])) {
-    if (!landedAll.some((p) => p.issueNumber === Number(pair.issueNumber))) landedAll.push({ issueNumber: Number(pair.issueNumber), sha: String(pair.sha) });
+    recordSettled(Number(pair.issueNumber), String(pair.sha), false);
   }
   for (const n of (snapshot ? asStrArray(snapshot.strikes).map(Number) : [])) evictedAllNumbers.push(n);
   const stacked = stack ? asObjArray<StackedEntry>(stack.stacked) : [];
@@ -1832,7 +1897,7 @@ async function trainLand(input: Input, round: number, snapshot: TrainSnapshot | 
     // converges instead of re-stacking and re-gating the same green prefix
     // for the entire round budget. Nothing external happens: no push, no gh
     // close, no ticket write (all are dryRun-guarded downstream).
-    for (const e of prefix) landedAll.push({ issueNumber: Number(e.issueNumber), sha: String(e.stackedSha) });
+    for (const e of prefix) recordSettled(Number(e.issueNumber), String(e.stackedSha), true);
     return {
       round, landedIssues: prefix.map((e) => Number(e.issueNumber)), landedTip: "", pushed: false,
       requeued, landedAll, evictedAllNumbers,
@@ -1862,7 +1927,7 @@ async function trainLand(input: Input, round: number, snapshot: TrainSnapshot | 
   try { git(["update-ref", "refs/heads/main", tipSha]); } catch { /* local ref is cosmetic */ }
   try { git(["fetch", "origin", "main"]); } catch { /* next round re-fetches */ }
   const landedIssues = prefix.map((e) => Number(e.issueNumber));
-  for (const e of prefix) landedAll.push({ issueNumber: Number(e.issueNumber), sha: String(e.stackedSha) });
+  for (const e of prefix) recordSettled(Number(e.issueNumber), String(e.stackedSha), false);
   return {
     round, landedIssues, landedTip: tipSha, pushed: true, requeued, landedAll, evictedAllNumbers,
     summary: "Round " + round + ": landed " + landedIssues.length + " issue(s) in one push (" + tipSha.slice(0, 10) + ")" + (popped ? "; popped #" + popped.issueNumber : "") + (requeued.length ? "; requeued " + requeued.length : "") + ".",
@@ -2013,9 +2078,26 @@ export default smithers((ctx) => {
   // row, so one read gives the full picture regardless of round count. ---
   const lastTrainLand = latest<TrainLand>(ctx, outputs.tfTrainLand, "train:land");
   const trainRound = (lastTrainLand ? Number(lastTrainLand.round) : -1) + 1;
-  const landedAllPairs = lastTrainLand ? asObjArray<{ issueNumber: number; sha: string }>(lastTrainLand.landedAll) : [];
-  const landedSet = new Set(landedAllPairs.map((p) => Number(p.issueNumber)));
+  const settledPairByIssue = new Map<number, TrainLandedPair>();
+  for (const rawPair of (lastTrainLand ? asObjArray<unknown>(lastTrainLand.landedAll) : [])) {
+    const hydrated = hydrateTrainLandedPair(rawPair, input.dryRun);
+    if (!hydrated) continue;
+    const existing = settledPairByIssue.get(hydrated.issueNumber);
+    if (!existing || (existing.simulated && !hydrated.simulated) || existing.simulated === hydrated.simulated) {
+      settledPairByIssue.set(hydrated.issueNumber, hydrated);
+    }
+  }
+  const settledAllPairs = [...settledPairByIssue.values()];
+  const settledSet = new Set(settledPairByIssue.keys());
+  const landedAllPairs = settledAllPairs.filter((pair) => !pair.simulated);
+  const landedShaByIssue = new Map(landedAllPairs.map((pair) => [Number(pair.issueNumber), String(pair.sha)]));
+  const landedSet = new Set(landedShaByIssue.keys());
+  const simulatedShaByIssue = new Map(settledAllPairs.filter((pair) => pair.simulated).map((pair) => [pair.issueNumber, pair.sha]));
   const trainEvictedAll = lastTrainLand ? asStrArray(lastTrainLand.evictedAllNumbers).map(Number) : [];
+  const trainEvictionCounts = new Map<number, number>();
+  for (const issueNumber of trainEvictedAll) {
+    trainEvictionCounts.set(issueNumber, (trainEvictionCounts.get(issueNumber) ?? 0) + 1);
+  }
   const trainSnapshotNow = (() => {
     const row = latest<TrainSnapshot>(ctx, outputs.tfTrainSnapshot, "train:snapshot");
     return row && Number(row.round) === trainRound ? row : undefined;
@@ -2032,20 +2114,30 @@ export default smithers((ctx) => {
     const gate = latest<Gate>(ctx, outputs.tfGate, "train:gate:" + e.issueNumber);
     return !!gate && gate.headSha === e.stackedSha;
   });
-  const laneDead = (n: number, needsApproval: boolean) => {
-    const readiness = latest<Readiness>(ctx, outputs.tfReadiness, "i" + n + ":ready");
-    if (readiness && readiness.ready !== true) return true;
-    if (needsApproval) {
-      const approval = latest<z.infer<typeof approvalDecisionSchema>>(ctx, outputs.tfMergeApproval, "i" + n + ":merge-approval");
-      if (approval && approval.approved !== true) return true;
-    }
-    return false;
-  };
-  const trainDone = selected.length > 0 && selected.every(({ issue, triage }) =>
-    landedSet.has(issue.number)
-    || trainEvictedAll.filter((x) => x === issue.number).length >= TRAIN_MAX_EVICTIONS
-    || laneDead(issue.number, triage.needsHumanApproval === true));
-  const merged = ready.filter(({ issue }) => landedSet.has(issue.number));
+  const dispositionFacts: TicketFleetLaneFacts[] = selected.map(({ issue, triage }) => {
+    const readiness = latest<Readiness>(ctx, outputs.tfReadiness, "i" + issue.number + ":ready");
+    const approval = triage.needsHumanApproval
+      ? latest<z.infer<typeof approvalDecisionSchema>>(ctx, outputs.tfMergeApproval, "i" + issue.number + ":merge-approval")
+      : undefined;
+    const landedSha = landedShaByIssue.get(issue.number);
+    const simulatedSha = landedSha === undefined ? simulatedShaByIssue.get(issue.number) : undefined;
+    return {
+      issueNumber: issue.number,
+      readiness: readiness ? { ready: readiness.ready === true, reason: readiness.summary } : undefined,
+      approval: approval ? { approved: approval.approved === true, reason: approval.note } : undefined,
+      needsApproval: triage.needsHumanApproval === true,
+      landed: landedSha !== undefined,
+      simulated: simulatedSha !== undefined,
+      landedSha: landedSha ?? simulatedSha,
+      evictionCount: trainEvictionCounts.get(issue.number) ?? 0,
+    };
+  });
+  const activeDisposition = ticketFleetDisposition(dispositionFacts, {
+    maxEvictions: TRAIN_MAX_EVICTIONS,
+    finalizeUnresolved: false,
+  });
+  const trainDone = activeDisposition.allTerminal && !trainSnapshotNow;
+  const merged = selected.filter(({ issue }) => landedSet.has(issue.number));
 
   return (
     <Workflow name="ticket-fleet">
@@ -2402,40 +2494,42 @@ export default smithers((ctx) => {
                Rounds repeat until every selected issue lands or parks. ---- */}
           {ready.length || lastTrainLand ? (
             <Loop id="merge-train" until={trainDone} maxIterations={TRAIN_MAX_ROUNDS} onMaxReached="return-last">
-              <Sequence>
-                <Task id="train:snapshot" output={outputs.tfTrainSnapshot} timeoutMs={10 * 60_000}>
-                  {() => trainSnapshot(
-                    trainRound,
-                    ready
-                      .map(({ issue }) => ({ issueNumber: issue.number, sha: String(latest<Readiness>(ctx, outputs.tfReadiness, "i" + issue.number + ":ready")?.headSha ?? "") }))
+              {!trainDone ? (
+                <Sequence>
+                  <Task id="train:snapshot" output={outputs.tfTrainSnapshot} timeoutMs={10 * 60_000}>
+                    {() => trainSnapshot(
+                      trainRound,
+                      ready
+                        .map(({ issue }) => ({ issueNumber: issue.number, sha: String(latest<Readiness>(ctx, outputs.tfReadiness, "i" + issue.number + ":ready")?.headSha ?? "") }))
                       .filter((lane) => lane.sha.length > 0),
-                    trainEvictedAll,
-                    [...landedSet],
-                  )}
-                </Task>
-                {trainSnapshotNow && asObjArray<TrainEntry>(trainSnapshotNow.entries).length ? (
-                  <Task id="train:stack" output={outputs.tfTrainStack} timeoutMs={20 * 60_000} continueOnFail>
-                    {() => trainStack(key, trainRound, asObjArray<TrainEntry>(trainSnapshotNow.entries).map((e) => ({ issueNumber: Number(e.issueNumber), fixSha: String(e.fixSha) })))}
+                      trainEvictedAll,
+                      [...settledSet],
+                    )}
                   </Task>
-                ) : null}
-                {trainStackedNow.length ? (
-                  <Parallel id="train:validate" maxConcurrency={TRAIN_GATE_CONCURRENCY}>
-                    {trainStackedNow.map((e) => (
-                      <Task key={"tg" + e.issueNumber} id={"train:gate:" + e.issueNumber} output={outputs.tfGate} timeoutMs={50 * 60_000} continueOnFail>
-                        {() => trainGate(Number(e.issueNumber), key, String(trainStackNow!.baseSha), String(e.stackedSha))}
-                      </Task>
-                    ))}
-                  </Parallel>
-                ) : null}
-                {trainSnapshotNow && (!asObjArray<TrainEntry>(trainSnapshotNow.entries).length || (trainStackNow && trainGatesDone)) ? (
-                  <Task id="train:land" output={outputs.tfTrainLand} timeoutMs={20 * 60_000}>
-                    {() => trainLand(input, trainRound, trainSnapshotNow, trainStackNow, trainGatesNow, lastTrainLand)}
+                  {trainSnapshotNow && asObjArray<TrainEntry>(trainSnapshotNow.entries).length ? (
+                    <Task id="train:stack" output={outputs.tfTrainStack} timeoutMs={20 * 60_000} continueOnFail>
+                      {() => trainStack(key, trainRound, asObjArray<TrainEntry>(trainSnapshotNow.entries).map((e) => ({ issueNumber: Number(e.issueNumber), fixSha: String(e.fixSha) })))}
+                    </Task>
+                  ) : null}
+                  {trainStackedNow.length ? (
+                    <Parallel id="train:validate" maxConcurrency={TRAIN_GATE_CONCURRENCY}>
+                      {trainStackedNow.map((e) => (
+                        <Task key={"tg" + e.issueNumber} id={"train:gate:" + e.issueNumber} output={outputs.tfGate} timeoutMs={50 * 60_000} continueOnFail>
+                          {() => trainGate(Number(e.issueNumber), key, String(trainStackNow!.baseSha), String(e.stackedSha))}
+                        </Task>
+                      ))}
+                    </Parallel>
+                  ) : null}
+                  {trainSnapshotNow && (!asObjArray<TrainEntry>(trainSnapshotNow.entries).length || (trainStackNow && trainGatesDone)) ? (
+                    <Task id="train:land" output={outputs.tfTrainLand} timeoutMs={20 * 60_000}>
+                      {() => trainLand(input, trainRound, trainSnapshotNow, trainStackNow, trainGatesNow, lastTrainLand)}
+                    </Task>
+                  ) : null}
+                  <Task id="train:guard" output={outputs.tfGuard}>
+                    {() => runGuard(ctx, "train:round")}
                   </Task>
-                ) : null}
-                <Task id="train:guard" output={outputs.tfGuard}>
-                  {() => runGuard(ctx, "train:round")}
-                </Task>
-              </Sequence>
+                </Sequence>
+              ) : null}
             </Loop>
           ) : null}
 
@@ -2470,24 +2564,32 @@ export default smithers((ctx) => {
             const pocsLanded = selected.filter(({ issue }) => latest<z.infer<typeof pocLandSchema>>(ctx, outputs.tfPocLand, "i" + issue.number + ":poc-land")?.landed === true).length;
             const pushedCount = landedAllPairs.length;
             const closedCount = landedAllPairs.filter((pair) => latest<z.infer<typeof dispositionSchema>>(ctx, outputs.tfDisposition, "i" + Number(pair.issueNumber) + ":train-close")?.closed === true).length;
+            const finalDisposition = ticketFleetDisposition(dispositionFacts, {
+              maxEvictions: TRAIN_MAX_EVICTIONS,
+              finalizeUnresolved: true,
+            });
+            const nonLanded = finalDisposition.rows.filter((row) => row.kind !== "landed");
             return {
               localTickets: localTickets.length,
               ghIssues: ghIssues.length,
               triaged: triageIssues.length,
-              selected: selected.length,
+              ...finalDisposition.counts,
+              dispositions: finalDisposition.rows,
               researched,
               pocsLanded,
               ready: ready.length,
               merged: merged.length,
               pushed: pushedCount,
               closed: closedCount,
-              successful: merged.length === ready.length && ready.length > 0,
+              successful: finalDisposition.successful,
               summary: [
                 "Sync: " + (syncApplied?.summary ?? (input.skipSync ? "skipped" : "not run")),
                 "CI: " + (ciStatus?.summary ?? (input.skipCiLane ? "skipped" : "not checked")),
                 "Triaged " + triageIssues.length + "; selected " + selected.length + " (cap " + input.maxImplement + ").",
                 researched + " researched, " + pocsLanded + " POC(s) landed.",
                 ready.length + " reached LGTM + green gate; " + merged.length + " landed on main, " + pushedCount + " pushed, " + closedCount + " closed.",
+                "Disposition: " + finalDisposition.counts.landed + " landed, " + finalDisposition.counts.parked + " parked, " + finalDisposition.counts.failedReadiness + " failed readiness, " + finalDisposition.counts.unlanded + " unlanded.",
+                nonLanded.length ? "Non-landed: " + nonLanded.map((row) => "#" + row.issueNumber + " " + row.kind + " (" + row.reason + ")").join("; ") + "." : "All selected issues landed.",
               ].join(" "),
             };
           }}

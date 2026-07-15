@@ -10,6 +10,7 @@ import {
   useGatewayRunTree,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { parseTicketFleetDispositionRows } from "../lib/ticketFleetDisposition";
 
 const WORKFLOW_KEY = "ticket-fleet";
 
@@ -358,12 +359,28 @@ function Dashboard({ runId }: { runId: string }) {
             );
           }} />
         <OutputCard runId={runId} nodeId="run-summary" title="Run summary" remountKey={remountKey}
-          render={(row) => (
-            <div>
-              <span className="big">{String(row.merged ?? 0)} landed · {String(row.pushed ?? 0)} pushed</span>
-              <p>{asString(row.summary)}</p>
-            </div>
-          )} />
+          render={(row) => {
+            const dispositions = parseTicketFleetDispositionRows(row.dispositions);
+            const nonLanded = dispositions.filter((disposition) => disposition.kind !== "landed");
+            const successful = asBool(row.successful);
+            return (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span className="big">{String(row.selected ?? 0)}/{String(row.accounted ?? 0)} accounted</span>
+                  <span className={"pill " + (successful ? "ok" : "err")}>{successful ? "success" : "failure"}</span>
+                </div>
+                <p>
+                  {String(row.landed ?? row.merged ?? 0)} landed · {String(row.parked ?? 0)} parked · {String(row.failedReadiness ?? 0)} failed readiness · {String(row.unlanded ?? 0)} unlanded
+                </p>
+                {nonLanded.map((disposition, index) => (
+                  <div key={String(disposition.issueNumber) + ":" + index} style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
+                    #{disposition.issueNumber} · {disposition.kind} · {disposition.reason}
+                  </div>
+                ))}
+                <p>{asString(row.summary)}</p>
+              </div>
+            );
+          }} />
       </div>
 
       {runApprovals.length ? (
