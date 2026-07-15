@@ -1,13 +1,63 @@
-import { onTestFinished } from "bun:test";
+import { afterAll, onTestFinished } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const CLI_ENTRY = resolve(REPO_ROOT, "apps/cli/src/index.js");
+const PROCESS_RUNNER = resolve(import.meta.dir, "e2e-process-runner.js");
 const ROOT_NODE_MODULES = resolve(REPO_ROOT, "node_modules");
 const BUN_BINARY = process.execPath;
 const EXECUTABLE_SHEBANG = `#!${BUN_BINARY}`;
+const activeProcessRecords = new Set();
+const tempDirs = new Set();
+
+function killProcessGroup(pid) {
+    if (!Number.isInteger(pid) || pid <= 0)
+        return;
+    try {
+        if (process.platform === "win32") {
+            spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+        }
+        else {
+            process.kill(-pid, "SIGKILL");
+        }
+    }
+    catch (error) {
+        if (error?.code !== "ESRCH")
+            throw error;
+    }
+}
+
+function reapOwnedProcesses() {
+    for (const record of activeProcessRecords) {
+        reapProcessRecord(record);
+    }
+    activeProcessRecords.clear();
+}
+
+function reapProcessRecord(record) {
+    try {
+        const pid = Number(readFileSync(record.pidPath, "utf8"));
+        killProcessGroup(pid);
+    }
+    catch (error) {
+        if (error?.code !== "ENOENT")
+            throw error;
+    }
+    cleanupTempDir(record.dir);
+}
+
+afterAll(() => {
+    reapOwnedProcesses();
+});
+
+process.once("exit", () => {
+    reapOwnedProcesses();
+    for (const dir of tempDirs) {
+        cleanupTempDir(dir);
+    }
+});
 export const FAKE_AGENT_RESPONSE = JSON.stringify({
     summary: "mock agent completed the task",
     prompt: "hello",
@@ -97,8 +147,10 @@ function linkRepoRuntimeDeps(repoDir) {
  */
 export function createTempRepo() {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "smithers-e2e-")));
+    tempDirs.add(dir);
     onTestFinished(() => {
         cleanupTempDir(dir);
+        tempDirs.delete(dir);
     });
     writeFile(join(dir, "package.json"), JSON.stringify({
         name: "smithers-e2e-fixture",
@@ -156,30 +208,64 @@ export function runSmithers(args, options) {
     const cliArgs = options.format
         ? ["run", CLI_ENTRY, ...args, "--format", options.format]
         : ["run", CLI_ENTRY, ...args];
-    const result = spawnSync(BUN_BINARY, cliArgs, {
-        cwd: options.cwd,
-        env: {
-            ...process.env,
-            ...options.env,
-        },
-        input: options.stdin,
-        encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: options.timeoutMs ?? 60_000,
-        killSignal: "SIGTERM",
+    const dir = mkdtempSync(join(tmpdir(), "smithers-e2e-process-"));
+    const pidPath = join(dir, "pid");
+    const resultPath = join(dir, "result.json");
+    const configPath = join(dir, "config.json");
+    const record = { dir, pidPath };
+    activeProcessRecords.add(record);
+    onTestFinished(() => {
+        if (activeProcessRecords.delete(record)) {
+            reapProcessRecord(record);
+        }
     });
-    const stdout = result.stdout ?? "";
-    const stderr = result.stderr ?? "";
-    let json;
-    if (options.format === "json") {
-        json = parseTrailingJson(stdout);
+    const tempDir = tempDirs.has(options.cwd) ? options.cwd : undefined;
+    writeFileSync(configPath, JSON.stringify({
+        command: BUN_BINARY,
+        args: cliArgs,
+        cwd: options.cwd,
+        env: options.env,
+        stdin: options.stdin,
+        timeoutMs: options.timeoutMs ?? 60_000,
+        parentPid: process.pid,
+        pidPath,
+        resultPath,
+        tempDir,
+    }), "utf8");
+    let workerResult;
+    try {
+        workerResult = spawnSync(BUN_BINARY, ["run", PROCESS_RUNNER, configPath], {
+            encoding: "utf8",
+            maxBuffer: 1024 * 1024,
+        });
+        const result = JSON.parse(readFileSync(resultPath, "utf8"));
+        const stdout = result.stdout ?? "";
+        const stderr = result.stderr ?? "";
+        let json;
+        if (options.format === "json") {
+            json = parseTrailingJson(stdout);
+        }
+        return {
+            exitCode: result.status ?? (result.signal === "SIGTERM" ? 143 : 1),
+            stdout,
+            stderr,
+            json,
+        };
     }
-    return {
-        exitCode: result.status ?? (result.signal === "SIGTERM" ? 143 : 1),
-        stdout,
-        stderr,
-        json,
-    };
+    catch {
+        const stdout = "";
+        const stderr = workerResult?.stderr ?? "";
+        return {
+            exitCode: 1,
+            stdout,
+            stderr,
+            json: undefined,
+        };
+    }
+    finally {
+        activeProcessRecords.delete(record);
+        cleanupTempDir(dir);
+    }
 }
 /**
  * Pin a workspace to the legacy bun:sqlite backend by writing
