@@ -771,6 +771,24 @@ describe("extractFromHost", () => {
         });
         expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
     });
+    test("throws when an array prompt contains an object", () => {
+        const root = hostEl("smithers:task", {
+            id: "mdx-array",
+            output: "out",
+            agent: { generate: async () => ({}) },
+            children: ["intro text", { bad: true }],
+        });
+        expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
+    });
+    test("throws when a prompt contains the object marker", () => {
+        const root = hostEl("smithers:task", {
+            id: "marker-text",
+            output: "out",
+            agent: { generate: async () => ({}) },
+            children: "Diagnose the [object Object] output",
+        });
+        expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
+    });
     test("scopes task ids by ancestor Ralph loops", () => {
         const root = hostEl("smithers:ralph", { id: "outer" }, [
             hostEl("smithers:workflow", {}, [
