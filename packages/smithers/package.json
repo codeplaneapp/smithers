@@ -158,7 +158,7 @@
   "scripts": {
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsup --dts-only"
+    "build": "rm -f src/index.d.ts src/index-*.d.ts && tsup --dts-only"
   },
   "dependencies": {
     "@mdx-js/esbuild": "^3.1.1",

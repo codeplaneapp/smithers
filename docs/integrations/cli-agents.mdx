@@ -36,7 +36,7 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[12]{class,cli,modelDefault,hijack,notes}:
+agents[13]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
@@ -49,9 +49,10 @@ agents[12]{class,cli,modelDefault,hijack,notes}:
   VibeAgent,vibe,CLI default,headless session id,Mistral Vibe CLI
   OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
   OpenClawAgent,openclaw,CLI default,session id,OpenClaw CLI (openclaw agent --json)
+  PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`.
+CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -550,10 +551,22 @@ new VibeAgent({
 ```ts
 import { OpenCodeAgent } from "smithers-orchestrator";
 new OpenCodeAgent({
-  model?: string; agentName?: string;
-  attachFiles?: string[];
-  continueSession?: boolean; sessionId?: string;
-  variant?: string;
+  model: "provider/model",
+  agentName: "readonly",
+  attachFiles: ["src/main.ts"],
+  variant: "high",
+});
+```
+
+`PoolAgent` wraps `pool exec` with ACP-compatible NDJSON streaming. It supports
+named agents, explicit sandbox mode, and manual session continuation.
+
+```ts
+import { PoolAgent } from "smithers-orchestrator";
+new PoolAgent({
+  agentName: "default",
+  sandbox: "required",
+  resumeSession: "session-id",
 });
 ```
 

@@ -340,6 +340,22 @@ describe("getCliAgentCapabilityReport", () => {
     expect(report.map((entry) => entry.id)).toContain("opencode");
   });
 
+  test("public registry type includes every reported engine", () => {
+    const source = readFileSync(
+      resolve(REPO_ROOT, "packages/agents/src/capability-registry/AgentCapabilityRegistry.ts"),
+      "utf8",
+    );
+    const union = source.match(/engine:\s*([^;]+);/);
+    expect(union).toBeTruthy();
+    const declared = new Set(
+      [...union[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]),
+    );
+    const missing = getCliAgentCapabilityReport()
+      .map((entry) => entry.capabilities.engine)
+      .filter((engine) => !declared.has(engine));
+    expect(missing).toEqual([]);
+  });
+
   test("covers every CLI surface manifest entry", () => {
     const report = getCliAgentCapabilityReport();
     expect(report.map((entry) => entry.id).sort()).toEqual(

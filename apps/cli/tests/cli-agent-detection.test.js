@@ -83,7 +83,19 @@ describe("detectAvailableAgents", () => {
         expect(ids).toContain("vibe");
         expect(ids).toContain("hermes");
         expect(ids).toContain("openclaw");
-        expect(results.length).toBe(11);
+        expect(ids).toContain("pool");
+        expect(results.length).toBe(12);
+
+        const availabilitySource = readFileSync(
+            new URL("../src/AgentAvailability.ts", import.meta.url),
+            "utf8",
+        );
+        const availabilityUnion = availabilitySource.match(/id:\s*([^;]+);/);
+        expect(availabilityUnion).toBeTruthy();
+        const declaredIds = [...availabilityUnion[1].matchAll(/"([^"]+)"/g)]
+            .map((match) => match[1])
+            .sort();
+        expect(declaredIds).toEqual([...ids].sort());
     });
     test("each result has required fields", () => {
         const results = detectAvailableAgents({});

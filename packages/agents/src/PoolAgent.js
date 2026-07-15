@@ -14,10 +14,10 @@ import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 /** @typedef {import("./PoolAgentOptions.ts").PoolAgentOptions} PoolAgentOptions */
 
 /**
- * @param {PoolAgentOptions} [opts]
+ * @param {PoolAgentOptions} [_opts]
  * @returns {AgentCapabilityRegistry}
  */
-export function createPoolCapabilityRegistry(opts = {}) {
+export function createPoolCapabilityRegistry(_opts = {}) {
   return {
     version: 1,
     engine: "pool",

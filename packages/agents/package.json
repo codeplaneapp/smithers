@@ -66,7 +66,7 @@
   "scripts": {
     "test": "bun test --timeout=60000 --max-concurrency=1 tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsup --dts-only"
+    "build": "rm -f src/index.d.ts src/index-*.d.ts src/BaseCliAgent/index.d.ts && tsup --dts-only"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.5",

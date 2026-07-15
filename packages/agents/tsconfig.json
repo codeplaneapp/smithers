@@ -11,6 +11,7 @@
     "moduleDetection": "force",
     "strict": true,
     "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
     "verbatimModuleSyntax": true,
     "noEmit": false,
     "declaration": true,

@@ -1,17 +1,16 @@
 #!/usr/bin/env node
-// Freshness gate for the per-file declaration bundles (packages that ship one
-// `.d.ts` per source module so `pkg/<subpath>` resolves real types). Regenerates
-// them from source and fails if the committed output drifted — the type-side
-// sibling of check-docs/check-llms. Runs in CI's `pnpm test` gate.
+// Freshness gate for committed declaration bundles. Regenerates them from
+// source and fails if the committed output drifted — the type-side sibling of
+// check-docs/check-llms. Runs in CI's `pnpm test` gate.
 //
 // Non-destructive: it snapshots the committed `.d.ts` under `pkg/src`, runs the
 // real build to regenerate them, content-compares regenerated-vs-committed to
 // detect drift, then ALWAYS restores the committed tree in a `finally` — even if
-// the build throws. The build script is `clean-dts src && tsup`, which deletes
-// every `.d.ts` before tsup rewrites them; without the restore, a transient tsup
-// failure would leave ~100 tracked declarations deleted across graph+integrations
-// (a nasty footgun in this shared jj working tree). The net effect of this gate
-// is now zero: pass or fail, the tree ends byte-identical to how it started.
+// the build throws. Each package build removes the declarations it generates
+// before tsup rewrites them; without the restore, a transient tsup failure would
+// leave tracked declarations deleted in this shared jj working tree. The net
+// effect of this gate is zero: pass or fail, the tree ends byte-identical to how
+// it started.
 //
 // Why in-place (not a throwaway temp outDir): tsup's dts bundler only emits the
 // committed re-export form for `index.d.ts` when it writes to `src` itself. Point
@@ -35,7 +34,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packages = ["packages/graph", "packages/integrations", "packages/cloudflare"];
+const packages = [
+  "packages/agents",
+  "packages/cloudflare",
+  "packages/graph",
+  "packages/integrations",
+  "packages/smithers",
+];
 
 /**
  * Snapshot every `.d.ts` under `srcDir` as a rel-path → content map.
