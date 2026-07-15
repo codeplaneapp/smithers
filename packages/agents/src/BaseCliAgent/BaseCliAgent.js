@@ -164,6 +164,48 @@ function classifyNonRetryableAgentError(message, command, context = {}) {
 }
 
 /**
+ * Detect CLI session-loss: the persisted resume/session id points at a
+ * conversation that no longer exists, so every retry that reuses it fails
+ * deterministically (and instantly) with the same error. Return a typed
+ * error whose `discardResumeSession: true` tells the engine retry path to
+ * DROP the dead id and mint a fresh conversation on the next attempt —
+ * without it a one-time timeout dead-loops through every retry AND every
+ * `--resume` of the whole run (issue-swarm run-1784095071179, 2026-07-15).
+ *
+ * - kimi: crashes mid-stream printing `To resume this session: kimi -r <uuid>`;
+ *   re-running `--session <same-uuid>` reproduces the crash.
+ * - claude: `--resume <id>` of a killed/relocated conversation prints
+ *   `No conversation found with session ID: <id>` (isolated jj worktrees can
+ *   relocate the cwd its conversation store is keyed by).
+ */
+export function classifySessionLoss(command, errorText, rawStderr) {
+    const kimiMatch = command === "kimi"
+        ? (rawStderr.match(/kimi -r ([0-9a-f-]{8,})/i) || errorText.match(/kimi -r ([0-9a-f-]{8,})/i))
+        : null;
+    if (kimiMatch) {
+        return new SmithersError("AGENT_SESSION_LOST", `Kimi session ${kimiMatch[1]} is broken. Retry will start a fresh session.`, {
+            failureRetryable: true,
+            discardResumeSession: true,
+            command: "kimi",
+            kimiSessionId: kimiMatch[1],
+        });
+    }
+    const claudeMatch = command === "claude"
+        ? (errorText.match(/No conversation found with session ID:?\s*([0-9a-f-]{8,})?/i)
+            || rawStderr.match(/No conversation found with session ID:?\s*([0-9a-f-]{8,})?/i))
+        : null;
+    if (claudeMatch) {
+        const lostId = claudeMatch[1] ? ` ${claudeMatch[1]}` : "";
+        return new SmithersError("AGENT_SESSION_LOST", `Claude conversation${lostId} no longer exists; the persisted resume id is dead. Retry will start a fresh session.`, {
+            failureRetryable: true,
+            discardResumeSession: true,
+            command: "claude",
+        });
+    }
+    return null;
+}
+
+/**
  * @param {string} stderr
  * @param {ReadonlyArray<RegExp>} [extraPatterns]
  * @returns {string}
@@ -1106,24 +1148,10 @@ export class BaseCliAgent {
                         if (nonRetryable) {
                             return yield* Effect.fail(nonRetryable);
                         }
-                        // Detect kimi session-loss. Kimi crashes mid-stream and prints
-                        // `To resume this session: kimi -r <uuid>` to stderr (and often
-                        // also to the merged error text after the benign-stderr filter
-                        // strips the bare-line variant). The session itself is corrupt
-                        // — re-running with `--session <same-uuid>` deterministically
-                        // reproduces the same crash. Surface a typed error that tells
-                        // the engine retry path to DROP the broken session id and
-                        // start a fresh one on the next attempt.
                         const rawStderr = result.stderr ?? "";
-                        const sessionLossMatch = rawStderr.match(/kimi -r ([0-9a-f-]{8,})/i)
-                            || errorText.match(/kimi -r ([0-9a-f-]{8,})/i);
-                        if (commandSpec.command === "kimi" && sessionLossMatch) {
-                            return yield* Effect.fail(new SmithersError("AGENT_SESSION_LOST", `Kimi session ${sessionLossMatch[1]} is broken; CLI exited ${result.exitCode}. Retry will start a fresh session.`, {
-                                failureRetryable: true,
-                                discardResumeSession: true,
-                                command: "kimi",
-                                kimiSessionId: sessionLossMatch[1],
-                            }));
+                        const sessionLoss = classifySessionLoss(commandSpec.command, errorText, rawStderr);
+                        if (sessionLoss) {
+                            return yield* Effect.fail(sessionLoss);
                         }
                         return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", errorText));
                     }
@@ -1133,6 +1161,14 @@ export class BaseCliAgent {
                     const completedQuota = classifyQuota(completedError, commandSpec.command);
                     if (completedQuota) {
                         return yield* Effect.fail(completedQuota);
+                    }
+                    // Session loss can surface through the CLI's structured result
+                    // (a `completed ok:false` event) instead of a non-zero exit —
+                    // claude-code reports "No conversation found" this way. Same
+                    // treatment: drop the dead id, retry fresh.
+                    const completedSessionLoss = classifySessionLoss(commandSpec.command, completedError, result.stderr ?? "");
+                    if (completedSessionLoss) {
+                        return yield* Effect.fail(completedSessionLoss);
                     }
                     return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", completedError));
                 }
