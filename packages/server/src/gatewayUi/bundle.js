@@ -1,7 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -17,13 +17,34 @@ const tanstackSpecifierRe = /^@tanstack\//;
 const smithersUiSpecifierRe = /^(?:smithers-orchestrator\/gateway-(?:react|client)|@smithers-orchestrator\/(?:gateway-react|gateway-client|gateway)(?:\/.*)?)$/;
 const INLINE_UI_NAMESPACE = "smithers-inline-ui";
 
+/**
+ * Bun's createRequire.resolve can return the original bare specifier when a
+ * source-shipping package is reached through a consumer workspace symlink.
+ * File-namespace onResolve callbacks may return only absolute paths.
+ *
+ * @param {string} specifier
+ * @param {string[]} searchPaths
+ * @returns {string | null}
+ */
+function resolveAbsoluteFile(specifier, searchPaths) {
+    const resolvers = [
+        () => require.resolve(specifier, { paths: searchPaths }),
+        ...searchPaths.map((searchPath) => () => Bun.resolveSync(specifier, searchPath)),
+    ];
+    for (const resolveSpecifier of resolvers) {
+        try {
+            const path = resolveSpecifier();
+            if (typeof path === "string" && isAbsolute(path)) {
+                return path;
+            }
+        }
+        catch { }
+    }
+    return null;
+}
+
 function resolveReactPeer(specifier) {
-    try {
-        return require.resolve(specifier);
-    }
-    catch {
-        return null;
-    }
+    return resolveAbsoluteFile(specifier, [thisDir, monorepoRoot]);
 }
 
 /**
@@ -48,14 +69,7 @@ function resolveWorkspaceDependency(specifier, resolveDir) {
         ...packageRoots,
         process.cwd(),
     ].filter(Boolean);
-    try {
-        return require.resolve(specifier, {
-            paths: searchPaths,
-        });
-    }
-    catch {
-        return null;
-    }
+    return resolveAbsoluteFile(specifier, searchPaths);
 }
 
 /**
@@ -64,14 +78,7 @@ function resolveWorkspaceDependency(specifier, resolveDir) {
  * @returns {string | null}
  */
 function resolveSmithersUiDependency(specifier, resolveDir) {
-    try {
-        return require.resolve(specifier, {
-            paths: [resolveDir, monorepoRoot, process.cwd()].filter(Boolean),
-        });
-    }
-    catch {
-        return null;
-    }
+    return resolveAbsoluteFile(specifier, [resolveDir, monorepoRoot, process.cwd()].filter(Boolean));
 }
 
 /**

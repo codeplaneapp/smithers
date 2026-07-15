@@ -74,6 +74,27 @@ function writeSharedComponentsUiEntry(dir) {
   return entry;
 }
 
+/** A source-shipping UI that traverses wildcard gateway package exports. */
+function writeGatewaySourceGraphUiEntry(dir) {
+  const entry = join(dir, "gateway-source-graph.jsx");
+  writeFileSync(
+    entry,
+    [
+      'import { createElement as h } from "react";',
+      'import { createRoot } from "react-dom/client";',
+      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { useGatewayActions } from "@smithers-orchestrator/gateway-react/useGatewayActions";',
+      'import { GatewayRpcError } from "@smithers-orchestrator/gateway-client/rpc";',
+      "const graph = [createGatewayReactRoot, useGatewayActions, GatewayRpcError]",
+      '  .map((value) => value.name).join(":");',
+      'createRoot(document.getElementById("root")).render(',
+      '  h("main", { "data-gateway-source-graph": graph }, "Gateway source graph"),',
+      ");",
+    ].join("\n"),
+  );
+  return entry;
+}
+
 describe("Gateway UI with shared components", () => {
   let gateway;
   let tempDir;
@@ -132,5 +153,23 @@ describe("Gateway UI with shared components", () => {
     // ui package's css-contract test); dark comes from the host page flipping
     // the tokens. The bundle DOES carry workflowUiThemeCss for the
     // SmithersUiStyles withTheme standalone path, which is expected.
+  }, 20000);
+
+  test("serves the source-shipping gateway-react and gateway-client graph as JavaScript", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-gateway-source-ui-"));
+    const entry = writeGatewaySourceGraphUiEntry(tempDir);
+    gateway = new Gateway();
+    gateway.register("source-graph", createValueWorkflow(join(tempDir, "source-graph.db")), {
+      ui: { entry, title: "Gateway Source Graph" },
+    });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const response = await fetch(
+      `http://127.0.0.1:${port}/workflows/source-graph/__smithers_ui/client.js`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type") ?? "").toContain("javascript");
+    expect(await response.text()).toContain("data-gateway-source-graph");
   }, 20000);
 });
