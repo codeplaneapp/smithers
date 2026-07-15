@@ -67,15 +67,14 @@ export function createBrowserSmithers(options) {
     if (!workflow || typeof workflow.build !== "function") {
         throw new TypeError("createBrowserSmithers requires a browser workflow definition — see defineBrowserWorkflow().");
     }
-    const renderer = new SmithersRenderer({ extractGraph });
     const definition = {
         zodToKeyName: workflow.zodToKeyName,
         build: (ctx) => React.createElement(SmithersContext.Provider, { value: ctx }, workflow.build(ctx)),
     };
-    const driver = new WorkflowDriver({
+    const createDriver = () => new WorkflowDriver({
         workflow: definition,
         runtime: { runPromise: (effect) => Effect.runPromise(effect) },
-        renderer,
+        renderer: new SmithersRenderer({ extractGraph }),
         runtimeAdapter: runtime,
         createSession: (sessionOptions) => makeWorkflowSession({
             ...sessionOptions,
@@ -91,7 +90,7 @@ export function createBrowserSmithers(options) {
     });
     return {
         runtime,
-        run: (runOptions = {}) => driver.run(runOptions),
+        run: (runOptions = {}) => createDriver().run(runOptions),
         getRun: (runId) => runtime.storage.loadRun(runId),
         getOutputs: (runId) => runtime.storage.loadOutputs(runId),
     };

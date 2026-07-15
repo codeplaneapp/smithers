@@ -126,19 +126,18 @@ export class PoolAgent extends BaseCliAgent {
       const eventType = asString(payload.type);
       if (!eventType) return [];
 
-      // Emit started on first event if not yet emitted
+      const events = [];
+
+      // Emit started on first event if not yet emitted. Keep processing this
+      // first payload too: it can itself carry the final answer or failure.
       if (!didEmitStarted) {
         didEmitStarted = true;
-        return [
-          {
-            type: "started",
-            engine: this.cliEngine,
-            title: "Pool",
-          },
-        ];
+        events.push({
+          type: "started",
+          engine: this.cliEngine,
+          title: "Pool",
+        });
       }
-
-      const events = [];
 
       // --- reasoning: model reasoning ---
       if (eventType === "reasoning") {
@@ -195,17 +194,16 @@ export class PoolAgent extends BaseCliAgent {
         // Track exit tool calls for task completion detection
         if (toolName === "exit") {
           const success = args && typeof args.success === "boolean" ? args.success : true;
-          if (didEmitCompleted) return [];
+          if (didEmitCompleted) return events;
 
           didEmitCompleted = true;
-          return [
-            {
-              type: "completed",
-              engine: this.cliEngine,
-              ok: success,
-              answer: lastThought || undefined,
-            },
-          ];
+          events.push({
+            type: "completed",
+            engine: this.cliEngine,
+            ok: success,
+            answer: lastThought || undefined,
+          });
+          return events;
         }
 
         // Track pending tool call for result pairing
@@ -260,7 +258,9 @@ export class PoolAgent extends BaseCliAgent {
         return events;
       }
 
-      return [];
+      // Unknown event types still flush a pending started event so the first
+      // record never silently swallows it.
+      return events;
     };
 
     return {

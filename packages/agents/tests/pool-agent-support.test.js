@@ -135,6 +135,69 @@ process.stdout.write(JSON.stringify({ args: { success: true }, name: "exit", typ
     }
   });
 
+  test("preserves an answer when the first pool NDJSON record is a thought", async () => {
+    const fake = await makeFakePool(`
+process.stdout.write(JSON.stringify({ thought: "First record answer", type: "thought" }) + "\\n");
+process.stdout.write(JSON.stringify({ args: { success: true }, name: "exit", type: "toolCall" }) + "\\n");
+`);
+
+    try {
+      process.env.PATH = `${fake.dir}:${originalPath}`;
+      /** @type {import("../src/BaseCliAgent/index.ts").AgentCliEvent[]} */
+      const events = [];
+      const agent = new PoolAgent({ env: { PATH: process.env.PATH } });
+
+      const result = await agent.generate({
+        prompt: "Return the first answer",
+        rootDir: fake.dir,
+        onEvent: (event) => events.push(event),
+      });
+
+      expect(result.text).toBe("First record answer");
+      expect(events[0]).toMatchObject({ type: "started", engine: "pool" });
+      expect(events[1]).toMatchObject({
+        type: "action",
+        engine: "pool",
+        entryType: "message",
+        message: "First record answer",
+      });
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: "completed",
+          engine: "pool",
+          ok: true,
+          answer: "First record answer",
+        }),
+      ]));
+    } finally {
+      await rm(fake.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails when the first pool NDJSON record is a failing exit", async () => {
+    const fake = await makeFakePool(`
+process.stdout.write(JSON.stringify({ args: { success: false }, name: "exit", type: "toolCall" }) + "\\n");
+`);
+
+    try {
+      process.env.PATH = `${fake.dir}:${originalPath}`;
+      /** @type {import("../src/BaseCliAgent/index.ts").AgentCliEvent[]} */
+      const events = [];
+      const agent = new PoolAgent({ env: { PATH: process.env.PATH } });
+
+      await expect(agent.generate({
+        prompt: "Fail immediately",
+        rootDir: fake.dir,
+        onEvent: (event) => events.push(event),
+      })).rejects.toMatchObject({ code: "AGENT_CLI_ERROR" });
+
+      expect(events[0]).toMatchObject({ type: "started", engine: "pool" });
+      expect(events[1]).toMatchObject({ type: "completed", engine: "pool", ok: false });
+    } finally {
+      await rm(fake.dir, { recursive: true, force: true });
+    }
+  });
+
   test("reports stderr when pool exits before emitting output", () => {
     const agent = new PoolAgent({ sessionId: "failed-session" });
     const interpreter = agent.createOutputInterpreter();
