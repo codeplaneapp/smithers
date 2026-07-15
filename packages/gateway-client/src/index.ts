@@ -1,5 +1,5 @@
 export { gatewayBackoffDelay, type GatewayBackoffOptions } from "./gatewayBackoffDelay.ts";
-export { GatewayRpcError } from "./GatewayRpcError.ts";
+export { GatewayRpcError } from "./rpc.ts";
 export { SmithersGatewayClient } from "./SmithersGatewayClient.ts";
 export type { GatewayStreamReconnectEvent } from "./SmithersGatewayClient.ts";
 export {
@@ -9,9 +9,14 @@ export {
   SmithersGatewayConnection,
 } from "./SmithersGatewayConnection.ts";
 export type { SmithersGatewayConnectionOptions } from "./SmithersGatewayConnection.ts";
-export type { GatewayEventFrame } from "./GatewayEventFrame.ts";
-export type { GatewayResponseFrame } from "./GatewayResponseFrame.ts";
-export type { GatewayRpcParams, GatewayRpcPayload, GatewayRpcRequestMap, GatewayRpcResponseMap } from "./GatewayRpcTypeMap.ts";
+export type {
+  GatewayEventFrame,
+  GatewayResponseFrame,
+  GatewayRpcParams,
+  GatewayRpcPayload,
+  GatewayRpcRequestMap,
+  GatewayRpcResponseMap,
+} from "./rpc.ts";
 export type { GatewayUiBootConfig } from "./GatewayUiBootConfig.ts";
 export type { SmithersGatewayClientOptions } from "./SmithersGatewayClientOptions.ts";
 
@@ -65,7 +70,7 @@ export type {
   ListScoresForRunsResponse,
   GetScoreDetailRequest,
   GetScoreDetailResponse,
-} from "@smithers-orchestrator/gateway/rpc";
+} from "./rpc.ts";
 export { createSmithersCollections } from "./data/createSmithersCollections.ts";
 export { createSmithersDataClient } from "./data/createSmithersDataClient.ts";
 export { mapSmithersElectricRow } from "./data/mapSmithersElectricRow.ts";

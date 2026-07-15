@@ -1,8 +1,1 @@
-export type GatewayEventFrame<Payload = unknown> = {
-  type: "event";
-  event: string;
-  payload?: Payload;
-  seq: number;
-  stateVersion: number;
-  apiVersion?: "v1";
-};
+export type { GatewayEventFrame } from "@smithers-orchestrator/protocol/gateway-rpc";

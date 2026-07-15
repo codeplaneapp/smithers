@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { listGatewayRpcMethods, type GatewayRpcMethod } from "@smithers-orchestrator/gateway/rpc";
+import { listGatewayRpcMethods } from "@smithers-orchestrator/gateway/rpc";
+import type { GatewayRpcMethod } from "@smithers-orchestrator/gateway-client/rpc";
 import {
   GATEWAY_EVENT_BACKPRESSURE_CODE,
   GatewayRpcError,

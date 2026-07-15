@@ -26,7 +26,7 @@ import type {
   SubmitApprovalResponse,
   SubmitApprovalRequest,
   UpdateTicketRequest,
-} from "@smithers-orchestrator/gateway/rpc";
+} from "@smithers-orchestrator/protocol/gateway-rpc";
 import { GatewayRpcError } from "../GatewayRpcError.ts";
 import { flattenGatewayRunNode } from "../sync/flattenGatewayRunNode.ts";
 import { runNodeKey } from "../sync/GatewayRunNode.ts";

@@ -34,7 +34,7 @@ import type {
   SubmitApprovalRequest,
   SubmitApprovalResponse,
   SubmitSignalRequest,
-} from "@smithers-orchestrator/gateway/rpc";
+} from "@smithers-orchestrator/protocol/gateway-rpc";
 import type { GatewayCronRow } from "../sync/GatewayCronRow.ts";
 import type { GatewayComparisonScoreRow } from "../sync/GatewayComparisonScoreRow.ts";
 import type { GatewayMemoryFactRow } from "../sync/GatewayMemoryFactRow.ts";

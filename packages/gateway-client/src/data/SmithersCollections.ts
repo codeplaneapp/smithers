@@ -8,7 +8,7 @@ import type {
   ListScoresRequest,
   ListTicketsRequest,
   ListWorkflowsRequest,
-} from "@smithers-orchestrator/gateway/rpc";
+} from "@smithers-orchestrator/protocol/gateway-rpc";
 import type { GatewayApprovalRow } from "../sync/GatewayApprovalRow.ts";
 import type { GatewayCronRow } from "../sync/GatewayCronRow.ts";
 import type { GatewayMemoryFactRow } from "../sync/GatewayMemoryFactRow.ts";

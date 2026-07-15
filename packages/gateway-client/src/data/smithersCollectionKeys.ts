@@ -7,7 +7,7 @@ import type {
   ListScoresRequest,
   ListTicketsRequest,
   ListWorkflowsRequest,
-} from "@smithers-orchestrator/gateway/rpc";
+} from "@smithers-orchestrator/protocol/gateway-rpc";
 
 const stable = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stable);

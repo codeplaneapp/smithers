@@ -47,7 +47,7 @@ import type {
   GetSchemaSignatureResponse,
   ListDocsRequest,
   ListDocsResponse,
-} from "@smithers-orchestrator/gateway/rpc";
+} from "@smithers-orchestrator/protocol/gateway-rpc";
 import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
 import type { GatewayMemoryFactRow } from "./sync/GatewayMemoryFactRow.ts";
 import type { GatewayPromptRow } from "./sync/GatewayPromptRow.ts";
