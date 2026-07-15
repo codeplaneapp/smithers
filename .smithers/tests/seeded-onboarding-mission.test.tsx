@@ -42,7 +42,7 @@ async function withFakeCli<T>(inspect: string, fn: (root: string) => Promise<T>)
     process.chdir(old.cwd);
     if (old.home === undefined) delete process.env.HOME; else process.env.HOME = old.home;
     if (old.path === undefined) delete process.env.PATH; else process.env.PATH = old.path;
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
   }
 }
 

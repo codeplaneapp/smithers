@@ -125,7 +125,7 @@ describe("local orchestration workflows C", () => {
       expect(verifyLandedCommit(claim(localOnlySha), repo)).toMatchObject({ landed: false, mergeSha: localOnlySha });
     } finally {
       process.chdir(oldCwd);
-      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 

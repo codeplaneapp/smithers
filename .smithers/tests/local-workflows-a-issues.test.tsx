@@ -109,7 +109,7 @@ describe.serial("Local-A causal issue workflows", () => {
       git("init", "-q"); git("config", "user.email", "test@example.invalid"); git("config", "user.name", "test");
       await writeFile(join(root, "old.txt"), "old\n"); git("add", "--", "old.txt"); git("commit", "-qm", "seed"); git("mv", "old.txt", "new.txt"); await writeFile(join(root, "untracked.txt"), "u\n");
       expect(parsePorcelainPaths(git("status", "--porcelain=v1", "-z"))).toEqual(["new.txt", "old.txt", "untracked.txt"]);
-    } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+    } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined); }
   });
 
   test("antigravity requires nonblank prompt, current green validation/review, and exact three-round exhaustion", async () => {

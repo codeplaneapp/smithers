@@ -44,7 +44,7 @@ async function isolated(prefix: string, body: (cwd: string) => Promise<void>) {
     for (const [key, value] of Object.entries(oldTemp)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
-    await rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
   }
 }
 async function gitFixture(cwd: string) {

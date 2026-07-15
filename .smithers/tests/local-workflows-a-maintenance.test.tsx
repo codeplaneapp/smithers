@@ -87,7 +87,7 @@ describe.serial("Local-A maintenance and probe workflows", () => {
       expect(await readFile(join(root, "failed.md"), "utf8")).toContain("Overall: attention needed");
     } finally {
       process.env.PATH = oldPath;
-      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); await rm(fake.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined); await rm(fake.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   }, 30_000);
 
@@ -151,7 +151,7 @@ describe.serial("Local-A maintenance and probe workflows", () => {
     } finally {
       process.env.PATH = oldPath; process.env.SMITHERS_CANARY_BUN = oldBun; process.env.LOCAL_A_BUN_LOG = oldLog; process.env.LOCAL_A_BUN_FAIL = oldFail; process.chdir(oldCwd);
       await rm(join(tmpdir(), "smithers-canary-persistent-old.md"), { force: true });
-      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); await rm(fake.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined); await rm(fake.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   }, 30_000);
 

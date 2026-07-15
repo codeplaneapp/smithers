@@ -403,7 +403,7 @@ describe("public issue agent policy", () => {
       expect(roots).not.toContain(join(pnpmHome, ".tools"));
       expect(roots).not.toContain(join(versionRoot, "node_modules"));
     } finally {
-      await rm(pnpmHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(pnpmHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -434,7 +434,7 @@ describe("public issue agent policy", () => {
       expect(roots).not.toContain(join(prefix, "Cellar"));
       expect(roots).not.toContain(llhttpOptRoot);
     } finally {
-      await rm(prefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(prefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -454,7 +454,7 @@ describe("public issue agent policy", () => {
 
       expect(roots).toEqual([]);
     } finally {
-      await rm(prefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(prefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -472,7 +472,7 @@ describe("public issue agent policy", () => {
       expect(roots).not.toContain(join(prefix, "opt"));
       expect(roots).not.toContain(join(prefix, "Cellar", "missing", "1.0"));
     } finally {
-      await rm(prefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(prefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -528,7 +528,7 @@ describe("public issue agent policy", () => {
         brotliLibrary,
       ].sort());
     } finally {
-      await rm(temporaryPrefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(temporaryPrefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -609,8 +609,8 @@ describe("public issue agent policy", () => {
         expect(result.stdout.toString()).toContain("jj ");
         expect(result.stderr.toString()).not.toContain("data did not match");
       } finally {
-        await rm(runtime, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-        await rm(codexHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        await rm(runtime, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
+        await rm(codexHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
       }
     },
     30_000,

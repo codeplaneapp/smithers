@@ -250,7 +250,12 @@ export default smithers((ctx) => {
   const scaffoldRows = ctx.outputs.scaffold ?? [];
   const fixRows = scaffoldRows.filter((r) => r.nodeId === "fix");
   const scaffold = fixRows.at(-1) ?? scaffoldRows.find((r) => r.nodeId === "scaffold");
-  const documentation = ctx.latest(outputs.document, "document") ?? ctx.outputMaybe("document", { nodeId: "document" });
+  // The retry loop re-documents under a loop-scoped node id that top-level
+  // ctx.latest() cannot see; pick the newest document row from the raw table
+  // (same idiom as scaffold above) so the terminal summary reports the
+  // corrected round, not the first failed one.
+  const documentRows = (ctx.outputs.document ?? []).filter((r) => String(r.nodeId).startsWith("document"));
+  const documentation = documentRows.at(-1) ?? ctx.outputMaybe("document", { nodeId: "document" });
   const skillVerification = ctx.latest(outputs.skillVerification, "skill-verification") ?? ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
   const skillReady = skillVerification?.exists === true && skillVerification.containsWorkflowMetadata === true;
 

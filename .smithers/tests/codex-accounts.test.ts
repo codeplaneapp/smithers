@@ -36,7 +36,7 @@ describe("subscriptionCodexFirst", () => {
       expect(agents.slice(0, 2).every((agent) => agent.opts.apiKey === undefined)).toBe(true);
       expect(agents[2]).toBe(fallback);
     } finally {
-      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -51,7 +51,7 @@ describe("subscriptionCodexFirst", () => {
         { SMITHERS_HOME: home },
       )).toEqual([fallback]);
     } finally {
-      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -77,7 +77,7 @@ describe("codexPaused kill-switch", () => {
       expect(codexFirst({ model: "gpt-5.6-luna" }, [fallback], env)).toEqual([fallback]);
       expect(subscriptionCodexFirst({ model: "gpt-5.6-sol" }, [fallback], env)).toEqual([fallback]);
     } finally {
-      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -88,7 +88,7 @@ describe("codexPaused kill-switch", () => {
       const agents = codexFirst({ model: "gpt-5.6-luna", inheritEnv: false }, [], { SMITHERS_HOME: home });
       expect(agents).toHaveLength(1);
     } finally {
-      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -102,7 +102,7 @@ describe("codexPaused kill-switch", () => {
       await writeFile(join(home, "codex-paused.json"), "{not json");
       expect(codexPaused({ SMITHERS_HOME: home })).toBe(true);
     } finally {
-      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -114,7 +114,7 @@ describe("codexPaused kill-switch", () => {
       expect(codexPaused({ SMITHERS_HOME: home, SMITHERS_CODEX_PAUSED: "0" })).toBe(false);
       expect(codexPaused({ SMITHERS_HOME: home, SMITHERS_CODEX_PAUSED: "off" })).toBe(false);
     } finally {
-      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
@@ -126,7 +126,7 @@ describe("codexPaused kill-switch", () => {
       expect(agents.length).toBeGreaterThan(1);
       expect(agents[agents.length - 1]).toBe(fallback);
     } finally {
-      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 });
