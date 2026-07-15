@@ -227,7 +227,7 @@ test("eval-author: derives and writes a real temp fixture contract, with null wo
     process.chdir(cwd);
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
     if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
-    await rm(temp, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }, { timeout: 15_000 });
 

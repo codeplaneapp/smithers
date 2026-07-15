@@ -57,7 +57,7 @@ async function isolated(prefix: string, body: (root: string) => Promise<void>) {
   try { await body(root); } finally {
     process.chdir(cwd);
     process.env.PATH = path;
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

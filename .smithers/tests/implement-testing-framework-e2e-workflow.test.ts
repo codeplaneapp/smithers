@@ -120,7 +120,7 @@ async function isolated(
 }
 
 afterAll(async () => {
-  await Promise.all(temporaryRoots.map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(temporaryRoots.map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
 const check = (passed = true) => ({

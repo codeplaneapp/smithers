@@ -112,7 +112,7 @@ describe.serial("curated production-shaped DDD and eval workflows", () => {
       expect(noApproval.tasks.map((item) => item.nodeId)).toEqual(["bootstrap", "metaTicket", "audit", "spec-update", "triage", "materialize-tickets", "work:1", "cycle-review"]);
       const preapproved = await stage(isolated, { runImplementation: true, requireImplementationApproval: true, implementationApproved: true, maxRounds: 1 }, [...Object.values(base), row("materialize-tickets", { created: 0, directory: "", tickets: [], summary: "none" })]);
       expect(preapproved.tasks.map((item) => item.nodeId)).toEqual(["bootstrap", "metaTicket", "audit", "spec-update", "triage", "materialize-tickets", "work:1", "cycle-review"]);
-    } finally { process.chdir(oldCwd); await rm(root, { recursive: true, force: true }); }
+    } finally { process.chdir(oldCwd); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 120_000);
 
   test("DDD simulates real two-round work, ticket bytes, diffs, trace, and max-round return-last", async () => {
@@ -166,8 +166,8 @@ describe.serial("curated production-shaped DDD and eval workflows", () => {
         const limitedTickets = limited.task("materialize-tickets").outputs[0] as any;
         expect(limitedTickets.created).toBe(1);
         expect(await readFile(join(limitedRoot, ".smithers/tickets", `${limitedTickets.tickets[0].path}.md`), "utf8")).toBe(limitedTickets.tickets[0].content);
-      } finally { process.chdir(root); await rm(limitedRoot, { recursive: true, force: true }); }
-    } finally { process.chdir(oldCwd); await rm(root, { recursive: true, force: true }); }
+      } finally { process.chdir(root); await rm(limitedRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+    } finally { process.chdir(oldCwd); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }, 30_000);
 
   test("eval validates input and causally aggregates mounted case rows", async () => {

@@ -69,7 +69,7 @@ async function isolated<T>(prefix: string, fn: (root: string) => Promise<T>): Pr
     let removed = false;
     let lastError: unknown;
     while (Date.now() < deadline) {
-      try { await rm(root, { recursive: true, force: true }); removed = true; break; } catch (error) { lastError = error; await new Promise((resolve) => setTimeout(resolve, 25)); }
+      try { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); removed = true; break; } catch (error) { lastError = error; await new Promise((resolve) => setTimeout(resolve, 25)); }
     }
     if (!removed) throw lastError ?? new Error(`could not remove ${root}`);
   }

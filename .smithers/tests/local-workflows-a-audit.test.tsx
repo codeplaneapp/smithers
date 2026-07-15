@@ -83,7 +83,7 @@ describe("Local-A audit and landing workflows", () => {
         expect(discover.items.map((x: any) => x.pkg)).toEqual(["apps/cli", null, null]);
         expect(new Set(discover.items.map((x: any) => x.slug)).size).toBe(3);
       } finally { process.chdir(cwd); }
-    } finally { await rm(temp, { recursive: true, force: true }); }
+    } finally { await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test("audit-fix-train uses explicit findings, stable duplicate keys, iteration-safe convergence, serial merge, and push gating", async () => {
@@ -198,7 +198,7 @@ describe("Local-A audit and landing workflows", () => {
       if (savedRoot === undefined) delete process.env.SMITHERS_BREAK_ROOT; else process.env.SMITHERS_BREAK_ROOT = savedRoot;
       if (savedBun === undefined) delete process.env.SMITHERS_BREAK_BUN; else process.env.SMITHERS_BREAK_BUN = savedBun;
       delete process.env.BREAK_BUN_LOG;
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 30_000);
 

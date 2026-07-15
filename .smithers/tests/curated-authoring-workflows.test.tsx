@@ -38,10 +38,16 @@ const temp = (prefix: string) => mkdtemp(join(tmpdir(), `authoring-${prefix}-`))
 const removeTemp = async (path: string) => {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
-      await rm(path, { recursive: true, force: true });
+      await rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       return;
     } catch (error) {
-      if (attempt === 7) throw error;
+      if (attempt === 7) {
+        // Windows can hold EBUSY on a former child cwd long past any sane
+        // backoff. Cleanup is best-effort: a leaked temp dir on an ephemeral
+        // runner must not fail the suite.
+        console.warn(`removeTemp: leaving ${path} behind: ${error}`);
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
     }
   }
