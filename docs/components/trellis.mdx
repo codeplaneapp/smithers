@@ -25,7 +25,9 @@ import {
 } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
-const input = z.object({ prompt: z.string().min(1) });
+const input = z.object({
+  prompt: z.string().trim().min(1).default("Build the requested result and prove it works."),
+});
 const { Workflow, smithers, outputs } = createSmithers({
   input,
   ...delegationV2Schemas,
@@ -36,21 +38,27 @@ const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const terra = new CodexAgent({ model: "gpt-5.6-terra" });
 const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
 
-export default smithers((ctx) => (
-  <Workflow name="adaptive-work">
-    <Trellis
-      prompt={ctx.input.prompt}
-      agents={{ sol, fable, terra, luna }}
-      outputs={outputs}
-      maxConcurrency={4}
-      limits={{
-        maxTotalAuthorTurns: 32,
-        maxAuthorGenerations: 4,
-        maxAuthorDepth: 4,
-      }}
-    />
-  </Workflow>
-));
+export default smithers((ctx) => {
+  // Static graph rendering does not apply input-schema defaults, so repeat the
+  // prompt default before Trellis validates it at render time.
+  const prompt = ctx.input.prompt?.trim() || "Build the requested result and prove it works.";
+
+  return (
+    <Workflow name="adaptive-work">
+      <Trellis
+        prompt={prompt}
+        agents={{ sol, fable, terra, luna }}
+        outputs={outputs}
+        maxConcurrency={4}
+        limits={{
+          maxTotalAuthorTurns: 32,
+          maxAuthorGenerations: 4,
+          maxAuthorDepth: 4,
+        }}
+      />
+    </Workflow>
+  );
+});
 ```
 
 The run must explicitly pin the same concurrency value:

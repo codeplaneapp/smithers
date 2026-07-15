@@ -129,8 +129,8 @@ describe.serial("curated authoring workflows", () => {
         { passed: true, command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow.tsx && ${process.env.SMITHERS_BUN} build --no-bundle .smithers/ui/report-workflow.tsx`, errors: [], notes: "report-workflow loads, its graph renders without executing, and .smithers/ui/report-workflow.tsx transpiles." },
       ]);
       expect(sim.task("fix").prompts[0]).toEqual(expect.stringContaining("GRAPH_SENTINEL"));
-      expect(await readFile(graphSentinel, "utf8")).toBe("GRAPH_SENTINEL\n");
-      expect(await readFile(buildSentinel, "utf8")).toBe("BUILD_SENTINEL\n");
+      expect((await readFile(graphSentinel, "utf8")).replaceAll("\r\n", "\n")).toBe("GRAPH_SENTINEL\n");
+      expect((await readFile(buildSentinel, "utf8")).replaceAll("\r\n", "\n")).toBe("BUILD_SENTINEL\n");
       expect(sim.task("document").outputs.map((value) => (value as { summary: string }).summary)).toEqual(["DOC_BAD"]);
       expect(sim.task("document-retry").outputs.map((value) => (value as { summary: string }).summary)).toEqual(["DOC_GOOD"]);
       expect(sim.task("skill-verification").outputs.map((value) => (value as { exists: boolean; containsWorkflowMetadata: boolean })["exists"])).toEqual([true]);
