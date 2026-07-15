@@ -1,0 +1,193 @@
+---
+title: Microsandbox Provider
+description: Run a Smithers <Sandbox> child workflow in a local Microsandbox microVM with createMicrosandboxSandboxProvider.
+---
+
+# Microsandbox Provider
+
+`@smithers-orchestrator/microsandbox` is a first-class Smithers
+`SandboxProvider` backed by the open source
+[Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
+boots a local microVM with its own Linux kernel, writes the Smithers request
+through the host-to-guest filesystem channel, executes the entry command, and
+reads the result back through the same channel. No daemon or hosted sandbox
+service is required.
+
+The provider id is `microsandbox` (exported as
+`MICROSANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createMicrosandboxSandboxProvider,
+  registerMicrosandboxSandboxProvider,
+  MICROSANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/microsandbox";
+```
+
+Microsandbox currently labels the runtime beta. Pin and test the SDK version you
+deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
+Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
+Windows. Run `msb doctor` on every host before accepting work.
+
+## Install
+
+The provider package declares `microsandbox` as an optional dependency and
+imports it only when a session starts. Install it directly if your package
+manager omits optional dependencies:
+
+```sh
+npm install microsandbox@0.6.6
+```
+
+The SDK downloads or resolves its platform runtime and pulls the selected OCI
+image on first use. Later sandboxes reuse the local image cache.
+
+## Usage
+
+Pass the provider object directly to `<Sandbox>`:
+
+```tsx
+import { createSmithers, Sandbox } from "smithers-orchestrator";
+import { createMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+
+const provider = createMicrosandboxSandboxProvider({
+  image: "oven/bun:1",
+  cpus: 2,
+  memoryMib: 4096,
+  security: "restricted",
+  setupFiles: {
+    "/workspace/run-smithers-sandbox.js": runnerSource,
+  },
+});
+
+export default parent.smithers((ctx) => (
+  <parent.Workflow name="microsandbox-run">
+    <Sandbox
+      id="isolated-edit"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      allowNetwork
+      output={parent.outputs.result}
+    />
+  </parent.Workflow>
+));
+```
+
+Or register it once and select it by id:
+
+```ts
+import { registerMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+
+const unregister = registerMicrosandboxSandboxProvider({
+  image: "oven/bun:1",
+});
+
+// <Sandbox provider="microsandbox" workflow={child} output={outputs.result} />
+```
+
+The default image is `oven/bun:1`. The default entry command is
+`bun /workspace/run-smithers-sandbox.js`. Put that runner in the image or
+provide it with `setupFiles`. A factory-level `command` wins over the
+`<Sandbox command>` prop. Without either, the default is used.
+
+The provider creates its workdir through `sandbox.fs()` after boot and passes
+that path to each command. It does not call `builder.workdir()`, which would
+require the directory to exist in the image before the provider can create it.
+
+## Smithers prop mapping
+
+The adapter maps the provider-neutral `<Sandbox>` controls onto the
+Microsandbox builder and execution APIs.
+
+| Smithers control | Microsandbox behavior |
+|---|---|
+| `image` | OCI image, local rootfs directory, or disk image passed to `builder.image()` |
+| `env` | Per-command environment, merged below provider `env` and egress variables |
+| `allowNetwork={false}` | `builder.disableNetwork()`, so no guest network interface is created |
+| `allowNetwork` | Microsandbox's default public-only policy, which blocks private and metadata destinations |
+| `ports` | TCP host-to-guest mappings through `builder.port()`; requires `allowNetwork` |
+| `volumes` | Host bind mounts through `builder.volume(...bind...)`; read-only unless `readonly: false` |
+| `cpuLimit` | Rounded up to a whole vCPU and passed to `builder.cpus()` |
+| `memoryLimit` | Converted from Docker-style `b`, `k`, `m`, or `g` units to MiB |
+| `workspace.snapshotId` | Boots from a Microsandbox snapshot instead of an image |
+| `workspace.idleTimeoutSecs` | Host-enforced idle drain timeout |
+| `workspace.persistence` | `ephemeral` removes state on stop; `sticky` reopens the named sandbox and preserves its writable layer |
+| `command` | Shell command executed with `/bin/sh -lc` unless the factory sets `command` |
+
+Provider options can also set `cpus`, `maxCpus`, `memoryMib`, `maxMemoryMib`,
+`maxDurationSecs`, `idleTimeoutSecs`, `security`, `labels`, `scripts`,
+`setupFiles`, `pullPolicy`, and `sandboxName`. `configureBuilder(builder,
+request)` is the escape hatch for Microsandbox features that Smithers does not
+model directly, including custom network policies, secret substitution,
+registry authentication, rootfs patches, and named or tmpfs volumes.
+
+## Request and result contract
+
+The shared provider kit writes the request JSON below the workdir and gives the
+entry command two env vars:
+
+- `SMITHERS_SANDBOX_REQUEST_PATH`: request JSON to read.
+- `SMITHERS_SANDBOX_RESULT_PATH`: result JSON to write.
+
+The entry command may print the result JSON to stdout or write it to the result
+path. The result is `{ bundlePath }` or a structured `{ status,
+output|outputs, patches?, diffBundle?, runId? }`. The provider fills
+`remoteRunId`, `workspaceId`, and `containerId` with the Microsandbox name when
+the entry omits them.
+
+Parent directories are created through `sandbox.fs()` before files are
+written. Command execution uses `execStreamWith()` so an abort signal or
+timeout can kill the guest process instead of leaving it running after the
+Smithers task ends.
+
+## Network and secrets
+
+Microsandbox runs locally, but its network policy is host-controlled. With
+`allowNetwork` unset or false, Smithers disables the interface. With
+`allowNetwork` true, Microsandbox allows public destinations and DNS while
+blocking private, link-local, host, and cloud metadata destinations by
+default.
+
+The Smithers provider kit still projects `egress` proxy variables and uploads
+an inline CA certificate into the guest. Use `configureBuilder` with
+Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
+allowlists or host-side secret substitution. Do not pass host credentials in
+`env` when Microsandbox secret substitution can keep them outside the VM.
+
+Bind mounts deliberately expose host paths to the guest. Keep them read-only
+unless the workflow must write, and never mount a credential directory or the
+Microsandbox state directory into an untrusted workload.
+
+## Cleanup and persistence
+
+`cleanup: "destroy"` is the default.
+
+- An ephemeral sandbox is stopped and its state is removed.
+- A sticky workspace is stopped but kept on disk, then reopened by
+  `workspace.name` on the next run.
+- `cleanup: "keep"` creates or starts the sandbox detached and leaves it
+  running after the provider returns. Set `idleTimeoutSecs` or
+  `maxDurationSecs` so a crashed orchestrator cannot leave compute running
+  forever.
+
+Microsandbox is local infrastructure. Capacity, image cache, persisted
+workspaces, logs, and the `~/.microsandbox` database live on the host. Running
+it as a fleet provider therefore requires host scheduling, admission control,
+state placement, and observability outside this adapter.
+
+## SDK subset used
+
+The adapter uses the published TypeScript SDK surface:
+
+- `Sandbox.builder(name)` with image or snapshot, resource, network, mount,
+  lifecycle, label, and script setters;
+- `Sandbox.get(name)` plus handle `connect()`, `start()`, and `startDetached()`
+  for sticky workspaces;
+- `sandbox.fs().write()`, `readToString()`, `exists()`, and `mkdir()` for file
+  transport;
+- `sandbox.execStreamWith()` plus `collect()` and `kill()` for commands;
+- `sandbox.stop()` and `Sandbox.remove(name)` for teardown.
+
+`createMockMicrosandboxEnvironment(handler, faults?)` supplies an in-memory SDK
+double for tests. It requires no hypervisor, image pull, or credentials.

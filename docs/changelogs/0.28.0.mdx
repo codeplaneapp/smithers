@@ -122,9 +122,12 @@ import { runBrowserWorkflow } from "smithers-orchestrator/browser";
   Workers, and Vercel.
 - Node-only operations (filesystem, subprocess, worktrees, sandboxes) fail
   closed in the browser with a typed `RUNTIME_CAPABILITY_UNAVAILABLE` error.
-- **AWS, GCP, Daytona, and Vercel** join Cloudflare as first-class sandbox
-  providers, built on a shared provider kit with contract tests for adapter
-  authors.
+- **Microsandbox, AWS, GCP, Daytona, and Vercel** join Cloudflare as
+  first-class sandbox providers, built on a shared provider kit with contract
+  tests for adapter authors.
+- The **Microsandbox provider** maps Smithers images, resources, networking,
+  mounts, snapshots, and sticky workspaces onto local hardware-isolated
+  microVMs, with abort-safe execution and host-enforced lifecycle limits.
 - `<Subflow>` can run a workflow module generated at runtime, and child runs
   carry persisted parent lineage.
 

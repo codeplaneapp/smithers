@@ -1,19 +1,19 @@
 ---
 title: Sandbox Providers
-description: The SandboxProvider contract, the shared provider-kit, provider selection and precedence, egress and secret redaction, and the built-in cloud providers.
+description: The SandboxProvider contract, the shared provider-kit, provider selection and precedence, egress and secret redaction, and the built-in providers.
 ---
 
 # Sandbox Providers
 
 A [`<Sandbox>`](/components/sandbox) boundary runs a child workflow outside the
 parent task process. Where it runs is decided by a provider. A provider is a
-plain object that takes a request and returns a result. Smithers ships
-first-class providers for five cloud backends and a shared kit so a new provider
-is a thin adapter.
+plain object that takes a request and returns a result. Smithers ships a local
+microVM provider, five cloud providers, and a shared kit so a new provider is a
+thin adapter.
 
-The built-in providers are Daytona, Vercel, AWS, GCP, and Cloudflare. Each is a
-separate optional package with its own SDK as an optional dependency, so you
-install only what you use.
+The built-in providers are Microsandbox, Daytona, Vercel, AWS, GCP, and
+Cloudflare. Each is a separate optional package with its own SDK as an optional
+dependency, so you install only what you use.
 
 ## The SandboxProvider contract
 
@@ -37,7 +37,7 @@ result types.
 
 ## The provider-kit
 
-Cloud providers do not implement `run()` from scratch. They call
+First-class providers do not implement `run()` from scratch. They call
 `createCommandSandboxProvider` from `smithers-orchestrator/sandbox`, which owns
 the request/result-file protocol once so every provider behaves the same:
 
@@ -104,8 +104,8 @@ through `sandboxEgressEnv()`, and when `caCertPem` is set it uploads the CA to
 the workspace so `NODE_EXTRA_CA_CERTS` resolves inside the sandbox. See
 [`<Sandbox>` egress controls](/components/sandbox#egress-controls).
 
-Providers with a real remote filesystem (Daytona, Vercel, Cloudflare) resolve
-that CA path directly. The object-store providers (AWS, GCP) have no shared
+Providers with a guest filesystem (Microsandbox, Daytona, Vercel, Cloudflare)
+resolve that CA path directly. The object-store providers (AWS, GCP) have no shared
 filesystem, so they upload the CA to their bundle store and pass its location to
 the container: AWS injects `SMITHERS_SANDBOX_CA_S3_KEY` and GCP injects
 `SMITHERS_SANDBOX_CA_GCS_OBJECT`. The container entry command must download that
@@ -123,6 +123,7 @@ containing `token`, `secret`, `key`, `password`, `credential`, or
 
 | Provider | Package | Provider id | Compute | Bundle transport | Auth | Exit code |
 |---|---|---|---|---|---|---|
+| Microsandbox | `smithers-orchestrator/microsandbox` | `microsandbox` | Local microVM | Guest filesystem channel | None | numeric |
 | Daytona | `smithers-orchestrator/daytona` | `daytona-sandbox` | Daytona sandbox | Sandbox filesystem | `DAYTONA_API_KEY` | numeric |
 | Vercel | `smithers-orchestrator/vercel` | `vercel-sandbox` | Vercel Sandbox | Sandbox filesystem | OIDC or token trio | numeric |
 | AWS | `smithers-orchestrator/aws` | `aws-sandbox` | Fargate or CodeBuild | S3 bucket (BYO) | AWS credential chain | Fargate numeric, CodeBuild status |
@@ -131,6 +132,7 @@ containing `token`, `secret`, `key`, `password`, `credential`, or
 
 Per-provider setup, options, and cost live on each provider page:
 
+- [Microsandbox Provider](/integrations/microsandbox-sandbox-provider)
 - [Daytona Sandbox Provider](/integrations/daytona-sandbox-provider)
 - [Vercel Sandbox Provider](/integrations/vercel-sandbox-provider)
 - [AWS Sandbox Provider](/integrations/aws-sandbox-provider)

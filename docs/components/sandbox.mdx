@@ -337,15 +337,16 @@ When `provider` is omitted, Smithers uses the legacy local transport path. `runt
 
 Unknown runtimes now fail closed. Docker is not silently replaced by bubblewrap when Docker is unavailable.
 
-## First-class cloud providers
+## First-class providers
 
-Smithers ships first-class sandbox providers for five cloud backends. Each is a
-separate optional package that maps the provider contract onto a vendor SDK, so
+Smithers ships a local microVM provider and five cloud providers. Each is a
+separate optional package that maps the provider contract onto a runtime SDK, so
 `<Sandbox provider={createDaytonaSandboxProvider({...})}>` runs the child
 workflow on that backend with no runtime change. See
 [Sandbox Providers](/components/sandbox-providers) for the shared contract, the
 provider-kit, selection precedence, and a comparison table.
 
+- [Microsandbox Provider](/integrations/microsandbox-sandbox-provider): id `microsandbox` (local microVM)
 - [Daytona Sandbox Provider](/integrations/daytona-sandbox-provider): id `daytona-sandbox`
 - [Vercel Sandbox Provider](/integrations/vercel-sandbox-provider): id `vercel-sandbox`
 - [AWS Sandbox Provider](/integrations/aws-sandbox-provider): id `aws-sandbox` (Fargate or CodeBuild, S3 transport)

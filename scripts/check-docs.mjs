@@ -833,6 +833,7 @@ function checkSandboxProviderDocsMatchPackages() {
   // Each first-class provider doc must name its provider id and its create
   // factory so the page stays wired to the shipped package.
   const providers = [
+    { file: "docs/integrations/microsandbox-sandbox-provider.mdx", id: "microsandbox", factory: "createMicrosandboxSandboxProvider" },
     { file: "docs/integrations/daytona-sandbox-provider.mdx", id: "daytona-sandbox", factory: "createDaytonaSandboxProvider" },
     { file: "docs/integrations/vercel-sandbox-provider.mdx", id: "vercel-sandbox", factory: "createVercelSandboxProvider" },
     { file: "docs/integrations/aws-sandbox-provider.mdx", id: "aws-sandbox", factory: "createAwsSandboxProvider" },

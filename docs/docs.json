@@ -277,6 +277,7 @@
           "integrations/telegram",
           "integrations/gateway",
           "integrations/cloudflare",
+          "integrations/microsandbox-sandbox-provider",
           "integrations/daytona-sandbox-provider",
           "integrations/vercel-sandbox-provider",
           "integrations/aws-sandbox-provider",

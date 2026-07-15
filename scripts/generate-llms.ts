@@ -180,8 +180,9 @@ const INTEGRATIONS_PAGES = [
   "integrations/ecosystem.mdx",
   "integrations/pi-integration.mdx",
   "integrations/hermes.mdx",
-  // First-class cloud sandbox providers (each maps the SandboxProvider
-  // contract onto a vendor SDK; see components/sandbox-providers.mdx).
+  // First-class sandbox providers (each maps the SandboxProvider contract
+  // onto a runtime SDK; see components/sandbox-providers.mdx).
+  "integrations/microsandbox-sandbox-provider.mdx",
   "integrations/daytona-sandbox-provider.mdx",
   "integrations/vercel-sandbox-provider.mdx",
   "integrations/aws-sandbox-provider.mdx",

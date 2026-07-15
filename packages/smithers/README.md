@@ -192,6 +192,7 @@ The main entry re-exports the full toolkit, so most code only needs
 | `smithers-orchestrator/gateway-client` | Typed client for the Gateway RPC/WS control plane. |
 | `smithers-orchestrator/gateway-react` | React hooks for live, multi-run state. |
 | `smithers-orchestrator/sandbox` | The `<Sandbox>` primitive and `SandboxProvider` interface. |
+| `smithers-orchestrator/microsandbox` | The first-class Microsandbox microVM provider. |
 | `smithers-orchestrator/control-plane` | Programmatic control-plane API for launching and steering runs. |
 | `smithers-orchestrator/server` | The Gateway server (`startServer`, `createServeApp`). |
 | `smithers-orchestrator/observability` | Prometheus metrics and OpenTelemetry tracing layers. |
@@ -208,9 +209,10 @@ plan, a fast model can fan out, and a specialized harness can do the edits.
 Agent adapters ship in the box, including `ClaudeCodeAgent`, `CodexAgent`, `PiAgent`,
 `AntigravityAgent`, `GeminiAgent`, and `AnthropicAgent` / `OpenAIAgent` for any AI SDK
 model (with tools, structured output, and MCP). The same `<Sandbox>` primitive runs an
-agent locally (Bubblewrap or Docker), in a container, on a managed remote like
-[Freestyle](https://freestyle.sh), or on any backend you implement against
-`SandboxProvider`.
+agent in a local hardware-isolated microVM with
+[Microsandbox](https://github.com/superradcompany/microsandbox), through Bubblewrap or
+Docker, on a managed remote like [Freestyle](https://freestyle.sh), or on any backend
+you implement against `SandboxProvider`.
 
 ## Requirements
 

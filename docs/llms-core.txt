@@ -5037,15 +5037,16 @@ When `provider` is omitted, Smithers uses the legacy local transport path. `runt
 
 Unknown runtimes now fail closed. Docker is not silently replaced by bubblewrap when Docker is unavailable.
 
-## First-class cloud providers
+## First-class providers
 
-Smithers ships first-class sandbox providers for five cloud backends. Each is a
-separate optional package that maps the provider contract onto a vendor SDK, so
+Smithers ships a local microVM provider and five cloud providers. Each is a
+separate optional package that maps the provider contract onto a runtime SDK, so
 `<Sandbox provider={createDaytonaSandboxProvider({...})}>` runs the child
 workflow on that backend with no runtime change. See
 [Sandbox Providers](/components/sandbox-providers) for the shared contract, the
 provider-kit, selection precedence, and a comparison table.
 
+- [Microsandbox Provider](/integrations/microsandbox-sandbox-provider): id `microsandbox` (local microVM)
 - [Daytona Sandbox Provider](/integrations/daytona-sandbox-provider): id `daytona-sandbox`
 - [Vercel Sandbox Provider](/integrations/vercel-sandbox-provider): id `vercel-sandbox`
 - [AWS Sandbox Provider](/integrations/aws-sandbox-provider): id `aws-sandbox` (Fargate or CodeBuild, S3 transport)
@@ -5067,19 +5068,19 @@ Freestyle's current VM docs show the stable package as `freestyle`, VM creation 
 
 ## Sandbox Providers
 
-> The SandboxProvider contract, the shared provider-kit, provider selection and precedence, egress and secret redaction, and the built-in cloud providers.
+> The SandboxProvider contract, the shared provider-kit, provider selection and precedence, egress and secret redaction, and the built-in providers.
 
 # Sandbox Providers
 
 A [`<Sandbox>`](/components/sandbox) boundary runs a child workflow outside the
 parent task process. Where it runs is decided by a provider. A provider is a
-plain object that takes a request and returns a result. Smithers ships
-first-class providers for five cloud backends and a shared kit so a new provider
-is a thin adapter.
+plain object that takes a request and returns a result. Smithers ships a local
+microVM provider, five cloud providers, and a shared kit so a new provider is a
+thin adapter.
 
-The built-in providers are Daytona, Vercel, AWS, GCP, and Cloudflare. Each is a
-separate optional package with its own SDK as an optional dependency, so you
-install only what you use.
+The built-in providers are Microsandbox, Daytona, Vercel, AWS, GCP, and
+Cloudflare. Each is a separate optional package with its own SDK as an optional
+dependency, so you install only what you use.
 
 ## The SandboxProvider contract
 
@@ -5103,7 +5104,7 @@ result types.
 
 ## The provider-kit
 
-Cloud providers do not implement `run()` from scratch. They call
+First-class providers do not implement `run()` from scratch. They call
 `createCommandSandboxProvider` from `smithers-orchestrator/sandbox`, which owns
 the request/result-file protocol once so every provider behaves the same:
 
@@ -5170,8 +5171,8 @@ through `sandboxEgressEnv()`, and when `caCertPem` is set it uploads the CA to
 the workspace so `NODE_EXTRA_CA_CERTS` resolves inside the sandbox. See
 [`<Sandbox>` egress controls](/components/sandbox#egress-controls).
 
-Providers with a real remote filesystem (Daytona, Vercel, Cloudflare) resolve
-that CA path directly. The object-store providers (AWS, GCP) have no shared
+Providers with a guest filesystem (Microsandbox, Daytona, Vercel, Cloudflare)
+resolve that CA path directly. The object-store providers (AWS, GCP) have no shared
 filesystem, so they upload the CA to their bundle store and pass its location to
 the container: AWS injects `SMITHERS_SANDBOX_CA_S3_KEY` and GCP injects
 `SMITHERS_SANDBOX_CA_GCS_OBJECT`. The container entry command must download that
@@ -5189,6 +5190,7 @@ containing `token`, `secret`, `key`, `password`, `credential`, or
 
 | Provider | Package | Provider id | Compute | Bundle transport | Auth | Exit code |
 |---|---|---|---|---|---|---|
+| Microsandbox | `smithers-orchestrator/microsandbox` | `microsandbox` | Local microVM | Guest filesystem channel | None | numeric |
 | Daytona | `smithers-orchestrator/daytona` | `daytona-sandbox` | Daytona sandbox | Sandbox filesystem | `DAYTONA_API_KEY` | numeric |
 | Vercel | `smithers-orchestrator/vercel` | `vercel-sandbox` | Vercel Sandbox | Sandbox filesystem | OIDC or token trio | numeric |
 | AWS | `smithers-orchestrator/aws` | `aws-sandbox` | Fargate or CodeBuild | S3 bucket (BYO) | AWS credential chain | Fargate numeric, CodeBuild status |
@@ -5197,6 +5199,7 @@ containing `token`, `secret`, `key`, `password`, `credential`, or
 
 Per-provider setup, options, and cost live on each provider page:
 
+- [Microsandbox Provider](/integrations/microsandbox-sandbox-provider)
 - [Daytona Sandbox Provider](/integrations/daytona-sandbox-provider)
 - [Vercel Sandbox Provider](/integrations/vercel-sandbox-provider)
 - [AWS Sandbox Provider](/integrations/aws-sandbox-provider)
@@ -9516,6 +9519,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/browser` | `./src/browser.js` | Runtime-agnostic core (`WorkflowDriver`, `SmithersRenderer`, graph extraction) running under a browser `RuntimeAdapter`: `createBrowserSmithers`, `runBrowserWorkflow`, `createBrowserRuntime`, `defineBrowserWorkflow`, and the browser-safe `Task`/`Workflow`/`Sequence`/`Worktree` primitives. Supports static, compute, and in-process `AgentLike.generate` tasks with Map-backed run/output storage and Web Crypto UUIDs. Does not include the Node engine, database factories, CLI agents, tools, or server code -- `filesystem`, `subprocess`, `worktree`, and `sandbox` operations fail closed with a typed `RuntimeCapabilityError` (code `RUNTIME_CAPABILITY_UNAVAILABLE`) |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
+| `smithers-orchestrator/microsandbox` | `./src/microsandbox.js` | Microsandbox provider: run child workflows in local hardware-isolated microVMs |
 | `smithers-orchestrator/daytona` | `./src/daytona.js` | Daytona sandbox provider: run child workflows in Daytona workspaces |
 | `smithers-orchestrator/vercel` | `./src/vercel.js` | Vercel Sandbox provider: run child workflows in Vercel sandboxes |
 | `smithers-orchestrator/aws` | `./src/aws.js` | AWS sandbox provider: run child workflows on ECS Fargate or CodeBuild with S3 bundle transport |
@@ -9550,6 +9554,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/aws` | AWS sandbox provider: ECS Fargate and CodeBuild execution with S3 bundle transport | [Sandbox](/components/sandbox), [AWS](/integrations/aws-sandbox-provider) |
 | `@smithers-orchestrator/daytona` | Daytona sandbox provider: run child workflows in Daytona workspaces | [Sandbox](/components/sandbox), [Daytona](/integrations/daytona-sandbox-provider) |
 | `@smithers-orchestrator/gcp` | GCP sandbox provider: Cloud Run Jobs execution with GCS bundle transport | [Sandbox](/components/sandbox), [GCP](/integrations/gcp-sandbox-provider) |
+| `@smithers-orchestrator/microsandbox` | Microsandbox provider: run child workflows in local hardware-isolated microVMs | [Sandbox](/components/sandbox), [Microsandbox](/integrations/microsandbox-sandbox-provider) |
 | `@smithers-orchestrator/vercel` | Vercel Sandbox provider: run child workflows in Vercel sandboxes | [Sandbox](/components/sandbox), [Vercel](/integrations/vercel-sandbox-provider) |
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | [CLI Agents](/integrations/cli-agents) |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | [SDK Agents](/integrations/sdk-agents) |

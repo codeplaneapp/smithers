@@ -76,12 +76,13 @@ In-process SDK agents (`AnthropicAgent`, `OpenAIAgent`, `HermesAgent`,
 agents (`ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, …) spawn a vendor
 binary and must run inside a container, which a `SandboxProvider` supplies at
 each `<Sandbox>` boundary. Each provider ships a `create…SandboxProvider` and a
-`createMock…SandboxEnvironment` test double; AWS/GCP/Vercel/Daytona also ship a
-`register…SandboxProvider` helper (on Cloudflare the provider is wired through
-`createSmithersCloudflare`).
+`createMock…SandboxEnvironment` test double;
+Microsandbox/AWS/GCP/Vercel/Daytona also ship a `register…SandboxProvider`
+helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
 
 | Platform | Package | Create fn · provider id | Execution · transport |
 |---|---|---|---|
+| Microsandbox | `@smithers-orchestrator/microsandbox` | `createMicrosandboxSandboxProvider` · `microsandbox` | Local hardware-isolated microVM · guest filesystem |
 | Cloudflare | `@smithers-orchestrator/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
 | AWS | `@smithers-orchestrator/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
 | GCP | `@smithers-orchestrator/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
@@ -103,7 +104,7 @@ the Node-runtime and isolate paths are in progress (see the host section above).
 
 | Platform | Control plane (Bun container) | Storage | Sandbox provider (CLI agents) | Status |
 |---|---|---|---|---|
-| **Local / any VM** | Bun | `bun:sqlite` / PGlite / Postgres | Docker `http-runner` | ✅ Full |
+| **Local / any VM** | Bun | `bun:sqlite` / PGlite / Postgres | `createMicrosandboxSandboxProvider` or Docker `http-runner` | ✅ Full |
 | **AWS** | Bun on ECS / App Runner | Postgres (RDS) | `createAwsSandboxProvider` (Fargate/CodeBuild) | ✅ Full |
 | **GCP** | Bun on Cloud Run / GKE | Postgres (Cloud SQL) | `createGcpSandboxProvider` (Cloud Run Jobs) | ✅ Full |
 | **Kubernetes** | Bun deployment | Postgres | Docker `http-runner` / custom | ✅ Full (no first-class provider yet) |
@@ -126,5 +127,5 @@ Three independent axes (detailed in
 
 - [Where agents run, sandboxes & cost](/concepts/execution-model) -- the model.
 - [Cloudflare](/integrations/cloudflare) -- Workers, DO-SQLite, and the provider.
-- [AWS](/integrations/aws-sandbox-provider) · [GCP](/integrations/gcp-sandbox-provider) · [Vercel](/integrations/vercel-sandbox-provider) · [Daytona](/integrations/daytona-sandbox-provider) sandbox providers.
+- [Microsandbox](/integrations/microsandbox-sandbox-provider) · [AWS](/integrations/aws-sandbox-provider) · [GCP](/integrations/gcp-sandbox-provider) · [Vercel](/integrations/vercel-sandbox-provider) · [Daytona](/integrations/daytona-sandbox-provider) sandbox providers.
 - [Control plane](/deployment/control-plane) · [Production hardening](/deployment/production-hardening).
