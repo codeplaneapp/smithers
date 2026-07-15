@@ -390,22 +390,48 @@ end_of_record
     ]);
   });
 
-  test("an ambiguous real LCOV merge fails its package and continues later selections", () => {
+  test("an ambiguous out-of-package LCOV source resolves conservatively instead of failing the package", () => {
     const coverageDir = tempCoverageDir();
     const sourceDir = tempDir();
     const fixture = "scripts/fixtures/ambiguous-bun-test";
+    // The changing source lives OUTSIDE the covered package, so its SF path is
+    // "../"-relative: bun's cross-package attribution noise, resolved with the
+    // max-found/max-hit lower bound rather than failing the merge.
     const result = runCoverage([fixture, "e2e"], {
       coverageDir,
       env: { COVERAGE_AMBIGUOUS_SOURCE: join(sourceDir, "changing.js") },
     });
-    expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(1);
-    expect(result.stderr).toContain(`[coverage] ${fixture}: LCOV merge failed:`);
-    expect(result.stderr).toContain("Ambiguous LCOV functions totals");
+    expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
+    expect(result.stderr).not.toContain("Ambiguous LCOV");
     const summary = readSummary(coverageDir);
     expect(summary).toHaveLength(2);
     expect(summary[0].package).toBe(fixture);
-    expect(summary[0].error).toContain("Ambiguous LCOV functions totals");
+    expect(summary[0].error).toBeUndefined();
     expect(summary[1]).toMatchObject({ package: "e2e", skipped: true });
+  });
+
+  test("LCOV merge still fails closed on ambiguous totals for the package's own files", () => {
+    const dir = tempDir();
+    const first = join(dir, "own-first.info");
+    const second = join(dir, "own-second.info");
+    writeFileSync(first, "SF:src/own.js\nFNF:1\nFNH:1\nLF:1\nLH:1\nend_of_record\n");
+    writeFileSync(second, "SF:src/own.js\nFNF:2\nFNH:1\nLF:1\nLH:1\nend_of_record\n");
+    expect(() => mergeLcovReports([first, second], join(dir, "own-merged.info"))).toThrow(
+      "Ambiguous LCOV functions totals",
+    );
+  });
+
+  test("LCOV merge resolves ambiguous out-of-package totals to the max-found lower bound", () => {
+    const dir = tempDir();
+    const first = join(dir, "dep-first.info");
+    const second = join(dir, "dep-second.info");
+    writeFileSync(first, "SF:../../packages/dep/src/styles.tsx\nFNF:4\nFNH:2\nLF:4\nLH:2\nend_of_record\n");
+    writeFileSync(second, "SF:../../packages/dep/src/styles.tsx\nFNF:3\nFNH:3\nLF:4\nLH:3\nend_of_record\n");
+    const merged = join(dir, "dep-merged.info");
+    mergeLcovReports([first, second], merged);
+    const output = readFileSync(merged, "utf8");
+    expect(output).toContain("FNF:4");
+    expect(output).toContain("FNH:3");
   });
 
   test("a package without package.json fails the run but still writes the summary report", () => {

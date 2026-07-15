@@ -172,7 +172,11 @@ jobs:
         # platform-clean. The excluded packages still run in the full Linux
         # workspace suite and coverage job, and Windows typecheck continues to
         # cover their compile-time surface.
-        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 5 --exclude apps/cli,apps/review,packages/accounts,packages/agents,packages/db,packages/engine,packages/sandbox,packages/server,packages/smithers
+        # .smithers is the local workflow-pack simulation suite: it leans on
+        # shell fixtures, PATH pinning, and a process-wide child_process mock,
+        # all of which are POSIX-shaped. It stays fully covered by the Linux
+        # workspace suite and the coverage job.
+        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 5 --exclude .smithers,apps/cli,apps/review,packages/accounts,packages/agents,packages/db,packages/engine,packages/sandbox,packages/server,packages/smithers
 
       # The examples/ tree (porting rules + worked ports) is otherwise only
       # typechecked; run its bun tests so structural porting rules are gated.

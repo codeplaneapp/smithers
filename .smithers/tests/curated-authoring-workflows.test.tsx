@@ -135,8 +135,10 @@ describe.serial("curated authoring workflows", () => {
         { passed: true, command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow.tsx && ${process.env.SMITHERS_BUN} build --no-bundle .smithers/ui/report-workflow.tsx`, errors: [], notes: "report-workflow loads, its graph renders without executing, and .smithers/ui/report-workflow.tsx transpiles." },
       ]);
       expect(sim.task("fix").prompts[0]).toEqual(expect.stringContaining("GRAPH_SENTINEL"));
-      expect((await readFile(graphSentinel, "utf8")).replaceAll("\r\n", "\n")).toBe("GRAPH_SENTINEL\n");
-      expect((await readFile(buildSentinel, "utf8")).replaceAll("\r\n", "\n")).toBe("BUILD_SENTINEL\n");
+      // cmd echo redirects append platform whitespace; the contract is that
+      // each sentinel was written exactly once, not its trailing bytes.
+      expect((await readFile(graphSentinel, "utf8")).trim()).toBe("GRAPH_SENTINEL");
+      expect((await readFile(buildSentinel, "utf8")).trim()).toBe("BUILD_SENTINEL");
       expect(sim.task("document").outputs.map((value) => (value as { summary: string }).summary)).toEqual(["DOC_BAD", "DOC_GOOD"]);
       // The retry loop re-verifies under the same node id; the surviving
       // verification row is the corrected round's, and sim.output below

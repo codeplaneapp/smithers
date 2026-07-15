@@ -5,6 +5,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, w
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
+// Bound before mock.module installs, so the mock can delegate to the real module.
+import * as realChildProcess from "node:child_process";
 import { renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
 import type { RenderedWorkflow } from "smithers-orchestrator/testing";
 import type { TaskDescriptor } from "smithers-orchestrator/graph";
@@ -13,6 +15,15 @@ import { parseFirstJsonObject } from "../lib/parse-first-json-value";
 // Bun resolves child-process commands against the process-start PATH. Keep
 // release's string-command subprocesses hermetic by routing both child APIs
 // through the per-test bin directory, whose executables are still real files.
+// mock.module() mutates a process-wide registry and bun interleaves test
+// FILES in one process, so the mock must stay transparent for every caller
+// outside this file's active fixture roots or concurrent suites lose git.
+const hermeticRoots = new Set<string>();
+const inHermeticRoot = (cwd: unknown) => {
+  const effective = typeof cwd === "string" && cwd ? cwd : process.cwd();
+  for (const root of hermeticRoots) if (effective.startsWith(root)) return true;
+  return false;
+};
 mock.module("node:child_process", () => {
   const run = (argv: string[], options: { cwd?: string; encoding?: string; stdio?: unknown } = {}) => {
     const result = Bun.spawnSync(argv, {
@@ -27,13 +38,20 @@ mock.module("node:child_process", () => {
     return options.encoding === "utf8" ? stdout : Buffer.from(stdout);
   };
   return {
-    execSync: (command: string, options?: { cwd?: string; encoding?: string; stdio?: unknown }) => run(
-      process.platform === "win32"
-        ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", command]
-        : ["/bin/sh", "-c", command],
-      options,
-    ),
-    execFileSync: (file: string, args: string[], options?: { cwd?: string; encoding?: string; stdio?: unknown }) => run([file, ...args], options),
+    ...realChildProcess,
+    execSync: (command: string, options?: { cwd?: string; encoding?: string; stdio?: unknown }) => {
+      if (!inHermeticRoot(options?.cwd)) return realChildProcess.execSync(command, options as never);
+      return run(
+        process.platform === "win32"
+          ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", command]
+          : ["/bin/sh", "-c", command],
+        options,
+      );
+    },
+    execFileSync: (file: string, args: string[], options?: { cwd?: string; encoding?: string; stdio?: unknown }) => {
+      if (!inHermeticRoot(options?.cwd)) return realChildProcess.execFileSync(file, args, options as never);
+      return run([file, ...args], options);
+    },
   };
 });
 
@@ -69,12 +87,15 @@ async function isolated<T>(prefix: string, body: (root: string, bin: string) => 
   const env = { ...process.env };
   try {
     process.chdir(root);
-    // Keep ambient npm/pnpm/git completely unreachable. The workflow uses
-    // string commands for release, so an empty fallback PATH is intentional.
-    process.env.PATH = bin;
+    // Keep ambient npm/pnpm/git unreachable for the workflow's own commands:
+    // the scoped child_process mock pins PATH to OPS_PATH for spawns inside
+    // this fixture root. process.env.PATH stays untouched so concurrently
+    // running test files keep resolving real git.
+    hermeticRoots.add(root);
     process.env.OPS_PATH = bin;
     return await body(root, bin);
   } finally {
+    hermeticRoots.delete(root);
     process.chdir(cwd);
     for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
     Object.assign(process.env, env);

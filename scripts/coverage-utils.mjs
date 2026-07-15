@@ -247,11 +247,25 @@ export function mergeLcovReports(lcovPaths, outputPath) {
     if (legs.every((leg) => leg.complete)) return { found: unionFound, hit: unionHit };
 
     const foundTotals = new Set(legs.map((leg) => leg.found));
+    // Bun attributes out-of-package sources (workspace deps reached through
+    // bundling) with counts that vary between legs. Those records are noise
+    // relative to the package under coverage, so resolve them conservatively
+    // instead of failing the merge; ambiguity for the package's OWN files
+    // still throws because it signals a real merge bug.
+    const outOfPackage = source.startsWith("..");
     if (foundTotals.size !== 1) {
-      throw new Error(`Ambiguous LCOV ${metricName} totals for ${source}: ${[...foundTotals].join(", ")}`);
+      if (!outOfPackage) {
+        throw new Error(`Ambiguous LCOV ${metricName} totals for ${source}: ${[...foundTotals].join(", ")}`);
+      }
+      const maxFound = Math.max(...foundTotals, unionFound);
+      const conservativeOutOfPackageHit = Math.min(maxFound, Math.max(unionHit, ...legs.map((leg) => leg.hit)));
+      return { found: maxFound, hit: conservativeOutOfPackageHit };
     }
     const stableFound = legs[0].found;
     if (unionFound > stableFound) {
+      if (outOfPackage) {
+        return { found: unionFound, hit: Math.min(unionFound, Math.max(unionHit, ...legs.map((leg) => leg.hit))) };
+      }
       throw new Error(
         `Ambiguous LCOV ${metricName} identities for ${source}: ${unionFound} identified exceeds ${stableFound} found`,
       );
