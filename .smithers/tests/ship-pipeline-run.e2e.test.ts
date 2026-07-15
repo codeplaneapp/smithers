@@ -184,10 +184,10 @@ afterAll(() => {
     proc?.kill("SIGTERM");
   } catch {}
   try {
-    rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try { rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
   } catch {}
   try {
-    rmSync(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try { rmSync(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
   } catch {}
 });
 

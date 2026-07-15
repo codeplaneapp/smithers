@@ -612,7 +612,7 @@ describe("riskless GitHub issue sweep production graph", () => {
           else sibling.once("close", () => resolve());
         });
       }
-      rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      try { rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
     }
   }, 90_000);
 });

@@ -113,8 +113,8 @@ describe.serial("curated authoring workflows", () => {
       const graphSentinel = join(root, "graph-sentinel");
       const buildSentinel = join(root, "build-sentinel");
       const launcher = (name: string, posix: string, windows: string) => writeFile(join(bin, process.platform === "win32" ? `${name}.cmd` : name), process.platform === "win32" ? windows : posix);
-      await launcher("bunx", `#!/bin/sh\nif [ ! -f ${JSON.stringify(graphSentinel)} ]; then echo GRAPH_SENTINEL >&2; echo GRAPH_SENTINEL > ${JSON.stringify(graphSentinel)}; exit 1; fi\necho graph-ok\n`, `@echo off\r\nif not exist "%~dp0..\\graph-sentinel" (echo GRAPH_SENTINEL 1>&2 & echo GRAPH_SENTINEL > "%~dp0..\\graph-sentinel" & exit /b 1)\r\necho graph-ok\r\n`);
-      await launcher("bun", `#!/bin/sh\nif [ "$1" = "build" ]; then echo BUILD_SENTINEL; echo BUILD_SENTINEL > ${JSON.stringify(buildSentinel)}; exit 0; fi\nexit 1\n`, `@echo off\r\nif "%1"=="build" (echo BUILD_SENTINEL & echo BUILD_SENTINEL > "%~dp0..\\build-sentinel" & exit /b 0)\r\nexit /b 1\r\n`);
+      await launcher("bunx", `#!/bin/sh\nif [ ! -f ${JSON.stringify(graphSentinel)} ]; then echo GRAPH_SENTINEL >&2; echo GRAPH_SENTINEL > ${JSON.stringify(graphSentinel)}; exit 1; fi\necho graph-ok\n`, `@echo off\r\nif not exist "%~dp0..\\graph-sentinel" (echo GRAPH_SENTINEL 1>&2 & echo GRAPH_SENTINEL> "%~dp0..\\graph-sentinel" & exit /b 1)\r\necho graph-ok\r\n`);
+      await launcher("bun", `#!/bin/sh\nif [ "$1" = "build" ]; then echo BUILD_SENTINEL; echo BUILD_SENTINEL > ${JSON.stringify(buildSentinel)}; exit 0; fi\nexit 1\n`, `@echo off\r\nif "%1"=="build" (echo BUILD_SENTINEL & echo BUILD_SENTINEL> "%~dp0..\\build-sentinel" & exit /b 0)\r\nexit /b 1\r\n`);
       if (process.platform !== "win32") { await chmod(join(bin, "bunx"), 0o755); await chmod(join(bin, "bun"), 0o755); }
       process.env.PATH = bin;
       process.env.SMITHERS_BUNX = join(bin, process.platform === "win32" ? "bunx.cmd" : "bunx"); process.env.SMITHERS_BUN = join(bin, process.platform === "win32" ? "bun.cmd" : "bun");

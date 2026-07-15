@@ -82,7 +82,7 @@ describe("component workflow core", () => {
       await expect(runTask({ ...task(presentFrame, "absent"), staticPayload: { command: "missing-smithers-command", available: "yes" } })).rejects.toThrow(/validation/);
     } finally {
       if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
-      rmSync(bin, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      try { rmSync(bin, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
     }
   }, 30_000);
 

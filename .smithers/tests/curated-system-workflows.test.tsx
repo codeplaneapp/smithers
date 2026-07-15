@@ -116,7 +116,11 @@ describe.serial("curated system workflow causal contracts", () => {
       const noRefresh = await runTask(task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }, [row("install-pack", forced as Row)]), "refresh-skills"));
       expect(noRefresh).toEqual({ refreshed: false, detail: "skipped (refreshSkills=false)" });
       const refreshed = await runTask(task(await render("init.tsx", { force: false, refreshSkills: true, skipInstall: true }, [row("install-pack", forced as Row)]), "refresh-skills"));
-      expect(refreshed).toEqual({ refreshed: true, detail: "↻ Smithers refreshed the `smithers` agent skill (Claude Code, Codex, OpenCode)." });
+      // The fixture guarantees Claude Code and Codex; OpenCode rides along only
+      // where the host environment leaks a detection signal (never on the
+      // Windows runner), so the agent list tail is platform-dependent.
+      expect(refreshed.refreshed).toBe(true);
+      expect(refreshed.detail).toMatch(/^\u21bb Smithers refreshed the `smithers` agent skill \(Claude Code, Codex(, OpenCode)?\)\.$/);
       const skillMd = await readFile(resolve(import.meta.dir, "../../skills/smithers/SKILL.md"), "utf8");
       const llms = await readFile(resolve(import.meta.dir, "../../docs/llms-full.txt"), "utf8");
       for (const home of [".claude", ".codex"]) {

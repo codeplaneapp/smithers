@@ -103,7 +103,7 @@ async function isolated<T>(body: (fixture: Fixture) => Promise<T>): Promise<T> {
     for (const [key, value] of Object.entries(oldEnv)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
-    rmSync(outer, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try { rmSync(outer, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
   }
 }
 

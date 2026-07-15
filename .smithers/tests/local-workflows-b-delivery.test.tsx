@@ -60,7 +60,7 @@ async function inTemp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
     process.chdir(oldCwd);
     for (const key of Object.keys(process.env)) if (!(key in oldEnv)) delete process.env[key];
     Object.assign(process.env, oldEnv);
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
   }
 }
 

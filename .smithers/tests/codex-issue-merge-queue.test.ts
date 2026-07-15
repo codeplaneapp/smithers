@@ -244,7 +244,7 @@ describe("codex issue local merge queue gates", () => {
       expect(rejected.exitCode).not.toBe(0);
       expect(git(publisher, ["ls-remote", "origin", "refs/heads/main"]).split(/\s+/)[0]).toBe(remoteAdvanced);
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
     }
   }, 30_000);
 });

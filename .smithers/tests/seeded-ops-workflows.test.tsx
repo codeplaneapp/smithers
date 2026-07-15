@@ -78,7 +78,7 @@ async function isolated<T>(prefix: string, body: (root: string, bin: string) => 
     process.chdir(cwd);
     for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
     Object.assign(process.env, env);
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
   }
 }
 function executable(path: string, source: string): string {

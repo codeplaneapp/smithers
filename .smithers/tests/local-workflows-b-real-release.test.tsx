@@ -111,7 +111,7 @@ describe("real stack and release workflow owner coverage", () => {
       process.chdir(oldCwd);
       if (oldGitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
       else process.env.GIT_CONFIG_GLOBAL = oldGitConfig;
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
     }
   });
 

@@ -227,7 +227,7 @@ test("extract-prompt: input defaults, maxTurns bounds, loop simulation, persiste
   } finally {
     process.chdir(previousCwd);
     process.env = previousEnv;
-    rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try { rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
   }
 });
 

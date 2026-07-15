@@ -89,7 +89,7 @@ describe("shipped workflow and component test ownership", () => {
         .map((workflow) => slash(relative(workflowRoot, workflow.entryFile)));
       expect(sorted(discovered)).toEqual(physicalWorkflowEntries());
     } finally {
-      rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      try { rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
     }
   });
 
