@@ -1252,7 +1252,7 @@ export function startLocalUiServer({
     }
     // The local concierge owns /api/chat (the chat backend).
     if (conciergePort && url.pathname.startsWith("/api/")) {
-      if (isCrossOriginProxyRequest(req)) {
+      if (!requestHostIsLoopback(req) || isCrossOriginProxyRequest(req)) {
         res.writeHead(403, { "content-type": "text/plain" });
         res.end("Cross-origin requests are not allowed");
         return;
@@ -1266,7 +1266,7 @@ export function startLocalUiServer({
     if (isGatewayPath(url.pathname)) {
       // Block cross-origin browsers BEFORE the Host/Origin rewrite, otherwise the
       // rewrite would hide their real origin from the gateway's own defense.
-      if (isCrossOriginProxyRequest(req)) {
+      if (!requestHostIsLoopback(req) || isCrossOriginProxyRequest(req)) {
         res.writeHead(403, { "content-type": "text/plain" });
         res.end("Cross-origin gateway requests are not allowed");
         return;
@@ -1299,7 +1299,11 @@ export function startLocalUiServer({
   // the gateway, rewriting the Host/Origin lines to keep it same-origin.
   server.on("upgrade", (req, clientSocket, head) => {
     const url = new URL(req.url ?? "/", `http://${host}`);
-    if (!isGatewayPath(url.pathname) || isCrossOriginProxyRequest(req)) {
+    if (
+      !isGatewayPath(url.pathname) ||
+      !requestHostIsLoopback(req) ||
+      isCrossOriginProxyRequest(req)
+    ) {
       clientSocket.destroy();
       return;
     }
