@@ -1,5 +1,5 @@
 import { tool, zodSchema } from "ai";
-import { getToolContext, getToolIdempotencyKey } from "./context.js";
+import { getToolContext, getToolIdempotencyKey, nextToolSeq } from "./context.js";
 
 const smithersToolMetadata = Symbol.for("smithers.tool.metadata");
 const warnedToolNames = new Set();
@@ -70,7 +70,22 @@ export function defineTool(options) {
         sideEffect,
         idempotent,
       };
-      const result = await options.execute(args, definedContext);
+      const seq = toolContext ? nextToolSeq(toolContext) : 0;
+      await toolContext?.recordToolCall?.({
+        phase: "started",
+        seq,
+        toolName: options.name,
+        input: args,
+        idempotencyKey: options.execute.length >= 2 ? definedContext.idempotencyKey : null,
+      });
+      let result;
+      try {
+        result = await options.execute(args, definedContext);
+        await toolContext?.recordToolCall?.({ phase: "finished", seq, toolName: options.name, output: result });
+      } catch (error) {
+        await toolContext?.recordToolCall?.({ phase: "failed", seq, toolName: options.name, error });
+        throw error;
+      }
       // Strict Tier 1 snapshot at this tool boundary, before the agent proceeds.
       // No-op by default; never delays past one jj snapshot and never fails the tool.
       if (sideEffect && typeof definedContext.durabilitySnapshot === "function") {
@@ -88,6 +103,7 @@ export function defineTool(options) {
     name: options.name,
     sideEffect,
     idempotent,
+    acceptsIdempotencyKey: options.execute.length >= 2,
   };
 
   return wrapped;

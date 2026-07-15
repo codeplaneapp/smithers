@@ -707,6 +707,19 @@ function collectToolResumeWarnings(toolCalls, agents, currentAttempt) {
         status: String(call.status ?? "unknown"),
     }));
 }
+
+function collectReplayUnsafeToolCalls(toolCalls, agents, currentAttempt) {
+    if (currentAttempt <= 1 || toolCalls.length === 0) return [];
+    const metadataByName = collectDefinedToolMetadata(agents);
+    return toolCalls
+        .filter((call) => typeof call.attempt === "number" && call.attempt < currentAttempt)
+        .filter((call) => {
+        const metadata = metadataByName.get(String(call.toolName ?? ""));
+        if (!metadata?.sideEffect || metadata.idempotent !== false) return false;
+        return metadata.acceptsIdempotencyKey !== true;
+    })
+        .map((call) => ({ toolName: String(call.toolName), attempt: Number(call.attempt), seq: Number(call.seq) }));
+}
 /**
  * @param {ToolResumeWarning[]} warnings
  * @returns {string | null}
@@ -4142,6 +4155,70 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const priorToolCalls = attemptNo > 1
                 ? await Effect.runPromise(adapter.listToolCalls(runId, desc.nodeId, desc.iteration))
                 : [];
+            const replayUnsafeToolCalls = collectReplayUnsafeToolCalls(priorToolCalls, allAgents, attemptNo);
+            if (replayUnsafeToolCalls.length > 0) {
+                const requestedAtMs = nowMs();
+                const request = {
+                    kind: "ReplayUnsafeApproval",
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    offending: replayUnsafeToolCalls,
+                    prompt: "Replay would re-execute non-idempotent side-effect tools without a usable idempotency key.",
+                };
+                await adapter.withTransaction("replay-unsafe-approval", Effect.gen(function* () {
+                    yield* adapter.insertOrUpdateApproval({
+                        runId,
+                        nodeId: desc.nodeId,
+                        iteration: desc.iteration,
+                        status: "requested",
+                        requestedAtMs,
+                        decidedAtMs: null,
+                        note: null,
+                        decidedBy: null,
+                        requestJson: JSON.stringify(request),
+                        decisionJson: null,
+                        autoApproved: false,
+                    });
+                    yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+                        state: "waiting-approval",
+                        metaJson: JSON.stringify({ ...attemptMeta, replayUnsafeToolCalls }),
+                    });
+                    yield* adapter.insertNode({
+                        runId,
+                        nodeId: desc.nodeId,
+                        iteration: desc.iteration,
+                        state: "waiting-approval",
+                        lastAttempt: attemptNo,
+                        updatedAtMs: requestedAtMs,
+                        outputTable: desc.outputTableName,
+                        label: desc.label ?? null,
+                    });
+                    yield* adapter.updateRunIfNotCancelled(runId, {
+                        status: "waiting-approval",
+                        heartbeatAtMs: null,
+                        runtimeOwnerId: null,
+                    });
+                }));
+                await Effect.runPromise(eventBus.emitEventWithPersist({
+                    type: "ApprovalRequested",
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    request,
+                    timestampMs: requestedAtMs,
+                }));
+                await Effect.runPromise(eventBus.emitEventWithPersist({
+                    type: "NodeWaitingApproval",
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    timestampMs: requestedAtMs,
+                }));
+                return;
+            }
             const toolResumeWarnings = collectToolResumeWarnings(priorToolCalls, allAgents, attemptNo);
             const toolResumeWarningMessage = buildToolResumeWarningMessage(toolResumeWarnings);
             emitOutput = (text, stream) => {
@@ -4694,16 +4771,40 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // context (run/node/cwd + a Tier 1 snapshot hook) so defineTool
                 // snapshots after each side-effect tool. Only when durability is
                 // active; null leaves the generate call exactly as before.
-                const toolCtx = durability.active
-                    ? {
+                const toolCtx = {
                         runId,
                         nodeId: desc.nodeId,
                         iteration: desc.iteration,
                         attempt: attemptNo,
                         rootDir: taskRoot,
-                        durabilitySnapshot: (label, toolUseId) => durability.snapshot({ source: "wrap", tier: 1, label, toolUseId }),
-                    }
-                    : null;
+                        ...(durability.active
+                            ? { durabilitySnapshot: (label, toolUseId) => durability.snapshot({ source: "wrap", tier: 1, label, toolUseId }) }
+                            : {}),
+                        recordToolCall: async (call) => {
+                            const timestampMs = nowMs();
+                            if (call.phase !== "started") return;
+                            const row = {
+                                runId,
+                                nodeId: desc.nodeId,
+                                iteration: desc.iteration,
+                                attempt: attemptNo,
+                                seq: Number(call.seq),
+                                toolName: String(call.toolName),
+                                inputJson: JSON.stringify(call.input ?? null),
+                                outputJson: null,
+                                startedAtMs: timestampMs,
+                                finishedAtMs: null,
+                                status: "started",
+                                errorJson: null,
+                            };
+                            await Effect.runPromise(adapter.insertToolCall(row));
+                            await Effect.runPromise(eventBus.emitEventWithPersist({
+                                type: "ToolCallStarted",
+                                ...row,
+                                timestampMs,
+                            }));
+                        },
+                    };
                 let result;
                 try {
                     try {
@@ -4761,7 +4862,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                                     onStepEnd: handleSdkStepFinish,
                                     outputSchema: desc.outputSchema,
                                 });
-                                return toolCtx ? runWithToolContext(toolCtx, doGenerate) : doGenerate();
+                                return runWithToolContext(toolCtx, doGenerate);
                             },
                             catch: (error) => error,
                         }), {
@@ -7930,6 +8031,7 @@ export const __engineInternals = {
     extractHijackContinuation,
     findHijackContinuation,
     collectDefinedToolMetadata,
+    collectReplayUnsafeToolCalls,
     collectToolResumeWarnings,
     buildToolResumeWarningMessage,
     hasToolResumeWarningMessage,

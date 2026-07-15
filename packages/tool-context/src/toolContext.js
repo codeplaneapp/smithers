@@ -14,6 +14,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * @property {string} [idempotencyKey] - Explicit idempotency key override.
  * @property {number} [seq] - Monotonic per-context tool sequence (mutated by nextToolSeq).
  * @property {(label?: string, toolUseId?: string) => unknown} [durabilitySnapshot] - Hook to snapshot workspace durability mid-tool.
+ * @property {(call: Record<string, unknown>) => unknown} [recordToolCall] - Hook to persist tool execution lifecycle.
  */
 
 /** @type {AsyncLocalStorage<ToolContext>} */
