@@ -312,7 +312,7 @@ export function createServeApp(opts) {
         if (!run) {
             throw new HttpError(404, "RUN_NOT_FOUND", "Run not found");
         }
-        if (run.status === "waiting-approval" || run.status === "waiting-timer") {
+        if (run.status === "waiting-approval" || run.status === "waiting-timer" || run.status === "waiting-quota") {
             const cancelledAtMs = nowMs();
             const result = await finalizeCancelledRun(adapter, runId, { now: cancelledAtMs });
             return c.json(result);

@@ -1577,7 +1577,8 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     if (r.status === "running" ||
         r.status === "waiting-approval" ||
         r.status === "waiting-timer" ||
-        r.status === "waiting-event") {
+        r.status === "waiting-event" ||
+        r.status === "waiting-quota") {
         ctaCommands.push({ command: `cancel ${runId}`, description: "Cancel run" });
     }
     if (pendingApprovals.length > 0) {
@@ -7300,8 +7301,8 @@ const cli = Cli.create({
                     if (run.status === "cancelled" || run.status === "canceled") {
                         const pendingApprovals = await adapter.listPendingApprovals(c.args.runId);
                         const pendingHumans = (await adapter.listPendingHumanRequests()).some((request) => request.runId === c.args.runId && request.status === "pending");
-                        const activeAttempts = (await adapter.listAttemptsForRun(c.args.runId)).some((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state));
-                        const waitingNodes = (await adapter.listNodes(c.args.runId)).some((node) => ["in-progress", "waiting-approval", "waiting_approval", "waiting-event", "waiting-timer"].includes(node.state));
+                        const activeAttempts = (await adapter.listAttemptsForRun(c.args.runId)).some((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(attempt.state));
+                        const waitingNodes = (await adapter.listNodes(c.args.runId)).some((node) => ["in-progress", "waiting-approval", "waiting_approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(node.state));
                         needsCancellationRepair = pendingApprovals.length > 0 || pendingHumans || activeAttempts || waitingNodes;
                     }
                     if (!hasCancellableDescendant && !needsCancellationRepair) {
@@ -7430,6 +7431,7 @@ const cli = Cli.create({
                 const waitingApprovalRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "waiting-approval");
                 const waitingEventRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "waiting-event");
                 const waitingTimerRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "waiting-timer");
+                const waitingQuotaRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "waiting-quota");
                 // A paused run is a durable, resumable state with no live engine;
                 // include it so `down` can terminate it. Its heartbeat is nulled
                 // (stale), so the fresh-heartbeat guard flips it to cancelled
@@ -7440,6 +7442,7 @@ const cli = Cli.create({
                     ...waitingApprovalRuns,
                     ...waitingEventRuns,
                     ...waitingTimerRuns,
+                    ...waitingQuotaRuns,
                     ...pausedRuns,
                 ];
                 if (allActive.length === 0) {

@@ -564,6 +564,33 @@ const fakeAgent = {
             expect(events).toHaveLength(1);
             cleanup();
         });
+        test("cancels a waiting-quota run", async () => {
+            const { db, cleanup } = buildDb();
+            ensureSmithersTables(db);
+            const adapter = new SmithersDb(db);
+            const runId = "waiting-quota-cancel";
+            await adapter.insertRun({
+                runId,
+                workflowName: "quota-flow",
+                workflowPath: null,
+                status: "waiting-quota",
+                createdAtMs: Date.now() - 5_000,
+                startedAtMs: Date.now() - 4_000,
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                errorJson: JSON.stringify({ resetAtMs: Date.now() + 60_000 }),
+            });
+            startTestServer({ db });
+
+            const { status, data } = await request(`/v1/runs/${runId}/cancel`, {
+                method: "POST",
+            });
+
+            expect(status).toBe(200);
+            expect(data.runId).toBe(runId);
+            expect((await adapter.getRun(runId))?.status).toBe("cancelled");
+            cleanup();
+        });
     });
     describe("POST /v1/runs/:runId/resume", () => {
         test("resumes a run with given runId", async () => {

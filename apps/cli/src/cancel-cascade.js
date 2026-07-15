@@ -14,6 +14,7 @@ const CANCELLABLE_RUN_STATUSES = new Set([
     "waiting-approval",
     "waiting-event",
     "waiting-timer",
+    "waiting-quota",
     "paused",
 ]);
 /**
@@ -329,7 +330,7 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
         // cancellation claim fences it out.
         await adapter.listInProgressAttempts(runId);
         const activeAttempts = await adapter.listAttemptsForRun(runId);
-        const activeCount = activeAttempts.filter((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state)).length;
+        const activeCount = activeAttempts.filter((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(attempt.state)).length;
         if (wasFresh) {
             const requested = await adapter.requestRunCancel(runId, now());
             if (requested) {

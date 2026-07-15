@@ -3216,9 +3216,10 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
         node.state === "waiting-approval" ||
         node.state === "waiting_approval" ||
         node.state === "waiting-event" ||
-        node.state === "waiting-timer");
+        node.state === "waiting-timer" ||
+        node.state === "waiting-quota");
     const cancelledAttemptKeys = new Set();
-    for (const attempt of allAttempts.filter((entry) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(entry.state))) {
+    for (const attempt of allAttempts.filter((entry) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(entry.state))) {
         const key = `${attempt.nodeId}:${attempt.iteration ?? 0}`;
         cancelledAttemptKeys.add(key);
         await Effect.runPromise(adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration ?? 0, attempt.attempt, {
@@ -3324,7 +3325,7 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
     // close that node so fresh monitors and resumes cannot observe a live gate.
     for (const node of waitingNodes) {
         const attempts = await Effect.runPromise(adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0));
-        for (const attempt of attempts.filter((entry) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(entry.state))) {
+        for (const attempt of attempts.filter((entry) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(entry.state))) {
             await Effect.runPromise(adapter.updateAttempt(runId, node.nodeId, node.iteration ?? 0, attempt.attempt, {
                 state: "cancelled",
                 finishedAtMs: cancelledAtMs,

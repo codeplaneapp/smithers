@@ -1136,7 +1136,7 @@ function startServerInternal(opts = {}) {
                         error: { code: "NOT_FOUND", message: "Run not found" },
                     });
                 }
-                if (!["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "cancelled", "canceled"].includes(run.status)) {
+                if (!["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "paused", "cancelled", "canceled"].includes(run.status)) {
                     logWarning("cancel rejected for inactive run", {
                         runId,
                         status: run.status,

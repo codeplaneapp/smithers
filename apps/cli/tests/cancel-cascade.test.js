@@ -175,6 +175,38 @@ async function insertContinuationBranch(sqlite, adapter, runId, parentRunId) {
 }
 
 describe("cascadeCancelRun (real sqlite store)", () => {
+    test("treats waiting-quota as cancellable and closes its parked node and attempt", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            expect(isCancellableRunStatus("waiting-quota")).toBe(true);
+            await insertRun(adapter, "quota-park", {
+                status: "waiting-quota",
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                errorJson: JSON.stringify({ resetAtMs: Date.now() + 60_000 }),
+            });
+            await adapter.insertNode({
+                runId: "quota-park", nodeId: "agent", iteration: 0, state: "waiting-quota",
+                lastAttempt: 1, updatedAtMs: Date.now(), outputTable: "", label: "Agent",
+            });
+            await adapter.insertAttempt({
+                runId: "quota-park", nodeId: "agent", iteration: 0, attempt: 1,
+                state: "waiting-quota", startedAtMs: Date.now() - 5_000,
+            });
+
+            const summary = await cascadeCancelRun(adapter, "quota-park");
+
+            expect(summary.root).toMatchObject({ runId: "quota-park", action: "cancelled" });
+            expect(summary.cancelledAttempts).toBe(1);
+            expect((await adapter.getRun("quota-park")).status).toBe("cancelled");
+            expect((await adapter.getNode("quota-park", "agent", 0)).state).toBe("cancelled");
+            expect((await adapter.getAttempt("quota-park", "agent", 0, 1)).state).toBe("cancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
     test("cancels nested descendants: stale root, waiting child, stale grandchild with an in-flight attempt", async () => {
         const { sqlite, adapter } = createMemoryDb();
         try {
@@ -602,6 +634,32 @@ describe("terminateRunOwner (real processes)", () => {
 });
 
 describe("smithers cancel cascades (CLI integration)", () => {
+    test("cancels a quota-parked run through the public CLI", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            await insertRun(adapter, "quota-cli", {
+                status: "waiting-quota",
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                errorJson: JSON.stringify({ resetAtMs: Date.now() + 60_000 }),
+            });
+
+            const result = runSmithers(["cancel", "quota-cli"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
+
+            expect(result.exitCode).toBe(2);
+            expect(result.json).toMatchObject({ runId: "quota-cli", status: "cancelled" });
+            expect((await adapter.getRun("quota-cli")).status).toBe("cancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    }, CLI_COMMAND_TIMEOUT_MS);
+
     test("cancelling the root sweeps nested descendants: stale flipped, live durably requested, bystanders untouched", async () => {
         const repo = createTempRepo();
         const { sqlite, adapter } = openRepoDb(repo);

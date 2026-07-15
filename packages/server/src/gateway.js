@@ -8317,7 +8317,7 @@ a { color: var(--brand); }</style>
                 if (!resolved || !run) {
                     return responseError(frame.id, "RunNotFound", "Run not found");
                 }
-                if (!["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "cancelled", "canceled"].includes(run.status)) {
+                if (!["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "paused", "cancelled", "canceled"].includes(run.status)) {
                     return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");
                 }
                 const { finalizeCancelledRun } = await loadEngineRuntime();

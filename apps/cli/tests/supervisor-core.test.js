@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { runsDueForQuotaResume } from "../../../packages/engine/src/engine.js";
+import { cascadeCancelRun } from "../src/cancel-cascade.js";
 import { SUPERVISOR_EVENT_RUN_ID, supervisorLoopEffect, supervisorPollEffect, } from "../src/supervisor.js";
 const now = Date.now();
 function createTestDb() {
@@ -177,6 +178,37 @@ describe("supervisor poll core", () => {
         expect((await adapter.getRun("run-quota-future"))?.runtimeOwnerId).toBeNull();
         expect((await adapter.getRun("run-quota-other-scope"))?.runtimeOwnerId).toBeNull();
         expect(await listEventTypes(adapter, "run-quota-owner-alive")).toContain("RunAutoResumeSkipped");
+        sqlite.close();
+    });
+    test("never wakes a due quota park after cancellation wins", async () => {
+        const { adapter, sqlite } = createTestDb();
+        const resumed = [];
+        await adapter.insertRun(runRow("run-quota-cancelled", {
+            status: "waiting-quota",
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            errorJson: JSON.stringify({ resetAtMs: now - 1 }),
+        }));
+        await cascadeCancelRun(adapter, "run-quota-cancelled");
+
+        const summary = await Effect.runPromise(supervisorPollEffect({
+            adapter,
+            runIds: ["run-quota-cancelled"],
+            deps: {
+                now: () => now,
+                workflowExists: () => true,
+                isPidAlive: () => false,
+                runsDueForQuotaResume,
+                spawnResumeDetached: (_workflowPath, runId) => {
+                    resumed.push(runId);
+                    return 7777;
+                },
+            },
+        }));
+
+        expect((await adapter.getRun("run-quota-cancelled"))?.status).toBe("cancelled");
+        expect(summary.resumedCount).toBe(0);
+        expect(resumed).toEqual([]);
         sqlite.close();
     });
     test("scoped supervisor exits after every bound run becomes terminal", async () => {

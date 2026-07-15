@@ -167,6 +167,50 @@ describe("gateway — many workflows sharing one DB", () => {
     expect(response.error?.code ?? response.error).toBe("RUN_NOT_ACTIVE");
   });
 
+  test("cancelRun finalizes a waiting-quota run and its parked work", async () => {
+    dbPath = makeDbPath("cancel-quota");
+    const wf = createSharedDbWorkflows(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("alpha", wf.alpha);
+    const adapter = gateway.adapterForWorkflow(wf.alpha);
+    await adapter.insertRun({
+      runId: "quota-run",
+      workflowName: "alpha",
+      status: "waiting-quota",
+      createdAtMs: Date.now(),
+      errorJson: JSON.stringify({ resetAtMs: Date.now() + 60_000 }),
+    });
+    await adapter.insertNode({
+      runId: "quota-run",
+      nodeId: "agent",
+      iteration: 0,
+      state: "waiting-quota",
+      lastAttempt: 1,
+      updatedAtMs: Date.now(),
+      outputTable: "",
+      label: "Agent",
+    });
+    await adapter.insertAttempt({
+      runId: "quota-run",
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      state: "waiting-quota",
+      startedAtMs: Date.now() - 5_000,
+    });
+
+    const response = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:write"], userId: "test" },
+      { id: "cancel", method: "cancelRun", params: { runId: "quota-run" } },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(response.payload).toMatchObject({ runId: "quota-run", terminalStatus: "cancelled" });
+    expect((await adapter.getRun("quota-run"))?.status).toBe("cancelled");
+    expect((await adapter.getNode("quota-run", "agent", 0))?.state).toBe("cancelled");
+    expect((await adapter.getAttempt("quota-run", "agent", 0, 1))?.state).toBe("cancelled");
+  });
+
   test("getSchemaSignature exposes the migration head over RPC", async () => {
     dbPath = makeDbPath("schema-signature");
     const wf = createSharedDbWorkflows(dbPath);
