@@ -33,10 +33,12 @@ import {
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packages = [
+const scriptPath = fileURLToPath(import.meta.url);
+const defaultRepoRoot = resolve(dirname(scriptPath), "..");
+export const DEFAULT_DECLARATION_PACKAGES = [
   "packages/agents",
   "packages/cloudflare",
+  "packages/gateway",
   "packages/graph",
   "packages/integrations",
   "packages/smithers",
@@ -87,60 +89,96 @@ function restoreDeclarations(srcDir, committed) {
   }
 }
 
-let failed = false;
-for (const pkg of packages) {
-  const cwd = join(repoRoot, pkg);
-  const srcDir = join(cwd, "src");
-  if (!existsSync(join(cwd, "tsup.config.ts"))) {
-    console.error(`check-dts: ${pkg} has no tsup.config.ts; skipping`);
-    continue;
-  }
-  process.stdout.write(`check-dts: regenerating declarations for ${pkg}… `);
-  const committed = collectDeclarations(srcDir);
-  try {
-    let buildError = null;
+/**
+ * @param {{
+ *   repoRoot?: string,
+ *   packages?: readonly string[],
+ *   runBuild?: (pkg: string, repoRoot: string) => void,
+ *   write?: (message: string) => void,
+ *   log?: (message: string) => void,
+ *   error?: (message: string) => void,
+ * }} [options]
+ * @returns {boolean}
+ */
+export function checkDeclarations({
+  repoRoot = defaultRepoRoot,
+  packages = DEFAULT_DECLARATION_PACKAGES,
+  runBuild = (pkg, root) =>
+    execFileSync("pnpm", ["-C", pkg, "run", "build"], { cwd: root, stdio: "pipe" }),
+  write = (message) => process.stdout.write(message),
+  log = (message) => console.log(message),
+  error = (message) => console.error(message),
+} = {}) {
+  let failed = false;
+  for (const pkg of packages) {
+    const cwd = join(repoRoot, pkg);
+    const srcDir = join(cwd, "src");
+    if (!existsSync(join(cwd, "tsup.config.ts"))) {
+      error(`check-dts: ${pkg} has no tsup.config.ts`);
+      failed = true;
+      continue;
+    }
+    write(`check-dts: regenerating declarations for ${pkg}… `);
+    const committed = collectDeclarations(srcDir);
     try {
-      execFileSync("pnpm", ["-C", pkg, "run", "build"], { cwd: repoRoot, stdio: "pipe" });
-    } catch (error) {
-      buildError = error;
-    }
-    if (buildError) {
-      console.error(
-        `\ncheck-dts: build failed for ${pkg}\n${buildError.stdout ?? ""}${buildError.stderr ?? ""}`,
-      );
-      failed = true;
-      continue; // finally restores the committed tree
-    }
-    const regenerated = collectDeclarations(srcDir);
-    const drift = [];
-    for (const [rel, content] of regenerated) {
-      const before = committed.get(rel);
-      if (before === undefined) {
-        drift.push(`${rel} (missing — a new source module has no committed declaration)`);
-      } else if (before !== content) {
-        drift.push(`${rel} (stale — committed declaration differs from a fresh build)`);
+      let buildError = null;
+      try {
+        runBuild(pkg, repoRoot);
+      } catch (caught) {
+        buildError = caught;
       }
-    }
-    for (const rel of committed.keys()) {
-      if (!regenerated.has(rel)) {
-        drift.push(`${rel} (orphan — no source module produces this declaration anymore)`);
+      if (buildError) {
+        error(
+          `\ncheck-dts: build failed for ${pkg}\n${buildError.stdout ?? ""}${buildError.stderr ?? ""}`,
+        );
+        failed = true;
+        continue; // finally restores the committed tree
       }
+      const regenerated = collectDeclarations(srcDir);
+      const drift = [];
+      for (const [rel, content] of regenerated) {
+        const before = committed.get(rel);
+        if (before === undefined) {
+          drift.push(`${rel} (missing — a new source module has no committed declaration)`);
+        } else if (before !== content) {
+          drift.push(`${rel} (stale — committed declaration differs from a fresh build)`);
+        }
+      }
+      for (const rel of committed.keys()) {
+        if (!regenerated.has(rel)) {
+          drift.push(`${rel} (orphan — no source module produces this declaration anymore)`);
+        }
+      }
+      if (drift.length > 0) {
+        error("DRIFT");
+        error(
+          `check-dts: committed declarations in ${pkg}/src are stale. Run \`pnpm -C ${pkg} run build\` and commit the result:\n${drift.sort().join("\n")}`,
+        );
+        failed = true;
+      } else {
+        log("ok");
+      }
+    } finally {
+      restoreDeclarations(srcDir, committed);
     }
-    if (drift.length > 0) {
-      console.error("DRIFT");
-      console.error(
-        `check-dts: committed declarations in ${pkg}/src are stale. Run \`pnpm -C ${pkg} run build\` and commit the result:\n${drift.sort().join("\n")}`,
-      );
-      failed = true;
-    } else {
-      console.log("ok");
-    }
-  } finally {
-    restoreDeclarations(srcDir, committed);
   }
+  return !failed;
 }
 
-if (failed) {
-  process.exit(1);
+if (resolve(process.argv[1] ?? "") === scriptPath) {
+  let regressionTestsPassed = true;
+  try {
+    execFileSync(process.execPath, ["--test", "scripts/check-dts.test.mjs"], {
+      cwd: defaultRepoRoot,
+      stdio: "inherit",
+    });
+  } catch {
+    regressionTestsPassed = false;
+  }
+
+  if (!regressionTestsPassed || !checkDeclarations()) {
+    process.exitCode = 1;
+  } else {
+    console.log("check-dts: all per-file declarations are fresh");
+  }
 }
-console.log("check-dts: all per-file declarations are fresh");
