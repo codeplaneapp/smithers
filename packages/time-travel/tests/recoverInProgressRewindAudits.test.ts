@@ -63,7 +63,13 @@ async function seedLease(adapter: SmithersDb, runId: string, expiresAtMs: number
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
+    // Windows holds EBUSY on just-closed sqlite dirs past any sane backoff;
+    // leaking a temp dir on an ephemeral runner must not fail the suite.
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // best-effort temp cleanup
+    }
   }
 });
 
