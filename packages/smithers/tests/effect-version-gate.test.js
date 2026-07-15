@@ -40,9 +40,12 @@ function runGate(dir) {
   // The gate runs under `node` in package.json and CI; bun's require
   // resolution can fall back to its global cache and fabricate an installed
   // effect version that node (correctly) never sees.
+  const env = { ...process.env };
+  delete env.NODE_PATH;
   return spawnSync("node", [join(dir, "scripts", "check-single-effect-version.mjs")], {
     cwd: dir,
     encoding: "utf8",
+    env,
     maxBuffer: 10 * 1024 * 1024,
   });
 }

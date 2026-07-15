@@ -207,6 +207,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "node scripts/check-sota.mjs",
       "node scripts/check-dts.mjs",
       "node scripts/check-smithers-test-script.mjs",
+      "bun test scripts/publish-next.test.mjs scripts/run-workspace-tests-timeout.test.mjs",
       "pnpm -r --no-bail test",
     ].join(" && "));
 
