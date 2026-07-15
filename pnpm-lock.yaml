@@ -862,6 +862,9 @@ importers:
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:../packages/time-travel
+      '@smithers-orchestrator/vcs':
+        specifier: workspace:*
+        version: link:../packages/vcs
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1
@@ -893,6 +896,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 4.20260701.1
         version: 4.20260701.1
+      '@effect/platform-bun':
+        specifier: ^0.90.0
+        version: 0.90.0(@effect/cluster@0.59.0(@effect/platform@0.96.2(effect@3.21.4))(@effect/rpc@0.75.1(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/sql@0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/workflow@0.18.2(@effect/experimental@0.60.0(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(@effect/rpc@0.75.1(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(@effect/rpc@0.75.1(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/sql@0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(effect@3.21.4)
       '@types/better-sqlite3':
         specifier: ^7.6.11
         version: 7.6.13
