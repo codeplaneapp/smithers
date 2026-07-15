@@ -3364,6 +3364,26 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
   .mon-inspector { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 90vw); background: var(--bg); box-shadow: -12px 0 36px rgb(var(--shadow-rgb) / 0.14); z-index: 10; }
 }
 
+/* Phones trade the side-by-side rail for vertically stacked, independently
+   scrollable panes. Keeping the shell itself clipped means wide tables and
+   tree rows remain scrollable inside their owning panels instead of widening
+   the document. */
+@media (max-width: 720px) {
+  .mon-topbar { align-items: flex-start; padding: var(--sp-3); }
+  .mon-brand, .mon-toolbar { width: 100%; }
+  .mon-toolbar { align-items: flex-start; }
+  .mon-filter-input { flex: 1 1 100%; min-width: 0; }
+
+  .mon-body { display: flex; flex-direction: column; min-height: 0; }
+  .mon-rail { flex: 0 1 42%; min-height: 160px; border-right: 0; border-bottom: 1px solid var(--border); padding: var(--sp-3); }
+  .mon-main { flex: 1 1 auto; min-width: 0; min-height: 0; padding: var(--sp-3); }
+
+  .mon-panel-head, .mon-detail-actions, .mon-progress, .mon-scrub { flex-wrap: wrap; }
+  .mon-metrics-grid { grid-template-columns: minmax(0, 1fr); }
+  .mon-modal-backdrop { padding: var(--sp-3); }
+  .mon-modal { width: min(1280px, 100%); height: min(860px, 100%); }
+}
+
 .mon-inbox { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); border-radius: var(--r-3); padding: var(--panel-pad); background: color-mix(in srgb, var(--warn) 5%, var(--surface)); animation: mon-in 140ms ease-out; }
 .mon-inbox .mon-kicker { margin-bottom: var(--sp-1); }
 .mon-approval { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0; border-top: 1px solid var(--border); }
