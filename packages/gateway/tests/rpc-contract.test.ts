@@ -10,6 +10,7 @@ import {
   getGatewayScopeValues,
   isGatewayRpcMethod,
   listGatewayRpcMethods,
+  type GatewayRpcMethod,
   type JsonSchema,
   type LaunchRunRequest,
   type LaunchRunResponse,
@@ -57,6 +58,10 @@ import {
   type UpdateTicketRequest,
   type DeleteTicketRequest,
 } from "../src/rpc/index.js";
+import type {
+  GatewayRpcMethod as ProtocolGatewayRpcMethod,
+  LaunchRunRequest as ProtocolLaunchRunRequest,
+} from "@smithers-orchestrator/protocol/gateway-rpc";
 import { GATEWAY_SCOPE_VALUES, hasGatewayScope, type GatewayScope } from "../src/auth/scopes.js";
 
 /**
@@ -173,6 +178,16 @@ function jsonType(value: unknown): string {
 }
 
 describe("Gateway RPC contract", () => {
+  test("gateway/rpc preserves the protocol-owned wire type surface", () => {
+    const protocolMethod = "launchRun" satisfies ProtocolGatewayRpcMethod;
+    const gatewayMethod: GatewayRpcMethod = protocolMethod;
+    const protocolRequest = { workflow: "deploy" } satisfies ProtocolLaunchRunRequest;
+    const gatewayRequest: LaunchRunRequest = protocolRequest;
+
+    expect(gatewayMethod).toBe("launchRun");
+    expect(gatewayRequest).toEqual({ workflow: "deploy" });
+  });
+
   test("getRun accepts null timestamps before a run starts or finishes", () => {
     const getRun = getGatewayRpcDefinition("getRun");
     if (!getRun) throw new Error("getRun RPC definition is missing");
