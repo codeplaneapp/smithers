@@ -251,6 +251,26 @@ describe("extractGraph", () => {
 			});
 			expect(() => extractGraph(root)).toThrow("[object Object]");
 		});
+
+		test("throws when an array prompt contains an object", () => {
+			const root = hostEl("smithers:task", {
+				id: "mdx-array",
+				output: "out",
+				agent: { generate: async () => ({}) },
+				children: ["intro text", { bad: true }],
+			});
+			expect(() => extractGraph(root)).toThrow("[object Object]");
+		});
+
+		test("throws when a prompt contains the object marker", () => {
+			const root = hostEl("smithers:task", {
+				id: "marker-text",
+				output: "out",
+				agent: { generate: async () => ({}) },
+				children: "Diagnose the [object Object] output",
+			});
+			expect(() => extractGraph(root)).toThrow("[object Object]");
+		});
 	});
 
 	describe("outputs", () => {

@@ -923,7 +923,7 @@ export function extractFromHost(root, opts) {
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
             const prompt = isAgent ? String(raw.children ?? "") : undefined;
-            if (prompt === "[object Object]") {
+            if (isAgent && prompt?.includes("[object Object]")) {
                 throw new SmithersError("MDX_PRELOAD_INACTIVE", `Task "${raw.id ?? nodeId}" prompt resolved to [object Object] — MDX preload is likely not active.\n` +
                     `Check that bunfig.toml has a top-level preload (not under [run]) and mdxPlugin() is registered.`);
             }

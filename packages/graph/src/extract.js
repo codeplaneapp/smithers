@@ -748,7 +748,7 @@ export function extractGraph(root, opts) {
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
             const prompt = isAgent ? String(raw.children ?? "") : undefined;
-            if (prompt === "[object Object]") {
+            if (isAgent && prompt?.includes("[object Object]")) {
                 throw new SmithersError("MDX_PRELOAD_INACTIVE", `Task "${logicalNodeId}" prompt resolved to [object Object].`);
             }
             addDescriptor(nodeId, "Task", {

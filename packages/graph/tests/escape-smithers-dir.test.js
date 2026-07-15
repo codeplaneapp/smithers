@@ -32,8 +32,13 @@ describe("escapeSmithersDir", () => {
 
   test("a relative .smithers path resolves against cwd, then escapes to cwd", () => {
     // resolve() makes it absolute first, so .smithers gains real ancestors and
-    // the escape lands on the invoking directory rather than a garbage root.
-    expect(escapeSmithersDir([".smithers", "workflows"].join(sep))).toBe(process.cwd());
+    // the escape lands above the first .smithers segment rather than a garbage
+    // root. Worktrees may themselves live below .smithers.
+    const cwd = resolve();
+    const parts = cwd.split(sep);
+    const smithersIndex = parts.indexOf(".smithers");
+    const expected = smithersIndex > 0 ? parts.slice(0, smithersIndex).join(sep) || sep : cwd;
+    expect(escapeSmithersDir([".smithers", "workflows"].join(sep))).toBe(expected);
   });
 
   test("returns the filesystem root when .smithers sits directly at the root", () => {
