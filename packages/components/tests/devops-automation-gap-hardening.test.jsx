@@ -90,8 +90,8 @@ describe("devops automation gap hardening", () => {
         expect(row.error.length).toBeGreaterThan(0);
     });
 
-    test("CheckSuite command check passes when successful stdout exceeds the capture limit", async () => {
-        const largeCommand = `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(17 * 1024 * 1024))"`;
+    test("CheckSuite command check keeps the real exit code when stdout exceeds the capture limit", async () => {
+        const largeCommand = `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(17 * 1024 * 1024) + 'tail-marker')"`;
         const { graph } = await render(
             <CheckSuite
                 id="gate"
@@ -105,9 +105,35 @@ describe("devops automation gap hardening", () => {
             passed: true,
             ok: true,
             command: largeCommand,
+            exitCode: 0,
+            signal: null,
             truncated: true,
         });
-        expect(row.stdout.length).toBeGreaterThan(1024 * 1024);
+        expect(row.stdout).toHaveLength(16 * 1024 * 1024);
+        expect(row.stdout.endsWith("tail-marker")).toBe(true);
+        expect(row.diagnostic).toContain("only the tail was retained");
+    });
+
+    test("CheckSuite command fails when output exceeds the capture limit before exit 7", async () => {
+        const overflowFailureCommand = `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(17 * 1024 * 1024), () => process.exit(7))"`;
+        const { graph } = await render(
+            <CheckSuite
+                id="gate"
+                verdictOutput="verdict_out"
+                checks={[{ id: "overflow-failure", command: overflowFailureCommand }]}
+            />,
+        );
+
+        const row = await byId(graph, "gate-overflow-failure").computeFn();
+        expect(row).toMatchObject({
+            passed: false,
+            ok: false,
+            command: overflowFailureCommand,
+            exitCode: 7,
+            signal: null,
+            truncated: true,
+        });
+        expect(row.error).toContain("Command exited with code 7");
     });
 
     test("CheckSuite verdict passes primitive rows, fails passed:false markers, and any-pass with zero passes fails", async () => {
