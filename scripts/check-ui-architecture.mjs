@@ -1,0 +1,1037 @@
+#!/usr/bin/env node
+
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { extname, join, posix, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import ts from "typescript";
+
+const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
+const STYLE_EXTENSIONS = new Set([".css", ".scss", ".sass", ".less"]);
+const IGNORED_DIRECTORIES = new Set([
+  ".git",
+  ".jj",
+  ".smithers",
+  ".worktrees",
+  "coverage",
+  "dist",
+  "node_modules",
+  "test",
+  "tests",
+  "tmp",
+  "ui-dist",
+]);
+const UI_PACKAGES = new Set([
+  "@smithers-orchestrator/gateway-react",
+  "@smithers-orchestrator/gateway-ui",
+  "@smithers-orchestrator/ui",
+  "@smithers-orchestrator/ui-styleguide",
+  "smithers-orchestrator/gateway-react",
+  "smithers-orchestrator/gateway-ui",
+  "smithers-orchestrator/ui",
+  "smithers-orchestrator/ui-styleguide",
+]);
+const LEGACY_UI_PACKAGES = new Set([
+  "@smithers-orchestrator/gateway-ui",
+  "@smithers-orchestrator/ui-styleguide",
+  "smithers-orchestrator/gateway-ui",
+  "smithers-orchestrator/ui-styleguide",
+]);
+const VISUAL_DEPENDENCY_PREFIXES = [
+  "@ai-elements",
+  "@chakra-ui",
+  "@headlessui",
+  "@heroui",
+  "@mui",
+  "@nextui-org",
+  "@opentui",
+  "@radix-ui",
+  "@shadcn",
+  "antd",
+  "daisyui",
+  "flowbite",
+  "lucide-react",
+  "mantine",
+  "radix-ui",
+  "semantic-ui",
+  "shadcnio",
+];
+const FORBIDDEN_REGISTRY_PREFIXES = ["@ai-elements", "@shadcn", "shadcnio"];
+const HEAVY_DEPENDENCY_PREFIXES = [
+  "@codemirror/",
+  "@milkdown/",
+  "@monaco-editor/",
+  "@pierre/",
+  "@replit/codemirror-vim",
+  "@xterm/",
+  "@xyflow/",
+  "codemirror",
+  "dagre",
+  "mermaid",
+  "monaco-editor",
+  "shiki",
+];
+const DUPLICATE_WRAPPER_NAMES = new Set([
+  "alert",
+  "avatar",
+  "badge",
+  "button",
+  "card",
+  "checkbox",
+  "dialog",
+  "dropdown-menu",
+  "empty-state",
+  "input",
+  "label",
+  "popover",
+  "progress",
+  "row-button",
+  "scroll-area",
+  "select",
+  "separator",
+  "skeleton",
+  "spinner",
+  "status-pill",
+  "table",
+  "tabs",
+  "textarea",
+  "tooltip",
+]);
+const DEPENDENCY_SECTIONS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+];
+const INVENTORY_KEYS = [
+  "heavyWidgetDependencies",
+  "legacyPackageUsage",
+  "localDuplicateWrappersAndIcons",
+  "packageExportSurfaces",
+  "styleEntryPoints",
+  "uiImports",
+];
+const SHADCN_DIRECTORIES = [
+  "packages/ui/src/chat/shadcn",
+  "packages/ui/src/primitives/shadcn",
+];
+const INTRINSIC_VISUAL_TAGS = new Set([
+  "a", "article", "aside", "button", "canvas", "code", "div", "footer", "form",
+  "h1", "h2", "h3", "header", "iframe", "img", "input", "label", "li", "main",
+  "nav", "ol", "option", "p", "pre", "section", "select", "span", "strong", "svg",
+  "table", "tbody", "td", "textarea", "th", "thead", "tr", "ul",
+]);
+function toPosix(value) {
+  return value.split("\\").join("/");
+}
+
+function sorted(values) {
+  return [...new Set(values)].sort(compareText);
+}
+
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function readJson(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => compareText(left, right))
+        .map(([key, child]) => [key, stableValue(child)]),
+    );
+  }
+  return value;
+}
+
+function walk(root, start, predicate = () => true) {
+  const absoluteStart = join(root, start);
+  if (!existsSync(absoluteStart)) return [];
+  const files = [];
+  function visit(absoluteDirectory) {
+    for (const entry of readdirSync(absoluteDirectory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRECTORIES.has(entry.name)) visit(join(absoluteDirectory, entry.name));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const path = toPosix(relative(root, join(absoluteDirectory, entry.name)));
+      if (predicate(path)) files.push(path);
+    }
+  }
+  visit(absoluteStart);
+  return files.sort(compareText);
+}
+
+function directWorkspaceDirectories(root, parent) {
+  const absoluteParent = join(root, parent);
+  if (!existsSync(absoluteParent)) return [];
+  return readdirSync(absoluteParent, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(join(absoluteParent, entry.name, "package.json")))
+    .map((entry) => `${parent}/${entry.name}`)
+    .sort(compareText);
+}
+
+function isSourcePath(path) {
+  return (
+    SOURCE_EXTENSIONS.has(extname(path)) &&
+    !path.endsWith(".d.ts") &&
+    !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
+  );
+}
+
+function sourceFiles(root, kind) {
+  if (kind === "multi") {
+    return sorted([
+      ...walk(root, "src", isSourcePath),
+      ...directWorkspaceDirectories(root, "packages").flatMap((directory) =>
+        walk(root, `${directory}/src`, isSourcePath),
+      ),
+    ]);
+  }
+  return sorted(
+    ["packages", "apps"].flatMap((parent) =>
+      directWorkspaceDirectories(root, parent).flatMap((directory) =>
+        walk(root, directory, isSourcePath),
+      ),
+    ),
+  );
+}
+
+function styleFiles(root, kind) {
+  const roots = kind === "multi" ? ["src", "packages"] : ["packages", "apps"];
+  return sorted(
+    roots.flatMap((directory) =>
+      walk(root, directory, (path) => STYLE_EXTENSIONS.has(extname(path))),
+    ),
+  );
+}
+
+function manifestFiles(root, kind) {
+  const paths = existsSync(join(root, "package.json")) ? ["package.json"] : [];
+  for (const parent of kind === "multi" ? ["packages"] : ["packages", "apps"]) {
+    for (const directory of directWorkspaceDirectories(root, parent)) {
+      paths.push(`${directory}/package.json`);
+    }
+  }
+  return sorted(paths);
+}
+
+function lexModules(source) {
+  const tokens = [];
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index];
+    if (/\s/.test(character)) {
+      index += 1;
+      continue;
+    }
+    if (character === "/" && source[index + 1] === "/") {
+      index += 2;
+      while (index < source.length && source[index] !== "\n") index += 1;
+      continue;
+    }
+    if (character === "/" && source[index + 1] === "*") {
+      index += 2;
+      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) index += 1;
+      index += 2;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      const quote = character;
+      let value = "";
+      index += 1;
+      while (index < source.length && source[index] !== quote) {
+        if (source[index] === "\\" && index + 1 < source.length) {
+          value += source[index + 1];
+          index += 2;
+        } else {
+          value += source[index];
+          index += 1;
+        }
+      }
+      index += 1;
+      tokens.push({ kind: "string", value });
+      continue;
+    }
+    if (character === "`") {
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\") index += 2;
+        else if (source[index] === "`") {
+          index += 1;
+          break;
+        } else index += 1;
+      }
+      tokens.push({ kind: "template", value: "" });
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(character)) {
+      let value = character;
+      index += 1;
+      while (index < source.length && /[A-Za-z0-9_$-]/.test(source[index])) {
+        value += source[index];
+        index += 1;
+      }
+      tokens.push({ kind: "identifier", value });
+      continue;
+    }
+    tokens.push({ kind: "punctuation", value: character });
+    index += 1;
+  }
+  return tokens;
+}
+
+function parseModuleReferences(source) {
+  const tokens = lexModules(source);
+  const references = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.kind !== "identifier") continue;
+    if ((token.value === "import" || token.value === "require") && tokens[index + 1]?.value === "(") {
+      if (tokens[index + 2]?.kind === "string") references.push({ specifier: tokens[index + 2].value, typeOnly: false });
+      continue;
+    }
+    if (token.value === "import" && tokens[index + 1]?.kind === "string") {
+      references.push({ specifier: tokens[index + 1].value, typeOnly: false });
+      continue;
+    }
+    if (token.value !== "import" && token.value !== "export") continue;
+    for (let cursor = index + 1; cursor < Math.min(tokens.length, index + 80); cursor += 1) {
+      if (tokens[cursor].value === ";") break;
+      if (tokens[cursor].value === "from" && tokens[cursor + 1]?.kind === "string") {
+        references.push({
+          specifier: tokens[cursor + 1].value,
+          typeOnly: tokens[index + 1]?.value === "type",
+        });
+        break;
+      }
+    }
+  }
+  return references;
+}
+
+export function parseModuleSpecifiers(source) {
+  return sorted(parseModuleReferences(source).map(({ specifier }) => specifier));
+}
+
+function basePackage(specifier) {
+  if (specifier.startsWith("@")) return specifier.split("/").slice(0, 2).join("/");
+  if (specifier.startsWith("smithers-orchestrator/")) return specifier.split("/").slice(0, 2).join("/");
+  return specifier.split("/")[0];
+}
+
+function matchesPrefix(value, prefixes) {
+  return prefixes.some((prefix) =>
+    prefix.endsWith("/") ? value.startsWith(prefix) : value === prefix || value.startsWith(`${prefix}/`),
+  );
+}
+
+function isUiSpecifier(specifier) {
+  return UI_PACKAGES.has(basePackage(specifier));
+}
+
+function isGatewayReact(specifier) {
+  const base = basePackage(specifier);
+  return base === "@smithers-orchestrator/gateway-react" || base === "smithers-orchestrator/gateway-react";
+}
+
+function isSmithersPackage(specifier) {
+  return specifier === "smithers-orchestrator" ||
+    specifier.startsWith("smithers-orchestrator/") ||
+    specifier.startsWith("@smithers-orchestrator/");
+}
+
+function isLegacyUiPackage(specifier) {
+  return LEGACY_UI_PACKAGES.has(basePackage(specifier));
+}
+
+function isHeavyDependency(specifier) {
+  return matchesPrefix(specifier, HEAVY_DEPENDENCY_PREFIXES);
+}
+
+function isDuplicateWrapperOrIcon(path) {
+  const withoutExtension = posix.basename(path, extname(path)).toLowerCase();
+  const looksVisual =
+    path.endsWith(".jsx") ||
+    path.endsWith(".tsx") ||
+    /\/(cards?|components?|icons?|ui|views?)\//i.test(path);
+  return (
+    looksVisual && (
+      DUPLICATE_WRAPPER_NAMES.has(withoutExtension) ||
+      withoutExtension === "icon" ||
+      withoutExtension === "icons" ||
+      withoutExtension.endsWith("-icon") ||
+      withoutExtension.endsWith("icon") ||
+      path.toLowerCase().includes("/icons/")
+    )
+  );
+}
+
+function isStyleModule(path) {
+  const name = posix.basename(path, extname(path));
+  return ["css", "style", "styles", "styleguide-css", "theme", "themes", "tokens", "uiCss"].includes(name);
+}
+
+function hasCodeIdentifier(source, identifiers) {
+  return lexModules(source).some((token) => token.kind === "identifier" && identifiers.has(token.value));
+}
+
+function intrinsicVisualTags(source, path) {
+  const tokens = lexModules(source);
+  const tags = [];
+  if (path.endsWith(".jsx") || path.endsWith(".tsx")) {
+    for (let index = 0; index < tokens.length - 1; index += 1) {
+      if (tokens[index].value === "<" && tokens[index + 1].kind === "identifier" && INTRINSIC_VISUAL_TAGS.has(tokens[index + 1].value)) {
+        tags.push(tokens[index + 1].value);
+      }
+    }
+  }
+  for (let index = 0; index < tokens.length; index += 1) {
+    const createsElement =
+      tokens[index].value === "React" &&
+      tokens[index + 1].value === "." &&
+      tokens[index + 2].value === "createElement" &&
+      tokens[index + 3].value === "(";
+    const jsxRuntime = ["jsx", "jsxs"].includes(tokens[index].value) && tokens[index + 1].value === "(";
+    const candidate = createsElement ? tokens[index + 4] : jsxRuntime ? tokens[index + 2] : null;
+    if (candidate?.kind === "string" && INTRINSIC_VISUAL_TAGS.has(candidate.value)) tags.push(candidate.value);
+  }
+  return sorted(tags);
+}
+
+function formatViolation(rule, detail) {
+  return `${rule} :: ${detail}`;
+}
+
+function exportEntries(path, manifest) {
+  const entries = typeof manifest.name === "string" ? [`${path}#name=${JSON.stringify(manifest.name)}`] : [];
+  entries.push(...(manifest.exports && typeof manifest.exports === "object"
+    ? Object.entries(manifest.exports)
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([key, value]) => `${path}#${key}=${JSON.stringify(stableValue(value))}`)
+    : []));
+  for (const key of ["browser", "main", "module"]) {
+    if (typeof manifest[key] === "string") entries.push(`${path}#${key}=${JSON.stringify(manifest[key])}`);
+  }
+  return sorted(entries);
+}
+
+function stringLeaves(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringLeaves);
+  if (value && typeof value === "object") return Object.values(value).flatMap(stringLeaves);
+  return [];
+}
+
+function publicEntryPaths(root, manifestPath, manifest) {
+  const directory = posix.dirname(manifestPath);
+  const conventionalEntries = ["./index.js", "./index.jsx", "./index.ts", "./index.tsx"];
+  const targets = [
+    ...stringLeaves(manifest.exports),
+    ...[manifest.main, manifest.module, manifest.browser].filter((value) => typeof value === "string"),
+    ...(manifest.exports?.["."] || manifest.main || manifest.module || manifest.browser ? [] : conventionalEntries),
+  ];
+  return sorted(
+    targets
+      .filter((target) => !posix.isAbsolute(target) && !target.includes(":"))
+      .map((target) => posix.normalize(posix.join(directory, target)))
+      .filter((target) => !target.endsWith(".d.ts"))
+      .filter((target) => existsSync(join(root, target))),
+  );
+}
+
+function jsxComponentSpecifiers(source) {
+  const tokens = lexModules(source);
+  const jsxRoots = new Set();
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    if (tokens[index].value === "<" && tokens[index + 1].kind === "identifier" && /^[A-Z]/.test(tokens[index + 1].value)) {
+      jsxRoots.add(tokens[index + 1].value);
+    }
+  }
+  const specifiers = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index].value !== "import") continue;
+    const bindings = new Set();
+    let specifier = null;
+    for (let cursor = index + 1; cursor < Math.min(tokens.length, index + 80); cursor += 1) {
+      if (tokens[cursor].value === ";") break;
+      if (tokens[cursor].value === "from" && tokens[cursor + 1]?.kind === "string") {
+        specifier = tokens[cursor + 1].value;
+        break;
+      }
+      if (tokens[cursor].kind === "identifier" && /^[A-Z]/.test(tokens[cursor].value)) bindings.add(tokens[cursor].value);
+    }
+    if (specifier && [...bindings].some((binding) => jsxRoots.has(binding))) specifiers.push(specifier);
+  }
+  return sorted(specifiers);
+}
+
+function hasPublicHookExport(source) {
+  const tokens = lexModules(source);
+  for (let index = 0; index < tokens.length - 2; index += 1) {
+    const commonJsExport =
+      (tokens[index].value === "exports" && tokens[index + 1].value === ".") ||
+      (
+        tokens[index].value === "module" &&
+        tokens[index + 1].value === "." &&
+        tokens[index + 2].value === "exports" &&
+        tokens[index + 3].value === "."
+      );
+    const name = commonJsExport
+      ? tokens[index].value === "exports"
+        ? tokens[index + 2]?.value
+        : tokens[index + 4]?.value
+      : null;
+    if (typeof name === "string" && /^use[A-Z]/.test(name)) return true;
+  }
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index].value !== "export") continue;
+    let hookFound = false;
+    let sourceSpecifier = null;
+    for (let cursor = index + 1; cursor < Math.min(tokens.length, index + 80); cursor += 1) {
+      if (tokens[cursor].value === ";") break;
+      if (tokens[cursor].kind === "identifier" && /^use[A-Z]/.test(tokens[cursor].value)) hookFound = true;
+      if (tokens[cursor].kind === "string" && /(^|\/)use[A-Z]/.test(tokens[cursor].value)) hookFound = true;
+      if (tokens[cursor].value === "from" && tokens[cursor + 1]?.kind === "string") sourceSpecifier = tokens[cursor + 1].value;
+    }
+    if (hookFound && (!sourceSpecifier || sourceSpecifier.startsWith(".") || isGatewayReact(sourceSpecifier) || basePackage(sourceSpecifier) === "react")) return true;
+  }
+  return false;
+}
+
+function uiLayer(path) {
+  const prefix = "packages/ui/src/";
+  if (!path.startsWith(prefix)) return null;
+  const relativePath = path.slice(prefix.length);
+  if (relativePath.startsWith("smithers/connected/")) return "connected";
+  const layer = relativePath.split("/")[0];
+  return ["adapters", "ai", "chat", "internal", "primitives", "smithers", "styles"].includes(layer)
+    ? layer
+    : null;
+}
+
+function importedUiLayer(file, specifier) {
+  if (isGatewayReact(specifier)) return "gateway-react";
+  const uiBases = ["@smithers-orchestrator/ui/", "smithers-orchestrator/ui/"];
+  const externalBase = uiBases.find((base) => specifier.startsWith(base));
+  if (externalBase) {
+    const subpath = specifier.slice(externalBase.length);
+    return subpath.startsWith("smithers/connected") ? "connected" : subpath.split("/")[0];
+  }
+  if (!specifier.startsWith(".")) return null;
+  const resolved = posix.normalize(posix.join(posix.dirname(file), specifier));
+  return uiLayer(resolved);
+}
+
+function resolveRelativeSource(file, specifier, files) {
+  if (!specifier.startsWith(".")) return null;
+  const base = posix.normalize(posix.join(posix.dirname(file), specifier));
+  const candidates = [
+    base,
+    ...[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].map((extension) => `${base}${extension}`),
+    ...[".ts", ".tsx", ".js", ".jsx"].map((extension) => `${base}/index${extension}`),
+  ];
+  return candidates.find((candidate) => files.includes(candidate)) ?? null;
+}
+
+function disconnectedPropViolations(path, source) {
+  const layer = uiLayer(path);
+  if (!["ai", "chat", "primitives", "smithers"].includes(layer)) return [];
+  if (path.includes("/smithers/connected/") || posix.basename(path).startsWith("index.")) return [];
+  if (!source.includes("<") || !/[.]tsx?$/.test(path)) return [];
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const hasModifier = (node, kind) => node.modifiers?.some((modifier) => modifier.kind === kind) ?? false;
+  const containsJsx = (node) => {
+    let found = false;
+    const visit = (child) => {
+      if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
+        found = true;
+        return;
+      }
+      if (!found) ts.forEachChild(child, visit);
+    };
+    visit(node);
+    return found;
+  };
+  const componentFunction = (expression) => {
+    if (!expression) return null;
+    if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) return expression;
+    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isSatisfiesExpression(expression)) {
+      return componentFunction(expression.expression);
+    }
+    if (ts.isCallExpression(expression)) {
+      return expression.arguments.map(componentFunction).find(Boolean) ?? null;
+    }
+    return null;
+  };
+  const exported = new Set();
+  for (const statement of file.statements) {
+    if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause) && !statement.moduleSpecifier) {
+      for (const element of statement.exportClause.elements) exported.add((element.propertyName ?? element.name).text);
+    }
+    if (ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression)) exported.add(statement.expression.text);
+  }
+  const violations = [];
+  const inspectFunction = (name, fn, contextualType = null, wrapper = null) => {
+    if (!fn || !containsJsx(fn) || fn.parameters.length === 0) return;
+    const wrapperTypes = wrapper && ts.isCallExpression(wrapper) ? wrapper.typeArguments?.length ?? 0 : 0;
+    if (!fn.parameters[0].type && !contextualType && wrapperTypes === 0) violations.push(name);
+  };
+  for (const statement of file.statements) {
+    if (ts.isFunctionDeclaration(statement)) {
+      const name = statement.name?.text ?? "default";
+      const isExported = hasModifier(statement, ts.SyntaxKind.ExportKeyword) || exported.has(name);
+      if (isExported && (name === "default" || /^[A-Z]/.test(name))) inspectFunction(name, statement);
+      continue;
+    }
+    if (ts.isVariableStatement(statement)) {
+      const statementExported = hasModifier(statement, ts.SyntaxKind.ExportKeyword);
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || !/^[A-Z]/.test(declaration.name.text)) continue;
+        if (!statementExported && !exported.has(declaration.name.text)) continue;
+        inspectFunction(
+          declaration.name.text,
+          componentFunction(declaration.initializer),
+          declaration.type,
+          declaration.initializer,
+        );
+      }
+      continue;
+    }
+    if (ts.isExportAssignment(statement) && !ts.isIdentifier(statement.expression)) {
+      inspectFunction("default", componentFunction(statement.expression), null, statement.expression);
+    }
+  }
+  return sorted(violations);
+}
+
+function shadcnViolations(root, files) {
+  const violations = [];
+  const manifestPath = "packages/ui/shadcn-provenance.json";
+  if (!existsSync(join(root, manifestPath))) {
+    return [formatViolation("shadcn-provenance", `${manifestPath} is missing`)];
+  }
+  let manifest;
+  try {
+    manifest = readJson(join(root, manifestPath));
+  } catch (error) {
+    return [formatViolation("shadcn-provenance", `${manifestPath} is invalid JSON: ${error.message}`)];
+  }
+  if (manifest.version !== 1) violations.push(formatViolation("shadcn-provenance", "version must be 1"));
+  if (manifest.policy?.registry !== "https://ui.shadcn.com") {
+    violations.push(formatViolation("shadcn-provenance", "policy.registry must be https://ui.shadcn.com"));
+  }
+  const expectedCollections = ["chat/shadcn", "primitives/shadcn"];
+  if (JSON.stringify(manifest.policy?.collections) !== JSON.stringify(expectedCollections)) {
+    violations.push(formatViolation("shadcn-provenance", `policy.collections must equal ${JSON.stringify(expectedCollections)}`));
+  }
+  const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
+  if (!Array.isArray(manifest.entries)) violations.push(formatViolation("shadcn-provenance", "entries must be an array"));
+  const paths = new Set();
+  for (const entry of entries) {
+    const path = typeof entry?.path === "string" ? toPosix(entry.path) : "";
+    if (!path || paths.has(path)) {
+      violations.push(formatViolation("shadcn-provenance", `${path || "<missing path>"} is missing or duplicated`));
+      continue;
+    }
+    paths.add(path);
+    if (!SHADCN_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`))) {
+      violations.push(formatViolation("shadcn-provenance", `${path} is outside an approved shadcn directory`));
+    }
+    if (typeof entry.component !== "string" || !entry.component) {
+      violations.push(formatViolation("shadcn-provenance", `${path} has no component name`));
+    }
+    try {
+      const sourceUrl = new URL(entry.sourceUrl);
+      if (
+        sourceUrl.origin !== "https://ui.shadcn.com" ||
+        sourceUrl.username ||
+        sourceUrl.password ||
+        !sourceUrl.pathname.startsWith("/r/") ||
+        !sourceUrl.pathname.endsWith(".json") ||
+        sourceUrl.pathname.split("/").at(-1) !== `${entry.component}.json` ||
+        sourceUrl.search ||
+        sourceUrl.hash
+      ) {
+        throw new Error("not an official registry item URL");
+      }
+    } catch {
+      violations.push(formatViolation("shadcn-provenance", `${path} sourceUrl must be an exact https://ui.shadcn.com/r/*.json URL`));
+    }
+  }
+  const shadcnFiles = files.filter((path) => SHADCN_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`)));
+  for (const path of shadcnFiles) {
+    if (!paths.has(path)) violations.push(formatViolation("shadcn-provenance", `${path} has no provenance entry`));
+  }
+  for (const path of paths) {
+    if (!shadcnFiles.includes(path)) violations.push(formatViolation("shadcn-provenance", `${path} is a stale provenance entry`));
+  }
+  return violations;
+}
+
+export function collectUiArchitectureState(root, kind = "smithers") {
+  const absoluteRoot = resolve(root);
+  const files = sourceFiles(absoluteRoot, kind);
+  const styles = styleFiles(absoluteRoot, kind);
+  const manifests = manifestFiles(absoluteRoot, kind);
+  const imports = new Map();
+  const references = new Map();
+  const sources = new Map();
+  for (const path of files) {
+    const source = readFileSync(join(absoluteRoot, path), "utf8");
+    sources.set(path, source);
+    imports.set(path, parseModuleSpecifiers(source));
+    references.set(path, parseModuleReferences(source));
+  }
+
+  const inventories = Object.fromEntries(INVENTORY_KEYS.map((key) => [key, []]));
+  const violations = [];
+
+  for (const [path, specifiers] of imports) {
+    for (const specifier of specifiers) {
+      if (isUiSpecifier(specifier)) inventories.uiImports.push(`${path} -> ${specifier}`);
+      if (isLegacyUiPackage(specifier)) inventories.legacyPackageUsage.push(`${path} -> ${specifier}`);
+      if (STYLE_EXTENSIONS.has(extname(specifier))) inventories.styleEntryPoints.push(`${path} -> ${specifier}`);
+      if (matchesPrefix(specifier, FORBIDDEN_REGISTRY_PREFIXES)) {
+        violations.push(formatViolation("official-shadcn-only", `${path} imports ${specifier}`));
+      }
+      if (kind === "smithers" && path.startsWith("packages/components/src/")) {
+        if (isUiSpecifier(specifier) || matchesPrefix(specifier, VISUAL_DEPENDENCY_PREFIXES) || STYLE_EXTENSIONS.has(extname(specifier))) {
+          violations.push(formatViolation("components-non-visual", `${path} imports ${specifier}`));
+        }
+      }
+      if (
+        kind === "smithers" &&
+        path.startsWith("packages/ui/src/") &&
+        isHeavyDependency(specifier) &&
+        !path.startsWith("packages/ui/src/adapters/")
+      ) {
+        violations.push(formatViolation("heavy-widget-location", `${path} imports ${specifier} outside adapters`));
+      }
+      if (
+        kind === "smithers" &&
+        isGatewayReact(specifier) &&
+        !path.startsWith("packages/ui/src/smithers/connected/")
+      ) {
+        violations.push(formatViolation("gateway-react-location", `${path} imports ${specifier}`));
+      }
+      if (kind === "smithers" && path.startsWith("packages/gateway-react/src/")) {
+        if (isSmithersPackage(specifier) && basePackage(specifier) !== "@smithers-orchestrator/gateway-client" && basePackage(specifier) !== "smithers-orchestrator/gateway-client") {
+          violations.push(formatViolation("gateway-react-direction", `${path} imports ${specifier}`));
+        }
+      }
+    }
+
+    if (kind === "smithers") {
+      const layer = uiLayer(path);
+      const allowedLayers = {
+        adapters: new Set(["adapters", "internal", "primitives", "styles"]),
+        ai: new Set(["ai", "chat", "internal", "primitives", "styles"]),
+        chat: new Set(["chat", "internal", "primitives", "styles"]),
+        connected: new Set(["connected", "gateway-react", "internal", "smithers", "styles"]),
+        internal: new Set(["internal"]),
+        primitives: new Set(["internal", "primitives", "styles"]),
+        smithers: new Set(["adapters", "ai", "internal", "primitives", "smithers", "styles"]),
+        styles: new Set(["internal", "styles"]),
+      };
+      if (layer) {
+        for (const specifier of specifiers) {
+          const target = importedUiLayer(path, specifier);
+          if (target && !allowedLayers[layer].has(target)) {
+            violations.push(formatViolation("ui-layer-direction", `${path} (${layer}) imports ${specifier} (${target})`));
+          }
+        }
+        if (layer === "smithers") {
+          for (const reference of references.get(path)) {
+            if (importedUiLayer(path, reference.specifier) === "adapters" && !reference.typeOnly) {
+              violations.push(formatViolation("adapter-types-only", `${path} imports ${reference.specifier} at runtime`));
+            }
+          }
+        }
+      }
+      for (const component of disconnectedPropViolations(path, sources.get(path))) {
+        violations.push(formatViolation("disconnected-typed-props", `${path} exports ${component} with untyped props`));
+      }
+      if (path === "packages/ui/src/index.ts" || path === "packages/ui/src/index.tsx") {
+        for (const specifier of specifiers) {
+          if (specifier.includes("/adapters") || specifier.includes("smithers/connected") || isHeavyDependency(specifier)) {
+            violations.push(formatViolation("base-ui-export", `${path} exposes ${specifier}`));
+          }
+          const target = resolveRelativeSource(path, specifier, files);
+          if (target && imports.get(target)?.some(isHeavyDependency)) {
+            violations.push(formatViolation("base-ui-export", `${path} exposes heavy module ${target}`));
+          }
+        }
+      }
+      if (
+        path.startsWith("packages/components/src/") &&
+        hasCodeIdentifier(sources.get(path), new Set(["document", "window", "HTMLElement", "SVGElement"]))
+      ) {
+        violations.push(formatViolation("components-non-visual", `${path} references a browser DOM global`));
+      }
+      if (path.startsWith("packages/components/src/")) {
+        for (const tag of intrinsicVisualTags(sources.get(path), path)) {
+          violations.push(formatViolation("components-non-visual", `${path} renders intrinsic <${tag}>`));
+        }
+      }
+      if (
+        path.startsWith("packages/ui/src/") &&
+        !uiLayer(path) &&
+        !["packages/ui/src/index.ts", "packages/ui/src/index.tsx"].includes(path)
+      ) {
+        violations.push(formatViolation("ui-layer-placement", `${path} is outside the target UI layers`));
+      }
+      if (path.startsWith("packages/gateway-ui/src/") || path.startsWith("packages/ui-styleguide/src/")) {
+        violations.push(formatViolation("compatibility-facade-file", `${path} is legacy facade implementation`));
+      }
+    }
+  }
+
+  if (kind === "smithers") {
+    for (const entry of ["packages/ui/src/index.ts", "packages/ui/src/index.tsx"].filter((path) => files.includes(path))) {
+      const pending = [entry];
+      const visited = new Set();
+      while (pending.length) {
+        const current = pending.shift();
+        if (visited.has(current)) continue;
+        visited.add(current);
+        for (const specifier of imports.get(current) ?? []) {
+          if (isHeavyDependency(specifier)) {
+            violations.push(formatViolation("base-ui-export", `${entry} transitively exposes heavy dependency ${specifier} via ${current}`));
+          }
+          const target = resolveRelativeSource(current, specifier, files);
+          if (!target) continue;
+          if (target.startsWith("packages/ui/src/adapters/")) {
+            violations.push(formatViolation("base-ui-export", `${entry} transitively exposes adapter module ${target}`));
+          }
+          pending.push(target);
+        }
+      }
+    }
+  }
+
+  for (const path of files) {
+    if (isStyleModule(path)) inventories.styleEntryPoints.push(path);
+    const canonicalUi = kind === "smithers" && path.startsWith("packages/ui/src/");
+    if (!canonicalUi && isDuplicateWrapperOrIcon(path)) inventories.localDuplicateWrappersAndIcons.push(path);
+  }
+  inventories.styleEntryPoints.push(...styles);
+
+  for (const path of manifests) {
+    const manifest = readJson(join(absoluteRoot, path));
+    const includeExports =
+      kind === "multi" ||
+      [
+        "@smithers-orchestrator/components",
+        "@smithers-orchestrator/gateway-react",
+        "@smithers-orchestrator/gateway-ui",
+        "@smithers-orchestrator/ui",
+        "@smithers-orchestrator/ui-styleguide",
+        "smithers-orchestrator",
+      ].includes(manifest.name);
+    if (typeof manifest.name === "string") {
+      inventories.packageExportSurfaces.push(`${path}#name=${JSON.stringify(manifest.name)}`);
+    }
+    if (includeExports) inventories.packageExportSurfaces.push(...exportEntries(path, manifest));
+    for (const section of DEPENDENCY_SECTIONS) {
+      const dependencies = manifest[section] ?? {};
+      for (const [dependency, version] of Object.entries(dependencies).sort(([left], [right]) => compareText(left, right))) {
+        if (isHeavyDependency(dependency)) {
+          inventories.heavyWidgetDependencies.push(`${path}#${section}:${dependency}@${version}`);
+        }
+        if (isLegacyUiPackage(dependency)) {
+          inventories.legacyPackageUsage.push(`${path}#${section}:${dependency}@${version}`);
+        }
+        if (matchesPrefix(dependency, FORBIDDEN_REGISTRY_PREFIXES)) {
+          violations.push(formatViolation("official-shadcn-only", `${path} ${section} contains ${dependency}`));
+        }
+        if (
+          kind === "smithers" &&
+          path === "packages/components/package.json" &&
+          (isUiSpecifier(dependency) || matchesPrefix(dependency, VISUAL_DEPENDENCY_PREFIXES))
+        ) {
+          violations.push(formatViolation("components-non-visual", `${path} ${section} contains ${dependency}`));
+        }
+        if (
+          kind === "smithers" &&
+          path === "packages/gateway-react/package.json" &&
+          section !== "devDependencies" &&
+          isSmithersPackage(dependency) &&
+          dependency !== "@smithers-orchestrator/gateway-client"
+        ) {
+          violations.push(formatViolation("gateway-react-direction", `${path} ${section} contains ${dependency}`));
+        }
+        if (
+          kind === "smithers" &&
+          path.startsWith("packages/") &&
+          ![
+            "@smithers-orchestrator/gateway-ui",
+            "@smithers-orchestrator/ui",
+            "@smithers-orchestrator/ui-styleguide",
+          ].includes(manifest.name) &&
+          matchesPrefix(dependency, VISUAL_DEPENDENCY_PREFIXES)
+        ) {
+          violations.push(formatViolation("single-visual-package", `${path} ${section} contains ${dependency}`));
+        }
+      }
+    }
+    const exportKeys = manifest.exports && typeof manifest.exports === "object" ? Object.keys(manifest.exports) : [];
+    if (
+      kind === "smithers" &&
+      manifest.name !== "@smithers-orchestrator/gateway-react" &&
+      (/(^|[-/])hooks?$/.test(manifest.name ?? "") || exportKeys.some((key) => /(^|\/)(?:hooks?|use(?:[-_A-Z]|$))/.test(key)))
+    ) {
+      violations.push(formatViolation("single-public-hook-package", `${path} publishes a hook package or hook export`));
+    }
+    if (kind === "smithers" && manifest.name !== "@smithers-orchestrator/gateway-react") {
+      for (const entryPath of publicEntryPaths(absoluteRoot, path, manifest)) {
+        const entrySource = readFileSync(join(absoluteRoot, entryPath), "utf8");
+        if (hasPublicHookExport(entrySource)) {
+          violations.push(formatViolation("single-public-hook-package", `${path} root entry ${entryPath} exports a React-style hook`));
+        }
+        for (const specifier of parseModuleSpecifiers(entrySource)) {
+          if (isGatewayReact(specifier) && !entryPath.startsWith("packages/ui/src/smithers/connected/")) {
+            violations.push(formatViolation("gateway-react-location", `${entryPath} imports ${specifier}`));
+          }
+        }
+      }
+    }
+    if (kind === "smithers" && manifest.name === "@smithers-orchestrator/ui") {
+      const baseExport = JSON.stringify(manifest.exports?.["."] ?? "");
+      if (baseExport.includes("adapters") || baseExport.includes("smithers/connected")) {
+        violations.push(formatViolation("base-ui-export", `${path} base export exposes an adapter or connected layer`));
+      }
+      for (const [key, value] of Object.entries(manifest.exports ?? {})) {
+        const target = JSON.stringify(value);
+        if (key === "./*") violations.push(formatViolation("explicit-ui-subpaths", `${path} exposes a wildcard subpath`));
+        if (target.includes("adapters") && !key.startsWith("./adapters/")) {
+          violations.push(formatViolation("explicit-ui-subpaths", `${path} exposes adapters through ${key}`));
+        }
+      }
+    }
+    if (
+      kind === "smithers" &&
+      path.startsWith("packages/") &&
+      ![
+        "@smithers-orchestrator/components",
+        "@smithers-orchestrator/gateway-ui",
+        "@smithers-orchestrator/ui",
+        "@smithers-orchestrator/ui-styleguide",
+      ].includes(manifest.name)
+    ) {
+      const packageDirectory = posix.dirname(path);
+      const packageSources = sorted([
+        ...files.filter((file) => file.startsWith(`${packageDirectory}/src/`)),
+        ...publicEntryPaths(absoluteRoot, path, manifest),
+      ]);
+      for (const sourcePath of packageSources) {
+        const source = sources.get(sourcePath) ?? readFileSync(join(absoluteRoot, sourcePath), "utf8");
+        for (const specifier of parseModuleSpecifiers(source)) {
+          if (matchesPrefix(specifier, VISUAL_DEPENDENCY_PREFIXES)) {
+            violations.push(formatViolation("single-visual-package", `${sourcePath} imports ${specifier}`));
+          }
+        }
+        if ([".jsx", ".tsx"].includes(extname(sourcePath))) {
+          for (const specifier of jsxComponentSpecifiers(source)) {
+            if (!specifier.startsWith(".") && !isSmithersPackage(specifier) && basePackage(specifier) !== "react") {
+              violations.push(formatViolation("single-visual-package", `${sourcePath} renders a component imported from ${specifier}`));
+            }
+          }
+        }
+        for (const tag of intrinsicVisualTags(source, sourcePath)) {
+          violations.push(formatViolation("single-visual-package", `${sourcePath} renders intrinsic <${tag}>`));
+        }
+      }
+    }
+  }
+
+  if (kind === "smithers") violations.push(...shadcnViolations(absoluteRoot, files));
+  for (const key of INVENTORY_KEYS) inventories[key] = sorted(inventories[key]);
+  return {
+    version: 1,
+    repo: kind,
+    inventories,
+    violations: sorted(violations),
+  };
+}
+
+export function baselineFromState(state) {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    version: state.version,
+    repo: state.repo,
+    policy: {
+      mode: "exact-ratchet",
+      note: "Inventories and legacy allowlists are sorted snapshots. Remove stale entries; do not add entries for new violations.",
+    },
+    inventories: state.inventories,
+    allowedLegacyViolations: state.violations,
+  };
+}
+
+function arrayDifference(left, right) {
+  const rightSet = new Set(right);
+  return left.filter((value) => !rightSet.has(value));
+}
+
+export function checkUiArchitecture({ root, baselinePath, kind = "smithers" }) {
+  const absoluteRoot = resolve(root);
+  const absoluteBaseline = resolve(absoluteRoot, baselinePath);
+  const errors = [];
+  let baseline;
+  try {
+    baseline = readJson(absoluteBaseline);
+  } catch (error) {
+    return { ok: false, errors: [`Cannot read ${toPosix(relative(absoluteRoot, absoluteBaseline))}: ${error.message}`] };
+  }
+  const state = collectUiArchitectureState(absoluteRoot, kind);
+  if (baseline.version !== state.version || baseline.repo !== kind) {
+    errors.push(`Baseline must declare version ${state.version} and repo ${kind}`);
+  }
+  const allowed = Array.isArray(baseline.allowedLegacyViolations) ? baseline.allowedLegacyViolations : [];
+  const newViolations = arrayDifference(state.violations, allowed);
+  const staleViolations = arrayDifference(allowed, state.violations);
+  for (const violation of newViolations) errors.push(`New architecture violation: ${violation}`);
+  for (const violation of staleViolations) errors.push(`Stale legacy allowlist entry (remove it): ${violation}`);
+  if (JSON.stringify(allowed) !== JSON.stringify(sorted(allowed))) {
+    errors.push("allowedLegacyViolations must be sorted and unique");
+  }
+  for (const key of INVENTORY_KEYS) {
+    const expected = Array.isArray(baseline.inventories?.[key]) ? baseline.inventories[key] : [];
+    const actual = state.inventories[key];
+    for (const entry of arrayDifference(actual, expected)) errors.push(`Inventory ${key} gained: ${entry}`);
+    for (const entry of arrayDifference(expected, actual)) errors.push(`Inventory ${key} removed (ratchet the baseline): ${entry}`);
+    if (JSON.stringify(expected) !== JSON.stringify(sorted(expected))) {
+      errors.push(`Inventory ${key} must be sorted and unique`);
+    }
+  }
+  return { ok: errors.length === 0, errors, state };
+}
+
+function runCli() {
+  const root = process.cwd();
+  const kindIndex = process.argv.indexOf("--repo");
+  const kind = kindIndex >= 0 ? process.argv[kindIndex + 1] : "smithers";
+  const state = collectUiArchitectureState(root, kind);
+  if (process.argv.includes("--print-current")) {
+    process.stdout.write(`${JSON.stringify(baselineFromState(state), null, 2)}\n`);
+    return;
+  }
+  const baselineIndex = process.argv.indexOf("--baseline");
+  const baselinePath = baselineIndex >= 0 ? process.argv[baselineIndex + 1] : "scripts/ui-architecture-baseline.json";
+  const result = checkUiArchitecture({ root, baselinePath, kind });
+  if (!result.ok) {
+    process.stderr.write(`UI architecture guard failed:\n${result.errors.map((error) => `- ${error}`).join("\n")}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`UI architecture guard passed (${kind}; ${state.violations.length} allowlisted legacy violations).\n`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) runCli();

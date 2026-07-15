@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": 1,
+  "policy": {
+    "registry": "https://ui.shadcn.com",
+    "collections": [
+      "chat/shadcn",
+      "primitives/shadcn"
+    ],
+    "verification": "Each future source file in an approved collection must name its exact official ui.shadcn.com registry item URL. This records provenance; it is not a cryptographic upstream verification."
+  },
+  "entries": []
+}

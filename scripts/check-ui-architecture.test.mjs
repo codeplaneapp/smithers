@@ -1,0 +1,377 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+
+import {
+  baselineFromState,
+  checkUiArchitecture,
+  collectUiArchitectureState,
+  parseModuleSpecifiers,
+} from "./check-ui-architecture.mjs";
+
+function write(root, path, contents) {
+  mkdirSync(dirname(join(root, path)), { recursive: true });
+  writeFileSync(join(root, path), contents);
+}
+
+function json(root, path, value) {
+  write(root, path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "smithers-ui-architecture-"));
+  json(root, "package.json", { name: "smithers-orchestrator", exports: {} });
+  json(root, "packages/ui/package.json", {
+    name: "@smithers-orchestrator/ui",
+    exports: { ".": "./src/index.ts" },
+  });
+  write(root, "packages/ui/src/index.ts", "export const ui = true;\n");
+  json(root, "packages/ui/shadcn-provenance.json", {
+    version: 1,
+    policy: {
+      registry: "https://ui.shadcn.com",
+      collections: ["chat/shadcn", "primitives/shadcn"],
+    },
+    entries: [],
+  });
+  json(root, "packages/components/package.json", {
+    name: "@smithers-orchestrator/components",
+    exports: { ".": "./src/index.js" },
+  });
+  write(root, "packages/components/src/index.js", "export const workflowComponent = true;\n");
+  json(root, "packages/gateway-react/package.json", {
+    name: "@smithers-orchestrator/gateway-react",
+    exports: { ".": "./src/index.ts" },
+    dependencies: { "@smithers-orchestrator/gateway-client": "workspace:*" },
+  });
+  write(root, "packages/gateway-react/src/index.ts", "export const gatewayHook = true;\n");
+  json(root, "packages/gateway-ui/package.json", {
+    name: "@smithers-orchestrator/gateway-ui",
+    exports: { ".": "./src/index.ts" },
+    dependencies: { "@smithers-orchestrator/gateway-react": "workspace:*" },
+  });
+  write(
+    root,
+    "packages/gateway-ui/src/index.ts",
+    'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
+  );
+  return root;
+}
+
+function snapshot(root) {
+  const baseline = baselineFromState(collectUiArchitectureState(root, "smithers"));
+  json(root, "scripts/ui-architecture-baseline.json", baseline);
+  return baseline;
+}
+
+function check(root) {
+  return checkUiArchitecture({
+    root,
+    kind: "smithers",
+    baselinePath: "scripts/ui-architecture-baseline.json",
+  });
+}
+
+test("module parser reads module specifiers without counting comments or templates", () => {
+  const imports = parseModuleSpecifiers(`
+    // import fake from "./community-registry.js"
+    const prose = \`import fake from "./also-fake.js"\`;
+    import type { A } from "./alpha.js";
+    export { B } from "./beta.js";
+    const lazy = import("./gamma.js");
+    const old = require("./delta.js");
+  `);
+  assert.deepEqual(imports, ["./alpha.js", "./beta.js", "./delta.js", "./gamma.js"]);
+});
+
+test("an exact legacy allowlist passes", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const baseline = snapshot(root);
+  assert.ok(baseline.allowedLegacyViolations.some((entry) => entry.startsWith("gateway-react-location ::")));
+  assert.deepEqual(check(root), {
+    ok: true,
+    errors: [],
+    state: collectUiArchitectureState(root, "smithers"),
+  });
+});
+
+for (const [name, mutate, expected] of [
+  [
+    "visual imports in packages/components",
+    (root) => write(root, "packages/components/src/Visual.tsx", 'import { Button } from "radix-ui"; export { Button };\n'),
+    "components-non-visual",
+  ],
+  [
+    "intrinsic visual JSX in packages/components",
+    (root) => write(root, "packages/components/src/Visual.tsx", "export function Visual() { return <strong />; }\n"),
+    "components-non-visual",
+  ],
+  [
+    "lucide icons in packages/components",
+    (root) => write(root, "packages/components/src/Visual.tsx", 'import { CircleIcon } from "lucide-react"; export { CircleIcon };\n'),
+    "components-non-visual",
+  ],
+  [
+    "gateway hooks outside smithers/connected",
+    (root) => write(root, "packages/ui/src/chat/Chat.tsx", 'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Chat() { return <div />; }\n'),
+    "gateway-react-location",
+  ],
+  [
+    "gateway hooks in any other package",
+    (root) => {
+      json(root, "packages/consumer/package.json", { name: "@smithers-orchestrator/consumer", exports: { ".": "./src/index.ts" } });
+      write(root, "packages/consumer/src/index.ts", 'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n');
+    },
+    "gateway-react-location",
+  ],
+  [
+    "gateway hooks from a public package entry outside src",
+    (root) => {
+      json(root, "packages/consumer/package.json", {
+        name: "@smithers-orchestrator/consumer",
+        exports: { ".": "./index.ts" },
+      });
+      write(root, "packages/consumer/index.ts", 'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n');
+    },
+    "gateway-react-location",
+  ],
+  [
+    "heavy adapters from the base UI entry",
+    (root) => write(root, "packages/ui/src/index.ts", 'export * from "./adapters/monaco";\n'),
+    "base-ui-export",
+  ],
+  [
+    "transitively re-exported heavy adapters from the base UI entry",
+    (root) => {
+      write(root, "packages/ui/src/index.ts", 'export * from "./internal/editor";\n');
+      write(root, "packages/ui/src/internal/editor.ts", 'export * from "../adapters/monaco";\n');
+      write(root, "packages/ui/src/adapters/monaco.ts", 'export { default as Editor } from "@monaco-editor/react";\n');
+    },
+    "base-ui-export",
+  ],
+  [
+    "untyped disconnected props",
+    (root) => write(root, "packages/ui/src/ai/Answer.tsx", "export function Answer(props) { return <div>{props.text}</div>; }\n"),
+    "disconnected-typed-props",
+  ],
+  [
+    "untyped disconnected props on an unparenthesized arrow",
+    (root) => write(root, "packages/ui/src/ai/Loose.tsx", "export const Loose = props => <div>{props.text}</div>;\n"),
+    "disconnected-typed-props",
+  ],
+  [
+    "untyped disconnected props on a default anonymous arrow",
+    (root) => write(root, "packages/ui/src/ai/Loose.tsx", "export default props => <div>{props.text}</div>;\n"),
+    "disconnected-typed-props",
+  ],
+  [
+    "untyped disconnected props exported through an export list",
+    (root) => write(root, "packages/ui/src/ai/Answer.tsx", "function Answer(props) { return <div>{props.text}</div>; } export { Answer };\n"),
+    "disconnected-typed-props",
+  ],
+  [
+    "runtime smithers-to-adapters imports",
+    (root) => {
+      write(root, "packages/ui/src/adapters/types.ts", "export const adapterValue = true;\n");
+      write(root, "packages/ui/src/smithers/Card.tsx", 'import { adapterValue } from "../adapters/types"; export function Card() { return <div>{String(adapterValue)}</div>; }\n');
+    },
+    "adapter-types-only",
+  ],
+  [
+    "missing official shadcn provenance",
+    (root) => write(root, "packages/ui/src/primitives/shadcn/button.tsx", "export function Button() { return <button />; }\n"),
+    "shadcn-provenance",
+  ],
+  [
+    "community shadcn provenance",
+    (root) => {
+      const path = "packages/ui/src/primitives/shadcn/button.tsx";
+      write(root, path, "export function Button() { return <button />; }\n");
+      json(root, "packages/ui/shadcn-provenance.json", {
+        version: 1,
+        policy: {
+          registry: "https://ui.shadcn.com",
+          collections: ["chat/shadcn", "primitives/shadcn"],
+        },
+        entries: [{ path, component: "button", sourceUrl: "https://community.example/r/button.json" }],
+      });
+    },
+    "shadcn-provenance",
+  ],
+  [
+    "non-official component registries",
+    (root) => write(root, "packages/ui/src/chat/Community.tsx", 'import { Chat } from "@ai-elements/chat"; export { Chat };\n'),
+    "official-shadcn-only",
+  ],
+  [
+    "new files outside the target UI layers",
+    (root) => write(root, "packages/ui/src/loose.ts", "export const loose = true;\n"),
+    "ui-layer-placement",
+  ],
+  [
+    "growth in a compatibility facade",
+    (root) => write(root, "packages/gateway-ui/src/NewPanel.tsx", "export function NewPanel() { return <div />; }\n"),
+    "compatibility-facade-file",
+  ],
+  [
+    "a second public React hook package",
+    (root) => {
+      json(root, "packages/data-react/package.json", {
+        name: "@smithers-orchestrator/data-react",
+        main: "index.js",
+        dependencies: { react: "^19.0.0" },
+      });
+      write(root, "packages/data-react/index.js", "export function useData() { return null; }\n");
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "a public hook subpath outside src",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        exports: { "./use-data": "./use-data.ts" },
+      });
+      write(root, "packages/data/use-data.ts", "export function useData() { return null; }\n");
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "a CommonJS public hook entry",
+    (root) => {
+      json(root, "packages/data/package.json", {
+        name: "@smithers-orchestrator/data",
+        main: "index.cjs",
+      });
+      write(root, "packages/data/index.cjs", "module.exports.useData = function useData() { return null; };\n");
+    },
+    "single-public-hook-package",
+  ],
+  [
+    "a second visual package",
+    (root) => {
+      json(root, "packages/dashboard/package.json", {
+        name: "@smithers-orchestrator/dashboard",
+        main: "index.tsx",
+      });
+      write(root, "packages/dashboard/index.tsx", "export function Dashboard() { return <section />; }\n");
+    },
+    "single-visual-package",
+  ],
+  [
+    "an unlisted component library in a new visual package",
+    (root) => {
+      json(root, "packages/dashboard/package.json", {
+        name: "@smithers-orchestrator/dashboard",
+        exports: { ".": "./index.tsx" },
+        dependencies: { "@fluentui/react-components": "1.0.0" },
+      });
+      write(root, "packages/dashboard/index.tsx", 'import { Button } from "@fluentui/react-components"; export function Dashboard() { return <Button />; }\n');
+    },
+    "single-visual-package",
+  ],
+  [
+    "an undeclared new package cannot hide an unlisted component dependency",
+    (root) => {
+      json(root, "packages/dashboard/package.json", {
+        name: "@smithers-orchestrator/dashboard",
+        dependencies: { "@fluentui/react-components": "1.0.0" },
+      });
+    },
+    "Inventory packageExportSurfaces gained",
+  ],
+  [
+    "a second package importing visual icons",
+    (root) => {
+      json(root, "packages/dashboard/package.json", {
+        name: "@smithers-orchestrator/dashboard",
+        main: "index.tsx",
+      });
+      write(root, "packages/dashboard/index.tsx", 'export { CircleIcon } from "lucide-react";\n');
+    },
+    "single-visual-package",
+  ],
+  [
+    "gateway-react imports through the umbrella package",
+    (root) => write(root, "packages/gateway-react/src/umbrella.ts", 'export { gatewayKeys } from "smithers-orchestrator";\n'),
+    "gateway-react-direction",
+  ],
+  [
+    "gateway-react depends on the umbrella package",
+    (root) => {
+      const manifest = JSON.parse(readFileSync(join(root, "packages/gateway-react/package.json"), "utf8"));
+      manifest.dependencies["smithers-orchestrator"] = "workspace:*";
+      json(root, "packages/gateway-react/package.json", manifest);
+    },
+    "gateway-react-direction",
+  ],
+  [
+    "a heavy widget outside adapters",
+    (root) => write(root, "packages/ui/src/ai/Editor.tsx", 'import Editor from "@monaco-editor/react"; export function EditorView() { return <Editor />; }\n'),
+    "heavy-widget-location",
+  ],
+]) {
+  test(`representative violation fails: ${name}`, (context) => {
+    const root = fixture();
+    context.after(() => rmSync(root, { recursive: true, force: true }));
+    snapshot(root);
+    mutate(root);
+    const result = check(root);
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), new RegExp(expected));
+  });
+}
+
+test("valid official shadcn provenance passes", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = "packages/ui/src/primitives/shadcn/button.tsx";
+  write(root, path, "export function Button() { return <button />; }\n");
+  json(root, "packages/ui/shadcn-provenance.json", {
+    version: 1,
+    policy: {
+      registry: "https://ui.shadcn.com",
+      collections: ["chat/shadcn", "primitives/shadcn"],
+    },
+    entries: [
+      {
+        path,
+        component: "button",
+        sourceUrl: "https://ui.shadcn.com/r/styles/new-york-v4/button.json",
+      },
+    ],
+  });
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
+test("type-only smithers-to-adapter imports pass", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  snapshot(root);
+  write(root, "packages/ui/src/adapters/types.ts", "export interface AdapterState { ready: boolean }\n");
+  write(root, "packages/ui/src/smithers/Card.tsx", 'import type { AdapterState } from "../adapters/types"; export function Card(props: AdapterState) { return <div>{String(props.ready)}</div>; }\n');
+  assert.equal(check(root).ok, true);
+});
+
+test("typed disconnected props and connected gateway imports pass", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "packages/ui/src/ai/Typed.tsx", "interface TypedProps { text: string } export const Typed: React.FC<TypedProps> = props => <div>{props.text}</div>;\n");
+  write(root, "packages/ui/src/smithers/connected/Live.tsx", 'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Live(props: { runId: string }) { return <div>{String(useGatewayRun(props.runId))}</div>; }\n');
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
+test("a disappeared violation must be removed from the allowlist", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  snapshot(root);
+  write(root, "packages/gateway-ui/src/index.ts", "export const facade = true;\n");
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /Stale legacy allowlist entry/);
+});
