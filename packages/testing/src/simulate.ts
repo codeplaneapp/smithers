@@ -207,6 +207,14 @@ function updateUnusedMocks(
   handle.unusedMocks = Object.keys(mocks).filter((key) => !consumedMocks.has(key));
 }
 
+function normalizeFunctionMockResult(task: TaskDescriptor, result: unknown): unknown {
+  if (!task.outputSchema || !isObject(result) || !("output" in result)) {
+    return result;
+  }
+  const parsedOutput = task.outputSchema.safeParse(result.output);
+  return parsedOutput.success ? parsedOutput.data : result;
+}
+
 async function materializeMock(
   mock: unknown,
   task: TaskDescriptor,
@@ -240,10 +248,7 @@ async function materializeMock(
       rootDir: context.options.rootDir ?? rootDir,
       outputSchema: task.outputSchema,
     });
-    if (isObject(result) && "output" in result) {
-      return result.output;
-    }
-    return result;
+    return normalizeFunctionMockResult(task, result);
   }
   return mock;
 }

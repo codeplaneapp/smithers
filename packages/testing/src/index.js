@@ -1527,6 +1527,13 @@ function resolveMock(mocks, task, agentTask) {
 function updateUnusedMocks(handle, mocks, consumedMocks) {
   handle.unusedMocks = Object.keys(mocks).filter((key) => !consumedMocks.has(key));
 }
+function normalizeFunctionMockResult(task, result) {
+  if (!task.outputSchema || !isObject(result) || !("output" in result)) {
+    return result;
+  }
+  const parsedOutput = task.outputSchema.safeParse(result.output);
+  return parsedOutput.success ? parsedOutput.data : result;
+}
 async function materializeMock(mock, task, context, rootDir, runId) {
   if (isAuto(mock)) {
     return schemaExample2(task);
@@ -1554,10 +1561,7 @@ async function materializeMock(mock, task, context, rootDir, runId) {
       rootDir: context.options.rootDir ?? rootDir,
       outputSchema: task.outputSchema
     });
-    if (isObject(result) && "output" in result) {
-      return result.output;
-    }
-    return result;
+    return normalizeFunctionMockResult(task, result);
   }
   return mock;
 }
