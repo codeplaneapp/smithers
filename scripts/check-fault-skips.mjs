@@ -25,7 +25,12 @@ const allowedSkips = new Map([
   ["e2e/faults/case30-soak-jjhub-long-lived.test.ts", 1],
 ]);
 
-const skipPattern = /\b(?:test|describe)\.skip(?:If)?\s*\(/g;
+const skipPattern = /\b(?:test|describe|it)\.(skip(?:If)?|only|todo|failing)\s*\(/g;
+const allowedForbiddenModifiers = new Map([
+  ["only", 0],
+  ["todo", 0],
+  ["failing", 0],
+]);
 
 function faultFiles() {
   return readdirSync(faultsDir)
@@ -35,14 +40,28 @@ function faultFiles() {
 }
 
 const observed = new Map();
+let failed = false;
 
 for (const file of faultFiles()) {
   const text = readFileSync(file, "utf8");
-  const count = [...text.matchAll(skipPattern)].length;
-  if (count > 0) observed.set(relative(root, file), count);
-}
+  const modifierCounts = new Map();
+  for (const [, modifier] of text.matchAll(skipPattern)) {
+    modifierCounts.set(modifier, (modifierCounts.get(modifier) ?? 0) + 1);
+  }
 
-let failed = false;
+  const count = (modifierCounts.get("skip") ?? 0) + (modifierCounts.get("skipIf") ?? 0);
+  if (count > 0) observed.set(relative(root, file), count);
+
+  for (const [modifier, allowed] of allowedForbiddenModifiers) {
+    const actual = modifierCounts.get(modifier) ?? 0;
+    if (actual !== allowed) {
+      console.error(
+        `[fault-skip-audit] unexpected .${modifier} fault test modifier in ${relative(root, file)}: expected ${allowed}, found ${actual}`,
+      );
+      failed = true;
+    }
+  }
+}
 
 for (const [file, count] of observed) {
   const allowed = allowedSkips.get(file);
