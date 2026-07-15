@@ -1,6 +1,6 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import * as nodeChildProcess from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { Effect } from "effect";
@@ -8,47 +8,9 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { launchCronWorkflow, schedulerTickEffect } from "../src/scheduler.js";
 
-const { spawnSync } = nodeChildProcess;
-// Snapshot the REAL child_process module up front. Bun's mock.restore() does NOT
-// undo a mock.module(), so afterAll must re-install this snapshot — otherwise the
-// fake spawn leaks to every test file that runs after this one (ui-command,
-// --watch) and crashes their `child.once(...)` / `child.stdout.setEncoding(...)`.
-const REAL_CHILD_PROCESS = { ...nodeChildProcess };
-const spawnCalls = [];
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
-
-let schedulerModule;
-
-// NOTE: mock the child_process module inside beforeAll (not at module top level).
-// A top-level mock.module is applied by Bun at collection time and leaks GLOBALLY
-// to every other test file — its bare `{ unref() }` child has no `.once`/`.stdout`,
-// which crashed every spawn-based test in the suite (devtools, --watch). Scoping it
-// to this file's run window (beforeAll → afterAll restore) keeps the mock local.
-beforeAll(async () => {
-    mock.module("node:child_process", () => ({
-        spawn(command, args, options) {
-            spawnCalls.push({ command, args, options });
-            return { unref() {} };
-        },
-        spawnSync,
-    }));
-    schedulerModule = await import("../src/scheduler.js");
-});
-
-afterAll(() => {
-    // Re-install the real module first — mock.restore() does not undo mock.module().
-    mock.module("node:child_process", () => REAL_CHILD_PROCESS);
-    mock.restore();
-});
-
-beforeEach(() => {
-    spawnCalls.length = 0;
-});
-
-afterEach(() => {
-    mock.restore();
-});
 
 /**
  * @param {string} dbPath
@@ -150,9 +112,37 @@ describe("smithers cron commands", () => {
 });
 
 describe("scheduler tick effects", () => {
+    test("launches a due cron workflow through the injected process boundary", () => {
+        const launches = [];
+        let unrefCalls = 0;
+
+        launchCronWorkflow({
+            cronId: "due-cron",
+            pattern: "*/5 * * * *",
+            workflowPath: "due.tsx",
+        }, (command, args, options) => {
+            launches.push({ command, args, options });
+            return { unref: () => { unrefCalls += 1; } };
+        });
+
+        expect(launches).toEqual([
+            {
+                command: process.execPath,
+                args: [CLI_ENTRY, "up", "due.tsx", "-d"],
+                options: {
+                    cwd: process.cwd(),
+                    detached: true,
+                    stdio: "ignore",
+                },
+            },
+        ]);
+        expect(unrefCalls).toBe(1);
+    });
+
     test("processes due cron jobs and skips future jobs", async () => {
         const now = Date.parse("2026-06-17T12:00:00.000Z");
         const updates = [];
+        const launches = [];
         const adapter = {
             listCronsEffect(enabledOnly) {
                 expect(enabledOnly).toBe(true);
@@ -178,25 +168,13 @@ describe("scheduler tick effects", () => {
                 return Effect.void;
             },
         };
-        const originalNow = Date.now;
-        Date.now = () => now;
-        try {
-            await Effect.runPromise(schedulerModule.schedulerTickEffect(adapter));
-        }
-        finally {
-            Date.now = originalNow;
-        }
+        await Effect.runPromise(schedulerTickEffect(adapter, {
+            now: () => now,
+            launchCronWorkflow: (job) => launches.push(job),
+        }));
 
-        expect(spawnCalls).toEqual([
-            {
-                command: process.execPath,
-                args: [CLI_ENTRY, "up", "due.tsx", "-d"],
-                options: {
-                    cwd: process.cwd(),
-                    detached: true,
-                    stdio: "ignore",
-                },
-            },
+        expect(launches).toEqual([
+            expect.objectContaining({ cronId: "due-cron", workflowPath: "due.tsx" }),
         ]);
         expect(updates).toHaveLength(1);
         expect(updates[0].cronId).toBe("due-cron");
@@ -208,6 +186,7 @@ describe("scheduler tick effects", () => {
     test("records cron processing errors without failing the tick", async () => {
         const now = Date.parse("2026-06-17T12:00:00.000Z");
         const updates = [];
+        const launches = [];
         const adapter = {
             listCronsEffect() {
                 return Effect.succeed([
@@ -225,16 +204,12 @@ describe("scheduler tick effects", () => {
                 return Effect.void;
             },
         };
-        const originalNow = Date.now;
-        Date.now = () => now;
-        try {
-            await Effect.runPromise(schedulerModule.schedulerTickEffect(adapter));
-        }
-        finally {
-            Date.now = originalNow;
-        }
+        await Effect.runPromise(schedulerTickEffect(adapter, {
+            now: () => now,
+            launchCronWorkflow: (job) => launches.push(job),
+        }));
 
-        expect(spawnCalls).toHaveLength(1);
+        expect(launches).toHaveLength(1);
         expect(updates).toEqual([
             {
                 cronId: "bad-cron",
@@ -246,6 +221,7 @@ describe("scheduler tick effects", () => {
     });
 
     test("continues when listing crons fails", async () => {
+        const launches = [];
         const adapter = {
             listCronsEffect() {
                 return Effect.fail(new Error("db unavailable"));
@@ -255,8 +231,10 @@ describe("scheduler tick effects", () => {
             },
         };
 
-        await Effect.runPromise(schedulerModule.schedulerTickEffect(adapter));
+        await Effect.runPromise(schedulerTickEffect(adapter, {
+            launchCronWorkflow: (job) => launches.push(job),
+        }));
 
-        expect(spawnCalls).toEqual([]);
+        expect(launches).toEqual([]);
     });
 });
