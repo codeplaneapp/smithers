@@ -146,6 +146,15 @@ function recordOrEmpty(value) {
         : {};
 }
 /**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function hasObjectChild(value) {
+    if (Array.isArray(value))
+        return value.some(hasObjectChild);
+    return value !== null && typeof value === "object";
+}
+/**
  * @param {HostNode} node
  * @returns {XmlNode}
  */
@@ -946,11 +955,11 @@ export function extractFromHost(root, opts) {
                 : undefined;
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
-            const prompt = isAgent ? String(raw.children ?? "") : undefined;
-            if (isAgent && prompt?.includes("[object Object]")) {
+            if (isAgent && hasObjectChild(raw.children)) {
                 throw new SmithersError("MDX_PRELOAD_INACTIVE", `Task "${raw.id ?? nodeId}" prompt resolved to [object Object] — MDX preload is likely not active.\n` +
                     `Check that bunfig.toml has a top-level preload (not under [run]) and mdxPlugin() is registered.`);
             }
+            const prompt = isAgent ? String(raw.children ?? "") : undefined;
             const isCompute = (kind === "compute" || kind === "human") && typeof raw.__smithersComputeFn === "function";
             const taskKind = kind === "human" && isCompute ? "human" : isAgent ? "agent" : isCompute ? "compute" : "static";
             const computeFn = isCompute ? /** @type {() => unknown} */ (raw.__smithersComputeFn) : undefined;

@@ -51,6 +51,15 @@ function isDrizzleTable(value) {
     }
 }
 /**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function hasObjectChild(value) {
+    if (Array.isArray(value))
+        return value.some(hasObjectChild);
+    return value !== null && typeof value === "object";
+}
+/**
  * Preserve whether `bind` was authored even when its value is undefined. An
  * undefined proof is a real scheduling dependency, distinct from omitting the
  * prop entirely.
@@ -765,10 +774,10 @@ export function extractGraph(root, opts) {
             const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
-            const prompt = isAgent ? String(raw.children ?? "") : undefined;
-            if (isAgent && prompt?.includes("[object Object]")) {
+            if (isAgent && hasObjectChild(raw.children)) {
                 throw new SmithersError("MDX_PRELOAD_INACTIVE", `Task "${logicalNodeId}" prompt resolved to [object Object].`);
             }
+            const prompt = isAgent ? String(raw.children ?? "") : undefined;
             addDescriptor(nodeId, "Task", {
                 ...common,
                 ...output,

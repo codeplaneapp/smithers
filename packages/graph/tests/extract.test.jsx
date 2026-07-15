@@ -249,7 +249,14 @@ describe("extractGraph", () => {
 				agent: { generate: async () => ({}) },
 				children: { bad: true },
 			});
-			expect(() => extractGraph(root)).toThrow("[object Object]");
+			let error;
+			try {
+				extractGraph(root);
+			}
+			catch (caught) {
+				error = caught;
+			}
+			expect(error?.code).toBe("MDX_PRELOAD_INACTIVE");
 		});
 
 		test("throws when an array prompt contains an object", () => {
@@ -259,17 +266,41 @@ describe("extractGraph", () => {
 				agent: { generate: async () => ({}) },
 				children: ["intro text", { bad: true }],
 			});
-			expect(() => extractGraph(root)).toThrow("[object Object]");
+			let error;
+			try {
+				extractGraph(root);
+			}
+			catch (caught) {
+				error = caught;
+			}
+			expect(error?.code).toBe("MDX_PRELOAD_INACTIVE");
 		});
 
-		test("throws when a prompt contains the object marker", () => {
+		test("preserves ordinary prompt text containing the object marker", () => {
 			const root = hostEl("smithers:task", {
 				id: "marker-text",
 				output: "out",
 				agent: { generate: async () => ({}) },
 				children: "Diagnose the [object Object] output",
 			});
-			expect(() => extractGraph(root)).toThrow("[object Object]");
+			expect(extractGraph(root).tasks[0].prompt).toBe("Diagnose the [object Object] output");
+		});
+
+		test("rejects custom-stringifying object children structurally", () => {
+			const root = hostEl("smithers:task", {
+				id: "custom-object",
+				output: "out",
+				agent: { generate: async () => ({}) },
+				children: { toString: () => "harmless text" },
+			});
+			let error;
+			try {
+				extractGraph(root);
+			}
+			catch (caught) {
+				error = caught;
+			}
+			expect(error?.code).toBe("MDX_PRELOAD_INACTIVE");
 		});
 	});
 

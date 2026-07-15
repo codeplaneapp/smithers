@@ -751,7 +751,14 @@ describe("extractFromHost", () => {
             agent: { generate: async () => ({}) },
             children: { bad: true },
         });
-        expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
+        let error;
+        try {
+            extractFromHost(root);
+        }
+        catch (caught) {
+            error = caught;
+        }
+        expect(error?.code).toBe("MDX_PRELOAD_INACTIVE");
     });
     test("throws when an array prompt contains an object", () => {
         const root = hostEl("smithers:task", {
@@ -760,34 +767,39 @@ describe("extractFromHost", () => {
             agent: { generate: async () => ({}) },
             children: ["intro text", { bad: true }],
         });
-        expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
+        let error;
+        try {
+            extractFromHost(root);
+        }
+        catch (caught) {
+            error = caught;
+        }
+        expect(error?.code).toBe("MDX_PRELOAD_INACTIVE");
     });
-    test("throws when a prompt contains the object marker", () => {
+    test("preserves ordinary prompt text containing the object marker", () => {
         const root = hostEl("smithers:task", {
             id: "marker-text",
             output: "out",
             agent: { generate: async () => ({}) },
             children: "Diagnose the [object Object] output",
         });
-        expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
+        expect(extractFromHost(root).tasks[0].prompt).toBe("Diagnose the [object Object] output");
     });
-    test("throws when an array prompt contains an object", () => {
+    test("rejects custom-stringifying object children structurally", () => {
         const root = hostEl("smithers:task", {
-            id: "mdx-array",
+            id: "custom-object",
             output: "out",
             agent: { generate: async () => ({}) },
-            children: ["intro text", { bad: true }],
+            children: { toString: () => "harmless text" },
         });
-        expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
-    });
-    test("throws when a prompt contains the object marker", () => {
-        const root = hostEl("smithers:task", {
-            id: "marker-text",
-            output: "out",
-            agent: { generate: async () => ({}) },
-            children: "Diagnose the [object Object] output",
-        });
-        expect(() => extractFromHost(root)).toThrow("MDX preload is likely not active");
+        let error;
+        try {
+            extractFromHost(root);
+        }
+        catch (caught) {
+            error = caught;
+        }
+        expect(error?.code).toBe("MDX_PRELOAD_INACTIVE");
     });
     test("scopes task ids by ancestor Ralph loops", () => {
         const root = hostEl("smithers:ralph", { id: "outer" }, [
