@@ -9,6 +9,6 @@
   },
   "longLivedRuns500": {
     "rssGrowthBytesMax": 134217728,
-    "comment": "case 30: 128 MB max RSS growth over baseline for 500 sequential run records (observed ~34 MB on CI, ~51 MB locally)."
+    "comment": "case 30: 128 MB max RSS growth over baseline for 500 sequential real workflow runs in one workspace runtime."
   }
 }

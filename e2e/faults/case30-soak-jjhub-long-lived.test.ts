@@ -1,25 +1,29 @@
-import { describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import React from "react";
 import { Effect } from "effect";
+import { z } from "zod";
+import {
+  Task,
+  Workflow,
+  createSmithers,
+  runWorkflow,
+} from "smithers-orchestrator";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { loadBudget } from "../budgets/loadBudget.ts";
 
 const SOAK_ENABLED = process.env.SMITHERS_E2E_SOAK === "1";
-
-// Simulate a long-lived workspace session: 500 sequential run records against
-// the same open DB connection. Once jjhub/0002 lands, this baseline can be
-// promoted to drive a real @jjhub/smithers-runtime-workspace instead.
-const RUN_COUNT = 500;
-const SAMPLE_INTERVAL_MS = 5_000;
-
-function buildDb(): { adapter: SmithersDb; sqlite: Database } {
-  const sqlite = new Database(":memory:");
-  const db = drizzle(sqlite);
-  ensureSmithersTables(db);
-  return { adapter: new SmithersDb(db), sqlite };
-}
+const RUN_COUNT = Number(process.env.SMITHERS_E2E_SOAK_RUNS ?? 500);
+const SAMPLE_INTERVAL_MS = 1_000;
 
 function tryGc(): void {
   const bunGc = (globalThis as { Bun?: { gc?: (force: boolean) => void } }).Bun
@@ -27,78 +31,116 @@ function tryGc(): void {
   if (typeof bunGc === "function") bunGc(true);
 }
 
-describe("case 30: Long-lived JJHub workspace, repeated runs; stable behavior", () => {
+describe("case 30: Long-lived workspace runtime, repeated runs; stable behavior", () => {
+  const tempRoots: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      tempRoots
+        .splice(0)
+        .map((root) => rm(root, { recursive: true, force: true })),
+    );
+  });
+
   test.skipIf(!SOAK_ENABLED)(
-    "500 sequential run records written and read back with correct status; peak RSS within budget",
+    "repeated real workflow runs preserve workspace files and run history within the RSS budget",
     async () => {
+      if (!Number.isSafeInteger(RUN_COUNT) || RUN_COUNT < 1) {
+        throw new Error("SMITHERS_E2E_SOAK_RUNS must be a positive integer");
+      }
+
       const budget = (await loadBudget("memory")) as {
         longLivedRuns500: { rssGrowthBytesMax: number };
       };
-      // Growth over this test's own baseline, not absolute RSS: the faults
-      // suite shares one bun process, so absolute RSS reflects whatever ran
-      // before this file, not this path's leakage.
       const rssGrowthBudget = budget.longLivedRuns500.rssGrowthBytesMax;
+      const root = await mkdtemp(join(tmpdir(), "smithers-case30-workspace-"));
+      tempRoots.push(root);
+      const artifactsDir = join(root, "artifacts");
+      await mkdir(artifactsDir);
 
-      const { adapter, sqlite } = buildDb();
+      const api = createSmithers(
+        {
+          input: z.object({ index: z.number().int().nonnegative() }),
+          artifact: z.object({ index: z.number().int(), contents: z.string() }),
+        },
+        { dbPath: join(root, "smithers.db") },
+      );
+      const adapter = new SmithersDb(api.db);
+      const workspaceAgent = {
+        id: "case30-workspace-writer",
+        tools: {},
+        generate: async ({ prompt }: { prompt?: string }) => {
+          const match = prompt?.match(/artifact-(\d+)\.txt/);
+          if (!match)
+            throw new Error(`Missing artifact index in prompt: ${prompt}`);
+          const index = Number(match[1]);
+          const contents = `case30-run-${index}\n`;
+          await writeFile(
+            join(artifactsDir, `artifact-${index}.txt`),
+            contents,
+          );
+          return { output: { index, contents } };
+        },
+      };
+      const workflow = api.smithers((ctx) =>
+        React.createElement(
+          Workflow,
+          { name: "case30-long-lived-workspace" },
+          React.createElement(
+            Task,
+            {
+              id: "write-artifact",
+              agent: workspaceAgent,
+              output: api.outputs.artifact,
+            },
+            `Write artifact-${ctx.input.index}.txt`,
+          ),
+        ),
+      );
 
       tryGc();
       const baselineRss = process.memoryUsage().rss;
       let peakRss = baselineRss;
-
       const sampleHandle = setInterval(() => {
-        const current = process.memoryUsage().rss;
-        if (current > peakRss) peakRss = current;
+        peakRss = Math.max(peakRss, process.memoryUsage().rss);
       }, SAMPLE_INTERVAL_MS);
 
       try {
-        const baseMs = Date.now();
-
-        // Phase 1: create RUN_COUNT run records (simulating workspace runs).
-        for (let i = 0; i < RUN_COUNT; i++) {
-          await Effect.runPromise(
-            adapter.insertRun({
-              runId: `case30-run-${i}`,
-              workflowName: "case30-workspace-run",
-              status: "running",
-              createdAtMs: baseMs + i,
+        for (let index = 0; index < RUN_COUNT; index++) {
+          const runId = `case30-run-${index}`;
+          const result = await Effect.runPromise(
+            runWorkflow(workflow, {
+              runId,
+              input: { index },
+              rootDir: root,
             }),
           );
-        }
+          expect(result.status).toBe("finished");
 
-        // Phase 2: mark each run finished (simulating completion).
-        for (let i = 0; i < RUN_COUNT; i++) {
-          await Effect.runPromise(
-            adapter.updateRun(`case30-run-${i}`, {
-              status: "finished",
-              finishedAtMs: baseMs + i + 1,
-            }),
-          );
-        }
-
-        // Phase 3: read back every run and assert data integrity.
-        for (let i = 0; i < RUN_COUNT; i++) {
-          const run = (await Effect.runPromise(
-            adapter.getRun(`case30-run-${i}`),
-          )) as Record<string, unknown> | undefined;
-          expect(run?.runId).toBe(`case30-run-${i}`);
+          const run = await Effect.runPromise(adapter.getRun(runId));
+          expect(run?.runId).toBe(runId);
           expect(run?.status).toBe("finished");
+          expect(
+            await readFile(join(artifactsDir, `artifact-${index}.txt`), "utf8"),
+          ).toBe(`${runId}\n`);
         }
+
+        const artifacts = await readdir(artifactsDir);
+        expect(artifacts).toHaveLength(RUN_COUNT);
+        expect(new Set(artifacts).size).toBe(RUN_COUNT);
 
         tryGc();
-        const finalRss = process.memoryUsage().rss;
-        if (finalRss > peakRss) peakRss = finalRss;
-
+        peakRss = Math.max(peakRss, process.memoryUsage().rss);
         const rssGrowth = peakRss - baselineRss;
         console.log(
-          `[case30] runs=${RUN_COUNT} baselineRss=${baselineRss} peakRss=${peakRss} growth=${rssGrowth} growthBudget=${rssGrowthBudget}`,
+          `[case30] realRuns=${RUN_COUNT} files=${artifacts.length} baselineRss=${baselineRss} peakRss=${peakRss} growth=${rssGrowth} growthBudget=${rssGrowthBudget}`,
         );
-
         expect(rssGrowth).toBeLessThan(rssGrowthBudget);
       } finally {
         clearInterval(sampleHandle);
-        sqlite.close();
+        api.db.$client?.close?.();
       }
     },
-    120_000,
+    RUN_COUNT >= 500 ? 7_200_000 : 120_000,
   );
 });
