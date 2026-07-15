@@ -39,7 +39,7 @@ All tools are sandboxed to `rootDir` (defaults to the workflow directory). Paths
 
 ## Tool call state
 
-Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows. The current engine reads that table on retry to build warnings for previously recorded non-idempotent side-effect tool calls. The `defineTool()` wrapper itself does not insert a durable row for every call; it attaches metadata, provides `ctx.idempotencyKey`, and runs the side-effect snapshot hook when a task supplies one.
+Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows. The engine durably records the start of every `defineTool()` invocation before executing it, then reads those rows on retry to detect previously invoked non-idempotent side-effect tools. This start-first record is intentional: a process crash after the external side effect cannot erase the evidence needed for replay protection.
 
 | Field | Description |
 |---|---|
@@ -50,11 +50,11 @@ Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to
 | `seq` | Sequential call counter within the task |
 | `toolName` | `read`, `write`, `edit`, `grep`, or `bash` |
 | `inputJson` | Serialized input arguments |
-| `outputJson` | Serialized output (truncated if over limit) |
+| `outputJson` | Reserved for a serialized output; start records leave it `null` |
 | `startedAtMs` | Start timestamp |
-| `finishedAtMs` | End timestamp |
-| `status` | `"success"` or `"error"` |
-| `errorJson` | Error details (if `"error"`) |
+| `finishedAtMs` | Reserved end timestamp; start records leave it `null` |
+| `status` | `"started"` for the durable pre-execution record |
+| `errorJson` | Reserved error details; start records leave it `null` |
 
 ## defineTool
 
@@ -84,7 +84,7 @@ const placeOrder = defineTool({
 - `ctx.idempotencyKey` is stable across retries and resumes for the same task iteration.
 - `sideEffect: true` opts the tool into Smithers side-effect tracking.
 - `idempotent: false` marks the tool for retry warnings when a previous attempt has a recorded `_smithers_tool_calls` row.
-- `defineTool()` does not persist `_smithers_tool_calls` rows directly; durable rows come from runtime paths that call the Smithers DB adapter.
+- The engine persists the durable start row through the Smithers DB adapter before `execute` runs.
 
 ### Side Effects and Idempotency
 

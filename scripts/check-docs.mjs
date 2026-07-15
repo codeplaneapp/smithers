@@ -2983,26 +2983,25 @@ function checkToolDocsMatchCurrentRuntimeLogging() {
   const engine = readFileSync(ENGINE_SOURCE, "utf8");
   const required = [
     "Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows.",
-    "The current engine reads that table on retry to build warnings for previously recorded non-idempotent side-effect tool calls.",
-    "The `defineTool()` wrapper itself does not insert a durable row for every call",
+    "The engine durably records the start of every `defineTool()` invocation before executing it",
+    "reads those rows on retry to detect previously invoked non-idempotent side-effect tools",
     "`defineTool()` wraps custom [AI SDK](https://ai-sdk.dev) tools with Smithers runtime context, deterministic idempotency keys, side-effect metadata, and the side-effect snapshot hook.",
     "`idempotent: false` marks the tool for retry warnings when a previous attempt has a recorded `_smithers_tool_calls` row.",
-    "`defineTool()` does not persist `_smithers_tool_calls` rows directly",
+    "The engine persists the durable start row through the Smithers DB adapter before `execute` runs.",
   ];
   const forbidden = [
-    "Every invocation is logged to `_smithers_tool_calls`:",
-    "Every `defineTool()` call is logged to `_smithers_tool_calls`.",
-    "durable tool-call logging",
+    "The `defineTool()` wrapper itself does not insert a durable row for every call",
+    "`defineTool()` does not persist `_smithers_tool_calls` rows directly",
   ];
   const missing = required.filter((needle) => !docs.includes(needle));
   const stale = forbidden.filter((needle) => docs.includes(needle));
   const engineReadsToolCalls = engine.includes(".listToolCalls(");
   const engineInsertsToolCalls = engine.includes(".insertToolCall(");
-  if (missing.length || stale.length || !engineReadsToolCalls || engineInsertsToolCalls) {
+  if (missing.length || stale.length || !engineReadsToolCalls || !engineInsertsToolCalls) {
     failed = true;
     console.error("\n✗ docs/integrations/tools.mdx must match current _smithers_tool_calls runtime behavior:");
     if (!engineReadsToolCalls) console.error("    engine no longer reads tool-call rows for retry warnings");
-    if (engineInsertsToolCalls) console.error("    engine now inserts tool-call rows; update docs to document full logging");
+    if (!engineInsertsToolCalls) console.error("    engine no longer inserts tool-call rows");
     if (missing.length) console.error(`    missing: ${missing.join(", ")}`);
     if (stale.length) console.error(`    stale: ${stale.join(", ")}`);
   } else {
