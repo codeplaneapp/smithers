@@ -2,6 +2,7 @@ import { getTableName } from "drizzle-orm";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { validateForkSources } from "./validateForkSources.js";
 import { resolveStableId } from "./utils/tree-ids.js";
+import { coerceFiniteNumber } from "./utils/numeric-props.js";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */
@@ -107,12 +108,11 @@ function resolveOutput(raw) {
  * @returns {number | null}
  */
 function parseHeartbeatTimeoutMs(raw) {
-    const candidate = typeof raw.heartbeatTimeoutMs === "number"
+    const selected = raw.heartbeatTimeoutMs !== undefined
         ? raw.heartbeatTimeoutMs
-        : typeof raw.heartbeatTimeout === "number"
-            ? raw.heartbeatTimeout
-            : null;
-    if (candidate == null || !Number.isFinite(candidate) || candidate <= 0) {
+        : raw.heartbeatTimeout;
+    const candidate = coerceFiniteNumber(selected);
+    if (candidate == null || candidate <= 0) {
         return null;
     }
     return Math.floor(candidate);
@@ -125,7 +125,8 @@ function parseHeartbeatTimeoutMs(raw) {
 function resolveRetryConfig(raw, isAgent = false) {
     const noRetry = Boolean(raw.noRetry);
     const continueOnFail = Boolean(raw.continueOnFail);
-    const hasExplicitRetries = typeof raw.retries === "number" && !Number.isNaN(raw.retries);
+    const coercedRetries = coerceFiniteNumber(raw.retries);
+    const hasExplicitRetries = coercedRetries !== null;
     const hasExplicitRetryPolicy = Boolean(raw.retryPolicy && typeof raw.retryPolicy === "object");
     const defaultNoRetryForContinueOnFail = continueOnFail && !hasExplicitRetries && !hasExplicitRetryPolicy;
     // Agent tasks (CLI agents like Codex/Claude) can hit transient upstream
@@ -140,7 +141,7 @@ function resolveRetryConfig(raw, isAgent = false) {
                 // Clamp negative values to 0 (one attempt, no retries): a
                 // negative budget would otherwise yield maxAttempts <= 0 and a
                 // task that fails without ever executing.
-                ? Math.max(0, /** @type {number} */ (raw.retries))
+                ? Math.max(0, coercedRetries)
                 : Infinity;
     const retryPolicy = hasExplicitRetryPolicy
         ? /** @type {import("./RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
@@ -570,7 +571,7 @@ export function extractGraph(root, opts) {
                     skipIf: Boolean(raw.skipIf),
                     retries,
                     retryPolicy,
-                    timeoutMs: typeof raw.timeoutMs === "number" ? raw.timeoutMs : null,
+                    timeoutMs: coerceFiniteNumber(raw.timeoutMs),
                     heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw),
                     continueOnFail: Boolean(raw.continueOnFail),
                     cachePolicy: raw.cache && typeof raw.cache === "object"
@@ -603,7 +604,7 @@ export function extractGraph(root, opts) {
                 skipIf: Boolean(raw.skipIf),
                 retries,
                 retryPolicy,
-                timeoutMs: typeof raw.timeoutMs === "number" ? raw.timeoutMs : null,
+                timeoutMs: coerceFiniteNumber(raw.timeoutMs),
                 heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw) ?? DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS,
                 continueOnFail: Boolean(raw.continueOnFail),
                 cachePolicy: raw.cache && typeof raw.cache === "object"
@@ -651,7 +652,7 @@ export function extractGraph(root, opts) {
                 waitAsync: Boolean(raw.waitAsync),
                 skipIf: Boolean(raw.skipIf),
                 retries: 0,
-                timeoutMs: typeof raw.timeoutMs === "number" ? raw.timeoutMs : null,
+                timeoutMs: coerceFiniteNumber(raw.timeoutMs),
                 heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw),
                 continueOnFail: onTimeout === "continue" || onTimeout === "skip",
                 label: typeof raw.label === "string" ? raw.label : undefined,
@@ -746,8 +747,8 @@ export function extractGraph(root, opts) {
             const approvalAllowedUsers = approvalRestriction(raw.approvalAllowedUsers, "allowedUsers", logicalNodeId);
             const kind = raw.__smithersKind;
             if (kind === "human" &&
-                typeof raw.retries === "number" &&
-                !Number.isFinite(raw.retries)) {
+                raw.retries !== undefined &&
+                coerceFiniteNumber(raw.retries) === null) {
                 const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
                     ? /** @type {Record<string, unknown>} */ (raw.meta)
                     : undefined;
@@ -786,7 +787,7 @@ export function extractGraph(root, opts) {
                 retries,
                 maxSchemaRetries: typeof raw.maxSchemaRetries === "number" ? raw.maxSchemaRetries : undefined,
                 retryPolicy,
-                timeoutMs: typeof raw.timeoutMs === "number" ? raw.timeoutMs : null,
+                timeoutMs: coerceFiniteNumber(raw.timeoutMs),
                 heartbeatTimeoutMs,
                 continueOnFail: Boolean(raw.continueOnFail),
                 cachePolicy: raw.cache && typeof raw.cache === "object"

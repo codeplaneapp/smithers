@@ -8,6 +8,7 @@ import { getTableName } from "drizzle-orm";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR, } from "../constants.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { resolveWorktreePath } from "../worktree-path.js";
+import { coerceFiniteNumber } from "../utils/numeric-props.js";
 
 /** @typedef {import("../ExtractOptions.ts").ExtractOptions} ExtractOptions */
 /** @typedef {import("../ExtractResult.ts").ExtractResult} ExtractResult */
@@ -126,12 +127,11 @@ function proofBindingProps(raw) {
  * @returns {number | null}
  */
 function parseHeartbeatTimeoutMs(raw) {
-    const candidate = typeof raw.heartbeatTimeoutMs === "number"
+    const selected = raw.heartbeatTimeoutMs !== undefined
         ? raw.heartbeatTimeoutMs
-        : typeof raw.heartbeatTimeout === "number"
-            ? raw.heartbeatTimeout
-            : null;
-    if (candidate == null || !Number.isFinite(candidate) || candidate <= 0) {
+        : raw.heartbeatTimeout;
+    const candidate = coerceFiniteNumber(selected);
+    if (candidate == null || candidate <= 0) {
         return null;
     }
     return Math.floor(candidate);
@@ -185,7 +185,8 @@ function getRalphIteration(opts, id) {
 function resolveRetryConfig(raw, isAgent = false) {
     const noRetry = Boolean(raw.noRetry);
     const continueOnFail = Boolean(raw.continueOnFail);
-    const hasExplicitRetries = typeof raw.retries === "number" && !Number.isNaN(raw.retries);
+    const coercedRetries = coerceFiniteNumber(raw.retries);
+    const hasExplicitRetries = coercedRetries !== null;
     const hasExplicitRetryPolicy = Boolean(raw.retryPolicy && typeof raw.retryPolicy === "object");
     const defaultNoRetryForContinueOnFail = continueOnFail && !hasExplicitRetries && !hasExplicitRetryPolicy;
     // Agent tasks (CLI agents like Codex/Claude) can hit transient upstream
@@ -200,7 +201,7 @@ function resolveRetryConfig(raw, isAgent = false) {
                 // Clamp negative values to 0 (one attempt, no retries): a
                 // negative budget would otherwise yield maxAttempts <= 0 and a
                 // task that fails without ever executing.
-                ? Math.max(0, /** @type {number} */ (raw.retries))
+                ? Math.max(0, coercedRetries)
                 : Infinity;
     const retryPolicy = hasExplicitRetryPolicy
         ? /** @type {import("../RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
@@ -426,7 +427,7 @@ export function extractFromHost(root, opts) {
                     : "";
             const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
             const { retries, retryPolicy } = resolveRetryConfig(raw);
-            const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+            const timeoutMs = coerceFiniteNumber(raw.timeoutMs);
             const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const continueOnFail = Boolean(raw.continueOnFail);
             const cachePolicy = raw.cache && typeof raw.cache === "object"
@@ -531,7 +532,7 @@ export function extractFromHost(root, opts) {
                     : "";
             const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
             const { retries, retryPolicy } = resolveRetryConfig(raw);
-            const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+            const timeoutMs = coerceFiniteNumber(raw.timeoutMs);
             const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw) ?? DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS;
             const continueOnFail = Boolean(raw.continueOnFail);
             const cachePolicy = raw.cache && typeof raw.cache === "object"
@@ -685,7 +686,7 @@ export function extractFromHost(root, opts) {
             const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
             const outputSchema = isZodObject(raw.outputSchema) ? raw.outputSchema : outputRef;
             const waitAsync = Boolean(raw.waitAsync);
-            const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+            const timeoutMs = coerceFiniteNumber(raw.timeoutMs);
             const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const dependsOn = Array.isArray(raw.dependsOn)
                 ? raw.dependsOn.filter((v) => typeof v === "string")
@@ -923,9 +924,21 @@ export function extractFromHost(root, opts) {
             const skipIf = Boolean(raw.skipIf);
             const agent = /** @type {TaskDescriptor["agent"]} */ (raw.agent);
             const kind = raw.__smithersKind;
+            if (kind === "human" &&
+                raw.retries !== undefined &&
+                coerceFiniteNumber(raw.retries) === null) {
+                const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                    ? /** @type {Record<string, unknown>} */ (raw.meta)
+                    : undefined;
+                const maxAttempts = typeof meta?.maxAttempts === "number" ? meta.maxAttempts : raw.retries;
+                throw new SmithersError("INVALID_INPUT", `<HumanTask id="${raw.id ?? nodeId}"> maxAttempts must be finite.`, {
+                    nodeId,
+                    maxAttempts: String(maxAttempts),
+                });
+            }
             const isAgent = kind === "agent" || Boolean(agent);
             const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
-            const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+            const timeoutMs = coerceFiniteNumber(raw.timeoutMs);
             const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const continueOnFail = Boolean(raw.continueOnFail);
             const cachePolicy = raw.cache && typeof raw.cache === "object"
