@@ -58,6 +58,17 @@ export function installWorkflowModuleResolution() {
     // Keep the first engine installation in charge for the lifetime of the
     // process. A later workflow-pack copy must not replace these identities.
     globals[WORKFLOW_MODULE_RESOLUTION] = true;
+    // Load the react modules once, eagerly, while module evaluation is still
+    // serial. Requiring them lazily inside a build.module callback races the
+    // loader's own in-flight fetch of the same file (surfaces as "Requested
+    // module is already fetched" under coverage instrumentation).
+    const eagerExports = new Map();
+    for (const [specifier, resolved] of aliases) {
+        if (specifier === "react" || specifier.startsWith("react/")) {
+            const module = require(resolved);
+            eagerExports.set(specifier, { ...module, default: module.default ?? module });
+        }
+    }
     bun.plugin({
         name: "smithers-workflow-module-resolution",
         setup(build) {
@@ -66,9 +77,9 @@ export function installWorkflowModuleResolution() {
                     // React is required by CommonJS react-dom internals. Bun
                     // cannot require an async virtual module, so these three
                     // canonical modules must stay synchronous.
-                    if (specifier === "react" || specifier.startsWith("react/")) {
-                        const module = require(resolved);
-                        return { exports: { ...module, default: module.default ?? module }, loader: "object" };
+                    const eager = eagerExports.get(specifier);
+                    if (eager) {
+                        return { exports: eager, loader: "object" };
                     }
                     return {
                         // A source-level re-export retains the complete

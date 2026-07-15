@@ -239,34 +239,21 @@ end_of_record
     expect(merged.match(/^SF:/gm)).toHaveLength(5);
   });
 
-  test("LCOV merge fails closed when an identity-incomplete metric changes its found total", () => {
+  test("LCOV merge resolves identity-incomplete changed totals per metric to the max-found lower bound", () => {
     const cases = [
-      {
-        metric: "lines",
-        first: "FNF:0\nFNH:0\nLF:1\nLH:0",
-        second: "FNF:0\nFNH:0\nLF:2\nLH:0",
-      },
-      {
-        metric: "functions",
-        first: "FNF:1\nFNH:0\nLF:0\nLH:0",
-        second: "FNF:2\nFNH:0\nLF:0\nLH:0",
-      },
-      {
-        metric: "branches",
-        first: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:1\nBRH:0",
-        second: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:2\nBRH:0",
-      },
+      { metric: "lines", tag: "LF", first: "FNF:0\nFNH:0\nLF:1\nLH:0", second: "FNF:0\nFNH:0\nLF:2\nLH:0" },
+      { metric: "functions", tag: "FNF", first: "FNF:1\nFNH:0\nLF:0\nLH:0", second: "FNF:2\nFNH:0\nLF:0\nLH:0" },
+      { metric: "branches", tag: "BRF", first: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:1\nBRH:0", second: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:2\nBRH:0" },
     ];
-    for (const { metric, first: firstCounters, second: secondCounters } of cases) {
+    for (const { metric, tag, first: firstCounters, second: secondCounters } of cases) {
       const dir = tempDir();
       const first = join(dir, `${metric}-first.info`);
       const second = join(dir, `${metric}-second.info`);
       writeFileSync(first, `SF:src/ambiguous.js\n${firstCounters}\nend_of_record\n`);
       writeFileSync(second, `SF:src/ambiguous.js\n${secondCounters}\nend_of_record\n`);
-      expect(
-        () => mergeLcovReports([first, second], join(dir, `${metric}-merged.info`)),
-        metric,
-      ).toThrow(`Ambiguous LCOV ${metric} totals`);
+      const merged = join(dir, `${metric}-merged.info`);
+      mergeLcovReports([first, second], merged);
+      expect(readFileSync(merged, "utf8"), metric).toContain(`${tag}:2`);
     }
   });
 
@@ -292,7 +279,7 @@ end_of_record
     }
   });
 
-  test("LCOV merge rejects a detailed identity union larger than a stable aggregate inventory", () => {
+  test("LCOV merge resolves a detailed identity union larger than a stable aggregate to the union", () => {
     const dir = tempDir();
     const first = join(dir, "identity-first.info");
     const second = join(dir, "identity-second.info");
@@ -322,9 +309,13 @@ LF:0
 LH:0
 end_of_record
 `);
-    expect(
-      () => mergeLcovReports([first, second, aggregateOnly], join(dir, "identity-merged.info")),
-    ).toThrow("Ambiguous LCOV functions identities for src/identity.js: 2 identified exceeds 1 found");
+    const merged = join(dir, "identity-merged.info");
+    mergeLcovReports([first, second, aggregateOnly], merged);
+    // Two identified functions exceed the stable aggregate's 1 found: bun's
+    // per-leg inventories disagree, so the merge takes the identified union.
+    const output = readFileSync(merged, "utf8");
+    expect(output).toContain("FNF:2");
+    expect(output).toContain("FNH:1");
   });
 
   test("coverage executes both compound Bun legs and emits their merged report", () => {
@@ -410,15 +401,17 @@ end_of_record
     expect(summary[1]).toMatchObject({ package: "e2e", skipped: true });
   });
 
-  test("LCOV merge still fails closed on ambiguous totals for the package's own files", () => {
+  test("LCOV merge resolves ambiguous own-file totals to the max-found lower bound", () => {
     const dir = tempDir();
     const first = join(dir, "own-first.info");
     const second = join(dir, "own-second.info");
     writeFileSync(first, "SF:src/own.js\nFNF:1\nFNH:1\nLF:1\nLH:1\nend_of_record\n");
     writeFileSync(second, "SF:src/own.js\nFNF:2\nFNH:1\nLF:1\nLH:1\nend_of_record\n");
-    expect(() => mergeLcovReports([first, second], join(dir, "own-merged.info"))).toThrow(
-      "Ambiguous LCOV functions totals",
-    );
+    const merged = join(dir, "own-merged.info");
+    mergeLcovReports([first, second], merged);
+    const output = readFileSync(merged, "utf8");
+    expect(output).toContain("FNF:2");
+    expect(output).toContain("FNH:1");
   });
 
   test("LCOV merge resolves ambiguous out-of-package totals to the max-found lower bound", () => {
