@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GatewayRpcMethod } from "@smithers-orchestrator/gateway/rpc";
-import type { GatewayRpcParams, GatewayRpcPayload } from "@smithers-orchestrator/gateway-client";
+import type {
+  GatewayRpcMethod,
+  GatewayRpcParams,
+  GatewayRpcPayload,
+} from "@smithers-orchestrator/gateway-client/rpc";
 import { useSmithersGateway } from "./useSmithersGateway.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 

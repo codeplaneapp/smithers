@@ -1,11 +1,10 @@
 import * as react from 'react';
 import { ReactElement, ReactNode } from 'react';
 import * as _smithers_orchestrator_gateway_client from '@smithers-orchestrator/gateway-client';
-import { SmithersGatewayClientOptions, WorkspaceMode, SmithersGatewayClient, SmithersDataClient, SmithersCollections, GatewayCronRow, GatewayMemoryFactRow, GatewayPromptRow, GatewayScoreRow, GatewayTicketRow, GatewayRpcParams, GatewayRpcPayload, GatewayEventFrame, GatewayBackoffOptions, GatewayRunNode } from '@smithers-orchestrator/gateway-client';
+import { SmithersGatewayClientOptions, WorkspaceMode, SmithersGatewayClient, SmithersDataClient, SmithersCollections, GatewayCronRow, GatewayMemoryFactRow, GatewayPromptRow, GatewayScoreRow, GatewayTicketRow, GatewayRpcPayload as GatewayRpcPayload$1, GatewayEventFrame, GatewayBackoffOptions, GatewayRunNode } from '@smithers-orchestrator/gateway-client';
 import * as _tanstack_react_query from '@tanstack/react-query';
 import { QueryClient } from '@tanstack/react-query';
-import * as _smithers_orchestrator_gateway_rpc from '@smithers-orchestrator/gateway/rpc';
-import { ListApprovalsRequest, ListApprovalsResponse, CronListRequest, ListTicketsRequest, GatewayRpcMethod, ListRunsRequest, ListWorkflowsRequest, ListWorkflowsResponse } from '@smithers-orchestrator/gateway/rpc';
+import { ListApprovalsRequest, ListApprovalsResponse, CronListRequest, ListTicketsRequest, GatewayRpcMethod, GatewayRpcParams, GatewayRpcPayload, ListRunsRequest, ListWorkflowsRequest, ListWorkflowsResponse } from '@smithers-orchestrator/gateway-client/rpc';
 
 declare function createGatewayReactRoot(element: ReactElement, options?: SmithersGatewayClientOptions & {
     rootId?: string;
@@ -36,57 +35,141 @@ declare function SmithersCollectionsProvider(props: {
 }): react.FunctionComponentElement<_tanstack_react_query.QueryClientProviderProps> | null;
 
 declare function useGatewayActions(): {
-    launchRun: (params: _smithers_orchestrator_gateway_rpc.LaunchRunRequest) => Promise<_smithers_orchestrator_gateway_rpc.LaunchRunResponse & {
+    launchRun: (params: {
+        workflow: string;
+        input?: Record<string, unknown>;
+        options?: {
+            runId?: string;
+            idempotencyKey?: string;
+            maxConcurrency?: number;
+            allowNetwork?: boolean;
+            maxOutputBytes?: number;
+            toolTimeoutMs?: number;
+        };
+    }) => Promise<{
+        runId: string;
+        workflow: string;
+    } & {
         seq?: number;
         txid?: string;
     }>;
-    resumeRun: (params: _smithers_orchestrator_gateway_rpc.ResumeRunRequest) => Promise<_smithers_orchestrator_gateway_rpc.ResumeRunResponse & {
+    resumeRun: (params: {
+        runId: string;
+        options?: {
+            force?: boolean;
+        };
+    }) => Promise<{
+        runId: string;
+        status: "resume_requested" | "already_terminal";
+    } & {
         seq?: number;
         txid?: string;
     }>;
-    cancelRun: (params: _smithers_orchestrator_gateway_rpc.CancelRunRequest) => Promise<_smithers_orchestrator_gateway_rpc.CancelRunResponse & {
+    cancelRun: (params: {
+        runId: string;
+    }) => Promise<{
+        runId: string;
+        status: "cancelling";
+    } & {
         seq?: number;
         txid?: string;
     }>;
-    hijackRun: (params: _smithers_orchestrator_gateway_rpc.HijackRunRequest) => Promise<_smithers_orchestrator_gateway_rpc.HijackRunResponse & {
+    hijackRun: (params: {
+        runId: string;
+        options?: Record<string, unknown>;
+    }) => Promise<{
+        runId: string;
+        status: "hijack-ready";
+        sessionId: string;
+    } & {
         seq?: number;
         txid?: string;
     }>;
-    rewindRun: (params: _smithers_orchestrator_gateway_rpc.RewindRunRequest) => Promise<Record<string, unknown> & {
+    rewindRun: (params: {
+        runId: string;
+        frameNo: number;
+        confirm: true;
+    }) => Promise<Record<string, unknown> & {
         seq?: number;
         txid?: string;
     }>;
-    submitApproval: (params: _smithers_orchestrator_gateway_rpc.SubmitApprovalRequest & {
+    submitApproval: (params: {
+        runId: string;
+        nodeId: string;
+        iteration?: number;
+        approved?: boolean;
+        decision: Record<string, unknown> & {
+            approved?: boolean;
+            value?: unknown;
+            note?: string;
+        };
+        note?: string;
+    } & {
         approvalId?: string;
-    }) => Promise<_smithers_orchestrator_gateway_rpc.SubmitApprovalResponse & {
+    }) => Promise<{
+        runId: string;
+        nodeId: string;
+        iteration: number;
+        approved: boolean;
+    } & {
         seq?: number;
         txid?: string;
     }>;
-    submitSignal: (params: _smithers_orchestrator_gateway_rpc.SubmitSignalRequest) => Promise<Record<string, unknown> & {
+    submitSignal: (params: {
+        runId: string;
+        correlationKey: string;
+        payload?: unknown;
+        signalName?: string;
+    }) => Promise<Record<string, unknown> & {
         seq?: number;
         txid?: string;
     }>;
-    cronCreate: (params: _smithers_orchestrator_gateway_rpc.CronCreateRequest) => Promise<_smithers_orchestrator_gateway_client.GatewayCronRow & {
+    cronCreate: (params: {
+        workflow: string;
+        pattern: string;
+        cronId?: string;
+        enabled?: boolean;
+    }) => Promise<_smithers_orchestrator_gateway_client.GatewayCronRow & {
         seq?: number;
         txid?: string;
     }>;
-    cronDelete: (params: _smithers_orchestrator_gateway_rpc.CronDeleteRequest) => Promise<Record<string, unknown> & {
+    cronDelete: (params: {
+        cronId: string;
+    }) => Promise<Record<string, unknown> & {
         seq?: number;
         txid?: string;
     }>;
-    cronRun: (params: _smithers_orchestrator_gateway_rpc.CronRunRequest) => Promise<_smithers_orchestrator_gateway_rpc.LaunchRunResponse & {
+    cronRun: (params: {
+        cronId?: string;
+        workflow?: string;
+        input?: Record<string, unknown>;
+    }) => Promise<{
+        runId: string;
+        workflow: string;
+    } & {
         seq?: number;
         txid?: string;
     }>;
-    createTicket: (params: _smithers_orchestrator_gateway_rpc.CreateTicketRequest) => Promise<_smithers_orchestrator_gateway_client.GatewayTicketRow & {
+    createTicket: (params: {
+        path: string;
+        content: string;
+        kind?: "ticket" | "plan" | "spec" | "proposal";
+        status?: string;
+    }) => Promise<_smithers_orchestrator_gateway_client.GatewayTicketRow & {
         seq?: number;
         txid?: string;
     }>;
-    updateTicket: (params: _smithers_orchestrator_gateway_rpc.UpdateTicketRequest) => Promise<_smithers_orchestrator_gateway_client.GatewayTicketRow & {
+    updateTicket: (params: {
+        path: string;
+        content?: string;
+        status?: string;
+    }) => Promise<_smithers_orchestrator_gateway_client.GatewayTicketRow & {
         seq?: number;
         txid?: string;
     }>;
-    deleteTicket: (params: _smithers_orchestrator_gateway_rpc.DeleteTicketRequest) => Promise<{
+    deleteTicket: (params: {
+        path: string;
+    }) => Promise<{
         path: string;
         deleted: boolean;
     } & {
@@ -194,7 +277,7 @@ declare function useGatewayRpc<Method extends GatewayRpcMethod>(method: Method, 
  * `streamRunEvents`, so each lifecycle frame upserts the row without a
  * whole-tree refetch). Same `GatewayAsyncState` shape the RPC hook returned.
  */
-declare function useGatewayRun(runId: string | undefined): GatewayAsyncState<GatewayRpcPayload<"getRun">>;
+declare function useGatewayRun(runId: string | undefined): GatewayAsyncState<GatewayRpcPayload$1<"getRun">>;
 
 /**
  * Live run-event buffer over the bounded `runEvents` collection. Local mode
@@ -212,13 +295,14 @@ declare function useGatewayRunEvents(runId: string | undefined, options?: {
     lastHeartbeat: GatewayEventFrame | undefined;
     error: Error | undefined;
     streaming: boolean;
+    loading: boolean;
 };
 
 /**
  * Live run list over the `runs` collection (initial `listRuns`, re-pulled on
  * `invalidate`). Same `GatewayAsyncState` shape the RPC hook returned.
  */
-declare function useGatewayRuns(params?: ListRunsRequest): GatewayAsyncState<GatewayRpcPayload<"listRuns">>;
+declare function useGatewayRuns(params?: ListRunsRequest): GatewayAsyncState<GatewayRpcPayload$1<"listRuns">>;
 
 /**
  * Live workflow list over the `workflows` collection (initial `listWorkflows`,
@@ -632,6 +716,9 @@ declare function isDcSkipRow(value: unknown): value is DcSkipRow;
 declare function isDcPollRow(value: unknown): value is DcPollRow;
 declare function isDelegationApprovalRecord(record: DelegationRecord): record is DelegationApprovalRecord;
 
+/** Why a record was excluded from the fold. */
+type DelegationIgnoreReason = "unknown-table" | "malformed-row";
+
 /**
  * Pure, non-React reducer that folds durable delegation rows into the
  * `DelegationGraph` flux state the UI renders. Deterministic and
@@ -643,11 +730,19 @@ declare function isDelegationApprovalRecord(record: DelegationRecord): record is
  *
  * Tolerance: unknown tables are ignored; malformed rows are reported through
  * `options.onIgnored` and skipped — the reducer never throws on bad data.
+ *
+ * Internals are an Effect-native state machine: each record is classified
+ * into a `DelegationEvent` (`Data.TaggedEnum`, see `delegationEvents.ts`),
+ * the bucket stage dispatches with `Match.tagsExhaustive` over event tags,
+ * and the fold phases (bucket → version assembly → cascade closure →
+ * attention rollup → budget rollup) are composable pure stages piped through
+ * one `Effect` that `foldDelegation` runs synchronously at the boundary —
+ * the public function stays a synchronous pure fold.
  */
 
 type DelegationFoldIssue = {
     record: DelegationRecord;
-    reason: "unknown-table" | "malformed-row";
+    reason: DelegationIgnoreReason;
 };
 type FoldDelegationOptions = {
     /** Called for every ignored record (unknown table / malformed row). */
@@ -656,7 +751,9 @@ type FoldDelegationOptions = {
 /**
  * Parse a physical delegation node id (`dc:<logicalId>:<phase>`) into its
  * logical id and phase. Returns null for anything that is not a delegation
- * node id.
+ * node id. Accepts every output-table phase plus the approval-only phases
+ * (`approve`, `approval-<i>`); unknown phases stay excluded so arbitrary
+ * `dc:*` ids from other workflows never leak into the fold.
  */
 declare function parseDelegationNodeId(nodeId: string): {
     logicalId: string;
@@ -666,7 +763,9 @@ declare function parseDelegationNodeId(nodeId: string): {
  * The output table a physical delegation node writes to, derived from the
  * `dc:<logicalId>:<phase>` naming contract (plus the signal/poll listener
  * node ids `dc-edit` / `dc-skip-preview` / `dc-poll`). Null when the node is
- * not part of a delegation chain.
+ * not part of a delegation chain — and also for the approval-only phases
+ * (`approve` / `approval-<i>`), which parse as delegation nodes but carry no
+ * output row the fold consumes.
  */
 declare function delegationTableForNodeId(nodeId: string): string | null;
 declare function foldDelegation(records: DelegationRecord[], options?: FoldDelegationOptions): DelegationGraph;
@@ -689,13 +788,16 @@ type UseDelegationChainResult = {
 /**
  * Folded delegation-chain state for one run, per the frozen contract.
  *
- * Record assembly: the live run tree (`useGatewayRunTree`) enumerates every
- * physical `dc:*` node (with loop/retry iterations), `getNodeOutput` fetches
- * each node's durable row exactly once (re-checked when a `node.finished` /
- * `node.failed` event for that node arrives — `useGatewayRunEvents` provides
- * the liveness tick), and `useGatewayApprovals` supplies the `_approval`
- * pending markers. The pure `foldDelegation` reducer turns those records into
- * the graph; malformed/unknown rows surface in `errors` instead of throwing.
+ * Record assembly lives in the Effect pipeline behind
+ * `createDelegationChainStore` (see `delegationChainStore.ts`): the run tree,
+ * live event frames, and approvals are pushed into a Queue-fed Stream whose
+ * consumer reconciles Effect-managed state (durable event-derived targets,
+ * the exactly-once `getNodeOutput` cache with finish-event invalidation, the
+ * paged `listRunEvents` history backfill) into a
+ * `SubscriptionRef<DelegationChainSnapshot>`; this hook subscribes via
+ * `useSyncExternalStore`. The pure `foldDelegation` reducer turns the
+ * assembled records into the graph; malformed/unknown rows surface in
+ * `errors` instead of throwing.
  */
 declare function useDelegationChain(params: {
     runId: string | undefined;

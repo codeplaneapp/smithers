@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayTicketRow } from "@smithers-orchestrator/gateway-client";
-import type { ListTicketsRequest } from "@smithers-orchestrator/gateway/rpc";
+import type { ListTicketsRequest } from "@smithers-orchestrator/gateway-client/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
 import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 
