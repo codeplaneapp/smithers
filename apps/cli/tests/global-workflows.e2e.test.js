@@ -137,3 +137,41 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
     // It did NOT scaffold a local pack in the cwd repo.
     expect(repo.exists(".smithers")).toBe(false);
 });
+
+test("smithers init --global honors HOME when SMITHERS_HOME is unset", () => {
+    const home = createTempRepo();
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeCodexBinary(binDir);
+    const env = {
+        HOME: home.dir,
+        SMITHERS_HOME: "",
+        PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+        OPENAI_API_KEY: "sk-test-openai-key",
+        ANTHROPIC_API_KEY: "",
+        GEMINI_API_KEY: "",
+        GOOGLE_API_KEY: "",
+    };
+
+    const result = runSmithers(["init", "--global", "--no-install"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const smithersHome = join(home.dir, ".smithers");
+    expect(result.json.rootDir).toBe(smithersHome);
+    expect(existsSync(join(smithersHome, "package.json"))).toBe(true);
+
+    const listed = runSmithers(["workflow", "list"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+    });
+    expect(listed.exitCode).toBe(0);
+    expect(listed.json.workflows.find((workflow) => workflow.id === "create-workflow")).toMatchObject({
+        scope: "global",
+        packDir: smithersHome,
+    });
+});
