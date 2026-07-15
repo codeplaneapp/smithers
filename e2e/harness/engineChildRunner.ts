@@ -13,7 +13,7 @@ import {
  * (or resumes) it.
  *
  * Usage:
- *   bun engineChildRunner.ts <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs] <adapterNonce>
+ *   bun engineChildRunner.ts <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs] [adapterNonce]
  *
  * It prints a single machine-readable line to stdout when the run resolves:
  *   RESULT_STATUS=<status>
@@ -40,18 +40,17 @@ async function main(): Promise<void> {
 
   if (!dbPath || !runId || !modeArg || !markerDir || !counterFile) {
     fail(
-      "missing args: <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs] <adapterNonce>",
+      "missing args: <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs]",
     );
   }
   if (modeArg !== "initial" && modeArg !== "resume") {
     fail(`invalid mode ${modeArg}; expected "initial" or "resume"`);
   }
   const mode: EngineChildMode = modeArg;
-  // This is the authenticated production-runner protocol marker consumed by
-  // realProcessAdapter admission; an arbitrary long-lived child cannot pass
-  // real-process admission by merely claiming a name in memory.
-  if (!nonce) fail("missing adapter nonce");
-  process.stdout.write(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}\n`);
+  // Adapter-launched children authenticate with a nonce. Keep direct fixture
+  // invocations compatible, but realProcessAdapter always supplies and
+  // verifies a nonce before admitting this as production evidence.
+  if (nonce) process.stdout.write(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}\n`);
   const bSleepMs = bSleepMsArg ? Number(bSleepMsArg) : undefined;
 
   const { workflow, db } = buildKillResumeWorkflow({

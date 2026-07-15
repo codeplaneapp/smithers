@@ -1,9 +1,10 @@
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { Effect } from "effect";
 import { registerTrustedAdapter, type HarnessAdapter } from "../harness/Harness.ts";
+import { realDbCutPoints } from "./realDbCutPoints.ts";
 
 export type RealDbResource = SmithersDb & Readonly<{ readonly path?: string; readonly productionIdentity?: "SmithersDb"; readonly close: () => void | Promise<void>; readonly operations?: Readonly<Record<string, (...args: readonly unknown[]) => unknown | Promise<unknown>>> }>;
-export type RealDbAdapterOptions = Readonly<{ readonly open: () => RealDbResource | Promise<RealDbResource>; readonly identity?: string }>;
+export type RealDbAdapterOptions = Readonly<{ readonly open: () => RealDbResource | Promise<RealDbResource>; readonly identity?: string; readonly serializeError?: HarnessAdapter["serializeError"]; readonly extensionExecutors?: HarnessAdapter["extensionExecutors"] }>;
 
 export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => {
   const productionOperations = new Set(["claimAttemptCompletion", "claimRunForResume", "heartbeatRun", "completeRun", "requestRunCancel", "claimRunCancellation", "heartbeatAttempt"]);
@@ -39,11 +40,27 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
       const rows = await runDb(resource.listRuns(100, undefined, "testing-framework"));
       if (!rows.some((row) => row.runId === id)) throw Object.assign(new Error("real-db admission write was not durably readable"), { code: "ADMISSION_FAILED" });
     },
-    cleanup: async () => { if (resource?.close) await resource.close(); if (resource?.db) { try { resource.db.query("SELECT 1"); throw Object.assign(new Error("CLEANUP_LEAK: database handle remained open after adapter cleanup"), { code: "CLEANUP_LEAK" }); } catch (error) { if ((error as { code?: string }).code === "CLEANUP_LEAK") throw error; } } resource = undefined; },
+    cleanup: async () => {
+      const native = (resource?.db as unknown as { $client?: { query: (sql: string) => { get: () => unknown } } } | undefined)?.$client;
+      if (resource?.close) await resource.close();
+      if (native) {
+        try { native.query("SELECT 1").get(); throw Object.assign(new Error("CLEANUP_LEAK: database handle remained open after adapter cleanup"), { code: "CLEANUP_LEAK" }); }
+        catch (error) { if ((error as { code?: string }).code === "CLEANUP_LEAK") throw error; }
+      }
+      resource = undefined;
+    },
     runStep: async (operation, ...args) => {
       if (!resource) throw new Error("REAL_DB_NOT_ADMITTED");
       const direct = (resource as unknown as Record<string, unknown>)[String(operation)];
       if (typeof direct === "function") return runDb((direct as (...values: readonly unknown[]) => unknown).apply(resource, args));
+      // Production cut-point names are resolved through the typed binding, not
+      // through resource.operations. This keeps a real-db claim tied to the
+      // actual SmithersDb implementation even when a scenario uses the
+      // framework vocabulary rather than a method name.
+      if (productionOperations.has(String(operation))) {
+        const bound = realDbCutPoints(resource)[String(operation) as keyof ReturnType<typeof realDbCutPoints>];
+        if (typeof bound === "function") return bound(...args as never[]);
+      }
       if (productionOperations.has(String(operation))) throw Object.assign(new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)} requires the admitted SmithersDb production method`), { code: "ADMISSION_FAILED" });
       const fn = resource.operations?.[String(operation)];
       if (!fn) throw new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)}`);
@@ -55,5 +72,7 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
       if (!operation) throw Object.assign(new Error(`REAL_DB_FAULT_UNAVAILABLE:${fault.operation}:${fault.phase}`), { code: "ADMISSION_FAILED" });
       await operation(fault);
     },
+    serializeError: options.serializeError,
+    extensionExecutors: options.extensionExecutors,
   }, "integration-real-db");
 };

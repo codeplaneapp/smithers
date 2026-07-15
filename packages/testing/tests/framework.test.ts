@@ -197,8 +197,8 @@ describe("controlled scenario kernel", () => {
   });
 
   test("caller-forged process identity is rejected even with a static marker and truthy handshake", async () => {
-    const child = spawn("sh", ["-c", "sleep 30"], { stdio: "ignore" });
-    const adapter = realProcessAdapter({ spawn: async () => ({
+    const child = spawn("sh", ["-c", "printf 'SMITHERS_ENGINE_HANDSHAKE=runWorkflow:%s\\n' \"$0\"; sleep 30", "fake-engineChildRunner.ts"], { stdio: ["ignore", "pipe", "ignore"] });
+    const adapter = realProcessAdapter({ runnerPath: "/repo/e2e/harness/engineChildRunner.ts", spawn: async () => ({
       pid: child.pid!, child,
       handshake: async () => "caller-forged" as unknown as string,
       kill: (signal?: string) => { child.kill(signal as NodeJS.Signals | undefined); },

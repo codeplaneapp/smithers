@@ -357,7 +357,12 @@ export function simulate<Schema = unknown>(
         },
         renderer,
         createSession: (sessionOptions) =>
-          makeWorkflowSession({ runId: sessionOptions.runId }),
+          makeWorkflowSession({
+            runId: sessionOptions.runId,
+            requireStableFinish: true,
+            requireRerenderOnOutputChange:
+              sessionOptions.options?.requireRerenderOnOutputChange !== false,
+          }),
         executeTask,
       });
       const result = await driver.run({

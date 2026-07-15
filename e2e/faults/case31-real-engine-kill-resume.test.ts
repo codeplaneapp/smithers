@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -30,7 +29,7 @@ import {
  * OS process with SIGKILL while it is actively executing a node, then resumes
  * the run from its last on-disk checkpoint in a fresh process. It verifies
  * smithers' #1 guarantee: a run survives SIGKILL of the engine and resumes
- * exactly-once.
+ * at-least-once external execution and journaled-at-most-once durable-row CAS.
  *
  * Mechanism:
  *   1. On-disk sqlite db (a real file in tmpdir, NOT :memory: — a fresh process
@@ -47,7 +46,7 @@ import {
  *        - run reaches status "finished";
  *        - each committed node has EXACTLY ONE output row (no double-commit);
  *        - node A (completed pre-kill) is NOT re-executed on resume — it appears
- *          exactly once in the counter (exactly-once side effect);
+ *          once in the external-effect counter;
  *        - node B (interrupted) does complete after resume.
  *
  * No agent CLI is used (compute Tasks only), so this runs on a clean CI box.
@@ -87,6 +86,7 @@ function spawnEngine(
   mode: "initial" | "resume",
   markerDir: string,
   counterFile: string,
+  nonce = crypto.randomUUID(),
 ): ChildProcess {
   return spawn(
     "bun",
@@ -98,7 +98,7 @@ function spawnEngine(
       markerDir,
       counterFile,
       String(B_SLEEP_MS),
-      randomUUID(),
+      nonce,
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -140,7 +140,7 @@ describe("case31 real engine kill + resume durability", () => {
     markerDirs.length = 0;
   });
 
-  test("SIGKILL mid-node then resume: exactly-once, no double-commit", async () => {
+  test("SIGKILL mid-node then resume: at-least-once execution, journaled-at-most-once durable commit", async () => {
     const dbPath = join(
       tmpdir(),
       `smithers-case31-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
@@ -261,7 +261,7 @@ describe("case31 real engine kill + resume durability", () => {
     ]);
 
     // Exactly-once side effect: node A (committed before the kill) is NOT
-    // re-executed on resume, so it appears exactly once. Node B was interrupted
+    // re-executed on resume, so it appears once. Node B was interrupted
     // (no output committed before the kill) so it re-executes on resume and
     // appears twice — but still commits exactly one output row (asserted above).
     const counter = readCounter(counterFile);

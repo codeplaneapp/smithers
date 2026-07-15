@@ -570,7 +570,11 @@ function simulate(workflow, options = {}) {
           runPromise: (effect) => Effect.runPromise(effect)
         },
         renderer,
-        createSession: (sessionOptions) => makeWorkflowSession({ runId: sessionOptions.runId }),
+        createSession: (sessionOptions) => makeWorkflowSession({
+          runId: sessionOptions.runId,
+          requireStableFinish: true,
+          requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false
+        }),
         executeTask
       });
       const result = await driver.run({

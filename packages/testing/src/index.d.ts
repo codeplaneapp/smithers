@@ -502,23 +502,32 @@ declare class ExactlyOnceUnsupportedError extends Error {
     readonly code = "EXACTLY_ONCE_UNSUPPORTED";
     constructor();
 }
+type ResultLike = Readonly<{
+    readonly trace: readonly {
+        readonly type: string;
+        readonly data?: unknown;
+    }[];
+    readonly ambiguity: readonly {
+        readonly outcome: string;
+    }[];
+}>;
+type Assertion = Readonly<{
+    readonly name: string;
+    readonly guarantee: string;
+    readonly assert: (result: ResultLike) => void;
+}>;
 declare const expectEffect: (name: string) => {
     name: string;
     exactlyOnce: () => never;
-    atLeastOnce: () => {
-        name: string;
-        guarantee: "at-least-once";
-    };
-    idempotencyKey: (key: string) => {
-        name: string;
-        key: string;
-        guarantee: "idempotency-key";
-    };
-    journalCas: () => {
-        name: string;
-        guarantee: "journal-cas";
-    };
+    atLeastOnce: (result?: ResultLike) => Assertion;
+    atMostOnceJournaled: (result?: ResultLike) => Assertion;
+    idempotencyKey: (key: string, result?: ResultLike) => Assertion & Readonly<{
+        readonly key: string;
+    }>;
+    journalCas: (result?: ResultLike) => Assertion;
 };
+declare const expectTrace: (predicate: (event: ResultLike["trace"][number]) => boolean, message?: string) => ((result: ResultLike) => void);
+declare const expectAmbiguity: (outcome: string) => ((result: ResultLike) => void);
 
 type ReplayBundle = Readonly<{
     readonly version: 1;
@@ -587,6 +596,8 @@ type RealDbResource = SmithersDb & Readonly<{
 type RealDbAdapterOptions = Readonly<{
     readonly open: () => RealDbResource | Promise<RealDbResource>;
     readonly identity?: string;
+    readonly serializeError?: HarnessAdapter["serializeError"];
+    readonly extensionExecutors?: HarnessAdapter["extensionExecutors"];
 }>;
 declare const realDbAdapter: (options: RealDbAdapterOptions) => HarnessAdapter;
 
@@ -626,11 +637,17 @@ type RealProcessResource = Readonly<{
     /** Production-owned fresh-process continuation used by the restart cut point. */
     readonly resume?: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
     readonly healthy?: () => boolean | Promise<boolean>;
+    /** Production-owned result observed from stdout/durable completion. */
+    readonly resultStatus?: () => string | undefined | Promise<string | undefined>;
 }>;
 type RealProcessAdapterOptions = Readonly<{
     readonly spawn: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
+    /** Absolute path to the repository-owned engineChildRunner. Required proof of identity. */
+    readonly runnerPath: string;
     readonly identity?: string;
+    readonly serializeError?: HarnessAdapter["serializeError"];
+    readonly extensionExecutors?: HarnessAdapter["extensionExecutors"];
 }>;
 declare const realProcessAdapter: (options: RealProcessAdapterOptions) => HarnessAdapter;
 
-export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbResource, type RealProcessAdapterOptions, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectEffect, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realDbCutPoints, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };
+export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbResource, type RealProcessAdapterOptions, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectAmbiguity, expectEffect, expectTrace, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realDbCutPoints, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };

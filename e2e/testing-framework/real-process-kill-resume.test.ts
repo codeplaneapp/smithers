@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Effect } from "effect";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { fault, e2eHarness, realProcessAdapter, runScenario, scenario, step } from "@smithers-orchestrator/testing";
 
 describe("testing framework real-process durability", () => {
@@ -17,7 +19,7 @@ describe("testing framework real-process durability", () => {
     let child: ChildProcess | undefined; let resumed: ChildProcess | undefined;
     const started = join(markerDir, "B.started");
     try {
-      const adapter = realProcessAdapter({ spawn: async (nonce: string) => {
+      const adapter = realProcessAdapter({ runnerPath: runner, spawn: async (nonce: string) => {
         child = spawnChild("initial", nonce);
         const waitFor = async (predicate: () => boolean) => { const deadline = Date.now() + 5_000; while (!predicate() && Date.now() < deadline) await Bun.sleep(10); return predicate(); };
         await waitFor(() => existsSync(started));
@@ -27,7 +29,7 @@ describe("testing framework real-process durability", () => {
           let resumedOutput = "";
           resumedChild.stdout?.on("data", (chunk) => { resumedOutput += String(chunk); });
           await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("resume child did not exit within 30s")), 30_000); resumedChild.once("exit", () => { clearTimeout(timer); resolve(); }); resumedChild.once("error", (error) => { clearTimeout(timer); reject(error); }); });
-          return { pid: resumedChild.pid!, child: resumedChild, handshake: async (nonce: string) => resumedOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) ? nonce : "", kill: (signal?: string) => { resumedChild.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined };
+          return { pid: resumedChild.pid!, child: resumedChild, handshake: async (nonce: string) => resumedOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) ? nonce : "", resultStatus: () => resumedOutput.match(/RESULT_STATUS=([^\n]+)/)?.[1], kill: (signal?: string) => { resumedChild.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined };
         } };
       } });
       const result = await runScenario(scenario("real-process-restart", { steps: [step("resume", { run: (runtime) => runtime.effect("durable-output", () => "resumed") })], faults: [fault("sigkill", "during-task", "resume")] }), { harness: e2eHarness({ adapter }), waitBudget: 30_000 });
@@ -38,6 +40,13 @@ describe("testing framework real-process durability", () => {
       expect(readFileSync(join(markerDir, "B.done"), "utf8").length).toBeGreaterThan(0);
       const executions = readFileSync(counter, "utf8").trim().split(/\n/).filter(Boolean);
       expect(executions.filter((id) => id === "node-b").length).toBe(2);
+      const reopened = new SmithersDb(new (await import("bun:sqlite")).Database(dbPath));
+      try {
+        const attempts = await Effect.runPromise(reopened.listAttemptsForRun("testing-framework-kill"));
+        const bAttempts = attempts.filter((attempt) => attempt.nodeId === "node-b");
+        expect(bAttempts.length).toBeGreaterThanOrEqual(2);
+        expect(bAttempts.some((attempt) => attempt.state === "finished")).toBe(true);
+      } finally { reopened.db.close(); }
     } finally { for (const process of [child, resumed]) if (process?.pid && process.exitCode === null) process.kill("SIGKILL"); rmSync(root, { recursive: true, force: true }); }
   }, { timeout: 60_000 });
 });

@@ -61,7 +61,7 @@ export { boundaryShape, compareBoundaryShape } from "./probes/compareBoundarySha
 export type { BoundaryShape } from "./probes/compareBoundaryShape.ts";
 export { CleanupScope } from "./cleanup/CleanupScope.ts";
 export { assertNoLeaks } from "./cleanup/leakAssertions.ts";
-export { expectEffect, ExactlyOnceUnsupportedError } from "./assertions/effectAssertions.ts";
+export { expectEffect, expectTrace, expectAmbiguity, ExactlyOnceUnsupportedError } from "./assertions/effectAssertions.ts";
 export { makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle } from "./replay/ReplayBundle.ts";
 export type { ReplayBundle } from "./replay/ReplayBundle.ts";
 export { firstDivergence } from "./replay/firstDivergence.ts";

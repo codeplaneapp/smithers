@@ -82,8 +82,11 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
   const program = Effect.gen(function* () {
     if (harness.adapter) {
       cleanup.register("harness", harness.name, harness.adapter.cleanup ?? (() => undefined));
-      try { yield* Effect.tryPromise({ try: () => Promise.resolve(harness.adapter!.admissionProbe()), catch: (cause) => Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), { code: "ADMISSION_FAILED", cause, details: { native: harness.adapter?.serializeError?.(cause) } }) }); }
-      catch (cause) { throw cause; }
+      // Admission is an executable resource acquisition.  Run it exactly once
+      // inside the kernel so the resource that was proven is the resource that
+      // cleanup later releases; a second probe can otherwise leak the first DB
+      // handle or child process and make the proof observer-dependent.
+      yield* Effect.tryPromise({ try: () => Promise.resolve(harness.adapter!.admissionProbe()), catch: (cause) => Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), { code: "ADMISSION_FAILED", cause, details: { native: harness.adapter?.serializeError?.(cause) } }) });
       for (const extension of ast.extensions) {
         const executor = harness.adapter.extensionExecutors?.[extension.name];
         if (!executor) throw Object.assign(new Error(`UNREGISTERED_EXTENSION: ${extension.name}`), { code: "UNREGISTERED_EXTENSION", details: { extension: extension.name } });

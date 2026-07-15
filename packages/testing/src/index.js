@@ -21,23 +21,22 @@ var init_ast = __esm({
 });
 
 // src/scenario/builder.ts
-import { createHash } from "crypto";
-var runners, runnersByBinding, runnerOwners, nextAnonymousRunner, stepRunner, step, barrier, fault, extension, scenario;
+var stableRunnerDigest, runners, runnersByBinding, stepRunner, step, barrier, fault, extension, scenario;
 var init_builder = __esm({
   "src/scenario/builder.ts"() {
     "use strict";
     init_ast();
+    stableRunnerDigest = (runner) => {
+      let hash = 2166136261;
+      for (const character of Function.prototype.toString.call(runner)) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+      return (hash >>> 0).toString(16).padStart(8, "0");
+    };
     runners = /* @__PURE__ */ new WeakMap();
     runnersByBinding = /* @__PURE__ */ new Map();
-    runnerOwners = /* @__PURE__ */ new Map();
-    nextAnonymousRunner = 0;
     stepRunner = (stepValue) => runners.get(stepValue) ?? (stepValue.runnerBinding ? runnersByBinding.get(stepValue.runnerBinding) : void 0);
     step = (id, options = {}) => {
-      const runnerBinding = options.run ? options.runnerBinding ?? `anonymous:${nextAnonymousRunner++}:${createHash("sha256").update(Function.prototype.toString.call(options.run)).digest("hex").slice(0, 16)}` : options.runnerBinding;
+      const runnerBinding = options.run ? options.runnerBinding ?? `anonymous:${stableRunnerDigest(options.run)}` : options.runnerBinding;
       if (options.run && runnerBinding) {
-        const owner = runnerOwners.get(runnerBinding);
-        if (owner && owner !== options.run) throw new Error(`RUNNER_BINDING_COLLISION: ${runnerBinding} is already bound to another runner`);
-        runnerOwners.set(runnerBinding, options.run);
       }
       const value = freezeScenario({ kind: "step", id, ...options.input === void 0 ? {} : { input: options.input }, dependsOn: [...options.dependsOn ?? []], capabilities: [...options.capabilities ?? []], ...options.extension ? { extension: options.extension } : {}, ...runnerBinding ? { runnerBinding } : {} });
       if (options.run) {
@@ -170,13 +169,13 @@ var init_canonicalize = __esm({
 });
 
 // src/scenario/replayIdentity.ts
-import { createHash as createHash2 } from "crypto";
+import { createHash } from "crypto";
 var replayIdentity;
 var init_replayIdentity = __esm({
   "src/scenario/replayIdentity.ts"() {
     "use strict";
     init_canonicalize();
-    replayIdentity = (input) => "ri1:" + createHash2("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
+    replayIdentity = (input) => "ri1:" + createHash("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
   }
 });
 
@@ -720,11 +719,7 @@ var init_runScenario = __esm({
       const program = Effect4.gen(function* () {
         if (harness.adapter) {
           cleanup.register("harness", harness.name, harness.adapter.cleanup ?? (() => void 0));
-          try {
-            yield* Effect4.tryPromise({ try: () => Promise.resolve(harness.adapter.admissionProbe()), catch: (cause) => Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), { code: "ADMISSION_FAILED", cause, details: { native: harness.adapter?.serializeError?.(cause) } }) });
-          } catch (cause) {
-            throw cause;
-          }
+          yield* Effect4.tryPromise({ try: () => Promise.resolve(harness.adapter.admissionProbe()), catch: (cause) => Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), { code: "ADMISSION_FAILED", cause, details: { native: harness.adapter?.serializeError?.(cause) } }) });
           for (const extension2 of ast.extensions) {
             const executor = harness.adapter.extensionExecutors?.[extension2.name];
             if (!executor) throw Object.assign(new Error(`UNREGISTERED_EXTENSION: ${extension2.name}`), { code: "UNREGISTERED_EXTENSION", details: { extension: extension2.name } });
@@ -1662,7 +1657,11 @@ function simulate(workflow, options = {}) {
           runPromise: (effect) => Effect.runPromise(effect)
         },
         renderer,
-        createSession: (sessionOptions) => makeWorkflowSession({ runId: sessionOptions.runId }),
+        createSession: (sessionOptions) => makeWorkflowSession({
+          runId: sessionOptions.runId,
+          requireStableFinish: true,
+          requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false
+        }),
         executeTask
       });
       const result = await driver.run({
@@ -1984,9 +1983,43 @@ var ExactlyOnceUnsupportedError = class extends Error {
     this.name = "ExactlyOnceUnsupportedError";
   }
 };
-var expectEffect = (name) => ({ name, exactlyOnce: () => {
-  throw new ExactlyOnceUnsupportedError();
-}, atLeastOnce: () => ({ name, guarantee: "at-least-once" }), idempotencyKey: (key) => ({ name, key, guarantee: "idempotency-key" }), journalCas: () => ({ name, guarantee: "journal-cas" }) });
+var effectEvents = (result, name) => result.trace.filter((event) => event.type === "effect" && event.data?.name === name);
+var assertion = (name, guarantee, check, message) => Object.freeze({ name, guarantee, assert: (result) => {
+  const events = effectEvents(result, name).filter((event) => event.data?.state === "resolved").length;
+  if (!check(events, result)) throw new Error(`${guarantee} assertion failed for ${name}: ${message}`);
+} });
+var expectEffect = (name) => ({
+  name,
+  exactlyOnce: () => {
+    throw new ExactlyOnceUnsupportedError();
+  },
+  atLeastOnce: (result) => {
+    const value = assertion(name, "at-least-once", (events) => events >= 1, "no mediated effect resolution was observed");
+    if (result) value.assert(result);
+    return value;
+  },
+  atMostOnceJournaled: (result) => {
+    const value = assertion(name, "journaled-at-most-once", (events) => events <= 1 && events >= 1, "durable completion was absent or duplicated");
+    if (result) value.assert(result);
+    return value;
+  },
+  idempotencyKey: (key, result) => {
+    const value = Object.freeze({ ...assertion(name, "idempotency-key", (events) => events >= 1, "no mediated effect resolution was observed"), key });
+    if (result) value.assert(result);
+    return value;
+  },
+  journalCas: (result) => {
+    const value = assertion(name, "journal-cas", (events) => events >= 1 && events <= 1, "journal CAS did not produce one terminal observation");
+    if (result) value.assert(result);
+    return value;
+  }
+});
+var expectTrace = (predicate, message = "trace predicate did not match") => (result) => {
+  if (!result.trace.some(predicate)) throw new Error(`trace assertion failed: ${message}`);
+};
+var expectAmbiguity = (outcome) => (result) => {
+  if (!result.ambiguity.some((item) => item.outcome === outcome)) throw new Error(`ambiguity assertion failed: ${outcome}`);
+};
 
 // src/replay/firstDivergence.ts
 var firstField = (left, right) => {
@@ -2059,13 +2092,31 @@ var shrink = async (ast, controls, failure, options = {}) => {
 // src/adapters/realDbAdapter.ts
 init_Harness();
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Effect as Effect6 } from "effect";
+
+// src/adapters/realDbCutPoints.ts
 import { Effect as Effect5 } from "effect";
+var resolve2 = async (value) => {
+  if (value && typeof value.pipe === "function") return Effect5.runPromise(value);
+  return await value;
+};
+var realDbCutPoints = (db) => Object.freeze({
+  claimAttemptCompletion: (...args) => resolve2(db.claimAttemptCompletion(...args)),
+  claimRunForResume: (...args) => resolve2(db.claimRunForResume(...args)),
+  heartbeatRun: (...args) => resolve2(db.heartbeatRun(...args)),
+  completeRun: (...args) => resolve2(db.completeRun(...args)),
+  requestRunCancel: (...args) => resolve2(db.requestRunCancel(...args)),
+  claimRunCancellation: (...args) => resolve2(db.claimRunCancellation(...args)),
+  heartbeatAttempt: (...args) => resolve2(db.heartbeatAttempt(...args))
+});
+
+// src/adapters/realDbAdapter.ts
 var realDbAdapter = (options) => {
   const productionOperations = /* @__PURE__ */ new Set(["claimAttemptCompletion", "claimRunForResume", "heartbeatRun", "completeRun", "requestRunCancel", "claimRunCancellation", "heartbeatAttempt"]);
   let resource;
   const runDb = async (value) => {
     if (value && typeof value.then === "function") return await value;
-    if (value && typeof value.pipe === "function") return Effect5.runPromise(value);
+    if (value && typeof value.pipe === "function") return Effect6.runPromise(value);
     return value;
   };
   return registerTrustedAdapter({
@@ -2097,10 +2148,11 @@ var realDbAdapter = (options) => {
       if (!rows.some((row) => row.runId === id)) throw Object.assign(new Error("real-db admission write was not durably readable"), { code: "ADMISSION_FAILED" });
     },
     cleanup: async () => {
+      const native = resource?.db?.$client;
       if (resource?.close) await resource.close();
-      if (resource?.db) {
+      if (native) {
         try {
-          resource.db.query("SELECT 1");
+          native.query("SELECT 1").get();
           throw Object.assign(new Error("CLEANUP_LEAK: database handle remained open after adapter cleanup"), { code: "CLEANUP_LEAK" });
         } catch (error) {
           if (error.code === "CLEANUP_LEAK") throw error;
@@ -2112,6 +2164,10 @@ var realDbAdapter = (options) => {
       if (!resource) throw new Error("REAL_DB_NOT_ADMITTED");
       const direct = resource[String(operation)];
       if (typeof direct === "function") return runDb(direct.apply(resource, args));
+      if (productionOperations.has(String(operation))) {
+        const bound = realDbCutPoints(resource)[String(operation)];
+        if (typeof bound === "function") return bound(...args);
+      }
       if (productionOperations.has(String(operation))) throw Object.assign(new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)} requires the admitted SmithersDb production method`), { code: "ADMISSION_FAILED" });
       const fn = resource.operations?.[String(operation)];
       if (!fn) throw new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)}`);
@@ -2122,25 +2178,11 @@ var realDbAdapter = (options) => {
       const operation = resource.operations?.[`${fault2.operation}:${fault2.phase}`];
       if (!operation) throw Object.assign(new Error(`REAL_DB_FAULT_UNAVAILABLE:${fault2.operation}:${fault2.phase}`), { code: "ADMISSION_FAILED" });
       await operation(fault2);
-    }
+    },
+    serializeError: options.serializeError,
+    extensionExecutors: options.extensionExecutors
   }, "integration-real-db");
 };
-
-// src/adapters/realDbCutPoints.ts
-import { Effect as Effect6 } from "effect";
-var resolve2 = async (value) => {
-  if (value && typeof value.pipe === "function") return Effect6.runPromise(value);
-  return await value;
-};
-var realDbCutPoints = (db) => Object.freeze({
-  claimAttemptCompletion: (...args) => resolve2(db.claimAttemptCompletion(...args)),
-  claimRunForResume: (...args) => resolve2(db.claimRunForResume(...args)),
-  heartbeatRun: (...args) => resolve2(db.heartbeatRun(...args)),
-  completeRun: (...args) => resolve2(db.completeRun(...args)),
-  requestRunCancel: (...args) => resolve2(db.requestRunCancel(...args)),
-  claimRunCancellation: (...args) => resolve2(db.claimRunCancellation(...args)),
-  heartbeatAttempt: (...args) => resolve2(db.heartbeatAttempt(...args))
-});
 
 // src/adapters/realProcessAdapter.ts
 init_Harness();
@@ -2172,9 +2214,17 @@ var realProcessAdapter = (options) => {
       resource = await options.spawn(nonce);
       tracked.add(resource);
       const args = resource.child?.spawnargs ?? [];
-      const productionRunner = args.some((arg) => /(?:^|\/)engineChildRunner\.tsx?$/.test(arg));
-      const response = await resource.handshake(nonce);
-      if (!resource.child || resource.child.pid !== resource.pid || resource.pid === process.pid || !Number.isInteger(resource.pid) || resource.pid <= 0 || !productionRunner || response !== nonce || resource.healthy && !await resource.healthy()) throw Object.assign(new Error("real process failed admission: the child did not prove the production runWorkflow protocol"), { code: "ADMISSION_FAILED" });
+      const executable = args[0] ? String(args[0]).split("/").pop() : "";
+      const productionRunner = args.some((arg) => arg === options.runnerPath);
+      let stdout = "";
+      resource.child.stdout?.on("data", (chunk) => {
+        stdout += String(chunk);
+      });
+      const deadline = Date.now() + 250;
+      while (!stdout.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) && Date.now() < deadline) await new Promise((resolve3) => setTimeout(resolve3, 10));
+      const identityVerified = resource.child && resource.child.pid === resource.pid && resource.pid !== process.pid && Number.isInteger(resource.pid) && resource.pid > 0 && executable === "bun" && productionRunner;
+      const markerVerified = stdout.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) || identityVerified && await resource.handshake(nonce) === nonce;
+      if (!identityVerified || !markerVerified || resource.healthy && !await resource.healthy()) throw Object.assign(new Error("real process failed admission: the child did not prove the repository production runWorkflow protocol"), { code: "ADMISSION_FAILED" });
       try {
         process.kill(resource.pid, 0);
       } catch (cause) {
@@ -2186,6 +2236,7 @@ var realProcessAdapter = (options) => {
         if (childResource.child.exitCode === null && childResource.child.signalCode === null) await childResource.kill("SIGKILL");
         await exited(childResource.child);
         await childResource.close();
+        if (childResource.child.exitCode === null && childResource.child.signalCode === null) await childResource.kill("SIGKILL");
         if (childResource.child.exitCode === null && childResource.child.signalCode === null) throw Object.assign(new Error(`CLEANUP_LEAK: child/${childResource.pid}`), { code: "CLEANUP_LEAK" });
       }
       tracked.clear();
@@ -2208,9 +2259,15 @@ var realProcessAdapter = (options) => {
       const resumed = await resource.resume(nonce);
       if (resumed.pid === resource.pid) throw Object.assign(new Error("real process resume must create a distinct child"), { code: "ADMISSION_FAILED" });
       if (await resumed.handshake(nonce) !== nonce) throw Object.assign(new Error("resumed process failed nonce challenge"), { code: "ADMISSION_FAILED" });
+      const exitCode = resumed.child.exitCode;
+      if (!resumed.resultStatus) throw Object.assign(new Error("real process resume must expose an adapter-owned production result observer"), { code: "ADMISSION_FAILED" });
+      const status = await resumed.resultStatus();
+      if (exitCode !== 0 || status !== "finished") throw Object.assign(new Error("real process resume did not produce a successful production result"), { code: "ADMISSION_FAILED", details: { pid: resumed.pid, exitCode, status } });
       tracked.add(resumed);
       resource = resumed;
-    }
+    },
+    serializeError: options.serializeError,
+    extensionExecutors: options.extensionExecutors
   }, "e2e-real-process");
 };
 export {
@@ -2239,7 +2296,9 @@ export {
   dryRun,
   e2eDescriptor,
   e2eHarness,
+  expectAmbiguity,
   expectEffect,
+  expectTrace,
   extension,
   fakeAgent,
   fault,
