@@ -1088,6 +1088,13 @@ declare class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} sandboxId
+   * @param {number} heartbeatAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    heartbeatSandbox(runId: string, sandboxId: string, heartbeatAtMs: number): RunnableEffect<void, SmithersError$1>;
+    /**
+   * @param {string} runId
+   * @param {string} sandboxId
    * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
    */
     getSandbox(runId: string, sandboxId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
