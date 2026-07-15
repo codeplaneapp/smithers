@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
+const timeoutKillGraceMs = 5_000;
 
 function usage() {
   console.error(
@@ -160,12 +161,13 @@ function shardPackages(packages, totalShards) {
   return shards;
 }
 
-function killProcessTree(child) {
+function killProcessTree(child, signal) {
   if (child.pid === undefined) {
     return;
   }
 
   if (process.platform === "win32") {
+    // taskkill /f is already the Windows equivalent of an immediate SIGKILL.
     spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
       stdio: "inherit",
     });
@@ -173,9 +175,9 @@ function killProcessTree(child) {
   }
 
   try {
-    process.kill(-child.pid, "SIGTERM");
+    process.kill(-child.pid, signal);
   } catch {
-    child.kill("SIGTERM");
+    child.kill(signal);
   }
 }
 
@@ -204,12 +206,33 @@ function runPackageTest(pkg, timeoutMinutes) {
 
     let timedOut = false;
     let settled = false;
-    const timer = setTimeout(() => {
+    let timer;
+    let killTimer;
+    const clearTimers = () => {
+      clearTimeout(timer);
+      clearTimeout(killTimer);
+    };
+    timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
       timedOut = true;
       console.error(
         `::error title=Package test timed out::${pkg.directory} exceeded ${timeoutMinutes} minutes`,
       );
-      killProcessTree(child);
+      killProcessTree(child, "SIGTERM");
+
+      if (process.platform !== "win32") {
+        killTimer = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          console.error(
+            `::error title=Package test timed out::${pkg.directory} did not exit after SIGTERM; sending SIGKILL`,
+          );
+          killProcessTree(child, "SIGKILL");
+        }, timeoutKillGraceMs);
+      }
     }, timeoutMs);
 
     child.on("error", (error) => {
@@ -217,7 +240,7 @@ function runPackageTest(pkg, timeoutMinutes) {
         return;
       }
       settled = true;
-      clearTimeout(timer);
+      clearTimers();
       const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
       console.error(
         `::error title=Package test failed::${pkg.directory} could not start: ${error.message}`,
@@ -230,7 +253,7 @@ function runPackageTest(pkg, timeoutMinutes) {
         return;
       }
       settled = true;
-      clearTimeout(timer);
+      clearTimers();
       const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
       if (timedOut) {
         resolve({ pkg, status: "timed out", elapsedSeconds });
