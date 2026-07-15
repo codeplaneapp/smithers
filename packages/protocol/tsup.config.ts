@@ -1,10 +1,14 @@
 import { defineConfig } from "tsup";
 
-export default defineConfig({
-  entry: { index: "src/index.ts" },
-  dts: { only: true, resolve: false },
+const declarationEntry = (name: string, source: string) => ({
+  entry: { [name]: source },
+  dts: { only: true as const, resolve: false },
   outDir: "src",
-  clean: false,
-  format: ["esm"],
+  format: ["esm" as const],
   silent: true,
 });
+
+export default defineConfig([
+  declarationEntry("index", "src/index.ts"),
+  declarationEntry("gateway-rpc", "src/gateway-rpc.js"),
+]);

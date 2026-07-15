@@ -20,6 +20,11 @@
       "import": "./src/errors/index.js",
       "default": "./src/errors/index.js"
     },
+    "./gateway-rpc": {
+      "types": "./src/gateway-rpc.d.ts",
+      "import": "./src/gateway-rpc.js",
+      "default": "./src/gateway-rpc.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
@@ -30,7 +35,7 @@
     "src/"
   ],
   "scripts": {
-    "build": "tsup --dts-only",
+    "build": "node ../../scripts/clean-dts.mjs src && tsup --dts-only",
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -316,3 +316,28 @@ describe("DevTools snapshot consumer types", () => {
     expect(result.status).toBe(0);
   });
 });
+
+describe("Gateway RPC consumer types", () => {
+  test("the explicit gateway-rpc subpath exposes wire contracts without gateway", () => {
+    const result = spawnSync(
+      tsc,
+      [
+        "--ignoreConfig",
+        "--noEmit",
+        "--strict",
+        "--skipLibCheck",
+        "--target",
+        "ESNext",
+        "--module",
+        "ESNext",
+        "--moduleResolution",
+        "bundler",
+        "tests/fixtures/gateway-rpc-consumer.ts",
+      ],
+      { cwd: protocolRoot, encoding: "utf8" },
+    );
+
+    expect(`${result.stdout}${result.stderr}`).toBe("");
+    expect(result.status).toBe(0);
+  });
+});

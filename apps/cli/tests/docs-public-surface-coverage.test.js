@@ -149,7 +149,7 @@ test("MCP semantic tool docs cover current semantic tools", () => {
 });
 
 test("Gateway RPC docs cover current RPC methods", () => {
-    const gatewayRpcSource = readRepoFile("packages/gateway/src/rpc/gatewayRpcTypes.ts");
+    const gatewayRpcSource = readRepoFile("packages/protocol/src/gatewayRpcTypes.ts");
     const methodBlock = gatewayRpcSource.match(/export type GatewayRpcMethod =([\s\S]*?);/)?.[1];
     expect(methodBlock).toBeTruthy();
 
