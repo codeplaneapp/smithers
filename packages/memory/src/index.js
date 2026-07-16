@@ -1,6 +1,7 @@
 // @smithers-type-exports-begin
 /** @typedef {import("./MemoryFact.ts").MemoryFact} MemoryFact */
 /** @typedef {import("./MemoryLayerConfig.ts").MemoryLayerConfig} MemoryLayerConfig */
+/** @typedef {import("./HindsightMemoryStoreOptions.ts").HindsightMemoryStoreOptions} HindsightMemoryStoreOptions */
 /** @typedef {import("./MemoryMessage.ts").MemoryMessage} MemoryMessage */
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("./MemoryNamespaceKind.ts").MemoryNamespaceKind} MemoryNamespaceKind */
@@ -24,6 +25,8 @@
 
 export { namespaceToString } from "./namespaceToString.js";
 export { parseNamespace } from "./parseNamespace.js";
+export { HindsightMemoryStore, createHindsightMemoryStore } from "./HindsightMemoryStore.js";
+export { LocalMemoryRuntime, createLocalMemoryRuntime } from "./LocalMemoryRuntime.js";
 // Schema (Drizzle tables)
 export { smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages, smithersMemoryNotes, smithersMemoryNoteSupersessions, } from "./schema.js";
 // Store

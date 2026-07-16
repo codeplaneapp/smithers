@@ -7,3 +7,4 @@ export { MemoryStoreService } from "./MemoryStoreService.js";
 export { MemoryStoreLive } from "./MemoryStoreLive.js";
 export { createMemoryStoreLayer } from "./createMemoryStoreLayer.js";
 export { createMemoryStore } from "./createMemoryStore.js";
+export { HindsightMemoryStore, createHindsightMemoryStore } from "../HindsightMemoryStore.js";

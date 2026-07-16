@@ -795,6 +795,7 @@
         "@smithers-orchestrator/graph": "workspace:*",
         "@smithers-orchestrator/observability": "workspace:*",
         "@smithers-orchestrator/scheduler": "workspace:*",
+        "@vectorize-io/hindsight-client": "0.8.4",
         "drizzle-orm": "^0.45.2",
         "effect": "3.21.4",
         "zod": "^4.4.3",
@@ -1064,6 +1065,10 @@
     "packages/tool-context": {
       "name": "@smithers-orchestrator/tool-context",
       "version": "0.28.0",
+      "dependencies": {
+        "ai": "^7.0.10",
+        "zod": "^4.4.3",
+      },
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~6.0.3",
@@ -2606,6 +2611,8 @@
     "@ungap/structured-clone": ["@ungap/structured-clone@1.2.0", "", {}, "sha512-zuVdFrMJiuCDQUMCzQaD6KL28MjnqqN8XnAqiEq9PNm/hCPTSGfrXCOfwj1ow4LFb/tNymJPwsNbVePc1xFqrQ=="],
 
     "@upsetjs/venn.js": ["@upsetjs/venn.js@2.0.0", "", { "optionalDependencies": { "d3-selection": "^3.0.0", "d3-transition": "^3.0.1" } }, "sha512-WbBhLrooyePuQ1VZxrJjtLvTc4NVfpOyKx0sKqioq9bX1C1m7Jgykkn8gLrtwumBioXIqam8DLxp88Adbue6Hw=="],
+
+    "@vectorize-io/hindsight-client": ["@vectorize-io/hindsight-client@0.8.4", "", {}, "sha512-Tk5wRRhRVSZ0FuGcUKqBZIidw/6eS81oTIKV0H5gmzKSM2r2CdoijmOi+NaP0v51rnoxVi0nFEHQXivt0J2+OA=="],
 
     "@vercel/oidc": ["@vercel/oidc@3.2.0", "", {}, "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="],
 

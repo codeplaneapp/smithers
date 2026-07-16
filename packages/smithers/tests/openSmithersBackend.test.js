@@ -36,8 +36,43 @@ describe("openSmithersBackend", () => {
     const api = await openSmithersBackend({}, { cwd, env: {} });
     try {
       expect(api.db.$client).toBeDefined();
+      expect(api.memoryStore.getFact).toBeFunction();
+      expect(api.memoryService.constructor.name).toBe("LocalMemoryRuntime");
+      expect(api.smithers(() => null).memoryService).toBe(api.memoryService);
+      await api.memoryService.retainMemory({
+        bank: "project-default",
+        content: "SQLite local recall is active.",
+        documentId: "run-sqlite",
+        updateMode: "replace",
+      });
+      expect(await api.memoryService.recallMemory({
+        banks: ["project-default"],
+        query: "local recall",
+      })).toHaveLength(1);
       expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
       expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
+    } finally {
+      await closeApi(api);
+    }
+  });
+
+  test("selects Hindsight memory only when HINDSIGHT_URL is configured", async () => {
+    const cwd = makeWorkspace("smithers-open-hindsight");
+    const api = await openSmithersBackend({}, {
+      cwd,
+      env: {
+        HINDSIGHT_URL: "http://127.0.0.1:18888/",
+        HINDSIGHT_API_KEY: "secret",
+        HINDSIGHT_BANK_PREFIX: "dev-",
+      },
+    });
+    try {
+      expect(api.memoryStore.constructor.name).toBe("HindsightMemoryStore");
+      expect(api.memoryService).toBe(api.memoryStore);
+      expect(api.memoryStore.baseUrl).toBe("http://127.0.0.1:18888");
+      expect(api.memoryStore.apiKey).toBe("secret");
+      expect(api.memoryStore.bankPrefix).toBe("dev-");
+      expect(api.smithers(() => null).memoryService).toBe(api.memoryService);
     } finally {
       await closeApi(api);
     }
@@ -48,7 +83,19 @@ describe("openSmithersBackend", () => {
     const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
     try {
       expect(api.db.dialect).toBe("postgres");
+      expect(api.memoryService.constructor.name).toBe("LocalMemoryRuntime");
+      await api.memoryService.retainMemory({
+        bank: "project-local",
+        content: "The PGlite workflow still uses local memory.",
+        documentId: "run-pglite",
+        updateMode: "replace",
+      });
+      expect(await api.memoryService.recallMemory({
+        banks: ["project-local"],
+        query: "local memory",
+      })).toHaveLength(1);
       expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(true);
+      expect(existsSync(join(cwd, ".smithers", "smithers.db"))).toBe(true);
       const rows = await api.db.connection.query({ text: "SELECT id FROM _smithers_schema_migrations ORDER BY id" });
       expect(rows.rows.map((row) => row.id)).toContain("0001_current_tables");
       expect(rows.rows.map((row) => row.id)).toContain("0016_add_workspace_checkpoints");

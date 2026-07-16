@@ -1,7 +1,11 @@
 import { Effect } from "effect";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
 import { createSmithers, createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
@@ -14,6 +18,68 @@ async function emitBackendResolution(attrs) {
 }
 
 /**
+ * Select the memory backend independently from workflow-state storage. A
+ * configured Hindsight service wins; otherwise the exact existing store stays
+ * local and the component gets a keyword runtime adapter over those facts.
+ * @param {any} api
+ * @param {Record<string, string | undefined>} env
+ * @param {string} localMemoryDbPath
+ */
+function attachMemoryBackend(api, env, localMemoryDbPath) {
+    const hindsightUrl = env.HINDSIGHT_URL?.trim();
+    let memoryStore;
+    let closeLocalMemory;
+    if (hindsightUrl) {
+        memoryStore = createHindsightMemoryStore({
+            baseUrl: hindsightUrl,
+            ...(env.HINDSIGHT_API_KEY ? { apiKey: env.HINDSIGHT_API_KEY } : {}),
+            ...(env.HINDSIGHT_BANK_PREFIX ? { bankPrefix: env.HINDSIGHT_BANK_PREFIX } : {}),
+        });
+    }
+    else if (api.db?.dialect !== "postgres") {
+        ensureSmithersTables(api.db);
+        memoryStore = createMemoryStore(api.db);
+    }
+    else {
+        mkdirSync(dirname(localMemoryDbPath), { recursive: true });
+        const sqlite = new Database(localMemoryDbPath);
+        sqlite.run("PRAGMA journal_mode = WAL");
+        sqlite.run("PRAGMA busy_timeout = 30000");
+        sqlite.run("PRAGMA synchronous = NORMAL");
+        sqlite.run("PRAGMA locking_mode = NORMAL");
+        sqlite.run("PRAGMA foreign_keys = ON");
+        const localDb = drizzle(sqlite);
+        ensureSmithersTables(localDb);
+        memoryStore = createMemoryStore(localDb);
+        closeLocalMemory = () => sqlite.close();
+    }
+    const memoryService = hindsightUrl ? memoryStore : createLocalMemoryRuntime(memoryStore);
+    const smithers = api.smithers;
+    const close = api.close;
+    return {
+        ...api,
+        memoryStore,
+        memoryService,
+        ...(closeLocalMemory ? {
+            close: async () => {
+                try {
+                    await close?.();
+                }
+                finally {
+                    closeLocalMemory();
+                }
+            },
+        } : {}),
+        smithers(build, smithersOpts) {
+            return {
+                ...smithers(build, smithersOpts),
+                memoryService,
+            };
+        },
+    };
+}
+
+/**
  * Resolve the storage backend and open the matching Smithers API. Delegates the
  * backend resolution and the fail-loud migration gate to
  * {@link resolveSmithersBackendChoice} so the gateway/server boot path and the
@@ -22,7 +88,11 @@ async function emitBackendResolution(attrs) {
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
  * @param {Schemas} schemas
  * @param {import("./OpenSmithersBackendOptions.ts").OpenSmithersBackendOptions} [opts]
- * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close?: () => Promise<void> }>}
+ * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & {
+ *   close?: () => Promise<void>;
+ *   memoryStore: import("@smithers-orchestrator/memory").MemoryStore;
+ *   memoryService: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
+ * }>}
  */
 export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}), opts = {}) {
     const startedAt = Date.now();
@@ -52,7 +122,7 @@ export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}),
             source,
             durationMs: Date.now() - startedAt,
         });
-        return api;
+        return attachMemoryBackend(api, env, join(workspaceRoot, ".smithers", "smithers.db"));
     }
     if (backend === "postgres") {
         const connectionString = opts.connectionString ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL;
@@ -73,7 +143,7 @@ export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}),
             source,
             durationMs: Date.now() - startedAt,
         });
-        return api;
+        return attachMemoryBackend(api, env, join(workspaceRoot, ".smithers", "smithers.db"));
     }
     const pgliteDataDir = resolve(cwd, opts.pgliteDataDir ?? join(workspaceRoot, ".smithers", "pg"));
     mkdirSync(dirname(pgliteDataDir), { recursive: true });
@@ -88,5 +158,5 @@ export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}),
         source,
         durationMs: Date.now() - startedAt,
     });
-    return api;
+    return attachMemoryBackend(api, env, join(workspaceRoot, ".smithers", "smithers.db"));
 }

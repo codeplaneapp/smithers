@@ -22,10 +22,14 @@
   "scripts": {
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsup --dts-only"
+    "build": "rm -f src/index.d.ts && tsup --dts-only"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "~6.0.3"
+  },
+  "dependencies": {
+    "ai": "^7.0.10",
+    "zod": "^4.4.3"
   }
 }
