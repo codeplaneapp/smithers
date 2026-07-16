@@ -1,3 +1,4 @@
+import * as node_fs_promises from 'node:fs/promises';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -143,7 +144,7 @@ type ValidatedSandboxBundle$1 = {
  * @returns {Promise<ValidatedSandboxBundle>}
  */
 declare function validateSandboxBundle(bundlePath: string, fsOverrides?: {
-    lstatLogs?: typeof import("node:fs/promises").lstat;
+    lstatLogs?: typeof node_fs_promises.lstat;
 }): Promise<ValidatedSandboxBundle>;
 /**
  * @param {{ bundlePath: string; output: unknown; status: "finished" | "failed" | "cancelled"; runId?: string; streamLogPath?: string | null; patches?: Array<{ path: string; content: string }>; artifacts?: Array<{ path: string; content: string }>; diffBundle?: unknown; }} params

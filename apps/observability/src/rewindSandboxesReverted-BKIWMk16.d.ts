@@ -103,8 +103,8 @@ type AgentSessionTranscriptEvent = {
     annotations: Record<string, string | number | boolean>;
 };
 
-type RunStatus = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "finished" | "continued" | "failed" | "cancelled";
-type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
+type RunStatus = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "finished" | "continued" | "failed" | "cancelled";
+type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
 type AgentCliActionKind = "turn" | "command" | "tool" | "file_change" | "web_search" | "todo_list" | "reasoning" | "warning" | "note";
 type AgentCliActionPhase = "started" | "updated" | "completed";
 type AgentCliEventLevel = "debug" | "info" | "warning" | "error";
@@ -697,24 +697,6 @@ type MetricsServiceShape$1 = {
     readonly snapshot: () => Effect.Effect<MetricsSnapshot>;
 };
 
-/**
- * @param {string} name
- * @returns {string}
- */
-declare function toPrometheusMetricName(name: string): string;
-
-/**
- * @returns {Effect.Effect<void>}
- */
-declare function updateProcessMetrics(): Effect.Effect<void>;
-
-/**
- * @param {SmithersEvent} event
- * @returns {Effect.Effect<void>}
- */
-declare function trackEvent(event: SmithersEvent): Effect.Effect<void>;
-type SmithersEvent = SmithersEvent$1;
-
 type SmithersMetricType = "counter" | "gauge" | "histogram";
 
 type SmithersMetricUnit = "count" | "milliseconds" | "seconds" | "bytes" | "tokens" | "ratio" | "depth";
@@ -732,6 +714,24 @@ type SmithersMetricDefinition = {
     readonly boundaries?: readonly number[];
     readonly defaultLabels?: readonly Readonly<Record<string, string>>[];
 };
+
+/**
+ * @param {string} name
+ * @returns {string}
+ */
+declare function toPrometheusMetricName(name: string): string;
+
+/**
+ * @returns {Effect.Effect<void>}
+ */
+declare function updateProcessMetrics(): Effect.Effect<void>;
+
+/**
+ * @param {SmithersEvent} event
+ * @returns {Effect.Effect<void>}
+ */
+declare function trackEvent(event: SmithersEvent): Effect.Effect<void>;
+type SmithersEvent = SmithersEvent$1;
 
 declare const smithersMetricCatalog: SmithersMetricDefinition[];
 

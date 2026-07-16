@@ -104,16 +104,13 @@ declare function revertToJjPointer(pointer: string, cwd?: string): Effect.Effect
  * @returns {Effect.Effect<boolean, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
 declare function isJjRepo(cwd?: string): Effect.Effect<boolean, never, _effect_platform_CommandExecutor.CommandExecutor>;
-/**
- * Create a new JJ workspace at `path` with a friendly `name`.
- * NOTE: Syntax may vary between JJ versions; this helper aims to be permissive.
- *
- * @param {string} name
- * @param {string} path
- * @param {WorkspaceAddOptions} [opts]
- * @returns {Effect.Effect<WorkspaceResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
- */
-declare function workspaceAdd(name: string, path: string, opts?: WorkspaceAddOptions): Effect.Effect<WorkspaceResult, never, _effect_platform_CommandExecutor.CommandExecutor>;
+declare function workspaceAdd(name: any, path: any, opts?: {}): Effect.Effect<{
+    success: boolean;
+    error: string;
+} | {
+    success: boolean;
+    error?: undefined;
+}, never, _effect_platform_CommandExecutor.CommandExecutor>;
 /**
  * List existing workspaces using a JJ template for structured output.
  * Falls back to parsing human output if `-T` is unavailable.

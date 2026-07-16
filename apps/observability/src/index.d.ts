@@ -1,7 +1,7 @@
 import { LogLevel, Effect, Context, Layer, FiberRef } from 'effect';
-import * as Tracer$1 from 'effect/Tracer';
-import { M as MetricsServiceShape$1, a as MetricLabels$1, b as MetricsSnapshot$1, S as SmithersEvent$1, c as SmithersMetricDefinition$1 } from './rewindSandboxesReverted-CL2v8C7d.js';
-export { d as activeNodes, e as activeRuns, f as approvalPending, g as approvalWaitDuration, h as approvalsDenied, i as approvalsGranted, j as approvalsRequested, k as attemptDuration, l as cacheHits, m as cacheMisses, n as dbQueryDuration, o as dbRetries, p as dbTransactionDuration, q as dbTransactionRetries, r as dbTransactionRollbacks, s as errorsTotal, t as eventsEmittedTotal, u as externalWaitAsyncPending, v as hotReloadDuration, w as hotReloadFailures, x as hotReloads, y as httpRequestDuration, z as httpRequests, A as metricsServiceAdapter, B as nodeDuration, C as nodeRetriesTotal, D as nodesFailed, E as nodesFinished, F as nodesStarted, G as processHeapUsedBytes, H as processMemoryRssBytes, I as processUptimeSeconds, J as promptSizeBytes, K as replaysStarted, L as responseSizeBytes, N as rewindDurationMs, O as rewindFramesDeleted, P as rewindRollbackTotal, Q as rewindSandboxesReverted, R as rewindTotal, T as runDuration, U as runForksCreated, V as runsAncestryDepth, W as runsCancelledTotal, X as runsCarriedStateBytes, Y as runsContinuedTotal, Z as runsFailedTotal, _ as runsFinishedTotal, $ as runsResumedTotal, a0 as runsTotal, a1 as sandboxActive, a2 as sandboxBundleSizeBytes, a3 as sandboxCompletedTotal, a4 as sandboxCreatedTotal, a5 as sandboxDurationMs, a6 as sandboxPatchCount, a7 as sandboxTransportDurationMs, a8 as schedulerConcurrencyUtilization, a9 as schedulerQueueDepth, aa as schedulerWaitDuration, ab as scorerEventsFailed, ac as scorerEventsFinished, ad as scorerEventsStarted, ae as smithersMetricCatalog, af as snapshotDuration, ag as snapshotsCaptured, ah as timerDelayDuration, ai as timersCancelled, aj as timersCreated, ak as timersFired, al as timersPending, am as toPrometheusMetricName, an as tokensCacheReadTotal, ao as tokensCacheWriteTotal, ap as tokensContextWindowBucketTotal, aq as tokensContextWindowPerCall, ar as tokensInputPerCall, as as tokensInputTotal, at as tokensOutputPerCall, au as tokensOutputTotal, av as tokensReasoningTotal, aw as toolCallErrorsTotal, ax as toolCallsTotal, ay as toolDuration, az as toolOutputTruncatedTotal, aA as trackSmithersEvent, aB as updateProcessMetrics, aC as vcsDuration } from './rewindSandboxesReverted-CL2v8C7d.js';
+import * as effect_Tracer from 'effect/Tracer';
+import { M as MetricsServiceShape$1, a as MetricLabels$1, b as MetricsSnapshot$1, S as SmithersEvent$1, c as SmithersMetricDefinition$1 } from './rewindSandboxesReverted-BKIWMk16.js';
+export { d as activeNodes, e as activeRuns, f as approvalPending, g as approvalWaitDuration, h as approvalsDenied, i as approvalsGranted, j as approvalsRequested, k as attemptDuration, l as cacheHits, m as cacheMisses, n as dbQueryDuration, o as dbRetries, p as dbTransactionDuration, q as dbTransactionRetries, r as dbTransactionRollbacks, s as errorsTotal, t as eventsEmittedTotal, u as externalWaitAsyncPending, v as hotReloadDuration, w as hotReloadFailures, x as hotReloads, y as httpRequestDuration, z as httpRequests, A as metricsServiceAdapter, B as nodeDuration, C as nodeRetriesTotal, D as nodesFailed, E as nodesFinished, F as nodesStarted, G as processHeapUsedBytes, H as processMemoryRssBytes, I as processUptimeSeconds, J as promptSizeBytes, K as replaysStarted, L as responseSizeBytes, N as rewindDurationMs, O as rewindFramesDeleted, P as rewindRollbackTotal, Q as rewindSandboxesReverted, R as rewindTotal, T as runDuration, U as runForksCreated, V as runsAncestryDepth, W as runsCancelledTotal, X as runsCarriedStateBytes, Y as runsContinuedTotal, Z as runsFailedTotal, _ as runsFinishedTotal, $ as runsResumedTotal, a0 as runsTotal, a1 as sandboxActive, a2 as sandboxBundleSizeBytes, a3 as sandboxCompletedTotal, a4 as sandboxCreatedTotal, a5 as sandboxDurationMs, a6 as sandboxPatchCount, a7 as sandboxTransportDurationMs, a8 as schedulerConcurrencyUtilization, a9 as schedulerQueueDepth, aa as schedulerWaitDuration, ab as scorerEventsFailed, ac as scorerEventsFinished, ad as scorerEventsStarted, ae as smithersMetricCatalog, af as snapshotDuration, ag as snapshotsCaptured, ah as timerDelayDuration, ai as timersCancelled, aj as timersCreated, ak as timersFired, al as timersPending, am as toPrometheusMetricName, an as tokensCacheReadTotal, ao as tokensCacheWriteTotal, ap as tokensContextWindowBucketTotal, aq as tokensContextWindowPerCall, ar as tokensInputPerCall, as as tokensInputTotal, at as tokensOutputPerCall, au as tokensOutputTotal, av as tokensReasoningTotal, aw as toolCallErrorsTotal, ax as toolCallsTotal, ay as toolDuration, az as toolOutputTruncatedTotal, aA as trackSmithersEvent, aB as updateProcessMetrics, aC as vcsDuration } from './rewindSandboxesReverted-BKIWMk16.js';
 import * as effect_Metric from 'effect/Metric';
 import * as BunContext from '@effect/platform-bun/BunContext';
 import 'effect/MetricState';
@@ -21,7 +21,7 @@ type ResolvedSmithersObservabilityOptions$2 = {
 type SmithersObservabilityService$1 = {
     readonly options: ResolvedSmithersObservabilityOptions$2;
     readonly annotate: (attributes: Readonly<Record<string, unknown>>) => Effect.Effect<void>;
-    readonly withSpan: <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Readonly<Record<string, unknown>>) => Effect.Effect<A, E, Exclude<R, Tracer$1.ParentSpan>>;
+    readonly withSpan: <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Readonly<Record<string, unknown>>) => Effect.Effect<A, E, Exclude<R, effect_Tracer.ParentSpan>>;
 };
 
 type SmithersObservabilityOptions$4 = {
@@ -62,9 +62,9 @@ declare namespace smithersSpanNames {
 }
 
 /**
- * @returns {Tracer.AnySpan | undefined}
+ * @returns {import("effect/Tracer").AnySpan | undefined}
  */
-declare function getCurrentSmithersTraceSpan(): Tracer.AnySpan | undefined;
+declare function getCurrentSmithersTraceSpan(): effect_Tracer.AnySpan | undefined;
 
 /**
  * @returns {| Readonly<Record<string, string>> | undefined}
@@ -92,12 +92,12 @@ declare function annotateSmithersTrace(attributes?: Readonly<Record<string, unkn
  * @param {string} name
  * @param {Effect.Effect<A, E, R>} effect
  * @param {Readonly<Record<string, unknown>>} [attributes]
- * @param {Omit<Tracer.SpanOptions, "attributes" | "kind"> & { readonly kind?: Tracer.SpanKind; }} [_options]
- * @returns {Effect.Effect<A, E, Exclude<R, Tracer.ParentSpan>>}
+ * @param {Omit<import("effect/Tracer").SpanOptions, "attributes" | "kind"> & { readonly kind?: import("effect/Tracer").SpanKind; }} [_options]
+ * @returns {Effect.Effect<A, E, Exclude<R, import("effect/Tracer").ParentSpan>>}
  */
-declare function withSmithersSpan<A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Readonly<Record<string, unknown>>, _options?: Omit<Tracer.SpanOptions, "attributes" | "kind"> & {
-    readonly kind?: Tracer.SpanKind;
-}): Effect.Effect<A, E, Exclude<R, Tracer.ParentSpan>>;
+declare function withSmithersSpan<A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Readonly<Record<string, unknown>>, _options?: Omit<effect_Tracer.SpanOptions, "attributes" | "kind"> & {
+    readonly kind?: effect_Tracer.SpanKind;
+}): Effect.Effect<A, E, Exclude<R, effect_Tracer.ParentSpan>>;
 
 /**
  * @returns {string}

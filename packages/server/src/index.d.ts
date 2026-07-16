@@ -2335,8 +2335,8 @@ declare function summarizeBundle(bundle: {
 
 /**
  * Compute the final run diff directly between the run base and terminal VCS
- * revisions. This deliberately does not concatenate per-node patches: retries
- * and reverted work must be represented by the terminal tree.
+ * revisions. Each checkout lane is reduced to its terminal tree; cached node
+ * bundles are used only when the terminal checkout has been reaped.
  */
 declare function getRunDiffRoute({ runId: rawRunId, resolveRun, computeDiffBundleBetweenRefsImpl, resolveCommitPointerImpl, }: {
     runId: any;
@@ -2345,29 +2345,13 @@ declare function getRunDiffRoute({ runId: rawRunId, resolveRun, computeDiffBundl
     resolveCommitPointerImpl?: typeof resolveCommitPointer | undefined;
 }): Promise<{
     ok: boolean;
-    payload: {
-        seq: number;
-        baseRef: any;
-        patches: any[];
-    };
-    error?: undefined;
-} | {
-    ok: boolean;
-    payload: {
-        status: string;
-        baseRef: any;
-        terminalRef: string | null;
-        sizeBytes: number;
-        maxBytes: number;
-    };
-    error?: undefined;
+    payload: any;
 } | {
     ok: boolean;
     error: {
         code: any;
         message: string;
     };
-    payload?: undefined;
 }>;
 declare const RUN_DIFF_MAX_BYTES: number;
 
