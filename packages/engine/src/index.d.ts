@@ -2,7 +2,7 @@ import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-o
 import { SmithersWorkflow as SmithersWorkflow$2 } from '@smithers-orchestrator/components/SmithersWorkflow';
 import * as _smithers_orchestrator_scheduler_SmithersWorkflowOptions from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
 import * as effect from 'effect';
-import { Schema, Effect, Layer, Context, Exit, Scope } from 'effect';
+import { Effect, Exit, Schema, Scope, Layer, Context } from 'effect';
 import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 import * as _smithers_orchestrator_db_adapter_RunRow from '@smithers-orchestrator/db/adapter/RunRow';
@@ -35,6 +35,7 @@ import * as Rpc from '@effect/rpc/Rpc';
 import * as RpcGroup from '@effect/rpc/RpcGroup';
 import * as zod from 'zod';
 import { z } from 'zod';
+import * as _smithers_orchestrator_graph_ProofBinding from '@smithers-orchestrator/graph/ProofBinding';
 import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
 import * as _smithers_orchestrator_errors_toSmithersError from '@smithers-orchestrator/errors/toSmithersError';
 export { SqlMessageStorage, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getSqlMessageStorage } from '@smithers-orchestrator/db/sql-message-storage';
@@ -104,6 +105,107 @@ declare class AlertRuntime {
 type AlertHumanRequestOptions = AlertHumanRequestOptions$1;
 type AlertRuntimeServices = AlertRuntimeServices$1;
 type SmithersAlertPolicy = _smithers_orchestrator_scheduler_SmithersWorkflowOptions.SmithersAlertPolicy;
+
+/**
+ * Ownership record Smithers writes into a worktree's git admin directory
+ * (`<git-common-dir>/worktrees/<name>/smithers-owner.json`) when the engine
+ * creates it for a `<Worktree>` node. It lives in git's private admin area, not
+ * in the checkout, so it can never dirty the worktree it describes, and git
+ * deletes it along with the worktree registration on `git worktree prune`.
+ *
+ * Presence of this file is what makes a worktree reapable: worktrees a human
+ * created by hand have no record and are never candidates.
+ */
+type WorktreeOwner$1 = {
+    runId: string;
+    workflowName?: string;
+    /** "jj" workspaces need `jj workspace forget` before their directory goes away. */
+    vcsType: "git" | "jj";
+    /** jj workspace name, i.e. what `jj workspace forget` takes. */
+    workspaceName?: string;
+    baseBranch?: string;
+    createdAtMs: number;
+    /** Refreshed every time a task re-enters the worktree; the reap age filter reads this. */
+    updatedAtMs: number;
+};
+
+/**
+ * Every worktree of `rootDir` that Smithers created for a `<Worktree>` node,
+ * read straight out of git's own admin area. Worktrees without an ownership
+ * record — anything a human added by hand — are not listed and so are never
+ * reap candidates. Entries whose checkout is already gone are still listed
+ * (`exists: false`) so `git worktree prune` can clear their stale registration.
+ *
+ * @param {string} rootDir
+ * @returns {Promise<SmithersWorktree[]>}
+ */
+declare function listSmithersWorktrees(rootDir: string): Promise<SmithersWorktree[]>;
+type WorktreeOwner = WorktreeOwner$1;
+type SmithersWorktree = {
+    path: string;
+    adminDir: string;
+    owner: WorktreeOwner;
+    exists: boolean;
+    locked: boolean;
+};
+
+/**
+ * Reclaim the worktrees of runs that are over. A `<Worktree>` lane is a full
+ * checkout; a 64-lane run leaves 64 of them behind, and nothing ever removed
+ * them, so repositories accumulated hundreds of registrations and tens of GB.
+ *
+ * Reaping is refused unless every one of these holds, and `force` relaxes only
+ * the last one:
+ *   - the worktree carries a Smithers ownership record (we created it);
+ *   - its owning run is in a terminal state;
+ *   - it holds no uncommitted, untracked, or unpushed work.
+ *
+ * @param {{
+ *   rootDir: string,
+ *   getRunStatus: (runId: string) => Promise<string | null | undefined>,
+ *   runId?: string,
+ *   force?: boolean,
+ *   dryRun?: boolean,
+ *   olderThanMs?: number,
+ *   nowMs?: number,
+ * }} options
+ * @returns {Promise<ReapWorktreesResult>}
+ */
+declare function reapWorktrees(options: {
+    rootDir: string;
+    getRunStatus: (runId: string) => Promise<string | null | undefined>;
+    runId?: string;
+    force?: boolean;
+    dryRun?: boolean;
+    olderThanMs?: number;
+    nowMs?: number;
+}): Promise<ReapWorktreesResult>;
+/** @typedef {import("./listSmithersWorktrees.js").SmithersWorktree} SmithersWorktree */
+/** @typedef {{ path: string; runId: string; bytes: number }} ReapedWorktree */
+/** @typedef {{ path: string; runId: string; reason: string }} SkippedWorktree */
+/** @typedef {{ removed: ReapedWorktree[]; skipped: SkippedWorktree[]; bytesFreed: number; dryRun: boolean }} ReapWorktreesResult */
+/**
+ * A run in any of these states will never schedule another task, so nothing can
+ * reach into its worktrees again. Everything else — running, paused, and every
+ * `waiting-*` state — is live work and is never reaped.
+ */
+declare const TERMINAL_RUN_STATUSES: Set<string>;
+type ReapedWorktree = {
+    path: string;
+    runId: string;
+    bytes: number;
+};
+type SkippedWorktree = {
+    path: string;
+    runId: string;
+    reason: string;
+};
+type ReapWorktreesResult = {
+    removed: ReapedWorktree[];
+    skipped: SkippedWorktree[];
+    bytesFreed: number;
+    dryRun: boolean;
+};
 
 /**
  * @param {SmithersDb} adapter
@@ -440,12 +542,13 @@ declare function createDocWatcher(deps: {
 
 /**
  * @param {unknown} value
- * @returns {| { name: string; sideEffect: boolean; idempotent: boolean; } | null}
+ * @returns {| { name: string; sideEffect: boolean; idempotent: boolean; acceptsIdempotencyKey?: boolean; } | null}
  */
 declare function getDefinedToolMetadata(value: unknown): {
     name: string;
     sideEffect: boolean;
     idempotent: boolean;
+    acceptsIdempotencyKey?: boolean;
 } | null;
 
 type HumanRequestStatus$1 = "pending" | "answered" | "cancelled" | "expired";
@@ -3031,6 +3134,9 @@ declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_
     ralphId?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;
+    proofBindingRequired?: boolean;
+    proofBindings?: readonly _smithers_orchestrator_graph_ProofBinding.ProofBinding[];
+    proofBindingStatus?: "current" | "missing" | "stale";
     forkSource?: string;
     worktreeId?: string;
     worktreePath?: string;
@@ -3062,6 +3168,7 @@ declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_
     };
     skipIf: boolean;
     retries: number;
+    maxSchemaRetries?: number;
     retryPolicy?: _smithers_orchestrator_graph_types.RetryPolicy;
     timeoutMs: number | null;
     heartbeatTimeoutMs: number | null;
@@ -3106,4 +3213,4 @@ type JsonSchema = Record<string, any>;
 type ChildWorkflowDefinition = ChildWorkflowDefinition$2;
 type ChildWorkflowFileRef = ChildWorkflowFileRef$2;
 
-export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnyEffect, type AnySchema, type AnySmithersWorkflow, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuildAgentAskRequestInput, type BuilderApi, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type BuiltSmithersWorkflow, COMPLETED_ACTIVITY_RESULTS_MAX, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, type ChildWorkflowFileRef, type ComponentDefinition, type ComponentDefinitionBuilder, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, DEFAULT_AGENT_ASK_NODE_ID, type DiffBundle, EventBus$1 as EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanAnswerOutcome, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, OPTIMIZATION_ARTIFACT_ENV, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunResult$2 as RunResult, type RunRow, RunStatusSchema, type RunSummary, RunSummarySchema, type SQLiteTable, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, Smithers, type SmithersAlertPolicy, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, type StaticTaskBridgeToolConfig, type StepOptions, type TaskActivityContext, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowDefinitionBuilder, type WorkflowGraph, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type XmlNode, type _TaskActivityContext, __approvalInternals, __builderInternals, __childWorkflowInternals, __computeTaskBridgeInternals, __diffBundleInternals, __humanRequestInternals, __staticTaskBridgeInternals, __workflowBridgeInternals, applyDiffBundle, applyOptimizationArtifactToTasks, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildAgentAskRequestId, buildAgentAskRequestRow, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cleanupGenerations, completedActivityResultsSize, computeDiffBundle, computeDiffBundleBetweenRefs, createDocWatcher, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, finalizeCancelledRun, fragment, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isHumanRequestPastTimeout, isHumanTaskMeta, isPidAlive, isResolvedHumanRequestStatus, isRunHeartbeatFresh, isTaskResultFailure, isWorkflowFileRef, jsonSchemaToZod, jsonSchemaToZodType, listRuns, loadOptimizationArtifact, loadWorkflowFileRef, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, parseRuntimeOwnerPid, renderFrame, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, startDocFileSync, subscribeTaskWorkerDispatches, syncDocsFromDisk, usePatched, validateHumanRequestValue, waitForHumanAnswer, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime, workflow };
+export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnyEffect, type AnySchema, type AnySmithersWorkflow, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuildAgentAskRequestInput, type BuilderApi, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type BuiltSmithersWorkflow, COMPLETED_ACTIVITY_RESULTS_MAX, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, type ChildWorkflowFileRef, type ComponentDefinition, type ComponentDefinitionBuilder, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, DEFAULT_AGENT_ASK_NODE_ID, type DiffBundle, EventBus$1 as EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanAnswerOutcome, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, OPTIMIZATION_ARTIFACT_ENV, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, type ReapWorktreesResult, type ReapedWorktree, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunResult$2 as RunResult, type RunRow, RunStatusSchema, type RunSummary, RunSummarySchema, type SQLiteTable, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, type SkippedWorktree, Smithers, type SmithersAlertPolicy, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, type StaticTaskBridgeToolConfig, type StepOptions, TERMINAL_RUN_STATUSES, type TaskActivityContext, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowDefinitionBuilder, type WorkflowGraph, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type WorktreeOwner, type XmlNode, type _TaskActivityContext, __approvalInternals, __builderInternals, __childWorkflowInternals, __computeTaskBridgeInternals, __diffBundleInternals, __humanRequestInternals, __staticTaskBridgeInternals, __workflowBridgeInternals, applyDiffBundle, applyOptimizationArtifactToTasks, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildAgentAskRequestId, buildAgentAskRequestRow, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cleanupGenerations, completedActivityResultsSize, computeDiffBundle, computeDiffBundleBetweenRefs, createDocWatcher, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, finalizeCancelledRun, fragment, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isHumanRequestPastTimeout, isHumanTaskMeta, isPidAlive, isResolvedHumanRequestStatus, isRunHeartbeatFresh, isTaskResultFailure, isWorkflowFileRef, jsonSchemaToZod, jsonSchemaToZodType, listRuns, listSmithersWorktrees, loadOptimizationArtifact, loadWorkflowFileRef, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, parseRuntimeOwnerPid, reapWorktrees, renderFrame, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, startDocFileSync, subscribeTaskWorkerDispatches, syncDocsFromDisk, usePatched, validateHumanRequestValue, waitForHumanAnswer, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime, workflow };

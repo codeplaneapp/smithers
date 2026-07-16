@@ -39,6 +39,9 @@ export class AnthropicAgent extends ToolLoopAgent {
         const outputArgs = args.outputSchema
             ? { output: Output.object({ schema: args.outputSchema }) }
             : {};
+        const toolArgs = args.tools && typeof args.tools === "object"
+            ? { tools: args.tools }
+            : {};
         const onStepEnd = args.onStepEnd ?? args.onStepFinish;
         if (!args.onStdout) {
             return super.generate({
@@ -46,6 +49,7 @@ export class AnthropicAgent extends ToolLoopAgent {
                 abortSignal: args.abortSignal,
                 ...promptArgs,
                 ...outputArgs,
+                ...toolArgs,
                 timeout: args.timeout,
                 onStepEnd,
             });
@@ -55,6 +59,7 @@ export class AnthropicAgent extends ToolLoopAgent {
             abortSignal: args.abortSignal,
             ...promptArgs,
             ...outputArgs,
+            ...toolArgs,
             timeout: args.timeout,
             onStepEnd,
         }).then((stream) => streamResultToGenerateResult(stream, args.onStdout));

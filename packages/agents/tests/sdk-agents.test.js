@@ -150,6 +150,30 @@ describe("SDK agents", () => {
             type: "json",
         });
     });
+    test.each([
+        ["OpenAIAgent", OpenAIAgent],
+        ["AnthropicAgent", AnthropicAgent],
+    ])("%s forwards runtime tools to the SDK model", async (_name, Agent) => {
+        const fake = createFakeModel();
+        const agent = new Agent({
+            id: "sdk-runtime-tools",
+            model: fake.model,
+        });
+        await agent.generate({
+            prompt: "Use memory if it helps.",
+            tools: {
+                remember: {
+                    description: "Remember a durable fact.",
+                    inputSchema: z.object({ content: z.string() }),
+                    execute: async ({ content }) => ({ saved: content.length > 0 }),
+                },
+            },
+        });
+        expect(fake.getLastCall()?.tools?.[0]).toMatchObject({
+            name: "remember",
+            description: "Remember a durable fact.",
+        });
+    });
     test("OpenAIAgent streams assistant deltas through onStdout", async () => {
         const model = new MockLanguageModelV3({
             modelId: "mock-stream-model",

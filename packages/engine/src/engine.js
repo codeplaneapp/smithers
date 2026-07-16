@@ -72,6 +72,7 @@ import { applyOptimizationArtifactToTasks } from "./optimization-artifact.js";
 import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.js";
 import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
 import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
+import { buildMemoryPromptBlock, createTaskMemoryTools, retainTaskMemory } from "./memory-runtime.js";
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
@@ -3524,7 +3525,7 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; agentPreflightCache?: WeakMap<object, Promise<void>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
+ * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
@@ -3848,6 +3849,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let cacheJjBase = null;
     let responseText = null;
     let effectiveAgent = null;
+    let generationTools;
     /** @type {number | null} */
     let effectiveChainIndex = null;
     let supportsNativeStructuredOutput = false;
@@ -4635,6 +4637,35 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         failureRetryable: false,
                     });
                 }
+                if (desc.memoryConfig && toolConfig.memoryService) {
+                    const cacheKey = `${desc.nodeId}:${desc.iteration}`;
+                    let memoryBlockPromise = toolConfig.memoryPrefetchCache?.get(cacheKey);
+                    if (!memoryBlockPromise) {
+                        memoryBlockPromise = buildMemoryPromptBlock(toolConfig.memoryService, desc.memoryConfig, effectivePrompt, {
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            taskSignal,
+                        });
+                        toolConfig.memoryPrefetchCache?.set(cacheKey, memoryBlockPromise);
+                    }
+                    const memoryBlock = await memoryBlockPromise;
+                    if (memoryBlock) {
+                        effectivePrompt = `${memoryBlock}\n\n${effectivePrompt}`;
+                    }
+                    if (desc.memoryConfig.tools) {
+                        const memoryTools = createTaskMemoryTools(toolConfig.memoryService, desc.memoryConfig, {
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            taskSignal,
+                        });
+                        generationTools = {
+                            ...(effectiveAgent.tools && typeof effectiveAgent.tools === "object" ? effectiveAgent.tools : {}),
+                            ...memoryTools,
+                        };
+                    }
+                }
                 // Tasks running in an isolated worktree get an explicit isolation
                 // contract up front. Without it, agents finding no node_modules
                 // improvise symlink-sharing with the parent checkout and corrupt
@@ -4970,6 +5001,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                                     options: undefined,
                                     abortSignal: taskSignal,
                                     ...agentCall,
+                                    ...(generationTools ? { tools: generationTools } : {}),
                                     resumeSession,
                                     continueSession,
                                     durabilitySocket: durability.socketPath,
@@ -5298,6 +5330,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             options: undefined,
                             abortSignal: taskSignal,
                             prompt: jsonPrompt,
+                            ...(generationTools ? { tools: generationTools } : {}),
                             rootDir: taskRoot,
                             maxOutputBytes: toolConfig.maxOutputBytes,
                             taskContext: {
@@ -5592,6 +5625,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 options: undefined,
                 abortSignal: taskSignal,
                 messages: retryMessages,
+                ...(generationTools ? { tools: generationTools } : {}),
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
                 taskContext: {
@@ -5797,6 +5831,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         if (!completionClaimed) {
             return;
         }
+        retainTaskMemory(toolConfig.memoryService, desc, payload, { runId });
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFinished",
             runId,
@@ -6489,6 +6524,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
         maxOutputBytes,
         toolTimeoutMs,
         agentPreflightCache: new WeakMap(),
+        memoryService: workflow.memoryService,
+        memoryPrefetchCache: new Map(),
         traceContext: {
             workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
             workflowHash: runMetadata.workflowHash ?? null,
