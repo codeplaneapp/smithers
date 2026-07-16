@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { bridgeSignalResolve } from "./effect/durable-deferred-bridge.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { normalizeWaitForEventCorrelationId } from "@smithers-orchestrator/db/waitForEventAttempt";
 /** @typedef {import("./SignalRunOptions.ts").SignalRunOptions} SignalRunOptions */
 
 /**
@@ -41,6 +42,7 @@ function serializeSignalPayload(payload) {
  */
 export function signalRun(adapter, runId, signalName, payload, options = {}) {
     const normalizedSignalName = normalizeSignalName(signalName);
+    const normalizedCorrelationId = normalizeWaitForEventCorrelationId(options.correlationId);
     const payloadJson = serializeSignalPayload(payload);
     const receivedAtMs = options.timestampMs ?? nowMs();
     return Effect.gen(function* () {
@@ -53,7 +55,7 @@ export function signalRun(adapter, runId, signalName, payload, options = {}) {
         const seq = yield* adapter.insertSignalWithNextSeq({
             runId,
             signalName: normalizedSignalName,
-            correlationId: options.correlationId ?? null,
+            correlationId: normalizedCorrelationId,
             payloadJson,
             receivedAtMs,
             receivedBy: options.receivedBy ?? null,
@@ -62,12 +64,12 @@ export function signalRun(adapter, runId, signalName, payload, options = {}) {
             runId,
             seq,
             signalName: normalizedSignalName,
-            correlationId: options.correlationId ?? null,
+            correlationId: normalizedCorrelationId,
             receivedAtMs,
         };
         yield* Effect.promise(() => bridgeSignalResolve(adapter, runId, {
             signalName: delivered.signalName,
-            correlationId: delivered.correlationId ?? null,
+            correlationId: normalizedCorrelationId,
             payloadJson,
             seq: delivered.seq,
             receivedAtMs: delivered.receivedAtMs,
@@ -76,6 +78,6 @@ export function signalRun(adapter, runId, signalName, payload, options = {}) {
     }).pipe(Effect.annotateLogs({
         runId,
         signalName: normalizedSignalName,
-        correlationId: options.correlationId ?? null,
+        correlationId: normalizedCorrelationId,
     }), Effect.withLogSpan("signal:send"));
 }
