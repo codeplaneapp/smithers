@@ -4,6 +4,7 @@ import { ClaudeWorkflowPhasePlan as ClaudeWorkflowPhasePlan$1 } from './ClaudeWo
 import { ClaudeWorkflowPhase as ClaudeWorkflowPhase$1 } from './ClaudeWorkflowPhase.js';
 import { ClaudeWorkflowNodeKind as ClaudeWorkflowNodeKind$1, ClaudeWorkflowNodePhase as ClaudeWorkflowNodePhase$1 } from './ClaudeWorkflowNodePhase.js';
 export { extractFromHost, extractGraph } from './extract.js';
+export { normalizeTaskMemoryConfig } from './normalizeTaskMemoryConfig.js';
 export { PhasePlanTask, buildClaudeWorkflowPhasePlan } from './buildClaudeWorkflowPhasePlan.js';
 export { deriveClaudeWorkflowPhases } from './deriveClaudeWorkflowPhases.js';
 export { deriveClaudeWorkflowPhasesFromFrame } from './deriveClaudeWorkflowPhasesFromFrame.js';

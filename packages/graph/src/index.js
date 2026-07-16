@@ -36,6 +36,7 @@
 // @smithers-type-exports-end
 
 export * from "./extract.js";
+export * from "./normalizeTaskMemoryConfig.js";
 export * from "./buildClaudeWorkflowPhasePlan.js";
 export * from "./deriveClaudeWorkflowPhases.js";
 export * from "./deriveClaudeWorkflowPhasesFromFrame.js";

@@ -4,6 +4,7 @@ import { validateForkSources } from "./validateForkSources.js";
 import { resolveStableId } from "./utils/tree-ids.js";
 import { coerceFiniteNumber } from "./utils/numeric-props.js";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
+import { normalizeTaskMemoryConfig } from "./normalizeTaskMemoryConfig.js";
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */
 /** @typedef {import("./ExtractOptions.ts").ExtractOptions} ExtractOptions */
@@ -330,11 +331,11 @@ function aspects(value) {
  * @returns {TaskDescriptor["memoryConfig"]}
  */
 function taskMemoryConfig(contextValue, taskValue) {
-    if (taskValue && typeof taskValue === "object" && !Array.isArray(taskValue)) {
-        return /** @type {TaskDescriptor["memoryConfig"]} */ (taskValue);
+    if (taskValue !== undefined) {
+        return normalizeTaskMemoryConfig(taskValue);
     }
-    if (contextValue && typeof contextValue === "object" && !Array.isArray(contextValue)) {
-        return /** @type {TaskDescriptor["memoryConfig"]} */ (contextValue);
+    if (contextValue !== undefined) {
+        return normalizeTaskMemoryConfig(contextValue);
     }
     return undefined;
 }

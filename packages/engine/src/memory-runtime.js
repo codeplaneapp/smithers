@@ -16,6 +16,13 @@ const PROJECT_TAG_PATTERN = /^(?:branch|stream):/u;
 const SOURCE_TAG_PATTERN = /^source:(?:chat|run|reflection|import)$/u;
 const SCOPE_TAG_PATTERN = /^scope:(?:main|branch)$/u;
 
+/** @param {TaskDescriptor["memoryConfig"]} config */
+function memoryMaxTokens(config) {
+    return Number.isSafeInteger(config?.maxTokens) && Number(config?.maxTokens) > 0
+        ? Number(config?.maxTokens)
+        : 2048;
+}
+
 /** @param {string} tag */
 function isStableProjectTag(tag) {
     if (!PROJECT_TAG_PATTERN.test(tag)) {
@@ -283,6 +290,7 @@ export async function buildMemoryPromptBlock(service, config, prompt, context) {
         return null;
     }
     const primerIds = Array.isArray(config?.primers) ? config.primers : [];
+    const maxTokens = memoryMaxTokens(config);
     const recall = config?.recall ?? "auto";
     const query = recall === false ? null : recall === "auto" ? prompt : typeof recall === "string" ? recall : null;
     if (primerIds.length === 0 && !query) {
@@ -307,7 +315,7 @@ export async function buildMemoryPromptBlock(service, config, prompt, context) {
                     query,
                     tagGroupsByBank: recallTagGroupsByBank(config, banks),
                     budget: config?.budget ?? "mid",
-                    maxTokens: config?.maxTokens ?? 2048,
+                    maxTokens,
                     signal,
                 })
                 : Promise.resolve([]),
@@ -330,7 +338,7 @@ export async function buildMemoryPromptBlock(service, config, prompt, context) {
         if (primers.length === 0 && memories.length === 0) {
             return null;
         }
-        return fenceMemoryContext(sections.join("\n"), config?.maxTokens ?? 2048);
+        return fenceMemoryContext(sections.join("\n"), maxTokens);
     }
     catch (error) {
         logWarning("memory recall unavailable; continuing without prompt injection", {
@@ -353,6 +361,7 @@ export async function buildMemoryPromptBlock(service, config, prompt, context) {
 export function createTaskMemoryTools(service, config, context) {
     const configuredBanks = memoryBanks(config);
     const configuredTags = Array.isArray(config?.tags) ? config.tags : [];
+    const configuredMaxTokens = memoryMaxTokens(config);
     const resolveSelectedBanks = (selected) => {
         if (selected === undefined) {
             return configuredBanks;
@@ -405,12 +414,12 @@ export function createTaskMemoryTools(service, config, context) {
             query: z.string().min(1),
             bank: z.string().min(1).optional(),
             tags: z.array(z.string().min(1)).optional(),
-            maxTokens: z.number().int().positive().optional(),
+            maxTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
         }),
         sideEffect: false,
         execute: async ({ query, bank, tags, maxTokens }) => {
             const banks = resolveSelectedBanks(bank);
-            const effectiveMaxTokens = Math.min(maxTokens ?? config?.maxTokens ?? 2048, config?.maxTokens ?? 2048);
+            const effectiveMaxTokens = Math.min(maxTokens ?? configuredMaxTokens, configuredMaxTokens);
             const memories = await service.recallMemory({
                 banks,
                 query,

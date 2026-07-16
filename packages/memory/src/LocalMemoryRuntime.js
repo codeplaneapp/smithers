@@ -81,6 +81,9 @@ function matchesTagGroups(actual, groups) {
  * keyword fallback when HINDSIGHT_URL is absent.
  */
 export class LocalMemoryRuntime {
+    /** @type {Map<string, Promise<void>>} */
+    #writeTails = new Map();
+
     /** @param {MemoryStore} store */
     constructor(store) {
         this.store = store;
@@ -127,6 +130,28 @@ export class LocalMemoryRuntime {
     async retainMemory(input) {
         const ns = namespaceForBank(input.bank);
         const key = `memory:${input.documentId}`;
+        const lockKey = `${ns.kind}:${ns.id}\0${key}`;
+        const previous = this.#writeTails.get(lockKey) ?? Promise.resolve();
+        const current = previous
+            .catch(() => undefined)
+            .then(() => this.#retainMemoryUnlocked(ns, key, input));
+        this.#writeTails.set(lockKey, current);
+        try {
+            await current;
+        }
+        finally {
+            if (this.#writeTails.get(lockKey) === current) {
+                this.#writeTails.delete(lockKey);
+            }
+        }
+    }
+
+    /**
+     * @param {MemoryNamespace} ns
+     * @param {string} key
+     * @param {{ content: string; tags?: string[]; metadata?: Record<string, string>; documentId: string; updateMode?: "replace" | "append" }} input
+     */
+    async #retainMemoryUnlocked(ns, key, input) {
         let content = input.content;
         if (input.updateMode !== "replace") {
             const previous = await this.store.getFact(ns, key);

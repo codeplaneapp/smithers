@@ -72,7 +72,31 @@ describe("Memory component", () => {
                 <Task id="private" output={output} agent={agent} memory={override}>Review</Task>
             </Memory>,
         );
-        expect(graph.tasks[0].memoryConfig).toBe(override);
+        expect(graph.tasks[0].memoryConfig).toEqual({
+            bank: "user-1",
+            tags: [],
+            recall: false,
+            budget: "mid",
+            maxTokens: 2048,
+            primers: [],
+            retain: "off",
+            tools: true,
+        });
+    });
+
+    test("validates direct task overrides with the provider rules", async () => {
+        for (const memory of [
+            { bank: "project-1", maxTokens: Number.POSITIVE_INFINITY },
+            { bank: "project-1", maxTokens: Number.NaN },
+            { bank: "project-1", banks: ["project-2"] },
+        ]) {
+            const renderer = new SmithersRenderer();
+            await expect(renderer.render(
+                <Memory bank="project-parent">
+                    <Task id="invalid" output={output} agent={agent} memory={memory}>Review</Task>
+                </Memory>,
+            )).rejects.toThrow(/Memory/);
+        }
     });
 
     test("rejects missing, conflicting, and malformed bank configuration", async () => {
@@ -81,6 +105,8 @@ describe("Memory component", () => {
             <Memory key="conflicting" bank="one" banks={["two"]}><Task id="b" output={output} agent={agent}>B</Task></Memory>,
             <Memory key="empty" banks={[]}><Task id="c" output={output} agent={agent}>C</Task></Memory>,
             <Memory key="malformed" bank="one" tools={/** @type {any} */ ("yes")}><Task id="d" output={output} agent={agent}>D</Task></Memory>,
+            <Memory key="infinite" bank="one" maxTokens={Number.POSITIVE_INFINITY}><Task id="e" output={output} agent={agent}>E</Task></Memory>,
+            <Memory key="nan" bank="one" maxTokens={Number.NaN}><Task id="f" output={output} agent={agent}>F</Task></Memory>,
         ];
         for (const tree of cases) {
             const renderer = new SmithersRenderer();

@@ -92,6 +92,42 @@ describe("LocalMemoryRuntime", () => {
         sqlite.close();
     });
 
+    test("preserves every concurrent append to one run document", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const store = createMemoryStore(db);
+        const runtime = createLocalMemoryRuntime(store);
+
+        for (let iteration = 0; iteration < 25; iteration += 1) {
+            const documentId = `parallel-run-${iteration}`;
+            await Promise.all([
+                runtime.retainMemory({
+                    bank: "project-7",
+                    content: `first-${iteration}`,
+                    documentId,
+                    updateMode: "append",
+                }),
+                runtime.retainMemory({
+                    bank: "project-7",
+                    content: `second-${iteration}`,
+                    documentId,
+                    updateMode: "append",
+                }),
+            ]);
+            const fact = await store.getFact(
+                { kind: "workflow", id: "project-7" },
+                `memory:${documentId}`,
+            );
+            const content = JSON.parse(fact.valueJson).content;
+            expect(content.split("\n").sort()).toEqual([
+                `first-${iteration}`,
+                `second-${iteration}`,
+            ]);
+        }
+        sqlite.close();
+    });
+
     test("tagless project tool writes default to main scope and recall locally", async () => {
         const sqlite = new Database(":memory:");
         const db = drizzle(sqlite);
