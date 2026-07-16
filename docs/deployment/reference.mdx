@@ -75,10 +75,12 @@ The minimal manifests in `deploy/reference/k8s/` create:
 - a `smithers` namespace
 - a single Gateway `Deployment`
 - a `ConfigMap` (`smithers-gateway-config`) supplying Gateway environment variables
-- Hindsight URL and bank prefix values in the `ConfigMap`, with the optional API key in the Secret
+- an empty Hindsight URL and bank prefix in the `ConfigMap`, with the optional API key in the Secret
 - a SQLite `PersistentVolumeClaim`
 - a token `Secret`
 - a `Service` and `Ingress`
+
+The reference directory does not deploy Hindsight, so `HINDSIGHT_URL` is empty and the Gateway keeps the local SQLite fallback. Set it only after deploying a reachable Hindsight service backed by Postgres and pgvector.
 
 Edit `deploy/reference/k8s/secret.example.yaml` to set the bearer token and update the host in `deploy/reference/k8s/ingress.yaml` before applying:
 
