@@ -23,6 +23,7 @@ const TRANSCRIPT_MAX_CHARS = 120000;
 export interface MessageRecord {
   updateId: number;
   chatId: string | null;
+  chatUsername: string | null;
   messageId: number | null;
   author: string;
   text: string;
@@ -158,6 +159,11 @@ function chatIdFromMessage(message: Record<string, unknown>): string | null {
   return null;
 }
 
+function chatUsernameFromMessage(message: Record<string, unknown>): string | null {
+  const chat = isRecord(message.chat) ? message.chat : null;
+  return chat && typeof chat.username === "string" ? chat.username : null;
+}
+
 function messageUrl(message: Record<string, unknown>): string | null {
   const chat = isRecord(message.chat) ? message.chat : null;
   const messageId = message.message_id;
@@ -189,7 +195,9 @@ function parseThreadId(env: TelegramSummaryEnv): number | null {
 
 function messageMatchesChat(message: MessageRecord, wanted: string | null): boolean {
   if (!wanted) return true;
-  return message.chatId === wanted || message.chatId === wanted.replace(/^@/, "") || message.chatId === `@${wanted}`;
+  if (message.chatId === wanted) return true;
+  if (!message.chatUsername) return false;
+  return message.chatUsername.replace(/^@/, "") === wanted.replace(/^@/, "");
 }
 
 function messageFromUpdate(update: TelegramUpdate): MessageRecord | null {
@@ -208,6 +216,7 @@ function messageFromUpdate(update: TelegramUpdate): MessageRecord | null {
   return {
     updateId,
     chatId: chatIdFromMessage(message),
+    chatUsername: chatUsernameFromMessage(message),
     messageId,
     author: authorFromMessage(message),
     text,

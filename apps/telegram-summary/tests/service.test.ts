@@ -49,6 +49,29 @@ function telegramUpdates(body: unknown): FetchLike {
   return routeFetch(() => ({ body }));
 }
 
+async function ingestSourceChatUpdate(env: TelegramSummaryEnv, updateId: number, username = "mygroup") {
+  globalThis.fetch = telegramUpdates({
+    ok: true,
+    result: [
+      {
+        update_id: updateId,
+        message: {
+          message_id: 1,
+          date: 1782931200,
+          chat: { id: -1001234567890, username },
+          from: { first_name: "X" },
+          text: "hi",
+        },
+      },
+    ],
+  });
+  const result = await ingestTelegramUpdates(env, 1782931300000);
+  const row = await env.DB.prepare("SELECT chat_id FROM messages WHERE update_id = ?")
+    .bind(updateId)
+    .first<{ chat_id: string | null }>();
+  return { result, storedChatId: row?.chat_id };
+}
+
 describe("service ingest", () => {
   test("warns when the telegram token is missing", async () => {
     const env = buildEnv({ TELEGRAM_BOT_TOKEN: "  " });
@@ -123,6 +146,38 @@ describe("service ingest", () => {
     // 6 parseable messages stored (the two nulls + empty-text one dropped)
     expect(result.storedMessages).toBe(6);
     expect(result.lastUpdateId).toBe(107);
+  });
+
+  test("stores updates when the source chat is configured as @username", async () => {
+    const env = buildEnv({ TELEGRAM_SOURCE_CHAT_ID: "@mygroup" });
+    const { result, storedChatId } = await ingestSourceChatUpdate(env, 180);
+
+    expect(result.storedMessages).toBe(1);
+    expect(storedChatId).toBe("-1001234567890");
+  });
+
+  test("stores updates when the source chat is configured as a bare username", async () => {
+    const env = buildEnv({ TELEGRAM_SOURCE_CHAT_ID: "mygroup" });
+    const { result, storedChatId } = await ingestSourceChatUpdate(env, 181);
+
+    expect(result.storedMessages).toBe(1);
+    expect(storedChatId).toBe("-1001234567890");
+  });
+
+  test("keeps numeric source chat matching compatible", async () => {
+    const env = buildEnv({ TELEGRAM_SOURCE_CHAT_ID: "-1001234567890" });
+    const { result, storedChatId } = await ingestSourceChatUpdate(env, 182);
+
+    expect(result.storedMessages).toBe(1);
+    expect(storedChatId).toBe("-1001234567890");
+  });
+
+  test("filters updates from a mismatched username source chat", async () => {
+    const env = buildEnv({ TELEGRAM_SOURCE_CHAT_ID: "@anothergroup" });
+    const { result, storedChatId } = await ingestSourceChatUpdate(env, 183);
+
+    expect(result.storedMessages).toBe(0);
+    expect(storedChatId).toBeUndefined();
   });
 
   test("skips insert when every update is filtered out by chat", async () => {
