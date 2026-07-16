@@ -570,8 +570,8 @@ declare class LocalMemoryRuntime {
         tagGroupsByBank?: Record<string, LocalTagGroup[]>;
         maxTokens?: number;
     }): Promise<{
-        bank: string;
-        text: any;
+        bank?: string;
+        text: string;
     }[]>;
     getPrimers(): Promise<never[]>;
     /**
@@ -586,7 +586,6 @@ declare class LocalMemoryRuntime {
         updateMode?: "replace" | "append";
     }): Promise<void>;
 }
-type MemoryStore$1 = MemoryStore$4;
 type LocalTagGroup = {
     tags: string[];
     match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
@@ -597,6 +596,7 @@ type LocalTagGroup = {
 } | {
     not: LocalTagGroup;
 };
+type MemoryStore$1 = MemoryStore$4;
 
 type MemoryFact = MemoryFact$2;
 type MemoryLayerConfig = MemoryLayerConfig$2;
