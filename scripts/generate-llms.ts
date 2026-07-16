@@ -67,6 +67,7 @@ const CORE_PAGES = [
   // Components reference (every component, compressed)
   "components/workflow.mdx",
   "components/task.mdx",
+  "components/memory.mdx",
   "components/sequence.mdx",
   "components/parallel.mdx",
   "components/branch.mdx",
