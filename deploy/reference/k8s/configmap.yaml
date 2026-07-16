@@ -8,3 +8,5 @@ data:
   SMITHERS_GATEWAY_HEADERS_TIMEOUT_MS: "30000"
   SMITHERS_GATEWAY_REQUEST_TIMEOUT_MS: "60000"
   SMITHERS_GATEWAY_MODULE: "/workspace/gateway.mjs"
+  HINDSIGHT_URL: "http://hindsight.smithers.svc.cluster.local:8888"
+  HINDSIGHT_BANK_PREFIX: ""

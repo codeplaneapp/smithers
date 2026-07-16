@@ -17,6 +17,8 @@ All memory values and non-generic types are re-exported from the
 ```ts
 import {
   createMemoryStore,
+  createHindsightMemoryStore,
+  HindsightMemoryStore,
   createMemoryLayer,
   MemoryService,
   Summarizer,
@@ -36,11 +38,18 @@ import type {
   MemoryProcessor,
   MemoryProcessorConfig,
   MemoryLayerConfig,
+  HindsightMemoryStoreOptions,
   TaskMemoryConfig,
   SemanticRecallConfig,
   MessageHistoryConfig,
 } from "smithers-orchestrator";
 ```
+
+`createMemoryStore(db)` preserves the local SQLite implementation.
+`createHindsightMemoryStore({ baseUrl, apiKey?, bankPrefix? })` returns the
+same `MemoryStore` contract backed by Hindsight documents and semantic recall.
+The `HindsightMemoryStore` class is exported for callers that need its
+`recallMemory`, `getPrimers`, or `retainMemory` engine-facing methods.
 
 <Note>
 The note types (`MemoryNote`, `SaveNoteInput`, `NoteReadFilter`, and

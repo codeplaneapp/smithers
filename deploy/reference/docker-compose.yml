@@ -11,6 +11,9 @@ services:
       SMITHERS_GATEWAY_HEADERS_TIMEOUT_MS: "30000"
       SMITHERS_GATEWAY_REQUEST_TIMEOUT_MS: "60000"
       SMITHERS_GATEWAY_MODULE: /workspace/gateway.mjs
+      HINDSIGHT_URL: ${HINDSIGHT_URL:-}
+      HINDSIGHT_API_KEY: ${HINDSIGHT_API_KEY:-}
+      HINDSIGHT_BANK_PREFIX: ${HINDSIGHT_BANK_PREFIX:-}
     volumes:
       - ../..:/workspace:ro
       - smithers-sqlite:/data
