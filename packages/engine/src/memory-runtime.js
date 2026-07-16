@@ -4,6 +4,7 @@ import { logWarning } from "@smithers-orchestrator/observability/logging";
 import { z } from "zod";
 
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeTagGroup} MemoryRuntimeTagGroup */
 
 const MEMORY_CONTEXT_OPEN = "<smithers_memory_context>";
 const MEMORY_CONTEXT_CLOSE = "</smithers_memory_context>";
@@ -24,6 +25,88 @@ function memoryBanks(config) {
     return Array.isArray(config.banks)
         ? config.banks.filter((bank) => typeof bank === "string" && bank.length > 0)
         : [];
+}
+
+/** @param {string} bank */
+function isUserBank(bank) {
+    return bank.startsWith("user-");
+}
+
+/** @param {string} bank */
+function isProjectBank(bank) {
+    return bank.startsWith("project-");
+}
+
+/** @param {string[]} values */
+function uniqueStrings(values) {
+    return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}
+
+/**
+ * Project tags do not belong in the cross-project user bank. Explicit tags
+ * supplied to a tool remain eligible because the tool author selected them for
+ * that individual operation.
+ * @param {string} bank
+ * @param {string[]} configuredTags
+ * @param {string[]} [additionalTags]
+ */
+function memoryWriteTags(bank, configuredTags, additionalTags = []) {
+    const inherited = isUserBank(bank)
+        ? configuredTags.filter((tag) => !/^(?:branch|scope|stream):/u.test(tag))
+        : configuredTags;
+    return uniqueStrings([...inherited, ...additionalTags]);
+}
+
+/** @param {string[]} tags @returns {MemoryRuntimeTagGroup} */
+function strictTagGroup(tags) {
+    return { tags: uniqueStrings(tags), match: "all_strict" };
+}
+
+/**
+ * Derive the architecture's standard recall scope. Project recall always sees
+ * canonical main plus the configured current branch, with stream and other
+ * stable tags applied as AND constraints. User banks are not scoped by project
+ * tags. Tool tags are appended as constraints, never substituted for the base.
+ * @param {string} bank
+ * @param {string[]} configuredTags
+ * @param {string[]} [additionalTags]
+ * @returns {MemoryRuntimeTagGroup[]}
+ */
+function recallTagGroups(bank, configuredTags, additionalTags = []) {
+    const extras = uniqueStrings(additionalTags);
+    if (isUserBank(bank)) {
+        return extras.length > 0 ? [strictTagGroup(extras)] : [];
+    }
+    if (!isProjectBank(bank)) {
+        const allTags = uniqueStrings([...configuredTags, ...extras]);
+        return allTags.length > 0 ? [strictTagGroup(allTags)] : [];
+    }
+
+    const branches = uniqueStrings(configuredTags.filter((tag) => tag.startsWith("branch:")));
+    /** @type {MemoryRuntimeTagGroup[]} */
+    const groups = [{
+        or: ["scope:main", ...branches].map((tag) => strictTagGroup([tag])),
+    }];
+    const additionalConfigured = uniqueStrings(configuredTags.filter((tag) =>
+        !tag.startsWith("branch:") && !tag.startsWith("scope:")));
+    groups.push(...additionalConfigured.map((tag) => strictTagGroup([tag])));
+    if (extras.length > 0) {
+        groups.push(strictTagGroup(extras));
+    }
+    return groups;
+}
+
+/**
+ * @param {TaskDescriptor["memoryConfig"]} config
+ * @param {string[]} banks
+ * @param {string[]} [additionalTags]
+ */
+function recallTagGroupsByBank(config, banks, additionalTags = []) {
+    const configuredTags = Array.isArray(config?.tags) ? config.tags : [];
+    return Object.fromEntries(banks.flatMap((bank) => {
+        const groups = recallTagGroups(bank, configuredTags, additionalTags);
+        return groups.length > 0 ? [[bank, groups]] : [];
+    }));
 }
 
 /**
@@ -80,7 +163,7 @@ export async function buildMemoryPromptBlock(service, config, prompt, context) {
                 ? service.recallMemory({
                     banks,
                     query,
-                    tags: Array.isArray(config?.tags) ? config.tags : [],
+                    tagGroupsByBank: recallTagGroupsByBank(config, banks),
                     budget: config?.budget ?? "mid",
                     maxTokens: config?.maxTokens ?? 2048,
                     signal,
@@ -156,7 +239,7 @@ export function createTaskMemoryTools(service, config, context) {
             await Promise.all(banks.map((selectedBank) => service.retainMemory({
                 bank: selectedBank,
                 content,
-                tags: [...new Set([...configuredTags, ...(tags ?? [])])],
+                tags: memoryWriteTags(selectedBank, configuredTags, tags ?? []),
                 metadata: {
                     session: context.runId,
                     run: context.runId,
@@ -183,16 +266,19 @@ export function createTaskMemoryTools(service, config, context) {
             maxTokens: z.number().int().positive().optional(),
         }),
         sideEffect: false,
-        execute: async ({ query, bank, tags, maxTokens }) => ({
-            memories: await service.recallMemory({
-                banks: resolveSelectedBanks(bank),
-                query,
-                tags: tags ?? configuredTags,
-                budget: config?.budget ?? "mid",
-                maxTokens: Math.min(maxTokens ?? config?.maxTokens ?? 2048, config?.maxTokens ?? 2048),
-                signal: context.taskSignal,
-            }),
-        }),
+        execute: async ({ query, bank, tags, maxTokens }) => {
+            const banks = resolveSelectedBanks(bank);
+            return {
+                memories: await service.recallMemory({
+                    banks,
+                    query,
+                    tagGroupsByBank: recallTagGroupsByBank(config, banks, tags ?? []),
+                    budget: config?.budget ?? "mid",
+                    maxTokens: Math.min(maxTokens ?? config?.maxTokens ?? 2048, config?.maxTokens ?? 2048),
+                    signal: context.taskSignal,
+                }),
+            };
+        },
     });
     return { remember, recall };
 }
@@ -229,11 +315,10 @@ export function retainTaskMemory(service, desc, payload, context) {
     if (banks.length === 0) {
         return;
     }
-    const tags = [...new Set([...(desc.memoryConfig.tags ?? []), "source:run"])];
     void Promise.resolve().then(() => Promise.all(banks.map((bank) => service.retainMemory({
         bank,
         content: taskMemoryDigest(payload, desc),
-        tags,
+        tags: memoryWriteTags(bank, desc.memoryConfig?.tags ?? [], ["source:run"]),
         metadata: {
             session: context.runId,
             run: context.runId,

@@ -7,11 +7,21 @@ export type MemoryRuntimeRecallResult = {
   mentioned_at?: string | null;
 };
 
+export type MemoryRuntimeTagGroup =
+  | {
+      tags: string[];
+      match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+    }
+  | { and: MemoryRuntimeTagGroup[] }
+  | { or: MemoryRuntimeTagGroup[] }
+  | { not: MemoryRuntimeTagGroup };
+
 export type MemoryRuntimeService = {
   recallMemory(input: {
     banks: string[];
     query: string;
     tags?: string[];
+    tagGroupsByBank?: Record<string, MemoryRuntimeTagGroup[]>;
     budget?: "low" | "mid" | "high";
     maxTokens?: number;
     signal?: AbortSignal;

@@ -511,9 +511,20 @@ type HindsightRecallInput = {
     banks: string[];
     query: string;
     tags?: string[] | undefined;
+    tagGroupsByBank?: Record<string, HindsightTagGroup[]> | undefined;
     budget?: "low" | "mid" | "high" | undefined;
     maxTokens?: number | undefined;
     signal?: AbortSignal | undefined;
+};
+type HindsightTagGroup = {
+    tags: string[];
+    match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+} | {
+    and: HindsightTagGroup[];
+} | {
+    or: HindsightTagGroup[];
+} | {
+    not: HindsightTagGroup;
 };
 /**
  * Hindsight-facing retain input used by the engine and memory tools.
@@ -553,10 +564,12 @@ declare class LocalMemoryRuntime {
     /** @param {MemoryStore} store */
     constructor(store: MemoryStore$1);
     store: MemoryStore$4;
-    /** @param {{ banks: string[]; query: string; maxTokens?: number }} input */
+    /** @param {{ banks: string[]; query: string; tags?: string[]; tagGroupsByBank?: Record<string, LocalTagGroup[]>; maxTokens?: number }} input */
     recallMemory(input: {
         banks: string[];
         query: string;
+        tags?: string[];
+        tagGroupsByBank?: Record<string, LocalTagGroup[]>;
         maxTokens?: number;
     }): Promise<{
         bank: string;
@@ -576,6 +589,16 @@ declare class LocalMemoryRuntime {
     }): Promise<void>;
 }
 type MemoryStore$1 = MemoryStore$4;
+type LocalTagGroup = {
+    tags: string[];
+    match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+} | {
+    and: LocalTagGroup[];
+} | {
+    or: LocalTagGroup[];
+} | {
+    not: LocalTagGroup;
+};
 
 type MemoryFact = MemoryFact$2;
 type MemoryLayerConfig = MemoryLayerConfig$2;

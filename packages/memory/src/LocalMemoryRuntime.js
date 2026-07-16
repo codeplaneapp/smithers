@@ -25,6 +25,54 @@ function searchableText(value) {
     return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+/** @param {unknown} value */
+function retainedTags(value) {
+    if (!value || typeof value !== "object" || !Array.isArray(value.tags)) {
+        return [];
+    }
+    return value.tags.filter((tag) => typeof tag === "string");
+}
+
+/**
+ * @typedef {{ tags: string[]; match?: "any" | "all" | "any_strict" | "all_strict" | "exact" }
+ * | { and: LocalTagGroup[] }
+ * | { or: LocalTagGroup[] }
+ * | { not: LocalTagGroup }} LocalTagGroup
+ */
+
+/** @param {string[]} actual @param {LocalTagGroup} group */
+function matchesTagGroup(actual, group) {
+    if ("and" in group) {
+        return group.and.every((child) => matchesTagGroup(actual, child));
+    }
+    if ("or" in group) {
+        return group.or.some((child) => matchesTagGroup(actual, child));
+    }
+    if ("not" in group) {
+        return !matchesTagGroup(actual, group.not);
+    }
+    const expected = [...new Set(group.tags)];
+    const actualSet = new Set(actual);
+    switch (group.match ?? "any") {
+        case "all":
+            return actual.length === 0 || expected.every((tag) => actualSet.has(tag));
+        case "any_strict":
+            return actual.length > 0 && expected.some((tag) => actualSet.has(tag));
+        case "all_strict":
+            return actual.length > 0 && expected.every((tag) => actualSet.has(tag));
+        case "exact":
+            return actualSet.size === expected.length && expected.every((tag) => actualSet.has(tag));
+        case "any":
+        default:
+            return actual.length === 0 || expected.some((tag) => actualSet.has(tag));
+    }
+}
+
+/** @param {string[]} actual @param {LocalTagGroup[]} groups */
+function matchesTagGroups(actual, groups) {
+    return groups.every((group) => matchesTagGroup(actual, group));
+}
+
 /**
  * Runtime recall/retain adapter for the pre-existing local facts store.
  * Exact MemoryStore behavior is untouched; this only gives `<Memory>` a
@@ -36,7 +84,7 @@ export class LocalMemoryRuntime {
         this.store = store;
     }
 
-    /** @param {{ banks: string[]; query: string; maxTokens?: number }} input */
+    /** @param {{ banks: string[]; query: string; tags?: string[]; tagGroupsByBank?: Record<string, LocalTagGroup[]>; maxTokens?: number }} input */
     async recallMemory(input) {
         const terms = input.query.toLowerCase().split(/\s+/u).filter(Boolean);
         const scored = [];
@@ -49,6 +97,11 @@ export class LocalMemoryRuntime {
                 }
                 catch {
                     value = fact.valueJson;
+                }
+                const groups = input.tagGroupsByBank?.[bank]
+                    ?? (input.tags?.length ? [{ tags: input.tags, match: "all_strict" }] : []);
+                if (groups.length > 0 && !matchesTagGroups(retainedTags(value), groups)) {
+                    continue;
                 }
                 const text = searchableText(value);
                 const haystack = `${fact.key} ${text}`.toLowerCase();
