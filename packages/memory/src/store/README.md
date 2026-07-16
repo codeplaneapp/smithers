@@ -38,6 +38,10 @@ Hindsight mapping:
   best-effort: failures are logged, queued for another attempt while the
   process remains alive, and never turn a committed local mutation into a
   rejected operation. The retry queue is not a durable outbox.
+- Projection ordering is per document and per `HindsightMemoryStore` instance.
+  A deployment must use one writer instance per transactional contract store.
+  Separate instances can project competing mutations out of order because
+  they do not share a queue or a durable version fence.
 - `searchNotes` and engine recall call Hindsight `recall`. Compound filters use
   `tag_groups` exclusively because the Hindsight client rejects requests that
   combine `tags` with `tag_groups`.

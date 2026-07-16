@@ -470,27 +470,57 @@ await Summarizer(myAgent).process(store);
 
 ## Task-level config
 
-`TaskMemoryConfig` is the shape of the `memory` prop on `Task`. It is preserved
-as task metadata for runtimes and integrations that layer memory behavior onto
-task execution; the store APIs above are the current public read/write surface.
+`TaskMemoryConfig` is the shape of the `memory` prop on `Task`. A `bank` or
+`banks` selection activates engine recall, primers, retention, and tools.
 
 <ParamField path="memory" type="TaskMemoryConfig">
   <Expandable title="TaskMemoryConfig">
-    <ParamField path="namespace" type="string | MemoryNamespace">
-      Default namespace for this task's memory.
+    <ParamField path="bank" type="string">
+      One memory bank. Mutually exclusive with `banks`.
     </ParamField>
-    <ParamField path="recall" type="{ namespace?; query?; topK? }">
-      Inject relevant past facts into the prompt. `namespace` overrides the
-      default, `query` is the recall query, `topK` caps results.
+    <ParamField path="banks" type="string[]">
+      Memory banks recalled in parallel. Mutually exclusive with `bank`.
+    </ParamField>
+    <ParamField path="tags" type="string[]">
+      Stable branch, stream, source, and scope dimensions for recall and retention.
+    </ParamField>
+    <ParamField path="recall" type='"auto" | string | false | { namespace?; query?; topK? }'>
+      `"auto"` derives the query from the task prompt, a string supplies the
+      query, and `false` disables prompt recall. The object form is legacy
+      compatibility metadata; it is preserved but inert.
+    </ParamField>
+    <ParamField path="budget" type='"low" | "mid" | "high"'>
+      Hindsight candidate-search budget. Defaults to `"mid"`.
+    </ParamField>
+    <ParamField path="maxTokens" type="number">
+      Hard cap for the complete injected memory block and serialized recall
+      tool result. Defaults to `2048`.
+    </ParamField>
+    <ParamField path="primers" type="string[]">
+      Mental-model ids fetched across the selected banks and injected verbatim.
+    </ParamField>
+    <ParamField path="retain" type='"on-complete" | "off"'>
+      Retain successful task output asynchronously, or disable automatic
+      retention. Defaults to `"off"`.
+    </ParamField>
+    <ParamField path="tools" type="boolean">
+      Expose `remember` and `recall` tools to the task agent. Defaults to `false`.
+    </ParamField>
+    <ParamField path="namespace" type="string | MemoryNamespace">
+      Legacy compatibility metadata. Preserved but inert.
     </ParamField>
     <ParamField path="remember" type="{ namespace?; key? }">
-      Persist this task's output as a fact under `key` in `namespace`.
+      Legacy compatibility metadata. Preserved but inert.
     </ParamField>
     <ParamField path="threadId" type="string">
-      Thread this task's messages are appended to.
+      Legacy compatibility metadata. Preserved but inert.
     </ParamField>
   </Expandable>
 </ParamField>
+
+Object-form `recall`, `remember`, `namespace`, and `threadId` do not inject
+facts, retain output, or append message history. Use the bank-based fields for
+runtime memory, or use the store APIs directly for exact local records.
 
 `SemanticRecallConfig` and `MessageHistoryConfig` describe the two recall
 strategies a memory-aware runtime can apply.

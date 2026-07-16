@@ -48,7 +48,7 @@ At least one non-empty bank is required after inheritance. Nested `<Memory>` com
 
 Before an agent task starts, Smithers fetches the configured primers and recalls memories from every bank. It prepends the result inside a fenced `<smithers_memory_context>` block. `maxTokens` caps the complete block so recalled context cannot crowd out the task instructions. Smithers applies a conservative UTF-8 byte ceiling to remain within the limit without depending on a specific model tokenizer. The same ceiling covers the complete serialized result returned by the `recall` tool.
 
-Tasks with `memoryConfig` bypass task-output caching. Their recalled snapshot can change while the prompt, agent, and worktree stay the same, so reusing an older task result would skip recall and return stale output. The memory snapshot itself remains frozen across retries of one task execution.
+Tasks with an active `bank` or `banks` memory configuration bypass task-output caching. Their recalled snapshot can change while the prompt, agent, and worktree stay the same, so reusing an older task result would skip recall and return stale output. Legacy-only memory metadata is inert and keeps the task's existing cache semantics. The memory snapshot itself remains frozen across retries of one task execution.
 
 Recall and primer reads are advisory. A timeout or backend error logs a warning and runs the task with its original prompt. A memory failure never fails the task.
 Missing mental-model ids are handled per bank. For example, `user-primer` can exist only in the user bank and `project-primer` only in the project bank; both valid primers are still injected.
@@ -111,6 +111,10 @@ Hindsight is a Postgres-family feature. The Hindsight service stores its data in
 | `HINDSIGHT_URL` unset, PGlite or Postgres workflow backend | Same local SQLite facts fallback. Workflow state can use another backend without enabling Hindsight. |
 | `HINDSIGHT_URL` set | Remote Hindsight recall, mental-model primers, and asynchronous retention. The Hindsight deployment must use Postgres with pgvector. |
 | Embedded Hindsight deployment | Use `SMITHERS_BACKEND=postgres`; embedded Hindsight is not supported with SQLite or PGlite. |
+
+<Warning>
+Use one `HindsightMemoryStore` writer instance per transactional contract store. Same-document projections are serialized inside that instance only. Separate instances can project competing mutations out of order because the process-local queues do not share a durable version fence.
+</Warning>
 
 When workflow state uses PGlite or Postgres and Hindsight is unset, Smithers keeps the fallback facts in the local `.smithers/smithers.db` sidecar. The workflow database remains on its selected backend.
 
