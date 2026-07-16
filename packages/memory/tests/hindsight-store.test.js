@@ -270,13 +270,59 @@ describe("HindsightMemoryStore", () => {
         });
     });
 
-    test("fetches mental-model primers verbatim", async () => {
+    test("uses independent compound filters for user and project banks", async () => {
         const store = createStore();
+        fixture.recallOverrides.set("test-user-3", [{ id: "user-memory", text: "Use concise answers." }]);
+        fixture.recallOverrides.set("test-project-7", [{ id: "project-memory", text: "Use the feature lane." }]);
+        const projectGroups = [
+            {
+                or: [
+                    { tags: ["scope:main"], match: "all_strict" },
+                    { tags: ["branch:feature"], match: "all_strict" },
+                ],
+            },
+            { tags: ["stream:checkout"], match: "all_strict" },
+        ];
+
+        const results = await store.recallMemory({
+            banks: ["user-3", "project-7"],
+            query: "implementation guidance",
+            budget: "mid",
+            maxTokens: 800,
+            tagGroupsByBank: { "project-7": projectGroups },
+        });
+
+        expect(results.map((result) => result.bank).sort()).toEqual(["test-project-7", "test-user-3"]);
+        const recalls = fixture.requests.filter((entry) => entry.path.endsWith("/memories/recall"));
+        expect(recalls).toHaveLength(2);
+        const userRecall = recalls.find((entry) => entry.path.includes("/test-user-3/"));
+        const projectRecall = recalls.find((entry) => entry.path.includes("/test-project-7/"));
+        expect(userRecall.body).not.toHaveProperty("tags");
+        expect(userRecall.body).not.toHaveProperty("tag_groups");
+        expect(projectRecall.body.tag_groups).toEqual(projectGroups);
+        expect(projectRecall.body).not.toHaveProperty("tags");
+        expect(projectRecall.body).not.toHaveProperty("tags_match");
+        expect(projectRecall.body.max_tokens).toBe(400);
+    });
+
+    test("keeps valid mixed-bank primers when other bank/id pairs are missing", async () => {
+        const store = createStore();
+        fixture.mentalModels.set("test-user-3/user-primer", "# User primer\nPrefer concise answers.");
         fixture.mentalModels.set("test-project-7/project-primer", "# Architecture\nPostgres is canonical.");
-        await expect(store.getPrimers({ banks: ["project-7"], primerIds: ["project-primer"] })).resolves.toEqual([{
-            bank: "test-project-7",
-            id: "project-primer",
-            content: "# Architecture\nPostgres is canonical.",
-        }]);
+        await expect(store.getPrimers({
+            banks: ["user-3", "project-7"],
+            primerIds: ["user-primer", "project-primer"],
+        })).resolves.toEqual([
+            {
+                bank: "test-user-3",
+                id: "user-primer",
+                content: "# User primer\nPrefer concise answers.",
+            },
+            {
+                bank: "test-project-7",
+                id: "project-primer",
+                content: "# Architecture\nPostgres is canonical.",
+            },
+        ]);
     });
 });

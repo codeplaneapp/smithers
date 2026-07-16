@@ -641,11 +641,22 @@ type MemoryRuntimeRecallResult = {
     occurred_end?: string | null;
     mentioned_at?: string | null;
 };
-type MemoryRuntimeService = {
+type MemoryRuntimeTagGroup$1 = {
+    tags: string[];
+    match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+} | {
+    and: MemoryRuntimeTagGroup$1[];
+} | {
+    or: MemoryRuntimeTagGroup$1[];
+} | {
+    not: MemoryRuntimeTagGroup$1;
+};
+type MemoryRuntimeService$1 = {
     recallMemory(input: {
         banks: string[];
         query: string;
         tags?: string[];
+        tagGroupsByBank?: Record<string, MemoryRuntimeTagGroup$1[]>;
         budget?: "low" | "mid" | "high";
         maxTokens?: number;
         signal?: AbortSignal;
@@ -682,7 +693,7 @@ type WorkflowDefinition$1<Schema = unknown> = {
     build: (ctx: WorkflowSmithersCtx<Schema>) => WorkflowElement;
     opts: SmithersWorkflowOptions;
     /** Memory bridge selected by `openSmithersBackend`, when available. */
-    memoryService?: MemoryRuntimeService;
+    memoryService?: MemoryRuntimeService$1;
     schemaRegistry?: Map<string, SchemaRegistryEntry>;
     zodToKeyName?: Map<z.ZodObject<z.ZodRawShape>, string>;
 };
@@ -921,6 +932,8 @@ type EffectPlatformRuntime = EffectPlatformRuntime$1;
 type RunOptions = RunOptions$2;
 type RunResult = RunResult$2;
 type RunStatus = RunStatus$1;
+type MemoryRuntimeService = MemoryRuntimeService$1;
+type MemoryRuntimeTagGroup = MemoryRuntimeTagGroup$1;
 type SmithersCtxOptions = SmithersCtxOptions$2;
 type WorkflowDefinition<Schema = unknown> = WorkflowDefinition$1<Schema>;
 type WorkflowLiteralViewNode = WorkflowLiteralViewNode$1;
@@ -943,4 +956,4 @@ type RuntimeCapability = RuntimeCapability$1;
 type RuntimeCapabilityErrorDetails = RuntimeCapabilityErrorDetails$1;
 type BrowserRuntimeOptions = BrowserRuntimeOptions$1;
 
-export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type OutputAccessor, type OutputKey, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };
+export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };

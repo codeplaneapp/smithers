@@ -44,9 +44,17 @@ const RECORD_TAG_PREFIX = "smithers:record:";
  * @property {string[]} banks
  * @property {string} query
  * @property {string[]} [tags]
+ * @property {Record<string, HindsightTagGroup[]>} [tagGroupsByBank]
  * @property {"low" | "mid" | "high"} [budget]
  * @property {number} [maxTokens]
  * @property {AbortSignal} [signal]
+ */
+
+/**
+ * @typedef {{ tags: string[]; match?: "any" | "all" | "any_strict" | "all_strict" | "exact" }
+ * | { and: HindsightTagGroup[] }
+ * | { or: HindsightTagGroup[] }
+ * | { not: HindsightTagGroup }} HindsightTagGroup
  */
 
 /**
@@ -611,20 +619,21 @@ export class HindsightMemoryStore {
      * @returns {Promise<Array<RecallResult & { bank: string }>>}
      */
     async recallMemory(input) {
-        const banks = input.banks.map((bank) => this.resolveBank(bank));
+        const banks = input.banks.map((rawBank) => ({ rawBank, bank: this.resolveBank(rawBank) }));
         if (banks.length === 0) {
             return [];
         }
         const perBankTokens = input.maxTokens === undefined
             ? undefined
             : Math.max(1, Math.floor(input.maxTokens / banks.length));
-        const responses = await Promise.all(banks.map(async (bank) => {
+        const responses = await Promise.all(banks.map(async ({ rawBank, bank }) => {
+            const tagGroups = input.tagGroupsByBank?.[rawBank]
+                ?? input.tagGroupsByBank?.[bank]
+                ?? (input.tags?.length ? [{ tags: [...input.tags], match: "all_strict" }] : undefined);
             const response = await this.client.recall(bank, input.query, {
                 budget: input.budget ?? "mid",
                 maxTokens: perBankTokens,
-                ...(input.tags?.length ? {
-                    tagGroups: [{ tags: [...input.tags], match: "all_strict" }],
-                } : {}),
+                ...(tagGroups?.length ? { tagGroups } : {}),
                 signal: input.signal,
             });
             return (response.results ?? []).map((result) => ({ ...result, bank }));
@@ -637,17 +646,26 @@ export class HindsightMemoryStore {
      * @param {{ banks: string[]; primerIds: string[]; signal?: AbortSignal }} input
      */
     async getPrimers(input) {
-        const contents = [];
-        for (const rawBank of input.banks) {
+        const lookups = input.banks.flatMap((rawBank) => {
             const bank = this.resolveBank(rawBank);
-            for (const primerId of input.primerIds) {
-                const model = await this.client.getMentalModel(bank, primerId, { signal: input.signal });
-                if (typeof model.content === "string" && model.content.length > 0) {
-                    contents.push({ bank, id: primerId, content: model.content });
+            return input.primerIds.map(async (primerId) => {
+                try {
+                    const model = await this.client.getMentalModel(bank, primerId, { signal: input.signal });
+                    if (typeof model.content === "string" && model.content.length > 0) {
+                        return { bank, id: primerId, content: model.content };
+                    }
                 }
-            }
-        }
-        return contents;
+                catch (error) {
+                    if (error instanceof HindsightError && error.statusCode === 404) {
+                        return null;
+                    }
+                    throw error;
+                }
+                return null;
+            });
+        });
+        const contents = await Promise.all(lookups);
+        return contents.flatMap((content) => content ? [content] : []);
     }
 
     /**

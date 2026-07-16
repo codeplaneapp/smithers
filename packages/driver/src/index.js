@@ -16,6 +16,8 @@
 /** @typedef {import("./RunOptions.ts").RunOptions} RunOptions */
 /** @typedef {import("./RunResult.ts").RunResult} RunResult */
 /** @typedef {import("./RunStatus.ts").RunStatus} RunStatus */
+/** @typedef {import("./MemoryRuntimeService.ts").MemoryRuntimeService} MemoryRuntimeService */
+/** @typedef {import("./MemoryRuntimeService.ts").MemoryRuntimeTagGroup} MemoryRuntimeTagGroup */
 /** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
 /**
  * @template [Schema=unknown]
