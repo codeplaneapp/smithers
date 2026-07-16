@@ -58,9 +58,11 @@ const memory = createHindsightMemoryStore({
 ```
 
 The contract store remains authoritative for atomic exact records and global
-message and note ids. Successful writes are projected into Hindsight for
-semantic recall. The `HindsightMemoryStore` class is exported for callers that
-need its `recallMemory`, `getPrimers`, or `retainMemory` engine-facing methods.
+message and note ids. Hindsight projection is best-effort: a remote failure is
+logged and queued for an in-process retry, but it does not reject a contract
+mutation that already committed. The queue is not durable across process
+restarts. The `HindsightMemoryStore` class is exported for callers that need
+its `recallMemory`, `getPrimers`, or `retainMemory` engine-facing methods.
 
 <Note>
 The note types (`MemoryNote`, `SaveNoteInput`, `NoteReadFilter`, and
