@@ -82,6 +82,10 @@ Stage:
   verify before linking or leave the reference as plain text.
 - Frame young features honestly: a first release is an MVP with rough edges,
   and saying so builds trust. Never frame an unshipped preview as launched.
+- Only embed media from the recorded list above, whose frames were verified.
+  Never reuse an old gallery screenshot you have not looked at: a stale image
+  can show the UI in an error or empty state (a past release embedded a
+  "Gateway errors" failure screen with a caption describing a healthy run).
 - Media captions must describe what the recording actually shows.
 - Use `bunx smithers-orchestrator` for CLI commands.
 - Include `claimIds` that support the changelog.
