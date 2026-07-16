@@ -95,6 +95,10 @@ describe("createServeApp startup rewind recovery", () => {
           queried = true;
           throw new Error("recovery query boom");
         },
+        // recoverInProgressRewindAudits treats a storage without BOTH queryAll
+        // and queryAllRaw as unusable and silently no-ops; queryAllRaw must be
+        // present for the recovery to reach the throwing queryAll above.
+        queryAllRaw: async () => [],
       },
     };
     const app = createServeApp({

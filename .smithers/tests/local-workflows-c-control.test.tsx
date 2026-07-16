@@ -242,8 +242,12 @@ describe("review-cloud-ship behavioral contract", () => {
       smoke: staged("smoke", { ok: true, detail: "green" }),
     });
     const text = renderPrompt(task(frame, "dogfood-pr").prompt);
-    expect(text).not.toContain("/tmp/review-cloud-dogfood");
-    expect(text).toContain(join(tmpdir(), "review-cloud-dogfood-"));
+    const uniqueWorktreePrefix = join(tmpdir(), "review-cloud-dogfood-");
+    expect(text).toContain(uniqueWorktreePrefix);
+    // On Linux tmpdir() IS /tmp, so the run-unique path itself starts with the
+    // fixed literal; strip every run-unique occurrence first, then assert no
+    // bare fixed-path worktree leaked through un-substituted.
+    expect(text.split(uniqueWorktreePrefix).join("")).not.toContain("/tmp/review-cloud-dogfood");
   });
 
   test("push-main atomically commits both the review app and its specification", async () => isolated("smithers-review-cloud-git-", async (root) => {

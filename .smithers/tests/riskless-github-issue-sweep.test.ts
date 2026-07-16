@@ -222,9 +222,22 @@ describe("riskless GitHub issue sweep production graph", () => {
 
   // pinnedCodexConfigDirectory fail-closes on win32 (POSIX mode/sticky-bit
   // invariants), so agent models resolve to the deterministic placeholder.
+  // Elsewhere the render must see a SECURE Codex auth directory, or a machine
+  // without a real ~/.codex login (CI) also gets the placeholder and the model
+  // assertions below are environment-dependent; pin CODEX_HOME to a hermetic
+  // secure fixture for the render.
   test.skipIf(process.platform === "win32")("renders two concrete current-iteration correction lanes and one complete serial landing queue", async () => {
     const outputs = lateOutputs(); const iterations = { "i42:correction-loop": 1, "i43:correction-loop": 1, "i42:landing-loop": 2, "i43:landing-loop": 2 };
-    const frame = await renderWorkflow(workflow, { input, outputs, iterations, workflowPath: ".smithers/workflows/riskless-github-issue-sweep.tsx" });
+    const codexFixture = mkdtempSync(join(tmpdir(), "riskless-codex-home-"));
+    chmodSync(codexFixture, 0o700);
+    writeFileSync(join(codexFixture, "auth.json"), "{}", { mode: 0o600 });
+    const priorCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = codexFixture;
+    const frame = await renderWorkflow(workflow, { input, outputs, iterations, workflowPath: ".smithers/workflows/riskless-github-issue-sweep.tsx" }).finally(() => {
+      if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = priorCodexHome;
+      rmSync(codexFixture, { recursive: true, force: true });
+    });
     const expectedAgents = ["i42:classify", "i42:adjudicate", "i42:sol-implement", "i42:luna-proposal", "i42:fable-review", "i42:landing-sol-implement", "i42:landing-luna-proposal", "i42:landing-review", "i42:close-proposal", "i43:classify", "i43:adjudicate", "i43:sol-implement", "i43:luna-proposal", "i43:fable-review", "i43:landing-sol-implement", "i43:landing-luna-proposal", "i43:landing-review"];
     for (const id of expectedAgents) expect(frame.tasks.some((task) => task.nodeId === id && typeof (Array.isArray(task.agent) ? task.agent[0] : task.agent)?.generate === "function")).toBe(true);
     for (const task of frame.tasks.filter((candidate) => candidate.agent)) {
