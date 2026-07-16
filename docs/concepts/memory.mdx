@@ -1,9 +1,9 @@
 ---
 title: Memory
-description: Cross-run facts, message history, namespaces, and task memory metadata.
+description: Cross-run facts, recalled context, message history, and durable knowledge.
 ---
 
-Memory persists state **across runs**. Task outputs are per-run; memory is per-namespace and survives every workflow execution.
+Memory persists state **across runs**. Task outputs are per-run; memory survives every workflow execution and can seed a new agent task with relevant context.
 
 <Note>API reference: [Memory](/reference/memory) lists every memory export and type, its options, and links to source and tests.</Note>
 
@@ -13,9 +13,10 @@ flowchart LR
   AG[agent] --> ST
   U[user] --> ST
   GL[global] --> ST
-  ST[(Memory store<br/>one SQLite db)] --> F[Facts · namespaced JSON, optional TTL]
+  ST[(Memory store)] --> F[Facts · namespaced JSON, optional TTL]
   ST --> H[Message history · ordered threads]
   ST --> N[Notes · append-only knowledge, supersession + status gate]
+  HM[(Hindsight on Postgres)] --> R[Semantic recall · mental-model primers]
   style ST fill:#def,stroke:#36c
 ```
 
@@ -39,6 +40,22 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 | Notes | `store.saveNote(input)` / `store.getNote(id)` / `store.listNotes(ns, filter?)` / `store.setNoteStatus(id, status)` / `store.enableNoteSearch(kind)` / `store.searchNotes(kind, query, limit?, filter?)` | Append-only knowledge (lessons, decisions, runbook rules). Notes never mutate; they die by supersession or rejection, not TTL. SQLite backend only. |
 | Maintenance | `store.deleteExpiredFacts()` plus processors | TTL cleanup and history compaction. |
 
+## Local SQLite or Hindsight
+
+The `<Memory>` component has two operating modes. Without `HINDSIGHT_URL`, it uses the existing local SQLite facts store and keyword recall. With `HINDSIGHT_URL`, it uses Hindsight for semantic recall, mental-model primers, and retention. Hindsight stores its own data in Postgres 15 or later with pgvector, so it is documented and deployed as a Postgres-family feature.
+
+| Capability | SQLite local (`HINDSIGHT_URL` unset) | Hindsight on Postgres (`HINDSIGHT_URL` set) |
+|---|---|---|
+| Exact facts | Namespaced JSON in `_smithers_memory_facts` | Retained documents with stable ids and replace semantics |
+| Recall | Local keyword matching | TEMPR semantic, text, graph, and temporal retrieval |
+| Mental-model primers | Unavailable | Saved mental-model content fetched verbatim |
+| Mid-task tools | `remember` and `recall` over local facts | `remember` and `recall` over Hindsight banks |
+| Automatic retention | Local fact write | Async Hindsight retain with per-run document id and append mode |
+| Workflow-state backend | SQLite, PGlite, or Postgres | SQLite, PGlite, or Postgres can call a remote service; embedded Hindsight requires `SMITHERS_BACKEND=postgres` |
+| Failure behavior | Local store remains available | Recall failure logs a warning and runs without injection; retention never blocks task completion |
+
+The fallback is deliberate. A workflow that does not configure Hindsight keeps the existing SQLite facts behavior and does not acquire a Postgres dependency.
+
 Every method has an Effect-returning twin (`store.listThreadsEffect`, `store.deleteMessagesEffect`, etc.) for use inside an Effect pipeline.
 
 ## Namespaces
@@ -49,7 +66,30 @@ type MemoryNamespace = { kind: "workflow" | "agent" | "user" | "global"; id: str
 
 Pick the kind to match the lifetime: `workflow` is scoped to a workflow definition; `agent` to an agent identity; `user` to an end user; `global` is shared across everything.
 
-## Task Memory Metadata
+## Declarative task memory
+
+```tsx
+<Memory
+  bank={`project-${ctx.input.repoId}`}
+  tags={["scope:main", `branch:${ctx.input.branch}`]}
+  recall="auto"
+  primers={["project-primer"]}
+  retain="on-complete"
+  tools
+>
+  <Task id="review" output={outputs.review} agent={reviewer}>
+    Review the latest PR.
+  </Task>
+</Memory>
+```
+
+The provider configuration and the existing per-task `memory={...}` prop converge on `TaskDescriptor.memoryConfig`. A task prop replaces its inherited provider configuration. Before the task runs, the engine fetches primers and recall results, applies the token cap, and prepends a fenced memory block. Recall failures degrade to the original prompt. After a successful task, `retain="on-complete"` starts a non-blocking retain.
+
+Use stable tags for branches, streams, source, and scope. Run and session identities belong in retention metadata and document ids, where they preserve provenance without fragmenting consolidation.
+
+See [`<Memory>`](/components/memory) for the complete prop table, multi-bank behavior, tool mode, and deployment configuration.
+
+The legacy task shape remains valid:
 
 ```tsx
 <Task
@@ -57,19 +97,20 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
   output={outputs.review}
   agent={reviewer}
   memory={{
-    recall:   { namespace: ns, topK: 3 },               // inject relevant past facts into prompt
-    remember: { namespace: ns, key: "last-review" },    // persist this output as a fact
-    threadId: `${ctx.input.repo}:reviews`,              // append messages to this thread
+    recall: { namespace: ns, topK: 3 },
+    remember: { namespace: ns, key: "last-review" },
+    threadId: `${ctx.input.repo}:reviews`,
   }}
 >
   Review the latest PR.
 </Task>
 ```
 
-`memory` is preserved on the task descriptor as metadata for runtimes and integrations that layer memory behavior onto task execution. The direct store APIs above are the current public memory read/write surface.
+Legacy namespace fields use the local facts seam. New bank-based fields enable the engine integration described above.
+
 ## Imperative get/set/delete inside a workflow
 
-The `memory={{ recall, remember }}` block above is **declarative metadata**; it is preserved on the task descriptor for runtimes that layer memory onto task execution, not an imperative call. To actually get, set, or delete a fact **while a run is executing**, build a store with `createMemoryStore(db)` and call it from inside a compute `<Task>` (a function task with no `agent`). The compute callback receives `deps` only; there is no injected `store`, so you create one:
+The `memory={{ recall, remember }}` legacy block is declarative. To get, set, or delete an exact fact from a compute `<Task>`, build a store with `createMemoryStore(db)` and call it directly. The compute callback receives `deps` only; there is no injected store, so you create one:
 
 ```tsx
 import { createMemoryStore } from "smithers-orchestrator/memory";

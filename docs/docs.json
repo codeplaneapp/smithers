@@ -196,6 +196,7 @@
         "pages": [
           "components/workflow",
           "components/task",
+          "components/memory",
           "components/sequence",
           "components/parallel",
           "components/branch",

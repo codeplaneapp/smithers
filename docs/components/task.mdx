@@ -33,7 +33,16 @@ type TaskProps = {
   meta?: Record<string, unknown>;
   scorers?: ScorersMap;
   memory?: {
-    recall?: { namespace?: string; query?: string; topK?: number };
+    bank?: string;
+    banks?: string[];
+    tags?: string[];
+    recall?: "auto" | string | false | { namespace?: string; query?: string; topK?: number };
+    budget?: "low" | "mid" | "high";
+    maxTokens?: number;
+    primers?: string[];
+    retain?: "on-complete" | "off";
+    tools?: boolean;
+    // Legacy local-memory fields:
     remember?: { namespace?: string; key?: string };
     threadId?: string;
   };
@@ -236,6 +245,7 @@ const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reas
 ## Notes
 
 - Three modes by `children` shape: agent (with `agent`), compute (function, no agent), static (value, no agent).
+- `memory` overrides the nearest [`<Memory>`](/components/memory) provider for this task. Recall and primer failures log a warning and run the original prompt.
 - `fork` requires an agent task; the source must be an agent task with a session snapshot. Forking copies the conversation into a new session and never reuses a native session id.
 - When `outputSchema` is set, JSON is extracted from agent text; schema-validation retries don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.

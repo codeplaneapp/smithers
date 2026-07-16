@@ -3486,7 +3486,16 @@ type TaskProps = {
   meta?: Record<string, unknown>;
   scorers?: ScorersMap;
   memory?: {
-    recall?: { namespace?: string; query?: string; topK?: number };
+    bank?: string;
+    banks?: string[];
+    tags?: string[];
+    recall?: "auto" | string | false | { namespace?: string; query?: string; topK?: number };
+    budget?: "low" | "mid" | "high";
+    maxTokens?: number;
+    primers?: string[];
+    retain?: "on-complete" | "off";
+    tools?: boolean;
+    // Legacy local-memory fields:
     remember?: { namespace?: string; key?: string };
     threadId?: string;
   };
@@ -3689,9 +3698,136 @@ const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reas
 ## Notes
 
 - Three modes by `children` shape: agent (with `agent`), compute (function, no agent), static (value, no agent).
+- `memory` overrides the nearest `<Memory>` provider for this task. Recall and primer failures log a warning and run the original prompt.
 - `fork` requires an agent task; the source must be an agent task with a session snapshot. Forking copies the conversation into a new session and never reuses a native session id.
 - When `outputSchema` is set, JSON is extracted from agent text; schema-validation retries don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.
+
+---
+
+## <Memory>
+
+> Recall durable context, load mental-model primers, and retain task results.
+
+```tsx
+import { Memory } from "smithers-orchestrator";
+
+<Memory
+  banks={[`user-${ctx.input.userId}`, `project-${ctx.input.repoId}`]}
+  tags={["scope:main", `branch:${ctx.input.branch}`]}
+  recall="auto"
+  budget="mid"
+  maxTokens={2048}
+  primers={["user-primer", "project-primer"]}
+  retain="on-complete"
+  tools
+>
+  <Task id="implement" output={outputs.implementation} agent={coder}>
+    Implement the requested change.
+  </Task>
+</Memory>
+```
+
+`<Memory>` provides one memory configuration to every descendant `<Task>`. Each task receives that configuration in `TaskDescriptor.memoryConfig`. A task-level `memory={...}` prop replaces the inherited configuration for that task.
+
+## Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `bank` | `string` | none | One Hindsight bank. Use either `bank` or `banks`. |
+| `banks` | `string[]` | none | Banks recalled in parallel. Results share the `maxTokens` injection cap. Use either `bank` or `banks`. |
+| `tags` | `string[]` | `[]` | Stable recall and retention dimensions such as `branch:*`, `stream:*`, `source:*`, and `scope:*`. The Hindsight adapter sends compound filters through `tagGroups`; it never sends `tags` and `tagGroups` together. |
+| `recall` | `"auto" \| string \| false` | `"auto"` | `"auto"` uses the task prompt as the query, a string supplies a fixed query, and `false` disables pre-task recall. |
+| `budget` | `"low" \| "mid" \| "high"` | `"mid"` | Hindsight recall search budget. Higher budgets examine more candidates before reranking. |
+| `maxTokens` | `number` | `2048` | Maximum tokens injected across recalled memories and primers. Must be a positive safe integer. |
+| `primers` | `string[]` | `[]` | Mental-model ids fetched from each bank and inserted verbatim. Smithers reads saved content; it does not run reflection in the task hot path. |
+| `retain` | `"on-complete" \| "off"` | `"off"` | Retain a digest of a successful task result asynchronously, or disable automatic retention. Retention never delays task completion. |
+| `tools` | `boolean` | `false` | Add `remember` and `recall` tools to the task agent for memory access during the run. |
+| `children` | `ReactNode` | none | Workflow content that inherits this configuration. |
+
+At least one non-empty bank is required after inheritance. Nested `<Memory>` components inherit omitted fields. Setting `bank` or `banks` on an inner component replaces the parent bank selection.
+
+## Prompt injection
+
+Before an agent task starts, Smithers fetches the configured primers and recalls memories from every bank. It prepends the result inside a fenced `<smithers_memory_context>` block. `maxTokens` caps the complete block so recalled context cannot crowd out the task instructions.
+
+Recall and primer reads are advisory. A timeout or backend error logs a warning and runs the task with its original prompt. A memory failure never fails the task.
+
+```tsx
+<Memory bank="project-checkout" recall="release rollback procedure" maxTokens={1200}>
+  <Task id="plan-rollback" output={outputs.plan} agent={operator}>
+    Prepare the rollback plan for this release.
+  </Task>
+</Memory>
+```
+
+Set `recall={false}` for tools-only memory:
+
+```tsx
+<Memory bank="project-checkout" recall={false} retain="off" tools>
+  <Task id="investigate" output={outputs.findings} agent={investigator}>
+    Investigate the incident. Save durable findings as you work.
+  </Task>
+</Memory>
+```
+
+## Banks, tags, and run identity
+
+Banks are isolation boundaries. Use a user bank for personal preferences and a project bank for team knowledge. Use stable, recall-relevant tags below the bank boundary:
+
+```tsx
+<Memory
+  banks={[`user-${userId}`, `project-${repoId}`]}
+  tags={["scope:main", `branch:${branch}`, `stream:${streamId}`]}
+>
+  {children}
+</Memory>
+```
+
+Do not put run ids, task ids, or session ids in `tags`. Smithers records them in Hindsight metadata and uses a stable per-run document id with append mode. This preserves provenance without fragmenting Hindsight observation consolidation.
+
+## Backend selection
+
+Hindsight is a Postgres-family feature. The Hindsight service stores its data in Postgres 15 or later with pgvector. Smithers selects it only when `HINDSIGHT_URL` is set.
+
+| Smithers configuration | Memory behavior |
+|---|---|
+| `HINDSIGHT_URL` unset, default SQLite backend | Existing local SQLite facts store and keyword recall. Primers are unavailable because SQLite facts have no Hindsight mental models. |
+| `HINDSIGHT_URL` unset, PGlite or Postgres workflow backend | Same local SQLite facts fallback. Workflow state can use another backend without enabling Hindsight. |
+| `HINDSIGHT_URL` set | Remote Hindsight recall, mental-model primers, and asynchronous retention. The Hindsight deployment must use Postgres with pgvector. |
+| Embedded Hindsight deployment | Use `SMITHERS_BACKEND=postgres`; embedded Hindsight is not supported with SQLite or PGlite. |
+
+```bash
+HINDSIGHT_URL=http://127.0.0.1:8888
+HINDSIGHT_API_KEY=replace-me
+HINDSIGHT_BANK_PREFIX=dev-
+```
+
+`HINDSIGHT_API_KEY` and `HINDSIGHT_BANK_PREFIX` are optional. The prefix is applied to every configured bank before requests are sent.
+
+## Task-level override
+
+The existing `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins over context:
+
+```tsx
+<Memory bank="project-checkout" recall="auto" retain="on-complete">
+  <Task
+    id="private-review"
+    output={outputs.review}
+    agent={reviewer}
+    memory={{
+      bank: `user-${ctx.input.userId}`,
+      recall: false,
+      tools: true,
+      retain: "off",
+    }}
+  >
+    Review using only user memory tools.
+  </Task>
+</Memory>
+```
+
+Legacy `namespace`, `remember`, and object-form `recall` fields remain accepted on `Task.memory` for compatibility. New workflows should use banks, tags, recall mode, primers, retention, and tools.
 
 ---
 
@@ -11461,9 +11597,9 @@ Rewrite these on sight; the daily research job does the same sweep mechanically.
 
 ## Memory
 
-> Cross-run facts, message history, namespaces, and task memory metadata.
+> Cross-run facts, recalled context, message history, and durable knowledge.
 
-Memory persists state **across runs**. Task outputs are per-run; memory is per-namespace and survives every workflow execution.
+Memory persists state **across runs**. Task outputs are per-run; memory survives every workflow execution and can seed a new agent task with relevant context.
 
 <Note>API reference: Memory lists every memory export and type, its options, and links to source and tests.</Note>
 
@@ -11473,9 +11609,10 @@ flowchart LR
   AG[agent] --> ST
   U[user] --> ST
   GL[global] --> ST
-  ST[(Memory store<br/>one SQLite db)] --> F[Facts · namespaced JSON, optional TTL]
+  ST[(Memory store)] --> F[Facts · namespaced JSON, optional TTL]
   ST --> H[Message history · ordered threads]
   ST --> N[Notes · append-only knowledge, supersession + status gate]
+  HM[(Hindsight on Postgres)] --> R[Semantic recall · mental-model primers]
   style ST fill:#def,stroke:#36c
 ```
 
@@ -11499,6 +11636,22 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 | Notes | `store.saveNote(input)` / `store.getNote(id)` / `store.listNotes(ns, filter?)` / `store.setNoteStatus(id, status)` / `store.enableNoteSearch(kind)` / `store.searchNotes(kind, query, limit?, filter?)` | Append-only knowledge (lessons, decisions, runbook rules). Notes never mutate; they die by supersession or rejection, not TTL. SQLite backend only. |
 | Maintenance | `store.deleteExpiredFacts()` plus processors | TTL cleanup and history compaction. |
 
+## Local SQLite or Hindsight
+
+The `<Memory>` component has two operating modes. Without `HINDSIGHT_URL`, it uses the existing local SQLite facts store and keyword recall. With `HINDSIGHT_URL`, it uses Hindsight for semantic recall, mental-model primers, and retention. Hindsight stores its own data in Postgres 15 or later with pgvector, so it is documented and deployed as a Postgres-family feature.
+
+| Capability | SQLite local (`HINDSIGHT_URL` unset) | Hindsight on Postgres (`HINDSIGHT_URL` set) |
+|---|---|---|
+| Exact facts | Namespaced JSON in `_smithers_memory_facts` | Retained documents with stable ids and replace semantics |
+| Recall | Local keyword matching | TEMPR semantic, text, graph, and temporal retrieval |
+| Mental-model primers | Unavailable | Saved mental-model content fetched verbatim |
+| Mid-task tools | `remember` and `recall` over local facts | `remember` and `recall` over Hindsight banks |
+| Automatic retention | Local fact write | Async Hindsight retain with per-run document id and append mode |
+| Workflow-state backend | SQLite, PGlite, or Postgres | SQLite, PGlite, or Postgres can call a remote service; embedded Hindsight requires `SMITHERS_BACKEND=postgres` |
+| Failure behavior | Local store remains available | Recall failure logs a warning and runs without injection; retention never blocks task completion |
+
+The fallback is deliberate. A workflow that does not configure Hindsight keeps the existing SQLite facts behavior and does not acquire a Postgres dependency.
+
 Every method has an Effect-returning twin (`store.listThreadsEffect`, `store.deleteMessagesEffect`, etc.) for use inside an Effect pipeline.
 
 ## Namespaces
@@ -11509,7 +11662,30 @@ type MemoryNamespace = { kind: "workflow" | "agent" | "user" | "global"; id: str
 
 Pick the kind to match the lifetime: `workflow` is scoped to a workflow definition; `agent` to an agent identity; `user` to an end user; `global` is shared across everything.
 
-## Task Memory Metadata
+## Declarative task memory
+
+```tsx
+<Memory
+  bank={`project-${ctx.input.repoId}`}
+  tags={["scope:main", `branch:${ctx.input.branch}`]}
+  recall="auto"
+  primers={["project-primer"]}
+  retain="on-complete"
+  tools
+>
+  <Task id="review" output={outputs.review} agent={reviewer}>
+    Review the latest PR.
+  </Task>
+</Memory>
+```
+
+The provider configuration and the existing per-task `memory={...}` prop converge on `TaskDescriptor.memoryConfig`. A task prop replaces its inherited provider configuration. Before the task runs, the engine fetches primers and recall results, applies the token cap, and prepends a fenced memory block. Recall failures degrade to the original prompt. After a successful task, `retain="on-complete"` starts a non-blocking retain.
+
+Use stable tags for branches, streams, source, and scope. Run and session identities belong in retention metadata and document ids, where they preserve provenance without fragmenting consolidation.
+
+See `<Memory>` for the complete prop table, multi-bank behavior, tool mode, and deployment configuration.
+
+The legacy task shape remains valid:
 
 ```tsx
 <Task
@@ -11517,19 +11693,20 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
   output={outputs.review}
   agent={reviewer}
   memory={{
-    recall:   { namespace: ns, topK: 3 },               // inject relevant past facts into prompt
-    remember: { namespace: ns, key: "last-review" },    // persist this output as a fact
-    threadId: `${ctx.input.repo}:reviews`,              // append messages to this thread
+    recall: { namespace: ns, topK: 3 },
+    remember: { namespace: ns, key: "last-review" },
+    threadId: `${ctx.input.repo}:reviews`,
   }}
 >
   Review the latest PR.
 </Task>
 ```
 
-`memory` is preserved on the task descriptor as metadata for runtimes and integrations that layer memory behavior onto task execution. The direct store APIs above are the current public memory read/write surface.
+Legacy namespace fields use the local facts seam. New bank-based fields enable the engine integration described above.
+
 ## Imperative get/set/delete inside a workflow
 
-The `memory={{ recall, remember }}` block above is **declarative metadata**; it is preserved on the task descriptor for runtimes that layer memory onto task execution, not an imperative call. To actually get, set, or delete a fact **while a run is executing**, build a store with `createMemoryStore(db)` and call it from inside a compute `<Task>` (a function task with no `agent`). The compute callback receives `deps` only; there is no injected `store`, so you create one:
+The `memory={{ recall, remember }}` legacy block is declarative. To get, set, or delete an exact fact from a compute `<Task>`, build a store with `createMemoryStore(db)` and call it directly. The compute callback receives `deps` only; there is no injected store, so you create one:
 
 ```tsx
 import { createMemoryStore } from "smithers-orchestrator/memory";
