@@ -13,6 +13,7 @@ import {
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { namespaceToString } from "./namespaceToString.js";
 import { parseNamespace } from "./parseNamespace.js";
+import { capMemoryRecallResults } from "./capMemoryRecallResults.js";
 
 /** @typedef {import("./store/MemoryStore.ts").MemoryStore} MemoryStore */
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
@@ -118,48 +119,6 @@ function stringMetadata(value) {
         return {};
     }
     return Object.fromEntries(Object.entries(value).flatMap(([key, entry]) => entry == null ? [] : [[key, String(entry)]]));
-}
-
-/**
- * Project SDK recall rows onto the runtime contract and cap the serialized
- * aggregate. Counting the JSON envelope keeps the recall tool bounded even
- * when a result set contains many short rows.
- * @param {Array<RecallResult & { bank: string }>} results
- * @param {number | undefined} maxTokens
- */
-function normalizeRecallResults(results, maxTokens) {
-    const normalized = results.flatMap((result) => typeof result.text === "string" && result.text.length > 0
-        ? [{ bank: result.bank, text: result.text }]
-        : []);
-    if (maxTokens === undefined) {
-        return normalized;
-    }
-    const charBudget = Math.max(0, maxTokens) * 4;
-    /** @type {Array<{ bank: string; text: string }>} */
-    const selected = [];
-    for (const result of normalized) {
-        if (JSON.stringify([...selected, result]).length <= charBudget) {
-            selected.push(result);
-            continue;
-        }
-        let low = 0;
-        let high = result.text.length;
-        while (low < high) {
-            const middle = Math.ceil((low + high) / 2);
-            const candidate = { ...result, text: result.text.slice(0, middle) };
-            if (JSON.stringify([...selected, candidate]).length <= charBudget) {
-                low = middle;
-            }
-            else {
-                high = middle - 1;
-            }
-        }
-        if (low > 0) {
-            selected.push({ ...result, text: result.text.slice(0, low) });
-        }
-        break;
-    }
-    return selected;
 }
 
 /**
@@ -591,7 +550,7 @@ export class HindsightMemoryStore {
             });
             return (response.results ?? []).map((result) => ({ ...result, bank }));
         }));
-        return normalizeRecallResults(responses.flat(), input.maxTokens);
+        return capMemoryRecallResults(responses.flat(), input.maxTokens);
     }
 
     /**

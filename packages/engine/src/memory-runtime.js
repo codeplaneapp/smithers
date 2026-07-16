@@ -9,9 +9,9 @@ import { z } from "zod";
 const MEMORY_CONTEXT_OPEN = "<smithers_memory_context>";
 const MEMORY_CONTEXT_CLOSE = "</smithers_memory_context>";
 const DEFAULT_MEMORY_TIMEOUT_MS = 2_000;
-const MEMORY_CHARS_PER_TOKEN = 4;
 const MAX_MEMORY_TAGS = 16;
 const MAX_MEMORY_TAG_LENGTH = 128;
+const UTF8_ENCODER = new TextEncoder();
 const PROJECT_TAG_PATTERN = /^(?:branch|stream):/u;
 const SOURCE_TAG_PATTERN = /^source:(?:chat|run|reflection|import)$/u;
 const SCOPE_TAG_PATTERN = /^scope:(?:main|branch)$/u;
@@ -59,10 +59,10 @@ function uniqueStrings(values) {
     return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
 }
 
-/** @param {string[]} tags */
-function validateStableTags(tags) {
+/** @param {string[]} tags @param {{ enforceLimit?: boolean }} [options] */
+function validateStableTags(tags, options = {}) {
     const unique = uniqueStrings(tags);
-    if (unique.length > MAX_MEMORY_TAGS) {
+    if (options.enforceLimit !== false && unique.length > MAX_MEMORY_TAGS) {
         throw new SmithersError("INVALID_INPUT", `Memory operations accept at most ${MAX_MEMORY_TAGS} stable tags.`, {
             tagCount: unique.length,
         });
@@ -91,7 +91,12 @@ function normalizeProjectWriteScope(tags) {
         throw new SmithersError("INVALID_INPUT", "Project memory writes accept one scope tag.", { scopes });
     }
     if (branches.length === 0) {
-        return tags;
+        if (scopes[0] === "scope:branch") {
+            throw new SmithersError("INVALID_INPUT", "Project branch-scoped memory writes require a branch tag.", {
+                scope: scopes[0],
+            });
+        }
+        return scopes.length === 0 ? [...tags, "scope:main"] : tags;
     }
     const expectedScope = branches[0] === "branch:main" ? "scope:main" : "scope:branch";
     if (scopes.length > 0 && scopes[0] !== expectedScope) {
@@ -112,8 +117,8 @@ function normalizeProjectWriteScope(tags) {
  * @param {string[]} [additionalTags]
  */
 function memoryWriteTags(bank, configuredTags, additionalTags = []) {
-    const configured = validateStableTags(configuredTags);
-    const additions = validateStableTags(additionalTags);
+    const configured = validateStableTags(configuredTags, { enforceLimit: false });
+    const additions = validateStableTags(additionalTags, { enforceLimit: false });
     if (isUserBank(bank)) {
         const projectTags = additions.filter((tag) => /^(?:branch|scope|stream):/u.test(tag));
         if (projectTags.length > 0) {
@@ -127,7 +132,8 @@ function memoryWriteTags(bank, configuredTags, additionalTags = []) {
         ? configured.filter((tag) => !/^(?:branch|scope|stream):/u.test(tag))
         : configured;
     const tags = uniqueStrings([...inherited, ...additions]);
-    return isProjectBank(bank) ? normalizeProjectWriteScope(tags) : tags;
+    const scoped = isProjectBank(bank) ? normalizeProjectWriteScope(tags) : tags;
+    return validateStableTags(scoped);
 }
 
 /** @param {string[]} tags @returns {MemoryRuntimeTagGroup} */
@@ -146,11 +152,13 @@ function strictTagGroup(tags) {
  * @returns {MemoryRuntimeTagGroup[]}
  */
 function recallTagGroups(bank, configuredTags, additionalTags = []) {
-    const configured = validateStableTags(configuredTags);
-    const extras = validateStableTags(additionalTags);
+    const configured = validateStableTags(configuredTags, { enforceLimit: false });
+    const extras = validateStableTags(additionalTags, { enforceLimit: false });
     if (isUserBank(bank)) {
-        return extras.length > 0 ? [strictTagGroup(extras)] : [];
+        const finalTags = validateStableTags(extras);
+        return finalTags.length > 0 ? [strictTagGroup(finalTags)] : [];
     }
+    validateStableTags([...configured, ...extras]);
     if (!isProjectBank(bank)) {
         const allTags = uniqueStrings([...configured, ...extras]);
         return allTags.length > 0 ? [strictTagGroup(allTags)] : [];
@@ -184,21 +192,81 @@ function recallTagGroupsByBank(config, banks, additionalTags = []) {
 }
 
 /**
- * Apply the same 1-token-per-4-characters estimate as TokenLimiter. The fence
- * itself counts against the cap, so an injected block cannot grow beyond the
- * configured prompt budget under that repository-wide estimate.
+ * Conservatively cap the complete fence by UTF-8 byte count. Byte count is an
+ * upper bound for byte-level tokenizers and remains safe for dense Unicode.
  * @param {string} body
  * @param {number} maxTokens
  */
 function fenceMemoryContext(body, maxTokens) {
     const prefix = `${MEMORY_CONTEXT_OPEN}\n`;
     const suffix = `\n${MEMORY_CONTEXT_CLOSE}`;
-    const charBudget = Math.max(1, maxTokens) * MEMORY_CHARS_PER_TOKEN;
-    const bodyBudget = charBudget - prefix.length - suffix.length;
+    const byteBudget = Math.max(1, maxTokens);
+    const bodyBudget = byteBudget
+        - UTF8_ENCODER.encode(prefix).byteLength
+        - UTF8_ENCODER.encode(suffix).byteLength;
     if (bodyBudget <= 0) {
         return null;
     }
-    return `${prefix}${body.slice(0, bodyBudget)}${suffix}`;
+    const characters = [];
+    let used = 0;
+    for (const character of body) {
+        const bytes = UTF8_ENCODER.encode(character).byteLength;
+        if (used + bytes > bodyBudget) {
+            break;
+        }
+        characters.push(character);
+        used += bytes;
+    }
+    return `${prefix}${characters.join("")}${suffix}`;
+}
+
+/** @param {unknown} value */
+function serializedByteLength(value) {
+    return UTF8_ENCODER.encode(JSON.stringify(value)).byteLength;
+}
+
+/**
+ * Bound the entire tool result, including its JSON envelope and bank labels.
+ * Extremely small positive budgets degrade to the smallest JSON scalar/list
+ * that fits; normal budgets retain the documented `{ memories }` envelope.
+ * @param {Array<{ text?: unknown; bank?: unknown }>} results
+ * @param {number} maxTokens
+ */
+function capMemoryToolResult(results, maxTokens) {
+    const byteBudget = Math.max(1, maxTokens);
+    const empty = { memories: [] };
+    if (serializedByteLength(empty) > byteBudget) {
+        return byteBudget === 1 ? 0 : [];
+    }
+    const normalized = results.flatMap((result) => typeof result.text === "string" && result.text.length > 0
+        ? [{ ...(typeof result.bank === "string" ? { bank: result.bank } : {}), text: result.text }]
+        : []);
+    /** @type {Array<{ bank?: string; text: string }>} */
+    const selected = [];
+    for (const result of normalized) {
+        if (serializedByteLength({ memories: [...selected, result] }) <= byteBudget) {
+            selected.push(result);
+            continue;
+        }
+        const characters = [...result.text];
+        let low = 0;
+        let high = characters.length;
+        while (low < high) {
+            const middle = Math.ceil((low + high) / 2);
+            const candidate = { ...result, text: characters.slice(0, middle).join("") };
+            if (serializedByteLength({ memories: [...selected, candidate] }) <= byteBudget) {
+                low = middle;
+            }
+            else {
+                high = middle - 1;
+            }
+        }
+        if (low > 0) {
+            selected.push({ ...result, text: characters.slice(0, low).join("") });
+        }
+        break;
+    }
+    return { memories: selected };
 }
 
 /**
@@ -342,16 +410,16 @@ export function createTaskMemoryTools(service, config, context) {
         sideEffect: false,
         execute: async ({ query, bank, tags, maxTokens }) => {
             const banks = resolveSelectedBanks(bank);
-            return {
-                memories: await service.recallMemory({
-                    banks,
-                    query,
-                    tagGroupsByBank: recallTagGroupsByBank(config, banks, tags ?? []),
-                    budget: config?.budget ?? "mid",
-                    maxTokens: Math.min(maxTokens ?? config?.maxTokens ?? 2048, config?.maxTokens ?? 2048),
-                    signal: context.taskSignal,
-                }),
-            };
+            const effectiveMaxTokens = Math.min(maxTokens ?? config?.maxTokens ?? 2048, config?.maxTokens ?? 2048);
+            const memories = await service.recallMemory({
+                banks,
+                query,
+                tagGroupsByBank: recallTagGroupsByBank(config, banks, tags ?? []),
+                budget: config?.budget ?? "mid",
+                maxTokens: effectiveMaxTokens,
+                signal: context.taskSignal,
+            });
+            return capMemoryToolResult(memories, effectiveMaxTokens);
         },
     });
     return { remember, recall };

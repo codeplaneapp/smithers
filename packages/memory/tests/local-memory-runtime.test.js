@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/createMemoryStore.js";
 import { createLocalMemoryRuntime } from "../src/LocalMemoryRuntime.js";
+import { createTaskMemoryTools } from "../../engine/src/memory-runtime.js";
 
 describe("LocalMemoryRuntime", () => {
     test("retains append documents and recalls matching facts by keyword", async () => {
@@ -88,6 +89,57 @@ describe("LocalMemoryRuntime", () => {
             "The shared deployment lane is blue.",
         ]);
         expect(results.some((result) => result.text.includes("secret"))).toBe(false);
+        sqlite.close();
+    });
+
+    test("tagless project tool writes default to main scope and recall locally", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const runtime = createLocalMemoryRuntime(createMemoryStore(db));
+        const tools = createTaskMemoryTools(runtime, {
+            bank: "project-7",
+            tools: true,
+            maxTokens: 256,
+        }, {
+            runId: "local-main-run",
+            nodeId: "local-main-task",
+            iteration: 0,
+            taskSignal: new AbortController().signal,
+        });
+
+        await tools.remember.execute({ content: "The canonical deployment lane is blue." }, {});
+        const recalled = await tools.recall.execute({ query: "canonical deployment" }, {});
+        const memories = Array.isArray(recalled) ? recalled : recalled.memories;
+        expect(memories.map((memory) => memory.text)).toEqual([
+            "The canonical deployment lane is blue.",
+        ]);
+        sqlite.close();
+    });
+
+    test("conservatively caps high-token-density aggregate results", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const runtime = createLocalMemoryRuntime(createMemoryStore(db));
+        await runtime.retainMemory({
+            bank: "project-7",
+            content: `dense ${"🔥".repeat(300)}`,
+            documentId: "dense",
+            updateMode: "replace",
+            tags: ["scope:main"],
+        });
+
+        const results = await runtime.recallMemory({
+            banks: ["project-7"],
+            query: "dense",
+            maxTokens: 96,
+            tagGroupsByBank: {
+                "project-7": [{ tags: ["scope:main"], match: "all_strict" }],
+            },
+        });
+        expect(results).not.toHaveLength(0);
+        expect(new TextEncoder().encode(JSON.stringify(results)).byteLength).toBeLessThanOrEqual(96);
         sqlite.close();
     });
 });

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
-import { createTaskMemoryTools } from "../src/memory-runtime.js";
+import { buildMemoryPromptBlock, createTaskMemoryTools } from "../src/memory-runtime.js";
 import { z } from "zod";
 
 const outputSchema = z.object({ value: z.number() });
@@ -65,6 +65,64 @@ describe("task memory runtime", () => {
         }, context);
         await expect(conflicting.remember.execute({ content: "unsafe" }, {}))
             .rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+        const boundary = createTaskMemoryTools(service, {
+            bank: "project-1",
+            tags: Array.from({ length: 14 }, (_, index) => `stream:boundary-${index}`),
+        }, context);
+        await boundary.remember.execute({
+            content: "exactly sixteen final tags",
+            tags: ["source:reflection"],
+        }, {});
+        expect(retains.at(-1).tags).toHaveLength(16);
+        expect(retains.at(-1).tags).toContain("scope:main");
+
+        const configuredOverflow = createTaskMemoryTools(service, {
+            bank: "project-1",
+            tags: Array.from({ length: 16 }, (_, index) => `stream:overflow-${index}`),
+        }, context);
+        await expect(configuredOverflow.remember.execute({ content: "derived scope overflows" }, {}))
+            .rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+        const mergedOverflow = createTaskMemoryTools(service, {
+            bank: "project-1",
+            tags: Array.from({ length: 15 }, (_, index) => `stream:merged-${index}`),
+        }, context);
+        await expect(mergedOverflow.remember.execute({
+            content: "tool source and scope overflow",
+            tags: ["source:reflection"],
+        }, {})).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    });
+
+    test("caps high-token-density prompt blocks and recall tool results", async () => {
+        const dense = "🔥".repeat(500);
+        const service = {
+            recallMemory: async () => [{ bank: "project-1", text: dense }],
+            getPrimers: async () => [{ bank: "project-1", id: "primer", content: dense }],
+            retainMemory: async () => {},
+        };
+        const context = {
+            runId: "dense-run",
+            nodeId: "dense-task",
+            iteration: 0,
+            taskSignal: new AbortController().signal,
+        };
+        const block = await buildMemoryPromptBlock(service, {
+            bank: "project-1",
+            recall: "auto",
+            primers: ["primer"],
+            maxTokens: 128,
+        }, "dense context", context);
+        expect(block).toStartWith("<smithers_memory_context>");
+        expect(block).toEndWith("</smithers_memory_context>");
+        expect(new TextEncoder().encode(block).byteLength).toBeLessThanOrEqual(128);
+
+        const tools = createTaskMemoryTools(service, {
+            bank: "project-1",
+            maxTokens: 96,
+        }, context);
+        const toolResult = await tools.recall.execute({ query: "dense" }, {});
+        expect(new TextEncoder().encode(JSON.stringify(toolResult)).byteLength).toBeLessThanOrEqual(96);
     });
 
     test("prepends a fenced snapshot, registers tools, and retains successful output", async () => {
@@ -348,6 +406,58 @@ describe("task memory runtime", () => {
         const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
         expect(result.status).toBe("finished");
         await Bun.sleep(0);
+        cleanup();
+    }, 15_000);
+
+    test("memory-configured tasks bypass stale task-output cache entries", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({ answer: outputSchema });
+        let agentCalls = 0;
+        const recalls = [];
+        const retains = [];
+        const memoryService = {
+            recallMemory: async (input) => {
+                recalls.push(input);
+                return [{ bank: "project-7", text: `memory snapshot ${recalls.length}` }];
+            },
+            getPrimers: async () => [],
+            retainMemory: async (input) => retains.push(input),
+        };
+        const agent = {
+            id: "memory-cache-agent",
+            supportsNativeStructuredOutput: true,
+            generate: async () => {
+                agentCalls += 1;
+                return {
+                    output: { value: agentCalls },
+                    text: JSON.stringify({ value: agentCalls }),
+                    response: { messages: [] },
+                };
+            },
+        };
+        const workflow = smithers(() => (<Workflow name="memory-cache-freshness">
+            <Task
+                id="answer"
+                output={outputs.answer}
+                agent={agent}
+                cache={{ scope: "workflow", key: "memory-cache" }}
+                memory={{
+                    bank: "project-7",
+                    recall: "auto",
+                    retain: "on-complete",
+                }}
+            >
+                Use the latest project memory.
+            </Task>
+        </Workflow>));
+        workflow.memoryService = memoryService;
+
+        await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "memory-cache-run-1" }));
+        await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "memory-cache-run-2" }));
+        await Bun.sleep(0);
+
+        expect(agentCalls).toBe(2);
+        expect(recalls).toHaveLength(2);
+        expect(retains).toHaveLength(2);
         cleanup();
     }, 15_000);
 });
