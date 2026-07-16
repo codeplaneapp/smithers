@@ -6,12 +6,32 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createHindsightMemoryStore } from "../src/HindsightMemoryStore.js";
 import { createMemoryStore } from "../src/store/createMemoryStore.js";
 import { memoryStoreConcurrencyContract } from "./memoryStoreConcurrencyContract.js";
+import { createTaskMemoryTools } from "../../engine/src/memory-runtime.js";
 
 const WF_NS = { kind: "workflow", id: "test-wf" };
 
 /** @param {unknown} value @param {number} [status] */
 function json(value, status = 200) {
     return Response.json(value, { status });
+}
+
+/** @param {string[]} actual @param {any} group */
+function matchesTagGroup(actual, group) {
+    if (Array.isArray(group.and)) {
+        return group.and.every((child) => matchesTagGroup(actual, child));
+    }
+    if (Array.isArray(group.or)) {
+        return group.or.some((child) => matchesTagGroup(actual, child));
+    }
+    if (group.not) {
+        return !matchesTagGroup(actual, group.not);
+    }
+    const actualSet = new Set(actual);
+    const expected = Array.isArray(group.tags) ? group.tags : [];
+    if (group.match === "all_strict") {
+        return actual.length > 0 && expected.every((tag) => actualSet.has(tag));
+    }
+    return expected.some((tag) => actualSet.has(tag));
 }
 
 function createFakeHindsight() {
@@ -82,6 +102,7 @@ function createFakeHindsight() {
                 const query = String(body.query ?? "").toLowerCase();
                 const results = recallOverrides.get(bank) ?? [...documents.values()]
                     .filter((document) => document.original_text.toLowerCase().includes(query))
+                    .filter((document) => (body.tag_groups ?? []).every((group) => matchesTagGroup(document.tags, group)))
                     .map((document) => ({
                         id: `memory-${document.id}`,
                         text: document.original_text,
@@ -360,7 +381,7 @@ describe("HindsightMemoryStore", () => {
             query: "fact",
             maxTokens: 2,
         });
-        expect(JSON.stringify(tiny).length).toBeLessThanOrEqual(8);
+        expect(new TextEncoder().encode(JSON.stringify(tiny)).byteLength).toBeLessThanOrEqual(2);
         const tinyRequests = fixture.requests.filter((entry) => entry.path.endsWith("/memories/recall"));
         expect(tinyRequests).toHaveLength(3);
         expect(tinyRequests.every((entry) => entry.body.max_tokens === 1)).toBe(true);
@@ -368,11 +389,39 @@ describe("HindsightMemoryStore", () => {
         const bounded = await store.recallMemory({
             banks: ["project-a", "project-b", "project-c"],
             query: "fact",
-            maxTokens: 30,
+            maxTokens: 96,
         });
-        expect(JSON.stringify(bounded).length).toBeLessThanOrEqual(120);
+        expect(new TextEncoder().encode(JSON.stringify(bounded)).byteLength).toBeLessThanOrEqual(96);
         expect(bounded.length).toBeGreaterThan(0);
         expect(Object.keys(bounded[0]).sort()).toEqual(["bank", "text"]);
+    });
+
+    test("tagless project tool writes default to main scope and recall through Hindsight", async () => {
+        const store = createStore();
+        const tools = createTaskMemoryTools(store, {
+            bank: "project-7",
+            tools: true,
+            maxTokens: 256,
+        }, {
+            runId: "hindsight-main-run",
+            nodeId: "hindsight-main-task",
+            iteration: 0,
+            taskSignal: new AbortController().signal,
+        });
+
+        await tools.remember.execute({ content: "The canonical deployment lane is blue." }, {});
+        const recalled = await tools.recall.execute({ query: "canonical deployment" }, {});
+        const memories = Array.isArray(recalled) ? recalled : recalled.memories;
+        expect(memories.map((memory) => memory.text)).toEqual([
+            "The canonical deployment lane is blue.",
+        ]);
+
+        const retain = fixture.requests.find((entry) => entry.path.endsWith("/test-project-7/memories"));
+        expect(retain.body.items[0].tags).toEqual(["scope:main"]);
+        const recall = fixture.requests.find((entry) => entry.path.endsWith("/test-project-7/memories/recall"));
+        expect(recall.body.tag_groups).toEqual([{
+            or: [{ tags: ["scope:main"], match: "all_strict" }],
+        }]);
     });
 
     test("keeps valid mixed-bank primers when other bank/id pairs are missing", async () => {

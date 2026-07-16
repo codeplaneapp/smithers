@@ -3877,7 +3877,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     };
     // Resolve effective root once so both caching and execution share it.
     const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
-    const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
+    // Recall and primers are mutable task inputs that are not represented in
+    // the durable output-cache identity. A cache hit would skip recall, tools,
+    // and the agent, then retain stale output under a new run. Memory tasks
+    // therefore bypass output caching while keeping their per-run prefetch
+    // snapshot frozen across retries.
+    const stepCacheEnabled = (cacheEnabled || Boolean(desc.cachePolicy)) && !desc.memoryConfig;
     const cacheAgent = Array.isArray(desc.agent) ? desc.agent[0] : desc.agent;
     const cachePolicyTtlMs = typeof desc.cachePolicy?.ttlMs === "number" && Number.isFinite(desc.cachePolicy.ttlMs)
         ? Math.max(0, desc.cachePolicy.ttlMs)

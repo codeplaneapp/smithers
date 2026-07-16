@@ -1,6 +1,8 @@
 /** @typedef {import("./store/MemoryStore.ts").MemoryStore} MemoryStore */
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 
+import { capMemoryRecallResults } from "./capMemoryRecallResults.js";
+
 /**
  * Map component bank names onto the existing local namespace store. Known
  * namespace prefixes preserve their kind; project banks intentionally map to
@@ -112,16 +114,7 @@ export class LocalMemoryRuntime {
             }
         }
         scored.sort((a, b) => b.score - a.score || b.updatedAtMs - a.updatedAtMs);
-        const maxChars = Math.max(1, input.maxTokens ?? 2048) * 4;
-        let used = 0;
-        return scored.flatMap(({ bank, text }) => {
-            if (used >= maxChars) {
-                return [];
-            }
-            const selected = text.slice(0, maxChars - used);
-            used += selected.length;
-            return [{ bank, text: selected }];
-        });
+        return capMemoryRecallResults(scored.map(({ bank, text }) => ({ bank, text })), input.maxTokens ?? 2048);
     }
 
     async getPrimers() {
