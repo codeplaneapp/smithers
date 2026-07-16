@@ -372,6 +372,7 @@ const UI_WORKFLOWS = [
     { key: "create-workflow", title: "Create Workflow" },
     { key: "create-skill", title: "Create Skill" },
     { key: "docs-driven-development", title: "Docs Driven Development" },
+    { key: "share-pack", title: "Share Pack" },
 ];
 export const UI_WORKFLOW_IDS = UI_WORKFLOWS.map((workflow) => workflow.key);
 function renderGatewayFile() {
