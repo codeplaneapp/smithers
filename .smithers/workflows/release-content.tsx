@@ -16,8 +16,10 @@ import DraftBlogOutlinePrompt from "../prompts/release-content/draft-blog-outlin
 import DraftChangelogPrompt from "../prompts/release-content/draft-changelog.mdx";
 import DraftThreadPrompt from "../prompts/release-content/draft-thread.mdx";
 import EditContentPrompt from "../prompts/release-content/edit-content.mdx";
+import RecordUiMediaPrompt from "../prompts/release-content/record-ui-media.mdx";
 import ScoreContentPrompt from "../prompts/release-content/score-content.mdx";
 import { collectReleaseContext, probeRelease } from "../lib/release-content/git";
+import { upsertCommitChangelog } from "../lib/release-content/commitChangelog";
 import {
   enforceQualityGate,
   runDeterministicChecks,
@@ -37,6 +39,7 @@ import {
   blogOutlineSchema,
   changelogDraftSchema,
   collectedContextSchema,
+  commitChangelogSchema,
   contentBriefSchema,
   deterministicCheckSchema,
   editedContentSchema,
@@ -49,6 +52,7 @@ import {
   scoreReportSchema,
   templateSelectionSchema,
   threadDraftSchema,
+  uiRecordingsSchema,
   type CollectedContext,
   type ContentBrief,
   type Probe,
@@ -84,6 +88,8 @@ const { Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, smithers, ou
     deterministicCheck: deterministicCheckSchema,
     scoreReport: scoreReportSchema,
     media: mediaAssetsSchema,
+    uiRecordings: uiRecordingsSchema,
+    commitChangelog: commitChangelogSchema,
     artifacts: artifactWriteSchema,
     qualityGate: qualityGateSchema,
     approval: approvalDecisionSchema,
@@ -194,6 +200,11 @@ export default smithers((rawCtx) => {
   const artifacts = rawCtx.outputMaybe(outputs.artifacts, { nodeId: "write-preview-artifacts" });
   const approval = rawCtx.outputMaybe(outputs.approval, { nodeId: "approve-content" });
   const publishResult = rawCtx.outputs.publishResult?.at(-1);
+  // Real UI recordings are captured BEFORE drafting so the changelog and
+  // thread are written around real assets instead of imagined ones.
+  const recordUi = !input.skip.renderMedia && input.tweetThread.generateMedia;
+  const recordings = rawCtx.outputMaybe(outputs.uiRecordings, { nodeId: "record-ui-media" });
+  const recordingsReady = !recordUi || recordings !== undefined;
   const changelogReady = !input.channels.changelog || input.skip.changelog || changelog !== undefined;
   const threadReady = !input.channels.tweetThread || input.skip.tweetThread || thread !== undefined;
   const blogReady = !input.channels.blogPost || input.skip.blogPost || blog !== undefined;
@@ -235,23 +246,52 @@ export default smithers((rawCtx) => {
         ) : null}
 
         {probe && context ? (
-          <Task
-            id="analyze-release"
-            output={outputs.releaseAnalysis}
-            agent={input.skip.analyze ? undefined : agents.research}
-            heartbeatTimeoutMs={900_000}
-          >
-            {input.skip.analyze
-              ? () => manualAnalysis(input, probe, context)
-              : (
-                  <AnalyzeReleasePrompt
-                    probe={probe}
-                    context={context}
-                    manualContext={input.releaseContext}
-                    globalAdditional={input.additionalPrompts.global}
-                    additional={input.additionalPrompts.analyzeRelease}
-                  />
-                )}
+          <Parallel id="analyze-and-record" maxConcurrency={2}>
+            <Task
+              id="analyze-release"
+              output={outputs.releaseAnalysis}
+              agent={input.skip.analyze ? undefined : agents.research}
+              heartbeatTimeoutMs={900_000}
+            >
+              {input.skip.analyze
+                ? () => manualAnalysis(input, probe, context)
+                : (
+                    <AnalyzeReleasePrompt
+                      probe={probe}
+                      context={context}
+                      manualContext={input.releaseContext}
+                      globalAdditional={input.additionalPrompts.global}
+                      additional={input.additionalPrompts.analyzeRelease}
+                    />
+                  )}
+            </Task>
+
+            <Task
+              id="record-ui-media"
+              output={outputs.uiRecordings}
+              agent={contentAgent}
+              skipIf={!recordUi}
+              heartbeatTimeoutMs={1_800_000}
+            >
+              <RecordUiMediaPrompt
+                version={probe.version}
+                repoRoot={process.cwd()}
+                globalAdditional={input.additionalPrompts.global}
+                additional={input.additionalPrompts.tweetThread}
+              />
+            </Task>
+          </Parallel>
+        ) : null}
+
+        {probe && context ? (
+          <Task id="preview-commit-changelog" output={outputs.commitChangelog}>
+            {() =>
+              upsertCommitChangelog({
+                probe,
+                context,
+                write: false,
+                artifactDir: input.output.artifactDir,
+              })}
           </Task>
         ) : null}
 
@@ -272,7 +312,7 @@ export default smithers((rawCtx) => {
           </Task>
         ) : null}
 
-        {probe && analysis && selected && brief ? (
+        {probe && analysis && selected && brief && recordingsReady ? (
           <Parallel id="draft-channel-content" maxConcurrency={3}>
             <Task
               id="draft-changelog"
@@ -286,6 +326,9 @@ export default smithers((rawCtx) => {
                 analysis={analysis}
                 template={selected}
                 brief={brief}
+                stats={context?.releaseStats ?? null}
+                recordings={recordings?.recordings ?? []}
+                priorChangelogs={context?.priorChangelogs ?? []}
                 globalAdditional={input.additionalPrompts.global}
                 additional={input.additionalPrompts.changelog}
               />
@@ -303,6 +346,8 @@ export default smithers((rawCtx) => {
                 analysis={analysis}
                 template={selected}
                 brief={brief}
+                stats={context?.releaseStats ?? null}
+                recordings={recordings?.recordings ?? []}
                 styleRef={context?.priorThreads.map((entry) => entry.excerpt).join("\n\n---\n\n")}
                 globalAdditional={input.additionalPrompts.global}
                 additional={input.additionalPrompts.tweetThread}
@@ -523,6 +568,17 @@ export default smithers((rawCtx) => {
                   {() => {
                     if (!latestEdited || !probe) throw new Error("No edited content available to publish.");
                     return publishFiles({ input, probe, content: latestEdited, media });
+                  }}
+                </Task>
+
+                <Task
+                  id="publish-commit-changelog"
+                  output={outputs.commitChangelog}
+                  skipIf={input.skip.publishChangelog}
+                >
+                  {() => {
+                    if (!probe || !context) throw new Error("No release context available for CHANGELOG.md.");
+                    return upsertCommitChangelog({ probe, context, write: true });
                   }}
                 </Task>
 
