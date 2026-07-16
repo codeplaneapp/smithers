@@ -318,6 +318,129 @@ describe("lazy FTS (criterion e)", () => {
         await expect(store.searchNotes("user", "anything")).rejects.toThrow(/not enabled/);
     });
 
+    test("whitespace-only search still validates the backend and enabled kind before returning empty", async () => {
+        await expect(store.searchNotes("user", " \t\n\u2003 ")).rejects.toThrow(/not enabled/);
+        await store.enableNoteSearch("user");
+        expect(await store.searchNotes("user", " \t\n\u00a0\u2003\u3000 ")).toEqual([]);
+    });
+
+    test("NUL bytes inside free text are token separators", async () => {
+        await store.enableNoteSearch("user");
+        const namespace = { kind: "user", id: "nul-query" };
+        const note = await store.saveNote({ namespace, body: "alpha\0beta" });
+
+        for (const query of ["alpha\0beta", "alpha \0 beta"]) {
+            const hits = await store.searchNotes("user", query, undefined, { namespace });
+            expect(hits.map((hit) => hit.id)).toEqual([note.id]);
+        }
+    });
+
+    test("tokenless NUL input validates the enabled kind first, then returns empty", async () => {
+        await expect(store.searchNotes("user", "\0\0")).rejects.toThrow(/not enabled/);
+        await store.enableNoteSearch("user");
+        for (const query of ["\0", "\0\0\0"]) {
+            expect(await store.searchNotes("user", query)).toEqual([]);
+        }
+    });
+
+    test("lone UTF-16 surrogates validate the enabled kind first, then return empty", async () => {
+        await expect(store.searchNotes("user", "\uD800")).rejects.toThrow(/not enabled/);
+        await store.enableNoteSearch("user");
+        for (const query of ["\uD800", "\uDC00"]) {
+            expect(await store.searchNotes("user", query)).toEqual([]);
+        }
+    });
+
+    test("embedded lone surrogates are separators while valid emoji pairs remain intact", async () => {
+        await store.enableNoteSearch("user");
+        const namespace = { kind: "user", id: "surrogate-query" };
+        const note = await store.saveNote({ namespace, body: "alpha beta" });
+
+        for (const query of ["alpha\uD800beta", "alpha\uDC00beta", "alpha💥beta"]) {
+            const hits = await store.searchNotes("user", query, undefined, { namespace });
+            expect(hits.map((hit) => hit.id)).toEqual([note.id]);
+        }
+        expect(await store.searchNotes("user", "💥", undefined, { namespace })).toEqual([]);
+    });
+
+    const literalQueryCases = [
+        ["a colon", "auth:token"],
+        ["a colon in multiword input", "status: done"],
+        ["an unmatched quote", '"hello'],
+        ["an unmatched quote in multiword input", 'timeout "error'],
+        ["embedded quotes", 'say"hello"'],
+        ["the AND operator", "AND"],
+        ["the OR operator", "OR"],
+        ["an OR operator in multiword input", "retry OR"],
+        ["the NOT operator", "NOT"],
+        ["the NEAR operator", "NEAR"],
+        ["a unary minus", "-draft"],
+        ["parentheses", "(alpha)"],
+        ["an operator-shaped expression", "NEAR(alpha beta)"],
+        ["column-filter metacharacters", "{alpha beta}"],
+        ["an initial-token metacharacter", "^alpha"],
+    ];
+
+    for (const [label, query] of literalQueryCases) {
+        test(`search treats ${label} as literal free text`, async () => {
+            await store.enableNoteSearch("user");
+            const namespace = { kind: "user", id: "literal-query" };
+            const note = await store.saveNote({ namespace, body: query });
+            const hits = await store.searchNotes("user", query, undefined, { namespace });
+            expect(hits.map((hit) => hit.id)).toEqual([note.id]);
+        });
+    }
+
+    test("search treats an asterisk as punctuation, not a prefix operator", async () => {
+        await store.enableNoteSearch("user");
+        const namespace = { kind: "user", id: "literal-asterisk" };
+        const literal = await store.saveNote({ namespace, body: "alpha*" });
+        await store.saveNote({ namespace, body: "alphabet" });
+        const hits = await store.searchNotes("user", "alpha*", undefined, { namespace });
+        expect(hits.map((hit) => hit.id)).toEqual([literal.id]);
+    });
+
+    test("punctuation-only free text reaches FTS and returns no matches", async () => {
+        await store.enableNoteSearch("user");
+        await store.saveNote({ namespace: USER_NS, body: "ordinary searchable text" });
+        for (const query of [":", '"', "()", "*", "---", "{}", "^", "💥"]) {
+            expect(await store.searchNotes("user", query)).toEqual([]);
+        }
+    });
+
+    test("Unicode whitespace, CJK, and canonically equivalent diacritics remain searchable", async () => {
+        await store.enableNoteSearch("user");
+        const unicodeNamespace = { kind: "user", id: "unicode" };
+        const unicode = await store.saveNote({ namespace: unicodeNamespace, body: "alpha βeta 東京" });
+        const unicodeHits = await store.searchNotes("user", " \u00a0alpha\u2003βeta\u3000東京\t ", undefined, {
+            namespace: unicodeNamespace,
+        });
+        expect(unicodeHits.map((hit) => hit.id)).toEqual([unicode.id]);
+
+        const composedNamespace = { kind: "user", id: "composed" };
+        const composed = await store.saveNote({ namespace: composedNamespace, body: "café" });
+        expect((await store.searchNotes("user", "cafe\u0301", undefined, { namespace: composedNamespace })).map((hit) => hit.id))
+            .toEqual([composed.id]);
+
+        const decomposedNamespace = { kind: "user", id: "decomposed" };
+        const decomposed = await store.saveNote({ namespace: decomposedNamespace, body: "cafe\u0301" });
+        expect((await store.searchNotes("user", "café", undefined, { namespace: decomposedNamespace })).map((hit) => hit.id))
+            .toEqual([decomposed.id]);
+    });
+
+    test("multi-term free text uses implicit AND and keeps ranked results stable", async () => {
+        await store.enableNoteSearch("user");
+        const namespace = { kind: "user", id: "ranked-and" };
+        const concise = await store.saveNote({ namespace, body: "alpha beta" });
+        const verbose = await store.saveNote({ namespace, body: "alpha filler filler filler filler beta" });
+        await store.saveNote({ namespace, body: "alpha only" });
+
+        const first = await store.searchNotes("user", "alpha beta", undefined, { namespace });
+        const second = await store.searchNotes("user", "alpha beta", undefined, { namespace });
+        expect(first.map((hit) => hit.id)).toEqual([concise.id, verbose.id]);
+        expect(second.map((hit) => hit.id)).toEqual(first.map((hit) => hit.id));
+    });
+
     test("enableNoteSearch backfills existing notes and indexes new ones", async () => {
         await store.saveNote({ namespace: USER_NS, body: "the zebra crossed the savanna" });
         await store.enableNoteSearch("user");
@@ -377,6 +500,9 @@ describe("non-sqlite backends fail loud", () => {
         await expect(store.saveNote({ namespace: USER_NS, body: "x" })).rejects.toThrow(/sqlite/);
         await expect(store.enableNoteSearch("user")).rejects.toThrow(/sqlite/);
         await expect(store.searchNotes("user", "x")).rejects.toThrow(/sqlite/);
+        await expect(store.searchNotes("user", " \t\n ")).rejects.toThrow(/sqlite/);
+        await expect(store.searchNotes("user", "\0\0")).rejects.toThrow(/sqlite/);
+        await expect(store.searchNotes("user", "\uDC00")).rejects.toThrow(/sqlite/);
         await expect(store.deleteThread("thread-1")).rejects.toThrow(/sqlite/);
     });
 });

@@ -104,6 +104,25 @@ const NOT_SUPERSEDED_BY_ACCEPTED = sql `NOT EXISTS (
     JOIN _smithers_memory_notes __sup ON __sup.id = __s.note_id
     WHERE __s.supersedes_id = ${smithersMemoryNotes.id} AND __sup.status = 'accepted'
   )`;
+/**
+ * Compile user-entered free text as an FTS5 literal query. Each whitespace-
+ * delimited term is quoted independently so adjacent terms retain FTS5's
+ * implicit-AND behavior without exposing operators or column filters.
+ * @param {string} query
+ * @returns {string}
+ */
+function literalFtsQuery(query) {
+    // SQLite cannot safely bind lone UTF-16 surrogates, so replace them with U+FFFD first.
+    // SQLite truncates bound FTS5 strings at NUL; a separator preserves the quoted token boundaries.
+    const trimmed = query.toWellFormed().replaceAll("\0", " ").trim();
+    if (trimmed.length === 0) {
+        return "";
+    }
+    return trimmed
+        .split(/\s+/u)
+        .map((term) => `"${term.replaceAll('"', '""')}"`)
+        .join(" ");
+}
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -575,8 +594,12 @@ function makeMemoryStore(db) {
             if (!noteFtsKindEnabled(kind)) {
                 return yield* Effect.fail(toSmithersError(new Error(`memory searchNotes: note search is not enabled for namespace kind "${kind}" — call enableNoteSearch("${kind}") first`), "memory searchNotes", { code: "DB_QUERY_FAILED", details: { kind } }));
             }
+            const literalQuery = literalFtsQuery(query);
+            if (literalQuery.length === 0) {
+                return [];
+            }
             const matches = yield* readEffect("memory searchNotes", () => Promise.resolve(db.all(sql `SELECT note_id AS noteId FROM _smithers_memory_notes_fts
-             WHERE _smithers_memory_notes_fts MATCH ${query} AND kind = ${kind}
+             WHERE _smithers_memory_notes_fts MATCH ${literalQuery} AND kind = ${kind}
              ORDER BY rank LIMIT ${max * 5}`)));
             const ids = matches.map((row) => String(/** @type {any} */ (row).noteId));
             if (ids.length === 0) {
