@@ -10,7 +10,7 @@ tweet 2 uses a real screen recording gif).
 
 **Media:** [hero card → assets/tweet-01-hero.png](assets/tweet-01-hero.png)
 
-> Smithers 0.28.0 is here! Our biggest release ever: 1,169 commits, 4,187 files changed.
+> Smithers 0.28.0 is here! Our biggest release ever: 1,188 commits, 4,232 files changed.
 >
 > A Monitor you operate fleets from, installable workflow packs, provenance-bound approvals, durable memory, and Node.js + browser support.
 >
@@ -96,7 +96,7 @@ Characters: 244
 
 **Media:** [release inventory card → assets/tweet-07-changelog.png](assets/tweet-07-changelog.png)
 
-> The honest shape of this release: 417 of 1,169 commits are fixes and 243 are tests, most aimed at the durable engine.
+> The honest shape of this release: 424 of 1,188 commits are fixes and 244 are tests, most aimed at the durable engine.
 >
 > Crash it, quota-park it, kill its owner process. 0.28.0 recovers more predictably than anything we've shipped.
 
