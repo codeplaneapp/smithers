@@ -7,8 +7,14 @@ INSERT, race-safe) and `mintSession.ts` (hashed `srs_` token, 2h TTL).
 
 - `verifyOidc.ts` — full RS256 JWKS verification of GitHub Actions OIDC
   tokens, with tagged failure reasons.
-- `fetchJwks.ts` + `jwksCache.ts` — 10-minute in-memory JWKS cache (tests
-  clear the exported map).
+- `fetchJwks.ts` + `jwksCache.ts` — 10-minute in-memory JWKS cache. An unknown
+  non-empty `kid` bypasses the TTL once, with concurrent refreshes coalesced
+  and miss-triggered requests limited to one per JWKS URL every five seconds.
+  Entries for other algorithms or non-signing uses are ignored; every RS256
+  candidate must be importable before a refresh can replace the last good
+  keys. Failed or malformed refreshes retain those keys and back off all
+  refresh paths for five seconds; cached network/HTTP/JSON errors are rethrown
+  during that window. Tests clear the exported map.
 - `lookupApiKey.ts` / `lookupRepo.ts` — hashed-key and repo-registration
   lookups.
 

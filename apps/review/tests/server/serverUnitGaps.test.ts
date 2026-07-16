@@ -346,10 +346,11 @@ describe("fetchJwks", () => {
   beforeEach(() => jwksCache.clear());
 
   test("serves from cache on the second call, throws on non-200, and tolerates a keyless body", async () => {
+    const keypair = await rsaKeypair("k");
     let calls = 0;
     const okImpl = (async () => {
       calls += 1;
-      return new Response(JSON.stringify({ keys: [{ kid: "k", kty: "RSA", n: "n", e: "AQAB" }] }), { status: 200 });
+      return new Response(JSON.stringify({ keys: [keypair.publicJwk] }), { status: 200 });
     }) as unknown as typeof fetch;
     const now = Date.now();
     const first = await fetchJwks("https://jwks.test/a", now, okImpl);

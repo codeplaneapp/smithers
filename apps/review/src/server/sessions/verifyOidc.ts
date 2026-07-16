@@ -1,4 +1,4 @@
-import { fetchJwks, type JsonWebKey as ReviewJwk } from "./fetchJwks.ts";
+import { fetchJwks, importRs256Jwk } from "./fetchJwks.ts";
 
 const ISSUER = "https://token.actions.githubusercontent.com";
 const AUDIENCE = "smithers-review";
@@ -60,29 +60,6 @@ function base64UrlToJson<T>(input: string): T | null {
   }
 }
 
-type ImportJwk = (
-  format: "jwk",
-  keyData: Record<string, unknown>,
-  algorithm: { name: string; hash: string },
-  extractable: boolean,
-  keyUsages: readonly string[],
-) => Promise<CryptoKey>;
-
-async function importJwk(jwk: ReviewJwk): Promise<CryptoKey> {
-  const { kty, n, e, kid, alg, use } = jwk;
-  const keyData = { kty, n, e, kid, alg: alg ?? "RS256", use: use ?? "sig", ext: true };
-  // tsc's lib doesn't declare JsonWebKey here; the runtime (Workers, Bun)
-  // accepts the standard jwk fields. Cast the function signature once and
-  // keep the call site readable.
-  return (crypto.subtle.importKey as unknown as ImportJwk)(
-    "jwk",
-    keyData,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["verify"],
-  );
-}
-
 /**
  * Verify a GitHub Actions OIDC token against the JWKS at `jwksUrl`. Returns a
  * tagged result instead of throwing: callers can map failure reasons to
@@ -97,16 +74,25 @@ export async function verifyOidc(
   const parts = token.split(".");
   if (parts.length !== 3) return { ok: false, reason: "malformed" };
   const [rawHeader, rawPayload, rawSig] = parts;
-  const header = base64UrlToJson<{ alg?: string; kid?: string }>(rawHeader);
+  const header = base64UrlToJson<{ alg?: unknown; kid?: unknown }>(rawHeader);
   const payload = base64UrlToJson<OidcClaims>(rawPayload);
   if (!header || !payload) return { ok: false, reason: "malformed" };
   if (header.alg !== "RS256") return { ok: false, reason: "unsupported-alg" };
+  if (typeof header.kid !== "string" || header.kid.length === 0) {
+    return { ok: false, reason: "unknown-key" };
+  }
 
   const keys = await fetchJwks(jwksUrl, now, fetchImpl);
-  const match = keys.find((k) => k.kid === header.kid);
+  let match = keys.find((k) => k.kid === header.kid);
+  if (!match) {
+    const refreshedKeys = await fetchJwks(jwksUrl, now, fetchImpl, {
+      bypassCacheOnKidMiss: true,
+    });
+    match = refreshedKeys.find((k) => k.kid === header.kid);
+  }
   if (!match) return { ok: false, reason: "unknown-key" };
 
-  const key = await importJwk(match);
+  const key = await importRs256Jwk(match);
   const signature = base64UrlToBytes(rawSig);
   const signed = new TextEncoder().encode(`${rawHeader}.${rawPayload}`);
   const ok = await crypto.subtle.verify(

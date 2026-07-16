@@ -1,8 +1,13 @@
 import type { JsonWebKey } from "./fetchJwks.ts";
 
 interface JwksCacheEntry {
-  fetchedAt: number;
-  keys: JsonWebKey[];
+  fetchedAt?: number;
+  keys?: JsonWebKey[];
+  inFlight?: Promise<JsonWebKey[]>;
+  lastMissRefreshAt?: number;
+  lastRefreshFailure?:
+    | { at: number; kind: "inadmissible" }
+    | { at: number; kind: "error"; error: unknown };
 }
 
 /**

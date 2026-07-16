@@ -15,8 +15,9 @@ function base64url(bytes: Uint8Array | string): string {
 export async function signTestJwt(
   keypair: RsaTestKeypair,
   claims: Record<string, unknown>,
+  headerOverrides: Record<string, unknown> = {},
 ): Promise<string> {
-  const header = { alg: "RS256", typ: "JWT", kid: keypair.kid };
+  const header = { alg: "RS256", typ: "JWT", kid: keypair.kid, ...headerOverrides };
   const encodedHeader = base64url(JSON.stringify(header));
   const encodedPayload = base64url(JSON.stringify(claims));
   const signingInput = `${encodedHeader}.${encodedPayload}`;

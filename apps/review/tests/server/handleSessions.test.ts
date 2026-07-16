@@ -5,6 +5,7 @@ import type { ReviewWorkerEnv } from "../../src/server/env.ts";
 import { buildTestEnv } from "./helpers/buildTestEnv.ts";
 import { rsaKeypair, type RsaTestKeypair } from "./helpers/rsaKeypair.ts";
 import { serveJwks, type ServedJwks } from "./helpers/serveJwks.ts";
+import { serveMutableJwks } from "./helpers/serveMutableJwks.ts";
 import { signTestJwt } from "./helpers/signTestJwt.ts";
 
 const REPO = "octo/widgets";
@@ -89,6 +90,49 @@ describe("POST /api/sessions (OIDC)", () => {
     expect(new Date(quota.resetsAt).getTime()).toBeGreaterThan(Date.now());
     expect(body.anthropicBaseUrl).toBe("https://review.test/anthropic");
     expect(body.publishUrl).toBe("https://review.test");
+  });
+
+  test("mints a session after the issuer rotates its JWKS within the cache TTL", async () => {
+    const keyA = await rsaKeypair("worker-rotation-a");
+    const keyB = await rsaKeypair("worker-rotation-b");
+    const rotatingJwks = serveMutableJwks([keyA.publicJwk]);
+    try {
+      const env = await buildTestEnv();
+      await registerRepo(env, REPO, 3);
+      const worker = makeWorker(rotatingJwks.url);
+      const exp = Math.floor(Date.now() / 1000) + 600;
+
+      const tokenA = await signTestJwt(keyA, baseClaims(REPO, 51, exp));
+      const first = await worker.fetch(
+        new Request("https://review.test/api/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ oidcToken: tokenA }),
+        }),
+        env,
+      );
+      expect(first.status).toBe(200);
+      expect(rotatingJwks.requestCount).toBe(1);
+
+      rotatingJwks.setKeys([keyA.publicJwk, keyB.publicJwk]);
+      const tokenB = await signTestJwt(keyB, baseClaims(REPO, 52, exp));
+      const second = await worker.fetch(
+        new Request("https://review.test/api/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ oidcToken: tokenB }),
+        }),
+        env,
+      );
+      expect(second.status).toBe(200);
+      expect(typeof ((await second.json()) as { token?: unknown }).token).toBe("string");
+      expect(rotatingJwks.requestCount).toBe(2);
+
+      const sessions = await env.DB.prepare("SELECT COUNT(*) AS c FROM sessions").first<{ c: number }>();
+      expect(sessions?.c).toBe(2);
+    } finally {
+      rotatingJwks.stop();
+    }
   });
 
   test("returns the repo's registered quiz mode", async () => {
