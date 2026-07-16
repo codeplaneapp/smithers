@@ -112,12 +112,12 @@ function AreaCard({ runId, nodeId, title, state, refreshKey }: {
 }
 
 function RunView({ runId }: { runId: string }) {
-  const run = useGatewayRun({ runId });
-  const events = useGatewayRunEvents({ runId });
+  const run = useGatewayRun(runId);
+  const events = useGatewayRunEvents(runId);
   const { nodeStates, finishedCount } = useMemo(() => {
     const states: Record<string, NodeState> = {};
     let finished = 0;
-    for (const frame of events.data ?? []) {
+    for (const frame of events.events ?? []) {
       const payload = isRecord(frame) && isRecord(frame.payload) ? frame.payload : null;
       if (!payload) continue;
       const kind = String(payload.event ?? "");
@@ -132,7 +132,7 @@ function RunView({ runId }: { runId: string }) {
       if (kind === "NodeFailed") states[nodeId] = "failed";
     }
     return { nodeStates: states, finishedCount: finished };
-  }, [events.data]);
+  }, [events.events]);
 
   const status = String(run.data?.status ?? "loading");
   return (
