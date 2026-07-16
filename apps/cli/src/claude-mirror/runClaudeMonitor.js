@@ -2,6 +2,7 @@ import { claudeMirrorContract } from "./claudeMirrorContract.js";
 import { isTerminalClaudeMirrorRunStatus } from "./isTerminalClaudeMirrorRunStatus.js";
 import { readClaudeMirrorSubscriptions } from "./readClaudeMirrorSubscriptions.js";
 import { removeClaudeMirrorSubscription } from "./removeClaudeMirrorSubscription.js";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
 
 const RUN_SCAN_LIMIT = 50;
 const EVENT_PAGE_SIZE = 200;
@@ -403,7 +404,13 @@ function trackStall(run, stalledAfterMs, stalledRuns, emit, now, lastEventActivi
     // keeps flowing, so recently persisted events count as liveness: a late
     // heartbeat alone must not flag a run that is still durably progressing.
     const recentEventActivity = lastEventActivityAtMs !== undefined && now() - lastEventActivityAtMs <= stalledAfterMs;
-    const isStalled = run.status === "running" && heartbeatLate && !recentEventActivity;
+    // A recorded owner whose pid is demonstrably alive is a busy engine with a
+    // lagging heartbeat (deriveRunState's "stale"), not a stalled run; alerting
+    // on it flaps a false "run-stalled" every quiet stretch of a long agent
+    // call. Only alert when no live owner process is verifiable on this host.
+    const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+    const ownerAlive = ownerPid !== null && isPidAlive(ownerPid);
+    const isStalled = run.status === "running" && heartbeatLate && !recentEventActivity && !ownerAlive;
     if (isStalled && !stalledRuns.has(runId)) {
         stalledRuns.add(runId);
         emit({

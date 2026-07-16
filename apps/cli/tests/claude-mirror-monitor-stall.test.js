@@ -304,6 +304,73 @@ describe("runClaudeMonitor stall notification", () => {
         expect(stalls[0].action).toContain(`smithers why ${QUIET_ID}`);
     });
 
+    // A busy engine on a long agent call heartbeats every few minutes and
+    // persists no events, so heartbeat+event checks alone flap a false
+    // run-stalled each quiet stretch. A recorded owner whose pid is verifiably
+    // ALIVE on this host is deriveRunState's "stale", never "stalled".
+
+    test("a live owner pid suppresses run-stalled despite a late heartbeat and no events", async () => {
+        const LIVE_OWNER_ID = "live-owner-run";
+        const nowMs = 1_700_000_000_000;
+        const stalledAfterMs = 120_000;
+        const adapter = {
+            async listRuns() {
+                return [{
+                    runId: LIVE_OWNER_ID,
+                    status: "running",
+                    heartbeatAtMs: nowMs - stalledAfterMs - 60_000,
+                    runtimeOwnerId: `pid:${process.pid}:11111111-1111-1111-1111-111111111111`,
+                }];
+            },
+            async getLastEventSeq() { return 0; },
+            async listEventHistory() { return []; },
+            async listPendingApprovals() { return []; },
+            async listPendingHumanRequests() { return []; },
+        };
+        const lines = [];
+        await runClaudeMonitor(adapter, {
+            ticks: 3,
+            intervalMs: 250,
+            stalledAfterMs,
+            now: () => nowMs,
+            write: (line) => lines.push(JSON.parse(line)),
+        });
+        expect(lines.filter((line) => line.kind === "run-stalled"), JSON.stringify(lines)).toHaveLength(0);
+    });
+
+    test("a dead owner pid still stalls on a late heartbeat with no events", async () => {
+        const DEAD_OWNER_ID = "dead-owner-run";
+        const nowMs = 1_700_000_000_000;
+        const stalledAfterMs = 120_000;
+        // A just-reaped child is a demonstrably dead pid (unlike a fixture
+        // constant, which some machine could coincidentally be running).
+        const { spawnSync } = await import("node:child_process");
+        const deadPid = spawnSync("true").pid;
+        const adapter = {
+            async listRuns() {
+                return [{
+                    runId: DEAD_OWNER_ID,
+                    status: "running",
+                    heartbeatAtMs: nowMs - stalledAfterMs - 60_000,
+                    runtimeOwnerId: `pid:${deadPid}:22222222-2222-2222-2222-222222222222`,
+                }];
+            },
+            async getLastEventSeq() { return 0; },
+            async listEventHistory() { return []; },
+            async listPendingApprovals() { return []; },
+            async listPendingHumanRequests() { return []; },
+        };
+        const lines = [];
+        await runClaudeMonitor(adapter, {
+            ticks: 2,
+            intervalMs: 250,
+            stalledAfterMs,
+            now: () => nowMs,
+            write: (line) => lines.push(JSON.parse(line)),
+        });
+        expect(lines.filter((line) => line.kind === "run-stalled" && line.runId === DEAD_OWNER_ID), JSON.stringify(lines)).toHaveLength(1);
+    });
+
     test("a failed run emits run-failed pointing at smithers inspect, not the nonexistent autopsy", async () => {
         const FAILED_ID = "failed-run";
         const lines = [];
