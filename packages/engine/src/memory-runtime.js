@@ -10,6 +10,23 @@ const MEMORY_CONTEXT_OPEN = "<smithers_memory_context>";
 const MEMORY_CONTEXT_CLOSE = "</smithers_memory_context>";
 const DEFAULT_MEMORY_TIMEOUT_MS = 2_000;
 const MEMORY_CHARS_PER_TOKEN = 4;
+const MAX_MEMORY_TAGS = 16;
+const MAX_MEMORY_TAG_LENGTH = 128;
+const PROJECT_TAG_PATTERN = /^(?:branch|stream):/u;
+const SOURCE_TAG_PATTERN = /^source:(?:chat|run|reflection|import)$/u;
+const SCOPE_TAG_PATTERN = /^scope:(?:main|branch)$/u;
+
+/** @param {string} tag */
+function isStableProjectTag(tag) {
+    if (!PROJECT_TAG_PATTERN.test(tag)) {
+        return false;
+    }
+    const value = tag.slice(tag.indexOf(":") + 1);
+    return value.length > 0 && [...value].every((character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return !/\s/u.test(character) && codePoint >= 32 && codePoint !== 127;
+    });
+}
 
 /**
  * @param {TaskDescriptor["memoryConfig"]} config
@@ -42,19 +59,75 @@ function uniqueStrings(values) {
     return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
 }
 
+/** @param {string[]} tags */
+function validateStableTags(tags) {
+    const unique = uniqueStrings(tags);
+    if (unique.length > MAX_MEMORY_TAGS) {
+        throw new SmithersError("INVALID_INPUT", `Memory operations accept at most ${MAX_MEMORY_TAGS} stable tags.`, {
+            tagCount: unique.length,
+        });
+    }
+    for (const tag of unique) {
+        const stable = tag.length <= MAX_MEMORY_TAG_LENGTH
+            && (isStableProjectTag(tag) || SOURCE_TAG_PATTERN.test(tag) || SCOPE_TAG_PATTERN.test(tag));
+        if (!stable) {
+            throw new SmithersError("INVALID_INPUT", `Memory tag ${tag} is not a stable branch, stream, source, or scope tag.`, {
+                tag,
+                allowed: ["branch:*", "stream:*", "source:chat|run|reflection|import", "scope:main|branch"],
+            });
+        }
+    }
+    return unique;
+}
+
+/** @param {string[]} tags */
+function normalizeProjectWriteScope(tags) {
+    const branches = tags.filter((tag) => tag.startsWith("branch:"));
+    const scopes = tags.filter((tag) => tag.startsWith("scope:"));
+    if (branches.length > 1) {
+        throw new SmithersError("INVALID_INPUT", "Project memory writes accept one branch tag.", { branches });
+    }
+    if (scopes.length > 1) {
+        throw new SmithersError("INVALID_INPUT", "Project memory writes accept one scope tag.", { scopes });
+    }
+    if (branches.length === 0) {
+        return tags;
+    }
+    const expectedScope = branches[0] === "branch:main" ? "scope:main" : "scope:branch";
+    if (scopes.length > 0 && scopes[0] !== expectedScope) {
+        throw new SmithersError("INVALID_INPUT", `Memory tag ${scopes[0]} conflicts with ${branches[0]}.`, {
+            branch: branches[0],
+            scope: scopes[0],
+            expectedScope,
+        });
+    }
+    return scopes.length === 0 ? [...tags, expectedScope] : tags;
+}
+
 /**
- * Project tags do not belong in the cross-project user bank. Explicit tags
- * supplied to a tool remain eligible because the tool author selected them for
- * that individual operation.
+ * Project tags do not belong in the cross-project user bank. Configured
+ * project tags are stripped from user-bank writes; a tool cannot add them back.
  * @param {string} bank
  * @param {string[]} configuredTags
  * @param {string[]} [additionalTags]
  */
 function memoryWriteTags(bank, configuredTags, additionalTags = []) {
+    const configured = validateStableTags(configuredTags);
+    const additions = validateStableTags(additionalTags);
+    if (isUserBank(bank)) {
+        const projectTags = additions.filter((tag) => /^(?:branch|scope|stream):/u.test(tag));
+        if (projectTags.length > 0) {
+            throw new SmithersError("INVALID_INPUT", "User-bank memory writes cannot carry project scope tags.", {
+                bank,
+                tags: projectTags,
+            });
+        }
+    }
     const inherited = isUserBank(bank)
-        ? configuredTags.filter((tag) => !/^(?:branch|scope|stream):/u.test(tag))
-        : configuredTags;
-    return uniqueStrings([...inherited, ...additionalTags]);
+        ? configured.filter((tag) => !/^(?:branch|scope|stream):/u.test(tag))
+        : configured;
+    const tags = uniqueStrings([...inherited, ...additions]);
+    return isProjectBank(bank) ? normalizeProjectWriteScope(tags) : tags;
 }
 
 /** @param {string[]} tags @returns {MemoryRuntimeTagGroup} */
@@ -73,21 +146,22 @@ function strictTagGroup(tags) {
  * @returns {MemoryRuntimeTagGroup[]}
  */
 function recallTagGroups(bank, configuredTags, additionalTags = []) {
-    const extras = uniqueStrings(additionalTags);
+    const configured = validateStableTags(configuredTags);
+    const extras = validateStableTags(additionalTags);
     if (isUserBank(bank)) {
         return extras.length > 0 ? [strictTagGroup(extras)] : [];
     }
     if (!isProjectBank(bank)) {
-        const allTags = uniqueStrings([...configuredTags, ...extras]);
+        const allTags = uniqueStrings([...configured, ...extras]);
         return allTags.length > 0 ? [strictTagGroup(allTags)] : [];
     }
 
-    const branches = uniqueStrings(configuredTags.filter((tag) => tag.startsWith("branch:")));
+    const branches = uniqueStrings(configured.filter((tag) => tag.startsWith("branch:")));
     /** @type {MemoryRuntimeTagGroup[]} */
     const groups = [{
         or: ["scope:main", ...branches].map((tag) => strictTagGroup([tag])),
     }];
-    const additionalConfigured = uniqueStrings(configuredTags.filter((tag) =>
+    const additionalConfigured = uniqueStrings(configured.filter((tag) =>
         !tag.startsWith("branch:") && !tag.startsWith("scope:")));
     groups.push(...additionalConfigured.map((tag) => strictTagGroup([tag])));
     if (extras.length > 0) {

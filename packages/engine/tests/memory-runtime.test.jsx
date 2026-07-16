@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
+import { createTaskMemoryTools } from "../src/memory-runtime.js";
 import { z } from "zod";
 
 const outputSchema = z.object({ value: z.number() });
@@ -12,6 +13,60 @@ afterEach(() => {
 });
 
 describe("task memory runtime", () => {
+    test("remember enforces stable tags, user-bank isolation, and derived branch scope", async () => {
+        const retains = [];
+        const service = {
+            recallMemory: async () => [],
+            getPrimers: async () => [],
+            retainMemory: async (input) => retains.push(input),
+        };
+        const context = {
+            runId: "tag-run",
+            nodeId: "tag-task",
+            iteration: 0,
+            taskSignal: new AbortController().signal,
+        };
+        const userTools = createTaskMemoryTools(service, {
+            banks: ["user-1", "project-1"],
+            tags: ["branch:feature", "stream:checkout"],
+        }, context);
+
+        await expect(userTools.remember.execute({
+            bank: "user-1",
+            content: "volatile",
+            tags: ["run:tag-run"],
+        }, {})).rejects.toMatchObject({ code: "INVALID_INPUT" });
+        await expect(userTools.remember.execute({
+            bank: "user-1",
+            content: "project scoped",
+            tags: ["branch:feature"],
+        }, {})).rejects.toMatchObject({ code: "INVALID_INPUT" });
+        await expect(userTools.remember.execute({
+            bank: "user-1",
+            content: "project identity",
+            tags: ["project:checkout"],
+        }, {})).rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+        await userTools.remember.execute({
+            bank: "project-1",
+            content: "branch finding",
+            tags: ["source:reflection"],
+        }, {});
+        expect(retains[0].tags).toEqual([
+            "branch:feature",
+            "stream:checkout",
+            "source:reflection",
+            "scope:branch",
+        ]);
+
+        const conflicting = createTaskMemoryTools(service, {
+            bank: "project-1",
+            tags: ["branch:feature", "scope:main"],
+        }, context);
+        await expect(conflicting.remember.execute({ content: "unsafe" }, {}))
+            .rejects.toMatchObject({ code: "INVALID_INPUT" });
+    });
+
     test("prepends a fenced snapshot, registers tools, and retains successful output", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers({ answer: outputSchema });
         const recalls = [];

@@ -39,7 +39,7 @@ describe("Memory component", () => {
         const graph = await renderer.render(
             <Memory
                 banks={["user-1", "project-2"]}
-                tags={["scope:main", "branch:feature"]}
+                tags={["scope:branch", "branch:feature"]}
                 recall="release policy"
                 budget="high"
                 maxTokens={900}
@@ -54,7 +54,7 @@ describe("Memory component", () => {
         );
         expect(graph.tasks[0].memoryConfig).toEqual({
             banks: ["user-1", "project-2"],
-            tags: ["scope:main", "branch:feature"],
+            tags: ["scope:branch", "branch:feature"],
             recall: false,
             budget: "high",
             maxTokens: 900,

@@ -33,7 +33,7 @@ import { Memory } from "smithers-orchestrator";
 |---|---|---|---|
 | `bank` | `string` | none | One Hindsight bank. Use either `bank` or `banks`. |
 | `banks` | `string[]` | none | Banks recalled in parallel. Results share the `maxTokens` injection cap. Use either `bank` or `banks`. |
-| `tags` | `string[]` | `[]` | Stable recall and retention dimensions such as `branch:*`, `stream:*`, `source:*`, and `scope:*`. Project-bank recall derives a compound filter from these tags. |
+| `tags` | `string[]` | `[]` | Up to 16 stable dimensions: `branch:*`, `stream:*`, `source:chat\|run\|reflection\|import`, and `scope:main\|branch`. Project-bank recall derives a compound filter from these tags. |
 | `recall` | `"auto" \| string \| false` | `"auto"` | `"auto"` uses the task prompt as the query, a string supplies a fixed query, and `false` disables pre-task recall. |
 | `budget` | `"low" \| "mid" \| "high"` | `"mid"` | Hindsight recall search budget. Higher budgets examine more candidates before reranking. |
 | `maxTokens` | `number` | `2048` | Maximum tokens injected across recalled memories and primers. Must be a positive safe integer. |
@@ -96,7 +96,7 @@ Smithers applies the standard two-bank recall policy automatically:
 - `project-*` banks use a `tag_groups`-only filter for `(scope:main OR branch:current)`, then apply configured `stream:*` and other tags as additional constraints.
 - Other bank names use all configured tags as a strict filter.
 
-The `recall` tool preserves those base filters. Tags passed by the agent add constraints and cannot widen the configured branch or stream scope. The local SQLite fallback evaluates the same strict filters before keyword scoring, so branch-local facts cannot cross into another branch recall.
+The `recall` tool preserves those base filters. Tags passed by the agent add stable constraints and cannot widen the configured branch or stream scope. The `remember` tool rejects volatile tags and rejects project scope tags when writing to a user bank. The local SQLite fallback evaluates the same strict filters before keyword scoring, so branch-local facts cannot cross into another branch recall.
 
 ## Backend selection
 
