@@ -11,6 +11,7 @@ import {
     sdk,
 } from "@vectorize-io/hindsight-client";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { logWarning } from "@smithers-orchestrator/observability/logging";
 import { namespaceToString } from "./namespaceToString.js";
 import { parseNamespace } from "./parseNamespace.js";
 import { capMemoryRecallResults } from "./capMemoryRecallResults.js";
@@ -151,6 +152,13 @@ function remoteEffect(operation, code, run) {
  * @implements {MemoryStore}
  */
 export class HindsightMemoryStore {
+    /** @type {Map<string, { operation: string; run: () => Promise<void> }>} */
+    #pendingProjections = new Map();
+    /** @type {Map<string, Promise<void>>} */
+    #projectionTails = new Map();
+    /** @type {Promise<void> | null} */
+    #projectionRetry = null;
+
     /** @param {HindsightMemoryStoreOptions} options */
     constructor(options) {
         if (!options || typeof options.baseUrl !== "string" || options.baseUrl.trim().length === 0) {
@@ -184,6 +192,84 @@ export class HindsightMemoryStore {
             : bank;
         this.knownBanks.add(resolved);
         return resolved;
+    }
+
+    /**
+     * Retry failed best-effort projections once. The queue is deliberately
+     * process-local: the transactional contract store remains authoritative.
+     */
+    async #retryPendingProjections() {
+        if (this.#projectionRetry) {
+            await this.#projectionRetry;
+            return;
+        }
+        const retry = async () => {
+            for (const [key, pending] of [...this.#pendingProjections]) {
+                if (this.#pendingProjections.get(key) !== pending) {
+                    continue;
+                }
+                try {
+                    await pending.run();
+                    if (this.#pendingProjections.get(key) === pending) {
+                        this.#pendingProjections.delete(key);
+                    }
+                }
+                catch (error) {
+                    this.#logProjectionFailure(pending.operation, key, error, true);
+                }
+            }
+        };
+        const running = retry();
+        this.#projectionRetry = running;
+        try {
+            await running;
+        }
+        finally {
+            if (this.#projectionRetry === running) {
+                this.#projectionRetry = null;
+            }
+        }
+    }
+
+    /**
+     * @param {string} key
+     * @param {string} operation
+     * @param {() => Promise<void>} run
+     */
+    async #projectBestEffort(key, operation, run) {
+        const previous = this.#projectionTails.get(key) ?? Promise.resolve();
+        const current = previous
+            .catch(() => undefined)
+            .then(async () => {
+                try {
+                    await run();
+                    this.#pendingProjections.delete(key);
+                }
+                catch (error) {
+                    this.#pendingProjections.set(key, { operation, run });
+                    this.#logProjectionFailure(operation, key, error, false);
+                }
+            });
+        this.#projectionTails.set(key, current);
+        try {
+            await current;
+        }
+        finally {
+            if (this.#projectionTails.get(key) === current) {
+                this.#projectionTails.delete(key);
+            }
+        }
+    }
+
+    /** @param {string} operation @param {string} key @param {unknown} error @param {boolean} retry */
+    #logProjectionFailure(operation, key, error, retry) {
+        logWarning("Hindsight projection failed; contract-store mutation remains committed", {
+            operation,
+            projectionKey: key,
+            retry,
+            pendingProjections: this.#pendingProjections.size,
+            error: error instanceof Error ? error.message : String(error),
+        }, "memory:hindsight");
     }
 
     /** @param {MemoryNamespace} ns */
@@ -295,6 +381,7 @@ export class HindsightMemoryStore {
      * @param {MemoryProvenance} [provenance]
      */
     async setFact(ns, key, value, ttlMs, provenance) {
+        await this.#retryPendingProjections();
         const valueJson = JSON.stringify(value);
         if (valueJson === undefined) {
             throw new TypeError("memory setFact cannot store undefined.");
@@ -304,19 +391,27 @@ export class HindsightMemoryStore {
         if (!fact) {
             throw new Error(`memory setFact: transactional readback missing ${namespaceToString(ns)}/${key}`);
         }
-        await this.putRecord(this.bankForNamespace(ns), "fact", documentId("fact", `${fact.namespace}\0${key}`), fact, {
+        const bank = this.bankForNamespace(ns);
+        const id = documentId("fact", `${fact.namespace}\0${key}`);
+        await this.#projectBestEffort(`${bank}:${id}`, "memory setFact projection", () => this.putRecord(bank, "fact", id, fact, {
             metadata: provenance,
             context: `Exact Smithers fact ${fact.namespace}/${key}`,
-        });
+        }));
     }
 
     /** @param {MemoryNamespace} ns @param {string} key */
     async deleteFact(ns, key) {
+        await this.#retryPendingProjections();
         const bank = this.bankForNamespace(ns);
         const id = documentId("fact", `${namespaceToString(ns)}\0${key}`);
+        const existing = await this.contractStore.getFact(ns, key);
         await this.contractStore.deleteFact(ns, key);
-        if (await this.client.getDocument(bank, id)) {
-            await this.client.deleteDocument(bank, id);
+        if (existing) {
+            await this.#projectBestEffort(`${bank}:${id}`, "memory deleteFact projection", async () => {
+                if (await this.client.getDocument(bank, id)) {
+                    await this.client.deleteDocument(bank, id);
+                }
+            });
         }
     }
 
@@ -331,8 +426,11 @@ export class HindsightMemoryStore {
 
     /** @param {MemoryNamespace} ns @param {string} [title] */
     async createThread(ns, title) {
+        await this.#retryPendingProjections();
         const thread = await this.contractStore.createThread(ns, title);
-        await this.putRecord(this.bankForNamespace(ns), "thread", documentId("thread", thread.threadId), thread);
+        const bank = this.bankForNamespace(ns);
+        const id = documentId("thread", thread.threadId);
+        await this.#projectBestEffort(`${bank}:${id}`, "memory createThread projection", () => this.putRecord(bank, "thread", id, thread));
         return thread;
     }
 
@@ -347,6 +445,7 @@ export class HindsightMemoryStore {
 
     /** @param {string} threadId */
     async deleteThread(threadId) {
+        await this.#retryPendingProjections();
         const thread = await this.contractStore.getThread(threadId);
         if (!thread) {
             return;
@@ -354,12 +453,21 @@ export class HindsightMemoryStore {
         const messages = await this.listMessages(threadId);
         const bank = this.bankForNamespace(parseNamespace(thread.namespace));
         await this.contractStore.deleteThread(threadId);
-        await Promise.all(messages.map((message) => this.client.deleteDocument(bank, documentId("message", message.id))));
-        await this.client.deleteDocument(bank, documentId("thread", threadId));
+        await Promise.all([
+            ...messages.map((message) => {
+                const id = documentId("message", message.id);
+                return this.#projectBestEffort(`${bank}:${id}`, "memory deleteThread message projection", () => this.client.deleteDocument(bank, id));
+            }),
+            (() => {
+                const id = documentId("thread", threadId);
+                return this.#projectBestEffort(`${bank}:${id}`, "memory deleteThread projection", () => this.client.deleteDocument(bank, id));
+            })(),
+        ]);
     }
 
     /** @param {Omit<MemoryMessage, "createdAtMs"> & { createdAtMs?: number }} msg */
     async saveMessage(msg) {
+        await this.#retryPendingProjections();
         await this.contractStore.saveMessage(msg);
         const message = await this.findContractMessage(msg.id);
         if (!message) {
@@ -370,10 +478,11 @@ export class HindsightMemoryStore {
             throw new Error(`memory saveMessage: no thread with id ${message.threadId}`);
         }
         const bank = this.bankForNamespace(parseNamespace(thread.namespace));
-        await this.putRecord(bank, "message", documentId("message", message.id), message, {
+        const id = documentId("message", message.id);
+        await this.#projectBestEffort(`${bank}:${id}`, "memory saveMessage projection", () => this.putRecord(bank, "message", id, message, {
             metadata: { run: message.runId, node: message.nodeId, iteration: message.iteration, session: message.threadId },
             context: `Smithers thread ${message.threadId} ${message.role} message`,
-        });
+        }));
     }
 
     /** @param {string} id @returns {Promise<MemoryMessage | undefined>} */
@@ -399,18 +508,23 @@ export class HindsightMemoryStore {
 
     /** @param {string} threadId @param {string[]} messageIds */
     async deleteMessages(threadId, messageIds) {
+        await this.#retryPendingProjections();
         const thread = await this.contractStore.getThread(threadId);
         const existing = new Set((await this.contractStore.listMessages(threadId)).map((message) => message.id));
         const selected = [...new Set(messageIds)].filter((id) => existing.has(id));
         const deleted = await this.contractStore.deleteMessages(threadId, messageIds);
         if (thread) {
             const bank = this.bankForNamespace(parseNamespace(thread.namespace));
-            await Promise.all(selected.map((id) => this.client.deleteDocument(bank, documentId("message", id))));
+            await Promise.all(selected.map((messageId) => {
+                const id = documentId("message", messageId);
+                return this.#projectBestEffort(`${bank}:${id}`, "memory deleteMessages projection", () => this.client.deleteDocument(bank, id));
+            }));
         }
         return deleted;
     }
 
     async deleteExpiredFacts() {
+        await this.#retryPendingProjections();
         const now = Date.now();
         const expired = (await this.contractStore.listAllFacts()).filter((fact) => fact.ttlMs != null && fact.updatedAtMs + fact.ttlMs < now);
         const deleted = await this.contractStore.deleteExpiredFacts();
@@ -418,23 +532,27 @@ export class HindsightMemoryStore {
             const ns = parseNamespace(fact.namespace);
             const bank = this.bankForNamespace(ns);
             const id = documentId("fact", `${fact.namespace}\0${fact.key}`);
-            if (await this.client.getDocument(bank, id)) {
-                await this.client.deleteDocument(bank, id);
-            }
+            await this.#projectBestEffort(`${bank}:${id}`, "memory deleteExpiredFacts projection", async () => {
+                if (await this.client.getDocument(bank, id)) {
+                    await this.client.deleteDocument(bank, id);
+                }
+            });
         }
         return deleted;
     }
 
     /** @param {SaveNoteInput} input */
     async saveNote(input) {
+        await this.#retryPendingProjections();
         const note = await this.contractStore.saveNote(input);
         const bank = this.bankForNamespace(parseNamespace(note.namespace));
         const tags = note.tagsJson ? JSON.parse(note.tagsJson) : [];
-        await this.putRecord(bank, "note", documentId("note", note.id), note, {
+        const id = documentId("note", note.id);
+        await this.#projectBestEffort(`${bank}:${id}`, "memory saveNote projection", () => this.putRecord(bank, "note", id, note, {
             tags,
             metadata: { run: note.runId, node: note.nodeId, iteration: note.iteration },
             context: note.kind ? `Smithers ${note.kind} note` : "Smithers knowledge note",
-        });
+        }));
         return note;
     }
 
@@ -450,6 +568,7 @@ export class HindsightMemoryStore {
 
     /** @param {string} id @param {string} status */
     async setNoteStatus(id, status) {
+        await this.#retryPendingProjections();
         await this.contractStore.setNoteStatus(id, status);
         const note = await this.contractStore.getNote(id);
         if (!note) {
@@ -457,14 +576,16 @@ export class HindsightMemoryStore {
         }
         const tags = note.tagsJson ? JSON.parse(note.tagsJson) : [];
         const bank = this.bankForNamespace(parseNamespace(note.namespace));
-        await this.putRecord(bank, "note", documentId("note", id), note, {
+        const recordId = documentId("note", id);
+        await this.#projectBestEffort(`${bank}:${recordId}`, "memory setNoteStatus projection", () => this.putRecord(bank, "note", recordId, note, {
             tags,
             metadata: { run: note.runId, node: note.nodeId, iteration: note.iteration },
-        });
+        }));
     }
 
     /** @param {string} _kind */
     async enableNoteSearch(_kind) {
+        await this.#retryPendingProjections();
         // Hindsight indexes retained content on write, so no separate FTS setup is needed.
     }
 
