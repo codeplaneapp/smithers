@@ -231,6 +231,20 @@ export const sourceRefSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
+export const releaseStatsSchema = z.object({
+  totalCommits: z.number().int(),
+  filesChanged: z.number().int(),
+  insertions: z.number().int(),
+  deletions: z.number().int(),
+  featCommits: z.number().int(),
+  fixCommits: z.number().int(),
+  securityCommits: z.number().int(),
+  perfCommits: z.number().int(),
+  refactorCommits: z.number().int(),
+  testCommits: z.number().int(),
+  docsCommits: z.number().int(),
+});
+
 export const collectedContextSchema = z.looseObject({
   version: z.string(),
   range: z.string(),
@@ -245,6 +259,7 @@ export const collectedContextSchema = z.looseObject({
     .default([]),
   changedFiles: z.array(z.string()).default([]),
   diffStats: z.string().default(""),
+  releaseStats: releaseStatsSchema.nullable().default(null),
   fileExcerpts: z
     .array(
       z.object({
@@ -385,6 +400,33 @@ export const mediaAssetsSchema = z.object({
   manifestPath: z.string().nullable().default(null),
   rasterizerPath: z.string().nullable().default(null),
   message: z.string().default(""),
+});
+
+/**
+ * Real screen recordings of the product UI (Monitor, workflow UIs), captured
+ * from a scratch workspace before any prose is drafted so the changelog and
+ * thread are written around real assets instead of imagined ones.
+ */
+export const uiRecordingsSchema = z.object({
+  recorded: z.boolean(),
+  recordings: z
+    .array(
+      z.object({
+        path: z.string().describe("Repo-relative path, e.g. docs/images/<version>/monitor-live.gif"),
+        kind: z.enum(["gif", "png"]),
+        caption: z.string().min(20).describe("What the recording actually shows, verified frame by frame."),
+        suggestedUse: z.string().describe("Where this asset belongs: changelog section, tweet index, or both."),
+      }),
+    )
+    .default([]),
+  notes: z.string().default(""),
+});
+
+export const commitChangelogSchema = z.object({
+  path: z.string(),
+  written: z.boolean(),
+  totalCommits: z.number().int(),
+  categories: z.record(z.string(), z.number()).default({}),
 });
 
 export const blogOutlineSchema = z.object({

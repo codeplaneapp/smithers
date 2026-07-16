@@ -183,6 +183,33 @@ function latestMarketingThreads(limit: number): Array<{ version: string; path: s
     .slice(-limit);
 }
 
+/**
+ * Exact tag-to-tag stats for the release. These feed the narrative changelog
+ * ("1,169 commits, 417 fixes") and the launch thread, so they must be computed
+ * deterministically here, never estimated by an agent. The category counts key
+ * off the emoji conventional-commit prefixes used across the repo.
+ */
+function computeReleaseStats(range: string, commits: CollectedContext["commits"]) {
+  const shortstat = run("git", ["diff", "--shortstat", range]);
+  const files = Number(/(\d+) files? changed/.exec(shortstat)?.[1] ?? 0);
+  const insertions = Number(/(\d+) insertions?/.exec(shortstat)?.[1] ?? 0);
+  const deletions = Number(/(\d+) deletions?/.exec(shortstat)?.[1] ?? 0);
+  const count = (re: RegExp) => commits.filter((c) => re.test(c.subject)).length;
+  return {
+    totalCommits: commits.length,
+    filesChanged: files,
+    insertions,
+    deletions,
+    featCommits: count(/^✨/),
+    fixCommits: count(/^(🐛|🔒)/),
+    securityCommits: count(/^🔒/),
+    perfCommits: count(/^(⚡️|⚡)/),
+    refactorCommits: count(/^♻️/),
+    testCommits: count(/^✅/),
+    docsCommits: count(/^📝/),
+  };
+}
+
 export function collectReleaseContext(input: ReleaseContentInput, probe: Probe): CollectedContext {
   const changedFiles = input.skip.collectGit
     ? []
@@ -192,6 +219,7 @@ export function collectReleaseContext(input: ReleaseContentInput, probe: Probe):
         .filter(Boolean);
   const diffStats = input.skip.collectGit ? "" : run("git", ["diff", "--stat", probe.range]);
   const commits = input.skip.collectGit ? [] : parseCommits(probe.range);
+  const releaseStats = input.skip.collectGit ? null : computeReleaseStats(probe.range, commits);
 
   const fileExcerpts = changedFiles
     .filter(isUsefulExcerptPath)
@@ -219,6 +247,7 @@ export function collectReleaseContext(input: ReleaseContentInput, probe: Probe):
     commits,
     changedFiles,
     diffStats,
+    releaseStats,
     fileExcerpts,
     priorChangelogs,
     priorThreads,
