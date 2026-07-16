@@ -121,27 +121,45 @@ function stringMetadata(value) {
 }
 
 /**
- * @param {NoteReadFilter | undefined} filter
- * @param {MemoryNote} note
- * @param {Set<string>} superseded
+ * Project SDK recall rows onto the runtime contract and cap the serialized
+ * aggregate. Counting the JSON envelope keeps the recall tool bounded even
+ * when a result set contains many short rows.
+ * @param {Array<RecallResult & { bank: string }>} results
+ * @param {number | undefined} maxTokens
  */
-function noteMatches(filter, note, superseded) {
-    if (!filter?.includeSuperseded && superseded.has(note.id)) {
-        return false;
+function normalizeRecallResults(results, maxTokens) {
+    const normalized = results.flatMap((result) => typeof result.text === "string" && result.text.length > 0
+        ? [{ bank: result.bank, text: result.text }]
+        : []);
+    if (maxTokens === undefined) {
+        return normalized;
     }
-    const status = filter?.status ?? "accepted";
-    if (status !== "any") {
-        if (Array.isArray(status) ? !status.includes(note.status) : note.status !== status) {
-            return false;
+    const charBudget = Math.max(0, maxTokens) * 4;
+    /** @type {Array<{ bank: string; text: string }>} */
+    const selected = [];
+    for (const result of normalized) {
+        if (JSON.stringify([...selected, result]).length <= charBudget) {
+            selected.push(result);
+            continue;
         }
+        let low = 0;
+        let high = result.text.length;
+        while (low < high) {
+            const middle = Math.ceil((low + high) / 2);
+            const candidate = { ...result, text: result.text.slice(0, middle) };
+            if (JSON.stringify([...selected, candidate]).length <= charBudget) {
+                low = middle;
+            }
+            else {
+                high = middle - 1;
+            }
+        }
+        if (low > 0) {
+            selected.push({ ...result, text: result.text.slice(0, low) });
+        }
+        break;
     }
-    if (filter?.kind && note.kind !== filter.kind) {
-        return false;
-    }
-    if (filter?.namespace && note.namespace !== namespaceToString(filter.namespace)) {
-        return false;
-    }
-    return true;
+    return selected;
 }
 
 /**
@@ -165,6 +183,8 @@ function remoteEffect(operation, code, run) {
  * Mapping:
  * - exact facts are retained with stable document ids and `updateMode=replace`;
  * - threads, messages, and notes are typed documents with stable record tags;
+ * - exact identity, concurrency, and supersession live in a transactional
+ *   contract store because Hindsight document ids are scoped to one bank;
  * - namespace identity selects a bank, while stable note/config tags stay tags;
  * - semantic note search and task recall call Hindsight recall;
  * - run/session identity is metadata, never a tag.
@@ -177,9 +197,13 @@ export class HindsightMemoryStore {
         if (!options || typeof options.baseUrl !== "string" || options.baseUrl.trim().length === 0) {
             throw new TypeError("HindsightMemoryStore requires a non-empty baseUrl.");
         }
+        if (!options.contractStore) {
+            throw new TypeError("HindsightMemoryStore requires a transactional contractStore.");
+        }
         this.baseUrl = options.baseUrl.replace(/\/+$/u, "");
         this.apiKey = options.apiKey;
         this.bankPrefix = options.bankPrefix ?? "";
+        this.contractStore = options.contractStore;
         this.client = options.client ?? new HindsightClient({
             baseUrl: this.baseUrl,
             ...(this.apiKey ? { apiKey: this.apiKey } : {}),
@@ -299,28 +323,9 @@ export class HindsightMemoryStore {
         });
     }
 
-    /**
-     * @param {string} id
-     * @param {"thread" | "note"} type
-     */
-    async findRecord(id, type) {
-        const docId = documentId(type, id);
-        for (const bank of await this.listBankIds()) {
-            const document = await this.client.getDocument(bank, docId);
-            const envelope = parseEnvelope(document?.original_text);
-            if (document && envelope?.type === type) {
-                return { bank, document, envelope };
-            }
-        }
-        return undefined;
-    }
-
     /** @param {MemoryNamespace} ns @param {string} key */
     async getFact(ns, key) {
-        const bank = this.bankForNamespace(ns);
-        const doc = await this.client.getDocument(bank, documentId("fact", `${namespaceToString(ns)}\0${key}`));
-        const envelope = parseEnvelope(doc?.original_text);
-        return envelope?.type === "fact" ? /** @type {MemoryFact} */ (envelope.value) : undefined;
+        return this.contractStore.getFact(ns, key);
     }
 
     /**
@@ -335,21 +340,11 @@ export class HindsightMemoryStore {
         if (valueJson === undefined) {
             throw new TypeError("memory setFact cannot store undefined.");
         }
-        const previous = await this.getFact(ns, key);
-        const now = Date.now();
-        /** @type {MemoryFact} */
-        const fact = {
-            namespace: namespaceToString(ns),
-            key,
-            valueJson,
-            schemaSig: null,
-            createdAtMs: previous?.createdAtMs ?? now,
-            updatedAtMs: now,
-            ttlMs: ttlMs ?? null,
-            runId: provenance?.runId ?? null,
-            nodeId: provenance?.nodeId ?? null,
-            iteration: provenance?.iteration ?? null,
-        };
+        await this.contractStore.setFact(ns, key, value, ttlMs, provenance);
+        const fact = await this.contractStore.getFact(ns, key);
+        if (!fact) {
+            throw new Error(`memory setFact: transactional readback missing ${namespaceToString(ns)}/${key}`);
+        }
         await this.putRecord(this.bankForNamespace(ns), "fact", documentId("fact", `${fact.namespace}\0${key}`), fact, {
             metadata: provenance,
             context: `Exact Smithers fact ${fact.namespace}/${key}`,
@@ -360,6 +355,7 @@ export class HindsightMemoryStore {
     async deleteFact(ns, key) {
         const bank = this.bankForNamespace(ns);
         const id = documentId("fact", `${namespaceToString(ns)}\0${key}`);
+        await this.contractStore.deleteFact(ns, key);
         if (await this.client.getDocument(bank, id)) {
             await this.client.deleteDocument(bank, id);
         }
@@ -367,195 +363,143 @@ export class HindsightMemoryStore {
 
     /** @param {MemoryNamespace} ns */
     async listFacts(ns) {
-        const namespace = namespaceToString(ns);
-        const records = await this.listRecords(this.bankForNamespace(ns), "fact");
-        return records
-            .map((record) => /** @type {MemoryFact} */ (record.envelope.value))
-            .filter((fact) => fact.namespace === namespace)
-            .sort((a, b) => a.key.localeCompare(b.key));
+        return this.contractStore.listFacts(ns);
     }
 
     async listAllFacts() {
-        const facts = (await Promise.all((await this.listBankIds()).map(async (bank) =>
-            (await this.listRecords(bank, "fact")).map((record) => /** @type {MemoryFact} */ (record.envelope.value))))).flat();
-        return facts.sort((a, b) => a.namespace.localeCompare(b.namespace) || a.key.localeCompare(b.key));
+        return this.contractStore.listAllFacts();
     }
 
     /** @param {MemoryNamespace} ns @param {string} [title] */
     async createThread(ns, title) {
-        const now = Date.now();
-        /** @type {MemoryThread} */
-        const thread = {
-            threadId: crypto.randomUUID(),
-            namespace: namespaceToString(ns),
-            title: title ?? null,
-            metadataJson: null,
-            createdAtMs: now,
-            updatedAtMs: now,
-        };
+        const thread = await this.contractStore.createThread(ns, title);
         await this.putRecord(this.bankForNamespace(ns), "thread", documentId("thread", thread.threadId), thread);
         return thread;
     }
 
     /** @param {string} threadId */
     async getThread(threadId) {
-        const record = await this.findRecord(threadId, "thread");
-        return record ? /** @type {MemoryThread} */ (record.envelope.value) : undefined;
+        return this.contractStore.getThread(threadId);
     }
 
     async listThreads() {
-        const threads = (await Promise.all((await this.listBankIds()).map(async (bank) =>
-            (await this.listRecords(bank, "thread")).map((record) => /** @type {MemoryThread} */ (record.envelope.value))))).flat();
-        return threads.sort((a, b) => a.createdAtMs - b.createdAtMs || a.threadId.localeCompare(b.threadId));
+        return this.contractStore.listThreads();
     }
 
     /** @param {string} threadId */
     async deleteThread(threadId) {
-        const record = await this.findRecord(threadId, "thread");
-        if (!record) {
+        const thread = await this.contractStore.getThread(threadId);
+        if (!thread) {
             return;
         }
         const messages = await this.listMessages(threadId);
-        await Promise.all(messages.map((message) => this.client.deleteDocument(record.bank, documentId("message", message.id))));
-        await this.client.deleteDocument(record.bank, documentId("thread", threadId));
+        const bank = this.bankForNamespace(parseNamespace(thread.namespace));
+        await this.contractStore.deleteThread(threadId);
+        await Promise.all(messages.map((message) => this.client.deleteDocument(bank, documentId("message", message.id))));
+        await this.client.deleteDocument(bank, documentId("thread", threadId));
     }
 
     /** @param {Omit<MemoryMessage, "createdAtMs"> & { createdAtMs?: number }} msg */
     async saveMessage(msg) {
-        const threadRecord = await this.findRecord(msg.threadId, "thread");
-        if (!threadRecord) {
-            throw new Error(`memory saveMessage: no thread with id ${msg.threadId}`);
+        await this.contractStore.saveMessage(msg);
+        const message = await this.findContractMessage(msg.id);
+        if (!message) {
+            throw new Error(`memory saveMessage: transactional readback missing ${msg.id}`);
         }
-        const existingDoc = await this.client.getDocument(threadRecord.bank, documentId("message", msg.id));
-        const existing = parseEnvelope(existingDoc?.original_text);
-        /** @type {MemoryMessage} */
-        const message = {
-            id: msg.id,
-            threadId: msg.threadId,
-            role: msg.role,
-            contentJson: msg.contentJson,
-            runId: msg.runId ?? null,
-            nodeId: msg.nodeId ?? null,
-            iteration: msg.iteration ?? null,
-            createdAtMs: existing?.type === "message"
-                ? /** @type {MemoryMessage} */ (existing.value).createdAtMs
-                : (msg.createdAtMs ?? Date.now()),
-        };
-        await this.putRecord(threadRecord.bank, "message", documentId("message", msg.id), message, {
-            metadata: { run: msg.runId, node: msg.nodeId, iteration: msg.iteration, session: msg.threadId },
-            context: `Smithers thread ${msg.threadId} ${msg.role} message`,
+        const thread = await this.contractStore.getThread(message.threadId);
+        if (!thread) {
+            throw new Error(`memory saveMessage: no thread with id ${message.threadId}`);
+        }
+        const bank = this.bankForNamespace(parseNamespace(thread.namespace));
+        await this.putRecord(bank, "message", documentId("message", message.id), message, {
+            metadata: { run: message.runId, node: message.nodeId, iteration: message.iteration, session: message.threadId },
+            context: `Smithers thread ${message.threadId} ${message.role} message`,
         });
+    }
+
+    /** @param {string} id @returns {Promise<MemoryMessage | undefined>} */
+    async findContractMessage(id) {
+        for (const thread of await this.contractStore.listThreads()) {
+            const message = (await this.contractStore.listMessages(thread.threadId)).find((candidate) => candidate.id === id);
+            if (message) {
+                return message;
+            }
+        }
+        return undefined;
     }
 
     /** @param {string} threadId @param {number} [limit] */
     async listMessages(threadId, limit) {
-        if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-            throw new TypeError("memory listMessages limit must be a non-negative integer.");
-        }
-        const threadRecord = await this.findRecord(threadId, "thread");
-        if (!threadRecord || limit === 0) {
-            return [];
-        }
-        const messages = (await this.listRecords(threadRecord.bank, "message"))
-            .map((record) => /** @type {MemoryMessage} */ (record.envelope.value))
-            .filter((message) => message.threadId === threadId)
-            .sort((a, b) => a.createdAtMs - b.createdAtMs || a.id.localeCompare(b.id));
-        return limit === undefined ? messages : messages.slice(0, limit);
+        return this.contractStore.listMessages(threadId, limit);
     }
 
     /** @param {string} threadId */
     async countMessages(threadId) {
-        return (await this.listMessages(threadId)).length;
+        return this.contractStore.countMessages(threadId);
     }
 
     /** @param {string} threadId @param {string[]} messageIds */
     async deleteMessages(threadId, messageIds) {
-        if (messageIds.length === 0) {
-            return 0;
-        }
-        const threadRecord = await this.findRecord(threadId, "thread");
-        if (!threadRecord) {
-            return 0;
-        }
-        const existing = new Set((await this.listMessages(threadId)).map((message) => message.id));
+        const thread = await this.contractStore.getThread(threadId);
+        const existing = new Set((await this.contractStore.listMessages(threadId)).map((message) => message.id));
         const selected = [...new Set(messageIds)].filter((id) => existing.has(id));
-        await Promise.all(selected.map((id) => this.client.deleteDocument(threadRecord.bank, documentId("message", id))));
-        return selected.length;
+        const deleted = await this.contractStore.deleteMessages(threadId, messageIds);
+        if (thread) {
+            const bank = this.bankForNamespace(parseNamespace(thread.namespace));
+            await Promise.all(selected.map((id) => this.client.deleteDocument(bank, documentId("message", id))));
+        }
+        return deleted;
     }
 
     async deleteExpiredFacts() {
         const now = Date.now();
-        const expired = (await this.listAllFacts()).filter((fact) => fact.ttlMs != null && fact.updatedAtMs + fact.ttlMs < now);
+        const expired = (await this.contractStore.listAllFacts()).filter((fact) => fact.ttlMs != null && fact.updatedAtMs + fact.ttlMs < now);
+        const deleted = await this.contractStore.deleteExpiredFacts();
         for (const fact of expired) {
-            await this.deleteFact(parseNamespace(fact.namespace), fact.key);
+            const ns = parseNamespace(fact.namespace);
+            const bank = this.bankForNamespace(ns);
+            const id = documentId("fact", `${fact.namespace}\0${fact.key}`);
+            if (await this.client.getDocument(bank, id)) {
+                await this.client.deleteDocument(bank, id);
+            }
         }
-        return expired.length;
+        return deleted;
     }
 
     /** @param {SaveNoteInput} input */
     async saveNote(input) {
-        const id = input.id ?? crypto.randomUUID();
-        const bank = this.bankForNamespace(input.namespace);
-        const existing = await this.client.getDocument(bank, documentId("note", id));
-        const existingEnvelope = parseEnvelope(existing?.original_text);
-        if (existingEnvelope?.type === "note") {
-            return /** @type {MemoryNote} */ (existingEnvelope.value);
-        }
-        const now = Date.now();
-        /** @type {MemoryNote} */
-        const note = {
-            id,
-            namespace: namespaceToString(input.namespace),
-            body: input.body,
-            kind: input.kind ?? null,
-            tagsJson: input.tags ? JSON.stringify(input.tags) : null,
-            author: input.author ?? null,
-            status: input.status ?? "accepted",
-            statusChangedAtMs: null,
-            createdAtMs: now,
-            runId: input.provenance?.runId ?? null,
-            nodeId: input.provenance?.nodeId ?? null,
-            iteration: input.provenance?.iteration ?? null,
-        };
-        await this.putRecord(bank, "note", documentId("note", id), note, {
-            tags: input.tags,
+        const note = await this.contractStore.saveNote(input);
+        const bank = this.bankForNamespace(parseNamespace(note.namespace));
+        const tags = note.tagsJson ? JSON.parse(note.tagsJson) : [];
+        await this.putRecord(bank, "note", documentId("note", note.id), note, {
+            tags,
             metadata: { run: note.runId, node: note.nodeId, iteration: note.iteration },
-            supersedes: input.supersedes,
-            context: input.kind ? `Smithers ${input.kind} note` : "Smithers knowledge note",
+            context: note.kind ? `Smithers ${note.kind} note` : "Smithers knowledge note",
         });
         return note;
     }
 
     /** @param {string} id */
     async getNote(id) {
-        const record = await this.findRecord(id, "note");
-        return record ? /** @type {MemoryNote} */ (record.envelope.value) : undefined;
+        return this.contractStore.getNote(id);
     }
 
     /** @param {MemoryNamespace} ns @param {NoteReadFilter} [filter] */
     async listNotes(ns, filter) {
-        const namespace = namespaceToString(ns);
-        const records = await this.listRecords(this.bankForNamespace(ns), "note");
-        const acceptedSuperseders = records.filter((record) => /** @type {MemoryNote} */ (record.envelope.value).status === "accepted");
-        const superseded = new Set(acceptedSuperseders.flatMap((record) => record.envelope.supersedes ?? []));
-        return records
-            .map((record) => /** @type {MemoryNote} */ (record.envelope.value))
-            .filter((note) => note.namespace === namespace && noteMatches(filter, note, superseded))
-            .sort((a, b) => a.createdAtMs - b.createdAtMs || a.id.localeCompare(b.id));
+        return this.contractStore.listNotes(ns, filter);
     }
 
     /** @param {string} id @param {string} status */
     async setNoteStatus(id, status) {
-        const record = await this.findRecord(id, "note");
-        if (!record) {
-            throw new Error(`memory setNoteStatus: no note with id ${id}`);
+        await this.contractStore.setNoteStatus(id, status);
+        const note = await this.contractStore.getNote(id);
+        if (!note) {
+            throw new Error(`memory setNoteStatus: transactional readback missing ${id}`);
         }
-        const note = /** @type {MemoryNote} */ (record.envelope.value);
-        const updated = { ...note, status, statusChangedAtMs: Date.now() };
         const tags = note.tagsJson ? JSON.parse(note.tagsJson) : [];
-        await this.putRecord(record.bank, "note", record.document.id, updated, {
+        const bank = this.bankForNamespace(parseNamespace(note.namespace));
+        await this.putRecord(bank, "note", documentId("note", id), note, {
             tags,
-            supersedes: record.envelope.supersedes,
             metadata: { run: note.runId, node: note.nodeId, iteration: note.iteration },
         });
     }
@@ -604,11 +548,17 @@ export class HindsightMemoryStore {
             }
         }
         const unique = [...new Map(notes.map((note) => [note.id, note])).values()];
-        const allNotes = (await Promise.all(banks.map(async (bank) => this.listRecords(bank, "note")))).flat();
-        const superseded = new Set(allNotes
-            .filter((record) => /** @type {MemoryNote} */ (record.envelope.value).status === "accepted")
-            .flatMap((record) => record.envelope.supersedes ?? []));
-        return unique.filter((note) => noteMatches(filter, note, superseded)).slice(0, max);
+        /** @type {Map<string, Set<string>>} */
+        const permittedByNamespace = new Map();
+        for (const note of unique) {
+            if (!permittedByNamespace.has(note.namespace)) {
+                const permitted = await this.contractStore.listNotes(parseNamespace(note.namespace), filter);
+                permittedByNamespace.set(note.namespace, new Set(permitted.map((candidate) => candidate.id)));
+            }
+        }
+        return unique
+            .filter((note) => permittedByNamespace.get(note.namespace)?.has(note.id))
+            .slice(0, max);
     }
 
     /**
@@ -622,6 +572,9 @@ export class HindsightMemoryStore {
         const banks = input.banks.map((rawBank) => ({ rawBank, bank: this.resolveBank(rawBank) }));
         if (banks.length === 0) {
             return [];
+        }
+        if (input.maxTokens !== undefined && (!Number.isSafeInteger(input.maxTokens) || input.maxTokens < 0)) {
+            throw new TypeError("memory recall maxTokens must be a non-negative safe integer.");
         }
         const perBankTokens = input.maxTokens === undefined
             ? undefined
@@ -638,7 +591,7 @@ export class HindsightMemoryStore {
             });
             return (response.results ?? []).map((result) => ({ ...result, bank }));
         }));
-        return responses.flat();
+        return normalizeRecallResults(responses.flat(), input.maxTokens);
     }
 
     /**

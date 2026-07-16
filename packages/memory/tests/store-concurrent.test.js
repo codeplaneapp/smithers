@@ -14,6 +14,7 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/createMemoryStore.js";
 import { namespaceToString } from "../src/namespaceToString.js";
 import { parseNamespace } from "../src/parseNamespace.js";
+import { memoryStoreConcurrencyContract } from "./memoryStoreConcurrencyContract.js";
 
 function createTestStore() {
 	const sqlite = new Database(":memory:");
@@ -23,6 +24,17 @@ function createTestStore() {
 }
 
 const NS = { kind: "workflow", id: "race" };
+
+memoryStoreConcurrencyContract("SQLite MemoryStore", async () => {
+	const sqlite = new Database(":memory:");
+	const db = drizzle(sqlite);
+	ensureSmithersTables(db);
+	return {
+		store: createMemoryStore(db),
+		secondStore: createMemoryStore(db),
+		cleanup: () => sqlite.close(),
+	};
+});
 
 describe("MemoryStore concurrency: setFact", () => {
 	test("two parallel setFact on same (ns,key) → last-write-wins, single row", async () => {

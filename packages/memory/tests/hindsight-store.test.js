@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createHindsightMemoryStore } from "../src/HindsightMemoryStore.js";
+import { createMemoryStore } from "../src/store/createMemoryStore.js";
+import { memoryStoreConcurrencyContract } from "./memoryStoreConcurrencyContract.js";
 
 const WF_NS = { kind: "workflow", id: "test-wf" };
 
@@ -125,10 +130,21 @@ function createFakeHindsight() {
 
 /** @type {ReturnType<typeof createFakeHindsight> | undefined} */
 let fixture;
+/** @type {Database | undefined} */
+let contractSqlite;
 afterEach(() => {
     fixture?.stop();
     fixture = undefined;
+    contractSqlite?.close();
+    contractSqlite = undefined;
 });
+
+function createContractStore() {
+    contractSqlite = new Database(":memory:");
+    const db = drizzle(contractSqlite);
+    ensureSmithersTables(db);
+    return createMemoryStore(db);
+}
 
 function createStore() {
     fixture = createFakeHindsight();
@@ -136,8 +152,30 @@ function createStore() {
         baseUrl: fixture.baseUrl,
         apiKey: "test-key",
         bankPrefix: "test-",
+        contractStore: createContractStore(),
     });
 }
+
+memoryStoreConcurrencyContract("HindsightMemoryStore", async () => {
+    const remote = createFakeHindsight();
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+    const contractStore = createMemoryStore(db);
+    const options = {
+        baseUrl: remote.baseUrl,
+        bankPrefix: "contract-",
+        contractStore,
+    };
+    return {
+        store: createHindsightMemoryStore(options),
+        secondStore: createHindsightMemoryStore(options),
+        cleanup: () => {
+            remote.stop();
+            sqlite.close();
+        },
+    };
+});
 
 describe("HindsightMemoryStore", () => {
     test("maps exact facts to stable replace documents and preserves provenance", async () => {
@@ -303,6 +341,38 @@ describe("HindsightMemoryStore", () => {
         expect(projectRecall.body).not.toHaveProperty("tags");
         expect(projectRecall.body).not.toHaveProperty("tags_match");
         expect(projectRecall.body.max_tokens).toBe(400);
+    });
+
+    test("normalizes recall rows under one aggregate cap when tokens are fewer than banks", async () => {
+        const store = createStore();
+        for (const bank of ["test-project-a", "test-project-b", "test-project-c"]) {
+            fixture.recallOverrides.set(bank, [{
+                id: `memory-${bank}`,
+                text: "A long recalled fact that must be bounded across every configured bank.",
+                document_id: `document-${bank}`,
+                tags: ["scope:main"],
+                metadata: { oversized: "x".repeat(2_000) },
+            }]);
+        }
+
+        const tiny = await store.recallMemory({
+            banks: ["project-a", "project-b", "project-c"],
+            query: "fact",
+            maxTokens: 2,
+        });
+        expect(JSON.stringify(tiny).length).toBeLessThanOrEqual(8);
+        const tinyRequests = fixture.requests.filter((entry) => entry.path.endsWith("/memories/recall"));
+        expect(tinyRequests).toHaveLength(3);
+        expect(tinyRequests.every((entry) => entry.body.max_tokens === 1)).toBe(true);
+
+        const bounded = await store.recallMemory({
+            banks: ["project-a", "project-b", "project-c"],
+            query: "fact",
+            maxTokens: 30,
+        });
+        expect(JSON.stringify(bounded).length).toBeLessThanOrEqual(120);
+        expect(bounded.length).toBeGreaterThan(0);
+        expect(Object.keys(bounded[0]).sort()).toEqual(["bank", "text"]);
     });
 
     test("keeps valid mixed-bank primers when other bank/id pairs are missing", async () => {

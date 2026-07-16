@@ -261,6 +261,8 @@ type HindsightMemoryStoreOptions$2 = {
     apiKey?: string;
     /** Prefix applied to Smithers-created and component-selected banks. */
     bankPrefix?: string;
+    /** Transactional authority for exact facts, threads, messages, and notes. */
+    contractStore: MemoryStore$4;
     /** Optional client override for tests and advanced transports. */
     client?: HindsightClient;
 };
@@ -338,6 +340,8 @@ declare function createHindsightMemoryStore(options: HindsightMemoryStoreOptions
  * Mapping:
  * - exact facts are retained with stable document ids and `updateMode=replace`;
  * - threads, messages, and notes are typed documents with stable record tags;
+ * - exact identity, concurrency, and supersession live in a transactional
+ *   contract store because Hindsight document ids are scoped to one bank;
  * - namespace identity selects a bank, while stable note/config tags stay tags;
  * - semantic note search and task recall call Hindsight recall;
  * - run/session identity is metadata, never a tag.
@@ -350,6 +354,7 @@ declare class HindsightMemoryStore implements MemoryStore$2 {
     baseUrl: string;
     apiKey: string | undefined;
     bankPrefix: string;
+    contractStore: MemoryStore$4;
     client: HindsightClient;
     sdkClient: _vectorize_io_hindsight_client.Client;
     /** @type {Set<string>} */
@@ -389,15 +394,6 @@ declare class HindsightMemoryStore implements MemoryStore$2 {
         supersedes?: string[];
         context?: string;
     }): Promise<void>;
-    /**
-     * @param {string} id
-     * @param {"thread" | "note"} type
-     */
-    findRecord(id: string, type: "thread" | "note"): Promise<{
-        bank: string;
-        document: _vectorize_io_hindsight_client.DocumentResponse;
-        envelope: SmithersRecordEnvelope;
-    } | undefined>;
     /** @param {MemoryNamespace} ns @param {string} key */
     getFact(ns: MemoryNamespace$1, key: string): Promise<MemoryFact$2 | undefined>;
     /**
@@ -424,6 +420,8 @@ declare class HindsightMemoryStore implements MemoryStore$2 {
     saveMessage(msg: Omit<MemoryMessage$1, "createdAtMs"> & {
         createdAtMs?: number;
     }): Promise<void>;
+    /** @param {string} id @returns {Promise<MemoryMessage | undefined>} */
+    findContractMessage(id: string): Promise<MemoryMessage$1 | undefined>;
     /** @param {string} threadId @param {number} [limit] */
     listMessages(threadId: string, limit?: number): Promise<MemoryMessage$2[]>;
     /** @param {string} threadId */

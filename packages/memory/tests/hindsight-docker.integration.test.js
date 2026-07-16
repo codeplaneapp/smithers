@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createHindsightMemoryStore } from "../src/HindsightMemoryStore.js";
+import { createMemoryStore } from "../src/store/createMemoryStore.js";
 
 const HINDSIGHT_IMAGE = process.env.HINDSIGHT_DOCKER_IMAGE
     ?? "ghcr.io/vectorize-io/hindsight:0.8.4-slim";
@@ -15,6 +19,8 @@ const embeddingsName = `smithers-hindsight-embeddings-${suffix}`;
 const postgresName = `smithers-hindsight-postgres-${suffix}`;
 const hindsightName = `smithers-hindsight-api-${suffix}`;
 let integrationUrl = "";
+/** @type {Database | undefined} */
+let contractSqlite;
 
 if (!dockerAvailable) {
     console.warn("SKIP Hindsight Docker integration: docker is unavailable");
@@ -163,6 +169,7 @@ beforeAll(async () => {
 }, 480_000);
 
 afterAll(async () => {
+    contractSqlite?.close();
     if (dockerAvailable) {
         await cleanupDockerFixture();
     }
@@ -172,9 +179,13 @@ describe.skipIf(!dockerAvailable)("Hindsight Docker integration", () => {
     test("verifies append, listing, missing primers, tag validation, and scoped recall", async () => {
         const prefix = `smithers-integration-${crypto.randomUUID()}-`;
         const bank = "project-test";
+        contractSqlite = new Database(":memory:");
+        const contractDb = drizzle(contractSqlite);
+        ensureSmithersTables(contractDb);
         const store = createHindsightMemoryStore({
             baseUrl: integrationUrl,
             bankPrefix: prefix,
+            contractStore: createMemoryStore(contractDb),
         });
 
         await store.retainMemory({
