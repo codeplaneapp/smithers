@@ -53,6 +53,9 @@ export class OpenAIAgent extends ToolLoopAgent {
         const outputArgs = this.supportsNativeStructuredOutput && args.outputSchema
             ? { output: Output.object({ schema: args.outputSchema }) }
             : {};
+        const toolArgs = args.tools && typeof args.tools === "object"
+            ? { tools: args.tools }
+            : {};
         const onStepEnd = args.onStepEnd ?? args.onStepFinish;
         if (!args.onStdout) {
             return super.generate({
@@ -60,6 +63,7 @@ export class OpenAIAgent extends ToolLoopAgent {
                 abortSignal: args.abortSignal,
                 ...promptArgs,
                 ...outputArgs,
+                ...toolArgs,
                 timeout: args.timeout,
                 onStepEnd,
             });
@@ -69,6 +73,7 @@ export class OpenAIAgent extends ToolLoopAgent {
             abortSignal: args.abortSignal,
             ...promptArgs,
             ...outputArgs,
+            ...toolArgs,
             timeout: args.timeout,
             onStepEnd,
         }).then((stream) => streamResultToGenerateResult(stream, args.onStdout));
