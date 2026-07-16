@@ -14,6 +14,7 @@ import { zodSchemaToJsonExample } from "../zod-to-example.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { AspectContext } from "../aspects/AspectContext.js";
+import { MemoryContext } from "../memory/MemoryContext.js";
 /** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./DepsSpec.ts").DepsSpec} DepsSpec */
 /**
@@ -196,6 +197,15 @@ function buildAspectMeta(aspectCtx) {
     };
 }
 /**
+ * Attach inherited Memory configuration to the host task. Graph extraction
+ * applies the task-level `memory` prop as the final override.
+ * @param {Record<string, unknown>} memoryCtx
+ * @returns {{ __memory: Record<string, unknown> }}
+ */
+function buildMemoryMeta(memoryCtx) {
+    return { __memory: memoryCtx };
+}
+/**
  * Build a `Task` component parameterized over how CLI-tool allowlisting is
  * enforced (`applyCliToolAllowlist`). Every other part of Task's render path
  * — deps resolution, agent-chain assembly, MDX prompt rendering,
@@ -215,6 +225,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
         const taskContext = props.smithersContext ?? SmithersContext;
         const ctx = React.useContext(taskContext);
         const aspectCtx = React.useContext(AspectContext);
+        const memoryCtx = React.useContext(MemoryContext);
         if (props.maxSchemaRetries !== undefined &&
             (!Number.isSafeInteger(props.maxSchemaRetries) || props.maxSchemaRetries < 0)) {
             throw new SmithersError("INVALID_INPUT", "Task maxSchemaRetries must be a non-negative safe integer.");
@@ -235,6 +246,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
             return null;
         }
         const aspectMeta = aspectCtx ? buildAspectMeta(aspectCtx) : undefined;
+        const memoryMeta = memoryCtx ? buildMemoryMeta(memoryCtx) : undefined;
         const agentChain = Array.isArray(agent)
             ? fallbackAgent
                 ? [...agent, fallbackAgent]
@@ -270,6 +282,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
                 agent: restrictedAgentChain,
                 __smithersKind: "agent",
                 ...aspectMeta,
+                ...memoryMeta,
             }, prompt);
         }
         if (typeof children === "function" && !deps) {
@@ -280,6 +293,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
                 __smithersKind: "compute",
                 __smithersComputeFn: children,
                 ...aspectMeta,
+                ...memoryMeta,
             };
             return React.createElement("smithers:task", nextProps, null);
         }
@@ -291,6 +305,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
             __smithersPayload: childValue,
             __payload: childValue,
             ...aspectMeta,
+            ...memoryMeta,
         };
         return React.createElement("smithers:task", nextProps, null);
     };

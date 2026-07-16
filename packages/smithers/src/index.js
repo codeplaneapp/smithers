@@ -65,6 +65,7 @@
 /** @typedef {import("@smithers-orchestrator/memory").MemoryFact} MemoryFact */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryLayerConfig} MemoryLayerConfig */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryMessage} MemoryMessage */
+/** @typedef {import("@smithers-orchestrator/components").MemoryProps} MemoryProps */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryNamespaceKind} MemoryNamespaceKind */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryProcessor} MemoryProcessor */
@@ -189,7 +190,7 @@ export { isKnownSmithersErrorCode } from "@smithers-orchestrator/errors/isKnownS
 export { isSmithersError } from "@smithers-orchestrator/errors/isSmithersError";
 export { knownSmithersErrorCodes } from "@smithers-orchestrator/errors/knownSmithersErrorCodes";
 // Components
-export { Approval, ApprovalGate, Aspects, Branch, CheckSuite, ClassifyAndRoute, ContentPipeline, ContinueAsNew, Debate, DecisionTable, DriftDetector, EscalationChain, GatherAndSynthesize, HumanTask, Kanban, Loop, MergeQueue, Optimizer, Panel, Parallel, Poller, Ralph, ReviewLoop, Runbook, Saga, SagaStep, Sandbox, ScanFixVerify, Sequence, Sidecar, Signal, Subflow, SuperSmithers, Supervisor, TUI, Task, Timer, TryCatchFinally, UI, WaitForEvent, Workflow, Worktree, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, computeSidecarDelta, continueAsNew, } from "@smithers-orchestrator/components";
+export { Approval, ApprovalGate, Aspects, Branch, CheckSuite, ClassifyAndRoute, ContentPipeline, ContinueAsNew, Debate, DecisionTable, DriftDetector, EscalationChain, GatherAndSynthesize, HumanTask, Kanban, Loop, Memory, MergeQueue, Optimizer, Panel, Parallel, Poller, Ralph, ReviewLoop, Runbook, Saga, SagaStep, Sandbox, ScanFixVerify, Sequence, Sidecar, Signal, Subflow, SuperSmithers, Supervisor, TUI, Task, Timer, TryCatchFinally, UI, WaitForEvent, Workflow, Worktree, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, computeSidecarDelta, continueAsNew, } from "@smithers-orchestrator/components";
 // Delegation chain
 export { BackpressurePlanning, DelegationChain, DelegationEditListener, DelegationExecution, DelegationPlanning, DelegationPreview, DelegationScoring, DeriskLoop, GoalRefinement, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER, captureWorkingCopyCommit, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, devPreviewKindSchema, estimateSchema, gateSchema, tierSchema, withCommitRange, } from "@smithers-orchestrator/components";
 // Trellis dynamic delegation

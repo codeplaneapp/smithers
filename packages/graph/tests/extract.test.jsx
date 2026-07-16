@@ -106,6 +106,37 @@ describe("extractGraph", () => {
 		expect(result.tasks[1].aspects).toBeUndefined();
 	});
 
+	test("threads Memory context metadata onto the descriptor", () => {
+		const inherited = {
+			banks: ["user-1", "project-2"],
+			tags: ["scope:main"],
+			recall: "auto",
+			budget: "mid",
+			maxTokens: 2048,
+			primers: ["project-primer"],
+			retain: "on-complete",
+			tools: true,
+		};
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", { id: "t1", output: "t", __memory: inherited }),
+		]);
+		expect(extractGraph(root).tasks[0].memoryConfig).toBe(inherited);
+	});
+
+	test("uses per-Task memory instead of Memory context metadata", () => {
+		const inherited = { bank: "project-2", recall: "auto" };
+		const override = { bank: "user-1", recall: false, tools: true };
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", {
+				id: "t1",
+				output: "t",
+				__memory: inherited,
+				memory: override,
+			}),
+		]);
+		expect(extractGraph(root).tasks[0].memoryConfig).toBe(override);
+	});
+
 	test("threads latencySlo.perTask onto the descriptor", () => {
 		const root = hostEl("smithers:workflow", {}, [
 			hostEl("smithers:task", {
