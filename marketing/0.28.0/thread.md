@@ -1,7 +1,8 @@
 # Smithers 0.28.0 launch thread
 
-Ready-to-post X/Twitter thread for the Smithers 0.28.0 release. Every tweet has
-an SVG source and a 2x PNG in `assets/`.
+Ready-to-post X/Twitter thread for the Smithers 0.28.0 release. Every tweet
+has media in `assets/` (SVG sources render to PNG via `render-pngs.mjs`;
+tweet 2 uses a real screen recording gif).
 
 ---
 
@@ -9,25 +10,29 @@ an SVG source and a 2x PNG in `assets/`.
 
 **Media:** [hero card → assets/tweet-01-hero.png](assets/tweet-01-hero.png)
 
-> Smithers 0.28.0 is out.
+> Smithers 0.28.0 is here! Our biggest release ever: 1,169 commits, 4,187 files changed.
 >
-> The Monitor is now an operations console. Install and share workflow packs. Bind sensitive tasks to the exact evidence that authorized them. Run fixed or adaptive delegation.
+> A Monitor you operate fleets from, installable workflow packs, provenance-bound approvals, durable memory, and Node.js + browser support.
 >
-> bunx smithers-orchestrator@0.28.0 init
+> bunx smithers-orchestrator@latest init
 
-Claim IDs: monitor, packs, provenance, delegation
-Characters: 239
+Claim IDs: release-scale, monitor, packs, provenance, memory-notes, runtimes
+Characters: 265
 
 ---
 
 ### 2. Tweet 2
 
-**Media:** [operations console card → assets/tweet-02-capability.png](assets/tweet-02-capability.png)
+**Media:** [live Monitor recording → assets/monitor-live.gif](assets/monitor-live.gif)
 
-> Operate a run without leaving the Monitor: live health diagnosis + Resume, per-node transcripts, in-browser session hijack, DevTools tree, frame scrubber, diffs, timeline, scores, crons, quotas, and agent/model attribution.
+> The Monitor became mission control.
+>
+> Health diagnosis with one-click resume, live transcripts, in-browser session hijack over a real PTY, frame scrubber, diffs, timeline, scores.
+>
+> The CLI opens it automatically when a run starts.
 
 Claim IDs: monitor
-Characters: 223
+Characters: 229
 
 ---
 
@@ -35,14 +40,16 @@ Characters: 223
 
 **Media:** [pack lifecycle terminal card → assets/tweet-03-terminal.png](assets/tweet-03-terminal.png)
 
-> Workflows are packages now.
+> You can now share workflows like packages.
 >
-> add installs a pack. packs update refreshes it. eject copies a workflow and its full UI/prompt/library closure for local editing. share opens the registry PR. remove uninstalls the pack.
+> smithers add acme/review-pack (GitHub)
+> smithers add npm:@acme/pack (npm)
+> then packs update / eject / share / remove
 >
-> Installs and publishes use staged, symlink-safe copies.
+> First release, rough edges expected. Installs are staged and atomic, so a bad pack can't wreck your repo.
 
 Claim IDs: packs, pack-hardening
-Characters: 272
+Characters: 266
 
 ---
 
@@ -50,39 +57,38 @@ Characters: 272
 
 **Media:** [provenance diagram → assets/tweet-04-diagram.png](assets/tweet-04-diagram.png)
 
-> Approvals now stay attached to what they approved.
+> The approval follows the artifact.
 >
-> ctx.prove() digests the exact upstream row. <Task bind> checks it again at schedule time. If the artifact changed, the task parks as BOUND_STALE instead of acting with stale authority.
+> ctx.prove() digests the exact row a human approved. \<Task bind\> re-checks it at schedule time. If the artifact changed, the task parks as BOUND_STALE instead of shipping stale work.
 
 Claim IDs: provenance
-Characters: 236
+Characters: 217
 
 ---
 
 ### 5. Tweet 5
 
-**Media:** [delegation diagram → assets/tweet-05-diagram.png](assets/tweet-05-diagram.png)
+**Media:** [runtime capability card → assets/tweet-06-capability.png](assets/tweet-06-capability.png)
 
-> Delegation ships in two forms:
+> The same workflow core now runs in Node.js, Bun, the browser, Cloudflare Workers, and Vercel, behind a typed RuntimeAdapter with conformance suites on all five.
 >
-> • DelegationChain: a fixed plan/review/execute graph
-> • Trellis: experimental runtime-authored delegation with strict IR validation, settled evidence, recursive fuel, and concurrency limits
->
-> Trellis is opt-in, not in the default pack.
+> AWS, GCP, Daytona, and Vercel join as first-class sandbox providers.
 
-Claim IDs: delegation-chain, trellis
-Characters: 265
+Claim IDs: runtimes, browser-runtime, sandbox-providers
+Characters: 229
 
 ---
 
 ### 6. Tweet 6
 
-**Media:** [runtime capability card → assets/tweet-06-capability.png](assets/tweet-06-capability.png)
+**Media:** [delegation diagram → assets/tweet-05-diagram.png](assets/tweet-05-diagram.png)
 
-> Durable memory notes now carry provenance, supersession, review status, and lazy full-text search. A browser runtime runs the real WorkflowDriver behind typed capabilities. AWS, GCP, Daytona, and Vercel are first-class sandbox providers.
+> Agents that remember: append-only memory notes with provenance, human review, supersession history, and opt-in full-text search.
+>
+> Plus two delegation models: DelegationChain (fixed, inspectable) and Trellis (experimental, model-authored plans).
 
-Claim IDs: memory-notes, browser-runtime, sandbox-providers
-Characters: 237
+Claim IDs: memory-notes, delegation-chain, trellis
+Characters: 244
 
 ---
 
@@ -90,12 +96,12 @@ Characters: 237
 
 **Media:** [release inventory card → assets/tweet-07-changelog.png](assets/tweet-07-changelog.png)
 
-> 0.28.0 spans 1,125 commits since the last published release, including 408 fix commits.
+> The honest shape of this release: 417 of 1,169 commits are fixes and 243 are tests, most aimed at the durable engine.
 >
-> Cancellation, quota parking, time travel, database migration, credentials, Gateway streams, generated types, plugins, tools, and pack writes all got a hardening pass.
+> Crash it, quota-park it, kill its owner process. 0.28.0 recovers more predictably than anything we've shipped.
 
-Claim IDs: release-range, hardening
-Characters: 255
+Claim IDs: release-scale, hardening
+Characters: 229
 
 ---
 
@@ -103,12 +109,14 @@ Characters: 255
 
 **Media:** [upgrade terminal card → assets/tweet-08-terminal.png](assets/tweet-08-terminal.png)
 
-> Also new: status, what, pause, review, upgrade, and worktree list|prune; saved eval suites; cross-run score comparison; PoolAgent; deterministic scenario testing; and the npm next channel.
+> init got a redesign too: one question, then your agent takes over in a live tutorial session.
 >
-> Full changelog: https://smithers.sh/changelogs/0.28.0
+> Also new: status, what, why, pause, worktree prune, and an agent-assisted upgrade. Every green main commit ships to npm's next channel.
+>
+> Full tour: https://smithers.sh/changelogs/0.28.0
 
-Claim IDs: cli, evals, scores, pool-agent, testing, next-channel
-Characters: 243
+Claim IDs: init, cli, next-channel
+Characters: 266 (after t.co link normalization)
 
 ---
 
@@ -117,15 +125,17 @@ Characters: 243
 | Tweet | Asset | Kind |
 |-------|-------|------|
 | 1 | `assets/tweet-01-hero.png` | hero |
-| 2 | `assets/tweet-02-capability.png` | capability |
+| 2 | `assets/monitor-live.gif` | screen recording |
 | 3 | `assets/tweet-03-terminal.png` | terminal |
 | 4 | `assets/tweet-04-diagram.png` | diagram |
-| 5 | `assets/tweet-05-diagram.png` | diagram |
-| 6 | `assets/tweet-06-capability.png` | capability |
+| 5 | `assets/tweet-06-capability.png` | capability |
+| 6 | `assets/tweet-05-diagram.png` | diagram |
 | 7 | `assets/tweet-07-changelog.png` | changelog |
 | 8 | `assets/tweet-08-terminal.png` | terminal |
 
-SVG files are the editable source. PNG files are rendered at 3200×1800 for
-upload. Run `node marketing/0.28.0/assets/render-pngs.mjs` after changing an SVG.
+SVG files are the editable source for cards. PNG files are rendered at
+3200×1800 for upload; run `node marketing/0.28.0/assets/render-pngs.mjs` after
+changing an SVG. `monitor-live.gif` is a real recording of the Monitor
+following a live run (same file as `docs/images/0.28.0/monitor-live.gif`).
 
 Tweets 3 and 8 use designed terminal cards rather than unpublished CLI output.

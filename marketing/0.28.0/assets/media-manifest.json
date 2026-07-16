@@ -13,10 +13,10 @@
     },
     {
       "tweetIndex": 2,
-      "kind": "capability",
-      "suggestion": "Capability card showing live run health, recovery, transcripts, and session controls",
-      "file": "marketing/0.28.0/assets/tweet-02-capability.svg",
-      "sibling": "assets/tweet-02-capability.svg",
+      "kind": "screen-recording",
+      "suggestion": "Real recording of the Monitor following a live run from running to completed (health verdict, execution tree, event feed)",
+      "file": "marketing/0.28.0/assets/monitor-live.gif",
+      "sibling": "assets/monitor-live.gif",
       "captureRecommended": false,
       "command": null
     },
