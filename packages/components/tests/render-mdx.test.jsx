@@ -38,6 +38,13 @@ function MultiNewlineMdx({ components }) {
       <P>Third</P>
     </>);
 }
+/**
+ * @param {{ components?: Record<string, any> }} value
+ */
+function EntityTextMdx({ components }) {
+    const P = components?.p ?? "p";
+    return <P>{`if a < b && c > d, say "go"; it's &lt; literal`}</P>;
+}
 describe("renderMdx", () => {
     test("renders headings as markdown", () => {
         const result = renderMdx(SimpleMdx);
@@ -74,5 +81,9 @@ describe("renderMdx", () => {
     test("handles null-returning component", () => {
         const result = renderMdx(EmptyMdx);
         expect(result).toBe("");
+    });
+    test("decodes renderer entities once without decoding entity-looking source text", () => {
+        const result = renderMdx(EntityTextMdx);
+        expect(result).toBe(`if a < b && c > d, say "go"; it's &lt; literal`);
     });
 });

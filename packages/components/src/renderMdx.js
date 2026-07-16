@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { decodeHtmlEntities } from "./decodeHtmlEntities.js";
 import { markdownComponents } from "./markdownComponents.js";
 /** @typedef {import("react").ComponentType<Record<string, any>>} MDXContent */
 /**
@@ -20,7 +21,7 @@ export function renderMdx(Component, props = {}) {
             ...props.components,
         },
     });
-    return renderToStaticMarkup(element)
+    return decodeHtmlEntities(renderToStaticMarkup(element))
         .replace(/\n{3,}/g, "\n\n")
         .trim();
 }
