@@ -29,6 +29,9 @@ tokens, never hex-plus-alpha.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
+| `SimpleWorkflowDashboard` | A complete one-workflow dashboard: prompt box + Start button, run list, node tree, and event log. The one-component UI. | `workflow`, `title`, `promptPlaceholder`, `inputFromPrompt`, `runLimit` |
+| `WorkflowUiShell` | The standard page scaffold: injects the style guide, renders a topbar (title, meta, actions), and wraps your content. | `title`, `meta`, `actions` |
+| `WorkflowUiStyles` | Just the shared style-guide `<style>` block, when you bring your own layout. | `mode`, `extra` |
 | `RunList` | A live, selectable list of runs with a status pill per row. | `filter`, `activeRunId`, `onSelect`, `pollMs` |
 | `RunTree` | The node tree for a run (initial snapshot plus live updates). | `runId`, `onSelectNode`, `activeNodeId` |
 | `RunEventLog` | A scrolling, auto-following event log for a run. | `runId`, `maxEvents`, `follow` |
@@ -41,6 +44,14 @@ tokens, never hex-plus-alpha.
 
 `StatusPill`, `statusColor`, and the `theme` style tokens are also exported for
 building your own rows that match the components.
+
+For a workflow whose UI just needs launch-watch-approve, render
+`<SimpleWorkflowDashboard workflow="my-workflow" />` inside
+`createGatewayReactRoot` and you are done. For everything you compose *around*
+these run widgets (buttons, cards, inputs, dialogs, tabs, empty states, chat
+surfaces), reach for the shared
+[`smithers-orchestrator/ui`](/reference/ui) component library instead of
+hand-writing markup and CSS.
 
 ## A complete UI
 

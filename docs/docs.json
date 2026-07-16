@@ -390,6 +390,7 @@
               "reference/gateway-client",
               "reference/gateway-react",
               "reference/gateway-ui",
+              "reference/ui",
               "reference/packs",
               "reference/db",
               "reference/time-travel"

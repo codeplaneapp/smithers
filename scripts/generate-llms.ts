@@ -119,6 +119,10 @@ const CORE_PAGES = [
   // Building a workflow UI: prebuilt React components agents drop into
   // .smithers/ui/<workflow>.tsx (built on the gateway-react hooks).
   "reference/gateway-ui.mdx",
+  // The shared component library (Button, Card, Tabs, StatusPill, chat
+  // surfaces, ...): the primitives agents compose around the gateway-ui run
+  // widgets instead of hand-rolling markup and CSS.
+  "reference/ui.mdx",
   // Building a workflow UI from the raw gateway-react hooks: live events
   // (frame.event/frame.payload), node output rows, and the submitApproval
   // `decision` shape — the details agents get wrong when hand-rolling a UI.
