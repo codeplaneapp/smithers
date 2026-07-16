@@ -64,6 +64,7 @@
 /** @typedef {import("@smithers-orchestrator/scorers").LlmJudgeConfig} LlmJudgeConfig */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryFact} MemoryFact */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryLayerConfig} MemoryLayerConfig */
+/** @typedef {import("@smithers-orchestrator/memory").HindsightMemoryStoreOptions} HindsightMemoryStoreOptions */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryMessage} MemoryMessage */
 /** @typedef {import("@smithers-orchestrator/components").MemoryProps} MemoryProps */
 /** @typedef {import("@smithers-orchestrator/memory").MemoryNamespace} MemoryNamespace */
@@ -276,7 +277,7 @@ export { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
 // Scorers
 export { createScorer, llmJudge, relevancyScorer, toxicityScorer, faithfulnessScorer, schemaAdherenceScorer, latencyScorer, runScorersAsync, runScorersBatch, aggregateScores, smithersScorers, modelTokenPrices, estimateCostUsd, } from "@smithers-orchestrator/scorers";
 // Memory
-export { createMemoryStore, createMemoryLayer, MemoryService, TtlGarbageCollector, TokenLimiter, Summarizer, namespaceToString, parseNamespace, memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration, } from "@smithers-orchestrator/memory";
+export { createMemoryStore, createHindsightMemoryStore, HindsightMemoryStore, createLocalMemoryRuntime, LocalMemoryRuntime, createMemoryLayer, MemoryService, TtlGarbageCollector, TokenLimiter, Summarizer, namespaceToString, parseNamespace, memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration, } from "@smithers-orchestrator/memory";
 // OpenAPI Tools
 export { createOpenApiTools, createOpenApiToolsSync, createOpenApiTool, createOpenApiToolSync, listOperations, openApiToolCallsTotal, openApiToolCallErrorsTotal, openApiToolDuration, } from "@smithers-orchestrator/openapi";
 // Utilities
