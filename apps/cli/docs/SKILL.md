@@ -181,9 +181,11 @@ before every workflow you build, and the rest of this skill assumes them.
      `smithers up <file>.tsx --interactive` (or
      `smithers workflow run <id> --interactive`) opens the interactive TUI
      monitor for a run.
-   - A custom browser UI: author `.smithers/ui/<workflowId>.tsx` with
-     `smithers-orchestrator/gateway-react`, then `smithers ui <runId>` opens it
-     live. **If a workflow has no UI yet, offer to build one.** See
+   - A custom browser UI: author `.smithers/ui/<workflowId>.tsx` by composing
+     the `smithers-orchestrator/gateway-ui` run widgets and
+     `smithers-orchestrator/ui` primitives over the
+     `smithers-orchestrator/gateway-react` hooks, then `smithers ui <runId>`
+     opens it live. **If a workflow has no UI yet, offer to build one.** See
      [Custom workflow UIs](#custom-workflow-uis).
    - `smithers ui --app` serves the full local control-plane UI when the user
      wants the whole picture, every run and workflow in one place.
@@ -770,7 +772,7 @@ bindings, the `renderWorkflow`-based test contract, and
 
 ## Custom workflow UIs
 
-A workflow can ship a **first-class browser UI** that the Gateway bundles, serves at `/workflows/<key>`, and the Smithers PWA / Studio / `smithers ui` embeds same-origin. Reach for this when a workflow has long-running interaction the CLI can't show well: a composer for an open-ended chat, a question pool, a live spec, a custom diff view. Per [How to guide the user](#how-to-guide-the-user-after-every-command), **offer to build a UI for every workflow that lacks one**: author `.smithers/ui/<workflowId>.tsx` with `smithers-orchestrator/gateway-react`, then open it with `smithers ui <runId>` (and `smithers ui --app` for the full control-plane UI).
+A workflow can ship a **first-class browser UI** that the Gateway bundles, serves at `/workflows/<key>`, and the Smithers PWA / Studio / `smithers ui` embeds same-origin. Reach for this when a workflow has long-running interaction the CLI can't show well: a composer for an open-ended chat, a question pool, a live spec, a custom diff view. Per [How to guide the user](#how-to-guide-the-user-after-every-command), **offer to build a UI for every workflow that lacks one**: author `.smithers/ui/<workflowId>.tsx` from the shipped component libraries (below), then open it with `smithers ui <runId>` (and `smithers ui --app` for the full control-plane UI).
 
 Register the UI when you register the workflow:
 
@@ -782,7 +784,7 @@ gateway.register("my-workflow", workflow, {
 
 The bundle is one file. Two shipping shapes:
 
-- **React (recommended).** `smithers-orchestrator/gateway-react`. One call to `createGatewayReactRoot(<App />)` reads the boot config, mounts a provider, and gives the tree live hooks: `useGatewayRun`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayActions` (for `submitApproval`, `submitSignal`, `cancelRun`, `rewindRun`, etc.). The hooks are **stale-data-free by construction**: when `runId` (or any input) changes, the prior data clears synchronously and any late response from the old inputs is dropped. A custom UI that switches between runs never blinks the wrong data. It automatically manages subscriptions, pushed updates, metrics, and resilient reconnections.
+- **React (recommended).** Compose from the shipped component libraries; hand-rolled markup and CSS is the last resort. `smithers-orchestrator/gateway-ui` ships run-shaped widgets that each connect to the Gateway by themselves: `SimpleWorkflowDashboard` (a complete launch/watch dashboard in one component), `WorkflowUiShell` (the page scaffold with house styles), `RunList`, `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel`, `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `StatusPill`. `smithers-orchestrator/ui` ships the token-native primitives for everything around them (`Button`, `Card`, `Input`, `Tabs`, `Dialog`, `Table`, `StatusPill`, `EmptyState`, `KpiStat`, chat surfaces), correct in light and dark automatically. Under both sits `smithers-orchestrator/gateway-react`: one call to `createGatewayReactRoot(<App />)` reads the boot config, mounts a provider, and gives the tree live hooks for bespoke panes: `useGatewayRun`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayActions` (for `submitApproval`, `submitSignal`, `cancelRun`, `rewindRun`, etc.). The hooks are **stale-data-free by construction**: when `runId` (or any input) changes, the prior data clears synchronously and any late response from the old inputs is dropped. A custom UI that switches between runs never blinks the wrong data. It automatically manages subscriptions, pushed updates, metrics, and resilient reconnections.
 - **Vanilla.** `smithers-orchestrator/gateway-client`. One `SmithersGatewayClient` class with `getRun`, `getNodeOutput`, `getNodeDiff`, `submitApproval`, `submitSignal`, `cancelRun`, and a `streamRunEventsResilient` async generator that reconnects with backoff + jitter and resumes from the last per-run `seq`. This generator handles live pushed updates, metrics streaming, and subscriptions. Pick this when you want zero dependencies or already own your render layer.
 
 The bundle reads `?runId=<id>` from `location.search` for the run to scope to, and optionally `__SMITHERS_GATEWAY_UI__` (a `GatewayUiBootConfig`) for the mount path, RPC path, WebSocket path, and free-form `props` you set at `gateway.register({ ui: { props } })`.
@@ -801,6 +803,7 @@ bunx smithers-orchestrator ui <runId>                # specific run
 
 **Docs:**
 - Guide: `smithers.sh/guides/custom-workflow-ui`
+- Component catalogs: `smithers.sh/reference/gateway-ui` (run widgets), `smithers.sh/reference/ui` (primitives)
 - Examples: `smithers.sh/examples/workflow-ui-react`, `smithers.sh/examples/workflow-ui-vanilla`
 - Protocol: `smithers.sh/integrations/gateway`
 

@@ -10106,6 +10106,9 @@ tokens, never hex-plus-alpha.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
+| `SimpleWorkflowDashboard` | A complete one-workflow dashboard: prompt box + Start button, run list, node tree, and event log. The one-component UI. | `workflow`, `title`, `promptPlaceholder`, `inputFromPrompt`, `runLimit` |
+| `WorkflowUiShell` | The standard page scaffold: injects the style guide, renders a topbar (title, meta, actions), and wraps your content. | `title`, `meta`, `actions` |
+| `WorkflowUiStyles` | Just the shared style-guide `<style>` block, when you bring your own layout. | `mode`, `extra` |
 | `RunList` | A live, selectable list of runs with a status pill per row. | `filter`, `activeRunId`, `onSelect`, `pollMs` |
 | `RunTree` | The node tree for a run (initial snapshot plus live updates). | `runId`, `onSelectNode`, `activeNodeId` |
 | `RunEventLog` | A scrolling, auto-following event log for a run. | `runId`, `maxEvents`, `follow` |
@@ -10118,6 +10121,14 @@ tokens, never hex-plus-alpha.
 
 `StatusPill`, `statusColor`, and the `theme` style tokens are also exported for
 building your own rows that match the components.
+
+For a workflow whose UI just needs launch-watch-approve, render
+`<SimpleWorkflowDashboard workflow="my-workflow" />` inside
+`createGatewayReactRoot` and you are done. For everything you compose *around*
+these run widgets (buttons, cards, inputs, dialogs, tabs, empty states, chat
+surfaces), reach for the shared
+[`smithers-orchestrator/ui`](/reference/ui) component library instead of
+hand-writing markup and CSS.
 
 ## A complete UI
 
@@ -10254,6 +10265,203 @@ and [Workflow UI (React)](/examples/workflow-ui-react) for a hand-wired example.
 
 ---
 
+## UI Component Library
+
+> The shared @smithers-orchestrator/ui component library (Button, Card, Dialog, Tabs, StatusPill, chat surfaces, and more), token-native shadcn anatomy that is correct in light and dark by construction.
+
+`@smithers-orchestrator/ui` is the shared component library for every Smithers
+UI surface: custom workflow UIs under `.smithers/ui/`, the Monitor, Studio, and
+any app embedding a Gateway page. It ships shadcn component anatomy (`data-slot`
+attributes, CVA variant props, `asChild` via Radix Slot) with Radix behavior for
+dialogs, tabs, tooltips, and selects, styled exclusively through the
+[workflow UI theme tokens](/guides/workflow-ui-design). Every component is
+correct in light and dark with zero dark-mode code: the OS
+`prefers-color-scheme` is respected, and an explicit `data-theme="dark|light"`
+on `<html>` (which the Gateway shell sets from a `?theme=` query param) always
+wins.
+
+Import from the `smithers-orchestrator/ui` subpath, which resolves through the
+`smithers-orchestrator` install you already have. Importing the scoped
+`@smithers-orchestrator/ui` name directly also works, but requires declaring it
+as a direct dependency under pnpm-style isolated layouts.
+
+```tsx
+import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "smithers-orchestrator/ui";
+```
+
+## How the three UI packages layer
+
+When you build a workflow UI, reach for the packages in this order:
+
+1. [`smithers-orchestrator/gateway-ui`](/reference/gateway-ui) for the
+   run-shaped widgets: `RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`,
+   `LaunchButton`, `SimpleWorkflowDashboard`, and the `WorkflowUiShell` page
+   scaffold. Each connects to the Gateway by itself.
+2. `smithers-orchestrator/ui` (this page) for everything around those widgets:
+   buttons, cards, inputs, dialogs, tabs, tables, status pills, empty states,
+   KPI stats, and the chat surface. These are pure visual components with no
+   Gateway wiring.
+3. [`smithers-orchestrator/gateway-react`](/reference/gateway-react) hooks for
+   bespoke pieces neither library covers: read the same live data the
+   gateway-ui widgets use and render it with the primitives here.
+
+Hand-written markup and hand-written CSS are the last resort, not the first
+move. A UI assembled from these packages follows the
+[design principles](/guides/workflow-ui-design) automatically.
+
+## Styling model
+
+The stylesheet ships as a JS string (`smithersUiCss`), never a `.css` import,
+because the Gateway's UI bundler drops CSS artifacts. Render
+`<SmithersUiStyles />` once at the root; every component also self-injects the
+sheet in the browser as a fallback, so a consumer that forgets it still renders
+styled. All classes are namespaced `sui-*`, so nothing collides with the
+styleguide page vocabulary or your own CSS, and every rule is document-global so
+Radix portal content (dialogs, tooltips, selects) stays styled.
+
+Colors resolve only through `var(--token, #lightFallback)` expressions over the
+theme tokens, with tints derived via `color-mix`. Inside a Gateway-served
+`/workflows/<key>` page the shell injects the token block for you. In a
+standalone host (no Gateway shell), pass `withTheme` so the token block ships
+with the sheet:
+
+```tsx
+<SmithersUiStyles withTheme />
+```
+
+## Components
+
+All components accept `className` and `style`, forward refs, and carry
+`data-slot` attributes for testing and targeted overrides.
+
+### Primitives
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `Button` | The house button. `default` is the tinted-brand recipe; `solid` is shadcn's filled look. | `variant` (`default`, `solid`, `secondary`, `outline`, `ghost`, `destructive`, `link`), `size` (`sm`, `default`, `lg`, `icon`), `asChild` |
+| `Badge` | Small pill. Includes status tints shadcn lacks. | `variant` (`default`, `secondary`, `outline`, `success`, `warning`, `destructive`, `muted`), `asChild` |
+| `Input`, `Textarea` | Form fields with the brand focus halo. | native props |
+| `Label`, `Field` | Form label and a label-plus-control stack. | native props |
+| `Alert`, `AlertTitle`, `AlertDescription` | Callout block. | `variant` |
+| `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardAction`, `CardContent`, `CardFooter` | The house card (8px radius). | slots |
+| `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableHead`, `TableCell`, `TableCaption` | Data table. | slots |
+| `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent` | Radix tabs. | Radix props |
+| `Dialog` family (`DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogFooter`, `DialogTitle`, `DialogDescription`, ...) | Radix dialog with portal and overlay. | Radix props |
+| `Tooltip`, `TooltipProvider`, `TooltipTrigger`, `TooltipContent` | Radix tooltip. | Radix props |
+| `Select` family (`SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, ...) | Radix select. | Radix props |
+| `Progress` | Determinate progress bar. | `value` |
+| `Separator`, `Skeleton`, `Spinner` | Hairline rule, loading placeholder, inline spinner. | `Spinner`: `size` |
+
+### House compositions
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `StatusPill` | A run/node status string as a correctly tinted `Badge`: success for finished states, warning for in-flight, destructive for failures, muted for cancelled/skipped/unknown. Carries `data-status`. | `status`, `label`, `withDot` |
+| `EmptyState` | Centered zero-data block replacing bare "No runs yet." paragraphs. | `icon`, `title`, `description`, `action` |
+| `SectionHeader`, `Eyebrow` | Section heading row: eyebrow plus title on the left, actions on the right. | `title`, `eyebrow`, `actions` |
+| `RowButton` | Full-width selectable list row with button semantics (the house run-row recipe). | `active` |
+| `KpiStat` | Compact stat card. | `label`, `value`, `hint` |
+
+### Chat surface
+
+The shared Multi-style conversation components. They are transport-neutral:
+feed them Gateway events, SSE text, or stored messages without bringing runtime
+hooks into the visual layer.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `ChatTranscript` | Scrollable, accessible transcript container. | `pending`, `pendingLabel`, `empty` |
+| `ChatMessage` | One chat row with the Multi bubble geometry. | `role` (`assistant`, `user`, `system`), `label`, `meta`, `variant` (`default`, `terminal`), `pending` |
+| `ChatComposer` | Controlled glass composer. Enter submits, Shift+Enter inserts a newline. | `value`, `onValueChange`, `onSubmit`, `status`, `actions`, `disabled`, `docked` |
+
+### Utilities
+
+| Export | What it does |
+| --- | --- |
+| `SmithersUiStyles`, `composeSmithersUiStyles`, `smithersUiCss` | Render or compose the stylesheet; `withTheme` also emits the theme token block. |
+| `normalizeStatus`, `statusClass`, `formatStatus`, `isTerminalRunStatus` | The shared status vocabulary `StatusPill` is built on. |
+| `tokens` | The token bridge (`var(--token, #lightFallback)` strings) for inline styles that must match the components. |
+| `cn` | clsx class composition. |
+| `buttonVariants`, `badgeVariants`, `alertVariants`, `spinnerVariants` | CVA variant builders for styling your own elements like the components. |
+
+## A complete workflow UI
+
+Gateway data via [`gateway-react`](/reference/gateway-react) hooks and
+[`gateway-ui`](/reference/gateway-ui) widgets, everything else from this
+library:
+
+```tsx .smithers/ui/triage.tsx
+/** @jsxImportSource react */
+import { useState } from "react";
+import { createGatewayReactRoot, useGatewayActions, useGatewayRuns } from "smithers-orchestrator/gateway-react";
+import { RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import {
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Input,
+  RowButton,
+  SmithersUiStyles,
+  StatusPill,
+} from "smithers-orchestrator/ui";
+
+function App() {
+  const [prompt, setPrompt] = useState("");
+  const [runId, setRunId] = useState<string>();
+  const runs = useGatewayRuns({ filter: { workflow: "triage", limit: 20 } });
+  const actions = useGatewayActions();
+  const activeRunId = runId ?? runs.data?.[0]?.runId;
+
+  return (
+    <WorkflowUiShell title="Triage">
+      <SmithersUiStyles />
+      <Card>
+        <CardHeader>
+          <CardTitle>Launch</CardTitle>
+        </CardHeader>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Input
+            style={{ flex: 1 }}
+            value={prompt}
+            onChange={(e) => setPrompt(e.currentTarget.value)}
+            placeholder="Optional prompt..."
+          />
+          <Button onClick={() => void actions.launchRun({ workflow: "triage", input: { prompt } })}>
+            Start
+          </Button>
+        </div>
+      </Card>
+      {(runs.data ?? []).length === 0 ? (
+        <EmptyState title="No runs yet" description="Launch one to see it here." />
+      ) : (
+        (runs.data ?? []).map((r) => (
+          <RowButton key={r.runId} active={r.runId === activeRunId} onClick={() => setRunId(r.runId)}>
+            <span className="mono">{r.runId.slice(0, 8)}</span>
+            <StatusPill status={r.status} />
+          </RowButton>
+        ))
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <RunTree runId={activeRunId} />
+        <RunEventLog runId={activeRunId} style={{ height: 280 }} />
+      </div>
+    </WorkflowUiShell>
+  );
+}
+
+createGatewayReactRoot(<App />);
+```
+
+Save it as `.smithers/ui/triage.tsx`, declare `<UI entry="../ui/triage.tsx" />`
+in the workflow, and open it with `bunx smithers-orchestrator ui RUN_ID`. See
+[Custom Workflow UIs](/guides/custom-workflow-ui) for the full wiring guide and
+[Workflow UI Design Principles](/guides/workflow-ui-design) for the visual
+language these components implement.
+
+---
+
 ## Custom Workflow UIs
 
 > Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
@@ -10308,7 +10516,7 @@ Both SDKs talk to the same Gateway. The vanilla SDK is published as `@smithers-o
 
 ## The shared component library
 
-Before styling anything by hand, reach for `smithers-orchestrator/ui` (the published `@smithers-orchestrator/ui` package). Prefer the `smithers-orchestrator/ui` subpath, which resolves through the `smithers-orchestrator` install you already have; importing the scoped `@smithers-orchestrator/ui` name directly requires declaring it as a direct dependency under pnpm-style isolated layouts. It ships shadcn-anatomy components (variant props, `asChild` slots, Radix behavior for dialogs, tabs, tooltips, and selects) that are styled entirely through the [workflow UI theme tokens](/guides/workflow-ui-design), so every component is correct in light and dark automatically: the OS `prefers-color-scheme` is respected, and an explicit `?theme=dark|light` on the host page always wins.
+Before styling anything by hand, reach for `smithers-orchestrator/ui` (the published `@smithers-orchestrator/ui` package; full catalog in the [UI Component Library reference](/reference/ui)). Prefer the `smithers-orchestrator/ui` subpath, which resolves through the `smithers-orchestrator` install you already have; importing the scoped `@smithers-orchestrator/ui` name directly requires declaring it as a direct dependency under pnpm-style isolated layouts. It ships shadcn-anatomy components (variant props, `asChild` slots, Radix behavior for dialogs, tabs, tooltips, and selects) that are styled entirely through the [workflow UI theme tokens](/guides/workflow-ui-design), so every component is correct in light and dark automatically: the OS `prefers-color-scheme` is respected, and an explicit `?theme=dark|light` on the host page always wins.
 
 ```tsx .smithers/ui/triage.tsx
 /** @jsxImportSource react */
