@@ -3731,7 +3731,7 @@ import { Memory } from "smithers-orchestrator";
 </Memory>
 ```
 
-`<Memory>` provides one memory configuration to every descendant `<Task>`. Each task receives that configuration in `TaskDescriptor.memoryConfig`. A task-level `memory={...}` prop replaces the inherited configuration for that task.
+`<Memory>` provides one memory configuration to every descendant `<Task>`. Each task receives that configuration in `TaskDescriptor.memoryConfig`. A task-level `memory={...}` prop replaces the inherited configuration for that task. Provider and task-level configurations use the same validation and defaults, including the positive safe-integer `maxTokens` bound and the `bank`/`banks` exclusivity check.
 
 ## Props
 
@@ -3850,7 +3850,7 @@ The existing `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins 
 </Memory>
 ```
 
-Legacy `namespace`, `remember`, and object-form `recall` fields remain accepted on `Task.memory` for compatibility. New workflows should use banks, tags, recall mode, primers, retention, and tools.
+Legacy `namespace`, `remember`, `threadId`, and object-form `recall` fields remain accepted and preserved on `Task.memory` for compatibility. They are inert metadata: the engine does not use them for prompt injection, retention, or message history. Use banks, tags, recall mode, primers, retention, and tools for runtime memory.
 
 ---
 
@@ -11666,7 +11666,7 @@ The `<Memory>` component has two operating modes. Without `HINDSIGHT_URL`, it us
 
 | Capability | SQLite local (`HINDSIGHT_URL` unset) | Hindsight on Postgres (`HINDSIGHT_URL` set) |
 |---|---|---|
-| Exact facts, threads, messages, and notes | Transactional rows in local SQLite | The same transactional SQLite contract store, projected into Hindsight with stable document ids for semantic retrieval |
+| Exact facts, threads, messages, and notes | Transactional rows in local SQLite | The same transactional SQLite contract store, with best-effort Hindsight projection for semantic retrieval |
 | Recall | Tag-scoped local keyword matching | TEMPR semantic, text, graph, and temporal retrieval with compound tag filters |
 | Mental-model primers | Unavailable | Saved mental-model content fetched verbatim |
 | Mid-task tools | `remember` and `recall` over local facts | `remember` and `recall` over Hindsight banks |
@@ -11677,7 +11677,7 @@ The `<Memory>` component has two operating modes. Without `HINDSIGHT_URL`, it us
 The fallback is deliberate. A workflow that does not configure Hindsight keeps the existing SQLite facts behavior and does not acquire a Postgres dependency.
 For PGlite and Postgres workflow-state backends, those fallback facts use the local `.smithers/smithers.db` sidecar; workflow state stays on the selected backend.
 
-`HindsightMemoryStore` implements the same `MemoryStore` contract without weakening its identity or concurrency guarantees. Exact contract rows stay in the transactional SQLite store: fact identity is namespace plus key, while message and note ids remain global. Successful writes are projected into Hindsight. Exact facts use a stable document id derived from namespace plus key and `updateMode: "replace"`; threads, messages, and notes use typed retained documents. `searchNotes` and task recall call Hindsight `recall`, while exact reads and supersession filtering use the contract rows. Compound filters use `tag_groups` only. Stable branch, stream, source, and scope dimensions are tags. Volatile session and run identity stays in metadata and stable append document ids.
+`HindsightMemoryStore` implements the same `MemoryStore` contract without weakening its identity or concurrency guarantees. Exact contract rows stay in the transactional SQLite store: fact identity is namespace plus key, while message and note ids remain global. Hindsight is a best-effort semantic projection, not the authoritative copy. A projection failure is logged and queued for another attempt while the process remains alive; it does not reject a contract-store mutation that already committed. The retry queue is not a durable outbox, so an interrupted process can leave Hindsight behind the contract store until the record is written or deleted again. Exact facts use a stable document id derived from namespace plus key and `updateMode: "replace"`; threads, messages, and notes use typed retained documents. `searchNotes` and task recall call Hindsight `recall`, while exact reads and supersession filtering use the contract rows. Compound filters use `tag_groups` only. Stable branch, stream, source, and scope dimensions are tags. Volatile session and run identity stays in metadata and stable append document ids.
 
 For a user bank plus a project bank, Smithers recalls the user bank without project filters and recalls the project bank through `(scope:main OR branch:current)`, with stream tags as additional constraints. Primer ids are searched across the configured banks; a missing bank/id pair does not discard primers found elsewhere. The local SQLite runtime applies the same strict tag scope before keyword ranking.
 
@@ -11737,11 +11737,11 @@ The legacy task shape remains valid:
 </Task>
 ```
 
-Legacy namespace fields use the local facts seam. New bank-based fields enable the engine integration described above.
+Legacy `namespace`, object-form `recall`, `remember`, and `threadId` fields remain accepted and preserved on `TaskDescriptor.memoryConfig`, but the engine does not interpret them. They do not recall facts, retain task output, or append message history. Use the bank-based fields above for runtime memory, or call `createMemoryStore` directly for exact local facts, threads, and messages.
 
 ## Imperative get/set/delete inside a workflow
 
-The `memory={{ recall, remember }}` legacy block is declarative. To get, set, or delete an exact fact from a compute `<Task>`, build a store with `createMemoryStore(db)` and call it directly. The compute callback receives `deps` only; there is no injected store, so you create one:
+The `memory={{ recall, remember }}` legacy block is inert compatibility metadata. To get, set, or delete an exact fact from a compute `<Task>`, build a store with `createMemoryStore(db)` and call it directly. The compute callback receives `deps` only; there is no injected store, so you create one:
 
 ```tsx
 import { createMemoryStore } from "smithers-orchestrator/memory";

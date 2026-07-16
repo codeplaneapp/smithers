@@ -3711,7 +3711,7 @@ import { Memory } from "smithers-orchestrator";
 </Memory>
 ```
 
-`<Memory>` provides one memory configuration to every descendant `<Task>`. Each task receives that configuration in `TaskDescriptor.memoryConfig`. A task-level `memory={...}` prop replaces the inherited configuration for that task.
+`<Memory>` provides one memory configuration to every descendant `<Task>`. Each task receives that configuration in `TaskDescriptor.memoryConfig`. A task-level `memory={...}` prop replaces the inherited configuration for that task. Provider and task-level configurations use the same validation and defaults, including the positive safe-integer `maxTokens` bound and the `bank`/`banks` exclusivity check.
 
 ## Props
 
@@ -3830,7 +3830,7 @@ The existing `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins 
 </Memory>
 ```
 
-Legacy `namespace`, `remember`, and object-form `recall` fields remain accepted on `Task.memory` for compatibility. New workflows should use banks, tags, recall mode, primers, retention, and tools.
+Legacy `namespace`, `remember`, `threadId`, and object-form `recall` fields remain accepted and preserved on `Task.memory` for compatibility. They are inert metadata: the engine does not use them for prompt injection, retention, or message history. Use banks, tags, recall mode, primers, retention, and tools for runtime memory.
 
 ---
 
