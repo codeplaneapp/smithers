@@ -125,6 +125,29 @@ describe("task memory runtime", () => {
         expect(new TextEncoder().encode(JSON.stringify(toolResult)).byteLength).toBeLessThanOrEqual(96);
     });
 
+    test("defensively caps non-finite descriptor limits", async () => {
+        const dense = "x".repeat(12_000);
+        const service = {
+            recallMemory: async () => [{ bank: "project-1", text: dense }],
+            getPrimers: async () => [],
+            retainMemory: async () => {},
+        };
+        const context = {
+            runId: "invalid-limit-run",
+            nodeId: "invalid-limit-task",
+            iteration: 0,
+            taskSignal: new AbortController().signal,
+        };
+        for (const maxTokens of [Number.POSITIVE_INFINITY, Number.NaN]) {
+            const block = await buildMemoryPromptBlock(service, {
+                bank: "project-1",
+                recall: "auto",
+                maxTokens,
+            }, "dense context", context);
+            expect(new TextEncoder().encode(block).byteLength).toBeLessThanOrEqual(2048);
+        }
+    });
+
     test("prepends a fenced snapshot, registers tools, and retains successful output", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers({ answer: outputSchema });
         const recalls = [];

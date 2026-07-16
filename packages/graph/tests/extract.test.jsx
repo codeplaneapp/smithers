@@ -120,7 +120,7 @@ describe("extractGraph", () => {
 		const root = hostEl("smithers:workflow", {}, [
 			hostEl("smithers:task", { id: "t1", output: "t", __memory: inherited }),
 		]);
-		expect(extractGraph(root).tasks[0].memoryConfig).toBe(inherited);
+		expect(extractGraph(root).tasks[0].memoryConfig).toEqual(inherited);
 	});
 
 	test("uses per-Task memory instead of Memory context metadata", () => {
@@ -134,7 +134,47 @@ describe("extractGraph", () => {
 				memory: override,
 			}),
 		]);
-		expect(extractGraph(root).tasks[0].memoryConfig).toBe(override);
+		expect(extractGraph(root).tasks[0].memoryConfig).toEqual({
+			bank: "user-1",
+			tags: [],
+			recall: false,
+			budget: "mid",
+			maxTokens: 2048,
+			primers: [],
+			retain: "off",
+			tools: true,
+		});
+	});
+
+	test("normalizes and validates direct per-Task memory configuration", () => {
+		const valid = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", {
+				id: "valid",
+				output: "t",
+				memory: { bank: "project-1" },
+			}),
+		]);
+		expect(extractGraph(valid).tasks[0].memoryConfig).toEqual({
+			bank: "project-1",
+			tags: [],
+			recall: "auto",
+			budget: "mid",
+			maxTokens: 2048,
+			primers: [],
+			retain: "off",
+			tools: false,
+		});
+
+		for (const memory of [
+			{ bank: "project-1", maxTokens: Number.POSITIVE_INFINITY },
+			{ bank: "project-1", maxTokens: Number.NaN },
+			{ bank: "project-1", banks: ["project-2"] },
+		]) {
+			const root = hostEl("smithers:workflow", {}, [
+				hostEl("smithers:task", { id: "invalid", output: "t", memory }),
+			]);
+			expect(() => extractGraph(root)).toThrow(/Memory/);
+		}
 	});
 
 	test("threads latencySlo.perTask onto the descriptor", () => {
@@ -585,7 +625,7 @@ describe("extractGraph", () => {
 			expect(task.heartbeatTimeoutMs).toBe(44);
 			expect(task.hijack).toBe(true);
 			expect(task.onHijackExit).toBe("reopen");
-			expect(task.memoryConfig).toBe(memory);
+			expect(task.memoryConfig).toEqual(memory);
 			expect(task.scorers).toBe(scorers);
 			expect(task.groundTruth).toBe(groundTruth);
 			expect(task.context).toBe(context);
