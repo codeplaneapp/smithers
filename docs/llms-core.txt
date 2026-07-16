@@ -3719,10 +3719,10 @@ import { Memory } from "smithers-orchestrator";
 |---|---|---|---|
 | `bank` | `string` | none | One Hindsight bank. Use either `bank` or `banks`. |
 | `banks` | `string[]` | none | Banks recalled in parallel. Results share the `maxTokens` injection cap. Use either `bank` or `banks`. |
-| `tags` | `string[]` | `[]` | Up to 16 stable dimensions: `branch:*`, `stream:*`, `source:chat\|run\|reflection\|import`, and `scope:main\|branch`. Project-bank recall derives a compound filter from these tags. |
+| `tags` | `string[]` | `[]` | Stable dimensions: `branch:*`, `stream:*`, `source:chat\|run\|reflection\|import`, and `scope:main\|branch`. A write may contain at most 16 distinct tags after configured, tool-supplied, and automatic source/scope tags are merged. Project-bank recall derives a compound filter from these tags. |
 | `recall` | `"auto" \| string \| false` | `"auto"` | `"auto"` uses the task prompt as the query, a string supplies a fixed query, and `false` disables pre-task recall. |
 | `budget` | `"low" \| "mid" \| "high"` | `"mid"` | Hindsight recall search budget. Higher budgets examine more candidates before reranking. |
-| `maxTokens` | `number` | `2048` | Maximum tokens injected across recalled memories and primers. Must be a positive safe integer. |
+| `maxTokens` | `number` | `2048` | Hard upper bound for the complete fenced prompt block and serialized `recall` tool result. It includes primers, recall rows, bank labels, and framing. Must be a positive safe integer. |
 | `primers` | `string[]` | `[]` | Mental-model ids searched across the configured banks and inserted verbatim. A missing bank/id pair is ignored, so user and project primers can share one list. Smithers does not run reflection in the task hot path. |
 | `retain` | `"on-complete" \| "off"` | `"off"` | Retain a digest of a successful task result asynchronously, or disable automatic retention. Retention never delays task completion. |
 | `tools` | `boolean` | `false` | Add `remember` and `recall` tools to the task agent for memory access during the run. |
@@ -3732,7 +3732,9 @@ At least one non-empty bank is required after inheritance. Nested `<Memory>` com
 
 ## Prompt injection
 
-Before an agent task starts, Smithers fetches the configured primers and recalls memories from every bank. It prepends the result inside a fenced `<smithers_memory_context>` block. `maxTokens` caps the complete block so recalled context cannot crowd out the task instructions.
+Before an agent task starts, Smithers fetches the configured primers and recalls memories from every bank. It prepends the result inside a fenced `<smithers_memory_context>` block. `maxTokens` caps the complete block so recalled context cannot crowd out the task instructions. Smithers applies a conservative UTF-8 byte ceiling to remain within the limit without depending on a specific model tokenizer. The same ceiling covers the complete serialized result returned by the `recall` tool.
+
+Tasks with `memoryConfig` bypass task-output caching. Their recalled snapshot can change while the prompt, agent, and worktree stay the same, so reusing an older task result would skip recall and return stale output. The memory snapshot itself remains frozen across retries of one task execution.
 
 Recall and primer reads are advisory. A timeout or backend error logs a warning and runs the task with its original prompt. A memory failure never fails the task.
 Missing mental-model ids are handled per bank. For example, `user-primer` can exist only in the user bank and `project-primer` only in the project bank; both valid primers are still injected.
@@ -3774,7 +3776,7 @@ Banks are isolation boundaries. Use a user bank for personal preferences and a p
 
 Do not put run ids, task ids, session ids, or project ids in `tags`. Smithers records volatile identity in Hindsight metadata and uses a stable per-run document id with append mode. This preserves provenance without fragmenting Hindsight observation consolidation.
 
-Use `scope:main` only with `branch:main`. Use `scope:branch` for branch-local writes. You may omit the scope tag on a project bank; Smithers derives it from the single configured branch tag. A conflicting explicit scope is rejected before retention.
+Use `scope:main` only with `branch:main`. Use `scope:branch` for branch-local writes. You may omit the scope tag on a project bank; Smithers derives it from the single configured branch tag. A tagless project-bank write defaults to `scope:main`, which matches the canonical project recall filter. A conflicting explicit scope is rejected before retention.
 
 Smithers applies the standard two-bank recall policy automatically:
 

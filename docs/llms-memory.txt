@@ -96,9 +96,11 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
 </Memory>
 ```
 
-The provider configuration and the existing per-task `memory={...}` prop converge on `TaskDescriptor.memoryConfig`. A task prop replaces its inherited provider configuration. Before the task runs, the engine fetches primers and recall results, applies the token cap, and prepends a fenced memory block. Recall failures degrade to the original prompt. After a successful task, `retain="on-complete"` starts a non-blocking retain.
+The provider configuration and the existing per-task `memory={...}` prop converge on `TaskDescriptor.memoryConfig`. A task prop replaces its inherited provider configuration. Before the task runs, the engine fetches primers and recall results, applies a conservative token cap to the complete fenced block, and prepends it to the prompt. The cap includes primers, recall rows, labels, and framing; it also applies to serialized `recall` tool results. Recall failures degrade to the original prompt. After a successful task, `retain="on-complete"` starts a non-blocking retain.
 
-Use stable tags for branches, streams, source, and scope. `scope:main` belongs only on `branch:main`; branch-local writes use `scope:branch`. When a project-bank configuration has one branch tag and no scope tag, Smithers derives the correct scope. Conflicting scope and branch tags are rejected. Run and session identities belong in retention metadata and document ids, where they preserve provenance without fragmenting consolidation.
+Memory-configured tasks bypass task-output caching. Recall is mutable input, and a cache hit would otherwise skip recall and return output produced from an older memory snapshot. Smithers still freezes one fetched snapshot across retries of the same task execution.
+
+Use stable tags for branches, streams, source, and scope. `scope:main` belongs only on `branch:main`; branch-local writes use `scope:branch`. When a project-bank configuration has one branch tag and no scope tag, Smithers derives the correct scope. A tagless project-bank write defaults to `scope:main`, so a later canonical recall can see it. Conflicting scope and branch tags are rejected. The 16-tag limit is checked after configured tags, tool tags, and automatic source/scope tags are merged. Run and session identities belong in retention metadata and document ids, where they preserve provenance without fragmenting consolidation.
 Tags supplied to the mid-task `recall` tool only narrow the configured recall scope. They cannot replace the base project branch or stream filters.
 
 See [`<Memory>`](/components/memory) for the complete prop table, multi-bank behavior, tool mode, and deployment configuration.
