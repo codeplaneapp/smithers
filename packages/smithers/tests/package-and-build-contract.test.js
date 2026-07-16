@@ -304,8 +304,10 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     ]);
     expectText("scripts/check-llms.mjs", [
       "docs/llms-full.txt",
-      'bun", ["scripts/generate-llms.ts"]',
-      'bun", ["scripts/optimize-llms-full.ts"]',
+      "checkNpmPublication",
+      "versionedGeneratorArgs",
+      'run("bun", ["scripts/generate-llms.ts", ...versionedArgs])',
+      'run("bun", ["scripts/optimize-llms-full.ts", ...versionedArgs])',
       "Run `pnpm docs:llms`",
     ]);
     expectText("scripts/check-docs.mjs", [
