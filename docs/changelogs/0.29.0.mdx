@@ -1,12 +1,12 @@
 ---
 title: "0.29.0"
-description: "First-class <Memory>: a declarative memory scope for tasks, backed by Hindsight on Postgres — recall and primers injected into prompts, remember/recall tools for agents, and async retention of task results."
+description: "First-class <Memory>: a declarative memory scope for tasks, backed by Hindsight on Postgres, with recall and primers injected into prompts, remember/recall tools for agents, and async retention of task results."
 ---
 
 **Smithers 0.29.0 introduces first-class memory.** Wrap any part of a workflow
 in a `<Memory>` provider and every task inside it can recall relevant context
 before it runs, expose `remember`/`recall` tools to its agent while it runs,
-and retain a digest of what it produced after it finishes — durably, across
+and retain a digest of what it produced after it finishes: durably, across
 runs, in a [Hindsight](https://hindsight.vectorize.io) memory bank stored in
 your own Postgres.
 
@@ -27,17 +27,17 @@ bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs 
 
 - **Declarative scope.** `bank`/`banks`, `tags`, `recall` (`"auto"`, a fixed
   query, or `false`), `budget`, `maxTokens`, `primers` (mental models injected
-  verbatim), `retain`, and `tools` — inherited by descendant tasks through
+  verbatim), `retain`, and `tools`: inherited by descendant tasks through
   context, overridable per task via the existing `memory` prop. Both converge
   on the same descriptor, so graph extraction and the engine see one shape.
 - **Frozen recall snapshots.** Recall runs once per node and iteration and is
   reused across retries, so retries stay deterministic and prompt-cache
   friendly. Recall failures and timeouts degrade to no injection with a
-  warning — memory never fails a task.
+  warning: memory never fails a task.
 - **Bounded injection.** Every injected block and tool result is capped by
   `maxTokens` (default 2048).
 - **Async retention.** With `retain="on-complete"`, a digest of the task's
-  output is retained after the result resolves — fire-and-forget, never
+  output is retained after the result resolves: fire-and-forget, never
   blocking completion. Run and session identity travel as metadata and stable
   document ids, never as tags.
 - **Postgres-family feature.** Set `HINDSIGHT_URL` (plus optional
@@ -58,4 +58,4 @@ See the [Memory component docs](/components/memory) and the updated
 - `HindsightMemoryStore` assumes a single writer per contract store; the
   limitation and its invariant tests are documented in the memory guides.
 - `defineTool` moved to a shared `@smithers-orchestrator/tool-context` package
-  re-exported from the existing entry points — imports keep working.
+  re-exported from the existing entry points: imports keep working.
