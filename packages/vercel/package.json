@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/vercel",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "Vercel Sandbox provider for Smithers: run durable workflow sandboxes on Vercel Sandbox compute",
   "type": "module",
   "sideEffects": false,
