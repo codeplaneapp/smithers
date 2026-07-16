@@ -39,12 +39,21 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      # Checkout must precede the gate: the gate step runs
+      # scripts/release-next-gate.mjs from this checkout, and without it the
+      # module-not-found exit was read as "not ready", silently skipping every
+      # publish.
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
       - name: Require the latest push workflow runs green for this commit
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          test -f scripts/release-next-gate.mjs
           runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
             --jq '.workflow_runs')
           if gate=$(printf '%s' "$runs" | node scripts/release-next-gate.mjs); then
@@ -59,11 +68,6 @@ jobs:
             echo "Latest required push workflows are not yet green for $HEAD_SHA; their completion events will re-trigger this workflow"
           fi
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v6.0.2
-        if: steps.gate.outputs.ready == 'true'
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: pnpm/action-setup@v6.0.8
         if: steps.gate.outputs.ready == 'true'
