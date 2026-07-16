@@ -43,6 +43,8 @@ function createFakeHindsight() {
     const mentalModels = new Map();
     /** @type {Map<string, any[]>} */
     const recallOverrides = new Map();
+    /** @type {Array<{ method: string; pathIncludes: string; remaining: number }>} */
+    const failures = [];
 
     const server = Bun.serve({
         hostname: "127.0.0.1",
@@ -59,6 +61,15 @@ function createFakeHindsight() {
                 authorization: request.headers.get("authorization"),
                 ...(body === undefined ? {} : { body }),
             });
+
+            const failure = failures.find((candidate) =>
+                candidate.remaining > 0
+                && candidate.method === request.method
+                && url.pathname.includes(candidate.pathIncludes));
+            if (failure) {
+                failure.remaining -= 1;
+                return json({ detail: "injected projection failure" }, 503);
+            }
 
             if (request.method === "GET" && url.pathname === "/v1/default/banks") {
                 return json({ banks: [...banks].map(([bank_id]) => ({ bank_id })) });
@@ -145,6 +156,9 @@ function createFakeHindsight() {
         mentalModels,
         recallOverrides,
         requests,
+        failNext(method, pathIncludes, count = 1) {
+            failures.push({ method, pathIncludes, remaining: count });
+        },
         stop: () => server.stop(true),
     };
 }
@@ -237,6 +251,94 @@ describe("HindsightMemoryStore", () => {
         expect(fixture.requests.filter((entry) => entry.method === "DELETE")).toHaveLength(0);
         await store.deleteFact(WF_NS, "decision");
         expect(await store.getFact(WF_NS, "decision")).toBeUndefined();
+    });
+
+    test("keeps contract mutations authoritative and retries every failed projection", async () => {
+        const store = createStore();
+        const projectionAttempts = () => fixture.requests.filter((entry) =>
+            (entry.method === "POST" && entry.path.endsWith("/memories"))
+            || entry.method === "DELETE").length;
+        const failProjection = () => fixture.failNext("POST", "/memories");
+        const retryPending = async (attemptsBefore) => {
+            await store.enableNoteSearch("workflow");
+            expect(projectionAttempts()).toBeGreaterThan(attemptsBefore + 1);
+        };
+
+        failProjection();
+        let attempts = projectionAttempts();
+        await expect(store.setFact(WF_NS, "projected", { value: 1 })).resolves.toBeUndefined();
+        expect(JSON.parse((await store.getFact(WF_NS, "projected")).valueJson)).toEqual({ value: 1 });
+        await retryPending(attempts);
+
+        fixture.failNext("DELETE", "/documents/");
+        attempts = projectionAttempts();
+        await expect(store.deleteFact(WF_NS, "projected")).resolves.toBeUndefined();
+        expect(await store.getFact(WF_NS, "projected")).toBeUndefined();
+        await retryPending(attempts);
+
+        failProjection();
+        attempts = projectionAttempts();
+        const thread = await store.createThread(WF_NS, "Projection retry");
+        expect(await store.getThread(thread.threadId)).toEqual(thread);
+        await retryPending(attempts);
+
+        failProjection();
+        attempts = projectionAttempts();
+        await expect(store.saveMessage({
+            id: "projection-message",
+            threadId: thread.threadId,
+            role: "assistant",
+            contentJson: '"saved locally"',
+        })).resolves.toBeUndefined();
+        expect(await store.countMessages(thread.threadId)).toBe(1);
+        await retryPending(attempts);
+
+        fixture.failNext("DELETE", "/documents/");
+        attempts = projectionAttempts();
+        await expect(store.deleteMessages(thread.threadId, ["projection-message"])).resolves.toBe(1);
+        expect(await store.countMessages(thread.threadId)).toBe(0);
+        await retryPending(attempts);
+
+        await store.saveMessage({
+            id: "thread-delete-message",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: '"delete with thread"',
+        });
+        fixture.failNext("DELETE", "/documents/");
+        attempts = projectionAttempts();
+        await expect(store.deleteThread(thread.threadId)).resolves.toBeUndefined();
+        expect(await store.getThread(thread.threadId)).toBeUndefined();
+        await retryPending(attempts);
+
+        await store.setFact(WF_NS, "expired", { value: "old" }, 1);
+        await Bun.sleep(5);
+        fixture.failNext("DELETE", "/documents/");
+        attempts = projectionAttempts();
+        await expect(store.deleteExpiredFacts()).resolves.toBe(1);
+        expect(await store.getFact(WF_NS, "expired")).toBeUndefined();
+        await retryPending(attempts);
+
+        failProjection();
+        attempts = projectionAttempts();
+        const note = await store.saveNote({
+            namespace: WF_NS,
+            id: "projection-note",
+            body: "Saved in the contract store.",
+            status: "pending",
+        });
+        expect(await store.getNote(note.id)).toEqual(note);
+        await retryPending(attempts);
+
+        failProjection();
+        attempts = projectionAttempts();
+        await expect(store.setNoteStatus(note.id, "accepted")).resolves.toBeUndefined();
+        expect((await store.getNote(note.id)).status).toBe("accepted");
+        await retryPending(attempts);
+
+        attempts = projectionAttempts();
+        await expect(store.enableNoteSearch("workflow")).resolves.toBeUndefined();
+        expect(projectionAttempts()).toBe(attempts);
     });
 
     test("implements threads, messages, and note supersession over typed documents", async () => {

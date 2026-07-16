@@ -495,6 +495,7 @@ declare class HindsightMemoryStore implements MemoryStore$2 {
     setNoteStatusEffect(id: any, status: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
     enableNoteSearchEffect(kind: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
     searchNotesEffect(kind: any, query: any, limit: any, filter: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
+    #private;
 }
 type SmithersRecordEnvelope = {
     version: number;
@@ -585,6 +586,7 @@ declare class LocalMemoryRuntime {
         documentId: string;
         updateMode?: "replace" | "append";
     }): Promise<void>;
+    #private;
 }
 type LocalTagGroup = {
     tags: string[];
