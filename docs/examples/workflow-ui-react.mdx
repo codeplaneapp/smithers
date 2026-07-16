@@ -7,6 +7,22 @@ This example is a minimal first-class React UI for a workflow that ships with th
 
 For the full conceptual walkthrough, see [Custom Workflow UIs](/guides/custom-workflow-ui).
 
+## Hijacked pipeline chat
+
+For a runnable multi-step version of this pattern, see
+[`examples/hijacked-chat-pipeline`](https://github.com/smithersai/smithers/tree/main/examples/hijacked-chat-pipeline).
+It declares three sequential agent tasks with `hijack` and
+`onHijackExit="complete"`. The workflow UI follows the active hijack candidate,
+opens the Gateway's PTY WebSocket, and presents the native agent session through
+the shared `ChatTranscript`, `ChatMessage`, and `ChatComposer` components from
+`smithers-orchestrator/ui`.
+
+Each session is still a real resumable Codex session. The browser only replaces
+the terminal presentation: submitted chat messages are written as PTY bytes and
+the streamed PTY screen is rendered in the assistant bubble. Ending a stage
+returns control to Smithers, which resumes the run and advances the `Sequence`
+to the next hijacked task.
+
 ## The bundle
 
 ```tsx
