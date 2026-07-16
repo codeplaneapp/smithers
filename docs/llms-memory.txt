@@ -42,7 +42,7 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 |---|---|---|
 | Facts | `store.setFact(ns, key, value, ttlMs?)` / `store.getFact(ns, key)` / `store.listFacts(ns)` / `store.listAllFacts()` | Namespaced JSON facts. Optional TTL. Last-write-wins. `listAllFacts()` returns every fact across all namespaces (what `memory list` prints with no namespace). |
 | Message history | `store.createThread(ns, title?)`, `store.listThreads()`, `store.saveMessage(msg)`, `store.listMessages(threadId, limit)`, `store.deleteMessages(threadId, messageIds)` | Ordered chat threads per agent or user; list/delete to compact history. |
-| Notes | `store.saveNote(input)` / `store.getNote(id)` / `store.listNotes(ns, filter?)` / `store.setNoteStatus(id, status)` / `store.enableNoteSearch(kind)` / `store.searchNotes(kind, query, limit?, filter?)` | Append-only knowledge (lessons, decisions, runbook rules). Notes never mutate; they die by supersession or rejection, not TTL. SQLite backend only. |
+| Notes | `store.saveNote(input)` / `store.getNote(id)` / `store.listNotes(ns, filter?)` / `store.setNoteStatus(id, status)` / `store.enableNoteSearch(kind)` / `store.searchNotes(kind, query, limit?, filter?)` | Append-only knowledge (lessons, decisions, runbook rules). Notes die by supersession or rejection, not TTL. SQLite uses opt-in FTS5; Hindsight uses semantic recall. |
 | Maintenance | `store.deleteExpiredFacts()` plus processors | TTL cleanup and history compaction. |
 
 ## Local SQLite or Hindsight
@@ -60,6 +60,9 @@ The `<Memory>` component has two operating modes. Without `HINDSIGHT_URL`, it us
 | Failure behavior | Local store remains available | Recall failure logs a warning and runs without injection; retention never blocks task completion |
 
 The fallback is deliberate. A workflow that does not configure Hindsight keeps the existing SQLite facts behavior and does not acquire a Postgres dependency.
+For PGlite and Postgres workflow-state backends, those fallback facts use the local `.smithers/smithers.db` sidecar; workflow state stays on the selected backend.
+
+`HindsightMemoryStore` implements the same `MemoryStore` contract. A Smithers namespace maps to a prefixed bank. Exact facts retain a typed document with a stable id derived from namespace + key and `updateMode: "replace"`. Threads, messages, and notes are typed retained documents. `searchNotes` and task recall call Hindsight `recall`; compound filters use `tag_groups` only. Stable branch, stream, source, and scope dimensions are tags. Volatile session and run identity stays in metadata and stable append document ids.
 
 Every method has an Effect-returning twin (`store.listThreadsEffect`, `store.deleteMessagesEffect`, etc.) for use inside an Effect pipeline.
 
@@ -180,12 +183,13 @@ await store.setNoteStatus(rule.id, "accepted");
 const live = await store.listNotes(ops);
 ```
 
-Full-text search is **lazy and opt-in per namespace kind**: nothing is
-indexed (and note writes pay nothing) until `enableNoteSearch(kind)`, which
-creates the FTS index and backfills. `searchNotes(kind, query)` spans every
-namespace of the kind; pass `{ namespace }` in the filter to stay
-namespace-local on a shared database. Notes require the SQLite backend and
-fail loud on Postgres/PGlite. See
+On SQLite, full-text search is **lazy and opt-in per namespace kind**: nothing
+is indexed (and note writes pay nothing) until `enableNoteSearch(kind)`, which
+creates the FTS index and backfills. On Hindsight, retained note content is
+indexed on write, so `enableNoteSearch` is a compatibility no-op and
+`searchNotes` uses semantic recall. Search spans every namespace of the kind;
+pass `{ namespace }` in the filter to stay namespace-local on a shared
+backend. See
 [`examples/incident-runbook-memory.jsx`](https://github.com/smithersai/smithers/blob/main/examples/incident-runbook-memory.jsx)
 for the full recall → triage → bank → distill → ratify loop.
 

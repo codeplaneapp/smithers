@@ -25,6 +25,12 @@ spec:
               value: /data/smithers.db
             - name: SMITHERS_TOKEN_STORE
               value: /var/run/smithers/tokens.json
+            - name: HINDSIGHT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smithers-gateway-tokens
+                  key: hindsight-api-key
+                  optional: true
           envFrom:
             - configMapRef:
                 name: smithers-gateway-config

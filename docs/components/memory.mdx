@@ -83,6 +83,7 @@ Do not put run ids, task ids, or session ids in `tags`. Smithers records them in
 ## Backend selection
 
 Hindsight is a Postgres-family feature. The Hindsight service stores its data in Postgres 15 or later with pgvector. Smithers selects it only when `HINDSIGHT_URL` is set.
+`openSmithersBackend` performs this selection and attaches the resulting memory service to every workflow it creates.
 
 | Smithers configuration | Memory behavior |
 |---|---|
@@ -90,6 +91,8 @@ Hindsight is a Postgres-family feature. The Hindsight service stores its data in
 | `HINDSIGHT_URL` unset, PGlite or Postgres workflow backend | Same local SQLite facts fallback. Workflow state can use another backend without enabling Hindsight. |
 | `HINDSIGHT_URL` set | Remote Hindsight recall, mental-model primers, and asynchronous retention. The Hindsight deployment must use Postgres with pgvector. |
 | Embedded Hindsight deployment | Use `SMITHERS_BACKEND=postgres`; embedded Hindsight is not supported with SQLite or PGlite. |
+
+When workflow state uses PGlite or Postgres and Hindsight is unset, Smithers keeps the fallback facts in the local `.smithers/smithers.db` sidecar. The workflow database remains on its selected backend.
 
 ```bash
 HINDSIGHT_URL=http://127.0.0.1:8888

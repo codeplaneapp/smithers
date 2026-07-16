@@ -43,6 +43,9 @@ Use `deploy/reference/systemd/smithers-gateway.service` for the Gateway process 
 SMITHERS_DB_PATH=/var/lib/smithers/smithers.db
 SMITHERS_TOKEN_STORE=/etc/smithers/tokens.json
 SMITHERS_GATEWAY_MODULE=/etc/smithers/gateway.mjs
+HINDSIGHT_URL=http://127.0.0.1:8888
+HINDSIGHT_API_KEY=replace-me
+HINDSIGHT_BANK_PREFIX=production-
 SMITHERS_GATEWAY_HEADERS_TIMEOUT_MS=30000
 SMITHERS_GATEWAY_REQUEST_TIMEOUT_MS=60000
 ```
@@ -57,6 +60,9 @@ SMITHERS_GATEWAY_REQUEST_TIMEOUT_MS=60000
 | `SMITHERS_DB_PATH` | `/data/smithers.db` | SQLite database path made available to the gateway module for workflow storage. |
 | `SMITHERS_TOKEN_STORE` | `/data/tokens.json` | JSON token grant store used by token auth. |
 | `SMITHERS_GATEWAY_MODULE` | `/workspace/gateway.mjs` | Module that registers workflows on startup. |
+| `HINDSIGHT_URL` | unset | Enables the Hindsight memory service. Leave unset to preserve local SQLite facts and keyword recall. |
+| `HINDSIGHT_API_KEY` | unset | Optional Hindsight bearer token. Store it as a secret. |
+| `HINDSIGHT_BANK_PREFIX` | unset | Optional prefix applied to configured Hindsight bank ids. |
 | `SMITHERS_GATEWAY_HEARTBEAT_MS` | `15000` | WebSocket heartbeat interval. |
 | `SMITHERS_GATEWAY_EVENT_WINDOW` | `10000` | Per-run replay window size (number of events) for `streamRunEvents`. |
 | `SMITHERS_GATEWAY_HEADERS_TIMEOUT_MS` | `30000` | Maximum time to receive complete HTTP headers. |
@@ -69,6 +75,7 @@ The minimal manifests in `deploy/reference/k8s/` create:
 - a `smithers` namespace
 - a single Gateway `Deployment`
 - a `ConfigMap` (`smithers-gateway-config`) supplying Gateway environment variables
+- Hindsight URL and bank prefix values in the `ConfigMap`, with the optional API key in the Secret
 - a SQLite `PersistentVolumeClaim`
 - a token `Secret`
 - a `Service` and `Ingress`
