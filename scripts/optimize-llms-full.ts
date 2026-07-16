@@ -39,7 +39,9 @@ const MIRRORS = [
 ];
 // Keep the release-pinned artifact frozen after publication without blocking
 // regeneration of the living docs and their package mirrors.
-const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION);
+const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION, {
+  skipVersioned: process.argv.includes("--skip-versioned"),
+});
 const before = readFileSync(TARGET, "utf8");
 let text = before;
 

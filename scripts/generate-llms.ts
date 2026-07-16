@@ -37,7 +37,9 @@ if (typeof PACKAGE_VERSION !== "string" || PACKAGE_VERSION.length === 0) {
 
 // A published version keeps its historical artifacts immutable, but the living
 // docs and the next release's package mirrors must still be regenerable.
-const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION);
+const versionedArtifacts = createVersionedArtifactGuard(PACKAGE_VERSION, {
+  skipVersioned: process.argv.includes("--skip-versioned"),
+});
 mkdirSync(PACKAGE_DOCS, { recursive: true });
 
 // -----------------------------------------------------------------------------
