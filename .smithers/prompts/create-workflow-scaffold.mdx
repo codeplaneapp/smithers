@@ -77,18 +77,28 @@ plan (skip only if the design's `ui` is null because the user declined one):
    and import `createGatewayReactRoot`, `useGatewayRuns`, `useGatewayRunEvents`,
    `useGatewayNodeOutput`, and `useGatewayActions` (as needed) from
    `smithers-orchestrator/gateway-react`.
-3. Set the workflow key constant to the workflow id and read the runId from the
+3. **Compose from the shipped component libraries instead of hand-rolling
+   markup or CSS**: `smithers-orchestrator/gateway-ui` for the run widgets
+   (`WorkflowUiShell` as the page scaffold, or `SimpleWorkflowDashboard` when
+   launch-and-watch is all the workflow needs, plus `RunList`, `RunTree`,
+   `RunEventLog`, `NodeOutputView`, `ApprovalPanel`, `LaunchButton`,
+   `ConnectionBadge`, `StatusPill`) and `smithers-orchestrator/ui` for the
+   primitives (`Button`, `Card`, `Input`, `Tabs`, `Table`, `Badge`,
+   `StatusPill`, `EmptyState`, `SectionHeader`, `RowButton`, `KpiStat`; render
+   `<SmithersUiStyles />` once at the root). Write bespoke JSX only for panels
+   neither library covers.
+4. Set the workflow key constant to the workflow id and read the runId from the
    URL (`?runId=`), like the existing UIs do.
-4. Render the design's `ui.panels` from the real node output tables (the task
+5. Render the design's `ui.panels` from the real node output tables (the task
    ids and schemas you scaffolded above). Node-output hooks may return the row
    directly or `{ row, schema, status }`, and row fields can be snake_case with
    JSON-string arrays: parse defensively like `vcs.tsx` does.
-5. Mount with `createGatewayReactRoot(...)` at the bottom, matching the
+6. Mount with `createGatewayReactRoot(...)` at the bottom, matching the
    existing UIs.
-6. Make sure the workflow imports `UI` and declares
+7. Make sure the workflow imports `UI` and declares
    `<UI entry="../ui/<workflowName>.tsx" title="<Title>" />` inside the root
    `<Workflow>`. Do not register the UI in `.smithers/gateway.ts`.
-7. Verify it transpiles before you finish:
+8. Verify it transpiles before you finish:
    `bun build --no-bundle {props.uiDir}/<workflowName>.tsx > /dev/null`.
 
 ## Acceptance criteria

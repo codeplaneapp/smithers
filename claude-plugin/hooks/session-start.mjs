@@ -106,7 +106,7 @@ try {
   }
 
   lines.push(
-    "MANDATORY UI RULE: every workflow you create or run MUST have a custom live UI at .smithers/ui/<key>.tsx built with the `smithers-orchestrator/gateway-react` package (import ONLY from `react` + `smithers-orchestrator/gateway-react`), and you MUST launch it (`smithers ui <runId>`) so the human can watch the run. Any workflow marked 'NO UI yet' above needs one. See the `smithers` skill for the exact authoring contract.",
+    "MANDATORY UI RULE: every workflow you create or run MUST have a custom live UI at .smithers/ui/<key>.tsx composed from the shipped component libraries: `smithers-orchestrator/gateway-ui` (SimpleWorkflowDashboard, WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and `smithers-orchestrator/ui` (Button, Card, Tabs, StatusPill, EmptyState, ...) over the `smithers-orchestrator/gateway-react` hooks. Import ONLY from `react` + those three subpaths; never hand-roll markup or CSS a shipped component covers. You MUST launch the UI (`smithers ui <runId>`) so the human can watch the run. Any workflow marked 'NO UI yet' above needs one. See the `smithers` skill for the exact authoring contract.",
   );
   lines.push(
     "WORKFLOW AUTHORING RULE: ALWAYS use https://smithers.sh/llms-full.txt as the API reference when creating or editing Smithers workflows — fetch it (WebFetch) before writing workflow code. Offline fallback: `bunx smithers-orchestrator docs-full`.",

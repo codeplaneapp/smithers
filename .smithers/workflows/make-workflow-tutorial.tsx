@@ -262,7 +262,7 @@ async function launchBuild(
   buildRunId: string,
 ) {
   const uiNote =
-    ` Also build a custom .smithers/ui/${pick.workflowName}.tsx for it using smithers-orchestrator/gateway-react so users can watch it live in the browser.`;
+    ` Also build a custom .smithers/ui/${pick.workflowName}.tsx for it so users can watch it live in the browser: compose it from the smithers-orchestrator/gateway-ui run widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smithers-orchestrator/ui primitives over the smithers-orchestrator/gateway-react hooks, not hand-rolled markup.`;
   const prompt =
     `Build a Smithers workflow named "${pick.workflowName}". ` +
     `Goal: ${pick.workflowGoal}.` +

@@ -34,8 +34,9 @@ Installing it gives a Claude Code session:
    toward a durable Smithers workflow that persists each step, resumes after a
    crash, retries on failure, and gates on human approvals.
 2. **A live UI for every workflow.** Whenever Claude creates or runs a workflow it
-   authors a standalone React UI at `.smithers/ui/<key>.tsx` (built **only** with
-   `smithers-orchestrator/gateway-react` + `react`) and launches it with
+   authors a standalone React UI at `.smithers/ui/<key>.tsx` (composed from the
+   `smithers-orchestrator/gateway-ui` run widgets and `smithers-orchestrator/ui`
+   primitives over the `smithers-orchestrator/gateway-react` hooks) and launches it with
    `smithers ui <runId>`, so the human watches the run live in their browser
    instead of reading text summaries. See
    [`skills/smithers/SKILL.md`](./skills/smithers/SKILL.md) for the exact

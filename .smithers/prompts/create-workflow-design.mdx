@@ -55,11 +55,17 @@ Custom UIs go in: {props.uiDir}
 
 Every new workflow gets a matching custom run UI at
 `{props.uiDir}/<workflowName>.tsx` (rendered by `smithers ui <runId>` after the
-workflow declares `<UI entry="../ui/<workflowName>.tsx" />`), built on
-`smithers-orchestrator/gateway-react` (`createGatewayReactRoot`,
-`useGatewayRuns`, `useGatewayRunEvents`, `useGatewayNodeOutput`,
-`useGatewayActions`). Look at `{props.uiDir}/vcs.tsx` or
-`{props.uiDir}/create-workflow.tsx` for the shape. Fill the design's `ui` field:
+workflow declares `<UI entry="../ui/<workflowName>.tsx" />`). Design it as a
+composition of the shipped component libraries, not hand-rolled markup:
+`smithers-orchestrator/gateway-ui` run widgets (`WorkflowUiShell`,
+`SimpleWorkflowDashboard`, `RunList`, `RunTree`, `RunEventLog`,
+`NodeOutputView`, `ApprovalPanel`, `LaunchButton`, `StatusPill`) plus
+`smithers-orchestrator/ui` primitives (`Button`, `Card`, `Tabs`, `Table`,
+`EmptyState`, `KpiStat`, ...), fed by `smithers-orchestrator/gateway-react`
+hooks (`createGatewayReactRoot`, `useGatewayRuns`, `useGatewayRunEvents`,
+`useGatewayNodeOutput`, `useGatewayActions`) for workflow-specific panes. Look
+at `{props.uiDir}/vcs.tsx` or `{props.uiDir}/create-workflow.tsx` for the
+shape. Fill the design's `ui` field:
 
 - `path`: `{props.uiDir}/<workflowName>.tsx`.
 - `summary`: what an operator sees while a run executes.

@@ -65,7 +65,7 @@ export function hasCustomUi(workflowId, cwd, exists = existsSync, read = readFil
 export function buildMonitoringOptions({ runId, workflowId, hasUi }) {
     const uiStep = hasUi
         ? `run \`smithers ui ${runId}\` (a custom UI already exists for "${workflowId}")`
-        : `author \`.smithers/ui/${workflowId}.tsx\` with the gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then run \`smithers ui ${runId}\``;
+        : `author \`.smithers/ui/${workflowId}.tsx\` by composing the smithers-orchestrator/gateway-ui widgets and smithers-orchestrator/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then run \`smithers ui ${runId}\``;
     return [
         {
             id: "monitor-ui",

@@ -1,6 +1,6 @@
 ---
 name: smithers
-description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, run long-running / multi-step / background work through a durable Smithers workflow, NOT through Task/Agent subagents, /loop, or hand-written native Workflow scripts; the native Workflow tool has exactly ONE sanctioned use, launching the plugin's smithers-run.mjs mirror so the run shows live in /workflows. HARD RULE 2, every workflow you create or run MUST get a live custom UI at .smithers/ui/<key>.tsx (built with gateway-react) and you MUST launch it with `smithers ui` so the human can watch. HARD RULE 3, when creating or editing workflow code, ALWAYS use https://smithers.sh/llms-full.txt as the API reference (fetch it first)."
+description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, run long-running / multi-step / background work through a durable Smithers workflow, NOT through Task/Agent subagents, /loop, or hand-written native Workflow scripts; the native Workflow tool has exactly ONE sanctioned use, launching the plugin's smithers-run.mjs mirror so the run shows live in /workflows. HARD RULE 2, every workflow you create or run MUST get a live custom UI at .smithers/ui/<key>.tsx (composed from the smithers-orchestrator/gateway-ui + smithers-orchestrator/ui component libraries over the gateway-react hooks, never hand-rolled markup) and you MUST launch it with `smithers ui` so the human can watch. HARD RULE 3, when creating or editing workflow code, ALWAYS use https://smithers.sh/llms-full.txt as the API reference (fetch it first)."
 ---
 
 # Smithers (from Claude Code)
@@ -185,10 +185,13 @@ It is fed entirely by live gateway hooks. The rules:
 1. **Path & name:** exactly `.smithers/ui/<key>.tsx`, where `<key>` is the
    workflow file's basename without extension (`.smithers/workflows/foo.tsx` →
    `.smithers/ui/foo.tsx`). A name mismatch means no UI is mounted.
-2. **Imports — ONLY these two:** `react` and `smithers-orchestrator/gateway-react`.
+2. **Imports — ONLY these four:** `react`,
+   `smithers-orchestrator/gateway-react` (hooks + `createGatewayReactRoot`),
+   `smithers-orchestrator/gateway-ui` (prebuilt run widgets + page shell), and
+   `smithers-orchestrator/ui` (Button/Card/Tabs/Dialog/... primitives).
    No `components` package (that is the server-side workflow-definition library,
-   not browser UI), no third-party UI libraries, no extra dependencies. Write
-   plain HTML/JSX and inline all CSS in a `<style>` tag.
+   not browser UI), no third-party UI libraries, no extra dependencies, no
+   `.css` imports (the shipped components carry their own styles).
 3. **First line is the JSX pragma:** `/** @jsxImportSource react */`.
 4. **Mount with `createGatewayReactRoot(<App />)`** as the last statement. It
    finds `#root`, builds the gateway client, and wraps your app in BOTH the action
@@ -202,6 +205,37 @@ It is fed entirely by live gateway hooks. The rules:
    result fields straight off `.data`.
 7. **Hooks no-op safely when `runId` is undefined** — guard the "no run yet"
    render state.
+8. **Compose from the component libraries below — never hand-roll** a run list,
+   node tree, event log, approval queue, status pill, button, card, or empty
+   state that a shipped component already provides. Bespoke markup is only for
+   panes neither library covers (feed those with the hooks).
+
+## The component libraries you compose from
+
+- **`smithers-orchestrator/gateway-ui` — run-shaped widgets.** Each one connects
+  to the gateway by itself: `SimpleWorkflowDashboard` (a complete
+  launch/watch/select dashboard in ONE component), `WorkflowUiShell` (the page
+  scaffold: house styles + topbar with `title`/`meta`/`actions`), `RunList`,
+  `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel` (approve/deny
+  buttons wired), `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`,
+  `StatusPill`, plus the `theme` tokens.
+- **`smithers-orchestrator/ui` — token-native primitives** for everything
+  around those widgets: `Button`, `Badge`, `StatusPill`, `Card`/`CardHeader`/
+  `CardTitle`/`CardContent`, `Input`, `Textarea`, `Label`, `Alert`, `Table`,
+  `Tabs`, `Dialog`, `Tooltip`, `Select`, `Progress`, `Separator`, `Skeleton`,
+  `Spinner`, `EmptyState`, `SectionHeader`, `RowButton`, `KpiStat`, and the
+  chat surface (`ChatTranscript`, `ChatMessage`, `ChatComposer`). Render
+  `<SmithersUiStyles />` once at the root. Everything is correct in light AND
+  dark automatically — write zero CSS for anything these cover.
+
+Default shapes, in order of preference:
+
+1. The workflow only needs launch + watch →
+   `createGatewayReactRoot(<SimpleWorkflowDashboard workflow="<key>" />)` and
+   you are done.
+2. The workflow has bespoke output → `WorkflowUiShell` + the gateway-ui widgets
+   for runs/tree/events/approvals + `smithers-orchestrator/ui` primitives for
+   the custom panes, fed by the hooks below.
 
 ## The hooks you actually have (from `smithers-orchestrator/gateway-react`)
 
@@ -232,11 +266,9 @@ There are **no** bare `useRun`/`useNodes`/`useTimeline` hooks — every hook is
 
 ```tsx
 /** @jsxImportSource react */
-import {
-  createGatewayReactRoot,
-  useGatewayRunEvents,
-  useGatewayNodeOutput,
-} from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayNodeOutput } from "smithers-orchestrator/gateway-react";
+import { ApprovalPanel, ConnectionBadge, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { Card, CardHeader, CardTitle, EmptyState, SmithersUiStyles, StatusPill } from "smithers-orchestrator/ui";
 
 // The node whose output is the workflow's headline result. Match your workflow.
 const RESULT_NODE_ID = "result";
@@ -259,74 +291,50 @@ function unwrapRow(value: unknown): Record<string, unknown> {
 
 function App() {
   const runId = runIdFromUrl();
-  const stream = useGatewayRunEvents(runId, { afterSeq: 0 });
   const output = useGatewayNodeOutput({ runId, nodeId: RESULT_NODE_ID, iteration: 0 });
   const row = unwrapRow(output.data);
   const result = typeof row.answer === "string" ? row.answer : "";
 
-  const status = !runId
-    ? "no run — open with `smithers ui <runId>`"
-    : result
-      ? "finished"
-      : stream.events.length > 0
-        ? "running"
-        : "waiting";
-
-  const steps = stream.events.filter((e) => e.event?.startsWith?.("node."));
-
   return (
-    <div className="wrap">
-      <style>{styles}</style>
-      <header>
-        <h1>Workflow run</h1>
-        <span className={`badge ${result ? "done" : "live"}`}>{status}</span>
-      </header>
-
-      <section className="timeline">
-        {steps.length === 0 && <p className="muted">Waiting for the first step…</p>}
-        {steps.map((e) => (
-          <div className="step" key={e.seq}>
-            <code>{e.event}</code>
-            <span className="muted">{String((e.payload as any)?.nodeId ?? "")}</span>
-          </div>
-        ))}
-      </section>
-
-      {result && (
-        <section className="result">
-          <h2>Result</h2>
-          <pre>{result}</pre>
-        </section>
+    <WorkflowUiShell
+      title="Workflow run"
+      meta={<StatusPill status={!runId ? undefined : result ? "ok" : "running"} />}
+      actions={<ConnectionBadge />}
+    >
+      <SmithersUiStyles />
+      {!runId ? (
+        <EmptyState title="No run yet" description="Open this page with: smithers ui RUN_ID" />
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <RunTree runId={runId} />
+          <RunEventLog runId={runId} style={{ height: 320 }} />
+        </div>
       )}
-    </div>
+      {result && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Result</CardTitle>
+          </CardHeader>
+          <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{result}</pre>
+        </Card>
+      )}
+      <ApprovalPanel />
+    </WorkflowUiShell>
   );
 }
-
-const styles = `
-  .wrap { font: 14px/1.5 ui-sans-serif, system-ui; max-width: 820px; margin: 0 auto; padding: 24px; color: #111; }
-  header { display: flex; align-items: center; gap: 12px; }
-  h1 { font-size: 18px; margin: 0; }
-  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eee; }
-  .badge.live { background: #fde68a; }
-  .badge.done { background: #bbf7d0; }
-  .timeline { margin-top: 16px; display: grid; gap: 6px; }
-  .step { display: flex; justify-content: space-between; padding: 6px 10px; border: 1px solid #eee; border-radius: 8px; }
-  .step code { color: #2563eb; }
-  .muted { color: #888; }
-  .result { margin-top: 20px; }
-  .result pre { background: #0b1020; color: #e5e7eb; padding: 14px; border-radius: 10px; overflow: auto; white-space: pre-wrap; }
-`;
 
 createGatewayReactRoot(<App />);
 ```
 
-Adapt `RESULT_NODE_ID` and the rendered fields to the workflow's real node ids and
-output schema. For a UI that also **launches/cancels/approves** runs and shows a
-run picker, additionally use `useGatewayRuns` + `useGatewayActions` (build buttons
-that call `actions.launchRun({ workflow: "<key>", input })`,
-`actions.cancelRun({ runId })`, `actions.submitApproval({...})`). Study the seeded
-`.smithers/ui/*.tsx` files in the repo for richer patterns; `e2e-probe.tsx` is the
-minimal live-watch model and `kanban.tsx` is the full launch/approve model.
+Every visible piece above is a shipped component: `WorkflowUiShell` injects the
+house styles and topbar, `RunTree`/`RunEventLog`/`ApprovalPanel` connect to the
+gateway by themselves, and the result pane is `smithers-orchestrator/ui`
+primitives. The only hand-written logic is the workflow-specific part: which
+node's output to headline. Adapt `RESULT_NODE_ID` and the rendered fields to
+the workflow's real node ids and output schema. For launch/cancel from the UI,
+add `LaunchButton` (or `useGatewayActions` for custom buttons); for a run
+picker, add `RunList`. Study the seeded `.smithers/ui/*.tsx` files in the repo
+for richer patterns.
 
 ## Launching the UI
 

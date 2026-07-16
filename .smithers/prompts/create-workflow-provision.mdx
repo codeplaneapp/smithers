@@ -31,10 +31,13 @@ this workflow needs, not the whole bundle.
   always relevant; add `llms-memory.txt`, `llms-openapi.txt`,
   `llms-observability.txt` (HTTP/gateway/MCP/OTel), `llms-integrations.txt`
   (agent runtimes, tools), or `llms-events.txt` only if the spec calls for them.
-- Because every new workflow ships a custom UI, also skim the gateway-react
-  material (docs on `smithers-orchestrator/gateway-react` and `smithers ui`) and
-  1-2 existing UIs in `.smithers/ui/` (e.g. `.smithers/ui/vcs.tsx`,
-  `.smithers/ui/create-workflow.tsx`) so the design step knows the hook surface.
+- Because every new workflow ships a custom UI, also skim the UI material: the
+  component catalogs (`smithers.sh/reference/gateway-ui` for the run widgets,
+  `smithers.sh/reference/ui` for the primitives), the
+  `smithers-orchestrator/gateway-react` hook docs, and 1-2 existing UIs in
+  `.smithers/ui/` (e.g. `.smithers/ui/vcs.tsx`,
+  `.smithers/ui/create-workflow.tsx`) so the design step knows which shipped
+  components to compose instead of hand-rolling markup.
 - `bunx smithers-orchestrator ask "<focused question>"` for anything specific
   (e.g. "how do I add a human approval gate?", "how does Ralph decide to stop?").
 
