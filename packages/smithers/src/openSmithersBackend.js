@@ -1,9 +1,8 @@
 import { Effect } from "effect";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { openDurableSqliteDatabase } from "@smithers-orchestrator/db/openDurableSqliteDatabase";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
 import { createSmithers, createSmithersPostgres } from "./create.js";
@@ -35,16 +34,10 @@ function attachMemoryBackend(api, env, localMemoryDbPath) {
     }
     else {
         mkdirSync(dirname(localMemoryDbPath), { recursive: true });
-        const sqlite = new Database(localMemoryDbPath);
-        sqlite.run("PRAGMA journal_mode = WAL");
-        sqlite.run("PRAGMA busy_timeout = 30000");
-        sqlite.run("PRAGMA synchronous = NORMAL");
-        sqlite.run("PRAGMA locking_mode = NORMAL");
-        sqlite.run("PRAGMA foreign_keys = ON");
-        const localDb = drizzle(sqlite);
-        ensureSmithersTables(localDb);
-        contractStore = createMemoryStore(localDb);
-        closeLocalMemory = () => sqlite.close();
+        const local = openDurableSqliteDatabase(localMemoryDbPath);
+        ensureSmithersTables(local.db);
+        contractStore = createMemoryStore(local.db);
+        closeLocalMemory = local.close;
     }
     const memoryStore = hindsightUrl
         ? createHindsightMemoryStore({
