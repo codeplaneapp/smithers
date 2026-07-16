@@ -3879,10 +3879,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
     // Recall and primers are mutable task inputs that are not represented in
     // the durable output-cache identity. A cache hit would skip recall, tools,
-    // and the agent, then retain stale output under a new run. Memory tasks
-    // therefore bypass output caching while keeping their per-run prefetch
-    // snapshot frozen across retries.
-    const stepCacheEnabled = (cacheEnabled || Boolean(desc.cachePolicy)) && !desc.memoryConfig;
+    // and the agent, then retain stale output under a new run. Active bank-
+    // based memory therefore bypasses output caching while keeping its per-run
+    // prefetch snapshot frozen across retries. Legacy-only memory metadata is
+    // inert and must not change the task's cache semantics.
+    const hasActiveMemoryConfig = typeof desc.memoryConfig?.bank === "string"
+        || (Array.isArray(desc.memoryConfig?.banks) && desc.memoryConfig.banks.length > 0);
+    const stepCacheEnabled = (cacheEnabled || Boolean(desc.cachePolicy)) && !hasActiveMemoryConfig;
     const cacheAgent = Array.isArray(desc.agent) ? desc.agent[0] : desc.agent;
     const cachePolicyTtlMs = typeof desc.cachePolicy?.ttlMs === "number" && Number.isFinite(desc.cachePolicy.ttlMs)
         ? Math.max(0, desc.cachePolicy.ttlMs)

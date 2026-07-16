@@ -513,10 +513,23 @@ type OpenCodeAgentOptions = BaseCliAgentOptions & {
 };
 
 type TaskMemoryConfig = {
-  namespace?: string | MemoryNamespace;
-  recall?: { namespace?: MemoryNamespace; query?: string; topK?: number };
-  remember?: { namespace?: MemoryNamespace; key?: string };
-  threadId?: string;
+  bank?: string;
+  banks?: string[];
+  tags?: string[];
+  recall?:
+    | "auto"
+    | string
+    | false
+    // Legacy object form: preserved but inert.
+    | { namespace?: MemoryNamespace; query?: string; topK?: number };
+  budget?: "low" | "mid" | "high";
+  maxTokens?: number;
+  primers?: string[];
+  retain?: "on-complete" | "off";
+  tools?: boolean;
+  namespace?: string | MemoryNamespace; // Legacy: preserved but inert.
+  remember?: { namespace?: MemoryNamespace; key?: string }; // Legacy: inert.
+  threadId?: string; // Legacy: preserved but inert.
 };
 
 type MemoryNamespace = { kind: MemoryNamespaceKind; id: string };

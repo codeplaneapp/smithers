@@ -483,4 +483,44 @@ describe("task memory runtime", () => {
         expect(retains).toHaveLength(2);
         cleanup();
     }, 15_000);
+
+    test("legacy-only memory metadata preserves task-output cache semantics", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({ answer: outputSchema });
+        let agentCalls = 0;
+        const agent = {
+            id: "legacy-memory-cache-agent",
+            supportsNativeStructuredOutput: true,
+            generate: async () => {
+                agentCalls += 1;
+                return {
+                    output: { value: agentCalls },
+                    text: JSON.stringify({ value: agentCalls }),
+                    response: { messages: [] },
+                };
+            },
+        };
+        const namespace = { kind: "workflow", id: "legacy-memory-cache" };
+        const workflow = smithers(() => (<Workflow name="legacy-memory-cache-semantics">
+            <Task
+                id="answer"
+                output={outputs.answer}
+                agent={agent}
+                cache={{ scope: "workflow", key: "legacy-memory-cache" }}
+                memory={{
+                    namespace,
+                    recall: { namespace, query: "ignored legacy recall", topK: 3 },
+                    remember: { namespace, key: "ignored-legacy-output" },
+                    threadId: "ignored-legacy-thread",
+                }}
+            >
+                Preserve the existing cache contract.
+            </Task>
+        </Workflow>));
+
+        await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "legacy-memory-cache-run-1" }));
+        await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "legacy-memory-cache-run-2" }));
+
+        expect(agentCalls).toBe(1);
+        cleanup();
+    }, 15_000);
 });

@@ -15,6 +15,14 @@ function json(value, status = 200) {
     return Response.json(value, { status });
 }
 
+function deferred() {
+    let resolve = () => {};
+    const promise = new Promise((done) => {
+        resolve = done;
+    });
+    return { promise, resolve };
+}
+
 /** @param {string[]} actual @param {any} group */
 function matchesTagGroup(actual, group) {
     if (Array.isArray(group.and)) {
@@ -45,6 +53,8 @@ function createFakeHindsight() {
     const recallOverrides = new Map();
     /** @type {Array<{ method: string; pathIncludes: string; remaining: number }>} */
     const failures = [];
+    /** @type {Array<{ method: string; pathIncludes: string; remaining: number; started: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> }>} */
+    const delays = [];
 
     const server = Bun.serve({
         hostname: "127.0.0.1",
@@ -61,6 +71,16 @@ function createFakeHindsight() {
                 authorization: request.headers.get("authorization"),
                 ...(body === undefined ? {} : { body }),
             });
+
+            const delay = delays.find((candidate) =>
+                candidate.remaining > 0
+                && candidate.method === request.method
+                && url.pathname.includes(candidate.pathIncludes));
+            if (delay) {
+                delay.remaining -= 1;
+                delay.started.resolve();
+                await delay.release.promise;
+            }
 
             const failure = failures.find((candidate) =>
                 candidate.remaining > 0
@@ -159,6 +179,12 @@ function createFakeHindsight() {
         failNext(method, pathIncludes, count = 1) {
             failures.push({ method, pathIncludes, remaining: count });
         },
+        delayNext(method, pathIncludes) {
+            const started = deferred();
+            const release = deferred();
+            delays.push({ method, pathIncludes, remaining: 1, started, release });
+            return { started: started.promise, release: release.resolve };
+        },
         stop: () => server.stop(true),
     };
 }
@@ -251,6 +277,36 @@ describe("HindsightMemoryStore", () => {
         expect(fixture.requests.filter((entry) => entry.method === "DELETE")).toHaveLength(0);
         await store.deleteFact(WF_NS, "decision");
         expect(await store.getFact(WF_NS, "decision")).toBeUndefined();
+    });
+
+    test("serializes same-document projections within one store instance", async () => {
+        const store = createStore();
+        const delay = fixture.delayNext("POST", "/memories");
+        const first = store.setFact(WF_NS, "ordered", { writer: "first" });
+        await delay.started;
+
+        const second = store.setFact(WF_NS, "ordered", { writer: "second" });
+        await Bun.sleep(5);
+        const retainsBeforeRelease = fixture.requests.filter((entry) =>
+            entry.method === "POST" && entry.path.endsWith("/memories"));
+        expect(retainsBeforeRelease).toHaveLength(1);
+
+        delay.release();
+        await Promise.all([first, second]);
+
+        const retains = fixture.requests.filter((entry) =>
+            entry.method === "POST" && entry.path.endsWith("/memories"));
+        const projectedWriters = retains.map((entry) => {
+            const envelope = JSON.parse(entry.body.items[0].content);
+            return JSON.parse(envelope.value.valueJson).writer;
+        });
+        expect(projectedWriters).toEqual(["first", "second"]);
+
+        const documents = fixture.banks.get("test-workflow-test-wf");
+        expect(documents.size).toBe(1);
+        const projected = [...documents.values()][0];
+        const envelope = JSON.parse(projected.original_text);
+        expect(JSON.parse(envelope.value.valueJson)).toEqual({ writer: "second" });
     });
 
     test("keeps contract mutations authoritative and retries every failed projection", async () => {

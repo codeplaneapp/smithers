@@ -33,6 +33,14 @@ const PAGE_SIZE = 100;
 const RECORD_TAG_PREFIX = "smithers:record:";
 
 /**
+ * Projection ordering contract: one HindsightMemoryStore instance serializes
+ * writes to the same remote document. Deployments must use a single writer
+ * instance per transactional contract store. Separate instances do not share
+ * projection queues or a durable version fence and can project competing
+ * contract-store mutations out of order.
+ */
+
+/**
  * @typedef {object} SmithersRecordEnvelope
  * @property {number} version
  * @property {"fact" | "thread" | "message" | "note"} type
