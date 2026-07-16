@@ -13,6 +13,9 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  ChatComposer,
+  ChatMessage,
+  ChatTranscript,
   composeSmithersUiStyles,
   EmptyState,
   Eyebrow,
@@ -166,6 +169,48 @@ describe("form controls", () => {
     expect(html).toContain('for="p"');
     expect(html).toContain("sui-input");
     expect(html).toContain("sui-textarea");
+  });
+});
+
+describe("chat", () => {
+  test("renders user, assistant, terminal, and pending message treatments", () => {
+    const html = renderToStaticMarkup(
+      <ChatTranscript pending pendingLabel="Agent is working">
+        <ChatMessage role="user">Please inspect the parser.</ChatMessage>
+        <ChatMessage role="assistant" variant="terminal" label="Plan">
+          $ pnpm test
+        </ChatMessage>
+      </ChatTranscript>,
+    );
+    expect(html).toContain('role="log"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('data-role="user"');
+    expect(html).toContain('data-role="assistant"');
+    expect(html).toContain('data-variant="terminal"');
+    expect(html).toContain('aria-label="Agent is working"');
+    expect(html).toContain("sui-chat-typing");
+  });
+
+  test("renders the controlled glass composer with accessible submit state", () => {
+    const ready = renderToStaticMarkup(
+      <ChatComposer
+        value="Ship it"
+        onValueChange={() => {}}
+        onSubmit={() => {}}
+        status="Connected"
+        docked
+      />,
+    );
+    expect(ready).toContain("sui-chat-composer");
+    expect(ready).toContain('data-docked="true"');
+    expect(ready).toContain('aria-label="Chat message"');
+    expect(ready).toContain('aria-label="Send message"');
+    expect(ready).not.toContain('disabled=""');
+
+    const disabled = renderToStaticMarkup(
+      <ChatComposer value="" onValueChange={() => {}} onSubmit={() => {}} />,
+    );
+    expect(disabled).toContain('disabled=""');
   });
 });
 

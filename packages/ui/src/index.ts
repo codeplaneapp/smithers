@@ -67,6 +67,13 @@ export {
 } from "./card";
 export { Input, Textarea } from "./input";
 export { Label, Field } from "./label";
+export {
+  ChatMessage,
+  type ChatMessageProps,
+  type ChatMessageRole,
+} from "./chat/ChatMessage";
+export { ChatTranscript, type ChatTranscriptProps } from "./chat/ChatTranscript";
+export { ChatComposer, type ChatComposerProps } from "./chat/ChatComposer";
 export { Alert, AlertTitle, AlertDescription, alertVariants, type AlertProps } from "./alert";
 export {
   Table,

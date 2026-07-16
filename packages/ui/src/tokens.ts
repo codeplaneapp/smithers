@@ -33,6 +33,9 @@ export const tokens = {
   /** Card / panel / popover surface. */
   card: "var(--surface, #ffffff)",
   cardForeground: "var(--text, #0a0a0a)",
+  /** Frosted surfaces used by the floating Multi-style chat composer. */
+  glass: "var(--surface-glass, rgba(255,255,255,0.72))",
+  glassStrong: "var(--surface-glass-strong, rgba(255,255,255,0.85))",
   popover: "var(--surface, #ffffff)",
   popoverForeground: "var(--text, #0a0a0a)",
   /** Brand color. The house "primary" button is TINTED (10% brand surface + brand text), not solid. */
@@ -54,6 +57,7 @@ export const tokens = {
   warning: "var(--warning, #bf7100)",
   /** Hairline borders. */
   border: "var(--border, rgba(10,10,10,0.08))",
+  borderStrong: "var(--border-strong, rgba(10,10,10,0.14))",
   /** Form control borders (slightly stronger). */
   input: "var(--border-solid, #ededed)",
   /** Focus ring fill; pair with a 50% brand border-color (the house focus rule). */

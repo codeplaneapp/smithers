@@ -22,6 +22,11 @@ How the pieces fit, infrastructure first:
   plus house compositions (`status-pill`, `empty-state`, `section-header`,
   `row-button`, `kpi-stat`). `index.ts` is the only entry point and defines the
   public API.
+- `chat/` contains the shared Multi-style conversation surface:
+  `ChatTranscript`, `ChatMessage`, and the controlled glass `ChatComposer`.
+  These are transport-neutral so workflow UIs can feed them Gateway events,
+  SSE text, PTY screen snapshots, or stored messages without bringing runtime
+  hooks into the visual layer.
 
 Gotchas (all enforced by `../tests/css-contract.test.ts`):
 
