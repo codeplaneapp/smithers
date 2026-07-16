@@ -72,6 +72,7 @@ describe("openSmithersBackend", () => {
       expect(api.memoryStore.baseUrl).toBe("http://127.0.0.1:18888");
       expect(api.memoryStore.apiKey).toBe("secret");
       expect(api.memoryStore.bankPrefix).toBe("dev-");
+      expect(api.memoryStore.contractStore.getFact).toBeFunction();
       expect(api.smithers(() => null).memoryService).toBe(api.memoryService);
     } finally {
       await closeApi(api);

@@ -27,18 +27,11 @@ async function emitBackendResolution(attrs) {
  */
 function attachMemoryBackend(api, env, localMemoryDbPath) {
     const hindsightUrl = env.HINDSIGHT_URL?.trim();
-    let memoryStore;
+    let contractStore;
     let closeLocalMemory;
-    if (hindsightUrl) {
-        memoryStore = createHindsightMemoryStore({
-            baseUrl: hindsightUrl,
-            ...(env.HINDSIGHT_API_KEY ? { apiKey: env.HINDSIGHT_API_KEY } : {}),
-            ...(env.HINDSIGHT_BANK_PREFIX ? { bankPrefix: env.HINDSIGHT_BANK_PREFIX } : {}),
-        });
-    }
-    else if (api.db?.dialect !== "postgres") {
+    if (api.db?.dialect !== "postgres") {
         ensureSmithersTables(api.db);
-        memoryStore = createMemoryStore(api.db);
+        contractStore = createMemoryStore(api.db);
     }
     else {
         mkdirSync(dirname(localMemoryDbPath), { recursive: true });
@@ -50,9 +43,17 @@ function attachMemoryBackend(api, env, localMemoryDbPath) {
         sqlite.run("PRAGMA foreign_keys = ON");
         const localDb = drizzle(sqlite);
         ensureSmithersTables(localDb);
-        memoryStore = createMemoryStore(localDb);
+        contractStore = createMemoryStore(localDb);
         closeLocalMemory = () => sqlite.close();
     }
+    const memoryStore = hindsightUrl
+        ? createHindsightMemoryStore({
+            baseUrl: hindsightUrl,
+            contractStore,
+            ...(env.HINDSIGHT_API_KEY ? { apiKey: env.HINDSIGHT_API_KEY } : {}),
+            ...(env.HINDSIGHT_BANK_PREFIX ? { bankPrefix: env.HINDSIGHT_BANK_PREFIX } : {}),
+        })
+        : contractStore;
     const memoryService = hindsightUrl ? memoryStore : createLocalMemoryRuntime(memoryStore);
     const smithers = api.smithers;
     const close = api.close;

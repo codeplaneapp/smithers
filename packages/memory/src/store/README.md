@@ -6,8 +6,9 @@ The Effect-based persistence layer behind the memory package:
 - `MemoryStoreService.js` — Context tag for the `MemoryStore` API.
 - `MemoryStoreLive.js` — the Layer implementing every query (facts, threads,
   messages, TTL maintenance).
-- `HindsightMemoryStore.js` — the remote implementation over
-  `@vectorize-io/hindsight-client`.
+- `HindsightMemoryStore.js` — Hindsight semantic projection/runtime over
+  `@vectorize-io/hindsight-client`, with exact records delegated to a
+  transactional `MemoryStore`.
 - `MemoryStore.ts` is the full contract; `MemoryStore.js` is its type-export
   shim; `index.js` is the subpath barrel (`@smithers-orchestrator/memory/store`).
 
@@ -21,7 +22,8 @@ Factories:
 - `createMemoryStoreLayer(db)` provides `MemoryStoreLive` with the db tag.
 - `createMemoryStore(db)` runs that synchronously for Promise-land callers
   (tests, CLI).
-- `createHindsightMemoryStore(options)` creates the Hindsight implementation.
+- `createHindsightMemoryStore({ ..., contractStore })` creates the Hindsight
+  implementation while preserving the exact store's atomic/global contract.
 
 Hindsight mapping:
 
