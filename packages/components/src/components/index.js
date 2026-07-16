@@ -74,6 +74,7 @@
 /** @typedef {import("./KanbanProps.ts").KanbanProps} KanbanProps */
 /** @typedef {import("./LoopProps.ts").LoopProps} LoopProps */
 /** @typedef {import("./MergeQueueProps.ts").MergeQueueProps} MergeQueueProps */
+/** @typedef {import("./MemoryProps.ts").MemoryProps} MemoryProps */
 /** @typedef {import("./OptimizerProps.ts").OptimizerProps} OptimizerProps */
 /** @typedef {import("./OutputTarget.ts").OutputTarget} OutputTarget */
 /** @typedef {import("./PanelistConfig.ts").PanelistConfig} PanelistConfig */
@@ -166,6 +167,7 @@ export { Saga, SagaStep } from "./Saga.js";
 export { TryCatchFinally } from "./TryCatchFinally.js";
 // --- Core Enhancements ---
 export { Aspects } from "./Aspects.js";
+export { Memory } from "./Memory.js";
 export { SuperSmithers } from "./SuperSmithers.js";
 // --- Delegation Chain ---
 export { DelegationChain } from "./delegation/DelegationChain.js";

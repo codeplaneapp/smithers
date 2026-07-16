@@ -322,6 +322,23 @@ function aspects(value) {
     return out.tokenBudget || out.latencySlo ? out : undefined;
 }
 /**
+ * Resolve task memory metadata. The explicit per-Task `memory` prop replaces
+ * the nearest `<Memory>` context configuration.
+ *
+ * @param {unknown} contextValue
+ * @param {unknown} taskValue
+ * @returns {TaskDescriptor["memoryConfig"]}
+ */
+function taskMemoryConfig(contextValue, taskValue) {
+    if (taskValue && typeof taskValue === "object" && !Array.isArray(taskValue)) {
+        return /** @type {TaskDescriptor["memoryConfig"]} */ (taskValue);
+    }
+    if (contextValue && typeof contextValue === "object" && !Array.isArray(contextValue)) {
+        return /** @type {TaskDescriptor["memoryConfig"]} */ (contextValue);
+    }
+    return undefined;
+}
+/**
  * @param {"parallel" | "merge-queue"} tag
  * @param {Record<string, unknown>} raw
  * @param {readonly number[]} path
@@ -821,9 +838,7 @@ export function extractGraph(root, opts) {
                     : undefined,
                 groundTruth: raw.groundTruth,
                 context: raw.context,
-                memoryConfig: raw.memory && typeof raw.memory === "object" && !Array.isArray(raw.memory)
-                    ? raw.memory
-                    : undefined,
+                memoryConfig: taskMemoryConfig(raw.__memory, raw.memory),
                 aspects: aspects(raw.__aspects),
             });
         }

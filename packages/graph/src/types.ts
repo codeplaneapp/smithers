@@ -105,11 +105,24 @@ export type MemoryNamespace = {
 };
 
 export type TaskMemoryConfig = {
-  recall?: {
-    namespace?: MemoryNamespace;
-    query?: string;
-    topK?: number;
-  };
+  namespace?: string | MemoryNamespace;
+  bank?: string;
+  banks?: string[];
+  tags?: string[];
+  recall?:
+    | "auto"
+    | string
+    | false
+    | {
+        namespace?: MemoryNamespace;
+        query?: string;
+        topK?: number;
+      };
+  budget?: "low" | "mid" | "high";
+  maxTokens?: number;
+  primers?: string[];
+  retain?: "on-complete" | "off";
+  tools?: boolean;
   remember?: {
     namespace?: MemoryNamespace;
     key?: string;
