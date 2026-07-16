@@ -16,6 +16,26 @@ function withFixture(run: (dir: string) => void): void {
 }
 
 describe("versioned llms artifact guard", () => {
+  test("skips versioned artifacts without consulting npm when requested", () => {
+    withFixture((dir) => {
+      const path = join(dir, "llms-full-v0.28.0.txt");
+      writeFileSync(path, "historic bundle\n");
+      let checks = 0;
+      const guard = createVersionedArtifactGuard(VERSION, {
+        skipVersioned: true,
+        checkPublication: () => {
+          checks += 1;
+          return "published";
+        },
+      });
+
+      expect(guard.write(path, "new bundle\n")).toBe("skipped");
+      expect(checks).toBe(0);
+      expect(readFileSync(path, "utf8")).toBe("historic bundle\n");
+      expect(() => guard.assertNoPublishedVersion()).not.toThrow();
+    });
+  });
+
   test("refuses to overwrite a version already published on npm", () => {
     withFixture((dir) => {
       const path = join(dir, "llms-full-v0.28.0.txt");

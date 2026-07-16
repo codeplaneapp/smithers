@@ -39,8 +39,8 @@ const before = new Map(
   ]),
 );
 
-run("bun", ["scripts/generate-llms.ts"]);
-run("bun", ["scripts/optimize-llms-full.ts"]);
+run("bun", ["scripts/generate-llms.ts", "--skip-versioned"]);
+run("bun", ["scripts/optimize-llms-full.ts", "--skip-versioned"]);
 
 const changed = generatedFiles.filter((file) => {
   const path = resolve(root, file);

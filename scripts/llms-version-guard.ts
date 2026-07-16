@@ -40,6 +40,7 @@ type VersionedArtifactGuardOptions = {
   checkPublication?: NpmPublicationChecker;
   warn?: (message: string) => void;
   error?: (message: string) => void;
+  skipVersioned?: boolean;
 };
 
 /**
@@ -56,6 +57,7 @@ export function createVersionedArtifactGuard(
   const checkPublication = options.checkPublication ?? checkNpmPublication;
   const warn = options.warn ?? console.warn;
   const error = options.error ?? console.error;
+  const skipVersioned = options.skipVersioned ?? false;
   let status: NpmPublicationStatus | undefined;
   const refusedPaths: string[] = [];
 
@@ -75,6 +77,7 @@ export function createVersionedArtifactGuard(
   }
 
   function write(path: string, content: string): VersionedArtifactWriteResult {
+    if (skipVersioned) return "skipped";
     const currentStatus = publicationStatus();
     if (currentStatus === "published") {
       const message =
