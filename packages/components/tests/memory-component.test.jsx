@@ -77,10 +77,10 @@ describe("Memory component", () => {
 
     test("rejects missing, conflicting, and malformed bank configuration", async () => {
         const cases = [
-            <Memory><Task id="a" output={output} agent={agent}>A</Task></Memory>,
-            <Memory bank="one" banks={["two"]}><Task id="b" output={output} agent={agent}>B</Task></Memory>,
-            <Memory banks={[]}><Task id="c" output={output} agent={agent}>C</Task></Memory>,
-            <Memory bank="one" tools={/** @type {any} */ ("yes")}><Task id="d" output={output} agent={agent}>D</Task></Memory>,
+            <Memory key="missing"><Task id="a" output={output} agent={agent}>A</Task></Memory>,
+            <Memory key="conflicting" bank="one" banks={["two"]}><Task id="b" output={output} agent={agent}>B</Task></Memory>,
+            <Memory key="empty" banks={[]}><Task id="c" output={output} agent={agent}>C</Task></Memory>,
+            <Memory key="malformed" bank="one" tools={/** @type {any} */ ("yes")}><Task id="d" output={output} agent={agent}>D</Task></Memory>,
         ];
         for (const tree of cases) {
             const renderer = new SmithersRenderer();

@@ -78,12 +78,6 @@ function documentId(type, identity) {
     return `smithers-${type}-${base64url(identity)}`;
 }
 
-/** @param {unknown} value */
-function asTimestamp(value) {
-    const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
-    return Number.isFinite(parsed) ? parsed : 0;
-}
-
 /**
  * @param {unknown} value
  * @returns {SmithersRecordEnvelope | undefined}

@@ -67,7 +67,7 @@ export function defineTool(options) {
             const toolContext = getToolContext();
             const definedContext = {
                 ...defaultToolContext(),
-                ...(toolContext ?? {}),
+                ...toolContext,
                 idempotencyKey: getToolIdempotencyKey(toolContext),
                 toolName: options.name,
                 sideEffect,
