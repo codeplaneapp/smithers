@@ -51,9 +51,10 @@ async function readExecutableSource(filePath) {
 
 /**
  * Read the source text used for frontmatter parsing.
- * Prefers a companion `.md` (pure `---` YAML) when present, otherwise falls
- * back to the executable file's own text (block-comment frontmatter). The
- * already-read `execSource` is reused for the fallback to avoid a second read.
+ * Uses a companion `.md` when it contains recognized leading frontmatter;
+ * otherwise falls back to the executable file's own text (block-comment
+ * frontmatter). The already-read `execSource` is reused for the fallback to
+ * avoid a second read.
  *
  * @param {string} filePath
  * @param {string} execSource - the executable file's own source, already read.
@@ -62,7 +63,9 @@ async function readExecutableSource(filePath) {
 async function readSourceForFrontmatter(filePath, execSource) {
   const companionMd = filePath.replace(/\.(ts|tsx|js|jsx|mjs)$/, ".md");
   try {
-    return await readFile(companionMd, "utf8");
+    const companionSource = await readFile(companionMd, "utf8");
+    const { body } = parseWorkflowFrontmatter(companionSource);
+    return body === companionSource ? execSource : companionSource;
   } catch {
     return execSource;
   }

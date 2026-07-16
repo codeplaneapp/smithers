@@ -464,6 +464,45 @@ describe("loadWorkflowsFromDir", () => {
     expect(result.workflows[0]!.tags).toEqual(["test"]);
   });
 
+  test("falls back to executable frontmatter when a companion .md contains only prose", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const execText = `/* ---
+name: cleanup-internal
+description: Remove stale workflow state
+tags:
+  - maintenance
+aliases:
+  - cleanup
+system: true
+disable-model-invocation: true
+version: "1.2.3"
+--- */
+export default { build: () => null, opts: {} };`;
+    writeFileSync(join(dir, "cleanup.workflow.js"), execText, "utf8");
+    writeFileSync(
+      join(dir, "cleanup.workflow.md"),
+      "# Cleanup workflow\n\nHuman-facing operating notes without frontmatter.\n",
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    const workflow = result.workflows[0]!;
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.workflows).toHaveLength(1);
+    expect(workflow.name).toBe("cleanup-internal");
+    expect(workflow.description).toBe("Remove stale workflow state");
+    expect(workflow.tags).toEqual(["maintenance"]);
+    expect(workflow.aliases).toEqual(["cleanup"]);
+    expect(workflow.system).toBe(true);
+    expect(workflow.disableModelInvocation).toBe(true);
+    expect(workflow.version).toBe("1.2.3");
+    expect(workflow.source).toBe(execText);
+    const prompt = formatWorkflowsForPrompt(result.workflows);
+    expect(prompt).toContain("(none)");
+    expect(prompt).not.toContain("cleanup-internal");
+  });
+
   test("ignores non-array and non-string frontmatter tags and aliases", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
     writeFileSync(
