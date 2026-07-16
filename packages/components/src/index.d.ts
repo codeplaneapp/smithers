@@ -4875,6 +4875,7 @@ type MemoryContextValue = {
  * `memory` prop replaces the inherited configuration for that task.
  *
  * @param {MemoryProps} props
+ * @returns {React.FunctionComponentElement<React.ProviderProps<import("../memory/MemoryContextValue.ts").MemoryContextValue | null>>}
  */
 declare function Memory(props: MemoryProps$1): React__default.FunctionComponentElement<React__default.ProviderProps<MemoryContextValue | null>>;
 type MemoryProps$1 = MemoryProps$2;

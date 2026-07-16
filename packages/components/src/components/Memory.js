@@ -14,6 +14,7 @@ import { MemoryContext } from "../memory/MemoryContext.js";
  * `memory` prop replaces the inherited configuration for that task.
  *
  * @param {MemoryProps} props
+ * @returns {React.FunctionComponentElement<React.ProviderProps<import("../memory/MemoryContextValue.ts").MemoryContextValue | null>>}
  */
 export function Memory(props) {
     const parent = React.useContext(MemoryContext);
