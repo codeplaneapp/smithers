@@ -3694,7 +3694,10 @@ import { Memory } from "smithers-orchestrator";
 
 <Memory
   banks={[`user-${ctx.input.userId}`, `project-${ctx.input.repoId}`]}
-  tags={["scope:main", `branch:${ctx.input.branch}`]}
+  tags={[
+    ctx.input.branch === "main" ? "scope:main" : "scope:branch",
+    `branch:${ctx.input.branch}`,
+  ]}
   recall="auto"
   budget="mid"
   maxTokens={2048}
@@ -3759,13 +3762,19 @@ Banks are isolation boundaries. Use a user bank for personal preferences and a p
 ```tsx
 <Memory
   banks={[`user-${userId}`, `project-${repoId}`]}
-  tags={["scope:main", `branch:${branch}`, `stream:${streamId}`]}
+  tags={[
+    branch === "main" ? "scope:main" : "scope:branch",
+    `branch:${branch}`,
+    `stream:${streamId}`,
+  ]}
 >
   {children}
 </Memory>
 ```
 
-Do not put run ids, task ids, or session ids in `tags`. Smithers records them in Hindsight metadata and uses a stable per-run document id with append mode. This preserves provenance without fragmenting Hindsight observation consolidation.
+Do not put run ids, task ids, session ids, or project ids in `tags`. Smithers records volatile identity in Hindsight metadata and uses a stable per-run document id with append mode. This preserves provenance without fragmenting Hindsight observation consolidation.
+
+Use `scope:main` only with `branch:main`. Use `scope:branch` for branch-local writes. You may omit the scope tag on a project bank; Smithers derives it from the single configured branch tag. A conflicting explicit scope is rejected before retention.
 
 Smithers applies the standard two-bank recall policy automatically:
 

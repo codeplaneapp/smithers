@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createVersionedArtifactGuard } from "./llms-version-guard.ts";
+import { versionedGeneratorArgs } from "./llms-check-mode.mjs";
 
 const VERSION = "0.28.0";
 
@@ -16,6 +17,12 @@ function withFixture(run: (dir: string) => void): void {
 }
 
 describe("versioned llms artifact guard", () => {
+  test("check mode skips versioned bundles only for a confirmed published version", () => {
+    expect(versionedGeneratorArgs("published", VERSION)).toEqual(["--skip-versioned"]);
+    expect(versionedGeneratorArgs("unpublished", VERSION)).toEqual([]);
+    expect(() => versionedGeneratorArgs("unavailable", VERSION)).toThrow(/refusing to skip versioned/);
+  });
+
   test("skips versioned artifacts without consulting npm when requested", () => {
     withFixture((dir) => {
       const path = join(dir, "llms-full-v0.28.0.txt");
