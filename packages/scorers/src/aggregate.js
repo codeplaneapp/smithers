@@ -48,22 +48,26 @@ export async function aggregateScores(adapter, opts) {
         return [];
     // Step 2: Get all scores to compute p50 and stddev per scorer in memory
     const scoresQuery = `
-    SELECT scorer_id, score
+    SELECT scorer_id, scorer_name, score
     FROM _smithers_scorers
     ${where}
-    ORDER BY scorer_id, score
+    ORDER BY scorer_id, scorer_name, score
   `;
     const allScores = (await adapter.rawQuery(scoresQuery, params));
-    // Group scores by scorer_id
+    // Group scores by the same (scorer_id, scorer_name) tuple as the SQL aggregates.
     const scoresByScorer = new Map();
     for (const row of allScores) {
         const id = row.scorer_id;
+        const name = row.scorer_name;
         if (!scoresByScorer.has(id))
-            scoresByScorer.set(id, []);
-        scoresByScorer.get(id).push(Number(row.score));
+            scoresByScorer.set(id, new Map());
+        const scoresByName = scoresByScorer.get(id);
+        if (!scoresByName.has(name))
+            scoresByName.set(name, []);
+        scoresByName.get(name).push(Number(row.score));
     }
     return aggRows.map((row) => {
-        const scores = scoresByScorer.get(row.scorer_id) ?? [];
+        const scores = scoresByScorer.get(row.scorer_id)?.get(row.scorer_name) ?? [];
         const p50 = computeMedian(scores);
         const mean = Number(row.mean ?? 0);
         const stddev = computeStddev(scores, mean);

@@ -68,6 +68,40 @@ describe("aggregateScores", () => {
         expect(b?.count).toBe(1);
         expect(b?.mean).toBeCloseTo(0.5, 1);
     });
+    it("aggregates renamed scorers independently when they share an id", async () => {
+        for (const score of [0.1, 0.2, 0.3]) {
+            await insertScore({ scorerId: "quality", scorerName: "Relevancy", score });
+        }
+        for (const score of [0.8, 0.9]) {
+            await insertScore({ scorerId: "quality", scorerName: "Answer Relevancy", score });
+        }
+
+        const result = await aggregateScores(adapter);
+        const relevancy = result.find((row) => row.scorerName === "Relevancy");
+        const answerRelevancy = result.find((row) => row.scorerName === "Answer Relevancy");
+
+        expect(result).toHaveLength(2);
+        expect(relevancy).toMatchObject({
+            scorerId: "quality",
+            scorerName: "Relevancy",
+            count: 3,
+            min: 0.1,
+            max: 0.3,
+        });
+        expect(relevancy?.mean).toBeCloseTo(0.2, 10);
+        expect(relevancy?.p50).toBeCloseTo(0.2, 10);
+        expect(relevancy?.stddev).toBeCloseTo(Math.sqrt(1 / 150), 10);
+        expect(answerRelevancy).toMatchObject({
+            scorerId: "quality",
+            scorerName: "Answer Relevancy",
+            count: 2,
+            min: 0.8,
+            max: 0.9,
+        });
+        expect(answerRelevancy?.mean).toBeCloseTo(0.85, 10);
+        expect(answerRelevancy?.p50).toBeCloseTo(0.85, 10);
+        expect(answerRelevancy?.stddev).toBeCloseTo(0.05, 10);
+    });
     it("filters by runId", async () => {
         await insertScore({ runId: "run-1", scorerId: "s", scorerName: "S", score: 0.9 });
         await insertScore({ runId: "run-2", scorerId: "s", scorerName: "S", score: 0.1 });
