@@ -1247,7 +1247,7 @@ type SchedulerWakeQueue = {
     notify(): void;
     wait(): Promise<void>;
 };
-type SmithersWorkflow$1 = any;
+type SmithersWorkflow$1 = _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow;
 type WorkflowEngineContext = effect.Context.Context<WorkflowEngine.WorkflowEngine>;
 type WorkflowMakeBridgeRuntime = {
     readonly engineContext: WorkflowEngineContext;
@@ -1773,7 +1773,7 @@ declare function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, opts: R
 type GraphSnapshot = _smithers_orchestrator_graph_GraphSnapshot.GraphSnapshot;
 type RunOptions = _smithers_orchestrator_driver_RunOptions.RunOptions;
 type RunResult = _smithers_orchestrator_driver_RunResult.RunResult;
-type SmithersWorkflow = any;
+type SmithersWorkflow = _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow;
 
 /**
  * @param {{ name: string; input: AnySchema }} options
