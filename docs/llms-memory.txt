@@ -51,7 +51,7 @@ The `<Memory>` component has two operating modes. Without `HINDSIGHT_URL`, it us
 
 | Capability | SQLite local (`HINDSIGHT_URL` unset) | Hindsight on Postgres (`HINDSIGHT_URL` set) |
 |---|---|---|
-| Exact facts | Namespaced JSON in `_smithers_memory_facts` | Retained documents with stable ids and replace semantics |
+| Exact facts, threads, messages, and notes | Transactional rows in local SQLite | The same transactional SQLite contract store, projected into Hindsight with stable document ids for semantic retrieval |
 | Recall | Tag-scoped local keyword matching | TEMPR semantic, text, graph, and temporal retrieval with compound tag filters |
 | Mental-model primers | Unavailable | Saved mental-model content fetched verbatim |
 | Mid-task tools | `remember` and `recall` over local facts | `remember` and `recall` over Hindsight banks |
@@ -62,7 +62,7 @@ The `<Memory>` component has two operating modes. Without `HINDSIGHT_URL`, it us
 The fallback is deliberate. A workflow that does not configure Hindsight keeps the existing SQLite facts behavior and does not acquire a Postgres dependency.
 For PGlite and Postgres workflow-state backends, those fallback facts use the local `.smithers/smithers.db` sidecar; workflow state stays on the selected backend.
 
-`HindsightMemoryStore` implements the same `MemoryStore` contract. A Smithers namespace maps to a prefixed bank. Exact facts retain a typed document with a stable id derived from namespace + key and `updateMode: "replace"`. Threads, messages, and notes are typed retained documents. `searchNotes` and task recall call Hindsight `recall`; compound filters use `tag_groups` only. Stable branch, stream, source, and scope dimensions are tags. Volatile session and run identity stays in metadata and stable append document ids.
+`HindsightMemoryStore` implements the same `MemoryStore` contract without weakening its identity or concurrency guarantees. Exact contract rows stay in the transactional SQLite store: fact identity is namespace plus key, while message and note ids remain global. Successful writes are projected into Hindsight. Exact facts use a stable document id derived from namespace plus key and `updateMode: "replace"`; threads, messages, and notes use typed retained documents. `searchNotes` and task recall call Hindsight `recall`, while exact reads and supersession filtering use the contract rows. Compound filters use `tag_groups` only. Stable branch, stream, source, and scope dimensions are tags. Volatile session and run identity stays in metadata and stable append document ids.
 
 For a user bank plus a project bank, Smithers recalls the user bank without project filters and recalls the project bank through `(scope:main OR branch:current)`, with stream tags as additional constraints. Primer ids are searched across the configured banks; a missing bank/id pair does not discard primers found elsewhere. The local SQLite runtime applies the same strict tag scope before keyword ranking.
 
@@ -81,7 +81,10 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
 ```tsx
 <Memory
   bank={`project-${ctx.input.repoId}`}
-  tags={["scope:main", `branch:${ctx.input.branch}`]}
+  tags={[
+    ctx.input.branch === "main" ? "scope:main" : "scope:branch",
+    `branch:${ctx.input.branch}`,
+  ]}
   recall="auto"
   primers={["project-primer"]}
   retain="on-complete"
@@ -95,7 +98,7 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
 
 The provider configuration and the existing per-task `memory={...}` prop converge on `TaskDescriptor.memoryConfig`. A task prop replaces its inherited provider configuration. Before the task runs, the engine fetches primers and recall results, applies the token cap, and prepends a fenced memory block. Recall failures degrade to the original prompt. After a successful task, `retain="on-complete"` starts a non-blocking retain.
 
-Use stable tags for branches, streams, source, and scope. Run and session identities belong in retention metadata and document ids, where they preserve provenance without fragmenting consolidation.
+Use stable tags for branches, streams, source, and scope. `scope:main` belongs only on `branch:main`; branch-local writes use `scope:branch`. When a project-bank configuration has one branch tag and no scope tag, Smithers derives the correct scope. Conflicting scope and branch tags are rejected. Run and session identities belong in retention metadata and document ids, where they preserve provenance without fragmenting consolidation.
 Tags supplied to the mid-task `recall` tool only narrow the configured recall scope. They cannot replace the base project branch or stream filters.
 
 See [`<Memory>`](/components/memory) for the complete prop table, multi-bank behavior, tool mode, and deployment configuration.
@@ -188,9 +191,10 @@ const live = await store.listNotes(ops);
 
 On SQLite, full-text search is **lazy and opt-in per namespace kind**: nothing
 is indexed (and note writes pay nothing) until `enableNoteSearch(kind)`, which
-creates the FTS index and backfills. On Hindsight, retained note content is
-indexed on write, so `enableNoteSearch` is a compatibility no-op and
-`searchNotes` uses semantic recall. Search spans every namespace of the kind;
+creates the FTS index and backfills. On Hindsight, the transactional note row
+is projected and indexed on write, so `enableNoteSearch` is a compatibility
+no-op and `searchNotes` uses semantic recall before applying the contract
+store's status and supersession rules. Search spans every namespace of the kind;
 pass `{ namespace }` in the filter to stay namespace-local on a shared
 backend. See
 [`examples/incident-runbook-memory.jsx`](https://github.com/smithersai/smithers/blob/main/examples/incident-runbook-memory.jsx)

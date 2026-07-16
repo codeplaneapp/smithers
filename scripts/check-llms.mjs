@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { versionedGeneratorArgs } from "./llms-check-mode.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageVersion = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version;
@@ -32,6 +33,24 @@ function run(command, args) {
   }
 }
 
+/**
+ * @param {string} version
+ * @returns {"published" | "unpublished" | "unavailable"}
+ */
+function checkNpmPublication(version) {
+  const result = spawnSync("npm", ["view", `smithers-orchestrator@${version}`, "version"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status === 0) return "published";
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  if (/\bE404\b|404\s+(?:Not Found|No match)|No match found for version/i.test(output)) {
+    return "unpublished";
+  }
+  return "unavailable";
+}
+
 const before = new Map(
   generatedFiles.map((file) => [
     file,
@@ -39,8 +58,16 @@ const before = new Map(
   ]),
 );
 
-run("bun", ["scripts/generate-llms.ts", "--skip-versioned"]);
-run("bun", ["scripts/optimize-llms-full.ts", "--skip-versioned"]);
+let versionedArgs;
+try {
+  versionedArgs = versionedGeneratorArgs(checkNpmPublication(packageVersion), packageVersion);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+
+run("bun", ["scripts/generate-llms.ts", ...versionedArgs]);
+run("bun", ["scripts/optimize-llms-full.ts", ...versionedArgs]);
 
 const changed = generatedFiles.filter((file) => {
   const path = resolve(root, file);
