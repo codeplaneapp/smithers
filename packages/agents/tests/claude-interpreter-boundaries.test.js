@@ -36,19 +36,39 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
     expect(completed.error).not.toMatch(/Retry after -/);
   });
 
-  test("rejected overage metadata on an allowed request does not set a limit banner", () => {
+  test("an allowed request with overage rejected is informational, not a failure", () => {
+    // Live capture from an overage-disabled org (2026-07-17): a fully
+    // successful stream carries this event before a success result. Treating
+    // it as fatal killed every claude attempt on such orgs.
     const interpreter = interpret();
     interpreter.onStdoutLine(
       rateLimitLine({
         status: "allowed",
+        resetsAt: Math.floor(Date.now() / 1000) + 7200,
+        rateLimitType: "five_hour",
         overageStatus: "rejected",
         overageDisabledReason: "org_level_disabled",
+        isUsingOverage: false,
       }),
     );
 
     const [completed] = interpreter.onStdoutLine(resultLine());
-    expect(completed).toMatchObject({ type: "completed", ok: true, answer: "done" });
+    expect(completed).toMatchObject({ type: "completed", ok: true });
     expect(completed.error).toBeUndefined();
+  });
+
+  test("overageStatus rejection still trips the banner when status is absent, with the usage label default", () => {
+    const interpreter = interpret();
+    interpreter.onStdoutLine(
+      rateLimitLine({ overageStatus: "rejected", overageDisabledReason: "out_of_credits" }),
+    );
+
+    const [completed] = interpreter.onStdoutLine(resultLine());
+    expect(completed.ok).toBe(false);
+    expect(completed.error).toContain("Claude usage usage limit exceeded");
+    expect(completed.error).toContain("out_of_credits");
+    // No resetsAt was provided, so there must be no retry hint.
+    expect(completed.error).not.toContain("Retry after");
   });
 
   test("the first rejected banner wins; later rejections do not overwrite it", () => {

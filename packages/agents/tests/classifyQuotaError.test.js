@@ -215,4 +215,11 @@ describe("classifyQuotaError — machine tokens", () => {
         const err = classifyQuotaError('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled"}}', "claude");
         expect(err).toBeNull();
     });
+    test("does not classify an allowed rate_limit_event whose overage is rejected (overage-disabled org)", () => {
+        // Live capture 2026-07-17: healthy streams on an overage-disabled org
+        // emit this alongside a success result; the bare-"rejected" regex
+        // branch used to classify it as quota and kill working agents.
+        const err = classifyQuotaError('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1784272800,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false}}', "claude");
+        expect(err).toBeNull();
+    });
 });

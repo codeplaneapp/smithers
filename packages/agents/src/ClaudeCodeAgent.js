@@ -200,10 +200,18 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 // waiting-quota (and picks up the reset time when present).
                 const info = isRecord(payload.rate_limit_info) ? payload.rate_limit_info : {};
                 const status = asString(info.status);
-                // Only status reflects whether this request was rejected.
-                // overageStatus can be "rejected" when organization usage
-                // credits are disabled, including on allowed requests.
-                const rejected = status === "rejected";
+                const overageStatus = asString(info.overageStatus);
+                // The CLI emits a rate_limit_event on HEALTHY streams too: with
+                // overage disabled at the org, a successful request still carries
+                // {status:"allowed", overageStatus:"rejected",
+                //  overageDisabledReason:"org_level_disabled", isUsingOverage:false}
+                // followed by a success result. overageStatus describes whether
+                // overage COULD rescue a future rejection — it is informational
+                // unless the request itself was rejected. Treating it as fatal
+                // killed every claude attempt on overage-disabled orgs. Only
+                // status decides; overageStatus is a fallback when status is
+                // absent entirely (older CLI shapes).
+                const rejected = status === "rejected" || (status == null && overageStatus === "rejected");
                 if (rejected && !limitBannerText) {
                     const windowLabel = asString(info.rateLimitType) ?? "usage";
                     const reason = asString(info.overageDisabledReason);

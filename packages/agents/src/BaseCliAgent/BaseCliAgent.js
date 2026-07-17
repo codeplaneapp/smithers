@@ -35,6 +35,11 @@ const QUOTA_PATTERNS = [
     // prose patterns above never match.
     /\bout_of_credits\b/i,
     /\busage_limit_reached\b/i,
+    // Require the request's own status to be rejected. A bare "rejected" match
+    // false-positives on {"status":"allowed","overageStatus":"rejected"} lines
+    // that healthy streams emit when the org has overage disabled; the
+    // out_of_credits / usage_limit_reached tokens above still catch shapes
+    // without a status field.
     /"rate_limit_event"[\s\S]{0,300}?"status"\s*:\s*"rejected"/i,
 ];
 
