@@ -107,11 +107,13 @@ and cleanup (`destroy` or `keep`).
 On Cloudflare, Smithers splits along the two execution modes described in
 [Where agents run](/concepts/execution-model):
 
-- **The control plane + in-process agents** run inside the Worker / Durable
+- **Storage + in-process agent calls** run inside the Worker / Durable
   Object. `createSmithersCloudflare` builds the Smithers API against Durable
   Object SQLite (`createCloudflareDurableObjectSqliteDescriptor`), and SDK agents
-  (`AnthropicAgent`, `OpenAIAgent`, …) are plain HTTPS calls with no subprocess --
-  so a workflow built entirely from SDK agents runs Worker-native.
+  (`AnthropicAgent`, `OpenAIAgent`, …) are plain HTTPS calls with no subprocess.
+  The run driver that advances a workflow is not Workers-native yet (see the
+  warning below and [Serverless deployment](/deployment/serverless)); to execute
+  a run on Cloudflare today, host the engine under Bun in a container.
 - **CLI / full-OS agents** cannot run in the Worker's JS runtime (they spawn a
   vendor binary via `node:child_process`). They are offloaded to a
   `@cloudflare/sandbox` container through `createCloudflareSandboxProvider`, which
