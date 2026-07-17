@@ -1,7 +1,7 @@
 import { createSandboxProviderContractSuite } from "@smithers-orchestrator/sandbox";
 import { MICROSANDBOX_PROVIDER_ID } from "../src/MICROSANDBOX_PROVIDER_ID.js";
 import { createMicrosandboxSandboxProvider } from "../src/createMicrosandboxSandboxProvider.js";
-import { createMockMicrosandboxEnvironment } from "../src/createMockMicrosandboxEnvironment.js";
+import { createMockMicrosandboxEnvironment } from "./fixtures/createMockMicrosandboxEnvironment.js";
 
 createSandboxProviderContractSuite({
 	name: "Microsandbox SandboxProvider contract",

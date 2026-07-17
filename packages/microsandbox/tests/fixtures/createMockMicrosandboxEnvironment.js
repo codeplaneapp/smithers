@@ -2,6 +2,23 @@ const REQUEST_ENV = "SMITHERS_SANDBOX_REQUEST_PATH";
 const RESULT_ENV = "SMITHERS_SANDBOX_RESULT_PATH";
 
 /**
+ * @typedef {{
+ *   failCreate?: boolean;
+ *   failGet?: boolean;
+ *   failExec?: boolean;
+ *   hangExec?: boolean;
+ *   failWrite?: boolean;
+ *   failRead?: boolean;
+ *   failStop?: boolean;
+ *   failRemove?: boolean;
+ *   onCreate?: (config: Record<string, unknown>) => void;
+ *   onExec?: (config: Record<string, unknown>) => void;
+ *   onStop?: (name: string) => void;
+ *   onRemove?: (name: string) => void;
+ * }} MicrosandboxMockFaults
+ */
+
+/**
  * In-memory double for the Microsandbox SDK subset used by the provider.
  * It models builder configuration, sticky start/connect, guest filesystem
  * operations, streaming exec, ephemeral cleanup, and typed not-found errors.
@@ -12,8 +29,8 @@ const RESULT_ENV = "SMITHERS_SANDBOX_RESULT_PATH";
  *   files: Map<string, string | Uint8Array>;
  *   env: Record<string, string>;
  * }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
- * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxMockFaults} [faults]
- * @returns {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxSdkLike & {
+ * @param {MicrosandboxMockFaults} [faults]
+ * @returns {import("../../src/MicrosandboxSandboxProviderOptions.ts").MicrosandboxSdkLike & {
  *   sandboxes: Map<string, any>;
  *   createConfigs: Record<string, unknown>[];
  * }}
@@ -56,7 +73,7 @@ export function createMockMicrosandboxEnvironment(handler, faults = {}) {
  * @param {Map<string, any>} sandboxes
  * @param {Record<string, unknown>[]} createConfigs
  * @param {Function} handler
- * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxMockFaults} faults
+ * @param {MicrosandboxMockFaults} faults
  */
 function createBuilder(name, sandboxes, createConfigs, handler, faults) {
 	const config = {
@@ -129,7 +146,7 @@ function createBuilder(name, sandboxes, createConfigs, handler, faults) {
  * @param {Record<string, any>} config
  * @param {Map<string, any>} sandboxes
  * @param {Function} handler
- * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxMockFaults} faults
+ * @param {MicrosandboxMockFaults} faults
  */
 function createSandbox(name, config, sandboxes, handler, faults) {
 	/** @type {Map<string, string | Uint8Array>} */

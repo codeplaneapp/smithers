@@ -29,6 +29,11 @@ deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
 Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
 Windows. Run `msb doctor` on every host before accepting work.
 
+Microsandbox `0.6.6` snapshots contain disk state, require a stopped sandbox,
+and cold-boot when restored. They do not preserve memory, running processes,
+sockets, or device state. A fleet integration must not advertise a sticky
+workspace as memory-preserving suspend, instant resume, or a live fork.
+
 ## Install
 
 The provider package declares `microsandbox` as an optional dependency and
@@ -152,8 +157,17 @@ default.
 The Smithers provider kit still projects `egress` proxy variables and uploads
 an inline CA certificate into the guest. Use `configureBuilder` with
 Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
-allowlists or host-side secret substitution. Do not pass host credentials in
-`env` when Microsandbox secret substitution can keep them outside the VM.
+allowlists or host-side secret substitution.
+
+There is an important `0.6.6` limitation for production secret handling. The
+raw Go SDK `Secret.Env` value is persisted in runtime state, while the declared
+store-backed secret source is not implemented by the runtime. Do not assume
+that selecting a secret API alone keeps plaintext out of provider state. Use a
+nonpersisting, operation-scoped delivery path, and test guest disk, snapshots,
+logs, errors, command arguments, and runtime metadata with a sentinel value.
+When a credential needs method/path policy, signing, audit, approval, MCP
+policy, rate limiting, or response filtering, give the guest a short-lived
+credential-proxy capability instead of the upstream secret.
 
 Bind mounts deliberately expose host paths to the guest. Keep them read-only
 unless the workflow must write, and never mount a credential directory or the
@@ -174,7 +188,10 @@ Microsandbox state directory into an untrusted workload.
 Microsandbox is local infrastructure. Capacity, image cache, persisted
 workspaces, logs, and the `~/.microsandbox` database live on the host. Running
 it as a fleet provider therefore requires host scheduling, admission control,
-state placement, and observability outside this adapter.
+state placement, generation fencing, snapshot export, authenticated streaming,
+and observability outside this adapter. Plue implements that remote fleet
+boundary separately; this package remains a local Smithers provider and does
+not make an arbitrary API pod a safe KVM host.
 
 ## SDK subset used
 
@@ -189,5 +206,7 @@ The adapter uses the published TypeScript SDK surface:
 - `sandbox.execStreamWith()` plus `collect()` and `kill()` for commands;
 - `sandbox.stop()` and `Sandbox.remove(name)` for teardown.
 
-`createMockMicrosandboxEnvironment(handler, faults?)` supplies an in-memory SDK
-double for tests. It requires no hypervisor, image pull, or credentials.
+The repository-only fixture at
+`packages/microsandbox/tests/fixtures/createMockMicrosandboxEnvironment.js`
+supplies an in-memory SDK double for package tests. It is not part of the
+package's public exports and requires no hypervisor, image pull, or credentials.

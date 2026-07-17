@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { MICROSANDBOX_PROVIDER_ID } from "../src/MICROSANDBOX_PROVIDER_ID.js";
 import { createMicrosandboxSandboxProvider } from "../src/createMicrosandboxSandboxProvider.js";
-import { createMockMicrosandboxEnvironment } from "../src/createMockMicrosandboxEnvironment.js";
+import { createMockMicrosandboxEnvironment } from "./fixtures/createMockMicrosandboxEnvironment.js";
 
 let requestSeq = 0;
 

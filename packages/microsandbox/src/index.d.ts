@@ -135,20 +135,6 @@ type MicrosandboxSandboxProviderOptions$1 = {
     /** Apply vendor-specific builder configuration after standard Smithers mappings. */
     configureBuilder?: (builder: MicrosandboxSandboxBuilderLike$1, request: SandboxProviderRequest) => MicrosandboxSandboxBuilderLike$1 | void;
 };
-type MicrosandboxMockFaults$1 = {
-    failCreate?: boolean;
-    failGet?: boolean;
-    failExec?: boolean;
-    hangExec?: boolean;
-    failWrite?: boolean;
-    failRead?: boolean;
-    failStop?: boolean;
-    failRemove?: boolean;
-    onCreate?: (config: Record<string, unknown>) => void;
-    onExec?: (config: Record<string, unknown>) => void;
-    onStop?: (name: string) => void;
-    onRemove?: (name: string) => void;
-};
 
 declare const MICROSANDBOX_PROVIDER_ID: "microsandbox";
 
@@ -172,39 +158,11 @@ declare function createMicrosandboxSandboxProvider(options?: MicrosandboxSandbox
  */
 declare function registerMicrosandboxSandboxProvider(options?: MicrosandboxSandboxProviderOptions$1): () => void;
 
-/**
- * In-memory double for the Microsandbox SDK subset used by the provider.
- * It models builder configuration, sticky start/connect, guest filesystem
- * operations, streaming exec, ephemeral cleanup, and typed not-found errors.
- *
- * @param {(args: {
- *   command: string;
- *   request: Record<string, unknown>;
- *   files: Map<string, string | Uint8Array>;
- *   env: Record<string, string>;
- * }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
- * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxMockFaults} [faults]
- * @returns {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxSdkLike & {
- *   sandboxes: Map<string, any>;
- *   createConfigs: Record<string, unknown>[];
- * }}
- */
-declare function createMockMicrosandboxEnvironment(handler: (args: {
-    command: string;
-    request: Record<string, unknown>;
-    files: Map<string, string | Uint8Array>;
-    env: Record<string, string>;
-}) => _smithers_orchestrator_sandbox.SandboxProviderResult | Promise<_smithers_orchestrator_sandbox.SandboxProviderResult>, faults?: MicrosandboxMockFaults$1): MicrosandboxSdkLike$1 & {
-    sandboxes: Map<string, any>;
-    createConfigs: Record<string, unknown>[];
-};
-
 type MicrosandboxSandboxProviderOptions = MicrosandboxSandboxProviderOptions$1;
 type MicrosandboxSdkLike = MicrosandboxSdkLike$1;
 type MicrosandboxSandboxStaticLike = MicrosandboxSandboxStaticLike$1;
 type MicrosandboxSandboxBuilderLike = MicrosandboxSandboxBuilderLike$1;
 type MicrosandboxSandboxHandleLike = MicrosandboxSandboxHandleLike$1;
 type MicrosandboxSandboxLike = MicrosandboxSandboxLike$1;
-type MicrosandboxMockFaults = MicrosandboxMockFaults$1;
 
-export { MICROSANDBOX_PROVIDER_ID, type MicrosandboxMockFaults, type MicrosandboxSandboxBuilderLike, type MicrosandboxSandboxHandleLike, type MicrosandboxSandboxLike, type MicrosandboxSandboxProviderOptions, type MicrosandboxSandboxStaticLike, type MicrosandboxSdkLike, createMicrosandboxSandboxProvider, createMockMicrosandboxEnvironment, registerMicrosandboxSandboxProvider };
+export { MICROSANDBOX_PROVIDER_ID, type MicrosandboxSandboxBuilderLike, type MicrosandboxSandboxHandleLike, type MicrosandboxSandboxLike, type MicrosandboxSandboxProviderOptions, type MicrosandboxSandboxStaticLike, type MicrosandboxSdkLike, createMicrosandboxSandboxProvider, registerMicrosandboxSandboxProvider };

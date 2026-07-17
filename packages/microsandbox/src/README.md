@@ -9,7 +9,6 @@ remain in `@smithers-orchestrator/sandbox`'s provider kit.
 
 - `createMicrosandboxSandboxProvider(options?)`
 - `registerMicrosandboxSandboxProvider(options?)`
-- `createMockMicrosandboxEnvironment(handler, faults?)`
 - `MICROSANDBOX_PROVIDER_ID`, equal to `"microsandbox"`
 
 ## Defaults

@@ -156,18 +156,3 @@ export type MicrosandboxSandboxProviderOptions = {
 		request: SandboxProviderRequest,
 	) => MicrosandboxSandboxBuilderLike | void;
 };
-
-export type MicrosandboxMockFaults = {
-	failCreate?: boolean;
-	failGet?: boolean;
-	failExec?: boolean;
-	hangExec?: boolean;
-	failWrite?: boolean;
-	failRead?: boolean;
-	failStop?: boolean;
-	failRemove?: boolean;
-	onCreate?: (config: Record<string, unknown>) => void;
-	onExec?: (config: Record<string, unknown>) => void;
-	onStop?: (name: string) => void;
-	onRemove?: (name: string) => void;
-};

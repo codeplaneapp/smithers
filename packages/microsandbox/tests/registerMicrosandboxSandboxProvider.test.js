@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { resolveSandboxProvider } from "@smithers-orchestrator/sandbox";
 import { MICROSANDBOX_PROVIDER_ID } from "../src/MICROSANDBOX_PROVIDER_ID.js";
-import { createMockMicrosandboxEnvironment } from "../src/createMockMicrosandboxEnvironment.js";
+import { createMockMicrosandboxEnvironment } from "./fixtures/createMockMicrosandboxEnvironment.js";
 import { registerMicrosandboxSandboxProvider } from "../src/registerMicrosandboxSandboxProvider.js";
 
 describe("registerMicrosandboxSandboxProvider", () => {
