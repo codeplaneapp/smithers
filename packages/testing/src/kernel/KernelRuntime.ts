@@ -17,7 +17,15 @@ export const makeKernel = (seed: number, controls: readonly ControlMessage[] = [
     // forked and raced by the Effect runtime; the public runner never owns the
     // task fibers or implements a Promise race itself.
     runReadySet: (tasks) => Effect.gen(function* () {
-      for (const { stepId, effect } of tasks) if (!active.has(stepId)) active.set(stepId, yield* Effect.fork(effect));
+      const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
+      for (const { stepId, effect } of fresh.slice(1)) active.set(stepId, yield* Effect.fork(effect));
+      if (fresh[0]) {
+        const first = yield* Effect.fork(fresh[0].effect);
+        active.set(fresh[0].stepId, first);
+        const value = yield* Fiber.join(first);
+        active.delete(fresh[0].stepId);
+        return { stepId: fresh[0].stepId, value };
+      }
       const winner = yield* Effect.raceAll([...active.entries()].map(([stepId, fiber]) => Fiber.join(fiber).pipe(Effect.map((value) => ({ stepId, value })))));
       active.delete(winner.stepId);
       return winner;
