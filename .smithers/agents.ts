@@ -64,7 +64,7 @@ export const agents = {
   // 2026-07-17: codex providers demoted to pool tails while the codex weekly quota
   // is exhausted (resets 2026-07-23); a codex-first pool parks runs until that reset.
   kimi: [
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
   ],
   codex: [
     // providers.codex1,  // codex weekly quota exhausted; restore after 2026-07-23
@@ -75,7 +75,7 @@ export const agents = {
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   cheapFast: [
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
@@ -87,7 +87,7 @@ export const agents = {
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   research: [
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     providers.claude,
     // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
@@ -99,7 +99,7 @@ export const agents = {
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   implement: [
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     providers.claude,
     // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
@@ -111,7 +111,7 @@ export const agents = {
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   midTier: [
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     providers.claude,
     // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
@@ -123,7 +123,7 @@ export const agents = {
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   smartTool: [
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     providers.claude,
     // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
@@ -135,7 +135,7 @@ export const agents = {
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   validate: [
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     providers.claude,
     // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
@@ -149,7 +149,7 @@ export const agents = {
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.openclaw,
@@ -162,7 +162,7 @@ export const agents = {
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
@@ -174,7 +174,7 @@ export const agents = {
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
@@ -185,7 +185,7 @@ export const agents = {
   orchestrator: [
     providers.claude,
     providers.claudeOpus,
-    providers.kimi1,
+    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
