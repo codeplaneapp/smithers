@@ -411,6 +411,7 @@ export default smithers((ctx) => {
                     loadRunConfig(input.configPath),
                     windowOut.windowStart,
                     windowOut.windowEnd,
+                    windowOut.issueDateEt,
                     deps.compose.attempt,
                   )
                 }

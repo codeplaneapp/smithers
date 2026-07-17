@@ -252,7 +252,7 @@ describe("verify: rejections", () => {
       topStories: [{ srcId: "SRC-999", headline: "h", body: "b".repeat(20), whyItMatters: "w", categories: [] }],
       lighterSide: [{ srcId: "SRC-001", text: "funny" }, { srcId: "SRC-001", text: "funny2" }, { srcId: "SRC-001", text: "funny3" }],
     });
-    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, 1);
+    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, "2026-07-17", 1);
     expect(out.passed).toBe(false);
     expect(out.errors.some((e) => e.includes('Invented SRC id "SRC-999"'))).toBe(true);
   });
@@ -263,7 +263,7 @@ describe("verify: rejections", () => {
       topStories: [{ srcId: "SRC-002", headline: "h", body: "b".repeat(20), whyItMatters: "w", categories: [] }],
       lighterSide: [{ srcId: "SRC-001", text: "funny" }, { srcId: "SRC-001", text: "funny2" }, { srcId: "SRC-001", text: "funny3" }],
     });
-    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, 1);
+    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, "2026-07-17", 1);
     expect(out.passed).toBe(false);
     expect(out.errors.some((e) => e.includes("outside the 24h window"))).toBe(true);
   });
@@ -277,7 +277,7 @@ describe("verify: rejections", () => {
       categories: [],
     }));
     const issue = baseIssue({ quietDay: false, topStories: many, lighterSide: [{ srcId: "SRC-001", text: "funny" }, { srcId: "SRC-001", text: "f2" }, { srcId: "SRC-001", text: "f3" }] });
-    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, 1);
+    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, "2026-07-17", 1);
     expect(out.passed).toBe(false);
     expect(out.errors.some((e) => e.startsWith("Too many top stories"))).toBe(true);
   });
@@ -285,7 +285,7 @@ describe("verify: rejections", () => {
   test("rejects more than maxActions recommended actions", () => {
     const many = Array.from({ length: RUN_CONFIG.maxActions + 1 }, (_, i) => ({ srcId: "SRC-001", action: `do thing ${i}` }));
     const issue = baseIssue({ recommendedActions: many, lighterSide: [{ srcId: "SRC-001", text: "funny" }, { srcId: "SRC-001", text: "f2" }, { srcId: "SRC-001", text: "f3" }] });
-    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, 1);
+    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, "2026-07-17", 1);
     expect(out.passed).toBe(false);
     expect(out.errors.some((e) => e.startsWith("Too many recommended actions"))).toBe(true);
   });
@@ -297,15 +297,22 @@ describe("verify: rejections", () => {
       topStories: [{ srcId: "SRC-001", headline: "h", body: "b".repeat(20), whyItMatters: "w", categories: [] }],
       lighterSide: [{ srcId: "SRC-001", text: "funny" }, { srcId: "SRC-001", text: "f2" }, { srcId: "SRC-001", text: "f3" }],
     });
-    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, 1);
+    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, "2026-07-17", 1);
     expect(out.passed).toBe(false);
     expect(out.errors.some((e) => e.includes("echoes an instruction-like phrase"))).toBe(true);
   });
 
   test("empty-news day: a quiet-day issue with zero stories and no Lighter Side minimum passes", () => {
-    const out = verifyIssue(baseIssue(), srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, 1);
+    const out = verifyIssue(baseIssue(), srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, "2026-07-17", 1);
     expect(out.passed).toBe(true);
     expect(out.errors).toEqual([]);
+  });
+
+  test("rejects an unrendered prompt placeholder in issueDateEt (live failure 2026-07-17)", () => {
+    const issue = baseIssue({ issueDateEt: "{props.issueDateEt}" });
+    const out = verifyIssue(issue, srcIdMap, clusters, RUN_CONFIG, windowStart, windowEnd, "2026-07-17", 1);
+    expect(out.passed).toBe(false);
+    expect(out.errors.some((e) => e.includes('must be exactly "2026-07-17"'))).toBe(true);
   });
 });
 

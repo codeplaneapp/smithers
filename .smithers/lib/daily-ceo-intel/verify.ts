@@ -34,9 +34,15 @@ export function verifyIssue(
   config: RunConfig,
   windowStart: string,
   windowEnd: string,
+  expectedIssueDateEt: string,
   attempt: number,
 ): VerifyOutput {
   const errors: string[] = [];
+  // An unrendered prompt placeholder ("{props.issueDateEt}") or drifted date
+  // corrupts the byline, the public JSON `date` field, and archive keys.
+  if (issue.issueDateEt !== expectedIssueDateEt) {
+    errors.push(`issueDateEt "${issue.issueDateEt}" must be exactly "${expectedIssueDateEt}".`);
+  }
   const validIds = new Set(Object.keys(srcIdMap));
   const clusterById = new Map(clusters.map((cluster) => [cluster.srcId, cluster]));
 
