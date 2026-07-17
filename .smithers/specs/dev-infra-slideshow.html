@@ -161,7 +161,7 @@
         <div class="card"><h3><span class="dot" style="background:#b07cff"></span> Electric (ElectricSQL)</h3>
           <p>Real-time Postgres sync. Lives at <span class="mono">electric.smithers.sh</span> in prod
           (its own Helm chart + auth proxy). Not on the sign-in path.</p></div>
-        <div class="card"><h3><span class="dot" style="background:#7c9cff"></span> Freestyle</h3>
+        <div class="card"><h3><span class="dot" style="background:#7c9cff"></span> Microsandbox</h3>
           <p>Workspace sandbox VMs + SSH (<span class="mono">vm-ssh</span>, <span class="mono">ssh-gateway</span>).
           Where agent runs execute. External managed service.</p></div>
       </div>
@@ -337,7 +337,7 @@ GET /  (any path)
       <div class="grid cols-3" style="margin-top:18px">
         <div class="card"><h3>repo-host <span class="tag">:8080</span></h3><p>Git storage + push-hook callbacks.</p></div>
         <div class="card"><h3>ssh <span class="tag">:2222</span></h3><p>Git over SSH (jj push / pull).</p></div>
-        <div class="card"><h3>fake-gcs <span class="tag">:4443</span></h3><p>Mock object storage. Optional fake-sandbox profile for Freestyle.</p></div>
+        <div class="card"><h3>fake-gcs <span class="tag">:4443</span></h3><p>Local object-storage dependency for development.</p></div>
       </div>
       <p class="sub" style="margin-top:20px"><strong>The api serves <span class="mono">/api/user</span> and
         <span class="mono">/api/auth/*</span> on port 4000</strong> — exactly what the web app's auth proxy needs.

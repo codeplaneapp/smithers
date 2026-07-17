@@ -154,7 +154,7 @@
       <div class="card">
         <h3><span class="tag cloud">Plue · Smithers Cloud</span></h3>
         <ul style="margin-top:12px">
-          <li>Agents run in <b>Freestyle microVMs</b>. <span class="filepath">agent_dispatch.buildServiceSpec</span> sets <b>no firewall</b>: open egress to any IP and port.</li>
+          <li>Agents run in <b>Microsandbox microVMs</b>. <span class="filepath">agent_dispatch.buildServiceSpec</span> sets <b>no firewall</b>: open egress to any IP and port.</li>
           <li>Secrets are injected as <b>plaintext env</b> (<span class="filepath">SMITHERS_AGENT_TOKEN</span>, repo secrets). Visible to agent code via <span class="filepath">env</span>, <span class="filepath">ps</span>, memory.</li>
           <li>A deny-default <span class="filepath">FirewallPolicy</span> already exists, but only <b>workflow</b> sandboxes use it. Agent VMs do not.</li>
         </ul>
@@ -183,7 +183,7 @@
       </div>
       <div class="card">
         <h3><span class="tag cloud">Plue · Smithers Cloud</span></h3>
-        <p class="lead" style="font-size:20px">Runs iron-proxy inside the Freestyle sandbox provider implementation.</p>
+        <p class="lead" style="font-size:20px">Runs iron-proxy inside the Microsandbox sandbox provider implementation.</p>
         <p class="mini">The hosted product can choose a sidecar, firewall, and secret-rewrite policy, but the workflow still passes a provider object and an egress config.</p>
       </div>
     </div>
@@ -281,8 +281,8 @@ provider.run({ ...request, egress, config: rawConfig });</code></pre>
   <section class="slide">
     <p class="kicker">Outside core · provider-owned</p>
     <h2>Iron-proxy lives inside the sandbox provider</h2>
-    <p class="lead" style="margin-bottom:14px">A Freestyle provider can choose to start iron-proxy, install its CA, set firewall rules, and translate <span class="filepath">request.egress</span> into VM-local config. Smithers only passes the request.</p>
-    <pre><code>function createPlueFreestyleProvider(providerId) {
+    <p class="lead" style="margin-bottom:14px">A Microsandbox provider can choose to start iron-proxy, install its CA, set firewall rules, and translate <span class="filepath">request.egress</span> into VM-local config. Smithers only passes the request.</p>
+    <pre><code>function createPlueMicrosandboxProvider(providerId) {
   return {
     id: providerId,
     async run(request) {
@@ -307,7 +307,7 @@ provider.run({ ...request, egress, config: rawConfig });</code></pre>
     <p class="filepath" style="margin-bottom:6px">Plue sandbox provider · build VM request from SandboxProviderRequest</p>
     <pre><code>// 1) Workflow or cloud policy supplies a provider object and sandbox egress config.
 &lt;Sandbox
-  provider={plueFreestyleProvider}
+  provider={plueMicrosandboxProvider}
   egress={{
     httpsProxy: "http://127.0.0.1:8080",
     httpProxy: "http://127.0.0.1:8080",
@@ -333,7 +333,7 @@ vm.env = { ...vm.env, ...sandboxEgressEnv(request.egress) };</code></pre>
       <tr>
         <td><b>Sidecar in VM</b></td>
         <td>iron-proxy as a systemd unit; <span class="filepath">HTTP_PROXY</span> → localhost</td>
-        <td>Low on its own. Pair with Freestyle deny-default (allow only :8080).</td>
+        <td>Low on its own. Pair with Microsandbox deny-default (allow only :8080).</td>
         <td class="good">Phase 1 default. Simplest.</td>
       </tr>
       <tr>
@@ -440,7 +440,7 @@ vm.env = { ...vm.env, ...sandboxEgressEnv(request.egress) };</code></pre>
       <div class="step"><div class="n">P1</div><h4>Config API</h4><p>Add <span class="filepath">SandboxEgressConfig</span> to <span class="filepath">&lt;Sandbox&gt;</span> and <span class="filepath">executeSandbox()</span>.</p></div>
       <div class="step"><div class="n">P2</div><h4>Provider path</h4><p>Pass normalized <span class="filepath">request.egress</span> into provider-backed sandboxes and redact persisted config.</p></div>
       <div class="step"><div class="n">P3</div><h4>Local path</h4><p>Materialize CA files and merge proxy env only inside built-in local sandbox transports.</p></div>
-      <div class="step"><div class="n">P4</div><h4>Plue default</h4><p>Freestyle provider starts sidecar, injects placeholder env, and applies deny-default firewall.</p></div>
+      <div class="step"><div class="n">P4</div><h4>Plue default</h4><p>Microsandbox provider starts sidecar, injects placeholder env, and applies deny-default firewall.</p></div>
       <div class="step"><div class="n">P5</div><h4>Harden</h4><p>nftables enforcement, OTEL audit, egress timeline, denial alerts.</p></div>
     </div>
     <p class="note" style="margin-top:20px">P1-P3 are the Smithers seam and can ship without iron-proxy. P4 flips the hosted provider default. Nothing forces open-source users to adopt iron-proxy.</p>
@@ -455,7 +455,7 @@ vm.env = { ...vm.env, ...sandboxEgressEnv(request.egress) };</code></pre>
         <ul>
           <li><b>Core stays clean and testable.</b> Tests pass provider objects directly and assert <span class="filepath">request.egress</span>. No module mocks or harness env mutation.</li>
           <li><b>Open-source users keep control.</b> Bring a sandbox provider, use local transports, or omit egress entirely. All paths share the same config type.</li>
-          <li><b>Cloud gets defense in depth by default.</b> Default-deny egress, secret rewriting, and audit can live inside the hosted Freestyle provider.</li>
+          <li><b>Cloud gets defense in depth by default.</b> Default-deny egress, secret rewriting, and audit can live inside the hosted Microsandbox provider.</li>
         </ul>
       </div>
       <div>
@@ -473,7 +473,7 @@ vm.env = { ...vm.env, ...sandboxEgressEnv(request.egress) };</code></pre>
     <p class="kicker">Honest open questions</p>
     <h2>What still needs answers</h2>
     <ul>
-      <li><b>Freestyle firewall semantics.</b> Plue's own <span class="filepath">TODO</span> notes the hosted egress-enforcement contract is not finalized. The sidecar works regardless; nftables is the fallback if the hosted firewall is weak.</li>
+      <li><b>Microsandbox firewall semantics.</b> Plue's own <span class="filepath">TODO</span> notes the hosted egress-enforcement contract is not finalized. The sidecar works regardless; nftables is the fallback if the hosted firewall is weak.</li>
       <li><b>CA trust distribution.</b> The MITM CA must be present and trusted in every sandbox image, including for non-Node runtimes (Python, Go, curl) that ignore <span class="filepath">NODE_EXTRA_CA_CERTS</span>.</li>
       <li><b>Provider audit surface.</b> Smithers currently passes config and sandbox lifecycle events; a first-class egress decision event would be additional work.</li>
       <li><b>Streaming.</b> SSE and websocket model streams must pass through cleanly. iron-proxy proxies both natively; verify under load.</li>
@@ -486,7 +486,7 @@ vm.env = { ...vm.env, ...sandboxEgressEnv(request.egress) };</code></pre>
   <section class="slide">
     <p class="kicker">Recap</p>
     <h2>One sandbox contract, two postures</h2>
-    <p class="lead">Smithers core exposes <span class="accent">SandboxEgressConfig</span>, writes CA material into the request bundle, and passes normalized egress to the selected sandbox provider. Plue can make iron-proxy the default inside its Freestyle provider without core hardcoding a provider string or mutating the parent harness.</p>
+    <p class="lead">Smithers core exposes <span class="accent">SandboxEgressConfig</span>, writes CA material into the request bundle, and passes normalized egress to the selected sandbox provider. Plue can make iron-proxy the default inside its Microsandbox provider without core hardcoding a provider string or mutating the parent harness.</p>
     <div class="pill-row" style="margin-top:22px">
       <span class="pill">core: pluggable, no vendor lock-in</span>
       <span class="pill">cloud: secure by default</span>
@@ -496,7 +496,7 @@ vm.env = { ...vm.env, ...sandboxEgressEnv(request.egress) };</code></pre>
     <div class="src">
       github.com/ironsh/iron-proxy &nbsp;·&nbsp; Apache-2.0, Go &nbsp;·&nbsp; @mslipper (Optimism)<br/>
       Smithers framework: <span class="filepath">packages/sandbox/src/execute.js</span>, <span class="filepath">packages/sandbox/src/egress.js</span>, <span class="filepath">packages/components/src/components/Sandbox.js</span><br/>
-      Plue: Freestyle sandbox provider implementation, sidecar policy, and firewall enforcement
+      Plue: Microsandbox sandbox provider implementation, sidecar policy, and firewall enforcement
     </div>
   </section>
 

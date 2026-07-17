@@ -15,14 +15,14 @@ type NodeStatus = "pending" | "running" | "done" | "failed" | "waiting" | "skipp
 type NodeState = { status: NodeStatus; startedMs?: number; finishedMs?: number; iteration: number };
 type EventLine = { ts: number; type: string; nodeId: string };
 
-const PHASES = ["freestyle-purge", "local-harness", "conformance-local", "ci-canary", "suite-green"];
+const PHASES = ["provider-purge", "local-harness", "conformance-local", "ci-canary", "suite-green"];
 
 const NODE_EXPLAINS: Record<string, string> = {
   "prep": "verify workspaces + mission brief exist",
   "docs-improve": "Fable reviews/improves docs, revises specs to Microsandbox-only, writes the work plan, freezes the suite gates",
-  "docs-check": "deterministic check: workplan on disk, gates parse, zero freestyle in spec+runbook",
-  "phase-freestyle-purge": "Sol removes every Freestyle remnant (code, config, Helm, dashboards, docs)",
-  "phase-freestyle-purge-review": "Sol adversarially reviews its own purge",
+  "docs-check": "deterministic check: workplan on disk, gates parse, zero retired-provider vocabulary in spec+runbook",
+  "phase-provider-purge": "Sol removes every retired-provider remnant (code, config, Helm, dashboards, docs)",
+  "phase-provider-purge-review": "Sol adversarially reviews its own purge",
   "phase-local-harness": "Sol builds the REAL local harness: compose deps + HVF Microsandbox + connected controller/API",
   "phase-local-harness-review": "Sol re-runs the harness entrypoint to verify",
   "phase-conformance-local": "Sol makes the full provider-conformance lifecycle + E2E green locally",

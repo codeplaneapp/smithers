@@ -5,7 +5,12 @@ description: Execute a Smithers workflow on Plue workspaces through the Plue san
 
 # Run on Plue
 
-`run-on-plue` executes a Smithers workflow script on Plue infrastructure instead of the local machine. It uses the [`<Sandbox>`](/components/sandbox) provider seam with `createPlueSandboxProvider`, and the provider shells through the `plue` CLI so Plue owns workspace lifecycle, authentication, quotas, and Freestyle VM access.
+`run-on-plue` executes a Smithers workflow script on Plue infrastructure
+instead of the local machine. It uses the
+[`<Sandbox>`](/components/sandbox) provider seam with
+`createPlueSandboxProvider`, and the provider shells through the `plue` CLI so
+Plue owns workspace lifecycle, authentication, quotas, placement, and sandbox
+execution through its self-hosted Microsandbox plane.
 
 Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
 
@@ -39,13 +44,17 @@ The parent workflow receives:
 
 - `plue` CLI installed and authenticated on the host running Smithers. Verify with `plue auth status`.
 - The target Plue server must have workspaces enabled. Local Plue uses `SMITHERS_FEATURE_FLAGS_WORKSPACES=true`.
-- The Plue server must be configured for real Freestyle workspaces, including the Freestyle API key required by that server (`SMITHERS_FREESTYLE_API_KEY` or the environment wiring used by your Plue deployment).
+- The Plue server must be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` and an authenticated Microsandbox controller.
 - The repo passed as `repo` must exist in Plue and be accessible to the authenticated user.
 - Claude auth must be available locally. The preferred path is Claude Code subscription OAuth in the OS credential store; `ANTHROPIC_API_KEY` only works when that key has usable API billing.
 - Codex auth must be available locally. The preferred path is `~/.codex/auth.json`; `OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth.
 - If `plue` is not on `PATH`, set `PLUE_BIN` or pass `plueBin` in the workflow input.
 
-Secrets are seeded at run time by the Plue CLI and written into the VM with restrictive file permissions. Do not bake Claude, Codex, OpenAI, Anthropic, or Freestyle credentials into workspace snapshots or committed files.
+Secrets are seeded at run time through Plue's operation-scoped secret or
+credential-proxy path. They must not be written into guest disks, snapshots,
+images, command arguments, logs, errors, or durable request state. Do not bake
+Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials
+into workspace snapshots or committed files.
 
 ## Run a workflow remotely
 

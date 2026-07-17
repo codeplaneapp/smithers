@@ -1431,7 +1431,7 @@ const analyze = G.step("analyze", {
           "",
           `   ${C.cyan}2${C.reset} ${C.bold}Smithers (the forge)${C.reset}      ${C.dim}AGPL · in build · ~78% of MVP${C.reset}`,
           `       jj-native code host · landing requests · agent runtime`,
-          `       cloud workspaces on Freestyle VMs · BYOK for LLM keys`,
+          `       cloud workspaces on Microsandbox VMs · BYOK for LLM keys`,
           "",
           `   ${C.cyan}3${C.reset} ${C.bold}Smithers GUI${C.reset}              ${C.dim}native macOS · download today${C.reset}`,
           `       embedded Ghostty terminal · time-travel scrubber`,

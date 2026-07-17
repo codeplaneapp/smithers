@@ -87,8 +87,7 @@ Work in ${SMITHERS_REPO}. Deliverables:
 
 1. \`.smithers/lib/plue-provider.ts\` — export \`createPlueSandboxProvider(options)\`
    returning a \`SandboxProvider\` (type from "smithers-orchestrator/sandbox";
-   see packages/sandbox/src/SandboxProvider.ts and the shape of
-   examples/freestyle/provider.ts). Options (all overridable):
+   see packages/sandbox/src/SandboxProvider.ts). Options (all overridable):
    { plueBin (default: env PLUE_BIN or "plue"), repo (required, "owner/repo"),
      workspaceName?, keepWorkspace? (default false),
      orchestratorVersion (default "0.26.1"), bootstrapAgents (default true),

@@ -1,6 +1,6 @@
 // smithers-source: authored
 // smithers-display-name: Run On Plue
-// smithers-description: Run any smithers workflow script on plue infrastructure (a real Freestyle VM provisioned through the plue CLI) via the Sandbox component.
+// smithers-description: Run any Smithers workflow script on a real Microsandbox VM provisioned through the Plue CLI.
 /** @jsxImportSource smithers-orchestrator */
 import { readFileSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
@@ -13,7 +13,7 @@ import { createPlueSandboxProvider } from "../lib/plue-provider.ts";
 /**
  * Run On Plue — the deliverable runner: hand it the path to ANY smithers
  * workflow `.tsx` file and it executes that script on plue infrastructure
- * (a real Freestyle VM, provisioned + SSH'd into via the plue CLI) instead of
+ * (a real Microsandbox VM, provisioned and reached through the Plue CLI) instead of
  * locally. The remote run's mapped result becomes this workflow's output.
  *
  * `reviewDiffs` MUST stay `false`: the Sandbox default fails closed (pauses
@@ -45,7 +45,7 @@ const inputSchema = z.object({
 	plueBin: z.string().optional(),
 	/**
 	 * Reuse an existing (warm) plue workspace instead of creating one. Fresh
-	 * Freestyle boots are occasionally flaky; set this to a known-good workspace
+	 * Cold boots take time; set this to a known-good workspace
 	 * id for deterministic runs. Never deleted on cleanup.
 	 */
 	existingWorkspaceId: z.string().optional(),
@@ -96,7 +96,7 @@ export default smithers((ctx) => {
 	// present (attachSandboxComputeFns skips the task otherwise and it would
 	// execute as a static task with undefined output). The plue provider runs
 	// the shipped script remotely and never calls executeChildWorkflow, so
-	// this child is a formality — same shape as examples/freestyle.
+	// this child is a formality because the provider executes the shipped source.
 	const remoteChildWorkflow = {
 		build: () => <Workflow name="plue-remote-child" />,
 		opts: {},

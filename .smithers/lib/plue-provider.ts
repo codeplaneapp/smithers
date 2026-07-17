@@ -1,7 +1,7 @@
 // smithers-source: authored
 //
 // A SandboxProvider that runs a smithers child workflow on plue infrastructure:
-// `plue workspace create` boots a real Freestyle VM (via plue's control
+// `plue workspace create` boots a real Microsandbox VM (via plue's control
 // plane), we SSH in, bootstrap bun + the claude/codex CLIs, ship a
 // self-contained mini-project (the child workflow's source + agents.ts +
 // input.json), run it with `bunx --bun smithers-orchestrator up`, and map the
@@ -39,7 +39,7 @@ export type PlueSandboxProviderOptions = {
 	bootTimeoutMs?: number;
 	/**
 	 * Reuse an existing (already-running) workspace by id instead of creating a
-	 * fresh one. Fresh Freestyle VM boots are occasionally flaky (status→failed);
+	 * fresh one. Fresh Microsandbox VM boots can take time;
 	 * pointing at a known-good warm workspace makes e2e/demo runs deterministic.
 	 * When set, the workspace is never deleted on cleanup regardless of
 	 * keepWorkspace.

@@ -6,10 +6,8 @@ GCP, keep Cloudflare on the same path, and extract a shared provider-kit so each
 vendor is a thin adapter. No new `SandboxRuntime` enum value is added.
 
 Grounding: `packages/sandbox/src/*` (execute.js, transport.js, SandboxProvider.ts,
-egress.js, bundle.js), the shipped `packages/cloudflare` provider,
-`examples/freestyle`, `.smithers/specs/cloud-execution-engineering.md` Part 5, and
-the `scripts/check-docs.mjs` gate that forbids adding vendor names to
-`SandboxRuntime`.
+egress.js, bundle.js), the shipped provider packages, and
+`.smithers/specs/cloud-execution-engineering.md` Part 5.
 
 ---
 
@@ -36,8 +34,7 @@ Each backend ships as `packages/<provider>` mirroring `@smithers-orchestrator/cl
 
 ### 1.1 Shared provider-kit (in `packages/sandbox`)
 
-Extract the request/result-file protocol that Cloudflare and the Freestyle
-example both hand-roll into `packages/sandbox/src/provider-kit/`. A provider
+Extract the request/result-file protocol into `packages/sandbox/src/provider-kit/`. A provider
 author implements a small `SandboxSession`, not a `run()` from scratch.
 
 ```ts
@@ -77,8 +74,7 @@ Kit files (one export each):
 `SANDBOX_PROVIDER_RESULT_ENV.js`, `index.js` (barrel). Re-export the kit from
 `packages/sandbox/src/index.js`.
 
-Cloudflare and the Freestyle example are refactored onto the kit in the same
-change so the pattern has three consumers before the new four land. The
+Cloudflare is refactored onto the kit in the same change. The
 Cloudflare `execution:"process"` long-running branch stays a Cloudflare-only path
 outside the kit. The existing `packages/cloudflare/tests` are the frozen contract
 and must pass unchanged.
@@ -200,7 +196,7 @@ Each: `package.json` (SDK optionalDependency; deps `@smithers-orchestrator/sandb
 `docs/components/sandbox-providers.mdx` (shared: contract, kit, registration, egress/secrets),
 `docs/integrations/{daytona,vercel,aws,gcp}-sandbox-provider.mdx`, update `docs/components/sandbox.mdx` provider list,
 add nav in `docs/docs.json`, add the 5 mdx paths to the `scripts/generate-llms.ts` manifest, add coverage asserts to
-`scripts/check-docs.mjs` (mirror the existing freestyle asserts). Regenerate with `pnpm docs:llms` (updates
+`scripts/check-docs.mjs`. Regenerate with `pnpm docs:llms` (updates
 `docs/llms-*.txt` + mirrored bundles under `apps/cli/docs/`, `packages/smithers/docs/`, `skills/smithers/`).
 CI gates on `check-docs` / `check-llms`.
 

@@ -5,7 +5,7 @@
 ## Overview
 
 This document covers the technical implementation of distributed Smithers
-execution across Kubernetes and Freestyle/JJHub. The product spec
+execution across Kubernetes and Plue's self-hosted Microsandbox plane. The product spec
 (`cloud-execution-product.md`) covers the what and why; this covers the how.
 
 ---
@@ -626,172 +626,31 @@ stringData:
 
 ---
 
-## Part 5: Freestyle Provider Implementation
+## Part 5: Sandbox Provider Implementations
 
-### Sandbox Provider Adapter
+### Plue and Microsandbox production boundary
 
-Do not add `"freestyle"` to `SandboxRuntime`. Freestyle is a third-party
-`SandboxProvider` implementation that a workflow passes as a provider object, or
-as a string only after explicit `registerSandboxProvider({ id, run })`
-registration. The core `runtime` field remains the legacy local transport enum:
-`"bubblewrap" | "docker" | "codeplane"`.
+Smithers ships a first-class local `microsandbox` provider. Plue's production
+provider uses the same request/result semantics through a remote Plue-owned
+control plane rather than running KVM in the Smithers or Plue API process.
 
-```tsx
-import { Sandbox, Workflow } from "smithers-orchestrator";
-import type { SandboxProvider } from "smithers-orchestrator/sandbox";
+- Plue keeps its GKE Autopilot control plane and adds a separate private GKE
+  Standard cluster with nested-virtualization workers.
+- Product services use Plue-owned DTOs; Microsandbox SDK types do not cross the
+  API boundary.
+- A controller places microVMs, persists worker/generation/desired state, and
+  fences stale operations. Application gateways stream terminal, SSH, and
+  preview traffic to the owning worker with short-lived grants.
+- Microsandbox `0.6.6` snapshots are disk-only, require a stopped sandbox, and
+  cold-boot on restore. Memory, processes, sockets, and devices are not durable.
+- Secrets use a nonpersisting operation-scoped path. The raw Go `Secret.Env`
+  representation is not acceptable because it persists the value; credential
+  proxy capabilities are used for richer policy and audit.
 
-const activeVms = new Map<string, string>();
-
-const freestyleProvider: SandboxProvider = {
-  id: "freestyle",
-  async run(request) {
-    const workspace = request.config.workspace as { snapshotId?: string } | undefined;
-    const { vm, vmId } = await freestyle.vms.create({
-      name: `smithers-${request.runId}-${request.sandboxId}`,
-      snapshotId: workspace?.snapshotId,
-      idleTimeoutSeconds: 600,
-    });
-    if (vmId) {
-      activeVms.set(`${request.runId}:${request.sandboxId}`, vmId);
-    }
-
-    await vm.fs.writeTextFile(
-      "/workspace/smithers-request.json",
-      JSON.stringify({
-        runId: request.runId,
-        sandboxId: request.sandboxId,
-        input: request.input,
-        egress: request.egress,
-      }),
-    );
-
-    const result = await vm.exec("node /workspace/run-smithers-sandbox.js");
-    const stdout = typeof result?.stdout === "string" ? result.stdout.trim() : "";
-    const raw = stdout.startsWith("{")
-      ? stdout
-      : await vm.fs.readTextFile("/workspace/smithers-result.json");
-
-    return {
-      ...JSON.parse(raw),
-      remoteRunId: vmId,
-      workspaceId: vmId,
-    };
-  },
-  async cleanup(request) {
-    const key = `${request.runId}:${request.sandboxId}`;
-    const vmId = activeVms.get(key);
-    if (typeof vmId === "string") {
-      await freestyle.vms.delete({ vmId });
-      activeVms.delete(key);
-    }
-  },
-};
-
-<Workflow name="cloud-worker">
-  <Sandbox
-    id="worker"
-    provider={freestyleProvider}
-    workflow={childWorkflow}
-    output={outputs.result}
-    workspace={{ name: "worker", snapshotId: "snap_abc123" }}
-  />
-</Workflow>;
-```
-
-### Golden Image Creation
-
-```ts
-// src/freestyle/golden-image.ts
-
-export async function createGoldenImage(opts: {
-  freestyle: typeof import("freestyle").freestyle;
-  snapshotId?: string;
-}): Promise<{ snapshotId: string }> {
-  // 1. Create base VM
-  const { vm } = await opts.freestyle.vms.create({
-    name: "smithers-golden-image",
-    snapshotId: opts.snapshotId,
-    idleTimeoutSeconds: null,
-  });
-
-  // 2. Install Bun
-  await vm.exec(
-    "curl -fsSL https://bun.sh/install | bash");
-
-  // 3. Write bootstrap metadata. Larger repos should come from Freestyle Git,
-  // a checked-out snapshot, or a provider-specific upload layer.
-  await vm.fs.writeTextFile("/opt/smithers/README.md", "Smithers worker image\n");
-
-  // 4. Install dependencies
-  await vm.exec(
-    "cd /opt/smithers && /root/.bun/bin/bun install --frozen-lockfile");
-
-  // 5. Snapshot
-  const snapshot = await vm.snapshot();
-
-  // 6. Stop or delete the builder VM once the snapshot exists.
-  await vm.stop();
-
-  return { snapshotId: snapshot.id };
-}
-```
-
-### CLI Command
-
-No public `--runtime freestyle` flag is added. The workflow TSX injects the
-provider object and can map workflow input into `<Sandbox workspace={...}>`.
-
-```bash
-# Run a workflow whose TSX injects a Freestyle SandboxProvider
-smithers workflow run cloud-worker --input '{"snapshotId":"snap_abc123"}'
-
-# Fork a run (DB fork; the provider decides whether to fork a VM snapshot)
-smithers fork workflow.tsx --run-id run-001 --frame 5
-```
-
-### Pause/Resume at Task Boundaries
-
-After each task completes, the worker VM can be paused:
-
-```ts
-// In freestyle worker lifecycle:
-async function executeAndPause(task: WorkerTask, vm: FreestyleVm) {
-  // Execute task
-  const result = await executeTask(task);
-
-  // If workflow has more tasks, pause VM (storage-only billing)
-  if (!result.terminal) {
-    await vm.pause();
-    // VM resumes when next task is dispatched
-  }
-
-  return result;
-}
-```
-
-For workflows with approval gates or timers, the VM stays paused for the
-entire wait period — hours or days — at storage cost only (~$0.000086/GiB-hr).
-
-### VM Snapshot at Frames
-
-Extend snapshot metadata to include Freestyle VM state:
-
-```ts
-// In src/time-travel/snapshot.ts, extend:
-type SnapshotMeta = {
-  runId: string;
-  frameNo: number;
-  contentHash: string;
-  vcsRevision?: string;
-  freestyleSnapshotId?: string;  // VM state reference
-  freestyleVmId?: string;        // Source VM for this snapshot
-};
-```
-
-When `smithers fork` is called with a Freestyle-backed run:
-1. Copy DB snapshot (existing behavior)
-2. Fork the Freestyle VM from the snapshot's `freestyleSnapshotId`
-3. New run executes on the forked VM — exact filesystem state from that frame
+The local adapter is documented in
+`docs/integrations/microsandbox-sandbox-provider.mdx`. Fleet placement,
+recovery, Terraform, gateways, and production conformance belong to Plue and
+are deliberately outside Smithers core.
 
 ---
 
@@ -882,53 +741,30 @@ deploy();
 5. Write README (the product spec's README preview, fully fleshed out)
 6. Test: deploy on Minikube, run a workflow end-to-end
 
-### Phase D: Freestyle Integration
+### Phase D: Microsandbox Integration
 
-1. Implement or package a Freestyle `SandboxProvider` adapter
-2. Pass the provider object into hosted workflows, or register an id explicitly
-3. Implement golden image or snapshot creation in the hosted provider layer
-4. Implement pause/resume at task boundaries
-5. Implement VM snapshot at frames
-6. Implement fork = DB fork + provider-managed VM fork
-7. Test: E2E on Freestyle — create golden image, run workflow, fork
+1. Use the first-class Microsandbox `SandboxProvider` locally and preserve the
+   same contract in Plue's remote adapter.
+2. Pin runtime and image versions and verify every worker with a real microVM.
+3. Implement image and stopped-disk snapshot creation in the hosted provider
+   layer.
+4. Implement stop/cold-resume at task boundaries without claiming memory
+   preservation.
+5. Implement disk snapshots at supported frames.
+6. Implement fork as DB fork plus independent disk snapshot and cold boot.
+7. Test end to end on real nested KVM: image, run, stop/resume, snapshot, fork,
+   access stream, secret sentinel, and cleanup.
 
-### Phase E: JJHub Integration
+### Phase E: Plue Integration
 
-1. Update `.jjhub/workflows/` to support Freestyle-backed workers
-2. Integrate with JJHub branch management (rebase, stacked PRs)
-3. Repository-scoped golden images
-4. Test: E2E via JJHub CLI
-
----
-
-## Appendix A: Freestyle / JJHub Amendment
-
-**Freestyle is encapsulated by JJHub.** The Freestyle API is not exposed
-directly to users. JJHub is the user-facing platform that wraps Freestyle and
-provides:
-
-- VCS-aware workflow execution (jj branches, landing, stacked PRs)
-- Repository-scoped golden images
-- Workspace management
-- Authentication and multi-tenancy
-
-The Freestyle sandbox provider in Smithers Cloud is an implementation detail.
-Users interact with JJHub or a workflow-supplied `SandboxProvider`; Smithers core
-does not expose a built-in `freestyle` runtime.
-
-JJHub may need updates to support the worker model described here. Specifically:
-- Worker VM lifecycle management (fork, pause, resume, destroy)
-- Golden image creation and management per repository
-- Routing task dispatch to Freestyle-backed workers
-
-> **Warning:** JJHub currently has a known bug where persistent VMs are not
-> supported. This was resolved by upgrading our Freestyle plan tier. Ensure the
-> JJHub deployment uses a Freestyle plan that supports persistent/sticky VMs
-> before relying on pause/resume behavior.
+1. Update hosted workflows to use provider-neutral Plue sandboxes.
+2. Integrate with Plue branch management (rebase, stacked PRs).
+3. Repository-scoped versioned images and disk snapshots.
+4. Test via the Plue CLI and Multi against the production Microsandbox plane.
 
 ---
 
-## Appendix B: Reference — Fabrik (Samuel Huber)
+## Appendix A: Reference — Fabrik (Samuel Huber)
 
 [Fabrik](https://github.com/SamuelLHuber/local-isolated-ralph) by
 [Samuel Huber](https://github.com/SamuelLHuber) (dTech.vision) is an existing

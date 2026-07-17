@@ -15,8 +15,8 @@ crashes, and manage expensive environment setup efficiently.
 1. **Distribute workers** across machines while keeping a single orchestrator as
    source of truth
 2. **Kubernetes deployment** as the standard, provider-agnostic path
-3. **JJHub / Freestyle deployment** as our platform path, with sub-200ms worker
-   provisioning via VM forking
+3. **Plue / Microsandbox deployment** as our platform path, with a self-hosted
+   nested-KVM worker plane and measured image/snapshot startup
 4. **Generalized architecture** — the orchestrator/worker split works everywhere,
    K8s and JJHub are just the first two targets
 5. **Minimal API surface change** — users write the same JSX workflows; cloud
@@ -268,43 +268,49 @@ a K3s-based Kubernetes layer for Smithers. Fabrik takes a different approach:
 
 ---
 
-## Freestyle / JJHub Product Experience
+## Plue / Microsandbox Product Experience
 
 ### What the user does
 
 1. Define workflow in `.jjhub/workflows/`
-2. JJHub provisions Freestyle VMs from a golden snapshot
-3. Workers fork from snapshot in <200ms — no cold start, no npm install
-4. VMs pause between tasks (storage-only billing)
+2. Plue provisions a Microsandbox microVM from a pinned image or exported disk
+   snapshot
+3. Workers reuse verified image and snapshot caches; readiness is measured and
+   no sub-second guarantee is implied
+4. Durable workspaces stop compute between tasks while retaining disk state
 
 ### Key differentiators from Kubernetes
 
-| Capability | Kubernetes | JJHub (Freestyle) |
+| Capability | Kubernetes workers | Plue (Microsandbox) |
 |---|---|---|
-| Worker startup | 30-60s (image pull + init) | <200ms (VM fork) |
-| Environment setup | Every pod or shared PVC | Once, then fork forever |
-| State between tasks | External DB only | Full VM state preserved |
-| Cost when idle | Full pod or scale-to-zero delay | Storage only |
-| Fork/branch a run | New run from DB snapshot | DB snapshot + VM clone |
+| Worker startup | image pull + pod init | cached image/disk snapshot + cold microVM boot |
+| Environment setup | baked image, init, or shared PVC | versioned image and immutable disk snapshot |
+| State between tasks | external DB or volume | disk state only; memory/processes do not survive stop |
+| Cost when idle | full pod or scale-to-zero delay | durable storage plus shared warm-host headroom |
+| Fork/branch a run | new run from DB snapshot | DB fork plus independent cold-started disk snapshot |
 
 ### Workflow
 
 ```
-1. Hosted Freestyle provider prepares a golden snapshot
-   → Creates base VM, installs Bun + deps, snapshots golden image
+1. Plue prepares a versioned Microsandbox image or disk snapshot
+   → Creates a base guest, installs Bun + dependencies, stops it, verifies the
+     disk snapshot, and exports it to durable storage
 
 2. Workflow runs:
-   → Each <Sandbox provider={freestyleProvider}>: fork golden VM (~200ms) → execute → pause ($0 CPU)
-   → Human approval gate: VM paused for hours/days at storage cost only
-   → Resume: instant warm start from paused state
+   → Each <Sandbox provider={plueProvider}>: place guest → cold boot → execute → stop compute and retain disk when needed
+   → Human approval gate: durable disk retained without guest compute
+   → Resume: cold boot and restart declared services
 
 3. smithers fork workflow.tsx --run-id run-001 --frame 5
-   → DB fork; provider decides whether to fork the VM snapshot for exact filesystem state
+   → DB fork; provider may create an independent disk snapshot for exact
+     filesystem state, but does not preserve memory or processes
 ```
 
 ### JJHub Integration
 
-JJHub is the platform that wraps Freestyle and adds VCS-aware features:
+Plue is the platform control plane around Microsandbox and adds VCS-aware
+features, placement, authorization, SSH/preview streams, recovery, and
+observability:
 
 - Branch management (create, rebase, stack PRs)
 - Landing / merge queue integration
@@ -312,8 +318,7 @@ JJHub is the platform that wraps Freestyle and adds VCS-aware features:
 - Repository-scoped golden images
 
 The `.jjhub/workflows/` directory already contains workflows (`prepare-publish.tsx`,
-`review-pr.tsx`, `verify-bug.tsx`) that will run on Freestyle-backed workers once
-this integration is complete.
+`review-pr.tsx`, `verify-bug.tsx`) that run on Plue-selected Microsandbox workers.
 
 ## Product Decisions
 

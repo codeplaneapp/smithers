@@ -150,7 +150,7 @@ orchestration.
 Why the others lose: Modal (best ergonomics, ~3x Fly, 24 h hard cap, ephemeral
 fs); AWS Batch (strong if already on AWS, ECR pull-through cache fixes scoring,
 but IAM/VPC boilerplate and a default 6-vCPU Fargate quota to raise); Cloud Run
-Jobs, Freestyle, RunPod, Railway, Depot are weaker fits for hours-long,
+Jobs, general-purpose hosted VM services, RunPod, Railway, and Depot are weaker fits for hours-long,
 per-container-secret, Docker-heavy work.
 
 ## 5. Subscription round-robin
