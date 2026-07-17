@@ -2268,6 +2268,11 @@ export class Gateway {
     runRegistry = new Map();
     activeRuns = new Map();
     inflightRuns = new Map();
+    /**
+     * Resume attempts keyed by run id.
+     * @type {Map<string, Promise<void>>}
+     */
+    inflightResumes = new Map();
     devtoolsSubscribers = new Map();
     runEventWindows = new Map();
     runEventSubscriberCounts = new Map();
@@ -5433,11 +5438,20 @@ a { color: var(--brand); }</style>
                     error: result.error,
                 });
             }
-        })
-            .finally(() => {
-            for (const m of [this.runRegistry, this.activeRuns, this.inflightRuns]) m.delete(runId);
         });
-        this.inflightRuns.set(runId, runPromise.then(() => undefined, () => undefined));
+        const cleanupOwnedRun = () => {
+            if (this.runRegistry.get(runId) === record) {
+                this.runRegistry.delete(runId);
+            }
+            if (this.activeRuns.get(runId) === record) {
+                this.activeRuns.delete(runId);
+            }
+            if (this.inflightRuns.get(runId) === inflightPromise) {
+                this.inflightRuns.delete(runId);
+            }
+        };
+        const inflightPromise = runPromise.then(cleanupOwnedRun, cleanupOwnedRun);
+        this.inflightRuns.set(runId, inflightPromise);
         return { runId, workflow: workflowKey };
     }
     /**
@@ -5447,20 +5461,36 @@ a { color: var(--brand); }</style>
    * @param {RunStartAuthContext} auth
    */
     async resumeRunIfNeeded(runId, workflowKey, adapter, auth) {
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-            if (this.activeRuns.has(runId)) {
-                await delay(25);
-                continue;
-            }
-            const run = await adapter.getRun(runId);
-            if (!run) {
-                return;
-            }
-            if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
-                return;
-            }
-            await this.startRun(workflowKey, {}, auth, runId, { resume: true });
+        const existingResume = this.inflightResumes.get(runId);
+        if (existingResume) {
+            await existingResume;
             return;
+        }
+        const resumePromise = (async () => {
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+                if (this.activeRuns.has(runId)) {
+                    await delay(25);
+                    continue;
+                }
+                const run = await adapter.getRun(runId);
+                if (!run) {
+                    return;
+                }
+                if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+                    return;
+                }
+                await this.startRun(workflowKey, {}, auth, runId, { resume: true });
+                return;
+            }
+        })();
+        this.inflightResumes.set(runId, resumePromise);
+        try {
+            await resumePromise;
+        }
+        finally {
+            if (this.inflightResumes.get(runId) === resumePromise) {
+                this.inflightResumes.delete(runId);
+            }
         }
     }
     /**
