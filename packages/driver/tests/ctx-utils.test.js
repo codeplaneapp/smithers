@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { Effect } from "effect";
+import { z } from "zod";
 import { buildCurrentScopes } from "../src/buildCurrentScopes.js";
 import { defaultTaskExecutor } from "../src/defaultTaskExecutor.js";
 import { filterRowsByNodeId } from "../src/filterRowsByNodeId.js";
@@ -93,8 +94,13 @@ describe("normalizeInputRow", () => {
     expect(normalizeInputRow(1)).toBe(1);
   });
 
-  test("leaves objects without payload unchanged", () => {
-    const input = { runId: "r1", value: 1 };
+  test("strips runId from table-shaped persisted input rows", () => {
+    const input = { runId: "r1", message: "hello" };
+    expect(normalizeInputRow(input)).toEqual({ message: "hello" });
+  });
+
+  test("leaves objects without persisted columns unchanged", () => {
+    const input = { message: "hello" };
     expect(normalizeInputRow(input)).toBe(input);
   });
 
@@ -148,6 +154,37 @@ describe("normalizeInputRow", () => {
   test("non-string payload is returned directly", () => {
     const payload = { nested: true };
     expect(normalizeInputRow({ runId: "r1", payload })).toBe(payload);
+  });
+
+  test("runs a strict-schema workflow without exposing the persisted runId", async () => {
+    const inputSchema = z.object({ message: z.string() }).strict();
+    let seenCtx;
+    const driver = makeDriver({
+      workflow: {
+        db: null,
+        zodToKeyName: new Map(),
+        build: (ctx) => {
+          seenCtx = ctx;
+          return inputSchema.parse(ctx.input);
+        },
+      },
+      session: makeSession({
+        submitGraph: () => ({
+          _tag: "Finished",
+          result: { runId: "run-strict", status: "finished" },
+        }),
+      }),
+    });
+
+    const result = await driver.run({
+      runId: "run-strict",
+      input: { runId: "run-strict", message: "hello" },
+    });
+
+    expect(result).toEqual({ runId: "run-strict", status: "finished" });
+    expect(seenCtx.runId).toBe("run-strict");
+    expect(seenCtx.input).toEqual({ message: "hello" });
+    expect(Object.prototype.hasOwnProperty.call(seenCtx.input, "runId")).toBe(false);
   });
 
   test("renderAndSubmit wraps a raw render TypeError as WORKFLOW_RENDER_FAILED naming the workflow", async () => {
@@ -325,6 +362,17 @@ describe("SmithersCtx output access", () => {
   test("normalizes input payload rows in constructor", () => {
     const ctx = makeCtx({ input: { runId: "r1", payload: '{"ok":true}' } });
     expect(ctx.input).toEqual({ ok: true });
+  });
+
+  test("keeps runtime identity separate from table-shaped workflow input", () => {
+    const ctx = makeCtx({
+      runId: "run-table",
+      input: { runId: "run-table", message: "hello" },
+    });
+
+    expect(ctx.runId).toBe("run-table");
+    expect(ctx.input).toEqual({ message: "hello" });
+    expect(Object.prototype.hasOwnProperty.call(ctx.input, "runId")).toBe(false);
   });
 
   test("resolves Worktree path props against the runtime root via the injected resolver", () => {
