@@ -92,7 +92,7 @@ async function handleWatchdogCron(env: Env, ctx: ExecutionContext, at: Date): Pr
 }
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
@@ -104,8 +104,20 @@ export default {
         return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
       }
       const { dateEt } = etClock(new Date());
-      const result = await triggerRunner(env, dateEt);
-      return Response.json(result.body, { status: result.status });
+      if (await isRunInFlight(env, dateEt)) {
+        return Response.json({ ok: false, error: "already in flight", dateEt }, { status: 409 });
+      }
+      // Run under waitUntil (matching the cron handlers below) so the container
+      // run survives the triggering client disconnecting/timing out — a run can
+      // take much longer than an HTTP client is willing to stay connected for,
+      // and a canceled fetch here would otherwise kill the run mid-flight and
+      // leave a stale inflight marker for up to INFLIGHT_TTL_SECONDS.
+      ctx.waitUntil(
+        triggerRunner(env, dateEt).then(async (result) => {
+          if (!result.ok) await alert(env, `Manual trigger run for ${dateEt} failed: HTTP ${result.status} ${JSON.stringify(result.body)}`);
+        }),
+      );
+      return Response.json({ ok: true, status: "started", dateEt }, { status: 202 });
     }
 
     return new Response("not found", { status: 404 });
