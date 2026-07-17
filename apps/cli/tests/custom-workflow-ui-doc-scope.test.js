@@ -9,7 +9,7 @@ describe("custom workflow UI guide scope", () => {
   test("documents smithers ui and gateway surfaces without retired product hosts", () => {
     const guide = readFileSync(guidePath, "utf8");
 
-    expect(guide).toContain("smithers ui");
+    expect(guide).toMatch(/(?:bunx smithers-orchestrator|smithers) ui\b/);
     expect(guide).toContain("gateway-react");
     expect(guide).not.toMatch(/\bapps\/smithers\b/);
     expect(guide).not.toMatch(/\bPWA\b/i);
