@@ -45,7 +45,7 @@ export class Runner extends Container<Env> {
           finalizeStatus: typeof body.finalizeStatus === "string" ? body.finalizeStatus : null,
           publishSkipped: typeof body.publishSkippedReason === "string" ? body.publishSkippedReason : null,
           failureDetail: Array.isArray(body.errors)
-            ? body.errors.join(" ").slice(-2000)
+            ? body.errors.join(" ").slice(-4000)
             : typeof body.error === "string"
               ? body.error.slice(-1000)
               : null,

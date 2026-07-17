@@ -125,7 +125,21 @@ export async function runOnce(): Promise<RunResult> {
 
   const publishMode = process.env.SIGNAL_PUBLISH_MODE?.trim() || "auto";
   const { exitCode, stderr } = await runSmithersCli(runId, { publishMode, configPath: CONFIG_PATH });
-  if (exitCode !== 0) errors.push(`smithers up exited ${exitCode}: ${redactSecrets(stderr.slice(-2000))}`);
+  if (exitCode !== 0) {
+    // The tail alone tends to be pure per-token agent-trace spam during a
+    // streaming step (dozens of JSON lines/sec), which can push the one line
+    // that actually explains an abort (e.g. "received SIGTERM"/"cancellation")
+    // out of a short tail. Surface those lines explicitly, in addition to the
+    // tail, so a mid-run cancellation source is diagnosable from run-status
+    // KV alone without needing to reproduce locally.
+    const signalLines = stderr
+      .split("\n")
+      .filter((line) => /SIGTERM|SIGINT|cancel|hijack|force-exit|out of memory|OOM/i.test(line))
+      .slice(0, 20);
+    const tail = redactSecrets(stderr.slice(-4000));
+    const signals = signalLines.length > 0 ? `\n--- cancellation/signal lines ---\n${redactSecrets(signalLines.join("\n"))}` : "";
+    errors.push(`smithers up exited ${exitCode}: ${tail}${signals}`);
+  }
 
   let published = false;
   let publishSkippedReason: string | null = null;
