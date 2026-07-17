@@ -156,7 +156,7 @@ declare const replayIdentity: (input: {
 type TraceEvent = Readonly<{
     readonly seq: number;
     readonly at: number;
-    readonly type: "schedule" | "barrier" | "fault" | "task" | "effect" | "opaque-effect" | "capability" | "wait" | "ambiguity" | "adapter";
+    readonly type: "schedule" | "barrier" | "fault" | "task" | "effect" | "opaque-effect" | "capability" | "wait" | "ambiguity" | "adapter" | "durability";
     readonly id?: string;
     readonly data?: ScenarioValue;
 }>;
@@ -486,10 +486,13 @@ type CleanupResource = Readonly<{
 }>;
 declare class CleanupScope {
     private readonly entries;
+    private readonly live;
     private closed;
     add(resource: CleanupResource, dispose: () => void | Promise<void>): () => void;
     register(kind: string, id: string, dispose: () => void | Promise<void>): () => void;
     pending(): readonly CleanupResource[];
+    track(resource: CleanupResource, operation: Promise<unknown>): () => void;
+    liveResources(): readonly CleanupResource[];
     close(budget?: number, timeoutMs?: number): Promise<void>;
 }
 

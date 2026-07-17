@@ -21,22 +21,25 @@ var init_ast = __esm({
 });
 
 // src/scenario/builder.ts
-var stableRunnerDigest, runners, runnersByBinding, stepRunner, step, barrier, fault, extension, scenario;
+import { createHash } from "crypto";
+var stableRunnerDigest, runners, runnersByBinding, anonymousBindingSequence, stepRunner, step, barrier, fault, extension, scenario;
 var init_builder = __esm({
   "src/scenario/builder.ts"() {
     "use strict";
     init_ast();
     stableRunnerDigest = (runner) => {
-      let hash = 2166136261;
-      for (const character of Function.prototype.toString.call(runner)) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-      return (hash >>> 0).toString(16).padStart(8, "0");
+      return createHash("sha256").update(Function.prototype.toString.call(runner)).digest("hex");
     };
     runners = /* @__PURE__ */ new WeakMap();
     runnersByBinding = /* @__PURE__ */ new Map();
+    anonymousBindingSequence = 0;
     stepRunner = (stepValue) => runners.get(stepValue) ?? (stepValue.runnerBinding ? runnersByBinding.get(stepValue.runnerBinding) : void 0);
     step = (id, options = {}) => {
-      const runnerBinding = options.run ? options.runnerBinding ?? `anonymous:${stableRunnerDigest(options.run)}` : options.runnerBinding;
-      if (options.run && runnerBinding) {
+      const explicitBinding = options.runnerBinding !== void 0;
+      const runnerBinding = options.run ? options.runnerBinding ?? `anonymous:${stableRunnerDigest(options.run)}:${anonymousBindingSequence++}` : options.runnerBinding;
+      if (options.run && runnerBinding && explicitBinding) {
+        const prior = runnersByBinding.get(runnerBinding);
+        if (prior && prior !== options.run) throw Object.assign(new Error(`RUNNER_BINDING_CONFLICT: ${runnerBinding} already names a different executable`), { code: "RUNNER_BINDING_CONFLICT", details: { runnerBinding } });
       }
       const value = freezeScenario({ kind: "step", id, ...options.input === void 0 ? {} : { input: options.input }, dependsOn: [...options.dependsOn ?? []], capabilities: [...options.capabilities ?? []], ...options.extension ? { extension: options.extension } : {}, ...runnerBinding ? { runnerBinding } : {} });
       if (options.run) {
@@ -169,13 +172,13 @@ var init_canonicalize = __esm({
 });
 
 // src/scenario/replayIdentity.ts
-import { createHash } from "crypto";
+import { createHash as createHash2 } from "crypto";
 var replayIdentity;
 var init_replayIdentity = __esm({
   "src/scenario/replayIdentity.ts"() {
     "use strict";
     init_canonicalize();
-    replayIdentity = (input) => "ri1:" + createHash("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
+    replayIdentity = (input) => "ri1:" + createHash2("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
   }
 });
 
@@ -456,7 +459,15 @@ var init_KernelRuntime = __esm({
         // forked and raced by the Effect runtime; the public runner never owns the
         // task fibers or implements a Promise race itself.
         runReadySet: (tasks) => Effect3.gen(function* () {
-          for (const { stepId, effect } of tasks) if (!active.has(stepId)) active.set(stepId, yield* Effect3.fork(effect));
+          const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
+          for (const { stepId, effect } of fresh.slice(1)) active.set(stepId, yield* Effect3.fork(effect));
+          if (fresh[0]) {
+            const first = yield* Effect3.fork(fresh[0].effect);
+            active.set(fresh[0].stepId, first);
+            const value = yield* Fiber2.join(first);
+            active.delete(fresh[0].stepId);
+            return { stepId: fresh[0].stepId, value };
+          }
           const winner = yield* Effect3.raceAll([...active.entries()].map(([stepId, fiber]) => Fiber2.join(fiber).pipe(Effect3.map((value) => ({ stepId, value })))));
           active.delete(winner.stepId);
           return winner;
@@ -494,6 +505,7 @@ var init_CleanupScope = __esm({
     "use strict";
     CleanupScope = class {
       entries = [];
+      live = /* @__PURE__ */ new Map();
       closed = false;
       add(resource, dispose) {
         if (this.closed) throw new Error("CLEANUP_SCOPE_CLOSED");
@@ -509,6 +521,22 @@ var init_CleanupScope = __esm({
       }
       pending() {
         return this.entries.map((e) => e.resource);
+      }
+      track(resource, operation) {
+        const key = `${resource.kind}/${resource.id}`;
+        this.live.set(key, { resource, operation });
+        let released = false;
+        const release = () => {
+          if (!released) {
+            released = true;
+            this.live.delete(key);
+          }
+        };
+        void operation.then(release, release);
+        return release;
+      }
+      liveResources() {
+        return [...this.live.values()].map((entry) => entry.resource);
       }
       async close(budget = 100, timeoutMs = 1e3) {
         this.closed = true;
@@ -542,6 +570,10 @@ var init_CleanupScope = __esm({
           if (!disposed) failed.push(entry);
         }
         this.entries.push(...failed.reverse());
+        const pending = [...this.live.values()];
+        if (pending.length && Date.now() < deadline) {
+          await Promise.race([Promise.allSettled(pending.map((entry) => entry.operation)), new Promise((resolve3) => setTimeout(resolve3, Math.max(0, deadline - Date.now())))]);
+        }
         if (error) throw error;
       }
     };
@@ -554,7 +586,7 @@ var init_leakAssertions = __esm({
   "src/cleanup/leakAssertions.ts"() {
     "use strict";
     assertNoLeaks = (scope, extra = []) => {
-      const leaks = [...scope.pending(), ...extra];
+      const leaks = [...scope.pending(), ...scope.liveResources(), ...extra];
       if (leaks.length) throw Object.assign(new Error(`CLEANUP_LEAK: ${leaks.map((x) => `${x.kind}/${x.id}`).join(", ")}`), { code: "CLEANUP_LEAK", details: { leaks } });
     };
   }
@@ -781,10 +813,18 @@ var init_runScenario = __esm({
                   return Promise.resolve(control.value);
                 }
                 if (control?.outcome === "fail") return Promise.reject(Object.assign(new Error(`effect ${name} failed by control`), { code: "CONTROLLED_EFFECT_FAILURE", details: control }));
-                if (control?.outcome === "hang") return new Promise(() => void 0);
+                if (control?.outcome === "hang") {
+                  const pending = new Promise(() => void 0);
+                  cleanup.track({ kind: "mediated-effect", id: effectId }, pending);
+                  return pending;
+                }
                 const beforeEffect = faultFor(ast.faults, "effect", "before-task");
                 if (beforeEffect) return Promise.reject(faultError(beforeEffect));
-                const invoke = () => settleKernel(Promise.resolve().then(operation), kernel, options.waitBudget ?? 1e4);
+                const invoke = () => {
+                  const pending = settleKernel(Promise.resolve().then(operation), kernel, options.waitBudget ?? 1e4);
+                  cleanup.track({ kind: "mediated-effect", id: effectId }, pending);
+                  return pending;
+                };
                 const run = control?.outcome === "duplicate" ? invoke().then(() => invoke()) : invoke();
                 return run.then((value2) => {
                   kernel.trace.emit({ type: "effect", id, data: { name, state: "requested" } });
@@ -792,18 +832,21 @@ var init_runScenario = __esm({
                   if (duringEffect) throw faultError(duringEffect);
                   journal.assertLease(selected.id, owner);
                   journal.effectApplied(effectId);
+                  kernel.trace.emit({ type: "durability", id, data: { operation: "effect-applied", effect: effectId, state: journal.state(effectId) } });
                   const effectFault = (controlledFault?.operation === "effect" && controlledFault.phase === "after-effect-before-journal" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-effect-before-journal");
                   if (effectFault) {
                     recordAmbiguity(ambiguity("effect-applied-journal-missing", { step: selected.id, effect: effectId, transition: "effect-applied->journal-missing", fault: effectFault.id }), id);
                     throw faultError(effectFault);
                   }
-                  journal.journal(effectId);
+                  if (!journal.journal(effectId)) throw Object.assign(new Error(`duplicate journal write ${effectId}`), { code: "JOURNAL_DUPLICATE" });
+                  kernel.trace.emit({ type: "durability", id, data: { operation: "journal-write", effect: effectId, state: journal.state(effectId) } });
                   const ackFault = (controlledFault?.phase === "after-journal-before-ack" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-journal-before-ack") ?? faultFor(ast.faults, "attempt-write", "after-journal-before-ack") ?? faultFor(ast.faults, "completion-cas", "after-journal-before-ack");
                   if (ackFault) {
                     recordAmbiguity(ambiguity("journal-applied-ack-missing", { step: selected.id, effect: effectId, transition: "journal-applied->ack-missing", fault: ackFault.id }), id);
                     throw faultError(ackFault);
                   }
                   journal.ack(effectId);
+                  kernel.trace.emit({ type: "durability", id, data: { operation: "ack", effect: effectId, state: journal.state(effectId) } });
                   const afterAck = (controlledFault?.phase === "after-ack" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-ack") ?? faultAt(ast.faults, "after-ack");
                   if (afterAck) throw faultError(afterAck);
                   kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved" } });
@@ -873,16 +916,21 @@ var init_runScenario = __esm({
             const runner = options.stepRunners?.[selected.id] ?? stepRunner(selected);
             if (runner) kernel.trace.emit({ type: "opaque-effect", id, data: { name: `step:${selected.id}`, controllable: false } });
             let value;
+            const runTask2 = () => {
+              const pending = Promise.resolve().then(() => runner(runtime, selected.input));
+              cleanup.track({ kind: "task-fiber", id: selected.id }, pending);
+              return pending;
+            };
             const duringFault = ast.faults.find((candidate) => candidate.phase === "during-task");
             if (runner && duringFault) {
-              const child = yield* Effect4.fork(Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e }));
+              const child = yield* Effect4.fork(Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e }));
               yield* Effect4.yieldNow();
               if (injectFault && harness.kind !== "unit-sim") yield* Effect4.tryPromise({ try: () => Promise.resolve(injectFault(duringFault)), catch: (e) => e });
               yield* Fiber3.interrupt(child);
               if (duringFault.operation === "resume") {
                 const item = ambiguityFor(duringFault, selected.id);
                 if (item) recordAmbiguity(item, id);
-                value = yield* Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
+                value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
               } else {
                 if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation") journal.loseLease(selected.id);
                 const item = ambiguityFor(duringFault, selected.id);
@@ -890,7 +938,7 @@ var init_runScenario = __esm({
                 throw faultError(duringFault);
               }
             }
-            if (runner && !duringFault) value = yield* Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
+            if (runner && !duringFault) value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
             const duplicateControl = runtimeKernel.controls.find("resolve-effect").find((control) => control.outcome === "duplicate" && (control.effect === selected.id || control.effect.startsWith(`${selected.id}:`)));
             if (duplicateControl && !ambiguities.some((item) => item.details.step === selected.id && item.outcome === "duplicate-delivery")) recordAmbiguity(ambiguity("duplicate-delivery", { step: selected.id, effect: duplicateControl.effect, transition: "effect-resolved->redelivered", journalState: journal.state(duplicateControl.effect) }), id);
             if (runtimeKernel.controls.peek()?.type === "cancel") {
@@ -902,7 +950,7 @@ var init_runScenario = __esm({
             if (pendingControl?.type === "task-restart" && pendingControl.step === selected.id) {
               runtimeKernel.controls.takeNext("task-restart");
               recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, transition: "task-completed->restarted" }), id);
-              if (runner) value = yield* Effect4.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
+              if (runner) value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
             }
             const during = controlledFault?.phase === "during-task" ? controlledFault : faultFor(ast.faults, "task", "during-task") ?? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "resume", "during-task") ?? faultAt(ast.faults, "during-task");
             if (during && during.operation !== "resume" && ["lease", "heartbeat", "cancellation"].includes(during.operation) && (runner !== void 0 || observedWait)) {
@@ -1998,6 +2046,10 @@ var assertion = (name, guarantee, check, message) => Object.freeze({ name, guara
   const events = effectEvents(result, name).filter((event) => event.data?.state === "resolved").length;
   if (!check(events, result)) throw new Error(`${guarantee} assertion failed for ${name}: ${message}`);
 } });
+var journaled = (result, name) => result.trace.filter((event) => {
+  const data = event.data;
+  return event.type === "durability" && data?.operation === "journal-write" && (data.effect === name || String(data.effect ?? "").endsWith(`:${name}`));
+}).length;
 var expectEffect = (name) => ({
   name,
   exactlyOnce: () => {
@@ -2009,7 +2061,7 @@ var expectEffect = (name) => ({
     return value;
   },
   atMostOnceJournaled: (result) => {
-    const value = assertion(name, "journaled-at-most-once", (events) => events <= 1 && events >= 1, "durable completion was absent or duplicated");
+    const value = assertion(name, "journaled-at-most-once", (_events, observed) => journaled(observed, name) === 1, "exactly one journal-write observation was required");
     if (result) value.assert(result);
     return value;
   },
@@ -2019,7 +2071,7 @@ var expectEffect = (name) => ({
     return value;
   },
   journalCas: (result) => {
-    const value = assertion(name, "journal-cas", (events) => events >= 1 && events <= 1, "journal CAS did not produce one terminal observation");
+    const value = assertion(name, "journal-cas", (_events, observed) => journaled(observed, name) === 1 && observed.trace.some((event) => event.type === "durability" && event.data?.operation === "ack"), "journal CAS did not produce one journal-write and ack transition");
     if (result) value.assert(result);
     return value;
   }
@@ -2196,6 +2248,7 @@ var realDbAdapter = (options) => {
 
 // src/adapters/realProcessAdapter.ts
 init_Harness();
+import { readFileSync, realpathSync } from "fs";
 var exited = (child, budgetMs = 1e3) => new Promise((resolve3) => {
   if (child.exitCode !== null || child.signalCode !== null) return resolve3();
   let timer;
@@ -2220,12 +2273,26 @@ var realProcessAdapter = (options) => {
     verifiedProductionIdentity: "smithers-engine:runWorkflow-child",
     supportedCutPoints: /* @__PURE__ */ new Set(["resume:during-task"]),
     admissionProbe: async () => {
+      let runnerSource = "";
+      try {
+        runnerSource = readFileSync(realpathSync(options.runnerPath), "utf8");
+      } catch (cause) {
+        throw Object.assign(new Error("real process admission requires the readable repository engineChildRunner source"), { code: "ADMISSION_FAILED", cause });
+      }
+      const productionSource = runnerSource.includes("runWorkflow") && runnerSource.includes("ensureSmithersTables") && runnerSource.includes("buildKillResumeWorkflow") && runnerSource.includes("SMITHERS_ENGINE_HANDSHAKE=runWorkflow:");
+      if (!productionSource) throw Object.assign(new Error("real process admission rejected: runner source is not the repository production runWorkflow adapter"), { code: "ADMISSION_FAILED" });
       const nonce = challenge();
       resource = await options.spawn(nonce);
       tracked.add(resource);
       const args = resource.child?.spawnargs ?? [];
       const executable = args[0] ? String(args[0]).split("/").pop() : "";
-      const productionRunner = args.some((arg) => arg === options.runnerPath);
+      const productionRunner = args[1] !== void 0 && (() => {
+        try {
+          return realpathSync(String(args[1])) === realpathSync(options.runnerPath);
+        } catch {
+          return false;
+        }
+      })();
       let stdout = "";
       resource.child.stdout?.on("data", (chunk) => {
         stdout += String(chunk);
