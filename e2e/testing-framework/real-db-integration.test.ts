@@ -42,17 +42,32 @@ describe("testing framework real-db admission", () => {
     const client = ((db as { $client?: Database }).$client); if (!client) throw new Error("createSmithers did not expose its real sqlite client"); clients.push(client);
     const adapter = new SmithersDb(db); const runId = "testing-framework-lease"; const now = Date.now();
     await adapter.insertRun({ runId, workflowName: "testing-framework", status: "running", createdAtMs: now - 100_000, startedAtMs: now - 100_000, heartbeatAtMs: now - 100_000, runtimeOwnerId: "old-owner" });
-    const resource = Object.assign(adapter, { path: dbPath, productionIdentity: "SmithersDb" as const, operations: {
-      lease: async () => {
-        const first = await adapter.claimRunForResume({ runId, expectedStatus: "running", expectedRuntimeOwnerId: "old-owner", expectedHeartbeatAtMs: now - 100_000, staleBeforeMs: now - 1_000, claimOwnerId: "new-owner", claimHeartbeatAtMs: now, requireStale: true });
-        const second = await adapter.claimRunForResume({ runId, expectedStatus: "running", expectedRuntimeOwnerId: "old-owner", expectedHeartbeatAtMs: now - 100_000, staleBeforeMs: now - 1_000, claimOwnerId: "other-owner", claimHeartbeatAtMs: now + 1, requireStale: true });
-        await adapter.heartbeatRun(runId, "old-owner", now + 2);
-        return { first, second };
-      },
-    }, close: () => { client.close(); } });
-    const result = await runScenario(scenario("real-db-lease", { steps: [step("lease", { run: () => "checked" })] }), { harness: integrationHarness({ adapter: realDbAdapter({ open: async () => resource }) }) });
+    await adapter.insertAttempt({ runId, nodeId: "node", iteration: 0, attempt: 1, state: "in-progress", startedAtMs: now - 100_000, runtimeOwnerId: "old-owner" });
+    const resource = Object.assign(adapter, { path: dbPath, productionIdentity: "SmithersDb" as const, close: () => { client.close(); } });
+    const resumeInput = { runId, expectedStatus: "running", expectedRuntimeOwnerId: "old-owner", expectedHeartbeatAtMs: now - 100_000, staleBeforeMs: now - 1_000, claimOwnerId: "new-owner", claimHeartbeatAtMs: now, requireStale: true };
+    const result = await runScenario(scenario("real-db-lease", { steps: [
+      step("claimRunForResume", { input: resumeInput }),
+      step("heartbeatRun", { dependsOn: ["claimRunForResume"], input: { runId, runtimeOwnerId: "old-owner", heartbeatAtMs: now + 2 } }),
+      step("claimAttemptCompletion#1", { dependsOn: ["heartbeatRun"], input: { runId, nodeId: "node", iteration: 0, attempt: 1, runtimeOwnerId: "old-owner", finishedAtMs: now + 3 } }),
+      step("claimAttemptCompletion#2", { dependsOn: ["claimAttemptCompletion#1"], input: { runId, nodeId: "node", iteration: 0, attempt: 1, runtimeOwnerId: "new-owner", finishedAtMs: now + 4 } }),
+      step("claimAttemptCompletion#3", { dependsOn: ["claimAttemptCompletion#2"], input: { runId, nodeId: "node", iteration: 0, attempt: 1, runtimeOwnerId: "new-owner", finishedAtMs: now + 5 } }),
+    ] }), { harness: integrationHarness({ adapter: realDbAdapter({ open: async () => resource }) }) });
     expect(result.status).toBe("finished");
+    expect(result.outputs.claimRunForResume).toBe(true);
+    expect(result.outputs["claimAttemptCompletion#1"]).toBe(false);
+    expect(result.outputs["claimAttemptCompletion#2"]).toBe(true);
+    expect(result.outputs["claimAttemptCompletion#3"]).toBe(false);
+    expect(result.ambiguity.some((item) => item.outcome === "lease-lost")).toBe(true);
+    expect(result.ambiguity.some((item) => item.outcome === "duplicate-delivery")).toBe(true);
     const verify = new SmithersDb(new (await import("bun:sqlite")).Database(dbPath));
-    try { const row = await verify.getRun(runId); expect(row?.runtimeOwnerId).toBe("new-owner"); expect(row?.heartbeatAtMs).toBe(now); } finally { verify.db.close(); }
+    try {
+      const row = await verify.getRun(runId);
+      const attempt = await verify.getAttempt(runId, "node", 0, 1);
+      expect(row?.runtimeOwnerId).toBe("new-owner");
+      expect(row?.heartbeatAtMs).toBe(now);
+      expect(attempt?.state).toBe("finished");
+      expect(attempt?.finishedAtMs).toBe(now + 4);
+      expect((await verify.listAttempts(runId, "node", 0)).filter((candidate) => candidate.state === "finished")).toHaveLength(1);
+    } finally { verify.db.close(); }
   });
 });

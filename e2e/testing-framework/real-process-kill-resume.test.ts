@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { buildKillResumeWorkflow } from "../harness/killResumeWorkflow.ts";
 import { fault, e2eHarness, realProcessAdapter, runScenario, scenario, step } from "@smithers-orchestrator/testing";
 
 describe("testing framework real-process durability", () => {
@@ -23,18 +24,20 @@ describe("testing framework real-process durability", () => {
         child = spawnChild("initial", nonce);
         const waitFor = async (predicate: () => boolean, description: string) => { const deadline = Date.now() + 30_000; while (!predicate() && Date.now() < deadline) await Bun.sleep(10); if (!predicate()) throw new Error(`timed out waiting for ${description}`); };
         await waitFor(() => existsSync(started), "B.started");
-        return { pid: child.pid!, child, handshake: async (expected: string) => { await waitFor(() => initialOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${expected}`), "initial engine handshake"); return expected; }, kill: (signal?: string) => { child!.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined, resume: async (resumeNonce: string) => {
+        const observe = async () => { const db = new SmithersDb(new (await import("bun:sqlite")).Database(dbPath)); let fixture: ReturnType<typeof buildKillResumeWorkflow> | undefined; try { const attempts = await Effect.runPromise(db.listAttemptsForRun("testing-framework-kill")); const b = attempts.filter((attempt) => attempt.nodeId === "node-b"); fixture = buildKillResumeWorkflow({ dbPath, markerDir, counterFile: counter, mode: "resume" }); const rows = await (fixture.db as unknown as { select: () => { from: (table: unknown) => Promise<readonly { nodeId?: string; value?: number }[]> } }).select().from(fixture.tables.b); const outputPersisted = rows.some((row) => row.nodeId === "node-b" && row.value === 20); const journalWritten = b.some((attempt) => attempt.state === "finished"); return { effectApplied: existsSync(started), journalWritten, outputPersisted }; } finally { (fixture?.db as unknown as { $client?: { close?: () => void } })?.$client?.close?.(); db.db.close(); } };
+        return { pid: child.pid!, child, handshake: async (expected: string) => { await waitFor(() => initialOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${expected}`), "initial engine handshake"); return expected; }, kill: (signal?: string) => { child!.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined, observeDurableState: observe, resume: async (resumeNonce: string) => {
           resumed = spawnChild("resume", resumeNonce);
           const resumedChild = resumed;
           let resumedOutput = "";
           resumedChild.stdout?.on("data", (chunk) => { resumedOutput += String(chunk); });
           await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("resume child did not exit within 30s")), 30_000); resumedChild.once("exit", () => { clearTimeout(timer); resolve(); }); resumedChild.once("error", (error) => { clearTimeout(timer); reject(error); }); });
-          return { pid: resumedChild.pid!, child: resumedChild, handshake: async (nonce: string) => resumedOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) ? nonce : "", resultStatus: () => resumedOutput.match(/RESULT_STATUS=([^\n]+)/)?.[1], kill: (signal?: string) => { resumedChild.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined };
+          return { pid: resumedChild.pid!, child: resumedChild, handshake: async (nonce: string) => resumedOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) ? nonce : "", resultStatus: () => resumedOutput.match(/RESULT_STATUS=([^\n]+)/)?.[1], kill: (signal?: string) => { resumedChild.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined, observeDurableState: observe };
         } };
       } });
       const result = await runScenario(scenario("real-process-restart", { steps: [step("resume", { run: (runtime) => runtime.effect("durable-output", () => "resumed") })], faults: [fault("sigkill", "during-task", "resume")] }), { harness: e2eHarness({ adapter }), waitBudget: 30_000 });
       expect(result.status).toBe("finished");
       expect(result.ambiguity.some((item) => item.outcome === "restart-in-task")).toBe(true);
+      expect(result.ambiguity.some((item) => item.outcome === "effect-applied-journal-missing")).toBe(true);
       const code = await new Promise<number | null>((resolve, reject) => { if (resumed!.exitCode !== null) return resolve(resumed!.exitCode); const timer = setTimeout(() => reject(new Error("resume child did not exit within 30s")), 30_000); resumed!.once("exit", (value) => { clearTimeout(timer); resolve(value); }); resumed!.once("error", (error) => { clearTimeout(timer); reject(error); }); });
       expect(code).toBe(0);
       expect(readFileSync(join(markerDir, "B.done"), "utf8").length).toBeGreaterThan(0);
@@ -46,6 +49,11 @@ describe("testing framework real-process durability", () => {
         const bAttempts = attempts.filter((attempt) => attempt.nodeId === "node-b");
         expect(bAttempts.length).toBeGreaterThanOrEqual(2);
         expect(bAttempts.some((attempt) => attempt.state === "finished")).toBe(true);
+        const outputFixture = buildKillResumeWorkflow({ dbPath, markerDir, counterFile: counter, mode: "resume" });
+        try {
+          const outputRows = await (outputFixture.db as unknown as { select: () => { from: (table: unknown) => Promise<readonly { nodeId?: string; value?: number }[]> } }).select().from(outputFixture.tables.b);
+          expect(outputRows.some((row) => row.nodeId === "node-b" && row.value === 20)).toBe(true);
+        } finally { (outputFixture.db as unknown as { $client?: { close?: () => void } }).$client?.close?.(); }
       } finally { reopened.db.close(); }
     } finally { for (const process of [child, resumed]) if (process?.pid && process.exitCode === null) process.kill("SIGKILL"); rmSync(root, { recursive: true, force: true }); }
   }, { timeout: 60_000 });

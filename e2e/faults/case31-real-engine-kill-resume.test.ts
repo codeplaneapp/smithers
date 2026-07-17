@@ -260,7 +260,7 @@ describe("case31 real engine kill + resume durability", () => {
       }),
     ]);
 
-    // Exactly-once side effect: node A (committed before the kill) is NOT
+    // Durable idempotent completion: node A (committed before the kill) is NOT
     // re-executed on resume, so it appears once. Node B was interrupted
     // (no output committed before the kill) so it re-executes on resume and
     // appears twice — but still commits exactly one output row (asserted above).

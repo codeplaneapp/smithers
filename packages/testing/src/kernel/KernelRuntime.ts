@@ -1,4 +1,4 @@
-import { Context, Effect, Fiber, Layer } from "effect";
+import { Context, Effect, Either, Fiber, Layer } from "effect";
 import type { ControlMessage } from "../control/ControlMessage.ts";
 import { ControlBus } from "./ControlBus.ts";
 import { SeededScheduler } from "./SeededScheduler.ts";
@@ -18,17 +18,21 @@ export const makeKernel = (seed: number, controls: readonly ControlMessage[] = [
     // task fibers or implements a Promise race itself.
     runReadySet: (tasks) => Effect.gen(function* () {
       const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
-      for (const { stepId, effect } of fresh.slice(1)) active.set(stepId, yield* Effect.fork(effect));
-      if (fresh[0]) {
-        const first = yield* Effect.fork(fresh[0].effect);
-        active.set(fresh[0].stepId, first);
-        const value = yield* Fiber.join(first);
-        active.delete(fresh[0].stepId);
-        return { stepId: fresh[0].stepId, value };
-      }
-      const winner = yield* Effect.raceAll([...active.entries()].map(([stepId, fiber]) => Fiber.join(fiber).pipe(Effect.map((value) => ({ stepId, value })))));
+      for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect.fork(effect));
+      if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
+      // Every active fiber participates in the race, including newly forked
+      // fibers. Joining fresh[0] makes a slow first task hide a completed
+      // sibling and delays newly-unblocked work.
+      const winner = yield* Effect.raceAll([...active.entries()].map(([stepId, fiber]) => Fiber.join(fiber).pipe(Effect.either, Effect.map((exit) => ({ stepId, exit })))));
       active.delete(winner.stepId);
-      return winner;
+      if (Either.isLeft(winner.exit)) {
+        // A terminal failure cancels every sibling still owned by this ready
+        // set before the failure crosses the public boundary.
+        yield* Effect.all([...active.values()].map((fiber) => Fiber.interrupt(fiber)));
+        active.clear();
+        return yield* Effect.fail(winner.exit.left);
+      }
+      return { stepId: winner.stepId, value: winner.exit.right };
     }),
   });
   return Object.freeze({ ...runtime, executor });

@@ -1,5 +1,7 @@
 import type { ChildProcess } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { registerTrustedAdapter, type HarnessAdapter } from "../harness/Harness.ts";
 import type { ScenarioFault } from "../scenario/ast.ts";
 
@@ -17,6 +19,20 @@ export type RealProcessResource = Readonly<{
   readonly healthy?: () => boolean | Promise<boolean>;
   /** Production-owned result observed from stdout/durable completion. */
   readonly resultStatus?: () => string | undefined | Promise<string | undefined>;
+  /** Reads durable/effect evidence owned by the production fixture. */
+  readonly observeDurableState?: () => RealProcessDurableState | Promise<RealProcessDurableState>;
+}>;
+export type RealProcessDurableState = Readonly<{ readonly effectApplied: boolean; readonly journalWritten: boolean; readonly outputPersisted: boolean }>;
+export type RealProcessObservation = Readonly<{
+  readonly terminatedBy: "SIGKILL";
+  readonly preKillEffectApplied: boolean;
+  readonly journalWritten: boolean;
+  readonly outputPersisted: boolean;
+  readonly resumed: boolean;
+  readonly resumedStatus?: string;
+  readonly resumedEffectApplied?: boolean;
+  readonly resumedJournalWritten?: boolean;
+  readonly resumedOutputPersisted?: boolean;
 }>;
 export type RealProcessAdapterOptions = Readonly<{
   readonly spawn: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
@@ -35,6 +51,15 @@ const exited = (child: ChildProcess, budgetMs = 1_000): Promise<void> => new Pro
   timer = setTimeout(done, budgetMs);
 });
 
+const verifiedChild = (resource: RealProcessResource, expectedRunner: string, nonce: string): boolean => {
+  const args = resource.child.spawnargs ?? [];
+  if (resource.child.pid !== resource.pid || resource.pid <= 0 || resource.pid === process.pid) return false;
+  if (String(args[0] ?? "").split("/").pop() !== "bun") return false;
+  if (!args[1]) return false;
+  try { if (realpathSync(String(args[1])) !== expectedRunner) return false; } catch { return false; }
+  return args.some((arg) => String(arg) === nonce);
+};
+
 export const realProcessAdapter = (options: RealProcessAdapterOptions): HarnessAdapter => {
   let resource: RealProcessResource | undefined;
   const tracked = new Set<RealProcessResource>();
@@ -45,10 +70,11 @@ export const realProcessAdapter = (options: RealProcessAdapterOptions): HarnessA
     verifiedProductionIdentity: "smithers-engine:runWorkflow-child",
     supportedCutPoints: new Set(["resume:during-task"]),
     admissionProbe: async () => {
-      let runnerSource = "";
-      try { runnerSource = readFileSync(realpathSync(options.runnerPath), "utf8"); } catch (cause) { throw Object.assign(new Error("real process admission requires the readable repository engineChildRunner source"), { code: "ADMISSION_FAILED", cause }); }
-      const productionSource = runnerSource.includes("runWorkflow") && runnerSource.includes("ensureSmithersTables") && runnerSource.includes("buildKillResumeWorkflow") && runnerSource.includes("SMITHERS_ENGINE_HANDSHAKE=runWorkflow:");
-      if (!productionSource) throw Object.assign(new Error("real process admission rejected: runner source is not the repository production runWorkflow adapter"), { code: "ADMISSION_FAILED" });
+      const repositoryRunner = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..", "e2e/harness/engineChildRunner.ts");
+      let suppliedRunner: string;
+      let expectedRunner: string;
+      try { suppliedRunner = realpathSync(options.runnerPath); expectedRunner = realpathSync(repositoryRunner); } catch (cause) { throw Object.assign(new Error("real process admission requires the repository-owned engineChildRunner"), { code: "ADMISSION_FAILED", cause }); }
+      if (suppliedRunner !== expectedRunner) throw Object.assign(new Error("real process admission rejected: runner identity is not repository-owned"), { code: "ADMISSION_FAILED", details: { suppliedRunner, expectedRunner } });
       const nonce = challenge();
       resource = await options.spawn(nonce);
       tracked.add(resource);
@@ -60,7 +86,7 @@ export const realProcessAdapter = (options: RealProcessAdapterOptions): HarnessA
       // The production runner is the executable script entrypoint, not an argv
       // suffix. This rejects `bun -e ... <engineChildRunner.ts>` echoers even
       // when they print the public marker and return a truthy callback result.
-      const productionRunner = args[1] !== undefined && (() => { try { return realpathSync(String(args[1])) === realpathSync(options.runnerPath); } catch { return false; } })();
+      const productionRunner = args[1] !== undefined && (() => { try { return realpathSync(String(args[1])) === expectedRunner; } catch { return false; } })();
       let stdout = "";
       resource.child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
       // The adapter, not the caller's handshake callback, authenticates the
@@ -68,12 +94,14 @@ export const realProcessAdapter = (options: RealProcessAdapterOptions): HarnessA
       // exact executable + exact runner-path identity checks.
       const deadline = Date.now() + 250;
       while (!stdout.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-      const identityVerified = resource.child && resource.child.pid === resource.pid && resource.pid !== process.pid && Number.isInteger(resource.pid) && resource.pid > 0 && executable === "bun" && productionRunner;
+      const nonceInArgv = args.some((arg) => String(arg) === nonce);
+      const identityVerified = resource.child && verifiedChild(resource, expectedRunner, nonce) && Number.isInteger(resource.pid) && executable === "bun" && productionRunner && nonceInArgv;
       // Some callers attach their stdout consumer before handing the resource
       // to the adapter. In that case the marker is already consumed; the
       // callback is accepted only as a liveness hint after the independent,
       // exact command identity checks above have passed.
       const markerVerified = stdout.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) || (identityVerified && await resource.handshake(nonce) === nonce);
+      nonces.delete(nonce);
       if (!identityVerified || !markerVerified || (resource.healthy && !(await resource.healthy()))) throw Object.assign(new Error("real process failed admission: the child did not prove the repository production runWorkflow protocol"), { code: "ADMISSION_FAILED" });
       try { process.kill(resource.pid, 0); } catch (cause) { throw Object.assign(new Error("real process is not a live production child"), { code: "ADMISSION_FAILED", cause }); }
     },
@@ -94,23 +122,35 @@ export const realProcessAdapter = (options: RealProcessAdapterOptions): HarnessA
       if (operation !== "runWorkflow") throw Object.assign(new Error(`REAL_PROCESS_OPERATION_UNAVAILABLE:${String(operation)}`), { code: "ADMISSION_FAILED" });
       return resource.pid;
     },
-    injectFault: async (fault: ScenarioFault) => {
+    injectFault: async (fault: ScenarioFault): Promise<RealProcessObservation> => {
       if (!resource) throw new Error("REAL_PROCESS_NOT_ADMITTED");
       if (fault.operation !== "resume" || fault.phase !== "during-task") throw Object.assign(new Error(`REAL_PROCESS_FAULT_UNAVAILABLE:${fault.operation}:${fault.phase}`), { code: "ADMISSION_FAILED" });
+      // Capture the durable/effect observation before termination. Reading it
+      // after replacement can accidentally report the resumed child's state
+      // as evidence for the killed attempt.
+      const preKill = await resource.observeDurableState?.();
+      if (!preKill) throw Object.assign(new Error("REAL_PROCESS_OBSERVATION_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
       await resource.kill("SIGKILL");
       await exited(resource.child);
       if (resource.child.signalCode !== "SIGKILL") throw Object.assign(new Error("real process replacement requires observed SIGKILL terminal event"), { code: "ADMISSION_FAILED", details: { pid: resource.pid, signalCode: resource.child.signalCode } });
-      if (!resource.resume) throw Object.assign(new Error("REAL_PROCESS_RESUME_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
+      if (!resource.resume || !resource.observeDurableState) throw Object.assign(new Error("REAL_PROCESS_OBSERVATION_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
       const nonce = challenge();
       const resumed = await resource.resume(nonce);
       if (resumed.pid === resource.pid) throw Object.assign(new Error("real process resume must create a distinct child"), { code: "ADMISSION_FAILED" });
-      if (await resumed.handshake(nonce) !== nonce) throw Object.assign(new Error("resumed process failed nonce challenge"), { code: "ADMISSION_FAILED" });
+      const runnerPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..", "e2e/harness/engineChildRunner.ts");
+      let resumedRunner: string;
+      try { resumedRunner = realpathSync(runnerPath); } catch (cause) { throw Object.assign(new Error("resumed process runner is unavailable"), { code: "ADMISSION_FAILED", cause }); }
+      if (!verifiedChild(resumed, resumedRunner, nonce) || await resumed.handshake(nonce) !== nonce) throw Object.assign(new Error("resumed process failed executable identity and nonce challenge"), { code: "ADMISSION_FAILED" });
       const exitCode = resumed.child.exitCode;
       if (!resumed.resultStatus) throw Object.assign(new Error("real process resume must expose an adapter-owned production result observer"), { code: "ADMISSION_FAILED" });
       const status = await resumed.resultStatus();
+      if (!resumed.observeDurableState) throw Object.assign(new Error("REAL_PROCESS_RESUME_OBSERVATION_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
+      const resumedState = await resumed.observeDurableState();
       if (exitCode !== 0 || status !== "finished") throw Object.assign(new Error("real process resume did not produce a successful production result"), { code: "ADMISSION_FAILED", details: { pid: resumed.pid, exitCode, status } });
+      if (!resumedState.outputPersisted) throw Object.assign(new Error("real process resume did not durably persist the expected output"), { code: "ADMISSION_FAILED", details: { pid: resumed.pid, outputPersisted: resumedState.outputPersisted } });
       tracked.add(resumed);
       resource = resumed;
+      return { terminatedBy: "SIGKILL", preKillEffectApplied: preKill.effectApplied, journalWritten: preKill.journalWritten, outputPersisted: preKill.outputPersisted, resumed: true, resumedStatus: status, resumedEffectApplied: resumedState.effectApplied, resumedJournalWritten: resumedState.journalWritten, resumedOutputPersisted: resumedState.outputPersisted };
     },
     serializeError: options.serializeError,
     extensionExecutors: options.extensionExecutors,

@@ -2,12 +2,13 @@ export type CleanupResource = Readonly<{ readonly kind: string; readonly id: str
 export class CleanupScope {
   private readonly entries: { resource: CleanupResource; dispose: () => void | Promise<void> }[] = [];
   private readonly live = new Map<string, { resource: CleanupResource; operation: Promise<unknown> }>();
+  private liveSequence = 0;
   private closed = false;
   add(resource: CleanupResource, dispose: () => void | Promise<void>): () => void { if (this.closed) throw new Error("CLEANUP_SCOPE_CLOSED"); const entry = { resource, dispose }; this.entries.push(entry); return () => { const i = this.entries.indexOf(entry); if (i >= 0) this.entries.splice(i, 1); }; }
   register(kind: string, id: string, dispose: () => void | Promise<void>): () => void { return this.add({ kind, id }, dispose); }
   pending(): readonly CleanupResource[] { return this.entries.map((e) => e.resource); }
   track(resource: CleanupResource, operation: Promise<unknown>): () => void {
-    const key = `${resource.kind}/${resource.id}`;
+    const key = `${resource.kind}/${resource.id}#${this.liveSequence++}`;
     this.live.set(key, { resource, operation });
     let released = false;
     const release = () => { if (!released) { released = true; this.live.delete(key); } };

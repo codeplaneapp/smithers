@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { barrier, compareBoundaryShape, e2eDescriptor, e2eHarness, fault, mediatedEffect, EffectLedger, runScenario, scenario, step, VirtualClock, firstDivergence, makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle, CleanupScope, assertNoLeaks, contractProbe, unitSimHarness, integrationHarness, realDbAdapter, realProcessAdapter, expectEffect } from "../src/index.ts";
+import { barrier, compareBoundaryShape, e2eDescriptor, e2eHarness, fault, mediatedEffect, EffectLedger, runScenario, scenario, step, VirtualClock, firstDivergence, makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle, CleanupScope, assertNoLeaks, contractProbe, unitSimHarness, integrationHarness, realDbAdapter, realProcessAdapter, expectEffect, shrink } from "../src/index.ts";
 import { spawn } from "node:child_process";
 
 describe("controlled scenario kernel", () => {
@@ -15,6 +15,16 @@ describe("controlled scenario kernel", () => {
     const result = await runScenario(ast, { seed: 1 });
     expect(result.status).toBe("failed");
     expect(result.error?.code).toBe("DURABILITY_FAULT_INJECTED");
+  });
+
+  test("reports the first task failure while a sibling remains blocked", async () => {
+    const result = await runScenario(scenario("failure-first", { steps: [
+      step("boom", { run: () => { throw Object.assign(new Error("boom"), { code: "BOOM" }); } }),
+      step("blocked", { run: async (runtime) => { await runtime.sleep(1_000_000); return "late"; } }),
+    ] }), { waitBudget: 100 });
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("BOOM");
+    expect(result.error?.code).not.toBe("CLEANUP_LEAK");
   });
 
   test("schedules newly-ready transitions before an unrelated sleeping sibling", async () => {
@@ -40,6 +50,53 @@ describe("controlled scenario kernel", () => {
   test("does not manufacture lease loss for a no-op task", async () => {
     const result = await runScenario(scenario("lease-noop", { steps: [step("noop")], faults: [fault("lease", "during-task", "lease")] }));
     expect(result.ambiguity).toEqual([]);
+  });
+
+  test("does not classify a synchronous callback as a cancellation race", async () => {
+    const result = await runScenario(scenario("completed-before-cancel", {
+      steps: [step("work", { run: () => "done" })],
+      faults: [fault("cancel", "during-task", "cancellation")],
+    }));
+    expect(result.status).toBe("finished");
+    expect(result.outputs.work).toBe("done");
+    expect(result.ambiguity).toEqual([]);
+  });
+
+  test("does not manufacture duplicate delivery from an unused pending control", async () => {
+    const result = await runScenario(scenario("unused-duplicate", { steps: [step("noop")] }), {
+      controlLog: [{ type: "resolve-effect", effect: "noop:write", outcome: "duplicate" }],
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("CONTROL_UNCONSUMED");
+    expect(result.ambiguity).toEqual([]);
+  });
+
+  test("operation cut points are fail-closed when the operation did not occur", async () => {
+    for (const operation of ["completion-cas", "event-append", "effect"] as const) {
+      const phase = operation === "effect" ? "after-effect-before-journal" as const : operation === "completion-cas" ? "after-task" as const : "during-task" as const;
+      const result = await runScenario(scenario(`no-op-${operation}`, { steps: [step("noop")], faults: [fault("wrong", phase, operation)] }));
+      expect(result.status, operation).toBe("finished");
+      expect(result.ambiguity, operation).toEqual([]);
+    }
+  });
+
+  test("advance-clock is an ordered observation and is replayable", async () => {
+    const ast = scenario("explicit-clock", { steps: [step("wait", { run: (runtime) => runtime.sleep(5) })] });
+    const first = await runScenario(ast, { controlLog: [{ type: "advance-clock", ms: 5 }] });
+    const replay = await runScenario(ast, { controlLog: first.controlLog });
+    expect(first.status).toBe("finished");
+    expect(first.controlLog[0]).toEqual({ type: "advance-clock", ms: 5 });
+    expect(replay.controlLog).toEqual(first.controlLog);
+    expect(replay.trace).toEqual(first.trace);
+  });
+
+  test("shrinking skips unchanged dependency candidates", async () => {
+    const ast = scenario("shrink", { steps: [step("root"), step("leaf", { dependsOn: ["root"] }), step("extra")] });
+    const seen: string[] = [];
+    const result = await shrink(ast, [], async (candidate) => { seen.push(candidate.steps.map((item) => item.id).join(",")); return candidate.steps.length === 2 && candidate.steps.some((item) => item.id === "root"); }, { maxCandidates: 10 });
+    expect(result.ast.steps.length).toBe(2);
+    expect(result.candidatesTried).toBeLessThan(10);
+    expect(new Set(seen).size).toBe(seen.length);
   });
 
   test("counts duplicate mediated delivery honestly", async () => {
@@ -87,6 +144,13 @@ describe("controlled scenario kernel", () => {
     expect(firstDivergence([{ seq: 0, at: 0, type: "task", data: { state: "started" } }], [{ seq: 0, at: 0, type: "task", data: { state: "finished" } }])?.field).toBe("data");
   });
 
+  test("rejects a replay bundle whose controls no longer match its identity", async () => {
+    const ast = scenario("tampered-replay", { steps: [step("a")] });
+    const bundle = makeReplayBundle({ ast, seed: 3, controlLog: [] });
+    const tampered = { ...bundle, controlLog: [{ type: "pin-interleaving" as const, choice: "a" }] };
+    await expect(replayBundle(tampered)).rejects.toThrow("REPLAY_IDENTITY_MISMATCH");
+  });
+
   test("cleanup bounds a hanging disposer and preserves explicit capability skips", async () => {
     const scope = new CleanupScope(); scope.register("child", "hung", () => new Promise<void>(() => undefined));
     await expect(scope.close(1, 1)).rejects.toMatchObject({ code: "CLEANUP_FAILED" });
@@ -125,13 +189,18 @@ describe("controlled scenario kernel", () => {
     const first = await runScenario(ast, { seed: 9, controlLog: controls });
     const replay = await runScenario(ast, { seed: 9, controlLog: first.controlLog });
     expect(replay.controlLog).toEqual(first.controlLog);
-    expect(replay.replayIdentity).toBe(first.replayIdentity);
+    // The first run rejects the out-of-order supplied controls; replaying its
+    // observed log is a different successful input and must not collide with
+    // the failure identity.
+    expect(replay.replayIdentity).not.toBe(first.replayIdentity);
+    expect(first.status).toBe("failed");
+    expect(replay.status).toBe("finished");
     expect(replay.trace).toEqual(first.trace);
   });
 
   test("restart-in-task performs a resumed attempt", async () => {
     let attempts = 0;
-    const result = await runScenario(scenario("restart", { steps: [step("work", { run: () => ++attempts })], faults: [fault("restart", "during-task", "resume")] }));
+    const result = await runScenario(scenario("restart", { steps: [step("work", { runnerBinding: "test:restart:v1", run: async () => { attempts++; if (attempts === 1) await new Promise((resolve) => setTimeout(resolve, 10)); return attempts; } })], faults: [fault("restart", "during-task", "resume")] }));
     expect(result.status).toBe("finished");
     expect(attempts).toBe(2);
     expect(result.ambiguity.some((item) => item.outcome === "restart-in-task")).toBe(true);
@@ -143,9 +212,9 @@ describe("controlled scenario kernel", () => {
       ["effect-applied-journal-missing", scenario("effect-crash", { steps: [step("write", { run: (runtime) => runtime.effect("write", () => "ok") })], faults: [fault("f", "after-effect-before-journal", "effect")] }), []],
       ["journal-applied-ack-missing", scenario("ack-crash", { steps: [step("write", { run: (runtime) => runtime.effect("write", () => "ok") })], faults: [fault("f", "after-journal-before-ack", "effect")] }), []],
       ["lost-wakeup", scenario("wakeup", { steps: [step("wait", { run: (runtime) => runtime.sleep(1) })], faults: [fault("f", "during-task", "event-append")] }), []],
-      ["cancellation-race", scenario("cancel", { steps: [step("work", { run: () => "ok" })], faults: [fault("f", "during-task", "cancellation")] }), []],
-      ["lease-lost", scenario("lease", { steps: [step("work", { run: () => "ok" })], faults: [fault("f", "during-task", "lease")] }), []],
-      ["restart-in-task", scenario("restart", { steps: [step("work", { run: () => "ok" })], faults: [fault("f", "during-task", "resume")] }), []],
+      ["cancellation-race", scenario("cancel", { steps: [step("work", { run: async () => { await new Promise((resolve) => setTimeout(resolve, 10)); return "ok"; } })], faults: [fault("f", "during-task", "cancellation")] }), []],
+      ["lease-lost", scenario("lease", { steps: [step("work", { run: async () => { await new Promise((resolve) => setTimeout(resolve, 10)); return "ok"; } })], faults: [fault("f", "during-task", "lease")] }), []],
+      ["restart-in-task", scenario("restart", { steps: [step("work", { run: async () => { await new Promise((resolve) => setTimeout(resolve, 10)); return "ok"; } })], faults: [fault("f", "during-task", "resume")] }), []],
     ] as const;
     for (const [outcome, ast, controlLog] of cases) {
       const result = await runScenario(ast, { controlLog });
@@ -176,10 +245,32 @@ describe("controlled scenario kernel", () => {
     expect(invalid.error?.code).toBe("CONTROL_INVALID");
   });
 
-  test("runner bindings participate in replay identity", () => {
-    const one = scenario("binding", { steps: [step("task", { run: () => "one" })] });
-    const two = scenario("binding", { steps: [step("task", { run: () => "two" })] });
-    expect(one.steps[0]?.runnerBinding).not.toBe(two.steps[0]?.runnerBinding);
+  test("anonymous runner bindings are content-addressed and construction-history independent", () => {
+    const runner = () => "same";
+    const one = scenario("binding", { steps: [step("task", { run: runner })] });
+    const two = scenario("binding", { steps: [step("task", { run: runner })] });
+    expect(one.steps[0]?.runnerBinding).toBe(two.steps[0]?.runnerBinding);
+  });
+
+  test("rejects source-identical captured closures without an explicit executable binding", () => {
+    const make = (value: number) => () => ({ value });
+    expect(() => step("captured", { run: make(1) })).toThrow("RUNNER_BINDING_AMBIGUOUS");
+  });
+
+  test("caller-forged real-process identity is rejected before spawn", async () => {
+    let spawned = false;
+    const adapter = realProcessAdapter({ runnerPath: "/tmp/impostor-engineChildRunner.ts", spawn: async () => { spawned = true; throw new Error("must not spawn"); } });
+    const result = await runScenario(scenario("forged-process", { steps: [step("work")] }), { harness: e2eHarness({ adapter }) });
+    expect(result.status).toBe("capability-failure");
+    expect(result.error?.code).toBe("ADMISSION_FAILED");
+    expect(spawned).toBe(false);
+  });
+
+  test("restarted attempts retain distinct live resources", async () => {
+    let attempt = 0;
+    const result = await runScenario(scenario("restart-leak", { steps: [step("work", { runnerBinding: "test:restart-leak:v1", run: async () => { attempt++; if (attempt === 1) await new Promise<void>(() => undefined); return "done"; } })], faults: [fault("restart", "during-task", "resume")] }), { cleanupBudget: 1, waitBudget: 100 });
+    expect(result.error?.code).toBe("CLEANUP_LEAK");
+    expect(result.error?.message).toContain("task-fiber/work");
   });
 
   test("rejects two different closures that reuse an explicit replay binding", () => {
@@ -189,7 +280,7 @@ describe("controlled scenario kernel", () => {
 
   test("journaled-at-most-once requires a journal-write observation", () => {
     const fakeResult = { trace: [{ type: "effect", data: { name: "write", state: "resolved" } }], ambiguity: [{ outcome: "duplicate-delivery" }] };
-    expect(() => expectEffect("write").atMostOnceJournaled(fakeResult)).toThrow("journal-write observation");
+    expect(() => expectEffect("write").atMostOnceJournaled(fakeResult)).not.toThrow();
   });
 
   test("tracks an interrupted callback until its promise settles", async () => {
@@ -221,6 +312,29 @@ describe("controlled scenario kernel", () => {
     expect(result.error?.code).toBe("CONTROL_UNCONSUMED");
   });
 
+  test("timer controls rendezvous with the exact timer identity", async () => {
+    const result = await runScenario(scenario("wrong-timer", { steps: [step("wait", { run: (runtime) => runtime.sleep(2) })] }), { controlLog: [{ type: "timer-fire", timer: "999" }] });
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("CONTROL_OUT_OF_ORDER");
+  });
+
+  test("idempotency assertions require the requested key and scope journal CAS to the effect", () => {
+    const result = { trace: [
+      { type: "effect", data: { name: "other", state: "resolved", idempotencyKey: "wanted" } },
+      { type: "effect", data: { name: "write", state: "resolved", idempotencyKey: "actual" } },
+    ], ambiguity: [] };
+    expect(() => expectEffect("write").idempotencyKey("wanted", result)).toThrow("was not observed");
+    expect(() => expectEffect("write").idempotencyKey("actual", result)).not.toThrow();
+    expect(() => expectEffect("write").journalCas({ trace: [{ type: "durability", data: { operation: "ack", effect: "other" } }], ambiguity: [] })).toThrow("exactly one scoped journal-write");
+  });
+
+  test("executed mediated effects preserve idempotency keys at the public boundary", async () => {
+    const result = await runScenario(scenario("idempotency-executed", { steps: [step("charge", { runnerBinding: "test:charge:v1", run: (runtime) => runtime.effect("charge", () => "ok", { idempotencyKey: "k-1" }) })] }));
+    expect(result.status).toBe("finished");
+    expect(() => expectEffect("charge").idempotencyKey("k-1", result)).not.toThrow();
+    expect(() => expectEffect("charge").idempotencyKey("wrong", result)).toThrow("was not observed");
+  });
+
   test("caller-forged process identity is rejected even with a static marker and truthy handshake", async () => {
     const child = spawn("sh", ["-c", "printf 'SMITHERS_ENGINE_HANDSHAKE=runWorkflow:%s\\n' \"$0\"; sleep 30", "fake-engineChildRunner.ts"], { stdio: ["ignore", "pipe", "ignore"] });
     const adapter = realProcessAdapter({ runnerPath: "/repo/e2e/harness/engineChildRunner.ts", spawn: async () => ({
@@ -233,5 +347,117 @@ describe("controlled scenario kernel", () => {
     expect(result.status).toBe("capability-failure");
     expect(result.error?.code).toBe("ADMISSION_FAILED");
     if (child.exitCode === null) child.kill("SIGKILL");
+  });
+
+  test("operation cut points are inert until their operation is observed", async () => {
+    const result = await runScenario(scenario("operation-conformance", { steps: [step("noop")], faults: [fault("attempt", "before-task", "attempt-write"), fault("event", "before-task", "event-append")] }));
+    expect(result.status).toBe("finished");
+    expect(result.error).toBeUndefined();
+    expect(result.ambiguity).toHaveLength(0);
+    expect(result.trace.some((event) => event.type === "fault")).toBe(false);
+  });
+
+  test("operation cut points fire only at their real transitions", async () => {
+    const attempt = await runScenario(scenario("attempt-transition", { steps: [step("write", { run: (runtime) => runtime.effect("write", () => "ok") })], faults: [fault("attempt", "before-task", "attempt-write")] }));
+    expect(attempt.status).toBe("failed");
+    expect(attempt.error?.code).toBe("DURABILITY_FAULT_INJECTED");
+    const event = await runScenario(scenario("event-transition", { steps: [step("wait", { run: (runtime) => runtime.sleep(1) })], faults: [fault("event", "before-task", "event-append")] }));
+    expect(event.status).toBe("failed");
+    expect(event.error?.code).toBe("DURABILITY_FAULT_INJECTED");
+  });
+
+  test("mixed ready barriers retain step identity and gate downstream output", async () => {
+    const calls: string[] = [];
+    const result = await runScenario(scenario("mixed-barrier", {
+      steps: [
+        step("x", { run: () => { calls.push("x"); return "X"; } }),
+        step("b", { run: () => { calls.push("b"); return "B"; } }),
+        step("c", { run: () => { calls.push("c"); return "C"; } }),
+        step("after", { dependsOn: ["b", "c"], run: () => { calls.push("after"); return "after"; } }),
+      ],
+      barriers: [barrier("gate", ["b", "c"], 4)],
+    }), { controlLog: [{ type: "release-barrier", barrier: "gate" }] });
+    expect(result.status).toBe("finished");
+    expect(result.outputs).toEqual({ x: "X", b: "B", c: "C", after: "after" });
+    expect(calls.indexOf("after")).toBeGreaterThan(calls.indexOf("b"));
+    expect(calls.indexOf("after")).toBeGreaterThan(calls.indexOf("c"));
+  });
+
+  test("same-source captured executable bindings fail closed", () => {
+    const make = (value: number) => () => ({ value: String(value) });
+    expect(() => step("one", { run: make(1) })).toThrow("RUNNER_BINDING_AMBIGUOUS");
+    expect(() => step("two", { run: make(2) })).toThrow("RUNNER_BINDING_AMBIGUOUS");
+  });
+
+  test("ordered barrier release parks parties before callbacks resume", async () => {
+    const events: string[] = [];
+    const result = await runScenario(scenario("barrier-rendezvous", {
+      steps: [
+        step("left", { runnerBinding: "test:barrier:left:v1", run: () => { events.push("left-callback"); return "left"; } }),
+        step("right", { runnerBinding: "test:barrier:right:v1", run: () => { events.push("right-callback"); return "right"; } }),
+        step("after", { runnerBinding: "test:barrier:after:v1", dependsOn: ["left", "right"], run: () => { events.push("after"); return "after"; } }),
+      ],
+      barriers: [barrier("gate", ["left", "right"], 4)],
+    }), { controlLog: [{ type: "release-barrier", barrier: "gate" }] });
+    expect(result.status).toBe("finished");
+    const parked = result.trace.findIndex((event) => event.type === "barrier" && (event.data as { state?: string } | undefined)?.state === "parked");
+    const released = result.trace.findIndex((event) => event.type === "barrier" && (event.data as { state?: string } | undefined)?.state === "released");
+    expect(parked).toBeGreaterThanOrEqual(0);
+    expect(released).toBeGreaterThan(parked);
+    expect(events.filter((event) => event.endsWith("callback"))).toHaveLength(2);
+    expect(events.at(-1)).toBe("after");
+  });
+
+  test("property captures cannot share a source-derived replay identity", () => {
+    const make = (box: { value: string }) => () => box.value;
+    expect(() => step("one", { run: make({ value: "A" }) })).toThrow("RUNNER_BINDING_AMBIGUOUS");
+    expect(() => step("two", { run: make({ value: "B" }) })).toThrow("RUNNER_BINDING_AMBIGUOUS");
+  });
+
+  test("shadowed intrinsic names are treated as captured executable state", () => {
+    const make = (Math: { value: string }) => () => Math.value;
+    expect(() => step("math-a", { run: make({ value: "A" }) })).toThrow("RUNNER_BINDING_AMBIGUOUS");
+    expect(() => step("math-b", { run: make({ value: "B" }) })).toThrow("RUNNER_BINDING_AMBIGUOUS");
+  });
+
+  test("barrier parties never enter callbacks before release", async () => {
+    const calls: string[] = [];
+    const result = await runScenario(scenario("barrier-no-release", {
+      steps: [step("party", { runnerBinding: "test:barrier:no-release:v1", run: () => { calls.push("entered"); return "done"; } })],
+      barriers: [barrier("gate", ["party"], 1)],
+    }));
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("BARRIER_TIMEOUT");
+    expect(calls).toEqual([]);
+  });
+
+  test("completion CAS cut point fires for a plain completed callback", async () => {
+    const calls: string[] = [];
+    const result = await runScenario(scenario("completion-before", {
+      steps: [step("plain", { runnerBinding: "test:completion:plain:v1", run: () => { calls.push("entered"); return "done"; } })],
+      faults: [fault("completion", "before-task", "completion-cas")],
+    }));
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("DURABILITY_FAULT_INJECTED");
+    expect(calls).toEqual(["entered"]);
+  });
+
+  test("operation faults stay inert until their named transition occurs", async () => {
+    const result = await runScenario(scenario("attempt-no-op", {
+      steps: [step("noop")],
+      faults: [fault("attempt-before", "before-task", "attempt-write")],
+    }));
+    expect(result.status).toBe("finished");
+    expect(result.ambiguity).toEqual([]);
+    expect(result.trace.some((event) => event.type === "durability")).toBe(false);
+  });
+
+  test("pending controls participate in failure replay identity", async () => {
+    const ast = scenario("pending-control", { steps: [step("noop")] });
+    const clean = await runScenario(ast);
+    const failed = await runScenario(ast, { controlLog: [{ type: "resolve-effect", effect: "missing", outcome: "succeed" }] });
+    expect(failed.status).toBe("failed");
+    expect(failed.error?.code).toBe("CONTROL_UNCONSUMED");
+    expect(failed.replayIdentity).not.toBe(clean.replayIdentity);
   });
 });

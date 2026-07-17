@@ -1,4 +1,4 @@
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Option } from "effect";
 import { replayIdentity } from "./scenario/replayIdentity.ts";
 import { kernelLayer, KernelRuntimeService, makeKernel } from "./kernel/KernelRuntime.ts";
 import { runAtBoundaryFork, type HarnessError } from "./kernel/boundary.ts";
@@ -13,6 +13,7 @@ import { CleanupScope } from "./cleanup/CleanupScope.ts";
 import { assertNoLeaks } from "./cleanup/leakAssertions.ts";
 import { JournalModel } from "./durability/journalModel.ts";
 import { ambiguity, type AmbiguityResult } from "./durability/ambiguity.ts";
+import { canonicalize } from "./scenario/canonicalize.ts";
 
 export type DeterminismReport = Readonly<{ readonly deterministic: boolean; readonly residues: readonly string[] }>;
 export type ScenarioStatus = "finished" | "failed" | "capability-failure" | "capability-skip";
@@ -20,12 +21,14 @@ export type ScenarioResult = Readonly<{ readonly status: ScenarioStatus; readonl
 export type RunScenarioOptions = Readonly<{ readonly harness?: Harness; readonly seed?: number; readonly controlLog?: readonly ControlMessage[]; readonly capabilities?: readonly Parameters<Harness["admit"]>[0][number][]; readonly stepRunners?: Readonly<Record<string, (runtime: TaskRuntime, input: import("./scenario/ast.ts").ScenarioValue | undefined) => unknown | Promise<unknown>>>; readonly cleanupBudget?: number; readonly waitBudget?: number }>;
 
 const faultFor = (faults: readonly ScenarioFault[], operation: ScenarioFault["operation"], phase: ScenarioFault["phase"]): ScenarioFault | undefined => faults.find((fault) => fault.operation === operation && fault.phase === phase);
-const faultAt = (faults: readonly ScenarioFault[], phase: ScenarioFault["phase"]): ScenarioFault | undefined => faults.find((fault) => fault.phase === phase);
 const faultError = (fault: ScenarioFault): Error => Object.assign(new Error(`fault injected at ${fault.id}`), { code: "DURABILITY_FAULT_INJECTED", details: fault, fidelity: "simulation" as const });
-const ambiguityFor = (fault: ScenarioFault, step: string, effect?: string, observed = true): AmbiguityResult | undefined => {
-  if ((fault.operation === "event-append" || fault.operation === "completion-cas") && !observed) return undefined;
-  const outcome = fault.phase === "after-effect-before-journal" ? "effect-applied-journal-missing" : fault.phase === "after-journal-before-ack" ? "journal-applied-ack-missing" : fault.operation === "lease" || fault.operation === "heartbeat" ? "lease-lost" : fault.operation === "cancellation" ? "cancellation-race" : fault.operation === "resume" ? "restart-in-task" : fault.operation === "event-append" ? "lost-wakeup" : fault.operation === "completion-cas" ? "duplicate-delivery" : undefined;
-  return outcome ? ambiguity(outcome, { step, effect, fault: fault.id }) : undefined;
+const adapterFailure = (adapter: Harness["adapter"], cause: unknown): unknown => {
+  if (!adapter) return cause;
+  const error = cause instanceof Error ? cause : new Error(String(cause));
+  return Object.assign(error, {
+    fidelity: "native" as const,
+    ...(adapter.serializeError ? { serialized: adapter.serializeError(cause) } : {}),
+  });
 };
 
 /** Drive a kernel promise while its VirtualClock owns all timers. */
@@ -36,8 +39,17 @@ const settleKernel = async <T>(promise: Promise<T>, kernel: ReturnType<typeof ma
     // Let the Effect scheduler drain its ready queue before advancing virtual
     // time; otherwise a timer in a sibling fiber can win merely because the
     // host loop advanced the clock before a just-completed fiber resumed.
-    for (let microtask = 0; microtask < 4; microtask++) await Promise.resolve();
-    if (!done && kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+    // Drain the Effect scheduler to a stable point before deciding that the
+    // virtual kernel is quiescent. Four turns is not a scheduler contract:
+    // user continuations may legally cross many host microtasks. The caller's
+    // bounded-wait budget is the guard; virtual time is advanced only after
+    // this bounded quiescence pass.
+    for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+    if (!done) {
+      const advance = kernel.controls.takeAdvanceClock();
+      if (advance) kernel.clock.advance(advance.ms);
+      else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+    }
   }
   if (!done) throw Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: kernel did not settle"), { code: "BOUNDED_WAIT_EXHAUSTED", details: { budget } });
   if (error !== undefined) throw error;
@@ -48,6 +60,14 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
   const seed = options.seed ?? ast.seed ?? 0;
   const harness = options.harness ?? unitSimHarness();
   const kernel = makeKernel(seed, options.controlLog ?? []);
+  // A runner supplied out-of-band is executable input, not scenario data. It
+  // therefore must be named by the canonical AST before it can participate in
+  // a replay. Without this admission check two different callbacks can share
+  // the same AST and replay identity while producing different outputs.
+  const unboundRunner = Object.keys(options.stepRunners ?? {}).filter((id) => {
+    const candidate = ast.steps.find((step) => step.id === id);
+    return candidate !== undefined && !candidate.runnerBinding;
+  });
   const capabilityReport = harness.admitScenario(ast, options.capabilities ?? []);
   // An extension declaration is not an executor. Compile against the
   // executable registry so a registered-name-without-implementation cannot
@@ -60,10 +80,12 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
     (control.type === "task-restart" && !ast.steps.some((item) => item.id === control.step)),
   );
   for (const decision of capabilityReport) kernel.trace.emit({ type: "capability", data: { kind: decision.kind, capability: decision.capability } });
-  const base = { replayIdentity: replayIdentity({ ast, seed, controlLog: kernel.controls.log() }), controlLog: kernel.controls.log(), capabilityReport, ambiguity: [] as AmbiguityResult[], determinismReport: { deterministic: true, residues: [] } as DeterminismReport };
+  const replayControls = options.controlLog ?? [];
+  const base = { replayIdentity: replayIdentity({ ast, seed, controlLog: replayControls }), controlLog: kernel.controls.log(), capabilityReport, ambiguity: [] as AmbiguityResult[], determinismReport: { deterministic: true, residues: [] } as DeterminismReport };
+  if (unboundRunner.length) return { ...base, status: "failed", outputs: {}, trace: kernel.trace.snapshot(), error: { name: "ReplayIdentityError", code: "RUNNER_BINDING_REQUIRED", message: `step runner(s) require explicit stable runnerBinding: ${unboundRunner.join(", ")}`, details: { steps: unboundRunner }, fidelity: "simulation" } };
   const failed = capabilityReport.find((d) => d.kind === "capability-failure");
   const skipped = capabilityReport.find((d) => d.kind === "capability-skip");
-  if (failed || skipped) return { ...base, status: failed ? "capability-failure" : "capability-skip", outputs: {}, trace: kernel.trace.snapshot() };
+  if (failed || skipped) return { ...base, status: failed ? "capability-failure" : "capability-skip", outputs: {}, trace: kernel.trace.snapshot(), ...(failed && harness.kind !== "unit-sim" ? { error: { name: "HarnessCapabilityError", code: "ADMISSION_FAILED", message: failed.hint ?? "real harness admission failed", details: failed, fidelity: "native" as const } } : {}) };
   if (invalidControl) return { ...base, status: "failed", outputs: {}, trace: kernel.trace.snapshot(), error: { name: "ControlError", code: "CONTROL_INVALID", message: `control ${invalidControl.type} is not applicable to this scenario`, details: invalidControl, fidelity: "simulation" } };
   if (!compiled.ok) return { ...base, status: "failed", outputs: {}, trace: kernel.trace.snapshot(), error: { name: "ScenarioCompileError", code: "SCENARIO_INVALID", message: compiled.diagnostics.map((d) => `${d.code}: ${d.message}`).join("; "), details: compiled.diagnostics, fidelity: "simulation" } };
   if (harness.kind !== "unit-sim" && !harness.adapter) return { ...base, status: "capability-failure", outputs: {}, trace: kernel.trace.snapshot(), capabilityReport: [...capabilityReport, { kind: "capability-failure", harness: harness.name, capability: harness.kind === "e2e-real-process" ? "real-process" : "real-db", hint: "declaration is not proof: an executable adapter is required" }] };
@@ -76,7 +98,7 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
     }
   }
 
-  const outputs: Record<string, unknown> = {}; const completed = new Set<string>(); const releasedBarriers = new Set<string>(); const cleanup = new CleanupScope(); const journal = new JournalModel(); const ambiguities: AmbiguityResult[] = []; const residues = new Set<string>(); const ids = deterministicIds(seed);
+  const outputs: Record<string, unknown> = {}; const parkedValues = new Map<string, unknown>(); const completed = new Set<string>(); const parked = new Set<string>(); const releasedBarriers = new Set<string>(); const cleanup = new CleanupScope(); const journal = new JournalModel(); const ambiguities: AmbiguityResult[] = []; const residues = new Set<string>(); const ids = deterministicIds(seed);
   const recordAmbiguity = (item: AmbiguityResult, id: string) => { ambiguities.push(item); kernel.trace.emit({ type: "ambiguity", id, data: { outcome: item.outcome, details: item.details } as unknown as ScenarioValue }); };
 
   const program = Effect.gen(function* () {
@@ -90,87 +112,137 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
       for (const extension of ast.extensions) {
         const executor = harness.adapter.extensionExecutors?.[extension.name];
         if (!executor) throw Object.assign(new Error(`UNREGISTERED_EXTENSION: ${extension.name}`), { code: "UNREGISTERED_EXTENSION", details: { extension: extension.name } });
-        yield* Effect.tryPromise({ try: () => Promise.resolve(executor(extension.name, extension.value)), catch: (cause) => cause });
+        yield* Effect.tryPromise({ try: () => Promise.resolve(executor(extension.name, extension.value)), catch: (cause) => adapterFailure(harness.adapter, cause) });
         kernel.trace.emit({ type: "adapter", id: extension.name, data: { identity: harness.adapter.identity, extension: extension.name, executed: true } });
       }
     }
     const runtimeKernel = yield* KernelRuntimeService;
     const activeTaskIds = new Set<string>();
+    const barrierGates = new Map<string, { readonly arrived: Set<string>; readonly promise: Promise<void>; readonly release: () => void }>();
+    const barrierGate = (barrierId: string) => {
+      const existing = barrierGates.get(barrierId);
+      if (existing) return existing;
+      let release!: () => void;
+      const gate = { arrived: new Set<string>(), promise: new Promise<void>((resolve) => { release = resolve; }), release };
+      barrierGates.set(barrierId, gate);
+      return gate;
+    };
+    const applyCutPoint = (operation: ScenarioFault["operation"], phase: ScenarioFault["phase"], stepId: string): void => {
+      const candidate = ast.faults.find((item) => item.operation === operation && item.phase === phase);
+      if (!candidate) return;
+      const receipt = { before: "runnable", attempted: `${operation}:${phase}`, winner: "fault", after: "failed", stepId, faultId: candidate.id };
+      kernel.trace.emit({ type: "durability", id: ids.next(`${operation}:${phase}`), data: { operation, phase, receipt } as unknown as ScenarioValue });
+      throw faultError(candidate);
+    };
     let controlIndex = 0;
-    const supplied = kernel.controls.log();
-    while (controlIndex < supplied.length) {
-      const control = supplied[controlIndex]!;
-      if (control.type !== "advance-clock") break;
-      controlIndex += 1;
-      kernel.controls.takeNext("advance-clock");
-      kernel.clock.advance(control.ms);
-    }
+    while (runtimeKernel.controls.peek()?.type === "advance-clock") runtimeKernel.clock.advance(runtimeKernel.controls.takeAdvanceClock()!.ms);
     while (completed.size < ast.steps.length) {
       for (const barrier of ast.barriers) {
-        const partiesComplete = barrier.parties.every((party) => completed.has(party));
-        const release = partiesComplete && runtimeKernel.controls.peek()?.type === "release-barrier" ? runtimeKernel.controls.takeNext("release-barrier") : undefined;
-        const released = release?.barrier === barrier.id;
-        if (released) releasedBarriers.add(barrier.id);
-        if (partiesComplete && !released && !releasedBarriers.has(barrier.id)) throw Object.assign(new Error(`barrier ${barrier.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: barrier.id, budget: barrier.budget } });
+        const arrived = barrier.parties.every((party) => parked.has(party));
+        if (arrived && !releasedBarriers.has(barrier.id)) {
+          const release = runtimeKernel.controls.peek()?.type === "release-barrier" ? runtimeKernel.controls.takeNext("release-barrier") : undefined;
+          if (release?.barrier === barrier.id) {
+            releasedBarriers.add(barrier.id);
+            for (const party of barrier.parties) { parked.delete(party); completed.add(party); if (parkedValues.has(party)) outputs[party] = parkedValues.get(party); parkedValues.delete(party); }
+            kernel.trace.emit({ type: "barrier", id: ids.next(barrier.id), data: { state: "released", parties: barrier.parties } });
+          }
+        }
       }
-      const ready = ast.steps.filter((s) => !completed.has(s.id) && !activeTaskIds.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
-      if (!ready.length && !activeTaskIds.size) throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
+      if (completed.size === ast.steps.length) break;
+      const ready = ast.steps.filter((s) => !completed.has(s.id) && !parked.has(s.id) && !activeTaskIds.has(s.id) && s.dependsOn.every((d) => completed.has(d)));
+      if (!ready.length && !activeTaskIds.size) {
+        const waiting = ast.barriers.find((barrier) => barrier.parties.every((party) => parked.has(party)) && !releasedBarriers.has(barrier.id));
+        if (waiting) throw Object.assign(new Error(`barrier ${waiting.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: waiting.id, budget: waiting.budget } });
+        throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
+      }
       if (!ready.length) {
         const winner = yield* runtimeKernel.executor.runReadySet([]);
-        activeTaskIds.delete(winner.stepId); completed.add(winner.stepId); outputs[winner.stepId] = winner.value;
+        activeTaskIds.delete(winner.stepId);
+        const winnerBarrier = ast.barriers.find((item) => item.parties.includes(winner.stepId) && !releasedBarriers.has(item.id));
+        if (winnerBarrier) {
+          parkedValues.set(winner.stepId, winner.value); parked.add(winner.stepId);
+          kernel.trace.emit({ type: "barrier", id: ids.next(winnerBarrier.id), data: { state: "parked", step: winner.stepId, released: false } });
+        } else { completed.add(winner.stepId); outputs[winner.stepId] = winner.value; }
         continue;
       }
       const ordered: typeof ready = []; const remaining = [...ready];
-      while (remaining.length) { const pin = runtimeKernel.controls.takeApplicablePin(remaining.map((s) => s.id)); const chosen = runtimeKernel.scheduler.choose(remaining, pin ? remaining.findIndex((s) => s.id === pin.choice) : undefined); ordered.push(chosen); remaining.splice(remaining.indexOf(chosen), 1); if (!pin) runtimeKernel.controls.append({ type: "pin-interleaving", choice: chosen.id }); runtimeKernel.trace.emit({ type: "schedule", id: ids.next(chosen.id), data: { step: chosen.id, ready: ready.map((s) => s.id), choice: chosen.id, controlIndex: runtimeKernel.controls.consumed() } }); }
-      const tasks = ordered.map((selected) => Effect.gen(function* () {
-        const id = ids.next(selected.id); let observedWait = false; kernel.trace.emit({ type: "task", id, data: { state: "started", step: selected.id } });
+      while (remaining.length) { const pin = runtimeKernel.controls.takeApplicablePin(remaining.map((s) => s.id)); const chosen = runtimeKernel.scheduler.choose(remaining, pin ? remaining.findIndex((s) => s.id === pin.choice) : undefined); ordered.push(chosen); remaining.splice(remaining.indexOf(chosen), 1); if (!pin) runtimeKernel.controls.append({ type: "pin-interleaving", choice: chosen.id }); runtimeKernel.trace.emit({ type: "schedule", id: ids.next(chosen.id), data: { step: chosen.id, ready: ready.map((s) => s.id), choice: chosen.id, controlIndex: Math.max(0, runtimeKernel.controls.consumed() - 1) } }); }
+      // A barrier is a continuation rendezvous, not a global scheduler gate:
+      // launch every currently-ready fiber so unrelated work can progress
+      // while barrier parties park at their continuation boundary.
+      const executableOrdered = ordered;
+      const tasks = executableOrdered.map((selected) => Effect.gen(function* () {
+        const id = ids.next(selected.id); let observedWait = false; let adapterObservation: unknown; kernel.trace.emit({ type: "task", id, data: { state: "started", step: selected.id } });
+        // Durability cut points are operation middleware, not aliases for
+        // task entry. They are invoked below only when the corresponding
+        // mediated effect, wakeup/event, or completion operation occurs.
         const owner = `sim:${seed}`; journal.claimLease(selected.id, owner);
         let controlledFault: ScenarioFault | undefined;
         const runtime: TaskRuntime = {
-          effect: <T>(name: string, operation: () => T | Promise<T>) => {
+          effect: <T>(name: string, operation: () => T | Promise<T>, effectOptions?: Readonly<{ idempotencyKey?: string }>) => {
             const effectId = `${selected.id}:${name}`;
+            const idempotencyKey = effectOptions?.idempotencyKey;
             const control = runtimeKernel.controls.takeResolve(effectId) ?? runtimeKernel.controls.takeResolve(name);
             if (control?.outcome === "succeed") {
-              kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved", controlled: true } });
+              kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved", controlled: true, ...(idempotencyKey ? { idempotencyKey } : {}) } });
               return Promise.resolve(control.value as T);
             }
             if (control?.outcome === "fail") return Promise.reject(Object.assign(new Error(`effect ${name} failed by control`), { code: "CONTROLLED_EFFECT_FAILURE", details: control }));
             if (control?.outcome === "hang") { const pending = new Promise<T>(() => undefined); cleanup.track({ kind: "mediated-effect", id: effectId }, pending); return pending; }
             const beforeEffect = faultFor(ast.faults, "effect", "before-task");
             if (beforeEffect) return Promise.reject(faultError(beforeEffect));
+            const completionBefore = faultFor(ast.faults, "completion-cas", "before-task");
+            if (completionBefore) return Promise.reject(faultError(completionBefore));
             const invoke: () => Promise<T> = () => {
               const pending = settleKernel(Promise.resolve().then(operation), kernel, options.waitBudget ?? 10_000);
               cleanup.track({ kind: "mediated-effect", id: effectId }, pending);
               return pending;
             };
-            const run = control?.outcome === "duplicate" ? invoke().then(() => invoke()) : invoke();
+            const run = control?.outcome === "duplicate" ? invoke().then(() => invoke()).then((value) => {
+              recordAmbiguity(ambiguity("duplicate-delivery", { step: selected.id, effect: effectId, before: journal.state(effectId), attempted: "redelivery", winner: "duplicate-delivery", after: journal.state(effectId), transition: "effect-resolved->redelivered", journalState: journal.state(effectId) }), id);
+              return value;
+            }) : invoke();
             return run.then((value) => {
-              kernel.trace.emit({ type: "effect", id, data: { name, state: "requested" } });
+              kernel.trace.emit({ type: "effect", id, data: { name, state: "requested", ...(idempotencyKey ? { idempotencyKey } : {}) } });
               const duringEffect = faultFor(ast.faults, "effect", "during-task");
               if (duringEffect) throw faultError(duringEffect);
               journal.assertLease(selected.id, owner); journal.effectApplied(effectId); kernel.trace.emit({ type: "durability", id, data: { operation: "effect-applied", effect: effectId, state: journal.state(effectId) } });
               const effectFault = (controlledFault?.operation === "effect" && controlledFault.phase === "after-effect-before-journal" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-effect-before-journal");
-              if (effectFault) { recordAmbiguity(ambiguity("effect-applied-journal-missing", { step: selected.id, effect: effectId, transition: "effect-applied->journal-missing", fault: effectFault.id }), id); throw faultError(effectFault); }
-              if (!journal.journal(effectId)) throw Object.assign(new Error(`duplicate journal write ${effectId}`), { code: "JOURNAL_DUPLICATE" });
+              if (effectFault) { recordAmbiguity(ambiguity("effect-applied-journal-missing", { step: selected.id, effect: effectId, before: "none", attempted: "journal-write", winner: "external-effect", after: "effect-applied", transition: "effect-applied->journal-missing", fault: effectFault.id }), id); throw faultError(effectFault); }
+              applyCutPoint("attempt-write", "before-task", selected.id);
+            if (!journal.journal(effectId)) throw Object.assign(new Error(`duplicate journal write ${effectId}`), { code: "JOURNAL_DUPLICATE" });
               kernel.trace.emit({ type: "durability", id, data: { operation: "journal-write", effect: effectId, state: journal.state(effectId) } });
               const ackFault = (controlledFault?.phase === "after-journal-before-ack" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-journal-before-ack") ?? faultFor(ast.faults, "attempt-write", "after-journal-before-ack") ?? faultFor(ast.faults, "completion-cas", "after-journal-before-ack");
-              if (ackFault) { recordAmbiguity(ambiguity("journal-applied-ack-missing", { step: selected.id, effect: effectId, transition: "journal-applied->ack-missing", fault: ackFault.id }), id); throw faultError(ackFault); }
+              if (ackFault) { recordAmbiguity(ambiguity("journal-applied-ack-missing", { step: selected.id, effect: effectId, before: "journaled", attempted: "ack", winner: "journal-write", after: "journaled", transition: "journal-applied->ack-missing", fault: ackFault.id }), id); throw faultError(ackFault); }
               journal.ack(effectId); kernel.trace.emit({ type: "durability", id, data: { operation: "ack", effect: effectId, state: journal.state(effectId) } });
-              const afterAck = (controlledFault?.phase === "after-ack" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-ack") ?? faultAt(ast.faults, "after-ack");
+              const afterAck = (controlledFault?.phase === "after-ack" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-ack");
               if (afterAck) throw faultError(afterAck);
-              kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved" } }); return value;
+              kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved", ...(idempotencyKey ? { idempotencyKey } : {}) } }); return value;
             });
           },
-          sleep: (ms: number) => new Promise<void>((resolve, reject) => { observedWait = true; const wakeup = `${selected.id}:timer:${ms}`; journal.registerWakeup(wakeup); const lost = ast.faults.some((candidate) => candidate.operation === "event-append" && (candidate.phase === "during-task" || candidate.phase === "after-task")); const timer = kernel.clock.sleep(ms, () => { const suppliedFire = runtimeKernel.controls.take("timer-fire"); if (lost) { journal.loseWakeup(wakeup); if (observedWait) recordAmbiguity(ambiguity("lost-wakeup", { step: selected.id, wakeup, transition: "registered->lost" } ), id); reject(Object.assign(new Error("lost wakeup"), { code: "LOST_WAKEUP" })); return; } journal.deliverWakeup(wakeup); if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: String(timer) }); kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms } }); resolve(); }); cleanup.register("virtual-timer", String(timer), () => kernel.clock.cancel(timer)); }),
+          sleep: (ms: number) => new Promise<void>((resolve, reject) => {
+            observedWait = true;
+            const wakeup = `${selected.id}:timer:${ms}`;
+            let settled = false;
+            const finish = (action: () => void) => { if (!settled) { settled = true; action(); } };
+            journal.registerWakeup(wakeup);
+            const eventBefore = faultFor(ast.faults, "event-append", "before-task");
+            if (eventBefore) return reject(faultError(eventBefore));
+            const lost = ast.faults.some((candidate) => candidate.operation === "event-append" && (candidate.phase === "during-task" || candidate.phase === "after-task"));
+            const timer = kernel.clock.sleep(ms, () => {
+              const timerId = String(timer);
+              const suppliedFire = runtimeKernel.controls.takeTimerFire(timerId);
+              const wrongFire = runtimeKernel.controls.peek()?.type === "timer-fire" && !suppliedFire;
+              if (wrongFire) { finish(() => reject(Object.assign(new Error(`CONTROL_OUT_OF_ORDER: timer ${timerId} was not the supplied timer target`), { code: "CONTROL_OUT_OF_ORDER", details: { expectedTimer: timerId, supplied: runtimeKernel.controls.peek() } }))); return; }
+              if (lost) { journal.loseWakeup(wakeup); if (observedWait) recordAmbiguity(ambiguity("lost-wakeup", { step: selected.id, wakeup, before: "registered", attempted: "wakeup", winner: "event-loss", after: "lost", transition: "registered->lost", journalState: journal.wakeupState(wakeup) }), id); finish(() => reject(Object.assign(new Error("lost wakeup"), { code: "LOST_WAKEUP" }))); return; }
+              journal.deliverWakeup(wakeup); if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: timerId }); kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms, timer: timerId } }); finish(resolve);
+            });
+            cleanup.register("virtual-timer", String(timer), () => { kernel.clock.cancel(timer); finish(() => reject(Object.assign(new Error("task interrupted while sleeping"), { code: "TASK_INTERRUPTED" }))); });
+          }),
           log: (message: string, data?: ScenarioValue) => kernel.trace.emit({ type: "task", id, data: { state: "log", message, ...(data === undefined ? {} : { data }) } }),
           opaque: <T>(name: string, operation: () => T | Promise<T>) => { kernel.trace.emit({ type: "opaque-effect", id, data: { name, controllable: false } }); return Promise.resolve().then(operation); },
         };
         let productionValue: unknown;
-        if (harness.adapter?.runStep && harness.kind !== "unit-sim") {
-          const productionOperation = harness.kind === "e2e-real-process" ? "runWorkflow" : selected.id;
-          productionValue = yield* Effect.tryPromise({ try: () => Promise.resolve(harness.adapter!.runStep!(productionOperation, selected.id, selected.input)), catch: (e) => e });
-          kernel.trace.emit({ type: "adapter", id, data: { identity: harness.adapter.identity, step: selected.id, executed: true } });
-        }
         if (runtimeKernel.controls.peek()?.type === "inject-fault") {
           const control = runtimeKernel.controls.takeNext("inject-fault")!;
           controlledFault = ast.faults.find((candidate) => candidate.id === control.fault);
@@ -178,15 +250,69 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
         }
         const extensionExecutor = selected.extension ? harness.adapter?.extensionExecutors?.[selected.extension] : undefined;
         if (selected.extension && !extensionExecutor) throw Object.assign(new Error(`UNREGISTERED_STEP_EXTENSION: ${selected.extension}`), { code: "UNREGISTERED_STEP_EXTENSION", details: { step: selected.id, extension: selected.extension } });
-        if (selected.extension && extensionExecutor) yield* Effect.tryPromise({ try: () => Promise.resolve(extensionExecutor(selected.id, selected.input)), catch: (e) => e });
+        if (selected.extension && extensionExecutor) yield* Effect.tryPromise({ try: () => Promise.resolve(extensionExecutor(selected.id, selected.input)), catch: (e) => adapterFailure(harness.adapter, e) });
+        const runner = options.stepRunners?.[selected.id] ?? stepRunner(selected);
+        const barrierBeforeFault = (controlledFault?.phase === "before-task" ? controlledFault : undefined)
+          ?? faultFor(ast.faults, "task", "before-task")
+          ?? (runner ? faultFor(ast.faults, "resume", "before-task") : undefined);
+        if (barrierBeforeFault) throw faultError(barrierBeforeFault);
+        const preCallbackBarrier = ast.barriers.find((item) => item.parties.includes(selected.id) && !releasedBarriers.has(item.id));
+        const nextControl = runtimeKernel.controls.peek();
+        if (preCallbackBarrier) {
+          const gate = barrierGate(preCallbackBarrier.id);
+          gate.arrived.add(selected.id);
+          kernel.trace.emit({ type: "barrier", id: ids.next(preCallbackBarrier.id), data: { state: "parked", step: selected.id, released: false, beforeCallback: true } });
+          const releaseControl = runtimeKernel.controls.peek();
+          if (preCallbackBarrier.parties.every((party) => gate.arrived.has(party))) {
+            if (releaseControl?.type === "release-barrier" && releaseControl.barrier === preCallbackBarrier.id) {
+              runtimeKernel.controls.takeNext("release-barrier");
+              releasedBarriers.add(preCallbackBarrier.id);
+              kernel.trace.emit({ type: "barrier", id: ids.next(preCallbackBarrier.id), data: { state: "released", parties: preCallbackBarrier.parties } });
+              gate.release();
+            } else {
+              throw Object.assign(new Error(`barrier ${preCallbackBarrier.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: preCallbackBarrier.id, budget: preCallbackBarrier.budget } });
+            }
+          }
+          yield* Effect.tryPromise({ try: () => gate.promise, catch: (cause) => cause });
+        }
         // During-task controls rendezvous after user code has entered. This
         // keeps a declared ambiguity from becoming a pre-execution shortcut.
         const duringTransition = undefined;
-        const injectable = ast.faults.find((candidate) => candidate.phase === "before-task");
+        const injectable = ast.faults.find((candidate) => candidate.phase === "before-task" && candidate.operation === "task");
         const injectFault = harness.adapter?.injectFault;
-        if (injectable && injectFault && harness.kind !== "unit-sim") yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(injectable)), catch: (e) => e });
-        const before = (controlledFault?.phase === "before-task" ? controlledFault : undefined) ?? faultFor(ast.faults, "task", "before-task") ?? faultFor(ast.faults, "resume", "before-task") ?? faultAt(ast.faults, "before-task");
-        if (before) { const item = ambiguityFor(before, selected.id); if (item) recordAmbiguity(item, id); throw faultError(before); }
+        if (injectable && injectFault && harness.kind !== "unit-sim") adapterObservation = yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(injectable)), catch: (e) => adapterFailure(harness.adapter, e) });
+        const duringFault = ast.faults.find((candidate) => candidate.phase === "during-task");
+        let adapterFaultHandled = false;
+        // Task middleware is distinct from operation middleware. An operation
+        // fault is consumed only at the operation's real transition below.
+        const before = (controlledFault?.operation === "task" && controlledFault.phase === "before-task" ? controlledFault : undefined)
+          ?? faultFor(ast.faults, "task", "before-task")
+          ?? (runner ? faultFor(ast.faults, "resume", "before-task") : undefined)
+          ;
+        if (before) { throw faultError(before); }
+        if (harness.adapter?.runStep && harness.kind !== "unit-sim") {
+          const productionOperation = harness.kind === "e2e-real-process" ? "runWorkflow" : selected.id;
+          productionValue = yield* Effect.tryPromise({ try: () => Promise.resolve(harness.adapter!.runStep!(productionOperation, selected.input)), catch: (e) => adapterFailure(harness.adapter, e) });
+          kernel.trace.emit({ type: "adapter", id, data: { identity: harness.adapter.identity, step: selected.id, executed: true } });
+          // A real CAS result is an observed transition receipt. It is the
+          // only source for these real-harness outcomes; the fault declaration
+          // itself never manufactures ambiguity.
+          if (productionOperation.startsWith("claimAttemptCompletion") && productionValue === false) {
+            const input = selected.input as { runtimeOwnerId?: string | null } | undefined;
+            recordAmbiguity(ambiguity(input?.runtimeOwnerId === "old-owner" ? "lease-lost" : "duplicate-delivery", {
+              step: selected.id, before: "in-progress", attempted: "completion-cas", winner: "existing-owner-or-prior-completion", after: "unchanged", observed: false, transition: "completion-cas-rejected",
+            }), id);
+          }
+        }
+        if (duringFault && injectFault && harness.kind !== "unit-sim") {
+          adapterObservation = yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(duringFault)), catch: (e) => adapterFailure(harness.adapter, e) });
+          adapterFaultHandled = true;
+          const observation = adapterObservation as { terminatedBy?: string; preKillEffectApplied?: boolean; journalWritten?: boolean; outputPersisted?: boolean; resumed?: boolean; resumedStatus?: string; resumedOutputPersisted?: boolean } | undefined;
+          if (observation?.terminatedBy === "SIGKILL" && observation.resumed) {
+            recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, source: "real-process-observation", terminatedBy: observation.terminatedBy, resumedStatus: observation.resumedStatus, resumedOutputPersisted: observation.resumedOutputPersisted === true }), id);
+            if (observation.preKillEffectApplied && !observation.journalWritten) recordAmbiguity(ambiguity("effect-applied-journal-missing", { step: selected.id, source: "real-process-observation", preKillEffectApplied: true, journalWritten: false, outputPersisted: observation.outputPersisted, resumedOutputPersisted: observation.resumedOutputPersisted === true }), id);
+          }
+        }
         // Interruption/fault controls are rendezvous points before user code
         // starts. Applying them here makes cancellation and during-task faults
         // observable before a callback can finish synchronously.
@@ -195,40 +321,67 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
           recordAmbiguity(ambiguity("cancellation-race", { step: selected.id, reason: cancel.reason ?? "cancelled", transition: "task-started->cancelled" }), id);
           throw Object.assign(new Error(cancel.reason ?? "scenario cancelled"), { code: "SCENARIO_CANCELLED" });
         }
-        if (controlledFault?.phase === "during-task" && !["lease", "heartbeat", "cancellation"].includes(controlledFault.operation)) { const item = ambiguityFor(controlledFault, selected.id); if (item) recordAmbiguity(item, id); throw faultError(controlledFault); }
+        if (controlledFault?.operation === "task" && controlledFault.phase === "during-task") { throw faultError(controlledFault); }
         // Lease, heartbeat, cancellation, and resume faults rendezvous after
         // the callback below, where a real task transition has occurred.
-        const runner = options.stepRunners?.[selected.id] ?? stepRunner(selected);
         // The kernel cannot inspect arbitrary user code. A callback is therefore
         // opaque unless it explicitly crosses taskRuntime.effect.
         if (runner) kernel.trace.emit({ type: "opaque-effect", id, data: { name: `step:${selected.id}`, controllable: false } });
         let value: unknown;
         const runTask = () => {
-          const pending = Promise.resolve().then(() => runner!(runtime, selected.input));
+          // Invoke the author callback at the fiber rendezvous itself. Using
+          // Promise.resolve().then(callback) hides a synchronous completion
+          // behind an extra host turn and lets a cancellation fault claim a
+          // race that never occurred.
+          let returned: unknown;
+          try { returned = runner!(runtime, selected.input); } catch (cause) { return Promise.reject(cause); }
+          const pending = Promise.resolve(returned);
           cleanup.track({ kind: "task-fiber", id: selected.id }, pending);
           return pending;
         };
-        const duringFault = ast.faults.find((candidate) => candidate.phase === "during-task");
-        if (runner && duringFault) {
+        let interruptedByFault = false;
+        let completedBeforeFault = false;
+        if (runner && duringFault && !adapterFaultHandled) {
           const child = yield* Effect.fork(Effect.tryPromise({ try: () => runTask(), catch: (e) => e }));
           // Let the child cross the callback boundary before interrupting it;
           // an immediate interrupt is a cancellation-before-start, not a
           // cancellation race during a running task.
           yield* Effect.yieldNow();
-          if (injectFault && harness.kind !== "unit-sim") yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(duringFault)), catch: (e) => e });
-          yield* Fiber.interrupt(child);
+          // Effect scheduling and a Promise-returning synchronous callback use
+          // separate queues. Give the callback one host continuation to reach
+          // its terminal state before polling; otherwise a completed callback
+          // is misclassified as an interrupted race.
+          yield* Effect.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
+          if (injectFault && harness.kind !== "unit-sim") adapterObservation = yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(duringFault)), catch: (e) => adapterFailure(harness.adapter, e) });
+          const completedExit = yield* Fiber.poll(child);
+          if (Option.isSome(completedExit)) {
+            completedBeforeFault = true;
+            value = yield* Fiber.join(child);
+          } else {
+            interruptedByFault = true;
+            yield* Fiber.interrupt(child);
           if (duringFault.operation === "resume") {
-            const item = ambiguityFor(duringFault, selected.id); if (item) recordAmbiguity(item, id);
+            recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, transition: "running->killed->restarted", winner: "resume" }), id);
             value = yield* Effect.tryPromise({ try: () => runTask(), catch: (e) => e });
           } else {
             if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation") journal.loseLease(selected.id);
-            const item = ambiguityFor(duringFault, selected.id); if (item) recordAmbiguity(item, id);
+            if (duringFault.operation === "cancellation") recordAmbiguity(ambiguity("cancellation-race", { step: selected.id, transition: "running->cancelled", attempted: "cancellation", winner: "cancellation", before: "owned", after: "cancelled" }), id);
+            if (duringFault.operation === "lease" || duringFault.operation === "heartbeat") recordAmbiguity(ambiguity("lease-lost", { step: selected.id, transition: "owned->fenced", attempted: "lease-takeover", winner: "lease-takeover", before: "owned", after: "fenced" }), id);
+            if (duringFault.operation === "event-append" && observedWait) recordAmbiguity(ambiguity("lost-wakeup", { step: selected.id, transition: "registered->lost", attempted: "wakeup", winner: "event-loss", before: "registered", after: "lost" }), id);
             throw faultError(duringFault);
+          }
           }
         }
         if (runner && !duringFault) value = yield* Effect.tryPromise({ try: () => runTask(), catch: (e) => e });
-        const duplicateControl = runtimeKernel.controls.find("resolve-effect").find((control) => control.outcome === "duplicate" && (control.effect === selected.id || control.effect.startsWith(`${selected.id}:`)));
-        if (duplicateControl && !ambiguities.some((item) => item.details.step === selected.id && item.outcome === "duplicate-delivery")) recordAmbiguity(ambiguity("duplicate-delivery", { step: selected.id, effect: duplicateControl.effect, transition: "effect-resolved->redelivered", journalState: journal.state(duplicateControl.effect) }), id);
+        // completion-cas is a terminal transition, not a mediated-effect
+        // shortcut. A plain callback must observe it here, and a scenario
+        // which never reaches completion must not trigger this fault.
+        const completionBefore = faultFor(ast.faults, "completion-cas", "before-task");
+        if (completionBefore && runner && !interruptedByFault) {
+          const receipt = { before: "task-completed", attempted: "completion-cas:before-task", winner: "fault", after: "failed", stepId: selected.id, faultId: completionBefore.id };
+          kernel.trace.emit({ type: "durability", id: ids.next("completion-cas"), data: { operation: "completion-cas", phase: "before-task", receipt } as unknown as ScenarioValue });
+          throw faultError(completionBefore);
+        }
         if (runtimeKernel.controls.peek()?.type === "cancel") {
           const cancel = runtimeKernel.controls.takeNext("cancel")!;
           recordAmbiguity(ambiguity("cancellation-race", { step: selected.id, reason: cancel.reason ?? "cancelled", transition: "task-completed->cancelled" }), id);
@@ -237,31 +390,49 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
         const pendingControl = runtimeKernel.controls.peek();
         if (pendingControl?.type === "task-restart" && pendingControl.step === selected.id) {
           runtimeKernel.controls.takeNext("task-restart");
-          recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, transition: "task-completed->restarted" }), id);
+          recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, before: "completed", attempted: "resume", winner: "resume", after: "running", transition: "task-completed->restarted" }), id);
           if (runner) value = yield* Effect.tryPromise({ try: () => runTask(), catch: (e) => e });
         }
-        const during = controlledFault?.phase === "during-task" ? controlledFault : faultFor(ast.faults, "task", "during-task") ?? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "resume", "during-task") ?? faultAt(ast.faults, "during-task");
-        if (during && during.operation !== "resume" && ["lease", "heartbeat", "cancellation"].includes(during.operation) && (runner !== undefined || observedWait)) {
+        const during = controlledFault?.phase === "during-task" ? controlledFault : faultFor(ast.faults, "task", "during-task") ?? (runner ? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "resume", "during-task") : undefined) ?? (observedWait ? faultFor(ast.faults, "event-append", "during-task") : undefined);
+        if (during && !completedBeforeFault && (interruptedByFault || observedWait) && during.operation !== "resume" && ["lease", "heartbeat", "cancellation"].includes(during.operation) && (runner !== undefined || observedWait)) {
           if (during.operation === "lease" || during.operation === "heartbeat") journal.loseLease(selected.id);
           try { journal.assertLease(selected.id, owner); } catch (cause) {
             const outcome = during.operation === "cancellation" ? "cancellation-race" : "lease-lost";
             recordAmbiguity(ambiguity(outcome, { step: selected.id, transition: "owned->fenced", cause: String((cause as Error).message) }), id);
             throw faultError(during);
           }
-        } else if (during && during.operation !== "resume") { const item = ambiguityFor(during, selected.id, undefined, observedWait); if (item && !["lease", "heartbeat", "cancellation"].includes(during.operation)) recordAmbiguity(item, id); throw faultError(during); }
-        const after = (controlledFault?.phase === "after-task" ? controlledFault : undefined) ?? faultFor(ast.faults, "task", "after-task") ?? faultFor(ast.faults, "completion-cas", "after-task") ?? faultFor(ast.faults, "event-append", "after-task") ?? faultFor(ast.faults, "resume", "after-task") ?? faultAt(ast.faults, "after-task");
-        if (after) { if (injectFault && harness.kind !== "unit-sim" && after.operation !== "task") yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(after)), catch: (e) => e }); const item = ambiguityFor(after, selected.id, undefined, after.operation !== "event-append" && after.operation !== "completion-cas" || observedWait); if (item) recordAmbiguity(item, id); throw faultError(after); }
-        kernel.trace.emit({ type: "task", id, data: { state: "finished", step: selected.id } }); return harness.kind === "unit-sim" ? value : productionValue;
+        } else if (during && !completedBeforeFault && (interruptedByFault || observedWait) && during.operation !== "resume") { throw faultError(during); }
+        const after = (controlledFault?.phase === "after-task" ? controlledFault : undefined) ?? faultFor(ast.faults, "task", "after-task") ?? (runner ? faultFor(ast.faults, "completion-cas", "after-task") ?? faultFor(ast.faults, "resume", "after-task") : undefined) ?? (observedWait ? faultFor(ast.faults, "event-append", "after-task") : undefined);
+        // Completion CAS is an actual terminal transition. Event append is
+        // handled by the wait/effect middleware above, so neither operation
+        // fires for a plain no-op task.
+        if (runner || productionValue !== undefined) applyCutPoint("completion-cas", "after-task", selected.id);
+        if (after) { if (injectFault && harness.kind !== "unit-sim" && after.operation !== "task") adapterObservation = yield* Effect.tryPromise({ try: () => Promise.resolve(injectFault(after)), catch: (e) => adapterFailure(harness.adapter, e) }); throw faultError(after); }
+        const finalValue = harness.kind === "unit-sim" ? value : productionValue;
+        const rendezvous = ast.barriers.find((item) => item.parties.includes(selected.id) && !releasedBarriers.has(item.id));
+        if (rendezvous) {
+          // Arrival is a continuation boundary. The task fiber is observable
+          // as parked before its completion is exposed to dependents; the
+          // outer scheduler only records the value and waits for release.
+          kernel.trace.emit({ type: "barrier", id: ids.next(rendezvous.id), data: { state: "parked", step: selected.id, released: false, beforeCompletion: true } });
+        } else {
+          kernel.trace.emit({ type: "task", id, data: { state: "finished", step: selected.id, resultDigest: canonicalize(finalValue === undefined ? null : finalValue) } });
+        }
+        return finalValue;
       }));
-      for (const selected of ordered) activeTaskIds.add(selected.id);
+      for (const selected of executableOrdered) activeTaskIds.add(selected.id);
       // Start the ready set as fibers and consume whichever fiber actually
       // exits next. This is the transition point: newly-unblocked work is
       // scheduled immediately, rather than waiting for an unrelated ready
       // task (for example a sleeping sibling) to finish.
-      const winner = yield* runtimeKernel.executor.runReadySet(tasks.map((effect, index) => ({ stepId: ordered[index]!.id, effect })));
+      const winner = yield* runtimeKernel.executor.runReadySet(tasks.map((effect, index) => ({ stepId: executableOrdered[index]!.id, effect })));
       activeTaskIds.delete(winner.stepId);
-      outputs[winner.stepId] = winner.value;
-      completed.add(winner.stepId);
+      const winnerBarrier = ast.barriers.find((item) => item.parties.includes(winner.stepId) && !releasedBarriers.has(item.id));
+      if (winnerBarrier) {
+        parkedValues.set(winner.stepId, winner.value);
+        parked.add(winner.stepId);
+        kernel.trace.emit({ type: "barrier", id: ids.next(winnerBarrier.id), data: { state: "parked", step: winner.stepId, released: false } });
+      } else { outputs[winner.stepId] = winner.value; completed.add(winner.stepId); }
     }
     for (const item of ast.barriers) { const pendingRelease = kernel.controls.peek(); const release = pendingRelease?.type === "release-barrier" && pendingRelease.barrier === item.id ? kernel.controls.takeNext("release-barrier") : undefined; const released = release?.barrier === item.id || releasedBarriers.has(item.id); if (!released) throw Object.assign(new Error(`barrier ${item.id} timed out waiting for release`), { code: "BARRIER_TIMEOUT", details: { barrier: item.id, budget: item.budget } }); kernel.trace.emit({ type: "barrier", id: item.id, data: { state: "released", parties: item.parties } }); }
     const leftover = runtimeKernel.controls.pendingControls();
@@ -272,7 +443,14 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
   let result: Awaited<typeof execution.promise>;
   try {
     if (harness.kind === "unit-sim") result = await settleKernel(execution.promise, kernel, options.waitBudget ?? 10_000);
-    else result = await Promise.race([execution.promise, new Promise<never>((_, reject) => setTimeout(() => reject(Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: real harness did not settle"), { code: "BOUNDED_WAIT_EXHAUSTED" })), Math.max(1, options.waitBudget ?? 10_000)))]);
+    else {
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        result = await Promise.race([execution.promise, new Promise<never>((_, reject) => {
+          deadlineTimer = setTimeout(() => reject(Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: real harness did not settle"), { code: "BOUNDED_WAIT_EXHAUSTED" })), Math.max(1, options.waitBudget ?? 10_000));
+        })]);
+      } finally { if (deadlineTimer !== undefined) clearTimeout(deadlineTimer); }
+    }
   } catch (cause) { await execution.interrupt(); result = { ok: false, error: { name: "BoundedWaitError", code: (cause as { code?: string }).code ?? "BOUNDED_WAIT_EXHAUSTED", message: String(cause) } }; }
   let cleanupFailure: unknown;
   try { await cleanup.close(options.cleanupBudget ?? 100); } catch (cause) { cleanupFailure = cause; }
@@ -280,11 +458,15 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
   if (cleanupFailure) {
     const primary = result.ok ? undefined : result.error;
     const cleanupCode = (cleanupFailure as { code?: string }).code === "CLEANUP_LEAK" ? "CLEANUP_LEAK" : "CLEANUP_FAILED";
-    result = { ok: false, error: { name: cleanupCode === "CLEANUP_LEAK" ? "CleanupLeakError" : "CleanupError", code: cleanupCode, message: String((cleanupFailure as Error).message), details: { cleanup: cleanupFailure, ...(primary ? { primary } : {}) }, ...(primary ? { cause: primary } : {}) } };
+    // A terminal task failure is the first observable result.  Cleanup is
+    // still reported in details, but an interrupted sibling must not mask the
+    // task's error with CLEANUP_LEAK/CLEANUP_FAILED.
+    result = { ok: false, error: { name: cleanupCode === "CLEANUP_LEAK" ? "CleanupLeakError" : "CleanupError", code: cleanupCode, message: String((cleanupFailure as Error).message), cause: primary, details: { primary, cleanup: cleanupFailure } } };
   }
   if (kernel.trace.snapshot().some((event) => event.type === "opaque-effect")) residues.add("unmediated-opaque-effect");
   const finalControlLog = kernel.controls.log();
-  const finalBase = { ...base, controlLog: finalControlLog, replayIdentity: replayIdentity({ ast, seed, controlLog: finalControlLog }), ambiguity: ambiguities, determinismReport: { deterministic: residues.size === 0, residues: [...residues] } };
+  const identityControls = kernel.controls.pendingControls().length ? replayControls : finalControlLog;
+  const finalBase = { ...base, controlLog: finalControlLog, replayIdentity: replayIdentity({ ast, seed, controlLog: identityControls }), ambiguity: ambiguities, determinismReport: { deterministic: residues.size === 0, residues: [...residues] } };
   if (!result.ok && result.error.code === "ADMISSION_FAILED") {
     const kind = harness.kind === "e2e-real-process" ? "real-process" : "real-db";
     const skippedAdmission = harness.config.policy === "skip";

@@ -11,6 +11,7 @@ import {
   CodexAgent,
   type AgentLike,
   createSmithers,
+  UI,
 } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import ConsensusFableReviewPrompt from "../prompts/implement-testing-framework-e2e-consensus-fable-review.mdx";
@@ -664,7 +665,8 @@ export default smithers((ctx) => {
     .map((command) => command.trim())
     .filter((command) => command.length > 0 && command.length <= 1_000 && !command.includes("\n") && !command.includes("\0"));
   const reusePlanRunId = ctx.input.reusePlanRunId?.trim() || null;
-  if (reusePlanRunId && !/^run-[A-Za-z0-9._-]+$/.test(reusePlanRunId)) {
+  // Run ids are not always run-prefixed: forks mint UUIDs and `smithers up --run-id` accepts arbitrary slugs.
+  if (reusePlanRunId && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(reusePlanRunId)) {
     throw new Error("reusePlanRunId must be a Smithers run id.");
   }
 
@@ -707,6 +709,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="implement-testing-framework-e2e">
+      <UI entry="../ui/implement-testing-framework-e2e.tsx" title={"Testing Framework E2E"} />
       <Sequence>
         <Task id="validate-input-and-agents" output={outputs.validation} noRetry>
           {() => {

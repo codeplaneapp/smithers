@@ -5,7 +5,6 @@ export { renderPromptToText as renderPrompt } from '@smithers-orchestrator/compo
 export { RunTaskOptions, runTask } from './runTask.js';
 export { Sim, SimTaskRecord, SimulateMockFunction, SimulateOptions, simulate } from './simulate.js';
 export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from './matchers.js';
-import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 import { ChildProcess } from 'node:child_process';
 import '@smithers-orchestrator/driver/SmithersCtx';
 import '@smithers-orchestrator/react-reconciler';
@@ -53,7 +52,9 @@ type ScenarioAst = Readonly<{
 }>;
 
 type TaskRuntime = Readonly<{
-    effect: <T>(name: string, operation: () => T | Promise<T>) => Promise<T>;
+    effect: <T>(name: string, operation: () => T | Promise<T>, options?: Readonly<{
+        idempotencyKey?: string;
+    }>) => Promise<T>;
     sleep: (ms: number) => Promise<void>;
     log: (message: string, data?: ScenarioValue) => void;
     opaque: <T>(name: string, operation: () => T | Promise<T>) => Promise<T>;
@@ -198,6 +199,8 @@ declare class ControlBus {
      * searched for or reordered: a generated decision is part of the log even
      * when a later supplied rendezvous is still pending. */
     append(message: ControlMessage): number;
+    /** Only rendezvoused controls are observations. Pending input is exposed
+     * separately so replay cannot mistake unconsumed commands for evidence. */
     log(): readonly ControlMessage[];
     find<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
         readonly type: T;
@@ -205,6 +208,10 @@ declare class ControlBus {
     /** Consume a command at its actual rendezvous and retain it in the replay log. */
     take<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
         readonly type: T;
+    }> | undefined;
+    /** Advance-clock is consumed only at a virtual-clock rendezvous. */
+    takeAdvanceClock(): Extract<ControlMessage, {
+        readonly type: "advance-clock";
     }> | undefined;
     /** Consume only the next command. Runtime commands are ordered. */
     takeNext<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
@@ -222,6 +229,9 @@ declare class ControlBus {
     peek(): ControlMessage | undefined;
     takeResolve(effect: string): Extract<ControlMessage, {
         readonly type: "resolve-effect";
+    }> | undefined;
+    takeTimerFire(timer: string): Extract<ControlMessage, {
+        readonly type: "timer-fire";
     }> | undefined;
     consumed(): number;
     pendingControls(): readonly ControlMessage[];
@@ -264,13 +274,39 @@ type HarnessError = Readonly<{
 }>;
 
 type HarnessKind = "unit-sim" | "integration-real-db" | "e2e-real-process";
+type UnitSimHarnessConfig = Readonly<{
+    readonly kind?: "unit-sim";
+    readonly name?: string;
+    readonly policy?: "fail" | "skip";
+    readonly capabilities?: readonly Capability[];
+}>;
+type IntegrationRealDbHarnessConfig = Readonly<{
+    readonly kind?: "integration-real-db";
+    readonly name?: string;
+    readonly policy?: "fail" | "skip";
+    readonly capabilities?: readonly Capability[];
+    readonly adapter: HarnessAdapter;
+    readonly dbPath?: string;
+    readonly retryProfile?: Readonly<Record<string, unknown>>;
+}>;
+type E2eRealProcessHarnessConfig = Readonly<{
+    readonly kind?: "e2e-real-process";
+    readonly name?: string;
+    readonly policy?: "fail" | "skip";
+    readonly capabilities?: readonly Capability[];
+    readonly adapter: HarnessAdapter;
+    readonly workflowEntry?: string;
+    readonly dbPath?: string;
+    readonly killSignal?: string;
+    readonly resumeOwner?: string;
+}>;
 type HarnessAdapter = Readonly<{
     readonly identity: string;
     readonly verifiedProductionIdentity?: string;
     readonly admissionProbe: () => void | Promise<void>;
     readonly cleanup?: () => void | Promise<void>;
     readonly runStep?: (...args: readonly unknown[]) => unknown | Promise<unknown>;
-    readonly injectFault?: (fault: ScenarioFault) => void | Promise<void>;
+    readonly injectFault?: (fault: ScenarioFault) => unknown | Promise<unknown>;
     readonly supportedCutPoints?: ReadonlySet<string>;
     readonly serializeError?: (error: unknown) => unknown;
     readonly extensions?: ReadonlySet<string>;
@@ -282,19 +318,34 @@ type HarnessConfig = Readonly<{
     readonly capabilities?: readonly Capability[];
     readonly adapter?: HarnessAdapter;
 }>;
-type Harness = Readonly<{
+type AdapterlessCompatibilityConfig = Readonly<{
+    readonly name?: string;
+    readonly policy?: "fail" | "skip";
+    readonly capabilities?: readonly Capability[];
+}>;
+type Harness<Config extends HarnessConfig = HarnessConfig> = Readonly<{
     readonly name: string;
     readonly kind: HarnessKind;
     readonly capabilities: ReadonlySet<Capability>;
-    readonly config: HarnessConfig;
+    readonly config: Config;
     readonly adapter?: HarnessAdapter;
     readonly admit: (requested: readonly Capability[]) => readonly CapabilityDecision[];
     readonly admitScenario: (ast: Parameters<typeof requiredCapabilities>[0], requested?: readonly Capability[]) => readonly CapabilityDecision[];
 }>;
-declare const makeHarness: (kind: HarnessKind, config?: HarnessConfig) => Harness;
-declare const unitSimHarness: (config?: HarnessConfig) => Harness;
-declare const integrationHarness: (config?: HarnessConfig) => Harness;
-declare const e2eHarness: (config?: HarnessConfig) => Harness;
+declare function makeHarness(kind: "unit-sim", config?: UnitSimHarnessConfig): Harness<UnitSimHarnessConfig>;
+declare function makeHarness(kind: "integration-real-db", config: IntegrationRealDbHarnessConfig): Harness<IntegrationRealDbHarnessConfig>;
+declare function makeHarness(kind: "integration-real-db", config?: AdapterlessCompatibilityConfig): Harness<AdapterlessCompatibilityConfig>;
+declare function makeHarness(kind: "e2e-real-process", config: E2eRealProcessHarnessConfig): Harness<E2eRealProcessHarnessConfig>;
+declare function makeHarness(kind: "e2e-real-process", config?: AdapterlessCompatibilityConfig): Harness<AdapterlessCompatibilityConfig>;
+/** @deprecated Dynamic-kind compatibility overload; literal kinds retain strict config checking. */
+declare function makeHarness(kind: HarnessKind, config?: HarnessConfig): Harness<HarnessConfig>;
+declare const unitSimHarness: (config?: UnitSimHarnessConfig) => Harness<UnitSimHarnessConfig>;
+declare function integrationHarness(config: IntegrationRealDbHarnessConfig): Harness<IntegrationRealDbHarnessConfig>;
+/** @deprecated Adapterless construction is compatibility-only and cannot prove real-db. */
+declare function integrationHarness(config?: AdapterlessCompatibilityConfig): Harness<AdapterlessCompatibilityConfig>;
+declare function e2eHarness(config: E2eRealProcessHarnessConfig): Harness<E2eRealProcessHarnessConfig>;
+/** @deprecated Adapterless construction is compatibility-only and cannot prove real-process. */
+declare function e2eHarness(config?: AdapterlessCompatibilityConfig): Harness<AdapterlessCompatibilityConfig>;
 
 declare const e2eDescriptor: (config?: HarnessConfig) => Harness;
 
@@ -367,6 +418,7 @@ declare const dryRun: (ast: ScenarioAst, options?: RunScenarioOptions) => {
             readonly residues: readonly string[];
         }>;
         readonly harness: string;
+        readonly harnessIdentity: string;
         readonly runnerBindings: Readonly<Record<string, string>>;
         readonly replayIdentity: string;
     }>;
@@ -487,6 +539,7 @@ type CleanupResource = Readonly<{
 declare class CleanupScope {
     private readonly entries;
     private readonly live;
+    private liveSequence;
     private closed;
     add(resource: CleanupResource, dispose: () => void | Promise<void>): () => void;
     register(kind: string, id: string, dispose: () => void | Promise<void>): () => void;
@@ -544,6 +597,7 @@ type ReplayBundle = Readonly<{
         readonly residues: readonly string[];
     }>;
     readonly harness: string;
+    readonly harnessIdentity: string;
     readonly runnerBindings: Readonly<Record<string, string>>;
     readonly replayIdentity: string;
 }>;
@@ -558,6 +612,7 @@ declare const makeReplayBundle: (input: {
         readonly residues: readonly string[];
     }>;
     harness?: string;
+    harnessIdentity?: string;
 }) => ReplayBundle;
 declare const serializeReplayBundle: (bundle: ReplayBundle) => string;
 declare const loadReplayBundle: (serialized: string) => ReplayBundle;
@@ -574,9 +629,11 @@ type Divergence = Readonly<{
 }>;
 declare const firstDivergence: (left: readonly TraceEvent[], right: readonly TraceEvent[]) => Divergence | null;
 
-declare const shrink: (ast: ScenarioAst, controls: readonly ControlMessage[], failure: (ast: ScenarioAst, controls: readonly ControlMessage[]) => boolean | Promise<boolean>, options?: {
-    maxCandidates?: number;
-}) => Promise<{
+type ShrinkOptions = Readonly<Pick<RunScenarioOptions, "harness" | "stepRunners"> & {
+    readonly maxCandidates?: number;
+    readonly seed?: number;
+}>;
+declare const shrink: (ast: ScenarioAst, controls: readonly ControlMessage[], failure: (ast: ScenarioAst, controls: readonly ControlMessage[], result?: ScenarioResult) => boolean | Promise<boolean>, options?: ShrinkOptions) => Promise<{
     ast: Readonly<{
         readonly version: 1;
         readonly name: string;
@@ -590,11 +647,34 @@ declare const shrink: (ast: ScenarioAst, controls: readonly ControlMessage[], fa
     candidatesTried: number;
 }>;
 
-type RealDbResource = SmithersDb & Readonly<{
+type PlainDbMethod = (...args: readonly never[]) => unknown | PromiseLike<unknown>;
+type DbMethod<Args extends readonly unknown[]> = (...args: Args) => unknown | PromiseLike<unknown>;
+type AttemptCompletionArgs = [runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, finishedAtMs: number];
+type ResumeArgs = [params: {
+    runId: string;
+    expectedStatus?: string;
+    expectedRuntimeOwnerId: string | null;
+    expectedHeartbeatAtMs: number | null;
+    staleBeforeMs: number;
+    claimOwnerId: string;
+    claimHeartbeatAtMs: number;
+    requireStale?: boolean;
+}];
+type RealDbResource = Readonly<{
+    readonly db: unknown;
     readonly path?: string;
     readonly productionIdentity?: "SmithersDb";
     readonly close: () => void | Promise<void>;
-    readonly operations?: Readonly<Record<string, (...args: readonly unknown[]) => unknown | Promise<unknown>>>;
+    readonly insertRun: PlainDbMethod;
+    readonly heartbeatRun: DbMethod<[runId: string, runtimeOwnerId: string, heartbeatAtMs: number]>;
+    readonly listRuns: PlainDbMethod;
+    readonly claimAttemptCompletion?: DbMethod<AttemptCompletionArgs>;
+    readonly claimRunForResume?: DbMethod<ResumeArgs>;
+    readonly completeRun?: DbMethod<[runId: string, runtimeOwnerId: string, finishedAtMs: number]>;
+    readonly requestRunCancel?: DbMethod<[runId: string, cancelRequestedAtMs: number]>;
+    readonly claimRunCancellation?: DbMethod<[runId: string, cancelledAtMs: number, errorJson?: string | null]>;
+    readonly heartbeatAttempt?: PlainDbMethod;
+    readonly operations?: Readonly<Record<string, PlainDbMethod>>;
 }>;
 type RealDbAdapterOptions = Readonly<{
     readonly open: () => RealDbResource | Promise<RealDbResource>;
@@ -604,29 +684,55 @@ type RealDbAdapterOptions = Readonly<{
 }>;
 declare const realDbAdapter: (options: RealDbAdapterOptions) => HarnessAdapter;
 
+type Awaitable<T> = T | PromiseLike<T>;
+type ClaimAttemptCompletionInput = Readonly<{
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    runtimeOwnerId: string | null;
+    finishedAtMs: number;
+}>;
+type ClaimRunForResumeInput = Readonly<{
+    runId: string;
+    expectedStatus?: string;
+    expectedRuntimeOwnerId: string | null;
+    expectedHeartbeatAtMs: number | null;
+    staleBeforeMs: number;
+    claimOwnerId: string;
+    claimHeartbeatAtMs: number;
+    requireStale?: boolean;
+}>;
+type HeartbeatRunInput = Readonly<{
+    runId: string;
+    runtimeOwnerId: string;
+    heartbeatAtMs: number;
+}>;
+type RealDbOperationMap = Readonly<{
+    claimAttemptCompletion: (input: ClaimAttemptCompletionInput) => Awaitable<boolean>;
+    claimRunForResume: (input: ClaimRunForResumeInput) => Awaitable<boolean>;
+    heartbeatRun: (input: HeartbeatRunInput) => Awaitable<void>;
+    completeRun: (input: Readonly<{
+        runId: string;
+        runtimeOwnerId: string;
+        finishedAtMs: number;
+    }>) => Awaitable<unknown>;
+    requestRunCancel: (input: Readonly<{
+        runId: string;
+        cancelRequestedAtMs: number;
+    }>) => Awaitable<unknown>;
+    claimRunCancellation: (input: Readonly<{
+        runId: string;
+        cancelledAtMs: number;
+        errorJson?: string | null;
+    }>) => Awaitable<unknown>;
+}>;
 /**
  * Bind the framework's durability vocabulary to SmithersDb's production CAS
  * methods.  These bindings are deliberately boring: a real-db proof must
  * call the methods on the admitted SmithersDb instance, never a journal echo.
  */
-declare const realDbCutPoints: (db: RealDbResource) => Readonly<{
-    claimAttemptCompletion: (runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, finishedAtMs: number) => Promise<boolean>;
-    claimRunForResume: (params: {
-        runId: string;
-        expectedStatus?: string;
-        expectedRuntimeOwnerId: string | null;
-        expectedHeartbeatAtMs: number | null;
-        staleBeforeMs: number;
-        claimOwnerId: string;
-        claimHeartbeatAtMs: number;
-        requireStale?: boolean;
-    }) => Promise<boolean>;
-    heartbeatRun: (runId: string, runtimeOwnerId: string, heartbeatAtMs: number) => Promise<void>;
-    completeRun: (runId: string, runtimeOwnerId: string, finishedAtMs: number) => Promise<boolean>;
-    requestRunCancel: (runId: string, cancelRequestedAtMs: number) => Promise<boolean>;
-    claimRunCancellation: (runId: string, cancelledAtMs: number, errorJson?: string | null | undefined) => Promise<boolean>;
-    heartbeatAttempt: (runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string | null) => Promise<boolean>;
-}>;
+declare const realDbCutPoints: (db: RealDbResource) => RealDbOperationMap;
 
 /** A resource created by the repository's engineChildRunner protocol. */
 type RealProcessResource = Readonly<{
@@ -642,6 +748,24 @@ type RealProcessResource = Readonly<{
     readonly healthy?: () => boolean | Promise<boolean>;
     /** Production-owned result observed from stdout/durable completion. */
     readonly resultStatus?: () => string | undefined | Promise<string | undefined>;
+    /** Reads durable/effect evidence owned by the production fixture. */
+    readonly observeDurableState?: () => RealProcessDurableState | Promise<RealProcessDurableState>;
+}>;
+type RealProcessDurableState = Readonly<{
+    readonly effectApplied: boolean;
+    readonly journalWritten: boolean;
+    readonly outputPersisted: boolean;
+}>;
+type RealProcessObservation = Readonly<{
+    readonly terminatedBy: "SIGKILL";
+    readonly preKillEffectApplied: boolean;
+    readonly journalWritten: boolean;
+    readonly outputPersisted: boolean;
+    readonly resumed: boolean;
+    readonly resumedStatus?: string;
+    readonly resumedEffectApplied?: boolean;
+    readonly resumedJournalWritten?: boolean;
+    readonly resumedOutputPersisted?: boolean;
 }>;
 type RealProcessAdapterOptions = Readonly<{
     readonly spawn: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
@@ -653,4 +777,4 @@ type RealProcessAdapterOptions = Readonly<{
 }>;
 declare const realProcessAdapter: (options: RealProcessAdapterOptions) => HarnessAdapter;
 
-export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbResource, type RealProcessAdapterOptions, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectAmbiguity, expectEffect, expectTrace, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realDbCutPoints, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };
+export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, type ClaimAttemptCompletionInput, type ClaimRunForResumeInput, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, type E2eRealProcessHarnessConfig, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, type HeartbeatRunInput, type IntegrationRealDbHarnessConfig, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbOperationMap, type RealDbResource, type RealProcessAdapterOptions, type RealProcessObservation, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, type UnitSimHarnessConfig, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectAmbiguity, expectEffect, expectTrace, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realDbCutPoints, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };
