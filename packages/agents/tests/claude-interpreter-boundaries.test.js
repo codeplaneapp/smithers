@@ -3,10 +3,10 @@ import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent.js";
 
 // Unit-level pins for the rate_limit_event arm of the Claude Code output
 // interpreter. The existing claude-support tests drive this branch through a
-// fake CLI with a *future* resetsAt and both status fields rejected; these
-// tests pin the boundary sub-branches directly: the Math.max(1, …) clamp on a
-// past reset time, rejection signalled by overageStatus alone, the "usage"
-// window-label default, and the first-banner-wins guard.
+// fake CLI with a *future* resetsAt; these tests pin the boundary sub-branches
+// directly: the Math.max(1, …) clamp on a past reset time, allowed requests
+// with rejected overage metadata, the "usage" window-label default, and the
+// first-banner-wins guard.
 
 function rateLimitLine(info) {
   return JSON.stringify({ type: "rate_limit_event", rate_limit_info: info });
@@ -36,18 +36,19 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
     expect(completed.error).not.toMatch(/Retry after -/);
   });
 
-  test("overageStatus rejection alone trips the banner and the window label defaults to usage", () => {
+  test("rejected overage metadata on an allowed request does not set a limit banner", () => {
     const interpreter = interpret();
     interpreter.onStdoutLine(
-      rateLimitLine({ status: "allowed", overageStatus: "rejected", overageDisabledReason: "out_of_credits" }),
+      rateLimitLine({
+        status: "allowed",
+        overageStatus: "rejected",
+        overageDisabledReason: "org_level_disabled",
+      }),
     );
 
     const [completed] = interpreter.onStdoutLine(resultLine());
-    expect(completed.ok).toBe(false);
-    expect(completed.error).toContain("Claude usage usage limit exceeded");
-    expect(completed.error).toContain("out_of_credits");
-    // No resetsAt was provided, so there must be no retry hint.
-    expect(completed.error).not.toContain("Retry after");
+    expect(completed).toMatchObject({ type: "completed", ok: true, answer: "done" });
+    expect(completed.error).toBeUndefined();
   });
 
   test("the first rejected banner wins; later rejections do not overwrite it", () => {
@@ -60,7 +61,7 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
     expect(completed.error).not.toContain("weekly");
   });
 
-  test("org_level_disabled (org concurrency throttle) does not emit the full-window retry hint", () => {
+  test("a genuine org_level_disabled rejection keeps the full-window retry hint", () => {
     const interpreter = interpret();
     const future = Math.floor(Date.now() / 1000) + 9880;
     interpreter.onStdoutLine(
@@ -76,8 +77,7 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
     const [completed] = interpreter.onStdoutLine(resultLine());
     expect(completed.ok).toBe(false);
     expect(completed.error).toContain("org_level_disabled");
-    // The far-future window reset must NOT surface as a multi-hour retry hint.
-    expect(completed.error).not.toMatch(/Retry after \d{4,} seconds/);
+    expect(completed.error).toMatch(/Retry after \d{4,} seconds/);
   });
 
   test("a non-numeric resetsAt is ignored rather than producing a NaN retry hint", () => {

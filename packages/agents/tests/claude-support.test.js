@@ -214,14 +214,14 @@ process.exit(0);
             await rm(fake.dir, { recursive: true, force: true });
         }
     });
-    test("classifies a rejected rate_limit_event (out_of_credits) as a quota error with a reset time", async () => {
+    test("classifies a genuine rejected rate_limit_event with its parsed reset time", async () => {
         // Claude emits a stream-json rate_limit_event when the subscription
         // window rejects the request. Historically this line was ignored, the
         // run failed on empty output, and the raw JSON tail was stored as the
         // error instead of parking the run as waiting-quota.
         const resetsAt = Math.floor(Date.now() / 1000) + 1800;
         const fake = await makeFakeClaude(`
-process.stdout.write(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: ${resetsAt}, rateLimitType: "five_hour", overageStatus: "rejected", overageDisabledReason: "out_of_credits", isUsingOverage: false } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: ${resetsAt}, rateLimitType: "five_hour", overageStatus: "rejected", overageDisabledReason: "org_level_disabled", isUsingOverage: false } }) + "\\n");
 process.exit(1);
 `);
         try {
@@ -239,7 +239,7 @@ process.exit(1);
             expect(error?.details?.failureQuota).toBe(true);
             const resetMs = error?.details?.quotaResetAtMs;
             expect(typeof resetMs).toBe("number");
-            expect(resetMs).toBeGreaterThan(Date.now());
+            expect(resetMs).toBeGreaterThanOrEqual(resetsAt * 1000 - 60_000);
             expect(resetMs).toBeLessThanOrEqual(resetsAt * 1000 + 60_000);
         }
         finally {
@@ -269,9 +269,9 @@ process.exit(0);
             await rm(fake.dir, { recursive: true, force: true });
         }
     });
-    test("does not treat an allowed rate_limit_event as an error", async () => {
+    test("does not treat rejected org-level overage metadata on an allowed successful session as an error", async () => {
         const fake = await makeFakeClaude(`
-process.stdout.write(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour" } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", overageStatus: "rejected", overageDisabledReason: "org_level_disabled", isUsingOverage: false } }) + "\\n");
 process.stdout.write(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } }) + "\\n");
 process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "hello" }) + "\\n");
 process.exit(0);

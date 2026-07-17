@@ -200,20 +200,14 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 // waiting-quota (and picks up the reset time when present).
                 const info = isRecord(payload.rate_limit_info) ? payload.rate_limit_info : {};
                 const status = asString(info.status);
-                const overageStatus = asString(info.overageStatus);
-                const rejected = status === "rejected" || overageStatus === "rejected";
+                // Only status reflects whether this request was rejected.
+                // overageStatus can be "rejected" when organization usage
+                // credits are disabled, including on allowed requests.
+                const rejected = status === "rejected";
                 if (rejected && !limitBannerText) {
                     const windowLabel = asString(info.rateLimitType) ?? "usage";
                     const reason = asString(info.overageDisabledReason);
-                    // org_level_disabled is an ORG-level concurrency/policy
-                    // throttle (too many concurrent Claude sessions), not the
-                    // subscriber's usage window being spent. Its resetsAt is the
-                    // full window reset (hours away) — the wrong backoff. Omit
-                    // the retry hint so the shared classifier applies a short
-                    // bounded backoff and retries on the same agent instead of
-                    // parking for the whole window.
-                    const isOrgThrottle = reason === "org_level_disabled";
-                    const resetsAt = !isOrgThrottle && typeof info.resetsAt === "number" ? info.resetsAt : null;
+                    const resetsAt = typeof info.resetsAt === "number" ? info.resetsAt : null;
                     const resetSeconds = resetsAt != null
                         ? Math.max(1, Math.round(resetsAt - Date.now() / 1000))
                         : null;
