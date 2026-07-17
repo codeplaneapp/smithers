@@ -135,22 +135,27 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
               return Promise.resolve(control.value as T);
             }
             if (control?.outcome === "fail") return Promise.reject(Object.assign(new Error(`effect ${name} failed by control`), { code: "CONTROLLED_EFFECT_FAILURE", details: control }));
-            if (control?.outcome === "hang") return new Promise<T>(() => undefined);
+            if (control?.outcome === "hang") { const pending = new Promise<T>(() => undefined); cleanup.track({ kind: "mediated-effect", id: effectId }, pending); return pending; }
             const beforeEffect = faultFor(ast.faults, "effect", "before-task");
             if (beforeEffect) return Promise.reject(faultError(beforeEffect));
-            const invoke: () => Promise<T> = () => settleKernel(Promise.resolve().then(operation), kernel, options.waitBudget ?? 10_000);
+            const invoke: () => Promise<T> = () => {
+              const pending = settleKernel(Promise.resolve().then(operation), kernel, options.waitBudget ?? 10_000);
+              cleanup.track({ kind: "mediated-effect", id: effectId }, pending);
+              return pending;
+            };
             const run = control?.outcome === "duplicate" ? invoke().then(() => invoke()) : invoke();
             return run.then((value) => {
               kernel.trace.emit({ type: "effect", id, data: { name, state: "requested" } });
               const duringEffect = faultFor(ast.faults, "effect", "during-task");
               if (duringEffect) throw faultError(duringEffect);
-              journal.assertLease(selected.id, owner); journal.effectApplied(effectId);
+              journal.assertLease(selected.id, owner); journal.effectApplied(effectId); kernel.trace.emit({ type: "durability", id, data: { operation: "effect-applied", effect: effectId, state: journal.state(effectId) } });
               const effectFault = (controlledFault?.operation === "effect" && controlledFault.phase === "after-effect-before-journal" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-effect-before-journal");
               if (effectFault) { recordAmbiguity(ambiguity("effect-applied-journal-missing", { step: selected.id, effect: effectId, transition: "effect-applied->journal-missing", fault: effectFault.id }), id); throw faultError(effectFault); }
-              journal.journal(effectId);
+              if (!journal.journal(effectId)) throw Object.assign(new Error(`duplicate journal write ${effectId}`), { code: "JOURNAL_DUPLICATE" });
+              kernel.trace.emit({ type: "durability", id, data: { operation: "journal-write", effect: effectId, state: journal.state(effectId) } });
               const ackFault = (controlledFault?.phase === "after-journal-before-ack" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-journal-before-ack") ?? faultFor(ast.faults, "attempt-write", "after-journal-before-ack") ?? faultFor(ast.faults, "completion-cas", "after-journal-before-ack");
               if (ackFault) { recordAmbiguity(ambiguity("journal-applied-ack-missing", { step: selected.id, effect: effectId, transition: "journal-applied->ack-missing", fault: ackFault.id }), id); throw faultError(ackFault); }
-              journal.ack(effectId);
+              journal.ack(effectId); kernel.trace.emit({ type: "durability", id, data: { operation: "ack", effect: effectId, state: journal.state(effectId) } });
               const afterAck = (controlledFault?.phase === "after-ack" ? controlledFault : undefined) ?? faultFor(ast.faults, "effect", "after-ack") ?? faultAt(ast.faults, "after-ack");
               if (afterAck) throw faultError(afterAck);
               kernel.trace.emit({ type: "effect", id, data: { name, state: "resolved" } }); return value;
@@ -198,9 +203,14 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
         // opaque unless it explicitly crosses taskRuntime.effect.
         if (runner) kernel.trace.emit({ type: "opaque-effect", id, data: { name: `step:${selected.id}`, controllable: false } });
         let value: unknown;
+        const runTask = () => {
+          const pending = Promise.resolve().then(() => runner!(runtime, selected.input));
+          cleanup.track({ kind: "task-fiber", id: selected.id }, pending);
+          return pending;
+        };
         const duringFault = ast.faults.find((candidate) => candidate.phase === "during-task");
         if (runner && duringFault) {
-          const child = yield* Effect.fork(Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e }));
+          const child = yield* Effect.fork(Effect.tryPromise({ try: () => runTask(), catch: (e) => e }));
           // Let the child cross the callback boundary before interrupting it;
           // an immediate interrupt is a cancellation-before-start, not a
           // cancellation race during a running task.
@@ -209,14 +219,14 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
           yield* Fiber.interrupt(child);
           if (duringFault.operation === "resume") {
             const item = ambiguityFor(duringFault, selected.id); if (item) recordAmbiguity(item, id);
-            value = yield* Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
+            value = yield* Effect.tryPromise({ try: () => runTask(), catch: (e) => e });
           } else {
             if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation") journal.loseLease(selected.id);
             const item = ambiguityFor(duringFault, selected.id); if (item) recordAmbiguity(item, id);
             throw faultError(duringFault);
           }
         }
-        if (runner && !duringFault) value = yield* Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
+        if (runner && !duringFault) value = yield* Effect.tryPromise({ try: () => runTask(), catch: (e) => e });
         const duplicateControl = runtimeKernel.controls.find("resolve-effect").find((control) => control.outcome === "duplicate" && (control.effect === selected.id || control.effect.startsWith(`${selected.id}:`)));
         if (duplicateControl && !ambiguities.some((item) => item.details.step === selected.id && item.outcome === "duplicate-delivery")) recordAmbiguity(ambiguity("duplicate-delivery", { step: selected.id, effect: duplicateControl.effect, transition: "effect-resolved->redelivered", journalState: journal.state(duplicateControl.effect) }), id);
         if (runtimeKernel.controls.peek()?.type === "cancel") {
@@ -228,7 +238,7 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
         if (pendingControl?.type === "task-restart" && pendingControl.step === selected.id) {
           runtimeKernel.controls.takeNext("task-restart");
           recordAmbiguity(ambiguity("restart-in-task", { step: selected.id, transition: "task-completed->restarted" }), id);
-          if (runner) value = yield* Effect.tryPromise({ try: () => Promise.resolve(runner(runtime, selected.input)), catch: (e) => e });
+          if (runner) value = yield* Effect.tryPromise({ try: () => runTask(), catch: (e) => e });
         }
         const during = controlledFault?.phase === "during-task" ? controlledFault : faultFor(ast.faults, "task", "during-task") ?? faultFor(ast.faults, "lease", "during-task") ?? faultFor(ast.faults, "heartbeat", "during-task") ?? faultFor(ast.faults, "cancellation", "during-task") ?? faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "resume", "during-task") ?? faultAt(ast.faults, "during-task");
         if (during && during.operation !== "resume" && ["lease", "heartbeat", "cancellation"].includes(during.operation) && (runner !== undefined || observedWait)) {

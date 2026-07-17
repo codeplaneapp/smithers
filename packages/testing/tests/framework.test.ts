@@ -182,6 +182,31 @@ describe("controlled scenario kernel", () => {
     expect(one.steps[0]?.runnerBinding).not.toBe(two.steps[0]?.runnerBinding);
   });
 
+  test("rejects two different closures that reuse an explicit replay binding", () => {
+    step("first", { runnerBinding: "module:worker:v1", run: () => "A" });
+    expect(() => step("second", { runnerBinding: "module:worker:v1", run: () => "B" })).toThrow("RUNNER_BINDING_CONFLICT");
+  });
+
+  test("journaled-at-most-once requires a journal-write observation", () => {
+    const fakeResult = { trace: [{ type: "effect", data: { name: "write", state: "resolved" } }], ambiguity: [{ outcome: "duplicate-delivery" }] };
+    expect(() => expectEffect("write").atMostOnceJournaled(fakeResult)).toThrow("journal-write observation");
+  });
+
+  test("tracks an interrupted callback until its promise settles", async () => {
+    let released = false;
+    const result = await runScenario(scenario("tracked-fiber", { steps: [step("work", { runnerBinding: "module:tracked:v1", run: async () => { await new Promise<void>((resolve) => setTimeout(resolve, 50)); released = true; return "late"; } })], faults: [fault("interrupt", "during-task", "cancellation")] }));
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("DURABILITY_FAULT_INJECTED");
+    expect(released).toBe(true);
+  });
+
+  test("reports an unresolved mediated effect as a cleanup leak", async () => {
+    const result = await runScenario(scenario("tracked-effect", { steps: [step("work", { runnerBinding: "module:tracked-effect:v1", run: (runtime) => runtime.effect("hang", () => new Promise(() => undefined)) })] }), { controlLog: [{ type: "resolve-effect", effect: "work:hang", outcome: "hang" }], cleanupBudget: 1 });
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("CLEANUP_LEAK");
+    expect(result.error?.message).toContain("mediated-effect/work:hang");
+  });
+
   test("controlled effect values are authoritative and do not invoke the caller operation", async () => {
     let calls = 0;
     const result = await runScenario(scenario("controlled-value", { steps: [step("write", { run: (runtime) => runtime.effect("write", () => { calls++; return "real"; }) })] }), { controlLog: [{ type: "resolve-effect", effect: "write:write", outcome: "succeed", value: "controlled" }] });
