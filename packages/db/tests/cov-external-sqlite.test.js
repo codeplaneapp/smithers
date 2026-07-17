@@ -171,4 +171,21 @@ describe("SmithersDb over an external-sqlite descriptor", () => {
         const seq1 = await adapter.insertSignalWithNextSeq({ runId: "r1", signalName: "go", correlationId: "c", payloadJson: "{}", receivedAtMs: 1, receivedBy: null });
         expect(seq1).toBe(1);
     });
+
+    test("deleteOutputRow resolves tables through sqlite_master, not information_schema", async () => {
+        const { raw, descriptor } = makeExternalDb();
+        const storage = new SqlMessageStorage(descriptor);
+        await storage.ensureSchema();
+        const adapter = new SmithersDb(descriptor);
+
+        raw.run(`CREATE TABLE out_delete (run_id TEXT NOT NULL, node_id TEXT NOT NULL, iteration INTEGER NOT NULL DEFAULT 0, ok INTEGER, PRIMARY KEY (run_id, node_id, iteration))`);
+        raw.run(`INSERT INTO out_delete (run_id, node_id, iteration, ok) VALUES ('r1','n1',0,1)`);
+        await adapter.deleteOutputRow("out_delete", { runId: "r1", nodeId: "n1", iteration: 0 });
+        expect(raw.query(`SELECT COUNT(*) AS n FROM out_delete`).get().n).toBe(0);
+
+        // The camelCase → snake_case resolution path also probes existence.
+        raw.run(`INSERT INTO out_delete (run_id, node_id, iteration, ok) VALUES ('r2','n2',0,1)`);
+        await adapter.deleteOutputRow("outDelete", { runId: "r2", nodeId: "n2", iteration: 0 });
+        expect(raw.query(`SELECT COUNT(*) AS n FROM out_delete`).get().n).toBe(0);
+    });
 });

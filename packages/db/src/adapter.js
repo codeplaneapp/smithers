@@ -1588,8 +1588,15 @@ export class SmithersDb {
                 // directly: calling hasPhysicalTable() here would try to acquire
                 // this adapter's transaction turn a second time and deadlock.
                 let resolvedTableName = tableName;
+                // Mirror hasPhysicalTable's dialect switch: external storages
+                // can speak sqlite (Cloudflare, libsql), where
+                // information_schema does not exist and would fail every
+                // retry-task / time-travel delete.
+                const existsSql = this.internalStorage.dialect === POSTGRES
+                    ? `SELECT 1 AS one FROM information_schema.tables WHERE table_name = ? LIMIT 1`
+                    : `SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`;
                 const tableExists = async (candidate) => {
-                    const row = await this.internalStorage.queryOneRaw(`SELECT 1 AS one FROM information_schema.tables WHERE table_name = ? LIMIT 1`, [candidate]);
+                    const row = await this.internalStorage.queryOneRaw(existsSql, [candidate]);
                     return row != null;
                 };
                 if (!(await tableExists(resolvedTableName))) {
