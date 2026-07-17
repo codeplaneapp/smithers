@@ -27,6 +27,12 @@ export type OpenApiToolsOptions = {
 	 * auth/API-key headers can never leak to an unexpected host.
 	 */
 	allowedRedirectOrigins?: string[];
+	/**
+	 * Maximum response body size in bytes. Both successful and error responses
+	 * are bounded. Defaults to 1,048,576 bytes (1 MiB) and must be a positive
+	 * safe integer.
+	 */
+	maxResponseBodyBytes?: number;
 	include?: string[];
 	exclude?: string[];
 	namePrefix?: string;

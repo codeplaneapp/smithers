@@ -18,6 +18,7 @@ import { SPEC_SOURCE_URL } from "../specSourceUrl.js";
 // caller passed no `baseUrl` option — requests then fail loudly against
 // localhost instead of silently hitting an arbitrary host.
 const FALLBACK_BASE_URL = "http://localhost";
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 1_048_576;
 
 // ---------------------------------------------------------------------------
 // HTTP execution
@@ -333,6 +334,127 @@ function assertHttpUrl(url) {
     }
 }
 /**
+ * @param {OpenApiToolsOptions} options
+ * @returns {number}
+ */
+function resolveMaxResponseBodyBytes(options) {
+    const maxBytes = options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new TypeError("maxResponseBodyBytes must be a positive safe integer.");
+    }
+    return maxBytes;
+}
+/**
+ * @param {number} maxBytes
+ * @returns {Error}
+ */
+function responseBodyTooLargeError(maxBytes) {
+    return new Error(`OpenAPI response body exceeds maxResponseBodyBytes limit of ${maxBytes} bytes.`);
+}
+/**
+ * @param {ReadableStream<Uint8Array> | null} body
+ * @param {unknown} reason
+ */
+async function cancelResponseBody(body, reason) {
+    if (body === null)
+        return;
+    try {
+        await body.cancel(reason);
+    }
+    catch {
+        // Preserve the overflow/abort error even if transport cleanup fails.
+    }
+}
+/**
+ * @param {ReadableStreamDefaultReader<Uint8Array>} reader
+ * @param {unknown} reason
+ */
+async function cancelResponseReader(reader, reason) {
+    try {
+        await reader.cancel(reason);
+    }
+    catch {
+        // Preserve the overflow/abort error even if transport cleanup fails.
+    }
+}
+/**
+ * @param {string | null} contentLength
+ * @param {number} maxBytes
+ * @returns {boolean}
+ */
+function declaredContentLengthExceedsLimit(contentLength, maxBytes) {
+    if (contentLength === null)
+        return false;
+    const normalized = contentLength.trim();
+    if (!/^\d+$/.test(normalized))
+        return false;
+    return BigInt(normalized) > BigInt(maxBytes);
+}
+/**
+ * @param {Response} response
+ * @param {number} maxBytes
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<Uint8Array>}
+ */
+async function readResponseBodyBytes(response, maxBytes, signal) {
+    const body = response.body;
+    if (signal?.aborted) {
+        await cancelResponseBody(body, signal.reason);
+        signal.throwIfAborted();
+    }
+    if (declaredContentLengthExceedsLimit(response.headers.get("content-length"), maxBytes)) {
+        const error = responseBodyTooLargeError(maxBytes);
+        await cancelResponseBody(body, error);
+        throw error;
+    }
+    if (body === null)
+        return new Uint8Array();
+    const reader = body.getReader();
+    /** @type {Uint8Array[]} */
+    const chunks = [];
+    let totalBytes = 0;
+    /** @type {Promise<void> | undefined} */
+    let abortCancellation;
+    const cancelOnAbort = () => {
+        abortCancellation = cancelResponseReader(reader, signal?.reason);
+    };
+    signal?.addEventListener("abort", cancelOnAbort, { once: true });
+    try {
+        signal?.throwIfAborted();
+        while (true) {
+            const { done, value } = await reader.read();
+            signal?.throwIfAborted();
+            if (done)
+                break;
+            totalBytes += value.byteLength;
+            if (totalBytes > maxBytes) {
+                const error = responseBodyTooLargeError(maxBytes);
+                await cancelResponseReader(reader, error);
+                throw error;
+            }
+            chunks.push(value);
+        }
+    }
+    catch (error) {
+        signal?.throwIfAborted();
+        throw error;
+    }
+    finally {
+        signal?.removeEventListener("abort", cancelOnAbort);
+        await abortCancellation;
+        reader.releaseLock();
+    }
+    if (chunks.length === 1)
+        return chunks[0];
+    const bytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return bytes;
+}
+/**
  * @param {ParsedOperation} operation
  * @param {Record<string, unknown>} args
  * @param {string} baseUrl
@@ -342,6 +464,7 @@ function assertHttpUrl(url) {
  * @returns {Promise<unknown>}
  */
 export async function executeRequest(operation, args, baseUrl, options, signal) {
+    const maxResponseBodyBytes = resolveMaxResponseBodyBytes(options);
     /** @type {Record<string, string>} */
     const pathParams = {};
     /** @type {Record<string, string>} */
@@ -385,10 +508,12 @@ export async function executeRequest(operation, args, baseUrl, options, signal) 
     // to an origin outside the configured service origin / allowlist.
     const response = await fetchWithRedirectValidation(url, operation.method.toUpperCase(), headers, body, options, signal);
     const contentType = response.headers.get("content-type") ?? "";
+    const responseBodyBytes = await readResponseBodyBytes(response, maxResponseBodyBytes, signal);
+    const responseBodyText = new TextDecoder().decode(responseBodyBytes);
     /** @type {unknown} */
     const payload = contentType.includes("application/json")
-        ? await response.json()
-        : await response.text();
+        ? JSON.parse(responseBodyText)
+        : responseBodyText;
     // Surface non-2xx HTTP responses as errors so the agent cannot mistake a
     // 401/403/429/500 for a successful side-effecting call. The status and
     // response body are included; the error never embeds the RequestInit (which

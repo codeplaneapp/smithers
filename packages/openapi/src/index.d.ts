@@ -95,6 +95,12 @@ type OpenApiToolsOptions$5 = {
     baseUrl?: string;
     headers?: Record<string, string>;
     auth?: OpenApiAuth$1;
+    /**
+     * Maximum response body size in bytes. Both successful and error responses
+     * are bounded. Defaults to 1,048,576 bytes (1 MiB) and must be a positive
+     * safe integer.
+     */
+    maxResponseBodyBytes?: number;
     include?: string[];
     exclude?: string[];
     namePrefix?: string;
