@@ -2954,6 +2954,46 @@ async function runMonitorCommand(c) {
         },
     });
 }
+/**
+ * Resolve a run's workflow without trusting a gateway's adapter-owner fallback.
+ * Older gateways can report the first registered shared-DB workflow as
+ * `workflowKey`; accept that value only when persisted run provenance supports
+ * it. A gateway key written into config by `Gateway.startRun` remains
+ * authoritative.
+ * @param {Record<string, unknown> | null | undefined} run
+ * @returns {string | undefined}
+ */
+function workflowKeyForUiRun(run) {
+    if (!run || typeof run !== "object") {
+        return undefined;
+    }
+    let configuredKey;
+    try {
+        const config = typeof run.configJson === "string"
+            ? JSON.parse(run.configJson)
+            : run.configJson;
+        configuredKey = typeof config?.gatewayWorkflowKey === "string" && config.gatewayWorkflowKey
+            ? config.gatewayWorkflowKey
+            : undefined;
+    }
+    catch { }
+    if (configuredKey) {
+        return configuredKey;
+    }
+    const advertisedKey = typeof run.workflowKey === "string" && run.workflowKey
+        ? run.workflowKey
+        : undefined;
+    const workflowName = typeof run.workflowName === "string" && run.workflowName
+        ? run.workflowName
+        : undefined;
+    const pathKey = typeof run.workflowPath === "string" && run.workflowPath
+        ? workflowIdFromPath(run.workflowPath)
+        : undefined;
+    if (advertisedKey && (advertisedKey === workflowName || advertisedKey === pathKey)) {
+        return advertisedKey;
+    }
+    return pathKey ?? workflowName ?? advertisedKey;
+}
 async function runUiCommand(c) {
     const fail = (code, message) => c.error({ code, message, exitCode: 1 });
     const resolved = await resolveBrowserGateway(c.options);
@@ -2990,8 +3030,11 @@ async function runUiCommand(c) {
         return frame.payload;
     };
     try {
-        const workflows = await rpc("listWorkflows", {});
-        const byKey = new Map((Array.isArray(workflows) ? workflows : []).map((w) => [w.key, w]));
+        const listWorkflowMap = async () => {
+            const workflows = await rpc("listWorkflows", {});
+            return new Map((Array.isArray(workflows) ? workflows : []).map((workflow) => [workflow.key, workflow]));
+        };
+        let byKey = await listWorkflowMap();
         let workflowKey = c.options.workflow;
         let runId = c.args.runId;
         if (!workflowKey) {
@@ -3002,19 +3045,32 @@ async function runUiCommand(c) {
                     return fail("NO_RUNS", "No runs found in this workspace yet, so there is no run UI to open. Start one with `smithers up <workflow.tsx>` or `smithers workflow run <id>` and re-run this command, pass --workflow <id> to open a workflow's UI directly, or run `smithers ui --app` for the full control-plane UI.");
                 }
                 runId = latest.runId ? String(latest.runId) : undefined;
-                workflowKey = latest.workflowKey ? String(latest.workflowKey) : undefined;
+                workflowKey = workflowKeyForUiRun(latest);
             }
             if (!workflowKey && runId) {
                 const run = await rpc("getRun", { runId });
-                workflowKey = run?.workflowKey ? String(run.workflowKey) : undefined;
+                workflowKey = workflowKeyForUiRun(run);
             }
         }
         if (!workflowKey) {
             return fail("WORKFLOW_UNRESOLVED", runId ? `Could not resolve a workflow for run ${runId}.` : "Could not resolve a workflow to open.");
         }
-        const summary = byKey.get(workflowKey);
+        let summary = byKey.get(workflowKey);
+        if (!summary) {
+            // A long-lived gateway may predate this workflow. Probe only the
+            // exact conventional route: current gateways use that lookup miss
+            // to rescan the workspace registry. Then read the authoritative
+            // mount path again, since a workflow can declare a custom path.
+            await fetch(`${base}/workflows/${encodeURIComponent(workflowKey)}`, {
+                method: "HEAD",
+                headers: token ? { authorization: `Bearer ${token}` } : {},
+            }).catch(() => null);
+            byKey = await listWorkflowMap();
+            summary = byKey.get(workflowKey);
+        }
         if (!summary || !summary.hasUi || !summary.uiPath) {
-            return fail("NO_UI", `Workflow "${workflowKey}" has no UI mounted on the Gateway at ${base}.`);
+            const runDetail = runId ? ` for run ${runId}` : "";
+            return fail("NO_UI", `Workflow "${workflowKey}"${runDetail} is not served with a UI by the Gateway at ${base}. Check the gateway warning log for a workflow load error, or add a .smithers/ui/${workflowKey}.tsx file (or <UI> declaration) and retry.`);
         }
         const url = `${base}${summary.uiPath}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
         warnIfBrowserUiNeedsBearer(token);
@@ -3300,9 +3356,12 @@ async function runGatewayCommand(options) {
         cwd: workspace,
         env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
     });
+    /** @type {(workflowKey: string) => Promise<void>} */
+    let refreshWorkflowRegistry = async () => { };
     gateway = new Gateway({
         heartbeatMs: 15_000,
         workspaceRoot: workspace,
+        workflowRegistryRefresh: (workflowKey) => refreshWorkflowRegistry(workflowKey),
         identity: { backend: identityBackend, version: readPackageVersion() },
         idleTimeoutMs,
         // The monitor's "what happened" panel: narrate a run/node with the
@@ -3347,6 +3406,7 @@ async function runGatewayCommand(options) {
     // and a broken workflow is still skipped instead of failing the whole boot.
     const discoveredWorkflows = discoverWorkflows(workspace);
     let loadedWorkflows;
+    let readOnlyWorkflow;
     if (manifestFallback) {
         // A read-only gateway must not import workspace workflow modules while
         // their nearest package.json is conflicted. Register a DB-backed shell
@@ -3355,7 +3415,7 @@ async function runGatewayCommand(options) {
         // the workflow or its workspace-owned UI bundle. Refuse execution
         // through these shells until the merge is resolved so a launch cannot
         // silently run an empty workflow.
-        const readOnlyWorkflow = workspaceApi.smithers((ctx) => {
+        readOnlyWorkflow = workspaceApi.smithers((ctx) => {
             if (!String(ctx.runId).startsWith("__smithers_ui_discovery__:")) {
                 throw new SmithersError("WORKSPACE_MANIFEST_CONFLICT", "Workflow execution is disabled while package.json contains unresolved conflict markers. Resolve the manifest, then restart the gateway.");
             }
@@ -3404,6 +3464,55 @@ async function runGatewayCommand(options) {
     const workflowIndex = new Map(loadedWorkflows
         .filter(({ loadError, workflow }) => !loadError && workflow)
         .map(({ discovered }) => [discovered.id, discovered]));
+    refreshWorkflowRegistry = async (workflowKey) => {
+        if (gateway.workflows.has(workflowKey)) {
+            return;
+        }
+        const discovered = discoverWorkflows(workspace).find((candidate) => candidate.id === workflowKey);
+        if (!discovered) {
+            return;
+        }
+        if (manifestFallback) {
+            if (!readOnlyWorkflow) {
+                return;
+            }
+            try {
+                gateway.register(discovered.id, readOnlyWorkflow, {
+                    system: discovered.system,
+                    ui: true,
+                });
+                workflows.push(discovered.id);
+                workflowIndex.set(discovered.id, discovered);
+            }
+            catch (error) {
+                process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+            }
+            return;
+        }
+        let workflow;
+        try {
+            workflow = await loadWorkflow(discovered.entryFile);
+        }
+        catch (error) {
+            process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+            return;
+        }
+        try {
+            ensureSmithersTables(workflow.db);
+            setupSqliteCleanup(workflow);
+            gateway.register(discovered.id, workflow, {
+                system: discovered.system,
+                entryFile: discovered.entryFile,
+            });
+            backendCleanups.push(() => closeWorkflowBackend(workflow));
+            workflows.push(discovered.id);
+            workflowIndex.set(discovered.id, discovered);
+        }
+        catch (error) {
+            await closeWorkflowBackend(workflow).catch(() => { });
+            process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+        }
+    };
     gateway.extend("evals", createEvalsExtension({
         adapter: new SmithersDb(workspaceWorkflow.db),
         resolveWorkflowKey: (key) => workflowIndex.get(key),

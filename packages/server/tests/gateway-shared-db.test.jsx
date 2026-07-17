@@ -230,7 +230,7 @@ describe("gateway — many workflows sharing one DB", () => {
 });
 
 describe("gateway — resolveRunWorkflowKey precedence", () => {
-  test("prefers stored gateway key, then a registered workflowName, then fallback", () => {
+  test("prefers stored gateway key, then registered names, then recorded path or name", () => {
     const gateway = new Gateway({ heartbeatMs: 1000 });
     const registered = new Set(["alpha", "beta"]);
 
@@ -268,14 +268,28 @@ describe("gateway — resolveRunWorkflowKey precedence", () => {
       ),
     ).toBe("alpha");
 
-    // Unknown workflowName and unregistered path: last-resort fallback (the
-    // adapter's first owner).
+    // An unregistered path still identifies the run's real workflow. Returning
+    // the adapter's first registered owner here makes `ui <runId>` silently
+    // open a different workflow when this gateway predates the run's workflow.
     expect(
       gateway.resolveRunWorkflowKey(
         { configJson: "{}", workflowName: "ghost", workflowPath: "/elsewhere/ghost-flow.tsx" },
         registered,
         "zzz",
       ),
-    ).toBe("zzz");
+    ).toBe("ghost-flow");
+
+    // Without path provenance, preserve the stored workflow name rather than
+    // attributing the row to an unrelated registered workflow.
+    expect(
+      gateway.resolveRunWorkflowKey(
+        { configJson: "{}", workflowName: "ghost" },
+        registered,
+        "zzz",
+      ),
+    ).toBe("ghost");
+
+    // Rows with no workflow identity at all retain the adapter-owner fallback.
+    expect(gateway.resolveRunWorkflowKey({ configJson: "{}" }, registered, "zzz")).toBe("zzz");
   });
 });

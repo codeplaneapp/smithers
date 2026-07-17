@@ -168,6 +168,33 @@ function seedConflictedWorkspace(repo) {
     ].join("\n"));
 }
 
+function writeWorkflowWithUi(repo, key, label, declareUi = true) {
+    repo.write(`.smithers/workflows/${key}.tsx`, [
+        "/** @jsxImportSource smithers-orchestrator */",
+        "import { createSmithers } from \"smithers-orchestrator\";",
+        "import { z } from \"zod\";",
+        "",
+        "const { Workflow, Task, UI, smithers, outputs } = createSmithers({",
+        "  result: z.object({ ok: z.boolean() }),",
+        "});",
+        "",
+        "export default smithers(() => (",
+        `  <Workflow name=\"${key}\">`,
+        ...(declareUi ? [`    <UI entry=\"../ui/${key}.tsx\" title=\"${label}\" />`] : []),
+        "    <Task id=\"done\" output={outputs.result}>{{ ok: true }}</Task>",
+        "  </Workflow>",
+        "));",
+        "",
+    ].join("\n"));
+    repo.write(`.smithers/ui/${key}.tsx`, [
+        "/** @jsxImportSource react */",
+        "import { createGatewayReactRoot } from \"smithers-orchestrator/gateway-react\";",
+        "",
+        `createGatewayReactRoot(<main>${label}</main>);`,
+        "",
+    ].join("\n"));
+}
+
 async function stopGatewayOnPort(port) {
     const result = spawnSync("lsof", ["-ti", `tcp:${port}`], {
         encoding: "utf8",
@@ -215,6 +242,34 @@ function spawnSmithers(args, options) {
     const closePromise = new Promise((resolvePromise) => child.once("close", resolvePromise));
     children.add({ child, closePromise });
     return { child, closePromise };
+}
+
+async function startWorkspaceGateway(repo, port, env) {
+    const { child, closePromise } = spawnSmithers([
+        "gateway",
+        "--port",
+        String(port),
+    ], { cwd: repo.dir, env });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const base = `http://127.0.0.1:${port}`;
+    await waitFor(async () => {
+        if (child.exitCode !== null || child.signalCode) {
+            throw new Error(`Gateway exited before becoming ready. stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`);
+        }
+        return fetch(`${base}/health`).then((response) => response.ok, () => false);
+    });
+    return {
+        base,
+        child,
+        closePromise,
+        stdout: () => stdout,
+        stderr: () => stderr,
+    };
 }
 
 async function runSmithersAsync(args, options) {
@@ -342,6 +397,107 @@ describe("smithers ui", () => {
             await gateway.close();
         }
     }, 30_000);
+
+    test("fails instead of opening another workflow UI when the run workflow is unavailable", async () => {
+        const repo = createTempRepo();
+        const gateway = await startFakeGateway((method, params) => {
+            if (method === "listWorkflows") {
+                return rpcResponse([{ key: "audit", hasUi: true, uiPath: "/workflows/audit" }]);
+            }
+            if (method === "getRun") {
+                expect(params).toEqual({ runId: "run-late" });
+                return rpcResponse({
+                    runId: "run-late",
+                    workflowKey: "audit",
+                    workflowName: "workflow",
+                    workflowPath: "/workspace/.smithers/workflows/tdsweep-land.tsx",
+                    configJson: "{}",
+                });
+            }
+            throw new Error(`Unexpected RPC ${method}`);
+        });
+        try {
+            const result = await runSmithersAsync(["ui", "run-late", "--gateway", gateway.base, "--no-open"], {
+                cwd: repo.dir,
+                format: "json",
+            });
+            expect(result.exitCode).not.toBe(0);
+            expect(result.json).toMatchObject({ code: "NO_UI" });
+            expect(result.json?.message).toContain("tdsweep-land");
+            expect(`${result.stdout}\n${result.stderr}`).not.toContain("/workflows/audit?runId=run-late");
+        }
+        finally {
+            await gateway.close();
+        }
+    }, 30_000);
+
+    test("a running gateway discovers and serves workflow UIs authored after startup", async () => {
+        const repo = createTempRepo();
+        writeWorkflowWithUi(repo, "audit", "Audit UI");
+        const { env } = makeStateDirEnv();
+        const port = await findOpenPort();
+        const gateway = await startWorkspaceGateway(repo, port, env);
+
+        writeWorkflowWithUi(repo, "tdsweep-land", "TDSweep Land UI", false);
+        repo.write(".smithers/workflows/broken-late.tsx", "throw new Error(\"broken late workflow\");\n");
+
+        const lateUi = await fetch(`${gateway.base}/workflows/tdsweep-land`);
+        expect(lateUi.status).toBe(200);
+        expect(await lateUi.text()).toContain('"workflowKey":"tdsweep-land"');
+        const lateAsset = await fetch(`${gateway.base}/workflows/tdsweep-land/__smithers_ui/client.js`);
+        expect(lateAsset.status).toBe(200);
+
+        const brokenUi = await fetch(`${gateway.base}/workflows/broken-late`);
+        expect(brokenUi.status).toBe(404);
+        await waitFor(() => gateway.stderr().includes("Skipping workflow broken-late")
+            && gateway.stderr().includes("broken late workflow"));
+        const health = await fetch(`${gateway.base}/health`);
+        expect(health.status).toBe(200);
+    }, 60_000);
+
+    test("ui resolves a late-authored run without falling back to an older workflow", async () => {
+        const repo = createTempRepo();
+        writeWorkflowWithUi(repo, "audit", "Audit UI");
+        const { env } = makeStateDirEnv();
+        const port = await findOpenPort();
+        const gateway = await startWorkspaceGateway(repo, port, env);
+
+        writeWorkflowWithUi(repo, "tdsweep-land", "TDSweep Land UI", false);
+        const run = await runSmithersAsync([
+            "up",
+            ".smithers/workflows/tdsweep-land.tsx",
+            "--run-id",
+            "run-late-authored",
+        ], {
+            cwd: repo.dir,
+            env,
+            format: "json",
+        });
+        if (run.exitCode !== 0) {
+            throw new Error(`Late-authored fixture run failed. stdout=${JSON.stringify(run.stdout)} stderr=${JSON.stringify(run.stderr)}`);
+        }
+
+        const result = await runSmithersAsync([
+            "ui",
+            "run-late-authored",
+            "--port",
+            String(port),
+            "--no-autostart",
+            "--no-open",
+        ], {
+            cwd: repo.dir,
+            env,
+            format: "json",
+        });
+        expect(result.exitCode).toBe(0);
+        expect(result.json).toMatchObject({
+            opened: false,
+            url: `${gateway.base}/workflows/tdsweep-land?runId=run-late-authored`,
+            runId: "run-late-authored",
+            workflow: "tdsweep-land",
+        });
+        expect(`${result.stdout}\n${result.stderr}`).not.toContain("/workflows/audit?runId=run-late-authored");
+    }, 60_000);
 
     test("emits a JSON error envelope when no Gateway is reachable and autostart is disabled", async () => {
         const repo = createTempRepo();

@@ -294,6 +294,14 @@ type GatewayOptions$1 = {
      */
     workspaceRoot?: string;
     /**
+     * Host-owned refresh hook for workflow registry misses. The gateway invokes
+     * it only when a requested workflow key is not registered, then retries the
+     * lookup. A CLI host can rescan its workspace packs and call
+     * `gateway.register(...)` without making the server package own CLI-specific
+     * discovery and module-loading rules.
+     */
+    workflowRegistryRefresh?: (workflowKey: string) => void | Promise<void>;
+    /**
      * Identity advertised on `GET /health`, the `health` RPC, and the WS hello
      * (together with `workspaceRoot`, the process pid, and the listen time).
      * Clients use it to verify they reached the gateway for the workspace they
@@ -709,6 +717,14 @@ declare class Gateway {
      */
     workspaceRoot: string | null;
     workflows: Map<any, any>;
+    /**
+     * Host-owned workspace workflow rescan. It is intentionally invoked only
+     * after a concrete key misses the in-memory registry.
+     * @type {((workflowKey: string) => void | Promise<void>) | null}
+     */
+    workflowRegistryRefresh: ((workflowKey: string) => void | Promise<void>) | null;
+    /** @type {Map<string, Promise<void>>} */
+    workflowRegistryRefreshes: Map<string, Promise<void>>;
     connections: Set<any>;
     /**
      * Subset of `connections` still awaiting a successful `connect` RPC.
@@ -841,6 +857,14 @@ declare class Gateway {
         pid: number;
         startedAtMs: number;
     };
+    /**
+     * Give the host one chance to register an unknown workflow. Concurrent
+     * requests for the same key share a single rescan, and loader failures are
+     * warnings rather than request/server failures.
+     * @param {string} workflowKey
+     * @returns {Promise<boolean>}
+     */
+    refreshWorkflowRegistryOnMiss(workflowKey: string): Promise<boolean>;
     /**
    * A workflow's UI: the one it declared, or — by convention — a sibling
    * `ui/<key>.tsx` next to its entry file's `workflows/` directory. The
@@ -1616,9 +1640,10 @@ declare class Gateway {
    * the CLI) does not, so we fall back to the row's own `workflowName` when that
    * matches a registered key, then to the run's entry-file basename (the
    * discovered-workflow id — this catches runs whose workflow crashed before it
-   * ever announced a name), and only then to the adapter's first owner. This
-   * is what keeps runs correctly attributed when many workflows share one DB —
-   * the adapter that finds a row is no longer assumed to own it.
+   * ever announced a name), then to an unregistered stored name. Only a row with
+   * no workflow identity falls back to the adapter's first owner. This keeps
+   * runs correctly attributed when many workflows share one DB — the adapter
+   * that finds a row is no longer assumed to own it.
    * @param {{ configJson?: string; workflowName?: string; workflowPath?: string }} row
    * @param {Set<string>} registeredKeys
    * @param {string} fallbackKey

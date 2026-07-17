@@ -56,6 +56,14 @@ export type GatewayOptions = {
    */
   workspaceRoot?: string;
   /**
+   * Host-owned refresh hook for workflow registry misses. The gateway invokes
+   * it only when a requested workflow key is not registered, then retries the
+   * lookup. A CLI host can rescan its workspace packs and call
+   * `gateway.register(...)` without making the server package own CLI-specific
+   * discovery and module-loading rules.
+   */
+  workflowRegistryRefresh?: (workflowKey: string) => void | Promise<void>;
+  /**
    * Identity advertised on `GET /health`, the `health` RPC, and the WS hello
    * (together with `workspaceRoot`, the process pid, and the listen time).
    * Clients use it to verify they reached the gateway for the workspace they

@@ -1871,6 +1871,26 @@ function workflowKeyFromRunPath(workflowPath) {
     return key || null;
 }
 /**
+ * Read the workflow key from a conventional workflow UI route. Asset requests
+ * use the same first segment, so a direct request for a late-authored bundle
+ * can refresh the registry too.
+ * @param {string} pathname
+ * @returns {string | null}
+ */
+function workflowKeyFromUiPath(pathname) {
+    const match = pathname.match(/^\/workflows\/([^/]+)(?:\/|$)/);
+    if (!match) {
+        return null;
+    }
+    try {
+        const key = decodeURIComponent(match[1]);
+        return key && !key.includes("/") && !key.includes("\\") ? key : null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
  * @param {ConnectionState} connection
  * @param {string | null} runId
  */
@@ -2266,6 +2286,14 @@ export class Gateway {
      */
     workspaceRoot = null;
     workflows = new Map();
+    /**
+     * Host-owned workspace workflow rescan. It is intentionally invoked only
+     * after a concrete key misses the in-memory registry.
+     * @type {((workflowKey: string) => void | Promise<void>) | null}
+     */
+    workflowRegistryRefresh = null;
+    /** @type {Map<string, Promise<void>>} */
+    workflowRegistryRefreshes = new Map();
     connections = new Set();
     /**
      * Subset of `connections` still awaiting a successful `connect` RPC.
@@ -2441,6 +2469,9 @@ export class Gateway {
         this.workspaceRoot = options.workspaceRoot
             ? resolve(options.workspaceRoot)
             : null;
+        this.workflowRegistryRefresh = typeof options.workflowRegistryRefresh === "function"
+            ? options.workflowRegistryRefresh
+            : null;
         this.identity = options.identity ?? null;
     }
     /**
@@ -2456,6 +2487,38 @@ export class Gateway {
             pid: process.pid,
             startedAtMs: this.startedAtMs,
         };
+    }
+    /**
+     * Give the host one chance to register an unknown workflow. Concurrent
+     * requests for the same key share a single rescan, and loader failures are
+     * warnings rather than request/server failures.
+     * @param {string} workflowKey
+     * @returns {Promise<boolean>}
+     */
+    async refreshWorkflowRegistryOnMiss(workflowKey) {
+        if (this.workflows.has(workflowKey)) {
+            return true;
+        }
+        if (!this.workflowRegistryRefresh) {
+            return false;
+        }
+        let refresh = this.workflowRegistryRefreshes.get(workflowKey);
+        if (!refresh) {
+            refresh = Promise.resolve()
+                .then(() => this.workflowRegistryRefresh?.(workflowKey))
+                .catch((error) => {
+                    emitGatewayLog("warning", "workflow registry refresh failed", {
+                        workflow: workflowKey,
+                        ...gatewayErrorAnnotations(error),
+                    }, "gateway:workflow-registry-refresh");
+                })
+                .finally(() => {
+                    this.workflowRegistryRefreshes.delete(workflowKey);
+                });
+            this.workflowRegistryRefreshes.set(workflowKey, refresh);
+        }
+        await refresh;
+        return this.workflows.has(workflowKey);
     }
     /**
    * A workflow's UI: the one it declared, or — by convention — a sibling
@@ -2617,6 +2680,10 @@ export class Gateway {
         }
         const host = headerValue(req, "host") ?? "127.0.0.1";
         const url = new URL(`http://${host}${req.url ?? "/"}`);
+        const requestedWorkflowKey = workflowKeyFromUiPath(url.pathname);
+        if (requestedWorkflowKey && !this.workflows.has(requestedWorkflowKey)) {
+            await this.refreshWorkflowRegistryOnMiss(requestedWorkflowKey);
+        }
         const uiMatch = this.resolveUiMatch(url.pathname);
         if (!uiMatch) {
             return false;
@@ -6597,9 +6664,10 @@ a { color: var(--brand); }</style>
    * the CLI) does not, so we fall back to the row's own `workflowName` when that
    * matches a registered key, then to the run's entry-file basename (the
    * discovered-workflow id — this catches runs whose workflow crashed before it
-   * ever announced a name), and only then to the adapter's first owner. This
-   * is what keeps runs correctly attributed when many workflows share one DB —
-   * the adapter that finds a row is no longer assumed to own it.
+   * ever announced a name), then to an unregistered stored name. Only a row with
+   * no workflow identity falls back to the adapter's first owner. This keeps
+   * runs correctly attributed when many workflows share one DB — the adapter
+   * that finds a row is no longer assumed to own it.
    * @param {{ configJson?: string; workflowName?: string; workflowPath?: string }} row
    * @param {Set<string>} registeredKeys
    * @param {string} fallbackKey
@@ -6616,8 +6684,11 @@ a { color: var(--brand); }</style>
             return fromName;
         }
         const fromPath = workflowKeyFromRunPath(asString(row.workflowPath));
-        if (fromPath && registeredKeys.has(fromPath)) {
+        if (fromPath) {
             return fromPath;
+        }
+        if (fromName) {
+            return fromName;
         }
         return fallbackKey;
     }
@@ -7212,6 +7283,9 @@ a { color: var(--brand); }</style>
                 // critical once workflows share a DB. Resolve the owning entry by
                 // that key so the returned workflow/adapter are the right ones.
                 const workflowKey = this.resolveRunWorkflowKey(run, registeredKeys, entry.key);
+                if (!this.workflows.has(workflowKey)) {
+                    await this.refreshWorkflowRegistryOnMiss(workflowKey);
+                }
                 const owner = this.workflows.get(workflowKey) ?? entry;
                 return {
                     workflowKey,
