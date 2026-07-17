@@ -59,11 +59,7 @@ export function launchCronWorkflow(job, spawnProcess = spawn) {
  */
 export function processCronEffect(adapter, job, now, launch = launchCronWorkflow) {
     return Effect.gen(function* () {
-        yield* Effect.logInfo(`[smithers-cron] Triggering due workflow: ${job.workflowPath} (Schedule: ${job.pattern})`);
-        yield* Effect.try({
-            try: () => launch(job),
-            catch: (cause) => toSmithersError(cause, `spawn cron workflow ${job.cronId}`),
-        });
+        // Parse before any side effect: an invalid pattern must never launch.
         const nextRunAtMs = yield* Effect.try({
             try: () => {
                 const interval = CronExpressionParser.parse(job.pattern, { currentDate: new Date(now) });
@@ -71,13 +67,27 @@ export function processCronEffect(adapter, job, now, launch = launchCronWorkflow
             },
             catch: (cause) => toSmithersError(cause, `calculate next run for cron ${job.cronId}`),
         });
-        yield* adapter.updateCronRunTimeEffect(job.cronId, now, nextRunAtMs);
+        // Persist the advanced schedule before launching. A crash in between
+        // skips at most one fire; launching first double-fires whenever a
+        // concurrent scheduler sees the same due row or the update fails.
+        const claimed = yield* adapter.claimCronRunEffect(job.cronId, job.nextRunAtMs ?? null, now, nextRunAtMs);
+        if (!claimed) {
+            yield* Effect.logDebug(`[smithers-cron] Skipping ${job.cronId}: another scheduler already claimed this fire`);
+            return;
+        }
+        yield* Effect.logInfo(`[smithers-cron] Triggering due workflow: ${job.workflowPath} (Schedule: ${job.pattern})`);
+        yield* Effect.try({
+            try: () => launch(job),
+            catch: (cause) => toSmithersError(cause, `spawn cron workflow ${job.cronId}`),
+        });
     }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
         const errorMessage = formatError(error);
         yield* Effect.logWarning(`[smithers-cron] Error processing job ${job.cronId}: ${errorMessage}`);
         const failedAtMs = now;
+        // Always park the retry in the future; re-persisting a stale past
+        // nextRunAtMs re-fires the broken job on every tick.
         yield* adapter
-            .updateCronRunTimeEffect(job.cronId, failedAtMs, job.nextRunAtMs ?? failedAtMs + 60_000, errorMessage)
+            .updateCronRunTimeEffect(job.cronId, failedAtMs, failedAtMs + 60_000, errorMessage)
             .pipe(Effect.catchAll((updateError) => Effect.logWarning(`[smithers-cron] Failed to record error for job ${job.cronId}: ${formatError(updateError)}`)));
     })));
 }

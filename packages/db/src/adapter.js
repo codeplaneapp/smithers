@@ -3339,6 +3339,23 @@ export class SmithersDb {
         return this.write(`update cron run time ${cronId}`, () => this.internalStorage.updateWhere("_smithers_cron", { lastRunAtMs, nextRunAtMs, errorJson: errorJson ?? null }, "cron_id = ?", [cronId]));
     }
     /**
+   * Atomically claim one cron fire by advancing the schedule only when the
+   * stored next fire time still matches what this scheduler read. Concurrent
+   * schedulers sharing a DB race this compare-and-set; exactly one observes
+   * `true` and may launch, the rest observe `false` and skip.
+   * @param {string} cronId
+   * @param {number | null} expectedNextRunAtMs
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimCronRun(cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs) {
+        return this.write(`claim cron run ${cronId}`, async () => {
+            const updated = await this.internalStorage.updateWhere("_smithers_cron", { lastRunAtMs, nextRunAtMs, errorJson: null }, "cron_id = ? AND (next_run_at_ms = ? OR (next_run_at_ms IS NULL AND ? IS NULL))", [cronId, expectedNextRunAtMs, expectedNextRunAtMs]);
+            return updated > 0;
+        });
+    }
+    /**
    * @param {string} cronId
    * @returns {RunnableEffect<void, SmithersError>}
    */
@@ -4014,6 +4031,16 @@ export class SmithersDb {
    */
     updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
         return this.updateCronRunTime(cronId, lastRunAtMs, nextRunAtMs, errorJson);
+    }
+    /**
+   * @param {string} cronId
+   * @param {number | null} expectedNextRunAtMs
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimCronRunEffect(cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs) {
+        return this.claimCronRun(cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs);
     }
     /**
    * @param {string} runId

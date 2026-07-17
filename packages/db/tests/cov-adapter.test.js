@@ -231,6 +231,20 @@ describe("adapter: cache / cron / scorer / memory / scorer effects", () => {
         expect((await adapter.listCrons(false)).length).toBe(1);
     });
 
+    test("claimCronRun: exactly one claimant advances the schedule per observed fire time", async () => {
+        const { adapter } = createDb();
+        await adapter.upsertCron({ cronId: "c1", pattern: "* * * * *", workflowPath: "/wf", enabled: true, createdAtMs: now });
+        // A fresh cron has no next fire time yet: the null-expectation claim wins once.
+        expect(await adapter.claimCronRun("c1", null, now, now + 60_000)).toBe(true);
+        expect(await adapter.claimCronRun("c1", null, now, now + 120_000)).toBe(false);
+        // A second scheduler that read the same fire time loses the compare-and-set.
+        expect(await adapter.claimCronRun("c1", now + 60_000, now + 60_000, now + 120_000)).toBe(true);
+        expect(await adapter.claimCronRun("c1", now + 60_000, now + 60_000, now + 180_000)).toBe(false);
+        const [cron] = await adapter.listCrons(true);
+        expect(cron.nextRunAtMs).toBe(now + 120_000);
+        expect(cron.errorJson).toBeNull();
+    });
+
     test("listMemoryFacts: all namespaces + scoped", async () => {
         const { sqlite, adapter } = createDb();
         sqlite.run(`INSERT INTO _smithers_memory_facts (namespace, key, value_json, created_at_ms, updated_at_ms) VALUES ('nsA','k1','1',?,?)`, [now, now]);

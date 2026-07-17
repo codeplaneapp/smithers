@@ -142,6 +142,7 @@ describe("scheduler tick effects", () => {
     test("processes due cron jobs and skips future jobs", async () => {
         const now = Date.parse("2026-06-17T12:00:00.000Z");
         const updates = [];
+        const claims = [];
         const launches = [];
         const adapter = {
             listCronsEffect(enabledOnly) {
@@ -167,6 +168,10 @@ describe("scheduler tick effects", () => {
                 updates.push({ cronId, lastRunAtMs, nextRunAtMs, errorJson });
                 return Effect.void;
             },
+            claimCronRunEffect(cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs) {
+                claims.push({ cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs });
+                return Effect.succeed(true);
+            },
         };
         await Effect.runPromise(schedulerTickEffect(adapter, {
             now: () => now,
@@ -176,14 +181,48 @@ describe("scheduler tick effects", () => {
         expect(launches).toEqual([
             expect.objectContaining({ cronId: "due-cron", workflowPath: "due.tsx" }),
         ]);
-        expect(updates).toHaveLength(1);
-        expect(updates[0].cronId).toBe("due-cron");
-        expect(updates[0].lastRunAtMs).toBe(now);
-        expect(updates[0].nextRunAtMs).toBeGreaterThan(now);
-        expect(updates[0].errorJson).toBeUndefined();
+        expect(updates).toHaveLength(0);
+        expect(claims).toHaveLength(1);
+        expect(claims[0].cronId).toBe("due-cron");
+        expect(claims[0].expectedNextRunAtMs).toBe(now - 1);
+        expect(claims[0].lastRunAtMs).toBe(now);
+        expect(claims[0].nextRunAtMs).toBeGreaterThan(now);
     });
 
-    test("records cron processing errors without failing the tick", async () => {
+    test("skips launching when another scheduler already claimed the fire", async () => {
+        const now = Date.parse("2026-06-17T12:00:00.000Z");
+        const updates = [];
+        const launches = [];
+        const adapter = {
+            listCronsEffect() {
+                return Effect.succeed([
+                    {
+                        cronId: "contested-cron",
+                        pattern: "*/5 * * * *",
+                        workflowPath: "contested.tsx",
+                        enabled: true,
+                        nextRunAtMs: now - 1,
+                    },
+                ]);
+            },
+            updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
+                updates.push({ cronId, lastRunAtMs, nextRunAtMs, errorJson });
+                return Effect.void;
+            },
+            claimCronRunEffect() {
+                return Effect.succeed(false);
+            },
+        };
+        await Effect.runPromise(schedulerTickEffect(adapter, {
+            now: () => now,
+            launchCronWorkflow: (job) => launches.push(job),
+        }));
+
+        expect(launches).toEqual([]);
+        expect(updates).toEqual([]);
+    });
+
+    test("an invalid pattern never launches and parks a future retry", async () => {
         const now = Date.parse("2026-06-17T12:00:00.000Z");
         const updates = [];
         const launches = [];
@@ -203,19 +242,62 @@ describe("scheduler tick effects", () => {
                 updates.push({ cronId, lastRunAtMs, nextRunAtMs, errorJson });
                 return Effect.void;
             },
+            claimCronRunEffect() {
+                throw new Error("should not claim when the pattern cannot be parsed");
+            },
         };
         await Effect.runPromise(schedulerTickEffect(adapter, {
             now: () => now,
             launchCronWorkflow: (job) => launches.push(job),
         }));
 
-        expect(launches).toHaveLength(1);
+        expect(launches).toHaveLength(0);
         expect(updates).toEqual([
             {
                 cronId: "bad-cron",
                 lastRunAtMs: now,
-                nextRunAtMs: now - 1,
+                nextRunAtMs: now + 60_000,
                 errorJson: expect.stringContaining("calculate next run for cron bad-cron"),
+            },
+        ]);
+    });
+
+    test("a failed launch after the claim parks a future retry", async () => {
+        const now = Date.parse("2026-06-17T12:00:00.000Z");
+        const updates = [];
+        const adapter = {
+            listCronsEffect() {
+                return Effect.succeed([
+                    {
+                        cronId: "spawn-fail-cron",
+                        pattern: "*/5 * * * *",
+                        workflowPath: "fail.tsx",
+                        enabled: true,
+                        nextRunAtMs: now - 1,
+                    },
+                ]);
+            },
+            updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
+                updates.push({ cronId, lastRunAtMs, nextRunAtMs, errorJson });
+                return Effect.void;
+            },
+            claimCronRunEffect() {
+                return Effect.succeed(true);
+            },
+        };
+        await Effect.runPromise(schedulerTickEffect(adapter, {
+            now: () => now,
+            launchCronWorkflow: () => {
+                throw new Error("spawn exploded");
+            },
+        }));
+
+        expect(updates).toEqual([
+            {
+                cronId: "spawn-fail-cron",
+                lastRunAtMs: now,
+                nextRunAtMs: now + 60_000,
+                errorJson: expect.stringContaining("spawn cron workflow spawn-fail-cron"),
             },
         ]);
     });

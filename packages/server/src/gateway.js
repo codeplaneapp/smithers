@@ -5217,12 +5217,24 @@ a { color: var(--brand); }</style>
                         continue;
                     }
                     try {
+                        // Parse before any side effect: an invalid pattern must
+                        // never start a run, and persisting the advanced
+                        // schedule before startRun keeps a concurrent scheduler
+                        // sharing this DB from firing the same cron twice.
+                        const nextRunAtMs = nextCronRunAtMs(cron.pattern);
+                        const claimed = await adapter.claimCronRun(cron.cronId, cron.nextRunAtMs ?? null, now, nextRunAtMs);
+                        if (!claimed) {
+                            emitGatewayLog("debug", "Gateway cron already claimed", {
+                                cronId: cron.cronId,
+                                workflow: workflowKey,
+                            }, "gateway:cron");
+                            continue;
+                        }
                         const run = await this.startRun(workflowKey, {}, {
                             triggeredBy: "cron:gateway",
                             scopes: ["*"],
                             role: "system",
                         });
-                        await adapter.updateCronRunTime(cron.cronId, now, nextCronRunAtMs(cron.pattern), null);
                         emitGatewayEffect(incrementMetric(gatewayCronTriggersTotal, {
                             source: "scheduled",
                         }));
@@ -5247,7 +5259,10 @@ a { color: var(--brand); }</style>
                             workflow: workflowKey,
                             ...gatewayErrorAnnotations(error),
                         }, "gateway:cron");
-                        await adapter.updateCronRunTime(cron.cronId, now, cron.nextRunAtMs ?? now + 60_000, error?.message ?? "cron trigger failed");
+                        // Always park the retry in the future; re-persisting a
+                        // stale past nextRunAtMs re-fires the broken cron on
+                        // every sweep.
+                        await adapter.updateCronRunTime(cron.cronId, now, now + 60_000, error?.message ?? "cron trigger failed");
                     }
                 }
             }

@@ -1374,6 +1374,18 @@ declare class SmithersDb {
    */
     updateCronRunTime(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
+   * Atomically claim one cron fire by advancing the schedule only when the
+   * stored next fire time still matches what this scheduler read. Concurrent
+   * schedulers sharing a DB race this compare-and-set; exactly one observes
+   * `true` and may launch, the rest observe `false` and skip.
+   * @param {string} cronId
+   * @param {number | null} expectedNextRunAtMs
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimCronRun(cronId: string, expectedNextRunAtMs: number | null, lastRunAtMs: number, nextRunAtMs: number): RunnableEffect<boolean, SmithersError$1>;
+    /**
    * @param {string} cronId
    * @returns {RunnableEffect<void, SmithersError>}
    */
@@ -1695,6 +1707,14 @@ declare class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     updateCronRunTimeEffect(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$1>;
+    /**
+   * @param {string} cronId
+   * @param {number | null} expectedNextRunAtMs
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimCronRunEffect(cronId: string, expectedNextRunAtMs: number | null, lastRunAtMs: number, nextRunAtMs: number): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} [nodeId]
