@@ -28,7 +28,6 @@ import { codexFirst } from "../lib/codexAccounts";
 const MISSION_DIR = "/tmp/microsandbox-finish";
 const WORKPLAN_PATH = join(MISSION_DIR, "WORKPLAN.md");
 const ISSUE_DRAFT_PATH = join(MISSION_DIR, "UPSTREAM-ISSUE.md");
-const RETIRED_PROVIDER_NAME = ["free", "style"].join("");
 
 // ── Schemas (msb* prefix) ────────────────────────────────────────────────────
 const prepSchema = z.object({
@@ -326,12 +325,12 @@ function checkDocs(input: Input, docs: Docs | undefined): DocsCheck {
       problems.push("missing " + path);
       continue;
     }
-    const hits = (readFileSync(path, "utf8").match(new RegExp(RETIRED_PROVIDER_NAME, "gi")) ?? []).length;
-    if (hits > 0) problems.push(rel + " still mentions the retired provider " + hits + " time(s); the single-provider spec must have zero");
+    const hits = (readFileSync(path, "utf8").match(/freestyle/gi) ?? []).length;
+    if (hits > 0) problems.push(rel + " still mentions Freestyle " + hits + " time(s); the single-provider spec must have zero");
   }
   return problems.length
     ? { passed: false, detail: problems.join("; ").slice(0, 4_000) }
-    : { passed: true, detail: "Workplan written, " + gates.length + " gates frozen, specs contain no retired-provider vocabulary." };
+    : { passed: true, detail: "Workplan written, " + gates.length + " gates frozen, specs are Freestyle-free." };
 }
 
 async function runGate(gate: GateDef): Promise<Gate> {
@@ -351,15 +350,15 @@ async function runGate(gate: GateDef): Promise<Gate> {
 type PhaseDef = { key: string; title: string; mission: (input: Input) => string };
 const PHASES: PhaseDef[] = [
   {
-    key: "provider-purge",
-    title: "Remove every retired-provider remnant",
+    key: "freestyle-purge",
+    title: "Remove every Freestyle remnant",
     mission: (input) => [
-      "Remove every retired-provider remnant from the isolated drafts, per the locked single-provider decision:",
-      "- Retired-provider fallback routing in the Plue provider code.",
-      "- Retired-provider configuration, secret plumbing, and Helm values.",
-      "- Retired-provider dashboards and monitoring references.",
-      "- Migration-oriented retired-provider documentation and the rejected vendor-backed compose setting.",
-      "Search exhaustively for " + RETIRED_PROVIDER_NAME + " across " + input.plueDir + ", " + input.multiDir + ", " + input.smithersDir + ".",
+      "Remove every Freestyle remnant from the isolated drafts, per the locked single-provider decision:",
+      "- Freestyle fallback routing in the Plue provider code.",
+      "- Freestyle configuration, secret plumbing, and Helm values.",
+      "- Freestyle dashboards/monitoring references.",
+      "- Migration-oriented Freestyle documentation and the rejected Freestyle-backed compose setting.",
+      "Search exhaustively (rg -i freestyle) across " + input.plueDir + ", " + input.multiDir + ", " + input.smithersDir + ".",
       "Historical changelog entries may keep the word; runtime code, config, infra, and active docs may not.",
       "Update any tests that referenced the removed paths; do not weaken unrelated assertions.",
     ].join("\n"),
@@ -428,10 +427,10 @@ function docsPrompt(input: Input, feedback: string): string {
     "",
     "Do all of the following:",
     "1. REVIEW the docs architecture and the implementation so far. Read the Plue spec (docs/specs/microsandbox-sandbox-provider.md) and runbook (docs/runbooks/microsandbox.md) in " + input.plueDir + ", the spec/docs changes in the Multi and Smithers drafts (use `jj diff` / `git diff` there to see what changed), and the in-flight packages/microsandbox package in /Users/williamcory/smithers5. Check the docs against the actual code: find drift, gaps, contradictions, and structural problems.",
-    "2. REVISE the Plue spec and runbook to the locked single-provider decision: Microsandbox only. Zero case-insensitive mentions of the retired provider may remain in those two files (a deterministic check enforces this). Fold in the operational reality: Autopilot control plane stays, isolated regional Standard GKE cluster with nested virtualization for sandboxes, out-of-state PKI/secret bootstrap, migration 000102, and the real local harness (Docker Compose deps + real HVF Microsandbox on macOS).",
+    "2. REVISE the Plue spec and runbook to the locked single-provider decision: Microsandbox only. Zero case-insensitive 'freestyle' mentions may remain in those two files (a deterministic check enforces this). Fold in the operational reality: Autopilot control plane stays, isolated regional Standard GKE cluster with nested virtualization for sandboxes, out-of-state PKI/secret bootstrap, migration 000102, and the real local harness (Docker Compose deps + real HVF Microsandbox on macOS).",
     "3. IMPROVE the docs you touch: correct structure, tighten prose per the house style in the brief, fix stale statements. Docs only in this phase; do not change product code (record code problems in the work plan instead).",
-    "4. WRITE the work plan to " + WORKPLAN_PATH + " with one section per phase: provider-purge, local-harness, conformance-local, ci-canary, suite-green. For each: concrete files/dirs to touch, exact commands, acceptance criteria, and known landmines from the brief and your review. Make it specific enough that a Codex implementer can execute without guessing.",
-    "5. FREEZE the deterministic verification gates and return them in the gatesJson output field: a JSON array of {\"gateKey\", \"cwd\", \"command\", \"timeoutMinutes\"} objects (3 to 10 gates). Each command is non-interactive bash where exit 0 means pass, run from cwd. Include at minimum: the Plue CI/E2E suite gate(s), the Multi full-suite gate, a Smithers checks gate, and a grep gate that fails if the retired provider name survives anywhere it must not (make the grep precise about allowed historical locations). Choose realistic timeoutMinutes; suites here run 30 to 120 minutes.",
+    "4. WRITE the work plan to " + WORKPLAN_PATH + " with one section per phase: freestyle-purge, local-harness, conformance-local, ci-canary, suite-green. For each: concrete files/dirs to touch, exact commands, acceptance criteria, and known landmines from the brief and your review. Make it specific enough that a Codex implementer can execute without guessing.",
+    "5. FREEZE the deterministic verification gates and return them in the gatesJson output field: a JSON array of {\"gateKey\", \"cwd\", \"command\", \"timeoutMinutes\"} objects (3 to 10 gates). Each command is non-interactive bash where exit 0 means pass, run from cwd. Include at minimum: the Plue CI/E2E suite gate(s), the Multi full-suite gate, a Smithers checks gate, and a grep gate that fails if 'freestyle' survives anywhere it must not (make the grep precise about allowed historical locations). Choose realistic timeoutMinutes; suites here run 30 to 120 minutes.",
     feedback ? "\nThe previous attempt failed the deterministic docs check. Fix exactly this:\n" + feedback : "",
     "",
     "Output fields: summary (what you found and changed), workPlanWritten (true only after the file is on disk), gatesJson (the frozen gates), filesChanged (repo-relative paths per workspace, prefixed like plue:docs/specs/...).",
@@ -493,7 +492,7 @@ function fableReviewPrompt(input: Input, gateResults: string): string {
     "",
     "Review the ENTIRE effort across all three drafts against the brief and " + WORKPLAN_PATH + ":",
     "- Correctness and completeness of the provider, controller/worker, harness, conformance coverage, CI gate, canary, and infra.",
-    "- Zero retired-provider remnants outside allowed historical locations.",
+    "- Zero Freestyle remnants outside allowed historical locations.",
     "- Docs/spec/runbook accuracy against the final code (docs were revised first; code moved since — re-verify).",
     "- Suite health: re-run anything you distrust; spot-check the gates' claims.",
     "POLISH directly while reviewing: fix prose, small code defects, naming, comments. Substantive problems go into findings instead.",
