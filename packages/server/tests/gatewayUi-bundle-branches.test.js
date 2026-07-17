@@ -45,6 +45,28 @@ describe("gateway UI bundle branch coverage", () => {
     }
   });
 
+  test("concurrent UI requests build through independent resolver plugins", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-ui-concurrent-"));
+    const firstEntry = join(tempDir, "first.tsx");
+    const secondEntry = join(tempDir, "second.tsx");
+    const source = [
+      'import { createElement } from "react";',
+      'import { createRoot } from "react-dom/client";',
+      'createRoot(document.createElement("div")).render(createElement("main"));',
+      "",
+    ].join("\n");
+    writeFileSync(firstEntry, source);
+    writeFileSync(secondEntry, source);
+
+    const [first, second] = await Promise.all([
+      bundleGatewayUiEntry({ entry: firstEntry }, new Map()),
+      bundleGatewayUiEntry({ entry: secondEntry }, new Map()),
+    ]);
+
+    expect(first).toContain("createRoot");
+    expect(second).toContain("createRoot");
+  });
+
   test("resolves a @tanstack workspace dependency through the dedupe plugin", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-ui-tanstack-"));
     const entry = join(tempDir, "entry.tsx");
