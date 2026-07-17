@@ -127,6 +127,83 @@ describe("@smithers-orchestrator/telegram", () => {
     expect(sleeps).toEqual([2000, 20]);
   });
 
+  test("caps server-provided retry_after values at maxRetryAfterSeconds", async () => {
+    const retryAfterSeconds = [1, 2, 3];
+    const sleeps = [];
+    let attempts = 0;
+    const client = createTelegramClient({
+      botToken: "token",
+      maxRetries: 3,
+      maxRetryAfterSeconds: 2,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      fetch: async () => {
+        const retryAfter = retryAfterSeconds[attempts];
+        attempts += 1;
+        if (retryAfter !== undefined) {
+          return Response.json(
+            { ok: false, description: "Too Many Requests", parameters: { retry_after: retryAfter } },
+            { status: 429 },
+          );
+        }
+        return Response.json({ ok: true, result: true });
+      },
+    });
+
+    await expect(client.getMe()).resolves.toBe(true);
+    expect(sleeps).toEqual([1000, 2000, 2000]);
+    expect(attempts).toBe(4);
+  });
+
+  test("aborts promptly during retry sleep without issuing another request", async () => {
+    const sleepStarted = Promise.withResolvers();
+    const releaseSleep = Promise.withResolvers();
+    const controller = new AbortController();
+    let attempts = 0;
+    const client = createTelegramClient({
+      botToken: "token",
+      retryBaseMs: 60_000,
+      sleep: async () => {
+        sleepStarted.resolve(undefined);
+        await releaseSleep.promise;
+      },
+      fetch: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return Response.json({ ok: false, description: "Bad Gateway" }, { status: 502 });
+        }
+        return Response.json({ ok: true, result: true });
+      },
+    });
+
+    const request = client.getMe({ signal: controller.signal });
+    await sleepStarted.promise;
+    const abortedAt = Date.now();
+    controller.abort();
+
+    const promptTimeoutMs = 1000;
+    let timeout;
+    const outcome = await Promise.race([
+      request.then(
+        (value) => ({ status: "resolved", value }),
+        (error) => ({ status: "rejected", error }),
+      ),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve({ status: "timeout" }), promptTimeoutMs);
+      }),
+    ]);
+    const elapsedMs = Date.now() - abortedAt;
+    clearTimeout(timeout);
+    releaseSleep.resolve(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(outcome.status).toBe("rejected");
+    expect(outcome.error?.name).toBe("AbortError");
+    expect(elapsedMs).toBeLessThan(promptTimeoutMs);
+    expect(attempts).toBe(1);
+  });
+
   test("retries network and malformed 5xx Bot API responses", async () => {
     let attempts = 0;
     const sleeps = [];
@@ -146,6 +223,30 @@ describe("@smithers-orchestrator/telegram", () => {
 
     await expect(client.getMe()).resolves.toEqual({ id: 1, is_bot: true });
     expect(sleeps).toEqual([10, 20]);
+  });
+
+  test("propagates response-body AbortError without retrying", async () => {
+    let attempts = 0;
+    const client = createTelegramClient({
+      botToken: "token",
+      sleep: async () => {},
+      fetch: async () => {
+        attempts += 1;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => {
+            throw new DOMException("body read aborted", "AbortError");
+          },
+        };
+      },
+    });
+
+    const error = await client.getMe().catch((cause) => cause);
+    expect(error.name).toBe("AbortError");
+    expect(error.message).toBe("body read aborted");
+    expect(error).not.toBeInstanceOf(TelegramNetworkError);
+    expect(attempts).toBe(1);
   });
 
   test("surfaces network failures after retry budget is exhausted", async () => {

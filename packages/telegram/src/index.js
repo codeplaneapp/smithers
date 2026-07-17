@@ -5,6 +5,9 @@ export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 export const TELEGRAM_SAFE_CHUNK_LENGTH = 3800;
 export const TELEGRAM_WEBHOOK_SECRET_HEADER = "x-telegram-bot-api-secret-token";
 
+// Default finite cap for server-provided Bot API `parameters.retry_after`
+// values. Callers may set `maxRetryAfterSeconds` to another finite limit.
+const DEFAULT_MAX_RETRY_AFTER_SECONDS = 30;
 // Exactly the message-bearing update kinds normalizeTelegramUpdate understands
 // (messageFromUpdate mirrors this list).
 const DEFAULT_ALLOWED_UPDATES = ["message", "edited_message", "channel_post", "edited_channel_post"];
@@ -58,14 +61,52 @@ function messageFromUpdate(update) {
   return null;
 }
 
-function telegramDelayMs(error, attempt, retryBaseMs) {
+function telegramDelayMs(error, attempt, retryBaseMs, maxRetryAfterSeconds) {
   // Bot API `parameters.retry_after` is in seconds — honor it (converted to ms)
-  // over our exponential backoff.
+  // over our exponential backoff, up to the configured finite cap.
   const retryAfter = error.payload?.parameters?.retry_after;
   if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
-    return Math.ceil(retryAfter * 1000);
+    return Math.ceil(Math.min(retryAfter, maxRetryAfterSeconds) * 1000);
   }
   return retryBaseMs * 2 ** attempt;
+}
+
+function abortReason(signal) {
+  return signal?.reason ?? new DOMException("The operation was aborted.", "AbortError");
+}
+
+function defaultSleep(ms, signal) {
+  if (signal?.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(abortReason(signal));
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function sleepWithSignal(sleep, ms, signal) {
+  if (!signal) {
+    await sleep(ms);
+    return;
+  }
+  if (signal.aborted) throw abortReason(signal);
+
+  let onAbort;
+  const aborted = new Promise((_, reject) => {
+    onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([sleep(ms, signal), aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 function isRetryableTelegramError(error) {
@@ -277,7 +318,12 @@ export function createTelegramClient(options) {
   if (typeof fetchImpl !== "function") throw new Error("fetch is not available");
   const maxRetries = Math.max(0, Math.floor(options.maxRetries ?? 3));
   const retryBaseMs = Math.max(1, Math.floor(options.retryBaseMs ?? 500));
-  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const configuredMaxRetryAfterSeconds = options.maxRetryAfterSeconds ?? DEFAULT_MAX_RETRY_AFTER_SECONDS;
+  const maxRetryAfterSeconds =
+    typeof configuredMaxRetryAfterSeconds === "number" && Number.isFinite(configuredMaxRetryAfterSeconds)
+      ? Math.max(0, configuredMaxRetryAfterSeconds)
+      : DEFAULT_MAX_RETRY_AFTER_SECONDS;
+  const sleep = options.sleep ?? defaultSleep;
 
   async function call(method, body = {}, init = {}) {
     let lastError = null;
@@ -307,6 +353,9 @@ export function createTelegramClient(options) {
         try {
           text = await response.text();
         } catch (error) {
+          if (init.signal?.aborted || error?.name === "AbortError") {
+            throw sanitizeTelegramNetworkCause(error, token, requestUrl);
+          }
           throw new TelegramNetworkError(method, sanitizeTelegramNetworkCause(error, token, requestUrl));
         }
 
@@ -331,7 +380,11 @@ export function createTelegramClient(options) {
       } catch (error) {
         lastError = error;
         if (attempt >= maxRetries || !isRetryableTelegramError(error)) throw error;
-        await sleep(telegramDelayMs(error, attempt, retryBaseMs));
+        await sleepWithSignal(
+          sleep,
+          telegramDelayMs(error, attempt, retryBaseMs, maxRetryAfterSeconds),
+          init.signal,
+        );
       }
     }
     throw lastError ?? new Error(`Telegram ${method} failed`);

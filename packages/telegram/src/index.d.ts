@@ -30,7 +30,10 @@ export interface TelegramClientOptions {
   fetch?: typeof fetch;
   maxRetries?: number;
   retryBaseMs?: number;
-  sleep?: (ms: number) => Promise<void>;
+  /** Finite cap on server-provided `retry_after` delays, in seconds. @default 30 */
+  maxRetryAfterSeconds?: number;
+  /** Retry sleeper. The active request signal is passed through for cancellation. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface TelegramRequestInit {
