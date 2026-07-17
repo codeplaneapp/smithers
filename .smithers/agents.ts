@@ -67,7 +67,7 @@ export const agents = {
     providers.kimi1,
   ],
   codex: [
-    providers.codex1,
+    // providers.codex1,  // codex weekly quota exhausted; restore after 2026-07-23
   ],
   gemini: [
     providers.gemini1,
@@ -76,8 +76,8 @@ export const agents = {
   cheapFast: [
     providers.claudeSonnet,
     providers.kimi1,
-    providers.codexLuna,
-    providers.codex1Luna,
+    // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.vibe,
     // providers.antigravity,
@@ -89,8 +89,8 @@ export const agents = {
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
-    providers.codexLuna,
-    providers.codex1Luna,
+    // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -101,8 +101,8 @@ export const agents = {
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
-    providers.codexLuna,
-    providers.codex1Luna,
+    // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -113,8 +113,8 @@ export const agents = {
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
-    providers.codexTerra,
-    providers.codex1Terra,
+    // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -125,8 +125,8 @@ export const agents = {
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
-    providers.codexTerra,
-    providers.codex1Terra,
+    // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -137,8 +137,8 @@ export const agents = {
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
-    providers.codexTerra,
-    providers.codex1Terra,
+    // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -149,8 +149,9 @@ export const agents = {
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
-    providers.codexSol,
-    providers.codex1Sol,
+    providers.kimi1,
+    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.openclaw,
     // providers.openrouter,
     // providers.antigravity,
@@ -161,8 +162,9 @@ export const agents = {
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
-    providers.codexSol,
-    providers.codex1Sol,
+    providers.kimi1,
+    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
@@ -172,8 +174,9 @@ export const agents = {
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
-    providers.codexSol,
-    providers.codex1Sol,
+    providers.kimi1,
+    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
@@ -183,8 +186,8 @@ export const agents = {
     providers.claude,
     providers.claudeOpus,
     providers.kimi1,
-    providers.codexSol,
-    providers.codex1Sol,
+    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
+    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
