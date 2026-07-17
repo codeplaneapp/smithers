@@ -6,6 +6,7 @@ import { renderWorkflow } from "smithers-orchestrator/testing";
 import { buildIssueBlitzNodeState } from "../lib/buildIssueBlitzNodeState";
 
 const workflowSource = readFileSync(join(import.meta.dir, "../workflows/issue-blitz.tsx"), "utf8");
+const issueTrainSource = readFileSync(join(import.meta.dir, "../workflows/issue-train.tsx"), "utf8");
 const uiSource = readFileSync(join(import.meta.dir, "../ui/issue-blitz.tsx"), "utf8");
 const workflowPath = join(import.meta.dir, "../workflows/issue-blitz.tsx");
 const itemKeys = [
@@ -40,6 +41,14 @@ describe("issue-blitz event parsing", () => {
 });
 
 describe("issue-blitz safety contract", () => {
+  test("keeps the same-branch issue train behind deterministic gates", () => {
+    expect(issueTrainSource).toContain("const GATE_COMMAND = \"pnpm typecheck && pnpm test\"");
+    expect(issueTrainSource).toContain("git([\"merge-base\", remoteSha, headSha]");
+    expect(issueTrainSource).toContain("[\"push\", \"origin\", \"HEAD:refs/heads/main\"]");
+    expect(issueTrainSource).toContain("pushed: after === headSha");
+    expect(issueTrainSource).not.toContain("--force");
+  });
+
   test("isolates public-issue agents and lands only an approved exact head", () => {
     expect(workflowSource).toContain("buildPublicIssueAgentPolicy");
     expect(workflowSource).toContain("subscriptionCodexFirst");

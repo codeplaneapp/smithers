@@ -13,8 +13,8 @@ const slash = (value: string) => value.split(sep).join("/");
 const sorted = (values: Iterable<string>) => [...values].sort((a, b) => a.localeCompare(b));
 
 const workflowOwners = {
+  "./tests/issue-blitz.test.ts": ["issue-blitz.tsx", "issue-train.tsx"],
   "./tests/curated-authoring-workflows.test.tsx": ["create-skill.tsx", "create-workflow.tsx"],
-  "./tests/issue-blitz.test.ts": ["issue-blitz.tsx"],
   "./tests/curated-ddd-eval-workflows.test.tsx": ["docs-driven-development.tsx", "eval-suite-run.tsx"],
   "./tests/curated-system-workflows.test.tsx": ["init.tsx", "post-failure.tsx", "upgrade.tsx"],
   "./tests/seeded-pack-workflows.test.tsx": ["add.tsx", "share-pack.tsx"],
@@ -35,7 +35,7 @@ const workflowOwners = {
   "./tests/local-workflows-b-utilities.test.tsx": ["open-code-review.tsx", "openclaw-integration-hardening.tsx", "plue-demo-child.tsx", "postgres-tanstack-sync.tsx", "repo-prospector.tsx", "restore-claude-implement.tsx"],
   "./tests/local-workflows-c-control.test.tsx": ["review-cloud-ship.tsx"],
   "./tests/local-workflows-c-progression.test.tsx": ["roadmapbench.tsx", "serverless-refactor.tsx", "ship-pipeline.tsx", "sweep.tsx", "sync-features.tsx", "tanstack-db-migration.tsx", "tanstack-db-sync-engine.tsx", "telegram-daily-digest.tsx"],
-  "./tests/local-workflows-c-utilities.test.tsx": ["review-codex-antigravity.tsx", "review-nokimi.tsx", "run-on-plue.tsx", "test-fortress-monitor.tsx", "trellis.tsx", "vcs.tsx", "verify-push-safety.tsx"],
+  "./tests/local-workflows-c-utilities.test.tsx": ["microsandbox-finish.tsx", "review-codex-antigravity.tsx", "review-nokimi.tsx", "run-on-plue.tsx", "test-fortress-monitor.tsx", "trellis.tsx", "vcs.tsx", "verify-push-safety.tsx"],
   "./tests/local-workflows-c-orchestration.test.tsx": ["route-and-merge-issues.tsx", "studio-parity-swarm.tsx", "test-fortress.tsx", "ultragrill.tsx", "validated-implement.tsx"],
   "./tests/ticket-fleet-workflow.test.tsx": ["ticket-fleet.tsx"],
   "./tests/authoring-benchmark-workflow.test.ts": ["authoring-benchmark.tsx"],

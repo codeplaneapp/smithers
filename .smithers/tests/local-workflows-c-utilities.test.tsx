@@ -75,6 +75,12 @@ async function executable(file: string, source: string) {
 function git(cwd: string, ...args: string[]) { return execFileSync("git", args, { cwd, encoding: "utf8" }).trim(); }
 
 describe("Batch C utility behavior", () => {
+  test("microsandbox finish starts with its deterministic preparation gate", async () => {
+    const frame = await render("microsandbox-finish.tsx");
+    expect(frame.tasks.map((candidate) => candidate.nodeId)).toEqual(["prep", "summary"]);
+    expect(task(frame, "prep").agent).toBeUndefined();
+  });
+
   test("review wrappers use exact prompt, distinct configured chains, staged schema rows, and moderator terminal", async () => wait((async () => {
     for (const name of ["review-codex-antigravity.tsx", "review-nokimi.tsx"]) {
       const original = "C-BATCH\n<exact>&\nkeep all punctuation";
@@ -174,11 +180,13 @@ describe("Batch C utility behavior", () => {
         const jj = resolveJjBinary();
         // The vendored jj binaries are fetched at release time (pnpm fetch:jj)
         // and never committed, so a clean workspace checkout may not carry one
-        // for this platform; without it the jj half of this test cannot run.
-        if (jj.source !== "bundled") { console.warn(`skipping jj coverage: no bundled jj for ${process.platform}-${process.arch} (resolved source=${jj.source})`); return; }
-        expect(resolve(jj.path)).toBe(jj.path);
+        // for this platform; fall back to a PATH-resolved jj before skipping.
+        const jjPath = jj.source === "path" ? Bun.which(jj.path) : jj.path;
+        if (!jjPath) { console.warn(`skipping jj coverage: no bundled or PATH jj for ${process.platform}-${process.arch} (resolved source=${jj.source})`); return; }
+        expect(resolve(jjPath)).toBe(jjPath);
+        process.env.SMITHERS_JJ_PATH = jjPath;
         process.env.PATH = "";
-        execFileSync(jj.path, ["git", "init", "--colocate"], { cwd: jjRoot }); await writeFile(join(jjRoot, "j.txt"), "jj\n");
+        execFileSync(jjPath!, ["git", "init", "--colocate"], { cwd: jjRoot }); await writeFile(join(jjRoot, "j.txt"), "jj\n");
         const status = await render("vcs.tsx", { action: "status", vcs: "jj" }); await expect(runTask(task(status, "vcs:status") as never)).resolves.toEqual(expect.objectContaining({ tool: "jj", isRepo: true, clean: false, changes: expect.arrayContaining([expect.objectContaining({ path: "j.txt" })]) }));
         const log = await render("vcs.tsx", { action: "log", vcs: "jj" }); await expect(runTask(task(log, "vcs:log") as never)).resolves.toEqual(expect.objectContaining({ tool: "jj", isRepo: true }));
       } finally {
