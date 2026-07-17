@@ -123,7 +123,9 @@ export function verifyTaskProofBindings(tasks, outputs) {
             task.proofBindingStatus = undefined;
             continue;
         }
-        if (!task.proofBindings) {
+        // An empty binding list proves nothing; treating it as verifiable
+        // would dispatch a proof-required task with zero authority checks.
+        if (!task.proofBindings || task.proofBindings.length === 0) {
             task.proofBindingStatus = "missing";
             continue;
         }

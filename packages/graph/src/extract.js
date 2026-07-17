@@ -63,7 +63,8 @@ function hasObjectChild(value) {
 /**
  * Preserve whether `bind` was authored even when its value is undefined. An
  * undefined proof is a real scheduling dependency, distinct from omitting the
- * prop entirely.
+ * prop entirely. An authored-but-empty bind list carries zero proofs, so it
+ * must wait like an undefined proof rather than pass verification vacuously.
  * @param {Record<string, unknown>} raw
  * @returns {{ proofBindingRequired?: boolean; proofBindings?: import("./ProofBinding.ts").ProofBinding[] }}
  */
@@ -81,7 +82,7 @@ function proofBindingProps(raw) {
         typeof value.digest === "string"));
     return {
         proofBindingRequired: true,
-        ...(bindings.length === values.length ? { proofBindings: bindings } : {}),
+        ...(values.length > 0 && bindings.length === values.length ? { proofBindings: bindings } : {}),
     };
 }
 /**

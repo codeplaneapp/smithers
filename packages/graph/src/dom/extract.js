@@ -119,7 +119,7 @@ function proofBindingProps(raw) {
         typeof value.digest === "string"));
     return {
         proofBindingRequired: true,
-        ...(bindings.length === values.length ? { proofBindings: bindings } : {}),
+        ...(values.length > 0 && bindings.length === values.length ? { proofBindings: bindings } : {}),
     };
 }
 /**

@@ -406,6 +406,43 @@ describe("provenance binding", () => {
         }
     }, 30_000);
 
+    test("bind={[]} waits like bind={undefined} instead of dispatching unproven", async () => {
+        const { smithers, outputs, tables, db, cleanup } = createTestSmithers(schemas);
+        const adapter = new SmithersDb(db);
+        const workflow = smithers(() => (
+            <Workflow name="provenance-binding-empty">
+                <Sequence>
+                    <Task id="unbound" output={outputs.result}>
+                        {{ executed: true }}
+                    </Task>
+                    <Task id="consumer" output={outputs.result} bind={[]}>
+                        {{ executed: true }}
+                    </Task>
+                </Sequence>
+            </Workflow>
+        ));
+        try {
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId: "provenance-binding-empty",
+            }));
+            expect(result.status).toBe("waiting-event");
+            expect((await adapter.getNode(result.runId, "unbound", 0))?.state).toBe("finished");
+            expect((await adapter.getNode(result.runId, "consumer", 0))?.state).toBe("waiting-bound");
+            expect(await adapter.listAttempts(result.runId, "consumer", 0)).toHaveLength(0);
+            expect(await db.select().from(tables.result)).toHaveLength(1);
+        }
+        finally {
+            cleanup();
+        }
+    });
+
+    test("an empty binding list never verifies as current", () => {
+        const task = { nodeId: "consumer", iteration: 0, proofBindingRequired: true, proofBindings: [] };
+        verifyTaskProofBindings([task], {});
+        expect(task.proofBindingStatus).toBe("missing");
+    });
+
     test("omitting bind executes while bind={undefined} waits without reporting stale", async () => {
         const { smithers, outputs, tables, db, cleanup } = createTestSmithers(schemas);
         const adapter = new SmithersDb(db);
