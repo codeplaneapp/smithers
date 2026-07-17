@@ -10,7 +10,12 @@ const WATCHDOG_CRON = "15 12,13 * * *";
 // watchdog doesn't fire a second concurrent full run while the primary run is
 // still mid-flight — duplicate publishes are prevented downstream by the
 // verifier's idempotent-delivery check, but overlapping runs still burn API spend.
-const INFLIGHT_TTL_SECONDS = 20 * 60;
+// 90 min, not 20: a full pipeline run on the container instance class takes
+// 40-60+ min (observed live 2026-07-17), and a marker that expires mid-run lets
+// the watchdog/manual triggers start an overlapping run. The marker is deleted
+// promptly on completion, so the long TTL only delays re-triggering after a
+// crashed run.
+const INFLIGHT_TTL_SECONDS = 90 * 60;
 const WATCHDOG_MARKER_TTL_SECONDS = 48 * 60 * 60;
 
 type TriggerResult = { ok: boolean; status: number; body: unknown };

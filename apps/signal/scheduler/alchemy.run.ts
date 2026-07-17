@@ -72,7 +72,11 @@ const runner = await Container("signal-runner", {
   // COPYs repo-root paths (package.json, apps/, packages/, .smithers/, config/).
   build: { context: REPO_ROOT, dockerfile: join("apps", "signal", "runner", "Dockerfile") },
   maxInstances: 2,
-  instanceType: "basic",
+  // standard (1/2 vCPU, 4 GiB), not basic (1/4 vCPU, 1 GiB): the headless
+  // smithers pipeline ground for 40-60+ min per run on basic (observed live
+  // 2026-07-17), which starved the inflight-marker window and made prod
+  // verification miserable.
+  instanceType: "standard",
   adopt: true,
   accountId: CLOUDFLARE_ACCOUNT_ID,
 });

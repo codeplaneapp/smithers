@@ -25,12 +25,20 @@ type OpenAIAgentStringModelOptions = {
    * API key sent to OpenAI-compatible endpoints. Local servers often accept "none".
    */
   apiKey?: string;
+  /**
+   * Which OpenAI API surface serves the string model. The provider default
+   * ("responses") targets the `/responses` endpoint, which most OpenAI-compatible
+   * servers (Gemini's compat layer, llama.cpp, vLLM, ...) do not implement — set
+   * "chat" to call `/chat/completions` on those endpoints.
+   */
+  api?: "responses" | "chat";
 };
 
 type OpenAIAgentPrebuiltModelOptions = {
   model: LanguageModel;
   baseURL?: never;
   apiKey?: never;
+  api?: never;
 };
 
 export type OpenAIAgentOptions<

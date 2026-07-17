@@ -104,7 +104,82 @@ describe("SDK agents", () => {
             id: "openai-sdk-conflict",
             model: fake.model,
             baseURL: "http://127.0.0.1:8080/v1",
-        })).toThrow(/baseURL\/apiKey can only be used when model is a string/);
+        })).toThrow(/baseURL\/apiKey\/api can only be used when model is a string/);
+    });
+    test("OpenAIAgent rejects the api option with a prebuilt model", () => {
+        const fake = createFakeModel();
+        expect(() => new OpenAIAgent({
+            id: "openai-sdk-api-conflict",
+            model: fake.model,
+            api: "chat",
+        })).toThrow(/baseURL\/apiKey\/api can only be used when model is a string/);
+    });
+    test.each([
+        ["chat", "/chat/completions"],
+        ["responses", "/responses"],
+        [undefined, "/responses"],
+    ])("OpenAIAgent api=%p routes string models to the %s endpoint", async (api, expectedPath) => {
+        const originalFetch = globalThis.fetch;
+        let requestUrl = "";
+        try {
+            globalThis.fetch = async (url) => {
+                requestUrl = String(url);
+                throw new Error("captured OpenAI request");
+            };
+            const agent = new OpenAIAgent({
+                id: "openai-sdk-api-surface",
+                model: "compat-model",
+                baseURL: "http://127.0.0.1:8080/v1",
+                apiKey: "none",
+                ...(api === undefined ? {} : { api }),
+            });
+            try {
+                await agent.generate({ prompt: "hit compat server" });
+            }
+            catch {
+                // request capture aborts the call; the URL is the assertion target
+            }
+            expect(requestUrl).toBe(`http://127.0.0.1:8080/v1${expectedPath}`);
+        }
+        finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+    test("OpenAIAgent sanitizes Zod outputSchema for OpenAI strict mode (defaults/optionals land in required)", async () => {
+        const originalFetch = globalThis.fetch;
+        let requestBody = "";
+        try {
+            globalThis.fetch = async (_url, init) => {
+                requestBody = typeof init?.body === "string" ? init.body : "";
+                throw new Error("captured OpenAI request");
+            };
+            const agent = new OpenAIAgent({
+                id: "openai-sdk-strict-schema",
+                model: "compat-model",
+                baseURL: "http://127.0.0.1:8080/v1",
+                apiKey: "none",
+                api: "chat",
+            });
+            const outputSchema = z.object({
+                verdict: z.string(),
+                categories: z.array(z.string()).default([]),
+                note: z.string().optional(),
+            });
+            try {
+                await agent.generate({ prompt: "assess", outputSchema });
+            }
+            catch {
+                // request capture aborts the call; the body is the assertion target
+            }
+            const body = JSON.parse(requestBody);
+            const schema = body?.response_format?.json_schema?.schema;
+            expect(schema?.type).toBe("object");
+            expect(schema?.additionalProperties).toBe(false);
+            expect((schema?.required ?? []).toSorted()).toEqual(["categories", "note", "verdict"]);
+        }
+        finally {
+            globalThis.fetch = originalFetch;
+        }
     });
     test("OpenAIAgent forwards outputSchema through the SDK structured output channel", async () => {
         const fake = createFakeModel();

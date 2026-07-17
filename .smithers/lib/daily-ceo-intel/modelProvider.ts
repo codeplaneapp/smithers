@@ -126,7 +126,10 @@ async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike): Pr
     const res = await fetchImpl("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: cheapModel, max_completion_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
+      // 16, not 1: gpt-5.6-family reasoning models spend the first tokens on
+      // reasoning and 400 on max_completion_tokens: 1, which false-negatives a
+      // funded, working key (verified live 2026-07-17: 1 -> HTTP 400, 16 -> 200).
+      body: JSON.stringify({ model: cheapModel, max_completion_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
     });
     if (res.ok) return { probe: { provider: "openai", attempted: true, ok: true, classification: "ok", detail: `verified model ${cheapModel}` }, cheapModel };
     const body = await safeErrorBody(res);
@@ -139,10 +142,14 @@ async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike): Pr
 async function probeGemini(apiKey: string | undefined, fetchImpl: FetchLike): Promise<ProviderProbe> {
   if (!apiKey) return { provider: "gemini", attempted: false, ok: false, classification: "missing-key", detail: "GEMINI_API_KEY not set" };
   try {
-    const res = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    // Probe the OpenAI-compat /chat/completions endpoint the agents actually
+    // serve through, not the native generateContent endpoint — probing a
+    // different code path than serving let an unusable provider win selection
+    // (native probe 200'd while every real call 404'd on /responses).
+    const res = await fetchImpl(`${GEMINI_OPENAI_COMPAT_BASE_URL}/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({ contents: [{ parts: [{ text: "ping" }] }] }),
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: GEMINI_MODEL, max_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
     });
     if (res.ok) return { provider: "gemini", attempted: true, ok: true, classification: "ok", detail: "probe call succeeded" };
     const body = await safeErrorBody(res);
@@ -244,10 +251,12 @@ export function buildAgentPoolsForSelection(
       strong: [new OpenAIAgent({ model: selection.strongModel })],
     };
   }
-  // gemini: routed through OpenAIAgent at Google's OpenAI-compatible endpoint (see module docstring).
+  // gemini: routed through OpenAIAgent at Google's OpenAI-compatible endpoint
+  // (see module docstring). api: "chat" is load-bearing — the provider default
+  // targets /responses, which Gemini's compat layer doesn't implement (404).
   const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
   return {
-    cheap: [new OpenAIAgent({ model: selection.cheapModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey })],
-    strong: [new OpenAIAgent({ model: selection.strongModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey })],
+    cheap: [new OpenAIAgent({ model: selection.cheapModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat" })],
+    strong: [new OpenAIAgent({ model: selection.strongModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat" })],
   };
 }

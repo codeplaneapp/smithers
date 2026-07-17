@@ -497,16 +497,18 @@ describe("modelProvider: SDK-agent provider fallback (auto|anthropic|openai|gemi
   const NOW = () => "2026-07-17T12:00:00.000Z";
 
   type FakeRoute = { match: (url: string) => boolean; status: number; body: string };
-  function fakeFetch(routes: FakeRoute[]): { impl: typeof fetch; calls: string[] } {
+  function fakeFetch(routes: FakeRoute[]): { impl: typeof fetch; calls: string[]; requests: Array<{ url: string; body: string }> } {
     const calls: string[] = [];
-    const impl = (async (input: RequestInfo | URL) => {
+    const requests: Array<{ url: string; body: string }> = [];
+    const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push(url);
+      requests.push({ url, body: typeof init?.body === "string" ? init.body : "" });
       const route = routes.find((r) => r.match(url));
       if (!route) throw new Error(`fakeFetch: no route matched ${url}`);
       return new Response(route.body, { status: route.status });
     }) as unknown as typeof fetch;
-    return { impl, calls };
+    return { impl, calls, requests };
   }
 
   const anthropicOk: FakeRoute = { match: (u) => u.includes("api.anthropic.com"), status: 200, body: "{}" };
@@ -674,5 +676,35 @@ describe("modelProvider: SDK-agent provider fallback (auto|anthropic|openai|gemi
     const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] });
     expect((pools.cheap[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
     expect((pools.strong[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
+  });
+
+  test("gemini pools serve through the chat/completions API, never /responses (Gemini's compat layer 404s on /responses)", () => {
+    const selection: ProviderSelection = { mode: "auto", provider: "gemini", cheapModel: GEMINI_MODEL, strongModel: GEMINI_MODEL, reason: "ok", probes: [], selectedAt: NOW() };
+    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] });
+    for (const agent of [...pools.cheap, ...pools.strong]) {
+      const model = (agent as unknown as { settings?: { model?: { provider?: string; modelId?: string } } }).settings?.model;
+      expect(model?.provider).toBe("openai.chat");
+      expect(model?.modelId).toBe(GEMINI_MODEL);
+    }
+  });
+
+  test("openai probe requests enough completion tokens for reasoning models (1 token 400s on gpt-5.6, false-negating a funded key)", async () => {
+    const { impl, requests } = fakeFetch([anthropicBilling, openaiModelsList(["gpt-5.6-mini"]), openaiChatOk]);
+    const selection = await selectModelProvider({ ANTHROPIC_API_KEY: "sk-ant-unfunded", OPENAI_API_KEY: "sk-test" }, impl, NOW);
+    expect(selection.provider).toBe("openai");
+    const probeRequest = requests.find((r) => r.url.includes("api.openai.com/v1/chat/completions"));
+    expect(probeRequest).toBeDefined();
+    const probeBody = JSON.parse(probeRequest!.body) as { max_completion_tokens?: number };
+    expect(probeBody.max_completion_tokens).toBeGreaterThanOrEqual(16);
+  });
+
+  test("gemini probe exercises the OpenAI-compat chat/completions path the agents serve through, not native generateContent", async () => {
+    const { impl, requests } = fakeFetch([anthropicAuth, openaiModelsList([]), openaiChatBilling, geminiOk]);
+    const selection = await selectModelProvider({ ANTHROPIC_API_KEY: "bad", OPENAI_API_KEY: "sk-broke", GEMINI_API_KEY: "g-test" }, impl, NOW);
+    expect(selection.provider).toBe("gemini");
+    const probeRequest = requests.find((r) => r.url.includes("generativelanguage.googleapis.com"));
+    expect(probeRequest?.url).toBe("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+    const probeBody = JSON.parse(probeRequest!.body) as { model?: string };
+    expect(probeBody.model).toBe(GEMINI_MODEL);
   });
 });
