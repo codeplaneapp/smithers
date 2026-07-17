@@ -16,17 +16,19 @@
 import { ClaudeCodeAgent, type AgentLike } from "smithers-orchestrator";
 import {
   existsSync,
+  closeSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { subscriptionCodexFirst } from "../lib/codexAccounts";
@@ -748,22 +750,84 @@ export function runSmithersJson(
       : command === "summary"
         ? ["output", runId, "run-summary", "--format", "json", "--full-output"]
         : ["why", runId, "--format", "json"];
+  if (process.platform === "win32") {
+    try {
+      return {
+        ok: true,
+        output: execFileSync(binary, args, {
+          cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+          timeout: timeoutMs, killSignal: "SIGKILL",
+        }),
+      };
+    } catch (error: any) {
+      return {
+        ok: false,
+        output: [error?.stdout?.toString?.() ?? "", error?.stderr?.toString?.() ?? "", error?.message ?? String(error)].filter(Boolean).join("\n"),
+      };
+    }
+  }
+
+  // execFileSync waits for a timed-out child to acknowledge its signal. A
+  // compiled Bun command can ignore that signal indefinitely, so run the
+  // command in a detached process group and enforce the deadline here. The
+  // shell receives every command argument positionally; no value is evaluated
+  // as shell source.
+  const commandDir = mkdtempSync(join(tmpdir(), "smithers-watchdog-command-"));
+  const stdoutPath = join(commandDir, "stdout");
+  const stderrPath = join(commandDir, "stderr");
+  const statusPath = join(commandDir, "status");
+  const stdoutFd = openSync(stdoutPath, "w");
+  const stderrFd = openSync(stderrPath, "w");
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  let childPid = 0;
   try {
-    return {
-      ok: true,
-      output: execFileSync(binary, args, {
-        cwd,
-        encoding: "utf8",
-        maxBuffer: 32 * 1024 * 1024,
-        timeout: timeoutMs,
-        killSignal: "SIGTERM",
-      }),
-    };
-  } catch (error: any) {
+    const child = spawn(
+      "/bin/sh",
+      [
+        "-c",
+        'status="$1"; shift; "$@"; code=$?; printf "%s" "$code" > "$status"',
+        "smithers-deadline",
+        statusPath,
+        binary,
+        ...args,
+      ],
+      { cwd, detached: true, stdio: ["ignore", stdoutFd, stderrFd] },
+    );
+    childPid = child.pid ?? 0;
+    child.unref();
+  } finally {
+    closeSync(stdoutFd);
+    closeSync(stderrFd);
+  }
+
+  try {
+    const deadline = Date.now() + timeoutMs;
+    while (!existsSync(statusPath) && Date.now() < deadline) {
+      Atomics.wait(sleeper, 0, 0, Math.min(10, Math.max(1, deadline - Date.now())));
+    }
+    const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
+    const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
+    if (!existsSync(statusPath)) {
+      if (childPid > 0) {
+        try {
+          process.kill(-childPid, "SIGKILL");
+        } catch (error: any) {
+          if (error?.code !== "ESRCH") throw error;
+        }
+      }
+      return {
+        ok: false,
+        output: [stdout, stderr, `Command timed out after ${timeoutMs}ms (ETIMEDOUT)`].filter(Boolean).join("\n"),
+      };
+    }
+    const status = Number.parseInt(readFileSync(statusPath, "utf8"), 10);
+    if (status === 0) return { ok: true, output: stdout };
     return {
       ok: false,
-      output: [error?.stdout?.toString?.() ?? "", error?.stderr?.toString?.() ?? "", error?.message ?? String(error)].filter(Boolean).join("\n"),
+      output: [stdout, stderr, `Command failed with exit code ${status}`].filter(Boolean).join("\n"),
     };
+  } finally {
+    rmSync(commandDir, { recursive: true, force: true });
   }
 }
 
