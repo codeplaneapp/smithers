@@ -1,21 +1,24 @@
 import { freezeScenario, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioStep, type ScenarioValue } from "./ast.ts";
+import { createHash } from "node:crypto";
 export type TaskRuntime = Readonly<{ effect: <T>(name: string, operation: () => T | Promise<T>) => Promise<T>; sleep: (ms: number) => Promise<void>; log: (message: string, data?: ScenarioValue) => void; opaque: <T>(name: string, operation: () => T | Promise<T>) => Promise<T> }>;
 export type StepRunner = (runtime: TaskRuntime, input: ScenarioValue | undefined) => unknown | Promise<unknown>;
 const stableRunnerDigest = (runner: StepRunner): string => {
-  let hash = 2166136261;
-  for (const character of Function.prototype.toString.call(runner)) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return createHash("sha256").update(Function.prototype.toString.call(runner)).digest("hex");
 };
 const runners = new WeakMap<object, StepRunner>();
 const runnersByBinding = new Map<string, StepRunner>();
+let anonymousBindingSequence = 0;
 export const stepRunner = (stepValue: ScenarioStep): StepRunner | undefined => runners.get(stepValue) ?? (stepValue.runnerBinding ? runnersByBinding.get(stepValue.runnerBinding) : undefined);
 export const step = (id: string, options: { input?: ScenarioValue; dependsOn?: readonly string[]; capabilities?: readonly string[]; extension?: string; runnerBinding?: string; run?: StepRunner } = {}): ScenarioStep => {
   // Anonymous bindings are content-addressed, never numbered.  A process-global
   // counter makes the canonical AST depend on construction history and makes a
   // fresh-process replay impossible.  Callers that need two distinct runners
   // with identical source must provide an explicit runnerBinding.
-  const runnerBinding = options.run ? (options.runnerBinding ?? `anonymous:${stableRunnerDigest(options.run)}`) : options.runnerBinding;
-  if (options.run && runnerBinding) {
+  const explicitBinding = options.runnerBinding !== undefined;
+  const runnerBinding = options.run ? (options.runnerBinding ?? `anonymous:${stableRunnerDigest(options.run)}:${anonymousBindingSequence++}`) : options.runnerBinding;
+  if (options.run && runnerBinding && explicitBinding) {
+    const prior = runnersByBinding.get(runnerBinding);
+    if (prior && prior !== options.run) throw Object.assign(new Error(`RUNNER_BINDING_CONFLICT: ${runnerBinding} already names a different executable`), { code: "RUNNER_BINDING_CONFLICT", details: { runnerBinding } });
   }
   const value = freezeScenario({ kind: "step" as const, id, ...(options.input === undefined ? {} : { input: options.input }), dependsOn: [...(options.dependsOn ?? [])], capabilities: [...(options.capabilities ?? [])], ...(options.extension ? { extension: options.extension } : {}), ...(runnerBinding ? { runnerBinding } : {}) });
   if (options.run) { runners.set(value, options.run); if (runnerBinding) runnersByBinding.set(runnerBinding, options.run); }
