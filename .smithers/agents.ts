@@ -61,6 +61,8 @@ export const providers = {
 } as const;
 
 export const agents = {
+  // 2026-07-17: codex providers demoted to pool tails while the codex weekly quota
+  // is exhausted (resets 2026-07-23); a codex-first pool parks runs until that reset.
   kimi: [
     providers.kimi1,
   ],
@@ -72,10 +74,10 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   cheapFast: [
-    providers.codexLuna,
-    providers.codex1Luna,
     providers.claudeSonnet,
     providers.kimi1,
+    providers.codexLuna,
+    providers.codex1Luna,
     // providers.kimi,
     // providers.vibe,
     // providers.antigravity,
@@ -84,11 +86,11 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   research: [
-    providers.codexLuna,
-    providers.codex1Luna,
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
+    providers.codexLuna,
+    providers.codex1Luna,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -96,11 +98,11 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   implement: [
-    providers.codexLuna,
-    providers.codex1Luna,
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
+    providers.codexLuna,
+    providers.codex1Luna,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -108,11 +110,11 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   midTier: [
-    providers.codexTerra,
-    providers.codex1Terra,
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
+    providers.codexTerra,
+    providers.codex1Terra,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -120,11 +122,11 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   smartTool: [
-    providers.codexTerra,
-    providers.codex1Terra,
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
+    providers.codexTerra,
+    providers.codex1Terra,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -132,11 +134,11 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   validate: [
-    providers.codexTerra,
-    providers.codex1Terra,
     providers.claudeSonnet,
     providers.kimi1,
     providers.claude,
+    providers.codexTerra,
+    providers.codex1Terra,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -144,11 +146,11 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   smart: [
-    providers.codexSol,
-    providers.codex1Sol,
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
+    providers.codexSol,
+    providers.codex1Sol,
     // providers.openclaw,
     // providers.openrouter,
     // providers.antigravity,
@@ -156,33 +158,33 @@ export const agents = {
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   review: [
-    providers.codexSol,
-    providers.codex1Sol,
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
+    providers.codexSol,
+    providers.codex1Sol,
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   planning: [
-    providers.codexSol,
-    providers.codex1Sol,
     providers.claude,
     providers.claudeOpus,
     providers.claudeSonnet,
+    providers.codexSol,
+    providers.codex1Sol,
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   orchestrator: [
-    providers.codexSol,
-    providers.codex1Sol,
     providers.claude,
     providers.claudeOpus,
     providers.kimi1,
+    providers.codexSol,
+    providers.codex1Sol,
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
