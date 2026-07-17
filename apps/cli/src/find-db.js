@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorDir";
 import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
+import { cliWorkspace } from "./cliWorkspace.js";
 /** @typedef {import("./FindDbWaitOptions.ts").FindDbWaitOptions} FindDbWaitOptions */
 
 /**
@@ -107,9 +108,9 @@ export async function waitForSmithersDb(from, opts = {}) {
  *
  * @param {string} [from]
  * @param {FindDbWaitOptions} [opts]
- * @returns {Promise<Pick<import("smithers-orchestrator/OpenSmithersStoreResult").OpenSmithersStoreResult, "adapter" | "dbPath" | "cleanup" | "choice">>}
+ * @returns {Promise<Pick<import("smithers-orchestrator/OpenSmithersStoreResult").OpenSmithersStoreResult, "adapter" | "db" | "dbPath" | "cleanup" | "choice">>}
  */
 export async function findAndOpenDb(from, opts) {
-    const opened = await openSmithersStore({ cwd: from ?? process.cwd(), mode: "read", wait: opts });
-    return { adapter: opened.adapter, dbPath: opened.dbPath, cleanup: opened.cleanup, choice: opened.choice };
+    const opened = await openSmithersStore({ cwd: from ?? cliWorkspace.cwd(), mode: "read", wait: opts });
+    return { adapter: opened.adapter, db: opened.db, dbPath: opened.dbPath, cleanup: opened.cleanup, choice: opened.choice };
 }

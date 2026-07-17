@@ -38,6 +38,7 @@ import { CronExpressionParser } from "cron-parser";
 import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanRequestValue, waitForHumanAnswer, } from "@smithers-orchestrator/engine/human-requests";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
+import { cliWorkspace } from "./cliWorkspace.js";
 import { cascadeCancelRun, finalizeCancelledOwnedRun, isCancellableRunStatus, listCascadeLineage } from "./cancel-cascade.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
 import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
@@ -132,7 +133,7 @@ import React from "react";
  * @returns {Promise<SmithersWorkflow<any>>}
  */
 async function loadWorkflowAsync(path) {
-    const abs = resolve(process.cwd(), path);
+    const abs = resolve(cliWorkspace.cwd(), path);
     mdxPlugin();
     const mod = await import(pathToFileURL(abs).href);
     if (!mod.default)
@@ -2729,7 +2730,7 @@ function titleizeWorkflowId(id) {
  * @param {string} [cwd]
  * @returns {string | undefined}
  */
-function resolveGatewayWorkspace(cwd = process.cwd()) {
+function resolveGatewayWorkspace(cwd = cliWorkspace.cwd()) {
     const localPackDir = resolvePackDirs(cwd).find((dir) => dir.scope === "local")?.packDir;
     if (localPackDir)
         return dirname(localPackDir);
@@ -3195,7 +3196,9 @@ async function runGatewayCommand(options) {
             },
         }
         : undefined;
-    const localPackDir = resolvePackDirs(process.cwd()).find((dir) => dir.scope === "local")?.packDir;
+    const operatorCwd = cliWorkspace.cwd();
+    const manifestFallback = cliWorkspace.usesManifestFallback();
+    const localPackDir = resolvePackDirs(operatorCwd).find((dir) => dir.scope === "local")?.packDir;
     const localWorkspace = localPackDir ? dirname(localPackDir) : undefined;
     /** @type {string} */
     let dbPath;
@@ -3204,7 +3207,7 @@ async function runGatewayCommand(options) {
     }
     else {
         try {
-            dbPath = findSmithersDb(process.cwd());
+            dbPath = findSmithersDb(operatorCwd);
         }
         catch (error) {
             if (!(error instanceof SmithersError) || error.code !== "CLI_DB_NOT_FOUND") {
@@ -3216,7 +3219,7 @@ async function runGatewayCommand(options) {
             // .smithers, serve the `smithers init --global` catalog). Create
             // the DB at the operator cwd, exactly where a local-pack boot
             // would put it, instead of refusing to start.
-            dbPath = resolve(process.cwd(), "smithers.db");
+            dbPath = resolve(operatorCwd, "smithers.db");
         }
     }
     const workspace = localWorkspace ?? dirname(dbPath);
@@ -3259,7 +3262,9 @@ async function runGatewayCommand(options) {
         if (unresolvedState && isGatewayPidAlive(unresolvedState.pid)) {
             throw new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway state file for this workspace names live pid ${unresolvedState.pid} at ${unresolvedState.url}, but /health did not verify in time. Refusing to start a second gateway over the same workspace.`, { workspace, pid: unresolvedState.pid, url: unresolvedState.url });
         }
-    process.chdir(workspace);
+    if (!manifestFallback) {
+        process.chdir(workspace);
+    }
     if (options.backend) {
         process.env.SMITHERS_BACKEND = options.backend;
     }
@@ -3341,21 +3346,51 @@ async function runGatewayCommand(options) {
     // loop so DB writes and gateway state mutate in a stable, discovery order,
     // and a broken workflow is still skipped instead of failing the whole boot.
     const discoveredWorkflows = discoverWorkflows(workspace);
-    const loadedWorkflows = await Promise.all(discoveredWorkflows.map((discovered) => loadWorkflow(discovered.entryFile).then((workflow) => ({ discovered, workflow, loadError: /** @type {unknown} */ (null) }), (loadError) => ({ discovered, workflow: /** @type {any} */ (null), loadError }))));
-    for (const { discovered, workflow, loadError } of loadedWorkflows) {
-        if (loadError || !workflow) {
-            process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${(/** @type {any} */ (loadError))?.message ?? String(loadError)}\n`);
-            continue;
-        }
-        try {
-            ensureSmithersTables(workflow.db);
-            setupSqliteCleanup(workflow);
-            backendCleanups.push(() => closeWorkflowBackend(workflow));
-            gateway.register(discovered.id, workflow, { system: discovered.system, entryFile: discovered.entryFile });
+    let loadedWorkflows;
+    if (manifestFallback) {
+        // A read-only gateway must not import workspace workflow modules while
+        // their nearest package.json is conflicted. Register a DB-backed shell
+        // and the built-in operator UI for each discovered id instead, so
+        // existing runs remain inspectable without asking Bun to resolve either
+        // the workflow or its workspace-owned UI bundle. Refuse execution
+        // through these shells until the merge is resolved so a launch cannot
+        // silently run an empty workflow.
+        const readOnlyWorkflow = workspaceApi.smithers((ctx) => {
+            if (!String(ctx.runId).startsWith("__smithers_ui_discovery__:")) {
+                throw new SmithersError("WORKSPACE_MANIFEST_CONFLICT", "Workflow execution is disabled while package.json contains unresolved conflict markers. Resolve the manifest, then restart the gateway.");
+            }
+            return React.createElement(workspaceApi.Workflow, { name: "workspace" });
+        });
+        loadedWorkflows = discoveredWorkflows.map((discovered) => ({
+            discovered,
+            workflow: readOnlyWorkflow,
+            loadError: null,
+        }));
+        for (const { discovered } of loadedWorkflows) {
+            gateway.register(discovered.id, readOnlyWorkflow, {
+                system: discovered.system,
+                ui: true,
+            });
             workflows.push(discovered.id);
         }
-        catch (error) {
-            process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+    }
+    else {
+        loadedWorkflows = await Promise.all(discoveredWorkflows.map((discovered) => loadWorkflow(discovered.entryFile).then((workflow) => ({ discovered, workflow, loadError: /** @type {unknown} */ (null) }), (loadError) => ({ discovered, workflow: /** @type {any} */ (null), loadError }))));
+        for (const { discovered, workflow, loadError } of loadedWorkflows) {
+            if (loadError || !workflow) {
+                process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${(/** @type {any} */ (loadError))?.message ?? String(loadError)}\n`);
+                continue;
+            }
+            try {
+                ensureSmithersTables(workflow.db);
+                setupSqliteCleanup(workflow);
+                backendCleanups.push(() => closeWorkflowBackend(workflow));
+                gateway.register(discovered.id, workflow, { system: discovered.system, entryFile: discovered.entryFile });
+                workflows.push(discovered.id);
+            }
+            catch (error) {
+                process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+            }
         }
     }
     if (workflows.length === 0) {
@@ -3727,8 +3762,9 @@ async function resolveMemoryWorkflowAsync(workflowPath) {
     // Every workflow in the pack opens the same shared `.smithers/smithers.db`,
     // so default to any discovered workflow file (preferring the seeded `hello`)
     // rather than forcing the user to name one for a workspace-scoped read/write.
-    const localPackDir = resolvePackDirs(process.cwd()).find((dir) => dir.scope === "local")?.packDir;
-    const workspace = localPackDir ? dirname(localPackDir) : process.cwd();
+    const cwd = cliWorkspace.cwd();
+    const localPackDir = resolvePackDirs(cwd).find((dir) => dir.scope === "local")?.packDir;
+    const workspace = localPackDir ? dirname(localPackDir) : cwd;
     const discovered = discoverWorkflows(workspace).filter((w) => w.entryFile);
     const entry = discovered.find((w) => w.id === "hello") ?? discovered[0];
     if (!entry?.entryFile)
@@ -3741,14 +3777,19 @@ async function resolveMemoryWorkflowAsync(workflowPath) {
  * dynamic so the memory package is only loaded when a memory command runs.
  *
  * @param {string | undefined} workflowPath
+ * @param {{ readOnly?: boolean }} [options]
  */
-async function openMemoryStore(workflowPath) {
+async function openMemoryStore(workflowPath, options = {}) {
     const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
     const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
+    if (!workflowPath && options.readOnly && cliWorkspace.usesManifestFallback()) {
+        const opened = await findAndOpenDb();
+        return { store: createMemoryStore(opened.db), parseNamespace, cleanup: opened.cleanup };
+    }
     const workflow = await resolveMemoryWorkflowAsync(workflowPath);
     ensureSmithersTables(workflow.db);
     setupSqliteCleanup(workflow);
-    return { store: createMemoryStore(workflow.db), parseNamespace };
+    return { store: createMemoryStore(workflow.db), parseNamespace, cleanup: undefined };
 }
 const memoryCli = Cli.create({
     name: "memory",
@@ -3760,8 +3801,11 @@ const memoryCli = Cli.create({
     options: memoryListOptions,
     alias: { workflow: "w" },
     async run(c) {
+        let cleanup;
         try {
-            const { store, parseNamespace } = await openMemoryStore(c.options.workflow);
+            const opened = await openMemoryStore(c.options.workflow, { readOnly: true });
+            const { store, parseNamespace } = opened;
+            cleanup = opened.cleanup;
             const printFact = (f) => {
                 const value = f.valueJson.length > 100 ? f.valueJson.slice(0, 100) + "..." : f.valueJson;
                 const age = formatAge(f.updatedAtMs);
@@ -3799,6 +3843,9 @@ const memoryCli = Cli.create({
             console.error(`Error: ${err?.message ?? String(err)}`);
             return c.error({ code: "MEMORY_LIST_FAILED", message: err?.message ?? String(err) });
         }
+        finally {
+            await cleanup?.();
+        }
     },
 })
     .command("get", {
@@ -3810,8 +3857,11 @@ const memoryCli = Cli.create({
     options: memoryListOptions,
     alias: { workflow: "w" },
     async run(c) {
+        let cleanup;
         try {
-            const { store, parseNamespace } = await openMemoryStore(c.options.workflow);
+            const opened = await openMemoryStore(c.options.workflow, { readOnly: true });
+            const { store, parseNamespace } = opened;
+            cleanup = opened.cleanup;
             const fact = await store.getFact(parseNamespace(c.args.namespace), c.args.key);
             if (!fact) {
                 console.log(`No fact "${c.args.key}" in namespace "${c.args.namespace}".`);
@@ -3823,6 +3873,9 @@ const memoryCli = Cli.create({
         catch (err) {
             console.error(`Error: ${err?.message ?? String(err)}`);
             return c.error({ code: "MEMORY_GET_FAILED", message: err?.message ?? String(err) });
+        }
+        finally {
+            await cleanup?.();
         }
     },
 })
@@ -9081,7 +9134,106 @@ function writeFdSync(fd, s) {
         }
     }
 }
+const JJ_CONFLICT_MARKER = /^(?:<<<<<<<|%%%%%%%|>>>>>>>)(?:\s|$)/m;
+/**
+ * Bun lazily reads the package.json nearest to its initial cwd when the CLI
+ * reaches a dynamic import. A jj-conflicted manifest therefore breaks commands
+ * that otherwise need only .smithers/ and the backend DB. Find that manifest
+ * without asking Bun's module loader to parse it.
+ *
+ * @param {string} from
+ * @returns {string | undefined}
+ */
+function findNearestPackageJson(from) {
+    let dir = resolve(from);
+    while (true) {
+        const candidate = resolve(dir, "package.json");
+        if (existsSync(candidate))
+            return candidate;
+        const parent = dirname(dir);
+        if (parent === dir)
+            return undefined;
+        dir = parent;
+    }
+}
+/**
+ * @param {string} cwd
+ * @returns {{ path: string; reason: string } | undefined}
+ */
+function conflictedWorkspaceManifest(cwd) {
+    const path = findNearestPackageJson(cwd);
+    if (!path)
+        return undefined;
+    let source;
+    try {
+        source = readFileSync(path, "utf8");
+    }
+    catch {
+        return undefined;
+    }
+    try {
+        JSON.parse(source);
+        return undefined;
+    }
+    catch {
+        if (!JJ_CONFLICT_MARKER.test(source))
+            return undefined;
+        return {
+            path,
+            reason: "contains unresolved jj conflict markers",
+        };
+    }
+}
+/**
+ * A fallback child starts in the CLI package so Bun initializes module
+ * resolution from a valid manifest. Restore the user's logical workspace
+ * before command dispatch so DB and .smithers discovery retain their existing
+ * behavior without changing the resolver's physical cwd.
+ *
+ * @returns {boolean}
+ */
+function restoreManifestFallbackCwd() {
+    return cliWorkspace.restoreFromEnv();
+}
+/**
+ * @returns {Promise<boolean>}
+ */
+async function relaunchForConflictedWorkspaceManifest() {
+    const cwd = process.cwd();
+    const conflict = conflictedWorkspaceManifest(cwd);
+    if (!conflict)
+        return false;
+    writeStderrSync(`[smithers] Warning: ${conflict.path} ${conflict.reason}; continuing with directory-based workspace detection.\n`);
+    const cliEntry = fileURLToPath(import.meta.url);
+    const cliPackageDir = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
+    const childEnv = Object.fromEntries(Object.entries({
+        ...process.env,
+        [cliWorkspace.fallbackCwdEnv]: cwd,
+    }).filter((entry) => entry[1] !== undefined));
+    // Replace the process when Bun exposes Node's execve API. Besides
+    // preserving pid/signal semantics for a long-running gateway, this avoids
+    // letting the original Bun process perform another lazy resolution from
+    // the conflicted cwd while it waits for a child.
+    if (typeof process.execve === "function") {
+        process.chdir(cliPackageDir);
+        process.execve(process.execPath, [process.execPath, cliEntry, ...process.argv.slice(2)], childEnv);
+    }
+    process.chdir(cliPackageDir);
+    const child = spawn(process.execPath, [cliEntry, ...process.argv.slice(2)], {
+        env: childEnv,
+        stdio: "inherit",
+    });
+    const exitCode = await new Promise((resolvePromise, reject) => {
+        child.once("error", reject);
+        child.once("exit", (code) => resolvePromise(code ?? 1));
+    });
+    process.exit(exitCode);
+}
 async function main() {
+    const manifestFallback = restoreManifestFallbackCwd();
+    if (!manifestFallback && await relaunchForConflictedWorkspaceManifest()) {
+        return;
+    }
     const rawArgv = process.argv.slice(2);
     let argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
     argv = rewriteGuiShortcutArgv(argv);

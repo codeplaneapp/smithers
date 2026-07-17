@@ -2,7 +2,7 @@ import { afterEach, describe, expect, onTestFinished, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -113,6 +113,59 @@ function seedLegacySqliteStore(repo) {
           VALUES ('cli-ui-legacy-run', 'legacy', 'finished', 1);
     `);
     api.db.$client.close();
+}
+
+function seedConflictedWorkspace(repo) {
+    repo.write(".smithers/workflows/basic.tsx", [
+        "/** @jsxImportSource smithers-orchestrator */",
+        "import { createSmithers } from \"smithers-orchestrator\";",
+        "",
+        "const { Workflow, Task, UI, smithers } = createSmithers({});",
+        "",
+        "export default smithers(() => (",
+        "  <Workflow name=\"basic\">",
+        "    <UI entry=\"../ui/basic.tsx\" title=\"Basic\" />",
+        "    <Task id=\"done\">{{ ok: true }}</Task>",
+        "  </Workflow>",
+        "));",
+        "",
+    ].join("\n"));
+    repo.write(".smithers/ui/basic.tsx", [
+        "import { createGatewayReactRoot } from \"smithers-orchestrator/gateway-react\";",
+        "",
+        "createGatewayReactRoot(<main>Basic UI</main>);",
+        "",
+    ].join("\n"));
+    const api = createSmithers({}, { dbPath: repo.path("smithers.db"), backend: "sqlite" });
+    ensureSmithersTables(api.db);
+    api.db.$client.exec(`
+        INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+          VALUES ('cli-ui-conflicted-run', 'basic', 'finished', 1);
+        INSERT INTO _smithers_nodes
+          (run_id, node_id, iteration, state, last_attempt, updated_at_ms, output_table, label)
+          VALUES ('cli-ui-conflicted-run', 'done', 0, 'finished', 1, 2, 'basic_output', 'Done');
+        CREATE TABLE basic_output (
+          run_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          iteration INTEGER NOT NULL,
+          ok INTEGER
+        );
+        INSERT INTO basic_output (run_id, node_id, iteration, ok)
+          VALUES ('cli-ui-conflicted-run', 'done', 0, 1);
+    `);
+    api.db.$client.close();
+    repo.write("package.json", [
+        "{",
+        "  \"name\": \"smithers-conflicted-fixture\",",
+        "<<<<<<< conflict 1 of 5",
+        "  \"type\": \"module\",",
+        "%%%%%%%",
+        "  \"type\": \"commonjs\",",
+        ">>>>>>> conflict 1 of 5",
+        "  \"private\": true",
+        "}",
+        "",
+    ].join("\n"));
 }
 
 async function stopGatewayOnPort(port) {
@@ -445,4 +498,67 @@ describe("smithers ui", () => {
             await stopGatewayOnPort(port);
         }
     }, 45_000);
+
+    test("read-only commands and ui tolerate a jj-conflicted workspace package.json", async () => {
+        const repo = createTempRepo();
+        seedConflictedWorkspace(repo);
+        const { stateDir, env } = makeStateDirEnv();
+        const port = await findOpenPort();
+        try {
+            for (const args of [
+                ["ps", "--backend", "sqlite"],
+                ["inspect", "cli-ui-conflicted-run", "--backend", "sqlite"],
+                ["output", "cli-ui-conflicted-run", "done"],
+                ["memory", "list"],
+            ]) {
+                const result = await runSmithersAsync(args, {
+                    cwd: repo.dir,
+                    env,
+                    format: "json",
+                });
+                expect(result.exitCode).toBe(0);
+                expect(result.stderr).toContain("contains unresolved jj conflict markers");
+                expect(`${result.stdout}\n${result.stderr}`).not.toContain("Unsupported syntax");
+            }
+
+            const result = await runSmithersAsync([
+                "ui",
+                "cli-ui-conflicted-run",
+                "--port",
+                String(port),
+                "--no-open",
+            ], {
+                cwd: repo.dir,
+                env,
+                format: "json",
+            });
+            expect(result.exitCode).toBe(0);
+            expect(result.stderr).toContain("contains unresolved jj conflict markers");
+            expect(`${result.stdout}\n${result.stderr}`).not.toContain("Unsupported syntax");
+            expect(result.json).toMatchObject({
+                opened: false,
+                url: `http://127.0.0.1:${port}/workflows/basic?runId=cli-ui-conflicted-run`,
+                runId: "cli-ui-conflicted-run",
+                workflow: "basic",
+            });
+
+            const uiUrl = new URL(result.json.url);
+            const asset = await fetch(`${uiUrl.origin}${uiUrl.pathname}/__smithers_ui/client.js`, {
+                signal: AbortSignal.timeout(30_000),
+            });
+            expect(asset.status).toBe(200);
+
+            const { logFile } = gatewayRuntimePaths(repo.dir, {
+                ...process.env,
+                SMITHERS_GATEWAY_STATE_DIR: stateDir,
+            });
+            const gatewayLog = readFileSync(logFile, "utf8");
+            expect(gatewayLog).toContain("contains unresolved jj conflict markers");
+            expect(gatewayLog).toContain("Registered workflows: basic");
+            expect(gatewayLog).not.toContain("Unsupported syntax");
+        }
+        finally {
+            await stopGatewayOnPort(port);
+        }
+    }, 60_000);
 });
