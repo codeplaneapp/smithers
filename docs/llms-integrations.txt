@@ -2054,6 +2054,11 @@ deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
 Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
 Windows. Run `msb doctor` on every host before accepting work.
 
+Microsandbox `0.6.6` snapshots contain disk state, require a stopped sandbox,
+and cold-boot when restored. They do not preserve memory, running processes,
+sockets, or device state. A fleet integration must not advertise a sticky
+workspace as memory-preserving suspend, instant resume, or a live fork.
+
 ## Install
 
 The provider package declares `microsandbox` as an optional dependency and
@@ -2177,8 +2182,17 @@ default.
 The Smithers provider kit still projects `egress` proxy variables and uploads
 an inline CA certificate into the guest. Use `configureBuilder` with
 Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
-allowlists or host-side secret substitution. Do not pass host credentials in
-`env` when Microsandbox secret substitution can keep them outside the VM.
+allowlists or host-side secret substitution.
+
+There is an important `0.6.6` limitation for production secret handling. The
+raw Go SDK `Secret.Env` value is persisted in runtime state, while the declared
+store-backed secret source is not implemented by the runtime. Do not assume
+that selecting a secret API alone keeps plaintext out of provider state. Use a
+nonpersisting, operation-scoped delivery path, and test guest disk, snapshots,
+logs, errors, command arguments, and runtime metadata with a sentinel value.
+When a credential needs method/path policy, signing, audit, approval, MCP
+policy, rate limiting, or response filtering, give the guest a short-lived
+credential-proxy capability instead of the upstream secret.
 
 Bind mounts deliberately expose host paths to the guest. Keep them read-only
 unless the workflow must write, and never mount a credential directory or the
@@ -2199,7 +2213,10 @@ Microsandbox state directory into an untrusted workload.
 Microsandbox is local infrastructure. Capacity, image cache, persisted
 workspaces, logs, and the `~/.microsandbox` database live on the host. Running
 it as a fleet provider therefore requires host scheduling, admission control,
-state placement, and observability outside this adapter.
+state placement, generation fencing, snapshot export, authenticated streaming,
+and observability outside this adapter. Plue implements that remote fleet
+boundary separately; this package remains a local Smithers provider and does
+not make an arbitrary API pod a safe KVM host.
 
 ## SDK subset used
 
@@ -2214,8 +2231,10 @@ The adapter uses the published TypeScript SDK surface:
 - `sandbox.execStreamWith()` plus `collect()` and `kill()` for commands;
 - `sandbox.stop()` and `Sandbox.remove(name)` for teardown.
 
-`createMockMicrosandboxEnvironment(handler, faults?)` supplies an in-memory SDK
-double for tests. It requires no hypervisor, image pull, or credentials.
+The repository-only fixture at
+`packages/microsandbox/tests/fixtures/createMockMicrosandboxEnvironment.js`
+supplies an in-memory SDK double for package tests. It is not part of the
+package's public exports and requires no hypervisor, image pull, or credentials.
 
 ---
 
@@ -2869,7 +2888,12 @@ Three independent axes (detailed in
 
 # Run on Plue
 
-`run-on-plue` executes a Smithers workflow script on Plue infrastructure instead of the local machine. It uses the [`<Sandbox>`](/components/sandbox) provider seam with `createPlueSandboxProvider`, and the provider shells through the `plue` CLI so Plue owns workspace lifecycle, authentication, quotas, and Freestyle VM access.
+`run-on-plue` executes a Smithers workflow script on Plue infrastructure
+instead of the local machine. It uses the
+[`<Sandbox>`](/components/sandbox) provider seam with
+`createPlueSandboxProvider`, and the provider shells through the `plue` CLI so
+Plue owns workspace lifecycle, authentication, quotas, placement, and sandbox
+execution through its self-hosted Microsandbox plane.
 
 Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
 
@@ -2903,13 +2927,17 @@ The parent workflow receives:
 
 - `plue` CLI installed and authenticated on the host running Smithers. Verify with `plue auth status`.
 - The target Plue server must have workspaces enabled. Local Plue uses `SMITHERS_FEATURE_FLAGS_WORKSPACES=true`.
-- The Plue server must be configured for real Freestyle workspaces, including the Freestyle API key required by that server (`SMITHERS_FREESTYLE_API_KEY` or the environment wiring used by your Plue deployment).
+- The Plue server must be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` and an authenticated Microsandbox controller.
 - The repo passed as `repo` must exist in Plue and be accessible to the authenticated user.
 - Claude auth must be available locally. The preferred path is Claude Code subscription OAuth in the OS credential store; `ANTHROPIC_API_KEY` only works when that key has usable API billing.
 - Codex auth must be available locally. The preferred path is `~/.codex/auth.json`; `OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth.
 - If `plue` is not on `PATH`, set `PLUE_BIN` or pass `plueBin` in the workflow input.
 
-Secrets are seeded at run time by the Plue CLI and written into the VM with restrictive file permissions. Do not bake Claude, Codex, OpenAI, Anthropic, or Freestyle credentials into workspace snapshots or committed files.
+Secrets are seeded at run time through Plue's operation-scoped secret or
+credential-proxy path. They must not be written into guest disks, snapshots,
+images, command arguments, logs, errors, or durable request state. Do not bake
+Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials
+into workspace snapshots or committed files.
 
 ## Run a workflow remotely
 

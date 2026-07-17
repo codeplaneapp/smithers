@@ -1109,7 +1109,7 @@ inside an isolated runtime -- whole-graph, per-step, or mixed, your choice. It
 renders as exactly **one scheduler task per boundary** (not per agent turn);
 children never become parent-run tasks. The runtime is pluggable
 (`bubblewrap`, `docker`, `codeplane`, `cloudflare`) or any custom provider you
-register -- e.g. the Freestyle VM example adapter.
+register, including the first-class Microsandbox provider.
 
 The lifecycle at a `<Sandbox>` boundary is: **create the sandbox when the task
 starts → run the harness → capture a diff bundle of what changed → tear it down**
@@ -1117,8 +1117,8 @@ starts → run the harness → capture a diff bundle of what changed → tear it
 decision, not a Smithers-core per-turn guarantee. The Cloudflare provider, for
 example, creates one container keyed `${runId}-${sandboxId}`, defaults
 `cleanup: "destroy"`, and can `keep` the container or hold it warm with
-`keepAlive`. A Freestyle VM exposes explicit `start()` / `stop()` / `fork()` /
-`delete()` and `idleTimeoutSeconds`.
+`keepAlive`. The Microsandbox provider exposes explicit create, start, stop,
+snapshot, and cleanup semantics.
 
 <Note>
   Running a CLI agent in a fresh per-turn container is a **composition you
@@ -4794,7 +4794,7 @@ Use `egress` when the sandbox itself should own outbound-network configuration. 
 />
 ```
 
-Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode a Freestyle or iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
+Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode an iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
 
 When `caCertPem` is provided, Smithers writes it into the request bundle at `.smithers/egress/ca.crt` and points local transports at `/workspace/.smithers/egress/ca.crt`. If the CA is already installed by the sandbox image or sidecar, use `caCertPath` instead. Persisted sandbox config redacts egress env values, CA PEM, and secret-binding entries.
 
@@ -5052,17 +5052,6 @@ provider-kit, selection precedence, and a comparison table.
 - [AWS Sandbox Provider](/integrations/aws-sandbox-provider): id `aws-sandbox` (Fargate or CodeBuild, S3 transport)
 - [GCP Sandbox Provider](/integrations/gcp-sandbox-provider): id `gcp-sandbox` (Cloud Run Jobs, GCS transport)
 - [Cloudflare](/integrations/cloudflare): id `cloudflare-sandbox`
-
-## Freestyle provider example
-
-[Freestyle VMs](https://www.freestyle.sh/docs/vms) are full sandboxes with nested virtualization, full networking, and the ability to scale to more resources than alternatives. Use Freestyle VMs when you want to give your agents a real computer rather than a code runner.
-
-See `examples/freestyle/` for a provider adapter that creates a Freestyle VM, writes setup and request files with `vm.fs.writeTextFile()`, executes a command with `vm.exec()`, reads `smithers-result.json` with `vm.fs.readTextFile()`, and returns a Smithers sandbox result.
-
-Freestyle's current VM docs show the stable package as `freestyle`, VM creation through `freestyle.vms.create()`, file I/O through `vm.fs.writeTextFile()` / `vm.fs.readTextFile()`, command execution with `vm.exec()`, and lifecycle controls such as `start()`, `stop()`, `resize()`, `fork()`, `delete({ vmId })`, and `idleTimeoutSeconds`. Relevant Freestyle docs:
-
-- https://www.freestyle.sh/docs/vms
-- https://www.freestyle.sh/docs/vms/lifecycle
 
 ---
 
@@ -9589,6 +9578,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the automation marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/ddd-site` | Private Cloudflare Worker deployment for the docs-driven-development marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the init marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/kimi-benchmarks-site` | Private Cloudflare Worker serving the Kimi K3 RoadmapBench report and its evidence bundle | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the monitor marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/openclaw-site` | Private Cloudflare Worker deployment for the OpenClaw marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the plugins marketing site | [Ecosystem](/integrations/ecosystem) |
@@ -10469,7 +10459,7 @@ language these components implement.
 
 ## Custom Workflow UIs
 
-> Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
+> Build a first-class browser UI for your workflow with bunx smithers-orchestrator ui, the Gateway, gateway-client, and gateway-react.
 
 A custom workflow UI is a small browser bundle that *belongs to your workflow*
 and talks to the Smithers Gateway through its domain API, RPC API, and live
@@ -10478,7 +10468,7 @@ event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
 builds and serves it at `/workflows/<key>`. `bunx smithers-orchestrator ui`
 opens it for a run with a stable `?runId=` deep link.
 
-This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through smithers ui and the Gateway.
+This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through bunx smithers-orchestrator ui and the Gateway.
 
 For the underlying RPC and event protocol, see [Gateway](/integrations/gateway). For the TanStack DB collection layer that backs the React hooks, see [Sync](/guides/sync). For two compact end-to-end examples, see [Workflow UI (React)](/examples/workflow-ui-react) and [Workflow UI (Vanilla)](/examples/workflow-ui-vanilla). For the *visual* language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see [Workflow UI Design Principles](/guides/workflow-ui-design).
 
@@ -10504,7 +10494,7 @@ Three pieces collaborate:
 
 2. **The Gateway serves an HTML shell.** Hitting `/workflows/vcs` returns a tiny HTML document with a `<div id="root">`, the bundled script, and a global `__SMITHERS_GATEWAY_UI__` object (the [`GatewayUiBootConfig`](#the-boot-config)) set before your script runs. The shell uses `?runId=<id>` from the query string to scope a session to one run; if it is omitted, your UI is responsible for showing a picker or empty state. The shell is also **theme-aware**: it inlines the [workflow UI style-guide tokens](/guides/workflow-ui-design) (light values, dark overrides, and `color-scheme`) so the document follows the OS `prefers-color-scheme` before your bundle loads, and it honors an explicit `?theme=dark` / `?theme=light` query param by stamping `data-theme` on `<html>` pre-paint. That query param is the channel an embedding host (for example an app rendering the page in an iframe) uses to push its own light/dark toggle into the UI.
 
-3. **smithers ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
+3. **bunx smithers-orchestrator ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
 
 ## Two SDKs: pick by appetite
 

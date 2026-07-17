@@ -1130,7 +1130,7 @@ inside an isolated runtime -- whole-graph, per-step, or mixed, your choice. It
 renders as exactly **one scheduler task per boundary** (not per agent turn);
 children never become parent-run tasks. The runtime is pluggable
 (`bubblewrap`, `docker`, `codeplane`, `cloudflare`) or any custom provider you
-register -- e.g. the Freestyle VM example adapter.
+register, including the first-class Microsandbox provider.
 
 The lifecycle at a `<Sandbox>` boundary is: **create the sandbox when the task
 starts → run the harness → capture a diff bundle of what changed → tear it down**
@@ -1138,8 +1138,8 @@ starts → run the harness → capture a diff bundle of what changed → tear it
 decision, not a Smithers-core per-turn guarantee. The Cloudflare provider, for
 example, creates one container keyed `${runId}-${sandboxId}`, defaults
 `cleanup: "destroy"`, and can `keep` the container or hold it warm with
-`keepAlive`. A Freestyle VM exposes explicit `start()` / `stop()` / `fork()` /
-`delete()` and `idleTimeoutSeconds`.
+`keepAlive`. The Microsandbox provider exposes explicit create, start, stop,
+snapshot, and cleanup semantics.
 
 <Note>
   Running a CLI agent in a fresh per-turn container is a **composition you
@@ -4813,7 +4813,7 @@ Use `egress` when the sandbox itself should own outbound-network configuration. 
 />
 ```
 
-Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode a Freestyle or iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
+Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode an iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
 
 When `caCertPem` is provided, Smithers writes it into the request bundle at `.smithers/egress/ca.crt` and points local transports at `/workspace/.smithers/egress/ca.crt`. If the CA is already installed by the sandbox image or sidecar, use `caCertPath` instead. Persisted sandbox config redacts egress env values, CA PEM, and secret-binding entries.
 
@@ -5070,17 +5070,6 @@ provider-kit, selection precedence, and a comparison table.
 - AWS Sandbox Provider: id `aws-sandbox` (Fargate or CodeBuild, S3 transport)
 - GCP Sandbox Provider: id `gcp-sandbox` (Cloud Run Jobs, GCS transport)
 - Cloudflare: id `cloudflare-sandbox`
-
-## Freestyle provider example
-
-[Freestyle VMs](https://www.freestyle.sh/docs/vms) are full sandboxes with nested virtualization, full networking, and the ability to scale to more resources than alternatives. Use Freestyle VMs when you want to give your agents a real computer rather than a code runner.
-
-See `examples/freestyle/` for a provider adapter that creates a Freestyle VM, writes setup and request files with `vm.fs.writeTextFile()`, executes a command with `vm.exec()`, reads `smithers-result.json` with `vm.fs.readTextFile()`, and returns a Smithers sandbox result.
-
-Freestyle's current VM docs show the stable package as `freestyle`, VM creation through `freestyle.vms.create()`, file I/O through `vm.fs.writeTextFile()` / `vm.fs.readTextFile()`, command execution with `vm.exec()`, and lifecycle controls such as `start()`, `stop()`, `resize()`, `fork()`, `delete({ vmId })`, and `idleTimeoutSeconds`. Relevant Freestyle docs:
-
-- https://www.freestyle.sh/docs/vms
-- https://www.freestyle.sh/docs/vms/lifecycle
 
 ---
 
@@ -9591,6 +9580,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the automation marketing site | Ecosystem |
 | `@smithers-orchestrator/ddd-site` | Private Cloudflare Worker deployment for the docs-driven-development marketing site | Ecosystem |
 | `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the init marketing site | Ecosystem |
+| `@smithers-orchestrator/kimi-benchmarks-site` | Private Cloudflare Worker serving the Kimi K3 RoadmapBench report and its evidence bundle | Ecosystem |
 | `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the monitor marketing site | Ecosystem |
 | `@smithers-orchestrator/openclaw-site` | Private Cloudflare Worker deployment for the OpenClaw marketing site | Ecosystem |
 | `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the plugins marketing site | Ecosystem |
@@ -10471,7 +10461,7 @@ language these components implement.
 
 ## Custom Workflow UIs
 
-> Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
+> Build a first-class browser UI for your workflow with bunx smithers-orchestrator ui, the Gateway, gateway-client, and gateway-react.
 
 A custom workflow UI is a small browser bundle that *belongs to your workflow*
 and talks to the Smithers Gateway through its domain API, RPC API, and live
@@ -10480,7 +10470,7 @@ event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
 builds and serves it at `/workflows/<key>`. `bunx smithers-orchestrator ui`
 opens it for a run with a stable `?runId=` deep link.
 
-This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through smithers ui and the Gateway.
+This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through bunx smithers-orchestrator ui and the Gateway.
 
 For the underlying RPC and event protocol, see Gateway. For the TanStack DB collection layer that backs the React hooks, see Sync. For two compact end-to-end examples, see Workflow UI (React) and Workflow UI (Vanilla). For the *visual* language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see Workflow UI Design Principles.
 
@@ -10506,7 +10496,7 @@ Three pieces collaborate:
 
 2. **The Gateway serves an HTML shell.** Hitting `/workflows/vcs` returns a tiny HTML document with a `<div id="root">`, the bundled script, and a global `__SMITHERS_GATEWAY_UI__` object (the `GatewayUiBootConfig`) set before your script runs. The shell uses `?runId=<id>` from the query string to scope a session to one run; if it is omitted, your UI is responsible for showing a picker or empty state. The shell is also **theme-aware**: it inlines the workflow UI style-guide tokens (light values, dark overrides, and `color-scheme`) so the document follows the OS `prefers-color-scheme` before your bundle loads, and it honors an explicit `?theme=dark` / `?theme=light` query param by stamping `data-theme` on `<html>` pre-paint. That query param is the channel an embedding host (for example an app rendering the page in an iframe) uses to push its own light/dark toggle into the UI.
 
-3. **smithers ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
+3. **bunx smithers-orchestrator ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
 
 ## Two SDKs: pick by appetite
 
@@ -16375,6 +16365,11 @@ deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
 Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
 Windows. Run `msb doctor` on every host before accepting work.
 
+Microsandbox `0.6.6` snapshots contain disk state, require a stopped sandbox,
+and cold-boot when restored. They do not preserve memory, running processes,
+sockets, or device state. A fleet integration must not advertise a sticky
+workspace as memory-preserving suspend, instant resume, or a live fork.
+
 ## Install
 
 The provider package declares `microsandbox` as an optional dependency and
@@ -16498,8 +16493,17 @@ default.
 The Smithers provider kit still projects `egress` proxy variables and uploads
 an inline CA certificate into the guest. Use `configureBuilder` with
 Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
-allowlists or host-side secret substitution. Do not pass host credentials in
-`env` when Microsandbox secret substitution can keep them outside the VM.
+allowlists or host-side secret substitution.
+
+There is an important `0.6.6` limitation for production secret handling. The
+raw Go SDK `Secret.Env` value is persisted in runtime state, while the declared
+store-backed secret source is not implemented by the runtime. Do not assume
+that selecting a secret API alone keeps plaintext out of provider state. Use a
+nonpersisting, operation-scoped delivery path, and test guest disk, snapshots,
+logs, errors, command arguments, and runtime metadata with a sentinel value.
+When a credential needs method/path policy, signing, audit, approval, MCP
+policy, rate limiting, or response filtering, give the guest a short-lived
+credential-proxy capability instead of the upstream secret.
 
 Bind mounts deliberately expose host paths to the guest. Keep them read-only
 unless the workflow must write, and never mount a credential directory or the
@@ -16520,7 +16524,10 @@ Microsandbox state directory into an untrusted workload.
 Microsandbox is local infrastructure. Capacity, image cache, persisted
 workspaces, logs, and the `~/.microsandbox` database live on the host. Running
 it as a fleet provider therefore requires host scheduling, admission control,
-state placement, and observability outside this adapter.
+state placement, generation fencing, snapshot export, authenticated streaming,
+and observability outside this adapter. Plue implements that remote fleet
+boundary separately; this package remains a local Smithers provider and does
+not make an arbitrary API pod a safe KVM host.
 
 ## SDK subset used
 
@@ -16535,8 +16542,10 @@ The adapter uses the published TypeScript SDK surface:
 - `sandbox.execStreamWith()` plus `collect()` and `kill()` for commands;
 - `sandbox.stop()` and `Sandbox.remove(name)` for teardown.
 
-`createMockMicrosandboxEnvironment(handler, faults?)` supplies an in-memory SDK
-double for tests. It requires no hypervisor, image pull, or credentials.
+The repository-only fixture at
+`packages/microsandbox/tests/fixtures/createMockMicrosandboxEnvironment.js`
+supplies an in-memory SDK double for package tests. It is not part of the
+package's public exports and requires no hypervisor, image pull, or credentials.
 
 ---
 
@@ -17184,7 +17193,12 @@ the execution model):
 > Execute a Smithers workflow on Plue workspaces through the Plue sandbox provider.
 
 
-`run-on-plue` executes a Smithers workflow script on Plue infrastructure instead of the local machine. It uses the `<Sandbox>` provider seam with `createPlueSandboxProvider`, and the provider shells through the `plue` CLI so Plue owns workspace lifecycle, authentication, quotas, and Freestyle VM access.
+`run-on-plue` executes a Smithers workflow script on Plue infrastructure
+instead of the local machine. It uses the
+`<Sandbox>` provider seam with
+`createPlueSandboxProvider`, and the provider shells through the `plue` CLI so
+Plue owns workspace lifecycle, authentication, quotas, placement, and sandbox
+execution through its self-hosted Microsandbox plane.
 
 Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
 
@@ -17218,13 +17232,17 @@ The parent workflow receives:
 
 - `plue` CLI installed and authenticated on the host running Smithers. Verify with `plue auth status`.
 - The target Plue server must have workspaces enabled. Local Plue uses `SMITHERS_FEATURE_FLAGS_WORKSPACES=true`.
-- The Plue server must be configured for real Freestyle workspaces, including the Freestyle API key required by that server (`SMITHERS_FREESTYLE_API_KEY` or the environment wiring used by your Plue deployment).
+- The Plue server must be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` and an authenticated Microsandbox controller.
 - The repo passed as `repo` must exist in Plue and be accessible to the authenticated user.
 - Claude auth must be available locally. The preferred path is Claude Code subscription OAuth in the OS credential store; `ANTHROPIC_API_KEY` only works when that key has usable API billing.
 - Codex auth must be available locally. The preferred path is `~/.codex/auth.json`; `OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth.
 - If `plue` is not on `PATH`, set `PLUE_BIN` or pass `plueBin` in the workflow input.
 
-Secrets are seeded at run time by the Plue CLI and written into the VM with restrictive file permissions. Do not bake Claude, Codex, OpenAI, Anthropic, or Freestyle credentials into workspace snapshots or committed files.
+Secrets are seeded at run time through Plue's operation-scoped secret or
+credential-proxy path. They must not be written into guest disks, snapshots,
+images, command arguments, logs, errors, or durable request state. Do not bake
+Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials
+into workspace snapshots or committed files.
 
 ## Run a workflow remotely
 
