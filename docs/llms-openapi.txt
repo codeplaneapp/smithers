@@ -41,6 +41,9 @@ type OpenApiToolsOptions = {
   allowedRedirectOrigins?: string[]; // extra origins redirects may follow;
                                      // other cross-origin hops are refused so
                                      // injected auth headers cannot leak
+  maxResponseBodyBytes?: number;     // cap on response body bytes, default
+                                     // 1 MiB; oversized bodies are rejected
+                                     // and the read is cancelled
   include?: string[];                // operationId allowlist
   exclude?: string[];                // operationId blocklist
   namePrefix?: string;               // prefix generated tool names
