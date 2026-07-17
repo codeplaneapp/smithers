@@ -721,9 +721,21 @@ declare class Gateway {
     runRegistry: Map<any, any>;
     activeRuns: Map<any, any>;
     inflightRuns: Map<any, any>;
+    /**
+     * Resume attempts keyed by run id.
+     * @type {Map<string, Promise<void>>}
+     */
+    inflightResumes: Map<string, Promise<void>>;
     devtoolsSubscribers: Map<any, any>;
     runEventWindows: Map<any, any>;
     runEventSubscriberCounts: Map<any, any>;
+    runEventSubscriberTotal: number;
+    /** Active streamRunEvents subscriber count per user identity (userId ?? tokenId ?? role). @type {Map<string, number>} */
+    runEventSubscribersByUser: Map<string, number>;
+    runEventStreamMaxSubscribers: number;
+    runEventStreamMaxSubscribersPerUser: number;
+    runEventStreamMaxSubscribersPerConnection: number;
+    runEventStreamMaxSubscribersPerRun: number;
     terminalRunEventWindows: Map<any, any>;
     terminalRunEventWindowTimers: Map<any, any>;
     apiStreamSeq: number;
@@ -1026,6 +1038,19 @@ declare class Gateway {
    * @returns {number}
    */
     getRunEventCurrentSeq(runId: string): number;
+    /**
+   * First cap a run-event subscription would violate, or null when it fits.
+   * The caller checks this immediately before registration, with no await in
+   * between, so rejection happens before a stream map, heartbeat, or counter
+   * is allocated.
+   * @param {ConnectionState} connection
+   * @param {string} runId
+   * @returns {{ scope: "global" | "user" | "connection" | "run"; limit: number } | null}
+   */
+    runEventStreamCapViolation(connection: ConnectionState, runId: string): {
+        scope: "global" | "user" | "connection" | "run";
+        limit: number;
+    } | null;
     /**
    * @param {ConnectionState} connection
    * @param {string} streamId
@@ -1951,6 +1976,7 @@ type ConnectRequest = ConnectRequest$1;
 type RunEventStreamState = {
     streamId: string;
     runId: string;
+    userKey: string;
     outboundQueue: Record<string, unknown>[];
     flushPending: boolean;
     backpressureDisconnected: boolean;

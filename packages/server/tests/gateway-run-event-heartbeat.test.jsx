@@ -60,6 +60,13 @@ function heartbeats(connection, streamId) {
   );
 }
 
+function expectNoRunEventSubscribers(gateway, connection) {
+  expect(connection.runEventStreams?.size ?? 0).toBe(0);
+  expect(gateway.runEventSubscriberTotal).toBe(0);
+  expect(gateway.runEventSubscribersByUser.size).toBe(0);
+  expect(gateway.runEventSubscriberCounts.size).toBe(0);
+}
+
 describe("run event stream shared heartbeat", () => {
   /** @type {Gateway | undefined} */
   let gateway;
@@ -90,6 +97,10 @@ describe("run event stream shared heartbeat", () => {
     // Registering more streams re-uses the connection's single timer.
     expect(connection.runEventHeartbeatTimer).toBe(timer);
     expect(connection.runEventStreams.size).toBe(3);
+    expect(gateway.runEventSubscriberTotal).toBe(3);
+    expect(gateway.runEventSubscribersByUser.get("user:hb")).toBe(3);
+    expect(gateway.getRunEventSubscriberCount("run-1")).toBe(2);
+    expect(gateway.getRunEventSubscriberCount("run-2")).toBe(1);
 
     // Let the shared timer tick at least once.
     await sleep(HEARTBEAT_MS + 400);
@@ -133,9 +144,13 @@ describe("run event stream shared heartbeat", () => {
     gateway.unregisterRunEventSubscriber(connection, "stream-first");
     // A stream remains, so the shared timer must keep running.
     expect(connection.runEventHeartbeatTimer).toBe(timer);
+    expect(gateway.runEventSubscriberTotal).toBe(1);
+    expect(gateway.runEventSubscribersByUser.get("user:hb")).toBe(1);
+    expect(gateway.getRunEventSubscriberCount("run-first")).toBe(0);
+    expect(gateway.getRunEventSubscriberCount("run-second")).toBe(1);
 
     unsubscribeSecond();
-    expect(connection.runEventStreams.size).toBe(0);
+    expectNoRunEventSubscribers(gateway, connection);
     expect(connection.runEventHeartbeatTimer).toBeNull();
 
     // No orphaned interval keeps firing after the last unsubscribe.
@@ -171,6 +186,7 @@ describe("run event stream shared heartbeat", () => {
     expect(errors[0].payload.error.code).toBe("BackpressureDisconnect");
     expect(connection.runEventStreams.has("stream-slow")).toBe(false);
     expect(connection.runEventHeartbeatTimer).toBeNull();
+    expectNoRunEventSubscribers(gateway, connection);
   });
 
   test("clears the timer via the socket-close cleanup path", () => {
@@ -183,7 +199,7 @@ describe("run event stream shared heartbeat", () => {
     // This is exactly what the ws "close"/"error" handler invokes.
     gateway.cleanupRunEventSubscribers(connection);
 
-    expect(connection.runEventStreams.size).toBe(0);
+    expectNoRunEventSubscribers(gateway, connection);
     expect(connection.runEventHeartbeatTimer).toBeNull();
   });
 
@@ -197,6 +213,7 @@ describe("run event stream shared heartbeat", () => {
     await gateway.close();
 
     expect(connection.runEventHeartbeatTimer).toBeNull();
+    expectNoRunEventSubscribers(gateway, connection);
     gateway = undefined;
     connection = undefined;
   });
@@ -362,6 +379,9 @@ describe("run event stream shared heartbeat over a real socket", () => {
     const connection = [...gateway.connections][0];
     expect(connection.runEventStreams.size).toBe(2);
     expect(connection.runEventHeartbeatTimer).toBeTruthy();
+    expect(gateway.runEventSubscriberTotal).toBe(2);
+    expect(gateway.runEventSubscribersByUser.get("user:test")).toBe(2);
+    expect(gateway.getRunEventSubscriberCount(runId)).toBe(2);
 
     // Both streams receive run.heartbeat frames over the wire.
     for (const streamId of streamIds) {
@@ -378,9 +398,12 @@ describe("run event stream shared heartbeat over a real socket", () => {
 
     await client.close();
     await waitUntil(
-      () => gateway.connections.size === 0 && connection.runEventHeartbeatTimer === null,
+      () =>
+        gateway.connections.size === 0 &&
+        connection.runEventHeartbeatTimer === null &&
+        gateway.runEventSubscriberTotal === 0,
       "shared heartbeat timer cleanup after socket close",
     );
-    expect(connection.runEventStreams.size).toBe(0);
+    expectNoRunEventSubscribers(gateway, connection);
   });
 });

@@ -60,7 +60,7 @@ import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
-/** @typedef {{ streamId: string, runId: string, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean, replayPending: boolean }} RunEventStreamState */
+/** @typedef {{ streamId: string, runId: string, userKey: string, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean, replayPending: boolean }} RunEventStreamState */
 /** @typedef {{ queue: Array<{ data: string, bytes: number, event: string }>, queuedBytes: number, flushPending: boolean, disconnected: boolean }} ConnectionEventWriterState */
 /** @typedef {import("./GatewayAuthConfig.js").GatewayAuthConfig} GatewayAuthConfig */
 /** @typedef {import("./GatewayOperatorUiConfig.js").GatewayOperatorUiConfig} GatewayOperatorUiConfig */
@@ -184,6 +184,16 @@ const RUN_EVENT_HEARTBEAT_MS = 1_000;
 const RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
 const RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const RUN_EVENT_STREAM_DRAIN_RETRY_MS = 10;
+// streamRunEvents subscriber caps. The SDK normally opens one socket per run,
+// while low-level clients can multiplex several runs, so a connection gets 8
+// slots. A user gets 32 for several tabs and one run gets 64 concurrent
+// viewers. The gateway-wide 256 cap bounds all per-stream queues and heartbeat
+// work. The per-run cap separately limits hot-run fanout and replay-window
+// retention, which the global cap alone does not isolate.
+const RUN_EVENT_STREAM_MAX_SUBSCRIBERS = 256;
+const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_USER = 32;
+const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_CONNECTION = 8;
+const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_RUN = 64;
 // One byte-bounded writer per connection for EVERY gateway event frame.
 // broadcastEvent used to hand the generic copy of each run event straight to
 // ws.send while only the dedicated run-event stream frames went through a
@@ -2276,6 +2286,15 @@ export class Gateway {
     devtoolsSubscribers = new Map();
     runEventWindows = new Map();
     runEventSubscriberCounts = new Map();
+    runEventSubscriberTotal = 0;
+    /** Active streamRunEvents subscriber count per user identity (userId ?? tokenId ?? role). @type {Map<string, number>} */
+    runEventSubscribersByUser = new Map();
+    // Instance copies let tests exercise every cap without opening hundreds of
+    // streams. Production uses the constants above.
+    runEventStreamMaxSubscribers = RUN_EVENT_STREAM_MAX_SUBSCRIBERS;
+    runEventStreamMaxSubscribersPerUser = RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_USER;
+    runEventStreamMaxSubscribersPerConnection = RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_CONNECTION;
+    runEventStreamMaxSubscribersPerRun = RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_RUN;
     terminalRunEventWindows = new Map();
     terminalRunEventWindowTimers = new Map();
     apiStreamSeq = 0;
@@ -2983,6 +3002,34 @@ a { color: var(--brand); }</style>
         return this.runEventWindows.get(runId)?.nextSeq ?? 0;
     }
     /**
+   * First cap a run-event subscription would violate, or null when it fits.
+   * The caller checks this immediately before registration, with no await in
+   * between, so rejection happens before a stream map, heartbeat, or counter
+   * is allocated.
+   * @param {ConnectionState} connection
+   * @param {string} runId
+   * @returns {{ scope: "global" | "user" | "connection" | "run"; limit: number } | null}
+   */
+    runEventStreamCapViolation(connection, runId) {
+        const userKey = asString(connection.userId) ??
+            asString(connection.tokenId) ??
+            asString(connection.role) ??
+            "anonymous";
+        if (this.runEventSubscriberTotal >= this.runEventStreamMaxSubscribers) {
+            return { scope: "global", limit: this.runEventStreamMaxSubscribers };
+        }
+        if ((this.runEventSubscribersByUser.get(userKey) ?? 0) >= this.runEventStreamMaxSubscribersPerUser) {
+            return { scope: "user", limit: this.runEventStreamMaxSubscribersPerUser };
+        }
+        if ((connection.runEventStreams?.size ?? 0) >= this.runEventStreamMaxSubscribersPerConnection) {
+            return { scope: "connection", limit: this.runEventStreamMaxSubscribersPerConnection };
+        }
+        if (this.getRunEventSubscriberCount(runId) >= this.runEventStreamMaxSubscribersPerRun) {
+            return { scope: "run", limit: this.runEventStreamMaxSubscribersPerRun };
+        }
+        return null;
+    }
+    /**
    * @param {ConnectionState} connection
    * @param {string} streamId
    * @param {string} runId
@@ -2993,15 +3040,22 @@ a { color: var(--brand); }</style>
         if (!connection.runEventStreams) {
             connection.runEventStreams = new Map();
         }
+        const userKey = asString(connection.userId) ??
+            asString(connection.tokenId) ??
+            asString(connection.role) ??
+            "anonymous";
         connection.runEventStreams.set(streamId, {
             streamId,
             runId,
+            userKey,
             outboundQueue: [],
             flushPending: false,
             backpressureDisconnected: false,
             replayPending,
         });
         this.startRunEventHeartbeat(connection);
+        this.runEventSubscriberTotal += 1;
+        this.runEventSubscribersByUser.set(userKey, (this.runEventSubscribersByUser.get(userKey) ?? 0) + 1);
         const previous = this.runEventSubscriberCounts.get(runId) ?? 0;
         this.runEventSubscriberCounts.set(runId, previous + 1);
         return () => this.unregisterRunEventSubscriber(connection, streamId);
@@ -3057,14 +3111,9 @@ a { color: var(--brand); }</style>
         if (!connection.runEventStreams || connection.runEventStreams.size === 0) {
             this.stopRunEventHeartbeat(connection);
         }
-        const previous = this.runEventSubscriberCounts.get(stream.runId) ?? 0;
-        const nextCount = Math.max(0, previous - 1);
-        if (nextCount === 0) {
-            this.runEventSubscriberCounts.delete(stream.runId);
-        }
-        else {
-            this.runEventSubscriberCounts.set(stream.runId, nextCount);
-        }
+        this.runEventSubscriberTotal = Math.max(0, this.runEventSubscriberTotal - 1);
+        decrementSubscriberCount(this.runEventSubscribersByUser, stream.userKey);
+        decrementSubscriberCount(this.runEventSubscriberCounts, stream.runId);
         this.releaseTerminalRunEventWindow(stream.runId);
         this.enforceRunEventWindowLimit();
     }
@@ -4772,10 +4821,14 @@ a { color: var(--brand); }</style>
             await Promise.allSettled(inflightRuns);
         }
         for (const connection of this.connections) {
+            // Fence any subscribe handler still awaiting resolveRun(), then
+            // synchronously release every run-event cap slot before closing the
+            // socket. The later WS close callback is idempotent.
+            connection.closed = true;
             if (connection.heartbeatTimer) {
                 clearInterval(connection.heartbeatTimer);
             }
-            this.stopRunEventHeartbeat(connection);
+            this.cleanupRunEventSubscribers(connection);
             if (connection.authDeadlineTimer) {
                 clearTimeout(connection.authDeadlineTimer);
                 connection.authDeadlineTimer = null;
@@ -7865,6 +7918,22 @@ a { color: var(--brand); }</style>
                 const window = [...(state?.window ?? [])];
                 if (typeof afterSeq === "number" && afterSeq > currentSeq) {
                     return responseError(frame.id, "SeqOutOfRange", `afterSeq ${afterSeq} is newer than current seq ${currentSeq}`);
+                }
+                const capViolation = this.runEventStreamCapViolation(connection, runId);
+                if (capViolation) {
+                    emitGatewayLog("warning", "Gateway run-event subscriber rejected: cap reached", {
+                        ...gatewayContextAnnotations(connection),
+                        runId,
+                        capScope: capViolation.scope,
+                        capLimit: capViolation.limit,
+                        subscriberCount: this.runEventSubscriberTotal,
+                    }, "gateway:run-events");
+                    // RateLimited is the stable v1 capacity error code. Clients
+                    // can retry it without parsing this message.
+                    return responseError(frame.id, "RateLimited", `Gateway run-event subscriber limit reached (${capViolation.scope} cap of ${capViolation.limit}).`, {
+                        scope: capViolation.scope,
+                        limit: capViolation.limit,
+                    });
                 }
                 const streamId = randomUUID();
                 this.registerRunEventSubscriber(connection, streamId, runId, typeof afterSeq === "number");
