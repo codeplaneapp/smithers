@@ -183,6 +183,31 @@ describe("smithers down --force staleness check", () => {
         }
     }, CLI_COMMAND_TIMEOUT_MS);
 
+    test("removes a cancelled run's recorded detached log", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            const logFile = repo.write("operator-logs/stale-with-log.log", "detached output\n");
+            await insertRunningRun(adapter, "stale-with-log", {
+                heartbeatAtMs: Date.now() - 120_000,
+                configJson: JSON.stringify({ logFile }),
+            });
+
+            const result = runSmithers(["down"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
+
+            expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+            expect((await adapter.getRun("stale-with-log"))?.status).toBe("cancelled");
+            expect(existsSync(logFile)).toBe(false);
+        }
+        finally {
+            sqlite.close();
+        }
+    }, CLI_COMMAND_TIMEOUT_MS);
+
     test("stale runs with no owner or a dead owner both finalize cleanly", async () => {
         const repo = createTempRepo();
         const { sqlite, adapter } = openRepoDb(repo);

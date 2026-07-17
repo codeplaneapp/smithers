@@ -92,6 +92,10 @@ import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
 import { launchPostFailureAutopsy } from "./launchPostFailureAutopsy.js";
 import { resolveLaunchRootDir, parsePersistedRootDir } from "./resolve-root.js";
+import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
+import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
+import { removeDetachedRunLog } from "./removeDetachedRunLog.js";
+import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
 import { formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, } from "@smithers-orchestrator/agents/cli-capabilities";
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect, } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
@@ -2203,6 +2207,8 @@ function normalizeEventsQuery(options) {
  * @param {FailFn} fail
  */
 async function executeUpCommand(c, workflowPath, options, fail) {
+    const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
+    delete process.env[DETACHED_RUN_LOG_FILE_ENV];
     try {
         let input;
         let annotations;
@@ -2329,16 +2335,20 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 childArgs.push("--backend", options.backend);
             if (options.postFailure === false)
                 childArgs.push("--no-post-failure");
-            const logFileDir = options.logDir ?? dirname(resolvedWorkflowPath);
             const effectiveRunId = runId ?? `run-${Date.now()}`;
-            const logFile = resolve(logFileDir, `${effectiveRunId}.log`);
+            await reapDetachedRunLogs({ cwd: cliWorkspace.cwd() });
+            const logFile = resolveDetachedRunLogFile(effectiveRunId, {
+                logDir: options.logDir,
+                cwd: cliWorkspace.cwd(),
+            });
+            mkdirSync(dirname(logFile), { recursive: true });
             if (!runId)
                 childArgs.push("--run-id", effectiveRunId);
             const fd = openSync(logFile, "a");
             const child = spawn("bun", [cliPath, ...childArgs], {
                 detached: true,
                 stdio: ["ignore", fd, fd],
-                env: process.env,
+                env: { ...process.env, [DETACHED_RUN_LOG_FILE_ENV]: logFile },
             });
             child.unref();
             let supervisorPid;
@@ -2648,6 +2658,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 input,
                 runId: effectiveRunId,
                 parentRunId: options.parentRunId,
+                ...(detachedLogFile ? { config: { logFile: detachedLogFile } } : {}),
                 ...buildDurabilityRunOptions({ resume, force: options.force, acceptWorkflowChange: options.acceptWorkflowChange }),
                 resumeClaim,
                 workflowPath: resolvedWorkflowPath,
@@ -2691,6 +2702,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             input,
             runId,
             parentRunId: options.parentRunId,
+            ...(detachedLogFile ? { config: { logFile: detachedLogFile } } : {}),
             ...buildDurabilityRunOptions({ resume, force: options.force, acceptWorkflowChange: options.acceptWorkflowChange }),
             resumeClaim,
             workflowPath: resolvedWorkflowPath,
@@ -7624,6 +7636,7 @@ const cli = Cli.create({
                     // hung engine from racing this shutdown with a completion.
                     const { cancellation: result } = await finalizeCancelledOwnedRun(adapter, run, { now });
                     if (result.won || result.repaired) {
+                        removeDetachedRunLog(run, { cwd: cliWorkspace.cwd() });
                         process.stderr.write(`⊘ Cancelled: ${run.runId}\n`);
                         cancelled++;
                     }

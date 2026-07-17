@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
+import { mkdirSync, openSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { workflowIdFromPath } from "./monitoring-suggestion.js";
+import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
 import { resolveWorkflow } from "./workflows.js";
 
 /**
@@ -76,14 +78,15 @@ export function launchPostFailureAutopsy({
         targetRunId: failedRunId,
         workflowPath: workflowPath ? resolve(cwd, workflowPath) : null,
     });
-    const logFile = resolve(dirname(entryFile), `${autopsyRunId}.log`);
+    const logFile = resolveDetachedRunLogFile(autopsyRunId, { cwd });
     try {
+        mkdirSync(dirname(logFile), { recursive: true });
         const fd = openSync(logFile, "a");
         const child = spawnFn(process.execPath, [cliPath, "up", entryFile, "--run-id", autopsyRunId, "--input", input], {
             cwd,
             detached: true,
             stdio: ["ignore", fd, fd],
-            env: { ...env, SMITHERS_POST_FAILURE: "0" },
+            env: { ...env, SMITHERS_POST_FAILURE: "0", [DETACHED_RUN_LOG_FILE_ENV]: logFile },
         });
         child.unref();
         // The spawn `error` event fires asynchronously (e.g. a bad execPath /

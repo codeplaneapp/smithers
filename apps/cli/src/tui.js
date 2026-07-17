@@ -1,7 +1,7 @@
 import { intro, log, outro, select, spinner, text, confirm, isCancel, cancel } from "@clack/prompts";
 import pc from "picocolors";
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { discoverWorkflows, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
@@ -13,6 +13,10 @@ import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { formatStreamText } from "./tui-format.js";
 import { fuzzySelect } from "./fuzzy-select.js";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { cliWorkspace } from "./cliWorkspace.js";
+import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
+import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
+import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
 
 export { formatStreamText } from "./tui-format.js";
 
@@ -1948,12 +1952,12 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     // Run the workflow as a detached background process so its agent output
     // streams to a log file and never collides with the live card.
     const indexPath = fileURLToPath(new URL("./index.js", import.meta.url));
-    // Honor --log-dir the same way `up` does (index.js resolves the child's log
-    // file from `options.logDir ?? dirname(resolvedWorkflowPath)`, and
-    // buildDetachedUpArgs forwards --log-dir to the child), so the launcher's
-    // "logs → …" path points at the SAME file the run writes to.
-    const logDir = (c.options && typeof c.options.logDir === "string" && c.options.logDir) || dirname(workflow.entryFile);
-    const logFile = resolve(logDir, `${runId}.log`);
+    // Resolve the same managed/default or explicit override path as `up -d`,
+    // then hand the exact absolute file to the child for run-config recording.
+    const logDir = c.options && typeof c.options.logDir === "string" ? c.options.logDir : undefined;
+    await reapDetachedRunLogs({ cwd: cliWorkspace.cwd() });
+    const logFile = resolveDetachedRunLogFile(runId, { logDir, cwd: cliWorkspace.cwd() });
+    mkdirSync(dirname(logFile), { recursive: true });
     let child;
     // Taken just before spawn: the run row the child inserts can only carry a
     // createdAtMs at or after this, so waitForRunRow can tell a fresh row from
@@ -1970,7 +1974,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             child = spawn("bun", upArgs, {
                 detached: true,
                 stdio: ["ignore", fd, fd],
-                env: process.env,
+                env: { ...process.env, [DETACHED_RUN_LOG_FILE_ENV]: logFile },
             });
         } finally {
             closeSync(fd);

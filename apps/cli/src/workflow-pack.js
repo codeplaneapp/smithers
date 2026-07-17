@@ -430,7 +430,7 @@ function renderGatewayFile() {
 }
 function renderTemplateFiles(versions, env, projectRoot, options = {}) {
     const files = [
-        { path: ".smithers/.gitignore", contents: "node_modules/\nexecutions/\nruns/\nreports/\nsandboxes/\nstate\ntmp\n*.db\n*.sqlite\npg/\n" },
+        { path: ".smithers/.gitignore", contents: "node_modules/\nexecutions/\nruns/\nreports/\nsandboxes/\nlogs/\nstate\ntmp\n*.db\n*.sqlite\npg/\n" },
         { path: ".smithers/workflows/.gitignore", contents: "*.log\nrun-*.log\n" },
         { path: ".smithers/package.json", contents: renderPackageJson(versions) },
         { path: ".smithers/tsconfig.json", contents: renderTsconfig() },

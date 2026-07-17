@@ -244,6 +244,7 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     // PGlite stores and migration receipts are local runtime state when present
     // and must never be committed, even though the clean default backend is SQLite.
     expect(repo.read(".smithers/.gitignore")).toContain("pg/");
+    expect(repo.read(".smithers/.gitignore")).toContain("logs/");
     expect(repo.exists(".smithers/workflows/.gitignore")).toBe(true);
     expect(repo.exists(".smithers/package.json")).toBe(true);
     expect(repo.exists(".smithers/tsconfig.json")).toBe(true);
