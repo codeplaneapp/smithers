@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
 import { registerTrustedAdapter, type HarnessAdapter } from "../harness/Harness.ts";
 import type { ScenarioFault } from "../scenario/ast.ts";
 
@@ -44,6 +45,10 @@ export const realProcessAdapter = (options: RealProcessAdapterOptions): HarnessA
     verifiedProductionIdentity: "smithers-engine:runWorkflow-child",
     supportedCutPoints: new Set(["resume:during-task"]),
     admissionProbe: async () => {
+      let runnerSource = "";
+      try { runnerSource = readFileSync(realpathSync(options.runnerPath), "utf8"); } catch (cause) { throw Object.assign(new Error("real process admission requires the readable repository engineChildRunner source"), { code: "ADMISSION_FAILED", cause }); }
+      const productionSource = runnerSource.includes("runWorkflow") && runnerSource.includes("ensureSmithersTables") && runnerSource.includes("buildKillResumeWorkflow") && runnerSource.includes("SMITHERS_ENGINE_HANDSHAKE=runWorkflow:");
+      if (!productionSource) throw Object.assign(new Error("real process admission rejected: runner source is not the repository production runWorkflow adapter"), { code: "ADMISSION_FAILED" });
       const nonce = challenge();
       resource = await options.spawn(nonce);
       tracked.add(resource);
@@ -52,7 +57,10 @@ export const realProcessAdapter = (options: RealProcessAdapterOptions): HarnessA
       // verification callbacks are deliberately not accepted as evidence.
       const args = resource.child?.spawnargs ?? [];
       const executable = args[0] ? String(args[0]).split("/").pop() : "";
-      const productionRunner = args.some((arg) => arg === options.runnerPath);
+      // The production runner is the executable script entrypoint, not an argv
+      // suffix. This rejects `bun -e ... <engineChildRunner.ts>` echoers even
+      // when they print the public marker and return a truthy callback result.
+      const productionRunner = args[1] !== undefined && (() => { try { return realpathSync(String(args[1])) === realpathSync(options.runnerPath); } catch { return false; } })();
       let stdout = "";
       resource.child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
       // The adapter, not the caller's handshake callback, authenticates the
