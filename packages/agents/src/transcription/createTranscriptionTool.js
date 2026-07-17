@@ -1,11 +1,23 @@
 import { isIP } from "node:net";
 import { dynamicTool, jsonSchema } from "ai";
+import { readBoundedResponseBody } from "../readBoundedResponseBody.js";
 import { createPinnedAudioTransport } from "./createPinnedAudioTransport.js";
 import { guardedAudioDownload } from "./guardedAudioDownload.js";
 
 const defaultPinnedAudioTransport = createPinnedAudioTransport();
 
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
+
+/** @typedef {{ maxBytes: number, usesCanonicalOption: boolean }} ResponseBodyLimit */
+
+class TranscriptionResponseBodyTooLargeError extends Error {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = "Error";
+  }
+}
 
 const transcriptionInputSchema = {
   type: "object",
@@ -44,6 +56,7 @@ export function createTranscriptionTool(options) {
   const provider = options.provider;
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  const audioResponseBodyLimit = resolveAudioResponseBodyLimit(options);
   if (typeof fetchImpl !== "function") {
     throw new Error("createTranscriptionTool requires fetch to be available");
   }
@@ -61,7 +74,14 @@ export function createTranscriptionTool(options) {
       signal?.throwIfAborted();
       const request = normalizeInput(input);
       if (provider === "whisper") {
-        return transcribeWithWhisper(options, request, fetchImpl, signal, maxResponseBytes);
+        return transcribeWithWhisper(
+          options,
+          request,
+          fetchImpl,
+          signal,
+          maxResponseBytes,
+          audioResponseBodyLimit,
+        );
       }
       if (provider === "deepgram") {
         // Deepgram receives the URL as JSON and downloads it server-side. Keep
@@ -73,6 +93,27 @@ export function createTranscriptionTool(options) {
       throw new Error(`Unsupported transcription provider: ${provider}`);
     },
   });
+}
+
+/**
+ * @param {import("./createTranscriptionTool.ts").CreateTranscriptionToolOptions} options
+ * @returns {ResponseBodyLimit}
+ */
+function resolveAudioResponseBodyLimit(options) {
+  const maxResponseBodyBytes = options.maxResponseBodyBytes;
+  if (
+    maxResponseBodyBytes !== undefined &&
+    (!Number.isSafeInteger(maxResponseBodyBytes) || maxResponseBodyBytes <= 0)
+  ) {
+    throw new TypeError("maxResponseBodyBytes must be a positive safe integer.");
+  }
+  if (maxResponseBodyBytes !== undefined) {
+    return { maxBytes: maxResponseBodyBytes, usesCanonicalOption: true };
+  }
+  if (options.maxResponseBytes !== undefined) {
+    return { maxBytes: options.maxResponseBytes, usesCanonicalOption: false };
+  }
+  return { maxBytes: DEFAULT_MAX_RESPONSE_BODY_BYTES, usesCanonicalOption: true };
 }
 
 /**
@@ -201,9 +242,17 @@ function stripBrackets(host) {
  * @param {typeof fetch} fetchImpl
  * @param {AbortSignal} [signal]
  * @param {number} maxResponseBytes
+ * @param {ResponseBodyLimit} audioResponseBodyLimit
  * @returns {Promise<import("./createTranscriptionTool.ts").TranscriptionToolResult>}
  */
-async function transcribeWithWhisper(options, input, fetchImpl, signal, maxResponseBytes) {
+async function transcribeWithWhisper(
+  options,
+  input,
+  fetchImpl,
+  signal,
+  maxResponseBytes,
+  audioResponseBodyLimit,
+) {
   const form = new FormData();
   form.set("model", options.model ?? "whisper-1");
   form.set("response_format", "verbose_json");
@@ -223,8 +272,20 @@ async function transcribeWithWhisper(options, input, fetchImpl, signal, maxRespo
         : {}),
       ...(signal ? { signal } : {}),
     });
-    await assertOk(audioResponse, "download audio for Whisper transcription", maxResponseBytes);
-    const bytes = await readResponseBytes(audioResponse, "download audio for Whisper transcription", maxResponseBytes);
+    await assertOk(
+      audioResponse,
+      "download audio for Whisper transcription",
+      audioResponseBodyLimit.maxBytes,
+      signal,
+      audioResponseBodyLimit.usesCanonicalOption,
+    );
+    const bytes = await readResponseBytes(
+      audioResponse,
+      "download audio for Whisper transcription",
+      audioResponseBodyLimit.maxBytes,
+      signal,
+      audioResponseBodyLimit.usesCanonicalOption,
+    );
     const blob = new Blob([bytes], { type: audioResponse.headers.get("content-type") ?? "" });
     form.set("file", new File([blob], filenameForMime(input.mimeType ?? blob.type), { type: input.mimeType ?? blob.type }));
   }
@@ -235,9 +296,9 @@ async function transcribeWithWhisper(options, input, fetchImpl, signal, maxRespo
     body: form,
     signal,
   });
-  await assertOk(response, "transcribe audio with Whisper", maxResponseBytes);
+  await assertOk(response, "transcribe audio with Whisper", maxResponseBytes, signal);
   const payload = parseJsonResponse(
-    await readResponseBytes(response, "read Whisper transcription response", maxResponseBytes),
+    await readResponseBytes(response, "read Whisper transcription response", maxResponseBytes, signal),
     "Whisper transcription response",
   );
   return {
@@ -274,9 +335,9 @@ async function transcribeWithDeepgram(options, input, fetchImpl, signal, maxResp
     body,
     signal,
   });
-  await assertOk(response, "transcribe audio with Deepgram", maxResponseBytes);
+  await assertOk(response, "transcribe audio with Deepgram", maxResponseBytes, signal);
   const payload = parseJsonResponse(
-    await readResponseBytes(response, "read Deepgram transcription response", maxResponseBytes),
+    await readResponseBytes(response, "read Deepgram transcription response", maxResponseBytes, signal),
     "Deepgram transcription response",
   );
   const alternative = payload.results?.channels?.[0]?.alternatives?.[0] ?? {};
@@ -291,10 +352,19 @@ async function transcribeWithDeepgram(options, input, fetchImpl, signal, maxResp
  * @param {Response} response
  * @param {string} action
  * @param {number} maxBytes
+ * @param {AbortSignal} [signal]
+ * @param {boolean} [usesCanonicalOption]
  */
-async function assertOk(response, action, maxBytes) {
+async function assertOk(response, action, maxBytes, signal, usesCanonicalOption = false) {
   if (response.ok) return;
-  const bytes = await readResponseBytes(response, action, maxBytes).catch(() => new Uint8Array());
+  let bytes;
+  try {
+    bytes = await readResponseBytes(response, action, maxBytes, signal, usesCanonicalOption);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof TranscriptionResponseBodyTooLargeError) throw error;
+    bytes = new Uint8Array();
+  }
   const message = new TextDecoder().decode(bytes);
   throw new Error(`Failed to ${action}: ${response.status} ${response.statusText}${message ? ` - ${message}` : ""}`);
 }
@@ -305,41 +375,29 @@ async function assertOk(response, action, maxBytes) {
  * @param {Response} response
  * @param {string} action
  * @param {number} maxBytes
+ * @param {AbortSignal} [signal]
+ * @param {boolean} [usesCanonicalOption]
  * @returns {Promise<Uint8Array>}
  */
-async function readResponseBytes(response, action, maxBytes) {
-  const contentLength = response.headers.get("content-length");
-  if (contentLength !== null && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
-    await response.body?.cancel();
-    throw new Error(`Failed to ${action}: response body exceeds ${maxBytes} bytes`);
-  }
+async function readResponseBytes(response, action, maxBytes, signal, usesCanonicalOption = false) {
+  return readBoundedResponseBody(response, {
+    maxBytes,
+    ...(signal ? { signal } : {}),
+    createTooLargeError: (limit) =>
+      transcriptionResponseBodyTooLargeError(action, limit, usesCanonicalOption),
+  });
+}
 
-  if (!response.body) return new Uint8Array();
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        throw new Error(`Failed to ${action}: response body exceeds ${maxBytes} bytes`);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+/**
+ * @param {string} action
+ * @param {number} maxBytes
+ * @param {boolean} usesCanonicalOption
+ */
+function transcriptionResponseBodyTooLargeError(action, maxBytes, usesCanonicalOption) {
+  const message = usesCanonicalOption
+    ? `Failed to ${action}: response body exceeds maxResponseBodyBytes limit of ${maxBytes} bytes.`
+    : `Failed to ${action}: response body exceeds ${maxBytes} bytes`;
+  return new TranscriptionResponseBodyTooLargeError(message);
 }
 
 /**

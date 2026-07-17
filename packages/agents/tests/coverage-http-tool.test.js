@@ -106,7 +106,7 @@ describe("createHttpTool", () => {
     });
   });
 
-  test("fires the abort when the request outlives its timeout", async () => {
+  test("propagates the timeout abort when an injected fetch returns a late response", async () => {
     let aborted = false;
     stub(async (_url, init) => {
       await new Promise((r) => setTimeout(r, 40));
@@ -114,9 +114,15 @@ describe("createHttpTool", () => {
       return Response.json({ late: true });
     });
     const tool = createHttpTool();
-    const result = await tool.execute({ url: "https://api.example.com/slow", timeoutMs: 1 }, callOptions);
+    const error = await tool.execute(
+      { url: "https://api.example.com/slow", timeoutMs: 1 },
+      callOptions,
+    ).then(
+      () => null,
+      (cause) => cause,
+    );
     expect(aborted).toBe(true);
-    expect(result.body).toEqual({ late: true });
+    expect(error).toMatchObject({ name: "AbortError" });
   });
 
   test("parses a full-URL allowlist entry down to its host", async () => {

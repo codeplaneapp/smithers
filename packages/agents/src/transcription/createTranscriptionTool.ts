@@ -46,7 +46,17 @@ export type CreateTranscriptionToolOptions = {
   description?: string;
   /** Provider API fetch implementation. Never used for local Whisper audio downloads. */
   fetch?: typeof fetch;
-  /** Maximum bytes accepted from a remote audio URL or transcription provider response. Defaults to 25 MiB. */
+  /**
+   * Maximum response-body bytes buffered from a remote audio URL before a
+   * Whisper upload. Defaults to 1,048,576 bytes (1 MiB) and must be a positive
+   * safe integer.
+   */
+  maxResponseBodyBytes?: number;
+  /**
+   * Maximum bytes accepted from a transcription provider response. For
+   * compatibility, this also caps a remote audio URL when
+   * `maxResponseBodyBytes` is omitted. Defaults to 25 MiB.
+   */
   maxResponseBytes?: number;
   /**
    * Hosts an agent-supplied `audioUrl` may use. When set, only these hosts are

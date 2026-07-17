@@ -3,7 +3,15 @@ export type CreateHttpToolOptions = {
   /**
    * Maximum number of response-body bytes the tool will buffer. Responses
    * larger than this are rejected to prevent model-selected endpoints from
-   * exhausting process memory. Defaults to 1 MiB.
+   * exhausting process memory. Defaults to 1,048,576 bytes (1 MiB) and must
+   * be a positive safe integer.
+   */
+  maxResponseBodyBytes?: number;
+  /**
+   * Backward-compatible alias for `maxResponseBodyBytes`. The canonical option
+   * takes precedence when both are provided.
+   *
+   * @deprecated Use `maxResponseBodyBytes`.
    */
   maxResponseBytes?: number;
   /**
