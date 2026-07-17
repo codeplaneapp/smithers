@@ -2200,7 +2200,7 @@
     "name": "SandboxProvider",
     "area": "sandboxing",
     "kind": "api",
-    "summary": "Pluggable interface for sandbox execution: {id, run(request), cleanup?(request)} for local/remote VM/Docker/Freestyle implementations.",
+    "summary": "Pluggable interface for sandbox execution: {id, run(request), cleanup?(request)} for local/remote VM/Docker/Microsandbox implementations.",
     "keyApi": "SandboxProvider, registerSandboxProvider, resolveSandboxProvider",
     "slice": "sandbox-worktree-vcs"
   },
@@ -2394,12 +2394,12 @@
     "slice": "sandbox-worktree-vcs"
   },
   {
-    "id": "sandbox-freestyle-provider",
-    "name": "Freestyle Sandbox Adapter",
+    "id": "sandbox-microsandbox-provider",
+    "name": "Microsandbox Sandbox Adapter",
     "area": "sandboxing",
     "kind": "example",
-    "summary": "Pluggable provider adapter that creates Freestyle VMs, writes request/setup files, execs commands, reads result JSON, enabling real VMs as sandboxes.",
-    "keyApi": "createFreestyleSandboxProvider",
+    "summary": "Pluggable provider adapter that creates Microsandbox VMs, writes request/setup files, execs commands, reads result JSON, enabling real VMs as sandboxes.",
+    "keyApi": "createMicrosandboxSandboxProvider",
     "slice": "sandbox-worktree-vcs"
   },
   {

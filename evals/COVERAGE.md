@@ -516,13 +516,13 @@ Immediate docs-gap candidates — an eval that fails here points straight at a d
 ### sandboxing
 
 - **<Sandbox>** (`<Sandbox id={string} provider? runtime? workflow? input? output>`) — React component that executes a child workflow through an injectable sandbox provider with optional networking, volume mounts, custom images, and egress config. · _?_
-- **Freestyle Sandbox Adapter** (`createFreestyleSandboxProvider`) — Pluggable provider adapter that creates Freestyle VMs, writes request/setup files, execs commands, reads result JSON, enabling real VMs as sandboxes. · _?_
+- **Microsandbox Sandbox Adapter** (`createMicrosandboxSandboxProvider`) — Pluggable provider adapter that creates Microsandbox VMs, writes request/setup files, execs commands, reads result JSON, enabling real VMs as sandboxes. · _?_
 - **Sandbox Diff Review** (`reviewDiffs, autoAcceptDiffs`) — Human-in-the-loop review and auto-acceptance of file changes produced by sandbox execution. · _?_
 - **Sandbox Egress Config** (`egress: SandboxEgressConfig`) — HTTP/HTTPS proxy, CA certificates, and secret bindings for sandbox outbound connections. · _?_
 - **Sandbox Network** (`allowNetwork: boolean`) — Network access control for sandboxes via allowNetwork prop; denied by default, enabled per-sandbox. · _?_
 - **Sandbox Volume Mounts** (`volumes: SandboxVolumeMount[]`) — Host directory binding into sandbox containers via volumes prop with {host, container, readonly?} specifications. · _?_
 - **Sandbox Workspace Spec** (`workspace: SandboxWorkspaceSpec`) — jj workspace configuration inside a sandbox with name, snapshot restoration, idle timeout, and persistence mode. · _?_
-- **SandboxProvider** (`SandboxProvider, registerSandboxProvider, resolveSandboxProvider`) — Pluggable interface for sandbox execution: {id, run(request), cleanup?(request)} for local/remote VM/Docker/Freestyle implementations. · _?_
+- **SandboxProvider** (`SandboxProvider, registerSandboxProvider, resolveSandboxProvider`) — Pluggable interface for sandbox execution: {id, run(request), cleanup?(request)} for local/remote VM/Docker/Microsandbox implementations. · _?_
 - **SandboxProvider Interface** (`SandboxProvider`) — Contract for sandbox implementations: {id, run(request), cleanup?(request)} where run receives request with rootDir/workflow/input and returns {bundlePath} or {status, output, diffBundle, patches}. · _?_
 - **SandboxRuntime** (`runtime: 'bubblewrap' | 'docker' | 'codeplane'`) — Process isolation runtime for sandboxes: bubblewrap (Linux), docker (OCI containers), or codeplane (cloud VMs). · _?_
 

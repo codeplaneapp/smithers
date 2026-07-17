@@ -3121,14 +3121,14 @@
     "slice": "sandbox-worktree-vcs"
   },
   {
-    "id": "sandbox-freestyle-example",
-    "feature": "sandbox-freestyle-provider",
+    "id": "sandbox-microsandbox-provider",
+    "feature": "sandbox-microsandbox-provider",
     "area": "sandboxing",
     "kind": "authoring",
     "tier": "weak",
     "verify": "judge",
-    "task": "Implement a SandboxProvider adapter for Freestyle VMs: create VM, write request JSON, exec command, read result JSON, return SandboxProviderResult.",
-    "canonicalAnswer": "createFreestyleSandboxProvider",
+    "task": "Implement a SandboxProvider adapter for Microsandbox VMs: create VM, write request JSON, exec command, read result JSON, return SandboxProviderResult.",
+    "canonicalAnswer": "createMicrosandboxSandboxProvider",
     "slice": "sandbox-worktree-vcs"
   },
   {

@@ -465,7 +465,7 @@ below); copy the complete dependency closure for the pattern you choose.
 
 The same substrate carries the concerns you'd otherwise bolt on later:
 
-- **Isolation**: `<Worktree>` (per-agent git worktrees), `<Sandbox>` (freestyle / docker / process), `<Subflow>` & `<SuperSmithers>` (nest a workflow as a node).
+- **Isolation**: `<Worktree>` (per-agent jj workspaces), `<Sandbox>` (microsandbox / docker / process), `<Subflow>` & `<SuperSmithers>` (nest a workflow as a node).
 - **Budgets**: `<Aspects tokenBudget={{ max, onExceeded }}>` propagates token / latency budgets to a subtree, enforced at task dispatch: before each descendant task the engine checks the run's accumulated tokens against `max` and applies `onExceeded` (`fail` raises `ASPECT_BUDGET_EXCEEDED`, `warn` logs, `skip-remaining` skips the task). The per-task limit (`perTask`) is not enforced yet. Catch `ASPECT_BUDGET_EXCEEDED` in a `<TryCatchFinally>` whose catch renders `<ContinueAsNew>` to do a durable `/clear` (see [Context engineering](/guides/context-engineering)).
 - **Scorers / evals**: attach `faithfulness`, `relevancy`, `schemaAdherence`, or `llmJudge(...)` to any `<Task>`; inspect with `smithers scores <run>`.
 - **Memory**: cross-run facts + history per namespace; `memory={{ recall, save }}` auto-injects the top-K relevant facts; query with `smithers memory`.
@@ -735,7 +735,7 @@ on GitHub:
 
 *Deployment & sandbox integrations (subfolders)*
 - `bun-port-smithers/`: production-oriented workflow pack (porting work for Bun)
-- `freestyle/`: Freestyle VM sandbox provider example (real-computer agents)
+- `microsandbox/`: first-class local microVM sandbox provider
 - `dstack/`: Smithers + dstack on Google Cloud, serving Kimi K2
 - `kubernetes/`: run Smithers workflows distributed on a Kubernetes cluster
 

@@ -238,9 +238,9 @@ harness can do the edits.
 | Antigravity | CLI harness |
 | Any [AI SDK](./docs/integrations/sdk-agents.mdx) model | SDK agent, with tools, structured output, and MCP |
 
-The same `<Sandbox>` primitive runs an agent locally (Bubblewrap, Docker) or on a
-remote provider like [Freestyle](https://freestyle.sh) with no change to the workflow,
-and the `SandboxProvider` interface accepts any backend you bring.
+The same `<Sandbox>` primitive runs an agent locally (Bubblewrap, Docker, or
+[Microsandbox](https://github.com/superradcompany/microsandbox)) or through any
+backend you implement against `SandboxProvider`.
 
 Beyond [`init`](#get-started), `bunx smithers-orchestrator mcp add` also wires the MCP
 server into Cursor, Copilot, Hermes, OpenClaw, and ~20 more coding agents.

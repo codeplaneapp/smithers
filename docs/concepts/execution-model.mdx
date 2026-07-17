@@ -60,7 +60,7 @@ inside an isolated runtime -- whole-graph, per-step, or mixed, your choice. It
 renders as exactly **one scheduler task per boundary** (not per agent turn);
 children never become parent-run tasks. The runtime is pluggable
 (`bubblewrap`, `docker`, `codeplane`, `cloudflare`) or any custom provider you
-register -- e.g. the Freestyle VM example adapter.
+register, including the first-class Microsandbox provider.
 
 The lifecycle at a `<Sandbox>` boundary is: **create the sandbox when the task
 starts → run the harness → capture a diff bundle of what changed → tear it down**
@@ -68,8 +68,8 @@ starts → run the harness → capture a diff bundle of what changed → tear it
 decision, not a Smithers-core per-turn guarantee. The Cloudflare provider, for
 example, creates one container keyed `${runId}-${sandboxId}`, defaults
 `cleanup: "destroy"`, and can `keep` the container or hold it warm with
-`keepAlive`. A Freestyle VM exposes explicit `start()` / `stop()` / `fork()` /
-`delete()` and `idleTimeoutSeconds`.
+`keepAlive`. The Microsandbox provider exposes explicit create, start, stop,
+snapshot, and cleanup semantics.
 
 <Note>
   Running a CLI agent in a fresh per-turn container is a **composition you

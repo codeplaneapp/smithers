@@ -94,7 +94,7 @@ Use `egress` when the sandbox itself should own outbound-network configuration. 
 />
 ```
 
-Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode a Freestyle or iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
+Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode an iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
 
 When `caCertPem` is provided, Smithers writes it into the request bundle at `.smithers/egress/ca.crt` and points local transports at `/workspace/.smithers/egress/ca.crt`. If the CA is already installed by the sandbox image or sidecar, use `caCertPath` instead. Persisted sandbox config redacts egress env values, CA PEM, and secret-binding entries.
 
@@ -352,14 +352,3 @@ provider-kit, selection precedence, and a comparison table.
 - [AWS Sandbox Provider](/integrations/aws-sandbox-provider): id `aws-sandbox` (Fargate or CodeBuild, S3 transport)
 - [GCP Sandbox Provider](/integrations/gcp-sandbox-provider): id `gcp-sandbox` (Cloud Run Jobs, GCS transport)
 - [Cloudflare](/integrations/cloudflare): id `cloudflare-sandbox`
-
-## Freestyle provider example
-
-[Freestyle VMs](https://www.freestyle.sh/docs/vms) are full sandboxes with nested virtualization, full networking, and the ability to scale to more resources than alternatives. Use Freestyle VMs when you want to give your agents a real computer rather than a code runner.
-
-See `examples/freestyle/` for a provider adapter that creates a Freestyle VM, writes setup and request files with `vm.fs.writeTextFile()`, executes a command with `vm.exec()`, reads `smithers-result.json` with `vm.fs.readTextFile()`, and returns a Smithers sandbox result.
-
-Freestyle's current VM docs show the stable package as `freestyle`, VM creation through `freestyle.vms.create()`, file I/O through `vm.fs.writeTextFile()` / `vm.fs.readTextFile()`, command execution with `vm.exec()`, and lifecycle controls such as `start()`, `stop()`, `resize()`, `fork()`, `delete({ vmId })`, and `idleTimeoutSeconds`. Relevant Freestyle docs:
-
-- https://www.freestyle.sh/docs/vms
-- https://www.freestyle.sh/docs/vms/lifecycle

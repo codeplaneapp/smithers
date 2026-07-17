@@ -211,8 +211,7 @@ Agent adapters ship in the box, including `ClaudeCodeAgent`, `CodexAgent`, `PiAg
 model (with tools, structured output, and MCP). The same `<Sandbox>` primitive runs an
 agent in a local hardware-isolated microVM with
 [Microsandbox](https://github.com/superradcompany/microsandbox), through Bubblewrap or
-Docker, on a managed remote like [Freestyle](https://freestyle.sh), or on any backend
-you implement against `SandboxProvider`.
+Docker, or on any backend you implement against `SandboxProvider`.
 
 ## Requirements
 
