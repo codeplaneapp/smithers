@@ -1130,7 +1130,7 @@ inside an isolated runtime -- whole-graph, per-step, or mixed, your choice. It
 renders as exactly **one scheduler task per boundary** (not per agent turn);
 children never become parent-run tasks. The runtime is pluggable
 (`bubblewrap`, `docker`, `codeplane`, `cloudflare`) or any custom provider you
-register, including the first-class Microsandbox provider.
+register -- e.g. the Freestyle VM example adapter.
 
 The lifecycle at a `<Sandbox>` boundary is: **create the sandbox when the task
 starts → run the harness → capture a diff bundle of what changed → tear it down**
@@ -1138,8 +1138,8 @@ starts → run the harness → capture a diff bundle of what changed → tear it
 decision, not a Smithers-core per-turn guarantee. The Cloudflare provider, for
 example, creates one container keyed `${runId}-${sandboxId}`, defaults
 `cleanup: "destroy"`, and can `keep` the container or hold it warm with
-`keepAlive`. The Microsandbox provider exposes explicit create, start, stop,
-snapshot, and cleanup semantics.
+`keepAlive`. A Freestyle VM exposes explicit `start()` / `stop()` / `fork()` /
+`delete()` and `idleTimeoutSeconds`.
 
 <Note>
   Running a CLI agent in a fresh per-turn container is a **composition you
@@ -4813,7 +4813,7 @@ Use `egress` when the sandbox itself should own outbound-network configuration. 
 />
 ```
 
-Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode an iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
+Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode a Freestyle or iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
 
 When `caCertPem` is provided, Smithers writes it into the request bundle at `.smithers/egress/ca.crt` and points local transports at `/workspace/.smithers/egress/ca.crt`. If the CA is already installed by the sandbox image or sidecar, use `caCertPath` instead. Persisted sandbox config redacts egress env values, CA PEM, and secret-binding entries.
 
@@ -5055,38 +5055,48 @@ When `provider` is omitted, Smithers uses the legacy local transport path. `runt
 
 Unknown runtimes now fail closed. Docker is not silently replaced by bubblewrap when Docker is unavailable.
 
-## First-class providers
+## First-class cloud providers
 
-Smithers ships a local microVM provider and five cloud providers. Each is a
-separate optional package that maps the provider contract onto a runtime SDK, so
+Smithers ships first-class sandbox providers for five cloud backends. Each is a
+separate optional package that maps the provider contract onto a vendor SDK, so
 `<Sandbox provider={createDaytonaSandboxProvider({...})}>` runs the child
 workflow on that backend with no runtime change. See
 Sandbox Providers for the shared contract, the
 provider-kit, selection precedence, and a comparison table.
 
-- Microsandbox Provider: id `microsandbox` (local microVM)
 - Daytona Sandbox Provider: id `daytona-sandbox`
 - Vercel Sandbox Provider: id `vercel-sandbox`
 - AWS Sandbox Provider: id `aws-sandbox` (Fargate or CodeBuild, S3 transport)
 - GCP Sandbox Provider: id `gcp-sandbox` (Cloud Run Jobs, GCS transport)
 - Cloudflare: id `cloudflare-sandbox`
 
+## Freestyle provider example
+
+[Freestyle VMs](https://www.freestyle.sh/docs/vms) are full sandboxes with nested virtualization, full networking, and the ability to scale to more resources than alternatives. Use Freestyle VMs when you want to give your agents a real computer rather than a code runner.
+
+See `examples/freestyle/` for a provider adapter that creates a Freestyle VM, writes setup and request files with `vm.fs.writeTextFile()`, executes a command with `vm.exec()`, reads `smithers-result.json` with `vm.fs.readTextFile()`, and returns a Smithers sandbox result.
+
+Freestyle's current VM docs show the stable package as `freestyle`, VM creation through `freestyle.vms.create()`, file I/O through `vm.fs.writeTextFile()` / `vm.fs.readTextFile()`, command execution with `vm.exec()`, and lifecycle controls such as `start()`, `stop()`, `resize()`, `fork()`, `delete({ vmId })`, and `idleTimeoutSeconds`. Relevant Freestyle docs:
+
+- https://www.freestyle.sh/docs/vms
+- https://www.freestyle.sh/docs/vms/lifecycle
+
 ---
 
 ## Sandbox Providers
 
-> The SandboxProvider contract, the shared provider-kit, provider selection and precedence, egress and secret redaction, and the built-in providers.
+> The SandboxProvider contract, the shared provider-kit, provider selection and precedence, egress and secret redaction, and the built-in cloud providers.
 
 
 A `<Sandbox>` boundary runs a child workflow outside the
 parent task process. Where it runs is decided by a provider. A provider is a
-plain object that takes a request and returns a result. Smithers ships a local
-microVM provider, five cloud providers, and a shared kit so a new provider is a
-thin adapter.
+plain object that takes a request and returns a result. Smithers ships
+first-class providers for five cloud backends and a shared kit so a new provider
+is a thin adapter.
 
-The built-in providers are Microsandbox, Daytona, Vercel, AWS, GCP, and
-Cloudflare. Each is a separate optional package with its own SDK as an optional
-dependency, so you install only what you use.
+The built-in providers are Daytona, Vercel, AWS, GCP, and Cloudflare. Each is a
+separate optional package with its own SDK as an optional dependency, so you
+install only what you use.
 
 ## The SandboxProvider contract
 
@@ -5110,7 +5120,7 @@ result types.
 
 ## The provider-kit
 
-First-class providers do not implement `run()` from scratch. They call
+Cloud providers do not implement `run()` from scratch. They call
 `createCommandSandboxProvider` from `smithers-orchestrator/sandbox`, which owns
 the request/result-file protocol once so every provider behaves the same:
 
@@ -5177,8 +5187,8 @@ through `sandboxEgressEnv()`, and when `caCertPem` is set it uploads the CA to
 the workspace so `NODE_EXTRA_CA_CERTS` resolves inside the sandbox. See
 `<Sandbox>` egress controls.
 
-Providers with a guest filesystem (Microsandbox, Daytona, Vercel, Cloudflare)
-resolve that CA path directly. The object-store providers (AWS, GCP) have no shared
+Providers with a real remote filesystem (Daytona, Vercel, Cloudflare) resolve
+that CA path directly. The object-store providers (AWS, GCP) have no shared
 filesystem, so they upload the CA to their bundle store and pass its location to
 the container: AWS injects `SMITHERS_SANDBOX_CA_S3_KEY` and GCP injects
 `SMITHERS_SANDBOX_CA_GCS_OBJECT`. The container entry command must download that
@@ -5196,7 +5206,6 @@ containing `token`, `secret`, `key`, `password`, `credential`, or
 
 | Provider | Package | Provider id | Compute | Bundle transport | Auth | Exit code |
 |---|---|---|---|---|---|---|
-| Microsandbox | `smithers-orchestrator/microsandbox` | `microsandbox` | Local microVM | Guest filesystem channel | None | numeric |
 | Daytona | `smithers-orchestrator/daytona` | `daytona-sandbox` | Daytona sandbox | Sandbox filesystem | `DAYTONA_API_KEY` | numeric |
 | Vercel | `smithers-orchestrator/vercel` | `vercel-sandbox` | Vercel Sandbox | Sandbox filesystem | OIDC or token trio | numeric |
 | AWS | `smithers-orchestrator/aws` | `aws-sandbox` | Fargate or CodeBuild | S3 bucket (BYO) | AWS credential chain | Fargate numeric, CodeBuild status |
@@ -5205,7 +5214,6 @@ containing `token`, `secret`, `key`, `password`, `credential`, or
 
 Per-provider setup, options, and cost live on each provider page:
 
-- Microsandbox Provider
 - Daytona Sandbox Provider
 - Vercel Sandbox Provider
 - AWS Sandbox Provider
@@ -7765,8 +7773,8 @@ type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet
   Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>, "model"> & {
     nativeStructuredOutput?: boolean;
   } & (
-    | { model: string; baseURL?: string; apiKey?: string }
-    | { model: import("ai").LanguageModel; baseURL?: never; apiKey?: never }
+    | { model: string; baseURL?: string; apiKey?: string; api?: "responses" | "chat" }
+    | { model: import("ai").LanguageModel; baseURL?: never; apiKey?: never; api?: never }
   );
 
 type HermesAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
@@ -9510,7 +9518,6 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/browser` | `./src/browser.js` | Runtime-agnostic core (`WorkflowDriver`, `SmithersRenderer`, graph extraction) running under a browser `RuntimeAdapter`: `createBrowserSmithers`, `runBrowserWorkflow`, `createBrowserRuntime`, `defineBrowserWorkflow`, and the browser-safe `Task`/`Workflow`/`Sequence`/`Worktree` primitives. Supports static, compute, and in-process `AgentLike.generate` tasks with Map-backed run/output storage and Web Crypto UUIDs. Does not include the Node engine, database factories, CLI agents, tools, or server code -- `filesystem`, `subprocess`, `worktree`, and `sandbox` operations fail closed with a typed `RuntimeCapabilityError` (code `RUNTIME_CAPABILITY_UNAVAILABLE`) |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
-| `smithers-orchestrator/microsandbox` | `./src/microsandbox.js` | Microsandbox provider: run child workflows in local hardware-isolated microVMs |
 | `smithers-orchestrator/daytona` | `./src/daytona.js` | Daytona sandbox provider: run child workflows in Daytona workspaces |
 | `smithers-orchestrator/vercel` | `./src/vercel.js` | Vercel Sandbox provider: run child workflows in Vercel sandboxes |
 | `smithers-orchestrator/aws` | `./src/aws.js` | AWS sandbox provider: run child workflows on ECS Fargate or CodeBuild with S3 bundle transport |
@@ -9545,7 +9552,6 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/aws` | AWS sandbox provider: ECS Fargate and CodeBuild execution with S3 bundle transport | Sandbox, AWS |
 | `@smithers-orchestrator/daytona` | Daytona sandbox provider: run child workflows in Daytona workspaces | Sandbox, Daytona |
 | `@smithers-orchestrator/gcp` | GCP sandbox provider: Cloud Run Jobs execution with GCS bundle transport | Sandbox, GCP |
-| `@smithers-orchestrator/microsandbox` | Microsandbox provider: run child workflows in local hardware-isolated microVMs | Sandbox, Microsandbox |
 | `@smithers-orchestrator/vercel` | Vercel Sandbox provider: run child workflows in Vercel sandboxes | Sandbox, Vercel |
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
@@ -9580,7 +9586,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the automation marketing site | Ecosystem |
 | `@smithers-orchestrator/ddd-site` | Private Cloudflare Worker deployment for the docs-driven-development marketing site | Ecosystem |
 | `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the init marketing site | Ecosystem |
-| `@smithers-orchestrator/kimi-benchmarks-site` | Private Cloudflare Worker serving the Kimi K3 RoadmapBench report and its evidence bundle | Ecosystem |
+| `@smithers-orchestrator/kimi-benchmarks-site` | Private Cloudflare Worker deployment for the Kimi K3 RoadmapBench comparison report | Ecosystem |
 | `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the monitor marketing site | Ecosystem |
 | `@smithers-orchestrator/openclaw-site` | Private Cloudflare Worker deployment for the OpenClaw marketing site | Ecosystem |
 | `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the plugins marketing site | Ecosystem |
@@ -9597,6 +9603,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | Evals, Evals Quickstart |
 | `@smithers-orchestrator/self-healing-site` | Private Cloudflare Worker deployment for the self-healing agent runs marketing site | Ecosystem |
 | `@smithers-orchestrator/server` | HTTP, WebSocket, Gateway, cron, webhook, metrics, and single-workflow serving APIs | Server, Serve |
+| `@smithers-orchestrator/signal` | Private Cloudflare deployment of The Smithers Signal: the daily-ceo-intel runner container, cron/watchdog scheduler Worker, and reports site | Serverless |
 | `@smithers-orchestrator/smithers-ui` | Private local-only UI app: the full run/approval/memory control surface, served by `bunx smithers-orchestrator ui --app` against a local Gateway | Gateway UI Components |
 | `@smithers-orchestrator/telegram` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes | Telegram |
 | `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Smithers on Telegram marketing site, including the reference approval Mini App | Telegram, Ecosystem |
@@ -10461,7 +10468,7 @@ language these components implement.
 
 ## Custom Workflow UIs
 
-> Build a first-class browser UI for your workflow with bunx smithers-orchestrator ui, the Gateway, gateway-client, and gateway-react.
+> Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
 
 A custom workflow UI is a small browser bundle that *belongs to your workflow*
 and talks to the Smithers Gateway through its domain API, RPC API, and live
@@ -10470,7 +10477,7 @@ event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
 builds and serves it at `/workflows/<key>`. `bunx smithers-orchestrator ui`
 opens it for a run with a stable `?runId=` deep link.
 
-This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through bunx smithers-orchestrator ui and the Gateway.
+This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through smithers ui and the Gateway.
 
 For the underlying RPC and event protocol, see Gateway. For the TanStack DB collection layer that backs the React hooks, see Sync. For two compact end-to-end examples, see Workflow UI (React) and Workflow UI (Vanilla). For the *visual* language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see Workflow UI Design Principles.
 
@@ -10496,7 +10503,7 @@ Three pieces collaborate:
 
 2. **The Gateway serves an HTML shell.** Hitting `/workflows/vcs` returns a tiny HTML document with a `<div id="root">`, the bundled script, and a global `__SMITHERS_GATEWAY_UI__` object (the `GatewayUiBootConfig`) set before your script runs. The shell uses `?runId=<id>` from the query string to scope a session to one run; if it is omitted, your UI is responsible for showing a picker or empty state. The shell is also **theme-aware**: it inlines the workflow UI style-guide tokens (light values, dark overrides, and `color-scheme`) so the document follows the OS `prefers-color-scheme` before your bundle loads, and it honors an explicit `?theme=dark` / `?theme=light` query param by stamping `data-theme` on `<html>` pre-paint. That query param is the channel an embedding host (for example an app rendering the page in an iframe) uses to push its own light/dark toggle into the UI.
 
-3. **bunx smithers-orchestrator ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
+3. **smithers ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
 
 ## Two SDKs: pick by appetite
 
@@ -12133,9 +12140,6 @@ type OpenApiToolsOptions = {
   allowedRedirectOrigins?: string[]; // extra origins redirects may follow;
                                      // other cross-origin hops are refused so
                                      // injected auth headers cannot leak
-  maxResponseBodyBytes?: number;     // cap on response body bytes, default
-                                     // 1 MiB; oversized bodies are rejected
-                                     // and the read is cancelled
   include?: string[];                // operationId allowlist
   exclude?: string[];                // operationId blocklist
   namePrefix?: string;               // prefix generated tool names
@@ -15123,7 +15127,7 @@ because many local Hermes servers do not honor JSON-schema response formats.
 Constructors forward standard AI SDK `ToolLoopAgent` settings: `instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`. The wrappers add provider model resolution on top.
 
 - `AnthropicAgentOptions` is `ToolLoopAgentSettings` without `model`, plus required `model: string | LanguageModel`.
-- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL` and `apiKey`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
+- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL`, `apiKey`, and `api`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
 - `HermesAgentOptions` makes `model` optional, allows `baseURL` and `apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
 
 For the string model form of `OpenAIAgent`, pass `baseURL` and `apiKey` directly when targeting an OpenAI-compatible endpoint instead of the default OpenAI API. This is the simplest path for local servers such as llama.cpp:
@@ -15140,6 +15144,17 @@ const local = new OpenAIAgent({
 ```
 
 Set `apiKey: "none"` in the `OpenAIAgent` config when your local server accepts OpenAI-compatible requests but does not require a real key.
+
+String models default to OpenAI's Responses API (`/responses`), which most OpenAI-compatible servers (Gemini's OpenAI-compat layer, llama.cpp, vLLM) do not implement: every call 404s even though the endpoint serves `/chat/completions` fine. Set `api: "chat"` to route the agent through `/chat/completions` on those endpoints:
+
+```ts
+const gemini = new OpenAIAgent({
+  model: "gemini-2.5-flash",
+  baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+  apiKey: process.env.GEMINI_API_KEY,
+  api: "chat",
+});
+```
 
 Some OpenAI-compatible local servers accept chat requests but do not reliably implement JSON schema structured output. For those servers, keep the output schema on the Smithers task and disable native structured output on the agent so Smithers uses prompt-based JSON extraction instead:
 
@@ -16339,219 +16354,6 @@ workflows (even small one-task ones), and optimize them like skills with
 
 ---
 
-## Microsandbox Provider
-
-> Run a Smithers <Sandbox> child workflow in a local Microsandbox microVM with createMicrosandboxSandboxProvider.
-
-
-`@smithers-orchestrator/microsandbox` is a first-class Smithers
-`SandboxProvider` backed by the open source
-[Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
-boots a local microVM with its own Linux kernel, writes the Smithers request
-through the host-to-guest filesystem channel, executes the entry command, and
-reads the result back through the same channel. No daemon or hosted sandbox
-service is required.
-
-The provider id is `microsandbox` (exported as
-`MICROSANDBOX_PROVIDER_ID`).
-
-```ts
-import {
-  createMicrosandboxSandboxProvider,
-  registerMicrosandboxSandboxProvider,
-  MICROSANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/microsandbox";
-```
-
-Microsandbox currently labels the runtime beta. Pin and test the SDK version you
-deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
-Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
-Windows. Run `msb doctor` on every host before accepting work.
-
-Microsandbox `0.6.6` snapshots contain disk state, require a stopped sandbox,
-and cold-boot when restored. They do not preserve memory, running processes,
-sockets, or device state. A fleet integration must not advertise a sticky
-workspace as memory-preserving suspend, instant resume, or a live fork.
-
-## Install
-
-The provider package declares `microsandbox` as an optional dependency and
-imports it only when a session starts. Install it directly if your package
-manager omits optional dependencies:
-
-```sh
-npm install microsandbox@0.6.6
-```
-
-The SDK downloads or resolves its platform runtime and pulls the selected OCI
-image on first use. Later sandboxes reuse the local image cache.
-
-## Usage
-
-Pass the provider object directly to `<Sandbox>`:
-
-```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
-
-const provider = createMicrosandboxSandboxProvider({
-  image: "oven/bun:1",
-  cpus: 2,
-  memoryMib: 4096,
-  security: "restricted",
-  setupFiles: {
-    "/workspace/run-smithers-sandbox.js": runnerSource,
-  },
-});
-
-export default parent.smithers((ctx) => (
-  <parent.Workflow name="microsandbox-run">
-    <Sandbox
-      id="isolated-edit"
-      provider={provider}
-      workflow={childWorkflow}
-      input={{ prompt: ctx.input.prompt }}
-      allowNetwork
-      output={parent.outputs.result}
-    />
-  </parent.Workflow>
-));
-```
-
-Or register it once and select it by id:
-
-```ts
-import { registerMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
-
-const unregister = registerMicrosandboxSandboxProvider({
-  image: "oven/bun:1",
-});
-
-// <Sandbox provider="microsandbox" workflow={child} output={outputs.result} />
-```
-
-The default image is `oven/bun:1`. The default entry command is
-`bun /workspace/run-smithers-sandbox.js`. Put that runner in the image or
-provide it with `setupFiles`. A factory-level `command` wins over the
-`<Sandbox command>` prop. Without either, the default is used.
-
-The provider creates its workdir through `sandbox.fs()` after boot and passes
-that path to each command. It does not call `builder.workdir()`, which would
-require the directory to exist in the image before the provider can create it.
-
-## Smithers prop mapping
-
-The adapter maps the provider-neutral `<Sandbox>` controls onto the
-Microsandbox builder and execution APIs.
-
-| Smithers control | Microsandbox behavior |
-|---|---|
-| `image` | OCI image, local rootfs directory, or disk image passed to `builder.image()` |
-| `env` | Per-command environment, merged below provider `env` and egress variables |
-| `allowNetwork={false}` | `builder.disableNetwork()`, so no guest network interface is created |
-| `allowNetwork` | Microsandbox's default public-only policy, which blocks private and metadata destinations |
-| `ports` | TCP host-to-guest mappings through `builder.port()`; requires `allowNetwork` |
-| `volumes` | Host bind mounts through `builder.volume(...bind...)`; read-only unless `readonly: false` |
-| `cpuLimit` | Rounded up to a whole vCPU and passed to `builder.cpus()` |
-| `memoryLimit` | Converted from Docker-style `b`, `k`, `m`, or `g` units to MiB |
-| `workspace.snapshotId` | Boots from a Microsandbox snapshot instead of an image |
-| `workspace.idleTimeoutSecs` | Host-enforced idle drain timeout |
-| `workspace.persistence` | `ephemeral` removes state on stop; `sticky` reopens the named sandbox and preserves its writable layer |
-| `command` | Shell command executed with `/bin/sh -lc` unless the factory sets `command` |
-
-Provider options can also set `cpus`, `maxCpus`, `memoryMib`, `maxMemoryMib`,
-`maxDurationSecs`, `idleTimeoutSecs`, `security`, `labels`, `scripts`,
-`setupFiles`, `pullPolicy`, and `sandboxName`. `configureBuilder(builder,
-request)` is the escape hatch for Microsandbox features that Smithers does not
-model directly, including custom network policies, secret substitution,
-registry authentication, rootfs patches, and named or tmpfs volumes.
-
-## Request and result contract
-
-The shared provider kit writes the request JSON below the workdir and gives the
-entry command two env vars:
-
-- `SMITHERS_SANDBOX_REQUEST_PATH`: request JSON to read.
-- `SMITHERS_SANDBOX_RESULT_PATH`: result JSON to write.
-
-The entry command may print the result JSON to stdout or write it to the result
-path. The result is `{ bundlePath }` or a structured `{ status,
-output|outputs, patches?, diffBundle?, runId? }`. The provider fills
-`remoteRunId`, `workspaceId`, and `containerId` with the Microsandbox name when
-the entry omits them.
-
-Parent directories are created through `sandbox.fs()` before files are
-written. Command execution uses `execStreamWith()` so an abort signal or
-timeout can kill the guest process instead of leaving it running after the
-Smithers task ends.
-
-## Network and secrets
-
-Microsandbox runs locally, but its network policy is host-controlled. With
-`allowNetwork` unset or false, Smithers disables the interface. With
-`allowNetwork` true, Microsandbox allows public destinations and DNS while
-blocking private, link-local, host, and cloud metadata destinations by
-default.
-
-The Smithers provider kit still projects `egress` proxy variables and uploads
-an inline CA certificate into the guest. Use `configureBuilder` with
-Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
-allowlists or host-side secret substitution.
-
-There is an important `0.6.6` limitation for production secret handling. The
-raw Go SDK `Secret.Env` value is persisted in runtime state, while the declared
-store-backed secret source is not implemented by the runtime. Do not assume
-that selecting a secret API alone keeps plaintext out of provider state. Use a
-nonpersisting, operation-scoped delivery path, and test guest disk, snapshots,
-logs, errors, command arguments, and runtime metadata with a sentinel value.
-When a credential needs method/path policy, signing, audit, approval, MCP
-policy, rate limiting, or response filtering, give the guest a short-lived
-credential-proxy capability instead of the upstream secret.
-
-Bind mounts deliberately expose host paths to the guest. Keep them read-only
-unless the workflow must write, and never mount a credential directory or the
-Microsandbox state directory into an untrusted workload.
-
-## Cleanup and persistence
-
-`cleanup: "destroy"` is the default.
-
-- An ephemeral sandbox is stopped and its state is removed.
-- A sticky workspace is stopped but kept on disk, then reopened by
-  `workspace.name` on the next run.
-- `cleanup: "keep"` creates or starts the sandbox detached and leaves it
-  running after the provider returns. Set `idleTimeoutSecs` or
-  `maxDurationSecs` so a crashed orchestrator cannot leave compute running
-  forever.
-
-Microsandbox is local infrastructure. Capacity, image cache, persisted
-workspaces, logs, and the `~/.microsandbox` database live on the host. Running
-it as a fleet provider therefore requires host scheduling, admission control,
-state placement, generation fencing, snapshot export, authenticated streaming,
-and observability outside this adapter. Plue implements that remote fleet
-boundary separately; this package remains a local Smithers provider and does
-not make an arbitrary API pod a safe KVM host.
-
-## SDK subset used
-
-The adapter uses the published TypeScript SDK surface:
-
-- `Sandbox.builder(name)` with image or snapshot, resource, network, mount,
-  lifecycle, label, and script setters;
-- `Sandbox.get(name)` plus handle `connect()`, `start()`, and `startDetached()`
-  for sticky workspaces;
-- `sandbox.fs().write()`, `readToString()`, `exists()`, and `mkdir()` for file
-  transport;
-- `sandbox.execStreamWith()` plus `collect()` and `kill()` for commands;
-- `sandbox.stop()` and `Sandbox.remove(name)` for teardown.
-
-The repository-only fixture at
-`packages/microsandbox/tests/fixtures/createMockMicrosandboxEnvironment.js`
-supplies an in-memory SDK double for package tests. It is not part of the
-package's public exports and requires no hypervisor, image pull, or credentials.
-
----
-
 ## Daytona Sandbox Provider
 
 > Run a Smithers <Sandbox> child workflow inside a Daytona sandbox with createDaytonaSandboxProvider.
@@ -17135,13 +16937,12 @@ In-process SDK agents (`AnthropicAgent`, `OpenAIAgent`, `HermesAgent`,
 agents (`ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, …) spawn a vendor
 binary and must run inside a container, which a `SandboxProvider` supplies at
 each `<Sandbox>` boundary. Each provider ships a `create…SandboxProvider` and a
-`createMock…SandboxEnvironment` test double;
-Microsandbox/AWS/GCP/Vercel/Daytona also ship a `register…SandboxProvider`
-helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
+`createMock…SandboxEnvironment` test double; AWS/GCP/Vercel/Daytona also ship a
+`register…SandboxProvider` helper (on Cloudflare the provider is wired through
+`createSmithersCloudflare`).
 
 | Platform | Package | Create fn · provider id | Execution · transport |
 |---|---|---|---|
-| Microsandbox | `@smithers-orchestrator/microsandbox` | `createMicrosandboxSandboxProvider` · `microsandbox` | Local hardware-isolated microVM · guest filesystem |
 | Cloudflare | `@smithers-orchestrator/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
 | AWS | `@smithers-orchestrator/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
 | GCP | `@smithers-orchestrator/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
@@ -17163,7 +16964,7 @@ the Node-runtime and isolate paths are in progress (see the host section above).
 
 | Platform | Control plane (Bun container) | Storage | Sandbox provider (CLI agents) | Status |
 |---|---|---|---|---|
-| **Local / any VM** | Bun | `bun:sqlite` / PGlite / Postgres | `createMicrosandboxSandboxProvider` or Docker `http-runner` | ✅ Full |
+| **Local / any VM** | Bun | `bun:sqlite` / PGlite / Postgres | Docker `http-runner` | ✅ Full |
 | **AWS** | Bun on ECS / App Runner | Postgres (RDS) | `createAwsSandboxProvider` (Fargate/CodeBuild) | ✅ Full |
 | **GCP** | Bun on Cloud Run / GKE | Postgres (Cloud SQL) | `createGcpSandboxProvider` (Cloud Run Jobs) | ✅ Full |
 | **Kubernetes** | Bun deployment | Postgres | Docker `http-runner` / custom | ✅ Full (no first-class provider yet) |
@@ -17186,7 +16987,7 @@ the execution model):
 
 - Where agents run, sandboxes & cost -- the model.
 - Cloudflare -- Workers, DO-SQLite, and the provider.
-- Microsandbox · AWS · GCP · Vercel · Daytona sandbox providers.
+- AWS · GCP · Vercel · Daytona sandbox providers.
 - Control plane · Production hardening.
 
 ---
@@ -17196,12 +16997,7 @@ the execution model):
 > Execute a Smithers workflow on Plue workspaces through the Plue sandbox provider.
 
 
-`run-on-plue` executes a Smithers workflow script on Plue infrastructure
-instead of the local machine. It uses the
-`<Sandbox>` provider seam with
-`createPlueSandboxProvider`, and the provider shells through the `plue` CLI so
-Plue owns workspace lifecycle, authentication, quotas, placement, and sandbox
-execution through its self-hosted Microsandbox plane.
+`run-on-plue` executes a Smithers workflow script on Plue infrastructure instead of the local machine. It uses the `<Sandbox>` provider seam with `createPlueSandboxProvider`, and the provider shells through the `plue` CLI so Plue owns workspace lifecycle, authentication, quotas, and Freestyle VM access.
 
 Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
 
@@ -17235,17 +17031,13 @@ The parent workflow receives:
 
 - `plue` CLI installed and authenticated on the host running Smithers. Verify with `plue auth status`.
 - The target Plue server must have workspaces enabled. Local Plue uses `SMITHERS_FEATURE_FLAGS_WORKSPACES=true`.
-- The Plue server must be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` and an authenticated Microsandbox controller.
+- The Plue server must be configured for real Freestyle workspaces, including the Freestyle API key required by that server (`SMITHERS_FREESTYLE_API_KEY` or the environment wiring used by your Plue deployment).
 - The repo passed as `repo` must exist in Plue and be accessible to the authenticated user.
 - Claude auth must be available locally. The preferred path is Claude Code subscription OAuth in the OS credential store; `ANTHROPIC_API_KEY` only works when that key has usable API billing.
 - Codex auth must be available locally. The preferred path is `~/.codex/auth.json`; `OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth.
 - If `plue` is not on `PATH`, set `PLUE_BIN` or pass `plueBin` in the workflow input.
 
-Secrets are seeded at run time through Plue's operation-scoped secret or
-credential-proxy path. They must not be written into guest disks, snapshots,
-images, command arguments, logs, errors, or durable request state. Do not bake
-Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials
-into workspace snapshots or committed files.
+Secrets are seeded at run time by the Plue CLI and written into the VM with restrictive file permissions. Do not bake Claude, Codex, OpenAI, Anthropic, or Freestyle credentials into workspace snapshots or committed files.
 
 ## Run a workflow remotely
 

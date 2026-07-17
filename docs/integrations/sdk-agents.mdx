@@ -107,7 +107,7 @@ because many local Hermes servers do not honor JSON-schema response formats.
 Constructors forward standard AI SDK `ToolLoopAgent` settings: `instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`. The wrappers add provider model resolution on top.
 
 - `AnthropicAgentOptions` is `ToolLoopAgentSettings` without `model`, plus required `model: string | LanguageModel`.
-- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL` and `apiKey`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
+- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL`, `apiKey`, and `api`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
 - `HermesAgentOptions` makes `model` optional, allows `baseURL` and `apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
 
 For the string model form of `OpenAIAgent`, pass `baseURL` and `apiKey` directly when targeting an OpenAI-compatible endpoint instead of the default OpenAI API. This is the simplest path for local servers such as llama.cpp:
@@ -124,6 +124,17 @@ const local = new OpenAIAgent({
 ```
 
 Set `apiKey: "none"` in the `OpenAIAgent` config when your local server accepts OpenAI-compatible requests but does not require a real key.
+
+String models default to OpenAI's Responses API (`/responses`), which most OpenAI-compatible servers (Gemini's OpenAI-compat layer, llama.cpp, vLLM) do not implement: every call 404s even though the endpoint serves `/chat/completions` fine. Set `api: "chat"` to route the agent through `/chat/completions` on those endpoints:
+
+```ts
+const gemini = new OpenAIAgent({
+  model: "gemini-2.5-flash",
+  baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+  apiKey: process.env.GEMINI_API_KEY,
+  api: "chat",
+});
+```
 
 Some OpenAI-compatible local servers accept chat requests but do not reliably implement JSON schema structured output. For those servers, keep the output schema on the Smithers task and disable native structured output on the agent so Smithers uses prompt-based JSON extraction instead:
 

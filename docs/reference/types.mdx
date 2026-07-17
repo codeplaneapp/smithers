@@ -416,8 +416,8 @@ type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet
   Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>, "model"> & {
     nativeStructuredOutput?: boolean;
   } & (
-    | { model: string; baseURL?: string; apiKey?: string }
-    | { model: import("ai").LanguageModel; baseURL?: never; apiKey?: never }
+    | { model: string; baseURL?: string; apiKey?: string; api?: "responses" | "chat" }
+    | { model: import("ai").LanguageModel; baseURL?: never; apiKey?: never; api?: never }
   );
 
 type HermesAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
