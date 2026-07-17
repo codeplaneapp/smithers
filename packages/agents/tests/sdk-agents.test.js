@@ -222,6 +222,40 @@ describe("SDK agents", () => {
         const result = await new OpenAIAgent({ model: fake.model }).generate({ prompt: "return a value", outputSchema: schema });
         expect(result.output).toEqual({ value: 14, label: "default-label" });
     });
+    test("OpenAIAgent preserves Zod defaults and transforms when onStepEnd is also passed (the engine's heartbeat callback rides along on every real Task call)", async () => {
+        const fake = createFakeModel();
+        fake.model.doGenerate = async (options) => {
+            fake.lastCall = options;
+            if (options.responseFormat?.type === "json") {
+                return {
+                    content: [{ type: "text", text: JSON.stringify({ value: "7" }) }],
+                    finishReason: "stop",
+                    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+                    warnings: [],
+                };
+            }
+            return {
+                content: [{ type: "text", text: "hello" }],
+                finishReason: "stop",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+                warnings: [],
+            };
+        };
+        const schema = z.object({
+            value: z.coerce.number().transform((value) => value * 2),
+            label: z.string().default("default-label"),
+        });
+        const steps = [];
+        const result = await new OpenAIAgent({ model: fake.model }).generate({
+            prompt: "return a value",
+            outputSchema: schema,
+            onStepEnd: (step) => {
+                steps.push(step);
+            },
+        });
+        expect(result.output).toEqual({ value: 14, label: "default-label" });
+        expect(steps).toHaveLength(1);
+    });
     test("OpenAIAgent defers invalid Zod output errors until direct output access", async () => {
         const fake = createFakeModel();
         fake.model.doGenerate = async () => ({

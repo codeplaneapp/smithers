@@ -62,6 +62,15 @@ type RunResult = {
   stateSyncedUp: boolean;
 };
 
+function redactSecrets(value: string): string {
+  let result = value;
+  for (const key of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "CLOUDFLARE_API_TOKEN", "SIGNAL_MANUAL_TRIGGER_SECRET"]) {
+    const secret = process.env[key]?.trim();
+    if (secret) result = result.split(secret).join("[REDACTED]");
+  }
+  return result;
+}
+
 async function runSmithersCli(runId: string, input: Record<string, unknown>): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(
     [
@@ -75,6 +84,7 @@ async function runSmithersCli(runId: string, input: Record<string, unknown>): Pr
       "--format",
       "json",
       "--no-report",
+      "--no-post-failure",
     ],
     { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", env: process.env },
   );
@@ -115,7 +125,7 @@ export async function runOnce(): Promise<RunResult> {
 
   const publishMode = process.env.SIGNAL_PUBLISH_MODE?.trim() || "auto";
   const { exitCode, stderr } = await runSmithersCli(runId, { publishMode, configPath: CONFIG_PATH });
-  if (exitCode !== 0) errors.push(`smithers up exited ${exitCode}: ${stderr.slice(-2000)}`);
+  if (exitCode !== 0) errors.push(`smithers up exited ${exitCode}: ${redactSecrets(stderr.slice(-2000))}`);
 
   let published = false;
   let publishSkippedReason: string | null = null;
