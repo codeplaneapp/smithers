@@ -11,7 +11,7 @@ function joinErrors(errors: CloudflareApiResponse["errors"]): string {
   return (errors ?? []).map((error) => `${error.code}: ${error.message}`).join("; ") || "unknown error";
 }
 
-export async function putR2Object(creds: CloudflareCreds, key: string, body: string, contentType: string): Promise<void> {
+export async function putR2Object(creds: CloudflareCreds, key: string, body: string | Uint8Array, contentType: string): Promise<void> {
   const url = `https://api.cloudflare.com/client/v4/accounts/${creds.accountId}/r2/buckets/${creds.r2Bucket}/objects/${key}`;
   const response = await fetch(url, {
     method: "PUT",
@@ -22,6 +22,15 @@ export async function putR2Object(creds: CloudflareCreds, key: string, body: str
     const parsed = (await response.json().catch(() => null)) as CloudflareApiResponse | null;
     throw new Error(`R2 PUT ${key} failed: HTTP ${response.status} ${parsed ? joinErrors(parsed.errors) : ""}`);
   }
+}
+
+/** Returns null on a 404 (object not yet written, e.g. first-ever run), throws on any other failure. */
+export async function getR2Object(creds: CloudflareCreds, key: string): Promise<Uint8Array | null> {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${creds.accountId}/r2/buckets/${creds.r2Bucket}/objects/${key}`;
+  const response = await fetch(url, { headers: { authorization: `Bearer ${creds.apiToken}` } });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`R2 GET ${key} failed: HTTP ${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 export async function putKvValue(creds: CloudflareCreds, key: string, value: string): Promise<void> {

@@ -41,7 +41,10 @@ export async function publishIssue(
   try {
     const kvKeys = [`report:${issueDateEt}`, "latest"];
     await putKvValue(creds, `report:${issueDateEt}`, render.issueJson);
-    await putKvValue(creds, "latest", render.issueJson);
+    // `latest` is a date pointer, not the Issue JSON itself (spec: "## Cloudflare
+    // architecture (phase 2)") — the site resolves it by following the pointer to
+    // `report:{date}`, so there's one source of truth per issue instead of two.
+    await putKvValue(creds, "latest", issueDateEt);
 
     const indexRaw = await getKvValue(creds, "archive-index");
     const index: string[] = indexRaw ? (JSON.parse(indexRaw) as string[]) : [];

@@ -1,7 +1,10 @@
 node_modules
+**/node_modules
 .git
 .jj
+.claude
 .worktrees
+**/.worktrees
 .cache
 coverage
 dist
@@ -17,6 +20,7 @@ tests/.test-*
 .smithers/sandboxes
 .smithers/workflows/.smithers
 .smithers/workflows/.worktrees
+data
 *.db
 *.db-shm
 *.db-wal

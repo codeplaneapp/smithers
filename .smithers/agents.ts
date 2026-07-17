@@ -8,6 +8,7 @@ import { CodexAgent as SmithersCodexAgent } from "smithers-orchestrator";
 import { AmpAgent as SmithersAmpAgent } from "smithers-orchestrator";
 import { KimiAgent as SmithersKimiAgent } from "smithers-orchestrator";
 import { OpenAIAgent as SmithersOpenAIAgent } from "smithers-orchestrator";
+import { AnthropicAgent as SmithersAnthropicAgent } from "smithers-orchestrator";
 // import { AntigravityAgent as SmithersAntigravityAgent } from "smithers-orchestrator";
 // import { PiAgent as SmithersPiAgent } from "smithers-orchestrator";
 // import { VibeAgent as SmithersVibeAgent } from "smithers-orchestrator";
@@ -58,6 +59,12 @@ export const providers = {
   codex1Terra: new SmithersCodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
   codex1Luna: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
   gemini1: new SmithersOpenAIAgent({ model: "gemini-3.1-pro-preview", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai" }),
+  // In-process SDK agents (no CLI, no filesystem/bash tools ever attached) for
+  // workflows that hand untrusted scraped web content to a model — e.g.
+  // daily-ceo-intel's classification/synthesis tasks. Never add `tools` to
+  // these instances or at their call sites.
+  anthropicHaiku: new SmithersAnthropicAgent({ model: "claude-haiku-4-5-20251001" }),
+  anthropicFable: new SmithersAnthropicAgent({ model: "claude-fable-5" }),
 } as const;
 
 export const agents = {
@@ -181,6 +188,14 @@ export const agents = {
     // providers.openclaw,
     // providers.openrouter,
   ],
+  // In-process SDK agents only, no CLI fallback, no tools ever attached — used
+  // by daily-ceo-intel's batched relevance-assessment and lighter-side-curation
+  // tasks, which score untrusted scraped web content and must never run with
+  // filesystem/bash tool access. See docs/deployment/serverless.mdx.
+  ceoIntelCheap: [providers.anthropicHaiku],
+  // In-process SDK agent only, no tools — daily-ceo-intel's editorial synthesis
+  // task; receives only the pre-selected evidence, never raw source HTML.
+  ceoIntelStrong: [providers.anthropicFable],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   orchestrator: [
     providers.claude,

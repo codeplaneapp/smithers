@@ -79,7 +79,9 @@ type Story = {
 ```
 
 Storage layout (Cloudflare):
-- KV namespace `SIGNAL_REPORTS`: `report:YYYY-MM-DD` → Issue JSON; `latest` → `YYYY-MM-DD`;
+- KV namespace `SIGNAL_REPORTS`: `report:YYYY-MM-DD` → Issue JSON; `latest` → the same Issue
+  JSON (mirrors the most recently published `report:*` value, not a date pointer — the site
+  worker serves `/api/issue/latest` directly from this key with no extra lookup hop);
   `archive-index` → JSON array of published dates.
 - R2 bucket `signal-state`: `state/ceo-intel.sqlite` (app DB synced down before the
   run, up after), `artifacts/YYYY-MM-DD/report.{md,html,json}`.

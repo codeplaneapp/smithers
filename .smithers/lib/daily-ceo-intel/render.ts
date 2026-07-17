@@ -1,4 +1,149 @@
-import type { CoverageRow, DateUncertainSample, Issue, RenderOutput } from "./schemas";
+import type { Cluster, CoverageRow, DateUncertainSample, Issue, RankedStory, RenderOutput } from "./schemas";
+
+/** Public, pinned contract (spec "Report JSON contract") that the site Worker consumes from KV/R2. */
+export type PublicIssue = {
+  version: 1;
+  date: string;
+  generatedAt: string;
+  window: { start: string; end: string };
+  degraded: boolean;
+  brief: Array<{ headline: string; text: string; storyId?: string }>;
+  stories: PublicStory[];
+  ourMove: Array<{ action: string; rationale: string; storyIds: string[] }>;
+  lighterSide: Array<{ text: string; url: string; sourceName: string; kind: "post" | "meme" }>;
+  coverage: {
+    sourcesChecked: Array<{ id: string; name: string; ok: boolean; error?: string; itemCount: number }>;
+    dateUncertain: Array<{ title: string; url: string; sourceName: string }>;
+    lateDiscovered: Array<{ title: string; url: string; publishedAt: string }>;
+    totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number };
+  };
+};
+export type PublicStorySection = "topStories" | "competitive" | "signals" | "risk" | "opportunities";
+export type PublicStory = {
+  id: string;
+  headline: string;
+  dek: string;
+  sections: PublicStorySection[];
+  categories: string[];
+  whatHappened: string;
+  whyItMatters: string;
+  recommendedAction?: string;
+  confidence: number;
+  score: number;
+  publishedAt: string;
+  isUpdate: boolean;
+  sources: Array<{ id: string; name: string; url: string; type: "primary" | "press" | "community"; primary: boolean }>;
+};
+
+const RISK_CATEGORIES = new Set(["safety", "outage", "regulation"]);
+const COMPETITIVE_CATEGORIES = new Set(["funding", "acquisition", "partnership", "competitive"]);
+const SIGNALS_CATEGORIES = new Set(["tooling", "culture"]);
+const COMMUNITY_SOURCE_KINDS = new Set(["hn", "lobsters", "reddit", "bluesky"]);
+
+/** Deterministic ontology-category -> masthead-section heuristic; `topStories` is always included. */
+function sectionsFor(categories: string[]): PublicStorySection[] {
+  const sections = new Set<PublicStorySection>(["topStories"]);
+  for (const category of categories) {
+    if (RISK_CATEGORIES.has(category)) sections.add("risk");
+    if (COMPETITIVE_CATEGORIES.has(category)) sections.add("competitive");
+    if (SIGNALS_CATEGORIES.has(category)) sections.add("signals");
+  }
+  return [...sections];
+}
+
+/** First sentence of `text`, capped, as a magazine-subhead stand-in — no model call, purely deterministic. */
+function dekFrom(text: string): string {
+  const firstSentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  return firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence;
+}
+
+function sourcesForCluster(cluster: Cluster | undefined, canonicalUrl: string): PublicStory["sources"] {
+  if (!cluster || cluster.sourceIds.length === 0) return [{ id: "unknown", name: "unknown", url: canonicalUrl, type: "community", primary: true }];
+  return cluster.sourceIds.map((sourceId, index) => {
+    const kind = cluster.sourceKinds[index] ?? cluster.sourceKinds[0];
+    const type: PublicStory["sources"][number]["type"] = index === 0 ? "primary" : kind && COMMUNITY_SOURCE_KINDS.has(kind) ? "community" : "press";
+    return { id: sourceId, name: sourceId, url: canonicalUrl, type, primary: index === 0 };
+  });
+}
+
+export function buildPublicIssue(
+  issue: Issue,
+  srcIdMap: Record<string, string>,
+  clusters: Cluster[],
+  rankedTopStories: RankedStory[],
+  coverage: CoverageRow[],
+  dateUncertainSample: DateUncertainSample[],
+  degraded: boolean,
+  windowStart: string,
+  windowEnd: string,
+  generatedAt: string,
+  totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number },
+): PublicIssue {
+  const clusterById = new Map(clusters.map((cluster) => [cluster.srcId, cluster]));
+  const rankedById = new Map(rankedTopStories.map((story) => [story.srcId, story]));
+  const headlineById = new Map(issue.topStories.map((story) => [story.srcId, story.headline]));
+  const actionById = new Map(issue.recommendedActions.map((action) => [action.srcId, action.action]));
+
+  const stories: PublicStory[] = issue.topStories.map((story) => {
+    const cluster = clusterById.get(story.srcId);
+    const ranked = rankedById.get(story.srcId);
+    const canonicalUrl = srcIdMap[story.srcId] ?? cluster?.canonicalUrl ?? "";
+    return {
+      id: story.srcId,
+      headline: story.headline,
+      dek: dekFrom(story.whyItMatters),
+      sections: sectionsFor(story.categories),
+      categories: story.categories,
+      whatHappened: story.body,
+      whyItMatters: story.whyItMatters,
+      recommendedAction: actionById.get(story.srcId),
+      confidence: ranked?.confidence ?? 0,
+      score: ranked?.score ?? 0,
+      publishedAt: cluster?.publishedAt ?? generatedAt,
+      isUpdate: cluster?.isUpdate ?? false,
+      sources: sourcesForCluster(cluster, canonicalUrl),
+    };
+  });
+
+  const brief = issue.briefs.map((item) => ({
+    headline: headlineById.get(item.srcId) ?? dekFrom(item.text),
+    text: item.text,
+    storyId: headlineById.has(item.srcId) ? item.srcId : undefined,
+  }));
+
+  const ourMove = issue.recommendedActions.map((action) => {
+    const story = issue.topStories.find((entry) => entry.srcId === action.srcId);
+    return { action: action.action, rationale: story?.whyItMatters ?? "", storyIds: [action.srcId] };
+  });
+
+  const lighterSide = issue.lighterSide.map((item) => {
+    const cluster = clusterById.get(item.srcId);
+    return {
+      text: item.text,
+      url: srcIdMap[item.srcId] ?? cluster?.canonicalUrl ?? "",
+      sourceName: cluster?.sourceIds[0] ?? "unknown",
+      kind: "post" as const,
+    };
+  });
+
+  return {
+    version: 1,
+    date: issue.issueDateEt,
+    generatedAt,
+    window: { start: windowStart, end: windowEnd },
+    degraded,
+    brief,
+    stories,
+    ourMove,
+    lighterSide,
+    coverage: {
+      sourcesChecked: coverage.map((row) => ({ id: row.sourceId, name: row.sourceId, ok: row.ok, error: row.error ?? undefined, itemCount: row.itemCount })),
+      dateUncertain: dateUncertainSample.map((item) => ({ title: item.title, url: item.url, sourceName: item.sourceId })),
+      lateDiscovered: [],
+      totals,
+    },
+  };
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -102,6 +247,14 @@ export function renderIssue(
   dateUncertainSample: DateUncertainSample[],
   degraded: boolean,
   criticalFailed: boolean,
+  publicIssueInputs: {
+    clusters: Cluster[];
+    rankedTopStories: RankedStory[];
+    windowStart: string;
+    windowEnd: string;
+    generatedAt: string;
+    totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number };
+  },
 ): RenderOutput {
   const bodyMarkdown = issue.sectionOrder.map((kind) => renderMarkdownSection(kind, issue, srcIdMap)).join("\n\n");
   const dateUncertainMarkdown = dateUncertainSample.length
@@ -123,18 +276,20 @@ export function renderIssue(
     : "<h2>Date-Uncertain Appendix</h2><p>None.</p>";
   const html = `<article class="smithers-signal"><header><h1>${escapeHtml(issue.headline)}</h1><p class="issue-date">${escapeHtml(issue.issueDateEt)} — The Smithers Signal</p><p class="intro">${escapeHtml(issue.intro)}</p></header>${bodyHtml}<section class="coverage-statement"><h2>Coverage Statement</h2><p>${escapeHtml(issue.coverageStatement)}${degraded ? " (degraded: one or more sources failed today.)" : ""}${criticalFailed ? " <strong>A critical source failed.</strong>" : ""}</p></section>${renderCoverageHtml(coverage)}${dateUncertainHtml}</article>`;
 
-  const issueJson = JSON.stringify(
-    {
-      ...issue,
-      links: srcIdMap,
-      coverage,
-      dateUncertainSample,
-      degraded,
-      criticalFailed,
-    },
-    null,
-    2,
+  const publicIssue = buildPublicIssue(
+    issue,
+    srcIdMap,
+    publicIssueInputs.clusters,
+    publicIssueInputs.rankedTopStories,
+    coverage,
+    dateUncertainSample,
+    degraded,
+    publicIssueInputs.windowStart,
+    publicIssueInputs.windowEnd,
+    publicIssueInputs.generatedAt,
+    publicIssueInputs.totals,
   );
+  const issueJson = JSON.stringify(publicIssue, null, 2);
 
   return {
     issueJson,

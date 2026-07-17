@@ -33,6 +33,11 @@ function isBlockedIpv6(ip: string): boolean {
   return false;
 }
 
+// NOTE: this resolves `hostname` via dns.lookup() as a point-in-time check;
+// the subsequent fetch() performs its own independent DNS resolution, so a
+// DNS-rebinding attacker who changes the record between the two lookups could
+// still reach a private address. Fully closing this in JS fetch requires
+// pinning the resolved address via a custom dispatcher/agent; not done here.
 async function assertPublicHostname(hostname: string): Promise<void> {
   const lower = hostname.toLowerCase();
   if (lower === "localhost" || lower.endsWith(".localhost") || lower.endsWith(".internal")) {
@@ -51,6 +56,7 @@ export type GuardedFetchOptions = {
   timeoutMs?: number;
   maxBytes?: number;
   allowedContentType?: RegExp;
+  maxRedirects?: number;
 };
 
 export type GuardedFetchResult = {
@@ -61,53 +67,82 @@ export type GuardedFetchResult = {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BYTES = 5_000_000;
+const DEFAULT_MAX_REDIRECTS = 5;
 
-/** https-only, SSRF-blocked (private/loopback/link-local ranges), timed out, and size-capped GET. */
-export async function guardedFetch(url: string, opts: GuardedFetchOptions = {}): Promise<GuardedFetchResult> {
+async function assertGuardedUrl(url: string): Promise<URL> {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:") throw new Error(`Refusing non-https URL: ${url}`);
   await assertPublicHostname(parsed.hostname);
+  return parsed;
+}
 
-  const controller = new AbortController();
+async function readBoundedBody(response: Response, maxBytes: number, url: string): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, "utf8") > maxBytes) throw new Error(`Response exceeded ${maxBytes} bytes: ${url}`);
+    return text;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error(`Response exceeded ${maxBytes} bytes: ${url}`);
+      }
+      chunks.push(value);
+    }
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
+}
+
+/**
+ * https-only, SSRF-blocked (private/loopback/link-local ranges), timed out, and
+ * size-capped GET. Redirects are followed manually, one hop at a time, so every
+ * hop — not just the initial URL — re-passes the https-only and SSRF checks;
+ * `fetch`'s built-in `redirect: "follow"` would resolve+connect to attacker-
+ * controlled hop targets before this module ever saw the URL.
+ */
+export async function guardedFetch(url: string, opts: GuardedFetchOptions = {}): Promise<GuardedFetchResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      headers: opts.headers,
-      signal: controller.signal,
-      redirect: "follow",
-    });
+  const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+
+  let currentUrl = url;
+  for (let hop = 0; ; hop++) {
+    const parsed = await assertGuardedUrl(currentUrl);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(parsed.toString(), {
+        headers: opts.headers,
+        signal: controller.signal,
+        redirect: "manual",
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (response.status >= 300 && response.status < 400 && response.headers.has("location")) {
+      if (hop >= maxRedirects) throw new Error(`Exceeded ${maxRedirects} redirects fetching ${url}`);
+      const location = response.headers.get("location")!;
+      currentUrl = new URL(location, parsed).toString();
+      continue;
+    }
+
     const contentType = response.headers.get("content-type");
     if (opts.allowedContentType && contentType && !opts.allowedContentType.test(contentType)) {
-      throw new Error(`Unexpected content-type "${contentType}" for ${url}`);
+      throw new Error(`Unexpected content-type "${contentType}" for ${currentUrl}`);
     }
-    const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-    const reader = response.body?.getReader();
-    let text: string;
-    if (!reader) {
-      text = await response.text();
-      if (Buffer.byteLength(text, "utf8") > maxBytes) throw new Error(`Response exceeded ${maxBytes} bytes: ${url}`);
-    } else {
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          total += value.byteLength;
-          if (total > maxBytes) {
-            await reader.cancel();
-            throw new Error(`Response exceeded ${maxBytes} bytes: ${url}`);
-          }
-          chunks.push(value);
-        }
-      }
-      text = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
-    }
-    if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+    const text = await readBoundedBody(response, maxBytes, currentUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status} for ${currentUrl}`);
     return { text, contentType, status: response.status };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
