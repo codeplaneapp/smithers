@@ -1,11 +1,12 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { createSmithers, Gateway, Sequence } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
@@ -159,14 +160,24 @@ function healthOk(): Promise<boolean> {
   });
 }
 
-async function loadChromium() {
-  // `playwright` isn't a dependency of the workflow pack; resolve it dynamically
-  // (a non-literal specifier so tsc doesn't try to resolve it here).
-  const playwrightPkg = "playwright";
-  return (await import(playwrightPkg)).chromium;
+// Resolve a Chromium with an installed browser binary. CI and the local
+// wave gates run `pnpm test` without `playwright install`, so the browser is
+// often absent — skip rather than fail there (matches
+// open-code-review-ui.e2e.test.ts).
+const requireHere = createRequire(import.meta.url);
+function resolveChromium() {
+  try {
+    const chromium = requireHere("playwright").chromium;
+    const executablePath = chromium?.executablePath?.();
+    if (typeof executablePath === "string" && existsSync(executablePath)) return chromium;
+  } catch {}
+  return null;
 }
+const CHROMIUM = resolveChromium();
+const browserTest = CHROMIUM ? test : test.skip;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return; // browser test skips; don't execute the fixture run
   const auth = { triggeredBy: "e2e", scopes: ["*"], role: "operator", tokenId: null };
   // Execute the run to completion BEFORE listening, so node output + the full
   // event window exist the instant the browser connects (no spec/run race).
@@ -186,16 +197,19 @@ afterAll(async () => {
   try { rmSync(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
 });
 
-test("ship-pipeline UI renders a real completed run end-to-end", async () => {
+browserTest("ship-pipeline UI renders a real completed run end-to-end", async () => {
   expect(await waitForHealth()).toBe(true);
 
-  const browser = await (await loadChromium()).launch({ headless: true });
+  const browser = await CHROMIUM.launch({ headless: true });
   try {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on("pageerror", (err: Error) => errors.push(err.message));
 
-    await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "networkidle" });
+    // domcontentloaded, not networkidle: the UI opens a live gateway WebSocket
+    // on mount, so networkidle never settles; the selector waits below gate
+    // real readiness.
+    await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
 
     // 1) The real bundle built + the app mounted to its root.
     await page.waitForSelector('[data-testid="ship-pipeline-ui"]', { timeout: 20_000 });

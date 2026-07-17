@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 /**
  * REAL end-to-end execution of the ship-pipeline workflow + its UI.
@@ -108,12 +109,23 @@ function healthOk(): Promise<boolean> {
   });
 }
 
-async function loadChromium() {
-  const playwrightPkg = "playwright";
-  return (await import(playwrightPkg)).chromium;
+// Resolve a Chromium with an installed browser binary. CI and the local wave
+// gates run `pnpm test` without `playwright install`, so the browser is often
+// absent — skip rather than fail there (matches open-code-review-ui.e2e.test.ts).
+const requireHere = createRequire(import.meta.url);
+function resolveChromium() {
+  try {
+    const chromium = requireHere("playwright").chromium;
+    const executablePath = chromium?.executablePath?.();
+    if (typeof executablePath === "string" && existsSync(executablePath)) return chromium;
+  } catch {}
+  return null;
 }
+const CHROMIUM = resolveChromium();
+const browserTest = CHROMIUM ? test : test.skip;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return; // browser test skips; don't execute the fixture run
   // A throwaway git repo with a `main` ref (so Worktree's `git worktree add -B`
   // off main succeeds) and a node_modules pointing at the real repo.
   tempRepo = mkdtempSync(join(tmpdir(), "ship-pipeline-run-"));
@@ -191,14 +203,17 @@ afterAll(() => {
   } catch {}
 });
 
-test("the real ship-pipeline run renders end-to-end in the UI", async () => {
-  const browser = await (await loadChromium()).launch({ headless: true });
+browserTest("the real ship-pipeline run renders end-to-end in the UI", async () => {
+  const browser = await CHROMIUM.launch({ headless: true });
   try {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on("pageerror", (err: Error) => errors.push(err.message));
 
-    await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "networkidle" });
+    // domcontentloaded, not networkidle: the UI opens a live gateway WebSocket
+    // on mount, so networkidle never settles; the selector waits below gate
+    // real readiness.
+    await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
 
     // The real bundle built + app mounted.
     await page.waitForSelector('[data-testid="ship-pipeline-ui"]', { timeout: 20_000 });
