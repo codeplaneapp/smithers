@@ -3,7 +3,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { ClaudeCodeAgent, Panel, createSmithers } from "smithers-orchestrator";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -23,9 +23,13 @@ const MAX_REVIEW_DIFF_BYTES = 200_000;
 
 const repoRoot = (() => {
   try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    return execFileSync("jj", ["workspace", "root"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
-    return process.cwd();
+    try {
+      return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      return process.cwd();
+    }
   }
 })();
 
@@ -311,11 +315,26 @@ type Input = z.infer<typeof inputSchema>;
 function git(args: string[], cwd = repoRoot, env?: NodeJS.ProcessEnv): string {
   return execFileSync("git", args, {
     cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
     env: env ?? process.env,
   }).trim();
 }
 function currentHead(cwd: string): string {
-  return git(["rev-parse", "HEAD"], cwd);
+  try {
+    return execFileSync("jj", ["log", "-r", "@", "--no-graph", "-T", "commit_id"], {
+      cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return git(["rev-parse", "HEAD"], cwd);
+  }
+}
+function currentMain(cwd: string): string {
+  if (!existsSync(join(cwd, ".git"))) return currentHead(cwd);
+  try {
+    return git(["rev-parse", "refs/heads/main"], cwd);
+  } catch {
+    return currentHead(cwd);
+  }
 }
 function runKey(runId: string): string {
   return runId.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 48) || "run";
@@ -633,7 +652,7 @@ function landLocalMain(issue: Issue, prep: LandingPrep, review: Review | undefin
   }
 }
 async function publishMain(input: Input, finalGate: Gate): Promise<Publication> {
-  const localMainSha = git(["rev-parse", "refs/heads/main"], repoRoot);
+  const localMainSha = currentMain(repoRoot);
   if (!finalGate.passed || finalGate.headSha !== localMainSha) {
     return { status: "blocked", localMainSha, remoteMainSha: "", gatePassed: false, summary: "Final local-main gate did not pass on the exact local main head." };
   }
@@ -839,7 +858,7 @@ export default smithers((ctx) => {
           <Worktree id="final-main-gate-worktree" path={join(repoRoot, ".smithers", "worktrees", "codex-issues", key, "final-main")}
             branch={"smithers/" + key + "/final-main-gate"} baseBranch="main">
             <Task id="final-main-gate" output={outputs.gate} timeoutMs={100 * 60_000}>
-              {() => runFinalMainGate(join(repoRoot, ".smithers", "worktrees", "codex-issues", key, "final-main"), git(["rev-parse", "refs/heads/main"], repoRoot))}
+              {() => runFinalMainGate(join(repoRoot, ".smithers", "worktrees", "codex-issues", key, "final-main"), currentMain(repoRoot))}
             </Task>
           </Worktree>
         ) : null}
@@ -852,7 +871,7 @@ export default smithers((ctx) => {
           <Task id="publish-main" output={outputs.publication}>
             {() => ({
               status: input.dryRun ? "dry-run" : "blocked",
-              localMainSha: git(["rev-parse", "refs/heads/main"], repoRoot),
+              localMainSha: currentHead(repoRoot),
               remoteMainSha: "",
               gatePassed: false,
               summary: "No issue fixes reached local main.",
