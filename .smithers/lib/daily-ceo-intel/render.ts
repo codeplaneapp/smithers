@@ -1,5 +1,15 @@
 import type { Cluster, CoverageRow, DateUncertainSample, Issue, RankedStory, RenderOutput } from "./schemas";
 
+/** Additive-only provenance (see .smithers/lib/daily-ceo-intel/modelProvider.ts); older PublicIssue consumers that don't know this field still parse fine. */
+export type IssueProvenance = {
+  provider: "anthropic" | "openai" | "gemini";
+  mode: "auto" | "anthropic" | "openai" | "gemini";
+  cheapModel: string;
+  strongModel: string;
+  reason: string;
+  selectedAt: string;
+};
+
 /** Public, pinned contract (spec "Report JSON contract") that the site Worker consumes from KV/R2. */
 export type PublicIssue = {
   version: 1;
@@ -17,6 +27,8 @@ export type PublicIssue = {
     lateDiscovered: Array<{ title: string; url: string; publishedAt: string }>;
     totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number };
   };
+  /** Additive (phase 2 round 3+); absent on issues rendered before the provider fallback landed. */
+  provenance?: IssueProvenance;
 };
 export type PublicStorySection = "topStories" | "competitive" | "signals" | "risk" | "opportunities";
 export type PublicStory = {
@@ -78,6 +90,7 @@ export function buildPublicIssue(
   windowEnd: string,
   generatedAt: string,
   totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number },
+  provenance?: IssueProvenance,
 ): PublicIssue {
   const clusterById = new Map(clusters.map((cluster) => [cluster.srcId, cluster]));
   const rankedById = new Map(rankedTopStories.map((story) => [story.srcId, story]));
@@ -142,6 +155,7 @@ export function buildPublicIssue(
       lateDiscovered: [],
       totals,
     },
+    ...(provenance ? { provenance } : {}),
   };
 }
 
@@ -255,6 +269,7 @@ export function renderIssue(
     generatedAt: string;
     totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number };
   },
+  provenance?: IssueProvenance,
 ): RenderOutput {
   const bodyMarkdown = issue.sectionOrder.map((kind) => renderMarkdownSection(kind, issue, srcIdMap)).join("\n\n");
   const dateUncertainMarkdown = dateUncertainSample.length
@@ -288,6 +303,7 @@ export function renderIssue(
     publicIssueInputs.windowEnd,
     publicIssueInputs.generatedAt,
     publicIssueInputs.totals,
+    provenance,
   );
   const issueJson = JSON.stringify(publicIssue, null, 2);
 

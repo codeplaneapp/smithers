@@ -14,6 +14,19 @@ import { normalize } from "../lib/daily-ceo-intel/normalize";
 import { publishIssue } from "../lib/daily-ceo-intel/publish";
 import { openDb, recordDelivery } from "../lib/daily-ceo-intel/db";
 import { guardedFetch } from "../lib/daily-ceo-intel/fetchGuards";
+import {
+  ANTHROPIC_CHEAP_MODEL,
+  ANTHROPIC_STRONG_MODEL,
+  GEMINI_MODEL,
+  OPENAI_STRONG_MODEL,
+  buildAgentPoolsForSelection,
+  classifyProbeError,
+  pickCheapOpenAIModel,
+  resolveModelProviderMode,
+  selectModelProvider,
+  type ProviderSelection,
+} from "../lib/daily-ceo-intel/modelProvider";
+import type { AgentLike } from "smithers-orchestrator";
 import type { RunConfig } from "../lib/daily-ceo-intel/config";
 import type { CoverageRow, FetchSourceRow, Issue, Item, RenderOutput } from "../lib/daily-ceo-intel/schemas";
 
@@ -477,5 +490,189 @@ describe("fetchGuards: SSRF + https-only + redirect hardening", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("modelProvider: SDK-agent provider fallback (auto|anthropic|openai|gemini)", () => {
+  const NOW = () => "2026-07-17T12:00:00.000Z";
+
+  type FakeRoute = { match: (url: string) => boolean; status: number; body: string };
+  function fakeFetch(routes: FakeRoute[]): { impl: typeof fetch; calls: string[] } {
+    const calls: string[] = [];
+    const impl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      const route = routes.find((r) => r.match(url));
+      if (!route) throw new Error(`fakeFetch: no route matched ${url}`);
+      return new Response(route.body, { status: route.status });
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  }
+
+  const anthropicOk: FakeRoute = { match: (u) => u.includes("api.anthropic.com"), status: 200, body: "{}" };
+  const anthropicBilling: FakeRoute = { match: (u) => u.includes("api.anthropic.com"), status: 400, body: '{"error":{"message":"Your credit balance is too low to access the Anthropic API."}}' };
+  const anthropicAuth: FakeRoute = { match: (u) => u.includes("api.anthropic.com"), status: 401, body: '{"error":{"message":"invalid x-api-key"}}' };
+  const openaiModelsList = (ids: string[]): FakeRoute => ({ match: (u) => u.includes("api.openai.com/v1/models"), status: 200, body: JSON.stringify({ data: ids.map((id) => ({ id })) }) });
+  const openaiChatOk: FakeRoute = { match: (u) => u.includes("api.openai.com/v1/chat/completions"), status: 200, body: "{}" };
+  const openaiChatBilling: FakeRoute = { match: (u) => u.includes("api.openai.com/v1/chat/completions"), status: 429, body: '{"error":{"code":"insufficient_quota","message":"You exceeded your current quota."}}' };
+  const geminiOk: FakeRoute = { match: (u) => u.includes("generativelanguage.googleapis.com"), status: 200, body: "{}" };
+  const geminiBilling: FakeRoute = { match: (u) => u.includes("generativelanguage.googleapis.com"), status: 400, body: '{"error":{"message":"credit balance too low"}}' };
+
+  test("resolveModelProviderMode defaults to auto and normalizes case/whitespace", () => {
+    expect(resolveModelProviderMode({})).toBe("auto");
+    expect(resolveModelProviderMode({ SIGNAL_MODEL_PROVIDER: "" })).toBe("auto");
+    expect(resolveModelProviderMode({ SIGNAL_MODEL_PROVIDER: "  OpenAI  " })).toBe("openai");
+    expect(resolveModelProviderMode({ SIGNAL_MODEL_PROVIDER: "GEMINI" })).toBe("gemini");
+  });
+
+  test("resolveModelProviderMode throws on an unrecognized value", () => {
+    expect(() => resolveModelProviderMode({ SIGNAL_MODEL_PROVIDER: "grok" })).toThrow(/auto\|anthropic\|openai\|gemini/);
+  });
+
+  test("classifyProbeError recognizes Anthropic's real 400 billing message", () => {
+    expect(classifyProbeError(400, "Your credit balance is too low to access the Anthropic API.")).toBe("billing");
+  });
+
+  test("classifyProbeError recognizes 401/403 as auth regardless of body", () => {
+    expect(classifyProbeError(401, "invalid x-api-key")).toBe("auth");
+    expect(classifyProbeError(403, "forbidden")).toBe("auth");
+  });
+
+  test("classifyProbeError recognizes OpenAI's 429 insufficient_quota as billing", () => {
+    expect(classifyProbeError(429, '{"error":{"code":"insufficient_quota"}}')).toBe("billing");
+  });
+
+  test("classifyProbeError falls back to other for an unrelated 500", () => {
+    expect(classifyProbeError(500, "internal server error")).toBe("other");
+  });
+
+  test("pickCheapOpenAIModel prefers nano over mini within the gpt-5.6 family", () => {
+    expect(pickCheapOpenAIModel(["gpt-5.6", "gpt-5.6-mini", "gpt-5.6-nano"])).toBe("gpt-5.6-nano");
+  });
+
+  test("pickCheapOpenAIModel falls back to mini when no nano is listed", () => {
+    expect(pickCheapOpenAIModel(["gpt-5.6", "gpt-5.6-mini"])).toBe("gpt-5.6-mini");
+  });
+
+  test("pickCheapOpenAIModel falls back to any gpt-5.6 variant when neither mini nor nano is listed", () => {
+    expect(pickCheapOpenAIModel(["gpt-5.6", "gpt-4o"])).toBe("gpt-5.6");
+  });
+
+  test("pickCheapOpenAIModel excludes non-chat models (audio/embedding/etc.) from the gpt-5.6 family", () => {
+    expect(pickCheapOpenAIModel(["gpt-5.6-mini-audio", "gpt-5.6-mini-transcribe", "gpt-5.6"])).toBe("gpt-5.6");
+  });
+
+  test("pickCheapOpenAIModel falls back to any *-mini model outside the gpt-5.6 family", () => {
+    expect(pickCheapOpenAIModel(["gpt-4o-mini", "gpt-4o"])).toBe("gpt-4o-mini");
+  });
+
+  test("pickCheapOpenAIModel returns null when nothing suitable is listed", () => {
+    expect(pickCheapOpenAIModel(["gpt-4o", "text-embedding-3-large"])).toBeNull();
+  });
+
+  test("explicit anthropic mode forces the provider without any probe calls", async () => {
+    const { impl, calls } = fakeFetch([]);
+    const selection = await selectModelProvider({ SIGNAL_MODEL_PROVIDER: "anthropic" }, impl, NOW);
+    expect(selection).toEqual({
+      mode: "anthropic",
+      provider: "anthropic",
+      cheapModel: ANTHROPIC_CHEAP_MODEL,
+      strongModel: ANTHROPIC_STRONG_MODEL,
+      reason: "SIGNAL_MODEL_PROVIDER=anthropic forced.",
+      probes: [],
+      selectedAt: "2026-07-17T12:00:00.000Z",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  test("explicit gemini mode forces the provider without any probe calls", async () => {
+    const { impl, calls } = fakeFetch([]);
+    const selection = await selectModelProvider({ SIGNAL_MODEL_PROVIDER: "gemini" }, impl, NOW);
+    expect(selection.provider).toBe("gemini");
+    expect(selection.cheapModel).toBe(GEMINI_MODEL);
+    expect(selection.strongModel).toBe(GEMINI_MODEL);
+    expect(calls).toEqual([]);
+  });
+
+  test("explicit openai mode resolves a cheap model from /v1/models without probing anthropic or gemini", async () => {
+    const { impl, calls } = fakeFetch([openaiModelsList(["gpt-5.6", "gpt-5.6-mini", "gpt-4o"])]);
+    const selection = await selectModelProvider({ SIGNAL_MODEL_PROVIDER: "openai", OPENAI_API_KEY: "sk-test" }, impl, NOW);
+    expect(selection.provider).toBe("openai");
+    expect(selection.cheapModel).toBe("gpt-5.6-mini");
+    expect(selection.strongModel).toBe(OPENAI_STRONG_MODEL);
+    expect(calls).toEqual(["https://api.openai.com/v1/models"]);
+  });
+
+  test("auto mode selects anthropic on a successful probe and never calls openai or gemini", async () => {
+    const { impl, calls } = fakeFetch([anthropicOk]);
+    const selection = await selectModelProvider({ ANTHROPIC_API_KEY: "sk-ant-test" }, impl, NOW);
+    expect(selection.mode).toBe("auto");
+    expect(selection.provider).toBe("anthropic");
+    expect(selection.probes).toHaveLength(1);
+    expect(selection.probes[0]).toMatchObject({ provider: "anthropic", ok: true, classification: "ok" });
+    expect(calls).toEqual(["https://api.anthropic.com/v1/messages"]);
+  });
+
+  test("auto mode treats a missing ANTHROPIC_API_KEY as an immediate probe failure with no network call", async () => {
+    const { impl, calls } = fakeFetch([openaiModelsList(["gpt-5.6-mini"]), openaiChatOk]);
+    const selection = await selectModelProvider({ OPENAI_API_KEY: "sk-test" }, impl, NOW);
+    expect(selection.provider).toBe("openai");
+    expect(selection.probes[0]).toMatchObject({ provider: "anthropic", attempted: false, ok: false, classification: "missing-key" });
+    expect(calls.some((u) => u.includes("anthropic"))).toBe(false);
+  });
+
+  test("auto mode falls back anthropic(billing) -> openai(success) and records both probes with the real Anthropic error text", async () => {
+    const { impl } = fakeFetch([anthropicBilling, openaiModelsList(["gpt-5.6-nano", "gpt-5.6"]), openaiChatOk]);
+    const selection = await selectModelProvider({ ANTHROPIC_API_KEY: "sk-ant-unfunded", OPENAI_API_KEY: "sk-test" }, impl, NOW);
+    expect(selection.provider).toBe("openai");
+    expect(selection.cheapModel).toBe("gpt-5.6-nano");
+    expect(selection.probes.map((p) => p.provider)).toEqual(["anthropic", "openai"]);
+    expect(selection.probes[0]).toMatchObject({ ok: false, classification: "billing" });
+    expect(selection.reason).toContain("billing");
+  });
+
+  test("auto mode falls back anthropic(auth) -> openai(billing) -> gemini(success)", async () => {
+    const { impl } = fakeFetch([anthropicAuth, openaiModelsList(["gpt-5.6-mini"]), openaiChatBilling, geminiOk]);
+    const selection = await selectModelProvider({ ANTHROPIC_API_KEY: "bad", OPENAI_API_KEY: "sk-broke", GEMINI_API_KEY: "g-test" }, impl, NOW);
+    expect(selection.provider).toBe("gemini");
+    expect(selection.cheapModel).toBe(GEMINI_MODEL);
+    expect(selection.strongModel).toBe(GEMINI_MODEL);
+    expect(selection.probes.map((p) => `${p.provider}:${p.classification}`)).toEqual(["anthropic:auth", "openai:billing", "gemini:ok"]);
+  });
+
+  test("auto mode throws a combined diagnostic error when every provider fails", async () => {
+    const { impl } = fakeFetch([anthropicBilling, openaiModelsList([]), openaiChatBilling, geminiBilling]);
+    await expect(
+      selectModelProvider({ ANTHROPIC_API_KEY: "sk-ant-unfunded", OPENAI_API_KEY: "sk-broke", GEMINI_API_KEY: "g-broke" }, impl, NOW),
+    ).rejects.toThrow(/no usable model provider.*anthropic\(billing.*openai\(billing.*gemini\(billing/s);
+  });
+
+  function fakeAgent(label: string): AgentLike {
+    return { hijackEngine: label } as unknown as AgentLike;
+  }
+
+  test("buildAgentPoolsForSelection reuses the existing anthropic pools verbatim (identity-preserving)", () => {
+    const cheap = [fakeAgent("anthropic-cheap")];
+    const strong = [fakeAgent("anthropic-strong")];
+    const selection: ProviderSelection = { mode: "auto", provider: "anthropic", cheapModel: ANTHROPIC_CHEAP_MODEL, strongModel: ANTHROPIC_STRONG_MODEL, reason: "ok", probes: [], selectedAt: NOW() };
+    const pools = buildAgentPoolsForSelection(selection, { cheap, strong });
+    expect(pools.cheap[0]).toBe(cheap[0]);
+    expect(pools.strong[0]).toBe(strong[0]);
+  });
+
+  test("buildAgentPoolsForSelection builds a single-agent OpenAI pool for the openai provider", () => {
+    const selection: ProviderSelection = { mode: "auto", provider: "openai", cheapModel: "gpt-5.6-mini", strongModel: OPENAI_STRONG_MODEL, reason: "ok", probes: [], selectedAt: NOW() };
+    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] });
+    expect(pools.cheap).toHaveLength(1);
+    expect(pools.strong).toHaveLength(1);
+    expect((pools.cheap[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
+    expect((pools.strong[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
+  });
+
+  test("buildAgentPoolsForSelection builds a single-agent OpenAI-compat pool for the gemini provider", () => {
+    const selection: ProviderSelection = { mode: "auto", provider: "gemini", cheapModel: GEMINI_MODEL, strongModel: GEMINI_MODEL, reason: "ok", probes: [], selectedAt: NOW() };
+    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] });
+    expect((pools.cheap[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
+    expect((pools.strong[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
   });
 });

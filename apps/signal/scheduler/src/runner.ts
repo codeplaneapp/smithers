@@ -8,7 +8,12 @@ export class Runner extends Container<Env> {
   // several minutes end to end; keep the container warm well past the slowest expected run.
   sleepAfter = "20m";
   envVars = {
-    ANTHROPIC_API_KEY: this.env.ANTHROPIC_API_KEY,
+    // Optional: SIGNAL_MODEL_PROVIDER's auto mode (default) probes whichever of
+    // these are non-empty at run start and falls back in order anthropic ->
+    // openai -> gemini (see .smithers/lib/daily-ceo-intel/modelProvider.ts).
+    ANTHROPIC_API_KEY: this.env.ANTHROPIC_API_KEY ?? "",
+    OPENAI_API_KEY: this.env.OPENAI_API_KEY ?? "",
+    GEMINI_API_KEY: this.env.GEMINI_API_KEY ?? "",
     CLOUDFLARE_ACCOUNT_ID: this.env.CLOUDFLARE_ACCOUNT_ID,
     CLOUDFLARE_API_TOKEN: this.env.CLOUDFLARE_API_TOKEN,
     CLOUDFLARE_KV_NAMESPACE_ID: this.env.CLOUDFLARE_KV_NAMESPACE_ID,

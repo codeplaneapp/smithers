@@ -278,6 +278,27 @@ export const finalizeSchema = z.object({
   summary: z.string(),
 });
 
+export const modelProviderNameSchema = z.enum(["anthropic", "openai", "gemini"]);
+export const modelProviderModeSchema = z.enum(["auto", "anthropic", "openai", "gemini"]);
+export const providerProbeSchema = z.object({
+  provider: modelProviderNameSchema,
+  attempted: z.boolean(),
+  ok: z.boolean(),
+  classification: z.enum(["ok", "missing-key", "auth", "billing", "network", "other"]),
+  detail: z.string(),
+});
+
+export const providerSelectionSchema = z.object({
+  mode: modelProviderModeSchema,
+  provider: modelProviderNameSchema,
+  cheapModel: z.string(),
+  strongModel: z.string(),
+  reason: z.string(),
+  probes: z.array(providerProbeSchema),
+  selectedAt: z.string(),
+  summary: z.string(),
+});
+
 export const assertVerifiedSchema = z.object({ ok: z.boolean() });
 
 export type Item = z.infer<typeof itemSchema>;
@@ -307,3 +328,6 @@ export type ArchiveOutput = z.infer<typeof archiveSchema>;
 export type PublishOutput = z.infer<typeof publishSchema>;
 export type CommitOutput = z.infer<typeof commitSchema>;
 export type FinalizeOutput = z.infer<typeof finalizeSchema>;
+export type ModelProviderNameOutput = z.infer<typeof modelProviderNameSchema>;
+export type ProviderProbeOutput = z.infer<typeof providerProbeSchema>;
+export type ProviderSelectionOutput = z.infer<typeof providerSelectionSchema>;

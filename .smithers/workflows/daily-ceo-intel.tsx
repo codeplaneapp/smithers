@@ -29,6 +29,7 @@ import { fetchGithubReleases } from "../lib/daily-ceo-intel/sources/githubReleas
 import { finalizeRun } from "../lib/daily-ceo-intel/finalize";
 import { fetchHn } from "../lib/daily-ceo-intel/sources/hn";
 import { fetchLobsters } from "../lib/daily-ceo-intel/sources/lobsters";
+import { buildAgentPoolsForSelection, selectModelProvider } from "../lib/daily-ceo-intel/modelProvider";
 import { normalize } from "../lib/daily-ceo-intel/normalize";
 import { publishIssue } from "../lib/daily-ceo-intel/publish";
 import { mergeAssessments, rankAndSelect } from "../lib/daily-ceo-intel/rank";
@@ -52,6 +53,7 @@ import {
   makeFetchResultSchema,
   mergeAssessmentsSchema,
   normalizeSchema,
+  providerSelectionSchema,
   publishSchema,
   rankAndSelectSchema,
   renderSchema,
@@ -102,6 +104,7 @@ const { Workflow, Task, Sequence, Parallel, Loop, smithers, outputs } = createSm
   input: inputSchema,
   ceoIntelWindow: windowSchema,
   ceoIntelConfig: configOutputSchema,
+  ceoIntelProviderSelection: providerSelectionSchema,
   ceoIntelFetchRss: makeFetchResultSchema("rss"),
   ceoIntelFetchGithub: makeFetchResultSchema("githubReleases"),
   ceoIntelFetchHn: makeFetchResultSchema("hn"),
@@ -132,6 +135,10 @@ export default smithers((ctx) => {
 
   const windowOut = ctx.outputMaybe(outputs.ceoIntelWindow, { nodeId: "compute-window" });
   const configOut = ctx.outputMaybe(outputs.ceoIntelConfig, { nodeId: "load-config-and-state" });
+  const providerSelectionOut = ctx.outputMaybe(outputs.ceoIntelProviderSelection, { nodeId: "select-model-provider" });
+  const agentPools = providerSelectionOut
+    ? buildAgentPoolsForSelection(providerSelectionOut, { cheap: agents.ceoIntelCheap, strong: agents.ceoIntelStrong })
+    : null;
 
   const fetchRssOut = ctx.outputMaybe(outputs.ceoIntelFetchRss, { nodeId: "fetch-rss" });
   const fetchGithubOut = ctx.outputMaybe(outputs.ceoIntelFetchGithub, { nodeId: "fetch-github-releases" });
@@ -194,6 +201,18 @@ export default smithers((ctx) => {
                 cfCredsPresent: state.cfCredsPresent,
                 effectiveMode: state.effectiveMode,
                 summary: `${state.sourceCount} sources configured; db ${state.schemaCreated ? "created" : "loaded"} at ${state.dbPath}; effective mode ${state.effectiveMode}.`,
+              };
+            }}
+          </Task>
+        ) : null}
+
+        {configOut ? (
+          <Task id="select-model-provider" output={outputs.ceoIntelProviderSelection}>
+            {async () => {
+              const selection = await selectModelProvider(process.env);
+              return {
+                ...selection,
+                summary: `provider=${selection.provider} mode=${selection.mode} cheapModel=${selection.cheapModel} strongModel=${selection.strongModel}: ${selection.reason}`,
               };
             }}
           </Task>
@@ -325,14 +344,14 @@ export default smithers((ctx) => {
           </Task>
         ) : null}
 
-        {clustersOut && batches.length > 0 ? (
+        {clustersOut && batches.length > 0 && agentPools ? (
           <Parallel maxConcurrency={3}>
             {batches.map((batch, index) => (
               <Task
                 key={`assess-relevance-b${index}`}
                 id={`assess-relevance-b${index}`}
                 output={outputs.ceoIntelAssessBatch}
-                agent={agents.ceoIntelCheap}
+                agent={agentPools.cheap}
                 heartbeatTimeoutMs={300_000}
               >
                 <AssessPrompt
@@ -356,16 +375,16 @@ export default smithers((ctx) => {
           </Task>
         ) : null}
 
-        {selectionOut ? (
-          <Task id="curate-lighter-side" output={outputs.ceoIntelLighterSide} agent={agents.ceoIntelCheap} heartbeatTimeoutMs={180_000}>
+        {selectionOut && agentPools ? (
+          <Task id="curate-lighter-side" output={outputs.ceoIntelLighterSide} agent={agentPools.cheap} heartbeatTimeoutMs={180_000}>
             <LighterSidePrompt candidates={selectionOut.lighterSideCandidates} />
           </Task>
         ) : null}
 
-        {selectionOut && lighterSideOut && clustersOut && windowOut ? (
+        {selectionOut && lighterSideOut && clustersOut && windowOut && agentPools ? (
           <Loop id="editorial-repair" maxIterations={2} until={latestVerify?.passed === true} onMaxReached="return-last">
             <Sequence>
-              <Task id="compose-editorial" output={outputs.ceoIntelIssue} agent={agents.ceoIntelStrong} heartbeatTimeoutMs={600_000}>
+              <Task id="compose-editorial" output={outputs.ceoIntelIssue} agent={agentPools.strong} heartbeatTimeoutMs={600_000}>
                 <ComposePrompt
                   issueDateEt={windowOut.issueDateEt}
                   topStories={selectionOut.topStories}
@@ -400,7 +419,7 @@ export default smithers((ctx) => {
           </Loop>
         ) : null}
 
-        {latestIssue && clustersOut && normalizeOut && windowOut && windowFilterOut && dedupeOut && mergedOut && selectionOut ? (
+        {latestIssue && clustersOut && normalizeOut && windowOut && windowFilterOut && dedupeOut && mergedOut && selectionOut && providerSelectionOut ? (
           <Task id="render" output={outputs.ceoIntelRender}>
             {() =>
               renderIssue(
@@ -424,6 +443,14 @@ export default smithers((ctx) => {
                     assessed: mergedOut.assessedCount,
                     selected: selectionOut.selectedCount,
                   },
+                },
+                {
+                  provider: providerSelectionOut.provider,
+                  mode: providerSelectionOut.mode,
+                  cheapModel: providerSelectionOut.cheapModel,
+                  strongModel: providerSelectionOut.strongModel,
+                  reason: providerSelectionOut.reason,
+                  selectedAt: providerSelectionOut.selectedAt,
                 },
               )
             }

@@ -9,8 +9,17 @@
  * .smithers/specs/daily-ceo-intel.md "## Cloudflare architecture (phase 2)").
  *
  * Deploy:  CLOUDFLARE_API_TOKEN=... ALCHEMY_PASSWORD=... ANTHROPIC_API_KEY=... \
- *          SIGNAL_MANUAL_TRIGGER_SECRET=... bun x alchemy deploy scheduler/alchemy.run.ts
+ *          OPENAI_API_KEY=... GEMINI_API_KEY=... SIGNAL_MANUAL_TRIGGER_SECRET=... \
+ *          bun x alchemy deploy scheduler/alchemy.run.ts
  * Destroy: bun x alchemy destroy scheduler/alchemy.run.ts
+ *
+ * Model credentials: at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY,
+ * GEMINI_API_KEY must be set — whichever are present get passed through as
+ * container secrets, and the runner's SIGNAL_MODEL_PROVIDER=auto (default)
+ * probes them in that order at run start (see
+ * .smithers/lib/daily-ceo-intel/modelProvider.ts). Anthropic is spec-preferred:
+ * with all three set, a billing/auth failure on Anthropic alone still falls
+ * through to OpenAI/Gemini without a redeploy.
  */
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +34,13 @@ const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "dd35
 const app = await alchemy("signal-scheduler");
 
 const anthropicApiKey = process.env.ANTHROPIC_API_KEY?.trim();
-if (!anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required to deploy — the runner cannot classify/compose an issue without it.");
+const openaiApiKey = process.env.OPENAI_API_KEY?.trim();
+const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
+if (!anthropicApiKey && !openaiApiKey && !geminiApiKey) {
+  throw new Error(
+    "At least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY is required to deploy — the runner's provider fallback (SIGNAL_MODEL_PROVIDER=auto by default) needs at least one usable model credential to classify/compose an issue.",
+  );
+}
 
 const cloudflareApiToken = process.env.CLOUDFLARE_API_TOKEN?.trim();
 if (!cloudflareApiToken) throw new Error("CLOUDFLARE_API_TOKEN is required to deploy");
@@ -75,7 +90,9 @@ export const worker = await Worker("signal-scheduler", {
   bindings: {
     RUNNER: runner,
     SIGNAL_REPORTS: kv,
-    ANTHROPIC_API_KEY: alchemy.secret(anthropicApiKey),
+    ...(anthropicApiKey ? { ANTHROPIC_API_KEY: alchemy.secret(anthropicApiKey) } : {}),
+    ...(openaiApiKey ? { OPENAI_API_KEY: alchemy.secret(openaiApiKey) } : {}),
+    ...(geminiApiKey ? { GEMINI_API_KEY: alchemy.secret(geminiApiKey) } : {}),
     CLOUDFLARE_ACCOUNT_ID: CLOUDFLARE_ACCOUNT_ID,
     CLOUDFLARE_API_TOKEN: alchemy.secret(cloudflareApiToken),
     CLOUDFLARE_KV_NAMESPACE_ID: kv.namespaceId,
