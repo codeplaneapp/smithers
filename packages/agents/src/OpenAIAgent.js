@@ -17,9 +17,44 @@ import { zodToOpenAISchema } from "./zodToOpenAISchema.js";
  */
 async function toNativeOutputSchema(outputSchema) {
     if (outputSchema && typeof outputSchema === "object" && "_zod" in outputSchema) {
-        return jsonSchema(await zodToOpenAISchema(/** @type {any} */ (outputSchema)));
+        const zodSchema = /** @type {any} */ (outputSchema);
+        return jsonSchema(await zodToOpenAISchema(zodSchema), {
+            // Keep Zod's defaults, transforms, refinements, and invalid-value
+            // behavior in the SDK result path while sending the sanitized
+            // schema to OpenAI's strict structured-output API.
+            validate: async (value) => {
+                const result = await zodSchema.safeParseAsync(value);
+                return result.success ? { success: true, value: result.data } : { success: false, error: result.error };
+            },
+        });
     }
     return outputSchema;
+}
+
+async function attachParsedZodOutput(result, outputSchema, enabled) {
+    if (!enabled || !(outputSchema && typeof outputSchema === "object" && "_zod" in outputSchema)) {
+        return result;
+    }
+    let parsed;
+    try {
+        parsed = await outputSchema.safeParseAsync(JSON.parse(result.text));
+    }
+    catch (error) {
+        parsed = { success: false, error };
+    }
+    // ToolLoopAgent/generateText exposes structured output on some AI SDK
+    // versions but not all of the versions supported by Smithers. Add the
+    // same parsed value explicitly so direct OpenAIAgent callers retain Zod
+    // defaults/transforms regardless of the SDK minor version.
+    Object.defineProperty(result, "output", {
+        configurable: true,
+        enumerable: true,
+        get() {
+            if (!parsed.success) throw parsed.error;
+            return parsed.data;
+        },
+    });
+    return result;
 }
 /** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 
@@ -79,7 +114,7 @@ export class OpenAIAgent extends ToolLoopAgent {
                 ? { output: Output.object({ schema: await toNativeOutputSchema(args.outputSchema) }) }
                 : {};
             if (!args.onStdout) {
-                return super.generate({
+                const result = await super.generate({
                     options: args.options,
                     abortSignal: args.abortSignal,
                     ...promptArgs,
@@ -88,8 +123,9 @@ export class OpenAIAgent extends ToolLoopAgent {
                     timeout: args.timeout,
                     onStepEnd,
                 });
+                return attachParsedZodOutput(result, args.outputSchema, this.supportsNativeStructuredOutput);
             }
-            return super.stream({
+            const stream = await super.stream({
                 options: args.options,
                 abortSignal: args.abortSignal,
                 ...promptArgs,
@@ -97,7 +133,9 @@ export class OpenAIAgent extends ToolLoopAgent {
                 ...toolArgs,
                 timeout: args.timeout,
                 onStepEnd,
-            }).then((stream) => streamResultToGenerateResult(stream, args.onStdout));
+            });
+            const result = await streamResultToGenerateResult(stream, args.onStdout);
+            return attachParsedZodOutput(result, args.outputSchema, this.supportsNativeStructuredOutput);
         };
         return run();
     }

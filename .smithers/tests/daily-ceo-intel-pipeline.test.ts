@@ -619,7 +619,36 @@ describe("modelProvider: SDK-agent provider fallback (auto|anthropic|openai|gemi
     expect(selection.provider).toBe("anthropic");
     expect(selection.probes).toHaveLength(1);
     expect(selection.probes[0]).toMatchObject({ provider: "anthropic", ok: true, classification: "ok" });
-    expect(calls).toEqual(["https://api.anthropic.com/v1/messages"]);
+    // Both the cheap and strong Anthropic models are verified, not just the cheap one.
+    expect(calls).toEqual(["https://api.anthropic.com/v1/messages", "https://api.anthropic.com/v1/messages"]);
+  });
+
+  test("auto mode's anthropic probe verifies both cheap and strong models before selecting anthropic", async () => {
+    const bodies: string[] = [];
+    const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    await selectModelProvider({ ANTHROPIC_API_KEY: "sk-ant-test" }, impl, NOW);
+    const models = bodies.map((b) => (JSON.parse(b) as { model: string }).model);
+    expect(models).toEqual([ANTHROPIC_CHEAP_MODEL, ANTHROPIC_STRONG_MODEL]);
+  });
+
+  test("auto mode's anthropic probe fails selection when only the strong (compose-editorial) model is unusable", async () => {
+    let anthropicCalls = 0;
+    const impl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("api.anthropic.com")) {
+        anthropicCalls += 1;
+        // Cheap model call succeeds, strong model call fails (e.g. no access to that model id).
+        return anthropicCalls === 1 ? new Response("{}", { status: 200 }) : new Response('{"error":{"message":"model not found"}}', { status: 404 });
+      }
+      return openaiModelsList(["gpt-5.6-mini"]).match(url)
+        ? new Response(JSON.stringify({ data: [{ id: "gpt-5.6-mini" }] }), { status: 200 })
+        : new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const selection = await selectModelProvider({ ANTHROPIC_API_KEY: "sk-ant-test", OPENAI_API_KEY: "sk-test" }, impl, NOW);
+    expect(selection.provider).toBe("openai");
   });
 
   test("auto mode treats a missing ANTHROPIC_API_KEY as an immediate probe failure with no network call", async () => {

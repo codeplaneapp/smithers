@@ -17,7 +17,7 @@ export async function zodToOpenAISchema(zodSchema) {
     // `schema._zod.def` TypeError. Surface a clear, actionable error instead.
     assertZodV4(zodSchema);
     const { z } = await import("zod");
-    const jsonSchema = z.toJSONSchema(zodSchema);
+    const jsonSchema = z.toJSONSchema(zodSchema, { unrepresentable: "any" });
     sanitizeForOpenAI(jsonSchema);
     return jsonSchema;
 }

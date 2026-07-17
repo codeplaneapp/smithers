@@ -43,6 +43,7 @@ export const ANTHROPIC_STRONG_MODEL = "claude-fable-5";
 export const OPENAI_STRONG_MODEL = "gpt-5.6";
 export const GEMINI_MODEL = "gemini-2.5-flash";
 export const GEMINI_OPENAI_COMPAT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+const PROBE_TIMEOUT_MS = 12_000;
 
 const NON_CHAT_MODEL_PATTERN = /audio|realtime|embedding|image|transcribe|tts|moderation|whisper|dall-e/i;
 
@@ -91,25 +92,53 @@ async function safeErrorBody(res: Response): Promise<string> {
   }
 }
 
+async function fetchWithTimeout(fetchImpl: FetchLike, input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    return await fetchImpl(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function probeDetail(status: number, classification: ProbeClassification): string {
+  return `HTTP ${status} (${classification})`;
+}
+
+async function callAnthropicPing(apiKey: string, model: string, fetchImpl: FetchLike): Promise<Response> {
+  return fetchWithTimeout(fetchImpl, "https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
+  });
+}
+
 async function probeAnthropic(apiKey: string | undefined, fetchImpl: FetchLike): Promise<ProviderProbe> {
   if (!apiKey) return { provider: "anthropic", attempted: false, ok: false, classification: "missing-key", detail: "ANTHROPIC_API_KEY not set" };
+  // Probe both the cheap (assess/lighter-side) and strong (compose-editorial)
+  // models, not just the cheap one — a billing failure applies account-wide,
+  // but an auth/model-access failure can be scoped to a single model id, and
+  // selection must not pick a provider whose editorial model can't serve.
+  const modelsToVerify = [...new Set([ANTHROPIC_CHEAP_MODEL, ANTHROPIC_STRONG_MODEL])];
   try {
-    const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: ANTHROPIC_CHEAP_MODEL, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
-    });
-    if (res.ok) return { provider: "anthropic", attempted: true, ok: true, classification: "ok", detail: "probe call succeeded" };
-    const body = await safeErrorBody(res);
-    return { provider: "anthropic", attempted: true, ok: false, classification: classifyProbeError(res.status, body), detail: `HTTP ${res.status}: ${body}` };
+    for (const model of modelsToVerify) {
+      const res = await callAnthropicPing(apiKey, model, fetchImpl);
+      if (!res.ok) {
+        const body = await safeErrorBody(res);
+        const classification = classifyProbeError(res.status, body);
+        return { provider: "anthropic", attempted: true, ok: false, classification, detail: probeDetail(res.status, classification) };
+      }
+    }
+    return { provider: "anthropic", attempted: true, ok: true, classification: "ok", detail: `verified models ${modelsToVerify.join(", ")}` };
   } catch (error) {
-    return { provider: "anthropic", attempted: true, ok: false, classification: "network", detail: error instanceof Error ? error.message : String(error) };
+    return { provider: "anthropic", attempted: true, ok: false, classification: "network", detail: "network or timeout" };
   }
 }
 
 async function listOpenAIModels(apiKey: string, fetchImpl: FetchLike): Promise<string[]> {
   try {
-    const res = await fetchImpl("https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${apiKey}` } });
+    const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${apiKey}` } });
     if (!res.ok) return [];
     const body = (await res.json().catch(() => null)) as { data?: Array<{ id: string }> } | null;
     return (body?.data ?? []).map((m) => m.id);
@@ -122,20 +151,25 @@ async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike): Pr
   if (!apiKey) return { probe: { provider: "openai", attempted: false, ok: false, classification: "missing-key", detail: "OPENAI_API_KEY not set" }, cheapModel: null };
   const modelIds = await listOpenAIModels(apiKey, fetchImpl);
   const cheapModel = pickCheapOpenAIModel(modelIds) ?? OPENAI_STRONG_MODEL;
+  const modelsToVerify = [...new Set([cheapModel, OPENAI_STRONG_MODEL])];
   try {
-    const res = await fetchImpl("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-      // 16, not 1: gpt-5.6-family reasoning models spend the first tokens on
-      // reasoning and 400 on max_completion_tokens: 1, which false-negatives a
-      // funded, working key (verified live 2026-07-17: 1 -> HTTP 400, 16 -> 200).
-      body: JSON.stringify({ model: cheapModel, max_completion_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
-    });
-    if (res.ok) return { probe: { provider: "openai", attempted: true, ok: true, classification: "ok", detail: `verified model ${cheapModel}` }, cheapModel };
-    const body = await safeErrorBody(res);
-    return { probe: { provider: "openai", attempted: true, ok: false, classification: classifyProbeError(res.status, body), detail: `HTTP ${res.status}: ${body}` }, cheapModel };
+    for (const model of modelsToVerify) {
+      const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        // 16, not 1: gpt-5.6-family reasoning models spend the first tokens on
+        // reasoning and 400 on max_completion_tokens: 1.
+        body: JSON.stringify({ model, max_completion_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
+      });
+      if (!res.ok) {
+        const body = await safeErrorBody(res);
+        const classification = classifyProbeError(res.status, body);
+        return { probe: { provider: "openai", attempted: true, ok: false, classification, detail: probeDetail(res.status, classification) }, cheapModel };
+      }
+    }
+    return { probe: { provider: "openai", attempted: true, ok: true, classification: "ok", detail: `verified models ${modelsToVerify.join(", ")}` }, cheapModel };
   } catch (error) {
-    return { probe: { provider: "openai", attempted: true, ok: false, classification: "network", detail: error instanceof Error ? error.message : String(error) }, cheapModel };
+    return { probe: { provider: "openai", attempted: true, ok: false, classification: "network", detail: "network or timeout" }, cheapModel };
   }
 }
 
@@ -146,16 +180,17 @@ async function probeGemini(apiKey: string | undefined, fetchImpl: FetchLike): Pr
     // serve through, not the native generateContent endpoint — probing a
     // different code path than serving let an unusable provider win selection
     // (native probe 200'd while every real call 404'd on /responses).
-    const res = await fetchImpl(`${GEMINI_OPENAI_COMPAT_BASE_URL}/chat/completions`, {
+    const res = await fetchWithTimeout(fetchImpl, `${GEMINI_OPENAI_COMPAT_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: GEMINI_MODEL, max_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
     });
     if (res.ok) return { provider: "gemini", attempted: true, ok: true, classification: "ok", detail: "probe call succeeded" };
     const body = await safeErrorBody(res);
-    return { provider: "gemini", attempted: true, ok: false, classification: classifyProbeError(res.status, body), detail: `HTTP ${res.status}: ${body}` };
+    const classification = classifyProbeError(res.status, body);
+    return { provider: "gemini", attempted: true, ok: false, classification, detail: probeDetail(res.status, classification) };
   } catch (error) {
-    return { provider: "gemini", attempted: true, ok: false, classification: "network", detail: error instanceof Error ? error.message : String(error) };
+    return { provider: "gemini", attempted: true, ok: false, classification: "network", detail: "network or timeout" };
   }
 }
 
@@ -200,7 +235,7 @@ export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = f
       provider: "openai",
       cheapModel: openaiCheapModel ?? OPENAI_STRONG_MODEL,
       strongModel: OPENAI_STRONG_MODEL,
-      reason: `Anthropic probe failed (${anthropicProbe.classification}: ${anthropicProbe.detail}); OpenAI probe succeeded.`,
+      reason: `Anthropic probe failed (${anthropicProbe.classification}); OpenAI cheap and editorial models verified.`,
       probes,
       selectedAt,
     };
@@ -214,7 +249,7 @@ export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = f
       provider: "gemini",
       cheapModel: GEMINI_MODEL,
       strongModel: GEMINI_MODEL,
-      reason: `Anthropic (${anthropicProbe.classification}) and OpenAI (${openaiProbe.classification}) probes failed; Gemini probe succeeded.`,
+      reason: `Anthropic (${anthropicProbe.classification}) and OpenAI (${openaiProbe.classification}) probes failed; Gemini verified.`,
       probes,
       selectedAt,
     };
@@ -222,9 +257,9 @@ export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = f
 
   throw new Error(
     `daily-ceo-intel: no usable model provider in auto mode — ` +
-      `anthropic(${anthropicProbe.classification}: ${anthropicProbe.detail}), ` +
-      `openai(${openaiProbe.classification}: ${openaiProbe.detail}), ` +
-      `gemini(${geminiProbe.classification}: ${geminiProbe.detail})`,
+      `anthropic(${anthropicProbe.classification}), ` +
+      `openai(${openaiProbe.classification}), ` +
+      `gemini(${geminiProbe.classification})`,
   );
 }
 
@@ -247,8 +282,8 @@ export function buildAgentPoolsForSelection(
   }
   if (selection.provider === "openai") {
     return {
-      cheap: [new OpenAIAgent({ model: selection.cheapModel })],
-      strong: [new OpenAIAgent({ model: selection.strongModel })],
+      cheap: [new OpenAIAgent({ model: selection.cheapModel, maxOutputTokens: 2_000 })],
+      strong: [new OpenAIAgent({ model: selection.strongModel, maxOutputTokens: 5_000 })],
     };
   }
   // gemini: routed through OpenAIAgent at Google's OpenAI-compatible endpoint
@@ -256,7 +291,7 @@ export function buildAgentPoolsForSelection(
   // targets /responses, which Gemini's compat layer doesn't implement (404).
   const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
   return {
-    cheap: [new OpenAIAgent({ model: selection.cheapModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat" })],
-    strong: [new OpenAIAgent({ model: selection.strongModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat" })],
+    cheap: [new OpenAIAgent({ model: selection.cheapModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat", maxOutputTokens: 2_000 })],
+    strong: [new OpenAIAgent({ model: selection.strongModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat", maxOutputTokens: 5_000 })],
   };
 }

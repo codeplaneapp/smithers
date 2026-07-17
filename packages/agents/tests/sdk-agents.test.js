@@ -196,6 +196,44 @@ describe("SDK agents", () => {
             type: "json",
         });
     });
+    test("OpenAIAgent preserves Zod defaults and transforms after native JSON-schema generation", async () => {
+        const fake = createFakeModel();
+        fake.model.doGenerate = async (options) => {
+            fake.lastCall = options;
+            if (options.responseFormat?.type === "json") {
+                return {
+                    content: [{ type: "text", text: JSON.stringify({ value: "7" }) }],
+                    finishReason: "stop",
+                    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+                    warnings: [],
+                };
+            }
+            return {
+                content: [{ type: "text", text: "hello" }],
+                finishReason: "stop",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+                warnings: [],
+            };
+        };
+        const schema = z.object({
+            value: z.coerce.number().transform((value) => value * 2),
+            label: z.string().default("default-label"),
+        });
+        const result = await new OpenAIAgent({ model: fake.model }).generate({ prompt: "return a value", outputSchema: schema });
+        expect(result.output).toEqual({ value: 14, label: "default-label" });
+    });
+    test("OpenAIAgent defers invalid Zod output errors until direct output access", async () => {
+        const fake = createFakeModel();
+        fake.model.doGenerate = async () => ({
+            content: [{ type: "text", text: JSON.stringify({ value: "not-a-number" }) }],
+            finishReason: "stop",
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            warnings: [],
+        });
+        const result = await new OpenAIAgent({ model: fake.model }).generate({ prompt: "return a number", outputSchema: z.object({ value: z.number() }) });
+        expect(() => result.output).toThrow();
+        expect(result.text).toContain("not-a-number");
+    });
     test("OpenAIAgent can disable native structured output for local providers", async () => {
         const fake = createFakeModel();
         const agent = new OpenAIAgent({

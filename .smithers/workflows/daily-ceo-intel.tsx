@@ -207,7 +207,7 @@ export default smithers((ctx) => {
         ) : null}
 
         {configOut ? (
-          <Task id="select-model-provider" output={outputs.ceoIntelProviderSelection}>
+          <Task id="select-model-provider" output={outputs.ceoIntelProviderSelection} noRetry timeoutMs={30_000}>
             {async () => {
               const selection = await selectModelProvider(process.env);
               return {

@@ -32,6 +32,13 @@ ${props.verifyErrors.map((error) => `- ${error}`).join("\n")}
 - **Word count: {props.wordMin}–{props.wordMax} words** for the full issue
   body (headline through the coverage statement), unless it is a quiet day
   (see below).
+- On a non-quiet day, this is a hard minimum, not a suggestion: target
+  1,050–1,200 words so the final structured output remains safely above the
+  {props.wordMin}-word floor. Estimate the actual prose before returning; if
+  it is below 1,000 words, expand story context, implications, and our-move
+  analysis first. Give each top story a substantive 120–180 word paragraph,
+  plus a 60–90 word intro and complete briefs/actions/lighter-side sections.
+  Never return a concise draft that is merely close to the threshold.
 
 ## Section order — always the same, Lighter Side always last
 

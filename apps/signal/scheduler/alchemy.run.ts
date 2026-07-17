@@ -97,6 +97,7 @@ export const worker = await Worker("signal-scheduler", {
     ...(anthropicApiKey ? { ANTHROPIC_API_KEY: alchemy.secret(anthropicApiKey) } : {}),
     ...(openaiApiKey ? { OPENAI_API_KEY: alchemy.secret(openaiApiKey) } : {}),
     ...(geminiApiKey ? { GEMINI_API_KEY: alchemy.secret(geminiApiKey) } : {}),
+    SIGNAL_MODEL_PROVIDER: process.env.SIGNAL_MODEL_PROVIDER?.trim().toLowerCase() || "auto",
     CLOUDFLARE_ACCOUNT_ID: CLOUDFLARE_ACCOUNT_ID,
     CLOUDFLARE_API_TOKEN: alchemy.secret(cloudflareApiToken),
     CLOUDFLARE_KV_NAMESPACE_ID: kv.namespaceId,

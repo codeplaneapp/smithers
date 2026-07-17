@@ -19,20 +19,48 @@ const INFLIGHT_TTL_SECONDS = 90 * 60;
 const WATCHDOG_MARKER_TTL_SECONDS = 48 * 60 * 60;
 
 type TriggerResult = { ok: boolean; status: number; body: unknown };
+type RunnerControl = {
+  start(): Promise<void>;
+  schedule(delaySeconds: number, callback: string, payload: { dateEt: string }): Promise<unknown>;
+  listSchedules(callback: string): Promise<Array<unknown>>;
+  getState(): Promise<{ status: string }>;
+};
 
 async function isRunInFlight(env: Env, dateEt: string): Promise<boolean> {
-  return (await env.SIGNAL_REPORTS.get(`inflight:${dateEt}`)) !== null;
+  const marker = await env.SIGNAL_REPORTS.get(`inflight:${dateEt}`);
+  const terminal = await env.SIGNAL_REPORTS.get(`run-status:${dateEt}`, "json") as
+    | { ok?: boolean; completedAt?: string }
+    | null;
+  if (terminal?.completedAt && terminal.ok === false) {
+    await env.SIGNAL_REPORTS.delete(`inflight:${dateEt}`);
+    return false;
+  }
+  const container = getContainer(env.RUNNER) as unknown as RunnerControl;
+  const schedules = await container.listSchedules("run");
+  if (marker === null) return schedules.length > 0;
+  if (schedules.length > 0) return true;
+  try {
+    const state = await container.getState();
+    if (state.status === "stopped" || state.status === "stopped_with_code") {
+      await env.SIGNAL_REPORTS.delete(`inflight:${dateEt}`);
+      return false;
+    }
+  } catch {
+    // Keep the marker when the container state cannot be inspected.
+  }
+  return true;
 }
 
 async function triggerRunner(env: Env, dateEt: string): Promise<TriggerResult> {
   await env.SIGNAL_REPORTS.put(`inflight:${dateEt}`, "1", { expirationTtl: INFLIGHT_TTL_SECONDS });
   try {
-    const container = getContainer(env.RUNNER);
-    const response = await container.fetch(new Request("http://runner/run", { method: "POST" }));
-    const body = await response.json().catch(() => ({ ok: response.ok }));
-    return { ok: response.ok, status: response.status, body };
-  } finally {
+    const container = getContainer(env.RUNNER) as unknown as RunnerControl;
+    await container.start();
+    await container.schedule(0, "run", { dateEt });
+    return { ok: true, status: 202, body: { ok: true, status: "scheduled", dateEt } };
+  } catch (error) {
     await env.SIGNAL_REPORTS.delete(`inflight:${dateEt}`);
+    return { ok: false, status: 500, body: { error: error instanceof Error ? error.message : String(error) } };
   }
 }
 
@@ -112,17 +140,12 @@ export default {
       if (await isRunInFlight(env, dateEt)) {
         return Response.json({ ok: false, error: "already in flight", dateEt }, { status: 409 });
       }
-      // Run under waitUntil (matching the cron handlers below) so the container
-      // run survives the triggering client disconnecting/timing out — a run can
-      // take much longer than an HTTP client is willing to stay connected for,
-      // and a canceled fetch here would otherwise kill the run mid-flight and
-      // leave a stale inflight marker for up to INFLIGHT_TTL_SECONDS.
-      ctx.waitUntil(
-        triggerRunner(env, dateEt).then(async (result) => {
-          if (!result.ok) await alert(env, `Manual trigger run for ${dateEt} failed: HTTP ${result.status} ${JSON.stringify(result.body)}`);
-        }),
-      );
-      return Response.json({ ok: true, status: "started", dateEt }, { status: 202 });
+      const result = await triggerRunner(env, dateEt);
+      if (!result.ok) {
+        await alert(env, `Manual trigger scheduling for ${dateEt} failed: HTTP ${result.status}`);
+        return Response.json(result.body, { status: result.status });
+      }
+      return Response.json(result.body, { status: 202 });
     }
 
     return new Response("not found", { status: 404 });
