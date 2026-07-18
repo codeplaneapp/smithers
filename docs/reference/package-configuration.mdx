@@ -22,7 +22,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/gateway-ui` | `./src/gateway-ui.js` | Prebuilt React components for gateway-backed UIs (`RunList`, `RunTree`, `ApprovalPanel`, and more) |
 | `smithers-orchestrator/ui` | `./src/ui.js` | Shared shadcn-anatomy component library (`Button`, `Card`, `Dialog`, `Tabs`, `StatusPill`, and more) styled through the ui-styleguide theme tokens |
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
-| `smithers-orchestrator/browser` | `./src/browser.js` | Runtime-agnostic core (`WorkflowDriver`, `SmithersRenderer`, graph extraction) running under a browser `RuntimeAdapter`: `createBrowserSmithers`, `runBrowserWorkflow`, `createBrowserRuntime`, `defineBrowserWorkflow`, and the browser-safe `Task`/`Workflow`/`Sequence`/`Worktree` primitives. Supports static, compute, and in-process `AgentLike.generate` tasks with Map-backed run/output storage and Web Crypto UUIDs. Does not include the Node engine, database factories, CLI agents, tools, or server code -- `filesystem`, `subprocess`, `worktree`, and `sandbox` operations fail closed with a typed `RuntimeCapabilityError` (code `RUNTIME_CAPABILITY_UNAVAILABLE`) |
+| `smithers-orchestrator/browser` | `./src/browser.js` | Portable browser runner, `RuntimeAdapter`, browser-safe workflow primitives, Map-backed default storage, and typed fail-closed host capabilities. See [Browser runtime](/runtime/browser) |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
 | `smithers-orchestrator/microsandbox` | `./src/microsandbox.js` | Microsandbox provider: run child workflows in local hardware-isolated microVMs |
@@ -50,7 +50,7 @@ The PI plugin is published as the separate `@smithers-orchestrator/pi-plugin` pa
 
 ## Workspace Packages
 
-Most applications should import from `smithers-orchestrator`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. Some app workspaces are private and are not published packages.
+Most applications should import from `smithers-orchestrator`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. This table is a repository map, not the core feature inventory. Private apps and examples are implementation consumers and are not published Smithers features. See [Feature inventory](/reference/feature-inventory) for the core product boundary.
 
 | Package | Primary surface | Related docs |
 |---|---|---|
@@ -92,16 +92,8 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the full-screen Smithers TUI monitor marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/observability` | Event types, logging, tracing, metrics, Prometheus rendering, and runtime observability layers | [Events](/runtime/events), [Event Types](/reference/event-types) |
 | `@smithers-orchestrator/openapi` | OpenAPI parsing, operation extraction, AI SDK tool generation, schema conversion, and metrics | [OpenAPI Tools](/concepts/openapi-tools), [Tools](/integrations/tools) |
-| `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the automation marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/ddd-site` | Private Cloudflare Worker deployment for the docs-driven-development marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the init marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/kimi-benchmarks-site` | Private Cloudflare Worker serving the Kimi K3 RoadmapBench report and its evidence bundle | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the monitor marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/openclaw-site` | Private Cloudflare Worker deployment for the OpenClaw marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the plugins marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/self-healing-site` | Private Cloudflare Worker deployment for the self-healing marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Telegram marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/ui-site` | Private Cloudflare Worker deployment for the UI marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/pi-plugin` | PI extension runtime, views, API wrappers, and workflow inspection integration | [PI Integration](/integrations/pi-integration) |
 | `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the Smithers plugins marketing site (Claude Code and Codex) | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | [Types](/reference/types), [Errors](/reference/errors) |
@@ -112,12 +104,12 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | [Evals](/guides/evals-quickstart), [Evals Quickstart](/guides/evals-quickstart) |
 | `@smithers-orchestrator/self-healing-site` | Private Cloudflare Worker deployment for the self-healing agent runs marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/server` | HTTP, WebSocket, Gateway, cron, webhook, metrics, and single-workflow serving APIs | [Server](/integrations/server), [Serve](/integrations/serve) |
-| `@smithers-orchestrator/signal` | Private Cloudflare deployment of The Smithers Signal: the daily-ceo-intel runner container, cron/watchdog scheduler Worker, and reports site | [Serverless](/deployment/serverless) |
+| `@smithers-orchestrator/signal` | Repository-only example deployment for The Smithers Signal and its daily CEO intel workflow; not part of the core Smithers product or init pack | [Serverless](/deployment/serverless) |
 | `@smithers-orchestrator/smithers-ui` | Private local-only UI app: the full run/approval/memory control surface, served by `bunx smithers-orchestrator ui --app` against a local Gateway | [Gateway UI Components](/reference/gateway-ui) |
 | `@smithers-orchestrator/telegram` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes | [Telegram](/integrations/telegram) |
 | `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Smithers on Telegram marketing site, including the reference approval Mini App | [Telegram](/integrations/telegram), [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/telegram-summary` | Private Cloudflare app: Telegram Bot API ingestion, Kimi daily digests, D1 storage, and the `telegram-summary.smithers.sh` dashboard | [Custom Workflow UI](/guides/custom-workflow-ui), [CLI Overview](/cli/overview) |
-| `@smithers-orchestrator/testing` | Source-shipped workflow test helpers for fake agents, frame rendering, prompt rendering, and descriptor task execution | This page, [Render Frame](/runtime/render-frame) |
+| `@smithers-orchestrator/testing` | Workflow simulation, scripted agents, render/task helpers, matchers, and unit/integration/e2e durability scenario harnesses | [Testing workflows](/guides/testing-workflows), [Render Frame](/runtime/render-frame) |
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | [Time Travel](/recipes), [Time Travel Quickstart](/guides/time-travel-quickstart) |
 | `@smithers-orchestrator/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smithers-orchestrator` without a dependency cycle | [Execution Model](/how-it-works) |
 | `@smithers-orchestrator/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smithers-orchestrator up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | [CLI Overview](/cli/overview) |

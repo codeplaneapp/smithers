@@ -8,6 +8,8 @@ import { Sequence } from "smithers-orchestrator";
 
 type SequenceProps = {
   key?: string;
+  label?: string; // display name in run views
+  failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
   children?: ReactNode;
 };

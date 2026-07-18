@@ -66,6 +66,7 @@ const CORE_PAGES = [
   // CLI catalog
   "cli/overview.mdx",
   "cli/quickstart.mdx",
+  "guides/testing-workflows.mdx",
   // Components reference (every component, compressed)
   "components/workflow.mdx",
   "components/task.mdx",
@@ -108,12 +109,14 @@ const CORE_PAGES = [
   "components/debate.mdx",
   "components/kanban.mdx",
   "components/delegation-chain.mdx",
+  "components/trellis.mdx",
   // Recipes and reference
   "recipes.mdx",
   "workflows/authoring-rules.mdx",
   "guides/common-footguns.mdx",
   "reference/types.mdx",
   "reference/errors.mdx",
+  "reference/feature-inventory.mdx",
   "reference/package-configuration.mdx",
   "reference/vcs-helpers.mdx",
   // Building a workflow UI: prebuilt React components agents drop into
@@ -131,6 +134,7 @@ const CORE_PAGES = [
   // fragment because the SmithersEvent union is too detailed for everyday
   // schema noise for everyday use.
   "runtime/run-workflow.mdx",
+  "runtime/browser.mdx",
   "runtime/render-frame.mdx",
   "runtime/revert.mdx",
   "runtime/run-state.mdx",

@@ -2397,7 +2397,7 @@ function checkPackageConfigurationDocsMatchRootConfig() {
     testRoot ? `| \`root\` | \`${testRoot.replace(/^"|"$/g, "")}\` |` : null,
     testPreload ? `| \`preload\` | \`${testPreload}\` |` : null,
     "Entry files in this table are relative to the published `smithers-orchestrator` package; in the repository they live under `packages/smithers/`.",
-    "Most applications should import from `smithers-orchestrator`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. Some app workspaces are private and are not published packages.",
+    "Most applications should import from `smithers-orchestrator`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. This table is a repository map, not the core feature inventory. Private apps and examples are implementation consumers and are not published Smithers features. See [Feature inventory](/reference/feature-inventory) for the core product boundary.",
     ...exportRows,
     ...facadeSubpathRows.map(([importPath, entry]) => `| \`${importPath}\` | \`${entry}\` |`),
     ...Object.entries(packageJson.scripts ?? {}).map(([script, command]) => `| \`${script}\` | \`${command}\` |`),
@@ -2416,6 +2416,7 @@ function checkPackageConfigurationDocsMatchRootConfig() {
     "| `smithers-orchestrator/memory` | `./packages/memory/src/index.js` |",
     "| `smithers-orchestrator/openapi` | `./packages/openapi/src/index.js` |",
     "The scoped workspace packages below are published for advanced integrations",
+    "Some app workspaces are private and are not published packages.",
   ];
   const missing = required.filter((needle) => !docs.includes(needle));
   const stale = forbidden.filter((needle) => docs.includes(needle));

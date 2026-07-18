@@ -11,6 +11,8 @@ type ParallelProps = {
   label?: string; // display name for this group in run views (graph, /workflows mirror)
   maxConcurrency?: number; // default: no per-group cap; effective concurrency is bounded by the run-level cap
   subtreeConcurrency?: number; // opt-in: cap DIRECT CHILDREN (whole subtrees) in flight, not leaf tasks
+  priority?: number; // inherited default for descendant tasks
+  failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
   children?: ReactNode;
 };

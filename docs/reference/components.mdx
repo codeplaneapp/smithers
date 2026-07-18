@@ -4,8 +4,9 @@ description: The typed JSX component surface a workflow is built from, at a glan
 icon: "shapes"
 ---
 
-Components are not imported from `smithers-orchestrator`; the factory returns a
-typed set bound to your output schemas.
+Components are exported from `smithers-orchestrator`. `createSmithers(...)`
+also returns the same primitives bound to the workflow context and typed output
+schemas, which is the preferred form inside workflow modules.
 
 ```ts
 const { Workflow, Task, Sequence, Parallel, Branch, Loop } = createSmithers(schemas);
@@ -23,6 +24,7 @@ The structural primitives. They order, branch, repeat, and gate the work.
 | --- | --- | --- | --- |
 | `Workflow` | [`WorkflowProps`](/reference/types) | Root node; names the run and holds the graph. | [Workflow](/components/workflow) |
 | `Task` | [`TaskProps`](/reference/types) | Executable node; runs an agent, a compute callback, or emits a static value. | [Task](/components/task) |
+| `Memory` | [`MemoryProps`](/reference/types) | Provide recall, primers, retention, and memory tools to descendant tasks. | [Memory](/components/memory) |
 | `Sequence` | [`SequenceProps`](/reference/types) | Run children in order, each waiting for the last. | [Sequence](/components/sequence) |
 | `Parallel` | [`ParallelProps`](/reference/types) | Run children concurrently and join. | [Parallel](/components/parallel) |
 | `Branch` | [`BranchProps`](/reference/types) | Pick one child path from a predicate. | [Branch](/components/branch) |
@@ -56,6 +58,7 @@ hand-rolling the same shape.
 | `Supervisor` | [`SupervisorProps`](/reference/types) | Watch a child and restart it under a policy. | [Supervisor](/components/supervisor) |
 | `Runbook` | [`RunbookProps`](/reference/types) | Run an ordered set of operational steps. | [Runbook](/components/runbook) |
 | `DelegationChain` | [`DelegationChainProps`](/reference/types) | Hand a task down a chain of agents until one resolves it. | [DelegationChain](/components/delegation-chain) |
+| `Trellis` | [`TrellisProps`](/reference/types) | Let trusted author agents compile bounded recursive delegation programs. | [Trellis](/components/trellis) |
 
 ## Engine
 

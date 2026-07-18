@@ -10,6 +10,7 @@ type TaskProps = {
   id: string;
   output: z.ZodObject | Table | string;
   outputSchema?: z.ZodObject; // inferred when output is a Zod schema
+  maxSchemaRetries?: number; // default 3; correction calls after the initial agent response
   agent?: AgentLike | AgentLike[]; // array = [primary, ...fallbacks]
   fallbackAgent?: AgentLike;
   dependsOn?: string[];
@@ -32,6 +33,8 @@ type TaskProps = {
   label?: string;
   meta?: Record<string, unknown>;
   scorers?: ScorersMap;
+  groundTruth?: unknown; // reference answer supplied to scorers
+  context?: unknown; // source context supplied to scorers
   memory?: {
     bank?: string;
     banks?: string[];
@@ -50,6 +53,8 @@ type TaskProps = {
   heartbeatTimeout?: number; // alias of heartbeatTimeoutMs
   hijack?: boolean; // request an immediate hijack handoff as soon as the task starts running
   onHijackExit?: "complete" | "reopen"; // what Smithers should do after a hijacked session exits
+  priority?: number; // higher runnable priorities claim free concurrency slots first
+  failurePolicy?: "halt" | "quarantine"; // override the nearest container policy
   children?:
     | string
     | Row

@@ -3387,6 +3387,189 @@ See [Tour](/tour) for a full worked example. See [CLI overview](/cli/overview) f
 
 ---
 
+## Testing workflows
+
+> Simulate workflows, script agents, and assert task behavior with Bun tests.
+
+`@smithers-orchestrator/testing` is the consumer-facing test surface for Smithers workflows. Import it from the published facade:
+
+```ts
+import {
+  auto,
+  dryRun,
+  fakeAgent,
+  renderPrompt,
+  renderWorkflow,
+  runTask,
+  simMatchers,
+  simulate,
+  toHaveExecuted,
+  toHaveExecutedInOrder,
+  toHaveFinished,
+} from "smithers-orchestrator/testing";
+```
+
+<Note>
+The examples below use the normal `createSmithers` workflow API and `bun:test`; the testing helpers do not replace workflow authoring components.
+</Note>
+
+## Unit-test a workflow
+
+`simulate(workflow, options?)` renders and runs a workflow in memory. Pass the workflow's input through `input`, and provide task responses in `mocks`. Mock keys can be exact task IDs or globs; `"*"` is the fallback key for agent tasks. Each value can be a function, a raw output value, `auto`, or a `FakeAgent`. Agent tasks without a matching mock fail loudly, which keeps a test from accidentally calling a real agent.
+
+The returned `Sim` is lazy: call `await sim.run()` to execute it. It records the task IDs it ran, the values stored in each output table, and the final run status.
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { describe, expect, test } from "bun:test";
+import { z } from "zod";
+import { createSmithers } from "smithers-orchestrator";
+import { auto, fakeAgent, simulate } from "smithers-orchestrator/testing";
+
+const schemas = {
+  input: z.object({ name: z.string() }),
+  greeting: z.object({ message: z.string() }),
+  reply: z.object({ text: z.string() }),
+};
+
+function buildWorkflow() {
+  const { Workflow, Task, smithers, outputs } = createSmithers(schemas);
+  const workflowAgent = fakeAgent(schemas.greeting, {
+    output: { message: "workflow fallback" },
+  });
+
+  return smithers((ctx) => (
+    <Workflow name="greeting">
+      <Task
+        id="greet"
+        output={outputs.greeting}
+        agent={workflowAgent}
+        noRetry
+      >
+        {`Greet ${ctx.input.name}`}
+      </Task>
+      <Task id="reply" output={outputs.reply} dependsOn={["greet"]}>
+        {() => ({ text: `done ${ctx.input.name}` })}
+      </Task>
+    </Workflow>
+  ));
+}
+
+describe("greeting workflow", () => {
+  test("runs with a scripted agent", async () => {
+    const scripted = fakeAgent.sequence(
+      schemas.greeting,
+      [{ message: "hello Ada" }],
+    );
+
+    const sim = simulate(buildWorkflow(), {
+      input: { name: "Ada" },
+      mocks: { greet: scripted },
+    });
+
+    await sim.run();
+
+    expect(sim.status).toBe("finished");
+    expect(sim.executed).toEqual(["greet", "reply"]);
+    expect(sim.outputs.greeting).toEqual([{ message: "hello Ada" }]);
+    expect(sim.outputs.reply).toEqual([{ text: "done Ada" }]);
+    expect(scripted.calls).toHaveLength(1);
+  });
+
+  test("can generate a schema-shaped response automatically", async () => {
+    const agent = fakeAgent(schemas.greeting, auto);
+
+    await expect(agent.generate()).resolves.toEqual({
+      output: { message: "string" },
+    });
+  });
+});
+```
+
+The main `Sim` fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `executed` | Task node IDs in the order they executed. |
+| `outputs` | Arrays of validated task outputs keyed by output-table name, such as `greeting` or `reply`. |
+| `status` | The current run status, including `pending`, `running`, `finished`, or `failed`. |
+
+`sim.output` is the latest workflow output. `sim.task(id)` returns that task's status, outputs, and rendered prompts; `unusedMocks` identifies mock keys that were never consumed. A failed simulation exposes `error` and `sim.run()` rejects. Output schemas are checked before values are recorded.
+
+### Scripted agents
+
+`fakeAgent(schema, script, options?)` creates a `FakeAgent` whose script can be a bare schema value, a `{ output, text, files }` response, `auto`, or a function returning one of those forms. Responses with an `output` are validated against the supplied schema. `fakeAgent.sequence(schema, entries, options?)` consumes a fixed list in order, which is useful for retries or repeated task runs.
+
+The `FakeAgent<T>` type describes the returned agent. Its `generate()` method is compatible with Smithers agents, while `calls`, `lastPrompt()`, and `reset()` let a test inspect or clear its history. The optional agent settings are `id`, `model`, and `supportsNativeStructuredOutput`.
+
+`auto` is a schema-derived response sentinel. It requires an output schema and supplies an example-shaped output; use an explicit value or function when the exact result matters. File responses are written below the `rootDir` supplied to `generate()` or the test helper.
+
+## Render and run one task
+
+Use `renderWorkflow` when a test needs a rendered frame or task descriptors without executing them. It resolves task output schemas and attaches the same subflow and sandbox compute functions as the engine. The returned `RenderedWorkflow` includes the rendered `tasks`, `ctx`, `runId`, `frameNo`, and `toXml()`.
+
+```ts
+import { renderPrompt, renderWorkflow, runTask } from "smithers-orchestrator/testing";
+
+const frame = await renderWorkflow(buildWorkflow(), {
+  input: { name: "Ada" },
+  runId: "render-test",
+});
+const task = frame.tasks.find(({ nodeId }) => nodeId === "greet");
+if (!task) throw new Error("greet task was not rendered");
+
+const prompt = renderPrompt(task.prompt);
+const output = await runTask(task, { runId: frame.runId });
+
+console.log({ prompt, output, xml: frame.toXml() });
+```
+
+`renderPrompt(prompt)` converts a rendered task prompt to the same text form used by the production task renderer. `runTask(task, options?)` executes only one `TaskDescriptor`: static descriptors return their payload, compute descriptors call their compute function, and agent descriptors call their selected agent. When the descriptor has an output schema, the result is validated. For agent descriptors, `RunTaskOptions` forwards `rootDir`, `attempt`, and `runId` to the agent call.
+
+`dryRun(ast, options?)` is the planning companion for the durability scenario API below. It canonicalizes and compiles the scenario, reports required capabilities and admissions, creates a replay-bundle skeleton, lists planned steps, and sets `executesAgents` to `false`. Its returned `run()` function is the point at which the scenario is actually executed.
+
+## Assertions with Bun matchers
+
+The testing package augments `bun:test`'s matcher types. Register the exported matcher set once in the test file, then assert against a `Sim`:
+
+```ts
+import { expect, test } from "bun:test";
+import { simMatchers, simulate } from "smithers-orchestrator/testing";
+
+expect.extend(simMatchers);
+
+test("checks the simulated path", async () => {
+  const sim = simulate(buildWorkflow(), {
+    input: { name: "Ada" },
+    mocks: { greet: { message: "hello Ada" } },
+  });
+
+  await sim.run();
+
+  expect(sim).toHaveExecuted(["greet", "reply"]);
+  expect(sim).toHaveExecutedInOrder(["greet", "reply"]);
+  expect(sim).toHaveFinished();
+});
+```
+
+`toHaveExecuted(ids)` requires every listed ID to appear. `toHaveExecutedInOrder(ids)` requires them as an ordered subsequence, so unrelated tasks may occur between them. `toHaveFinished()` checks for the exact `"finished"` status. The same functions are also exported as `toHaveExecuted`, `toHaveExecutedInOrder`, and `toHaveFinished` for direct matcher use.
+
+## Advanced: durability scenario harness
+
+For modeled scheduling and durability behavior, compose an immutable scenario AST with `scenario`, `step`, and `fault`; `barrier` and `extension` are available for explicit synchronization and registered extensions. A `step` can declare `input`, `dependsOn`, `capabilities`, and a `run` function. Its task runtime exposes mediated `effect`, virtual `sleep`, structured `log`, and explicitly opaque work. A `fault` names a phase and operation at which to inject a failure or ambiguity.
+
+`runScenario(ast, options?)` executes the AST and returns a result containing its status, outputs, trace, replay identity, control log, capability report, ambiguity records, and determinism report. `unitSimHarness`, `integrationHarness`, and `e2eHarness` select the capability tier: deterministic virtual-time and seeded-interleaving simulation; a real database adapter; or a real process adapter. `runScenario` defaults to `unitSimHarness()`; the real tiers require verified, executable production adapters and can report a capability failure or skip according to policy.
+
+<Warning>
+Unit simulation is not a database or child-process substitute. External effects remain at-least-once unless the application supplies idempotency, and effects outside the task-runtime mediation boundary are opaque. See [`packages/testing/README.md`](https://github.com/smithersai/smithers/blob/main/packages/testing/README.md) for the real-system boundary, replay, fault, and adapter details.
+</Warning>
+
+## Related evaluation tools
+
+For LLM-judge assertions, see [`llmJudge`](/reference/scorers#llmjudge) and [`runScorersBatch`](/reference/scorers#runscorersbatch) in the [Scorers reference](/reference/scorers). For dataset-driven regression suites, see the [Eval Suites Quickstart](/guides/evals-quickstart).
+
+---
+
 ## <Workflow>
 
 > Root container; sequences direct children, optionally caches for resume.
@@ -3443,6 +3626,7 @@ type TaskProps = {
   id: string;
   output: z.ZodObject | Table | string;
   outputSchema?: z.ZodObject; // inferred when output is a Zod schema
+  maxSchemaRetries?: number; // default 3; correction calls after the initial agent response
   agent?: AgentLike | AgentLike[]; // array = [primary, ...fallbacks]
   fallbackAgent?: AgentLike;
   dependsOn?: string[];
@@ -3465,6 +3649,8 @@ type TaskProps = {
   label?: string;
   meta?: Record<string, unknown>;
   scorers?: ScorersMap;
+  groundTruth?: unknown; // reference answer supplied to scorers
+  context?: unknown; // source context supplied to scorers
   memory?: {
     bank?: string;
     banks?: string[];
@@ -3483,6 +3669,8 @@ type TaskProps = {
   heartbeatTimeout?: number; // alias of heartbeatTimeoutMs
   hijack?: boolean; // request an immediate hijack handoff as soon as the task starts running
   onHijackExit?: "complete" | "reopen"; // what Smithers should do after a hijacked session exits
+  priority?: number; // higher runnable priorities claim free concurrency slots first
+  failurePolicy?: "halt" | "quarantine"; // override the nearest container policy
   children?:
     | string
     | Row
@@ -3847,6 +4035,8 @@ import { Sequence } from "smithers-orchestrator";
 
 type SequenceProps = {
   key?: string;
+  label?: string; // display name in run views
+  failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
   children?: ReactNode;
 };
@@ -3894,6 +4084,8 @@ type ParallelProps = {
   label?: string; // display name for this group in run views (graph, /workflows mirror)
   maxConcurrency?: number; // default: no per-group cap; effective concurrency is bounded by the run-level cap
   subtreeConcurrency?: number; // opt-in: cap DIRECT CHILDREN (whole subtrees) in flight, not leaf tasks
+  priority?: number; // inherited default for descendant tasks
+  failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
   children?: ReactNode;
 };
@@ -4001,6 +4193,7 @@ type BranchProps = {
   then: ReactElement;
   else?: ReactElement | null;
   skipIf?: boolean;
+  children?: never; // branches are supplied through then/else
 };
 ```
 
@@ -6124,6 +6317,8 @@ import { MergeQueue } from "smithers-orchestrator";
 type MergeQueueProps = {
   id?: string;
   maxConcurrency?: number;  // default: 1
+  priority?: number; // inherited task priority; default 1000
+  failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
   children?: ReactNode;
 };
@@ -6141,6 +6336,10 @@ type MergeQueueProps = {
 
 - Innermost group determines the effective cap for its descendants.
 - Tasks outside the queue are unaffected by its limit.
+- The default priority is `1000`, so ready landing work claims a free run slot
+  before ordinary tasks at priority `0`. An explicit child priority wins.
+- `failurePolicy="quarantine"` lets unrelated queue branches continue after a
+  child fails; the default `halt` behavior fails the run.
 
 ---
 
@@ -6635,6 +6834,270 @@ attention rollups, budget rollup, phase) and returns the `submitEdit`,
 - Scoring wiring: `scorers.exec` / `scorers.review` ride the exec and review
   tasks; `scorers.run` rides the digest task. The delegation scorers live in
   `smithers-orchestrator/scorers` (see the [scorer reference](/reference/scorers)).
+
+---
+
+## <Trellis>
+
+> Recursive, model-authored delegation over a strict and fuel-bounded workflow IR.
+
+`<Trellis>` lets Sol or Fable decide the useful workflow shape from evidence
+discovered during the run. Authors return declarative `agent | sequence |
+parallel` data; Smithers validates and compiles it into ordinary tasks in the
+same run. Terra and Luna can execute bounded goals, but their schemas contain
+no way to delegate.
+
+Trellis is experimental and coexists with the fixed
+[`<DelegationChain>`](/components/delegation-chain). Use it for open-ended work
+whose topology should adapt at runtime. Keep fixed JSX for known deterministic
+graphs.
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import {
+  ClaudeCodeAgent,
+  CodexAgent,
+  Trellis,
+  createSmithers,
+  delegationV2Schemas,
+} from "smithers-orchestrator";
+import { z } from "zod/v4";
+
+const input = z.object({
+  prompt: z.string().trim().min(1).default("Build the requested result and prove it works."),
+});
+const { Workflow, smithers, outputs } = createSmithers({
+  input,
+  ...delegationV2Schemas,
+});
+
+const sol = new CodexAgent({ model: "gpt-5.6-sol" });
+const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
+const terra = new CodexAgent({ model: "gpt-5.6-terra" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
+
+export default smithers((ctx) => {
+  // Static graph rendering does not apply input-schema defaults, so repeat the
+  // prompt default before Trellis validates it at render time.
+  const prompt = ctx.input.prompt?.trim() || "Build the requested result and prove it works.";
+
+  return (
+    <Workflow name="adaptive-work">
+      <Trellis
+        prompt={prompt}
+        agents={{ sol, fable, terra, luna }}
+        outputs={outputs}
+        maxConcurrency={4}
+        limits={{
+          maxTotalAuthorTurns: 32,
+          maxAuthorGenerations: 4,
+          maxAuthorDepth: 4,
+        }}
+      />
+    </Workflow>
+  );
+});
+```
+
+The run must explicitly pin the same concurrency value:
+
+```bash
+bunx smithers-orchestrator up workflow.tsx \
+  --input '{"prompt":"Implement the feature and prove it works"}' \
+  --max-concurrency 4
+```
+
+Trellis rejects an omitted or mismatched run cap and rejects
+`requireRerenderOnOutputChange: false`. This keeps recursive fan-out inside one
+authoritative scheduler pool and ensures outputs trigger the continuation
+render that consumes them.
+
+## Props
+
+```ts
+type TrellisProps = {
+  prompt: string;
+  goal?: GoalContract;
+  acceptance?: AcceptanceCriterion[];
+  instructions?: string;
+  role?: "sol" | "fable";             // default "sol"
+  work?: WorkKind;                     // default "synthesize"
+  outputContract?: OutputContractId;   // default "work_product"
+  agents: Record<"sol" | "fable" | "terra" | "luna", AgentLike | AgentLike[]>;
+  outputs: TrellisOutputs;             // from delegationV2Schemas
+  idPrefix?: string;                   // default "trellis"
+  semanticRevision?: string;
+  criticalExecutionPolicy?: {
+    allowedCategories: Array<
+      | "security_boundary"
+      | "data_integrity"
+      | "concurrency_invariant"
+      | "protocol_core"
+      | "irreversible_migration"
+    >;
+    allowedPathPrefixes: string[];     // normalized workspace-relative paths
+    maxChangedLines: number;           // 1..500, per admitted execution
+  };
+  maxConcurrency?: number;             // default 4; must equal the pinned run cap
+  limits?: {
+    maxTotalAuthorTurns?: number;       // default 32; global recursive author fuel
+    maxAuthorGenerations?: number;      // default 4 per logical author
+    maxAuthorDepth?: number;            // default 4
+    maxNodesPerProgram?: number;        // default 64
+    maxProgramDepth?: number;           // default 8
+    maxFanout?: number;                 // default 16
+    maxPromptBytes?: number;            // default 16,384
+    maxTotalPromptBytes?: number;       // default 131,072
+  };
+  skipIf?: boolean;
+};
+```
+
+Spread `delegationV2Schemas` into the same `createSmithers` call and pass its
+`outputs`. It registers raw author and worker envelopes, validation rows,
+canonical outcomes, the final row, and reserved question/answer rows.
+
+`semanticRevision` is a caller-owned cache/identity revision. Change it when an
+agent's provider, sandbox, ambient commands, or tool policy changes in a way
+that is not visible in the agent fingerprint; Trellis then derives new root and
+final node IDs instead of reusing old semantic results.
+
+### Exceptional Sol/Fable execution
+
+Direct Sol/Fable implementation is disabled when `criticalExecutionPolicy` is
+omitted. With a policy, an authored `execute` node must request a registered
+criticality category, state the invariant and line sensitivity, name explicit
+workspace-relative paths and expected changed lines, identify surrounding
+delegated work, and feed its output to an independent review node. That review,
+or a node consuming it, must be a declared program output so the next author
+continuation cannot race it.
+
+Independent means a different role backed by a non-overlapping configured
+agent or failover chain, not merely a different graph node. Trellis derives the
+allowed reviewer-role matrix from `agents`: the executor and reviewer cannot
+share the same `AgentLike` object or the same non-empty `AgentLike.id`, and any
+overlap between their failover chains disqualifies that role pairing.
+
+The validator admits a request only inside the caller's category, path-prefix,
+and line ceiling. The compiler then binds the canonical grant to the exact
+invocation, program ID/digest, logical node, role, `execute` work kind, and the
+reviewer's role and canonical outcome node; an
+ungranted or mismatched Sol/Fable `complete` becomes
+`runtime_failed/invalid_return`. Policy and grant hashes are persisted in task
+metadata, and changing policy changes the root semantic identity.
+
+This is an admission contract, not measured filesystem enforcement in Phase A.
+The runtime does not yet compare the reported estimate with a real diff or
+prevent symlink/ambient-shell escapes. Configure an adapter-owned sandbox/tool
+boundary when those guarantees are required.
+
+## Authority and return types
+
+Every model return is a strict top-level object containing a tagged union:
+
+| Renderer | Allowed final tags | May author descendants |
+| --- | --- | --- |
+| Sol/Fable author | `subworkflow | complete | blocked` | Yes |
+| Sol/Fable semantic repair | `subworkflow` only after settlement rules | Correct one rejected fragment |
+| Terra worker | `complete | blocked` | No |
+| Luna worker | `complete | blocked` | No |
+| Trusted settlement | `complete | blocked | runtime_failed` | No |
+| Root final row | `complete | blocked | runtime_failed | fuel_exhausted` | No |
+
+An authored subworkflow can contain Sol, Fable, Terra, or Luna `agent` nodes
+inside `sequence` and `parallel` containers. Sol/Fable agent nodes recursively
+render another author invocation. Terra/Luna agent nodes render one worker and
+one deterministic settlement. Workers cannot smuggle graph structure because
+`subworkflow` is absent from their output schema.
+
+The runtime does not trust a model's terminal claim directly. Settlement binds
+it to the trusted assignment's role, work kind, output contract, and exact
+acceptance IDs; every passed or failed criterion must cite a real evidence or
+artifact ID. Bad coverage, a dangling proof, the wrong work kind, or a
+contract-specific shape violation becomes parent-visible
+`runtime_failed/invalid_return`.
+
+## Recursive execution
+
+One logical author invocation proceeds as follows:
+
+1. Sol/Fable returns `complete`, `blocked`, or a proposed subworkflow.
+2. A deterministic validation node receives a bounded raw JSON proposal and
+   rejects unknown fields/tags, bad roles,
+   unresolved/forward references, unsafe parallel writes, invalid critical
+   execution, contract mismatches, and resource-limit violations.
+3. One semantic-repair author turn may correct rejected IR. A structural diff
+   permits changes only at diagnosed fragments and necessarily affected
+   references; valid nodes, intent, and continuation state cannot be replaced.
+   Rejection never mounts descendants.
+4. Accepted IR compiles inline into the current run and preserves explicit
+   declared-output fan-in.
+5. Every child settles to a canonical outcome. The author receives a bounded,
+   provenance-bearing evidence packet and either finishes or authors the
+   smallest corrective fragment.
+
+This expresses direct delegation, pipelines, fan-out/fan-in, research and POC
+waves, debate, and review/optimization loops. The loop is the author
+continuation over settled evidence rather than a model-authored JavaScript
+condition.
+
+Accepted history is append-only. Physical IDs include runtime/prompt/registry
+versions, the root assignment, author lineage, generation, semantic program
+digest, logical ID, and phase. Reordering parallel siblings does not change the
+digest; changing sequence order or prompt semantics does. Completed rows are
+therefore replay-safe without treating a mutable logical ID as identity.
+
+## Fuel and concurrency
+
+`maxTotalAuthorTurns` is the hard recursive cap for all Sol/Fable calls,
+including semantic repair. After an accepted fragment, remaining turns are
+deterministically partitioned between the parent continuation and immediate
+nested authors by sorted logical ID. Shares are immutable and non-refundable:
+unused child fuel burns, so concurrent siblings cannot race or reset a shared
+counter. Author tasks have no execution retries and set `maxSchemaRetries={0}`.
+At the last permitted author depth, Sol/Fable may still author Terra/Luna work,
+but validation rejects another Sol/Fable child before it can mount.
+
+Trusted task metadata persists the pinned root concurrency, global author-turn
+cap, generation/depth limits, and each author invocation's immutable allocation
+and local remainder. Workflow UIs can therefore distinguish selected-run truth
+from next-launch controls. A root invocation remainder is not the global
+remainder after fuel has been partitioned into child allocations.
+
+The pinned run `maxConcurrency` is the hard aggregate. An authored
+`parallel.maxConcurrency` may add a smaller local cap but cannot exceed the
+root. Nested authored local caps that Smithers cannot compose faithfully are
+rejected in this release.
+
+## Output contracts
+
+Work intent and output shape are separate. The closed registry supports
+`work_product`, `goal_contract`, `plan`, `evaluation`, `classification`,
+`issue_scan`, `condition`, `artifact_collection`, and `evidence_collection`.
+The validator restricts which work kinds may promise each contract, and
+settlement checks contract-specific cardinality or structured detail.
+
+Unfavorable evidence is still a completed result: a failed review, disproven
+POC, or failed preview is not automatically `blocked`. Runtime crash, timeout,
+cancel, invalid return, fuel exhaustion, and invalid subworkflow remain typed
+separately.
+
+## Phase A limitations
+
+- The nonblocking `ask_question` broker is not wired. Prompts explicitly say
+  questions are unavailable, and the UI offers no answer control.
+- `Task.allowTools` is not an authority boundary for every adapter. Prompt
+  policy cannot prevent a shell-capable agent from invoking ambient commands;
+  configure role agents with the appropriate real sandbox/tool policy. The
+  example UI labels this boundary explicitly rather than presenting prompt
+  policy as enforced tool or filesystem isolation.
+- Hierarchical token, USD, and time reservations are not enforced.
+- Only `agent | sequence | parallel` is authorable. Branches, loops, macros,
+  approvals, arbitrary callbacks, child runs, and model-authored schemas are
+  intentionally unavailable.
+
+The repository includes a real custom UI and example workflow documented at
+[`trellis`](/workflows/trellis).
 
 ---
 
@@ -7956,11 +8419,13 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   id: string;
   output: Output;
   outputSchema?: import("zod").ZodObject<any>;
+  maxSchemaRetries?: number;        // default 3; correction calls after the initial agent response
   agent?: AgentLike | AgentLike[];
   fallbackAgent?: AgentLike;
   dependsOn?: string[];
   needs?: Record<string, string>;
   deps?: D;
+  depsOptional?: boolean;
   fork?: string;                    // start from another task's final agent session snapshot
   bind?: ProofBinding | ProofBinding[];
   skipIf?: boolean;
@@ -7975,10 +8440,14 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   continueOnFail?: boolean;
   cache?: CachePolicy;
   scorers?: ScorersMap;
+  groundTruth?: unknown;
+  context?: unknown;
   memory?: TaskMemoryConfig;
   hijack?: boolean;
   onHijackExit?: "complete" | "reopen";
   allowTools?: string[];            // CLI-agent tool allowlist
+  priority?: number;
+  failurePolicy?: "halt" | "quarantine";
   label?: string;
   meta?: Record<string, unknown>;
   // string = prompt literal; Row = static result; () => Row = compute fn;
@@ -7986,8 +8455,35 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   children: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | React.ReactNode);
 };
 
-type SequenceProps  = { key?: string; skipIf?: boolean; children?: React.ReactNode };
-type ParallelProps  = { id?: string; maxConcurrency?: number; subtreeConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type SequenceProps = {
+  key?: string;
+  label?: string;
+  failurePolicy?: "halt" | "quarantine";
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+type ParallelProps = {
+  id?: string;
+  label?: string;
+  maxConcurrency?: number;
+  subtreeConcurrency?: number;
+  priority?: number;
+  failurePolicy?: "halt" | "quarantine";
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+type MemoryProps = {
+  bank?: string;
+  banks?: string[];
+  tags?: string[];
+  recall?: "auto" | string | false;
+  budget?: "low" | "mid" | "high";
+  maxTokens?: number;
+  primers?: string[];
+  retain?: "on-complete" | "off";
+  tools?: boolean;
+  children?: React.ReactNode;
+};
 type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
 type LoopProps      = {
   key?: string;
@@ -8109,6 +8605,7 @@ type PollerProps = {
   maxAttempts?: number;
   backoff?: "fixed" | "linear" | "exponential";
   intervalMs?: number;
+  checkTimeoutMs?: number;
   onTimeout?: "fail" | "return-last";
   skipIf?: boolean;
   children?: React.ReactNode;
@@ -8294,6 +8791,139 @@ type EscalationChainProps = {
 };
 
 type MergeQueueProps = { id?: string; maxConcurrency?: number; priority?: number; failurePolicy?: "halt" | "quarantine"; skipIf?: boolean; children?: React.ReactNode };
+
+type Tier = "fable" | "opus" | "sonnet" | "haiku";
+type DelegationAgents = Partial<Record<Tier, AgentLike | AgentLike[]>>;
+type DelegationOutputs = {
+  dcGoal: OutputTarget;
+  dcQuestion: OutputTarget;
+  dcForecast: OutputTarget;
+  dcGoalApproval: OutputTarget;
+  dcPlan: OutputTarget;
+  dcPreview: OutputTarget;
+  dcDevPreview?: OutputTarget;
+  dcGates: OutputTarget;
+  dcProbe: OutputTarget;
+  dcReplan: OutputTarget;
+  dcExec: OutputTarget;
+  dcReview: OutputTarget;
+  dcApproval?: OutputTarget;
+  dcEdit: OutputTarget;
+  dcSkip: OutputTarget;
+  dcPoll: OutputTarget;
+  dcBudget?: OutputTarget;
+  dcScore?: OutputTarget;
+};
+type DelegationBudget = { maxUsd?: number; maxMinutes?: number };
+type DelegationScorers = {
+  exec?: ScorersMap;
+  review?: ScorersMap;
+  run?: ScorersMap;
+};
+type DelegationSharedProps = {
+  idPrefix?: string;
+  agents: DelegationAgents;
+  outputs: DelegationOutputs;
+  approvalPolicy?: string;
+  tierOrder?: Tier[];
+  maxDepth?: number;
+  maxConcurrency?: number;
+  maxDeriskRounds?: number;
+  poll?: boolean;
+  budget?: DelegationBudget;
+  scorers?: DelegationScorers;
+  skipIf?: boolean;
+};
+type GoalRefinementProps = DelegationSharedProps & {
+  prompt: string;
+  maxQuestions?: number;
+  prefetchDepth?: number;
+};
+type DelegationPlanningProps = DelegationSharedProps & { prompt?: string };
+type DelegationPreviewProps = DelegationSharedProps;
+type BackpressurePlanningProps = DelegationSharedProps;
+type DeriskLoopProps = DelegationSharedProps;
+type DelegationExecutionProps = DelegationSharedProps & { maxAttempts?: number };
+type DelegationScoringProps = DelegationSharedProps;
+type DelegationEditListenerProps = DelegationSharedProps & {
+  until?: boolean;
+  maxEdits?: number;
+};
+type DelegationChainProps = DelegationSharedProps & {
+  prompt: string;
+  maxQuestions?: number;
+  prefetchDepth?: number;
+  maxAttempts?: number;
+  maxEdits?: number;
+};
+
+type DelegationV2Role = "sol" | "fable" | "terra" | "luna";
+type DelegationV2WorkKind =
+  | "refine_goal" | "plan" | "research" | "poc"
+  | "execute" | "review" | "preview" | "synthesize";
+type OutputContractId =
+  | "work_product" | "goal_contract" | "plan" | "evaluation"
+  | "classification" | "issue_scan" | "condition"
+  | "artifact_collection" | "evidence_collection";
+type GoalContract = {
+  objective: string;
+  context: string[];
+  constraints: string[];
+  nonGoals: string[];
+};
+type AcceptanceCriterion = {
+  id: string;
+  requirement: string;
+  verification: string;
+};
+type TrellisCriticalExecutionCategory =
+  | "security_boundary"
+  | "data_integrity"
+  | "concurrency_invariant"
+  | "protocol_core"
+  | "irreversible_migration";
+type TrellisAgents = Record<"sol" | "fable" | "terra" | "luna", AgentLike | AgentLike[]>;
+type TrellisOutputs = {
+  dv2Author: OutputTarget;
+  dv2Worker: OutputTarget;
+  dv2Validation: OutputTarget;
+  dv2Outcome: OutputTarget;
+  dv2Final: OutputTarget;
+  dv2Question: OutputTarget;
+  dv2Answer: OutputTarget;
+};
+type TrellisLimits = {
+  maxTotalAuthorTurns?: number;
+  maxAuthorGenerations?: number;
+  maxAuthorDepth?: number;
+  maxNodesPerProgram?: number;
+  maxProgramDepth?: number;
+  maxFanout?: number;
+  maxPromptBytes?: number;
+  maxTotalPromptBytes?: number;
+};
+type TrellisCriticalExecutionPolicy = {
+  allowedCategories: TrellisCriticalExecutionCategory[];
+  allowedPathPrefixes: string[];
+  maxChangedLines: number;
+};
+type TrellisProps = {
+  prompt: string;
+  goal?: GoalContract;
+  acceptance?: AcceptanceCriterion[];
+  instructions?: string;
+  role?: "sol" | "fable";
+  work?: DelegationV2WorkKind;
+  outputContract?: OutputContractId;
+  agents: TrellisAgents;
+  outputs: TrellisOutputs;
+  idPrefix?: string;
+  semanticRevision?: string;
+  criticalExecutionPolicy?: TrellisCriticalExecutionPolicy;
+  maxConcurrency?: number;
+  limits?: TrellisLimits;
+  skipIf?: boolean;
+};
 
 type OptimizerProps = {
   id?: string;
@@ -9518,6 +10148,73 @@ JSON response codes, not `SmithersErrorInstance` objects.
 
 ---
 
+## Feature inventory
+
+> Complete code-backed catalog of the Smithers product surface and its current evidence status.
+
+This is the public documentation view of
+`.smithers/spec/features.json`, the structured feature ledger used by the
+docs-driven-development workflow. It covers the open-source runtime, CLI,
+published packages, built-in workflow pack, and operator surfaces in this
+repository. Example projects, benchmarks, private deployments, and marketing
+applications are consumers of Smithers. They do not create, downgrade, or
+otherwise count as core product features.
+
+`fixed` means the described scope has convincing current tests and no known
+gap. `partial` means the capability ships, but its feature record lists an
+unproved environment, provider path, or explicit limitation. The JSON ledger
+contains the detailed capabilities, tests, architecture, observability,
+debugging notes, and open gaps behind every row.
+
+| Feature id | Surface | Status | Tier | Primary docs |
+| --- | --- | --- | --- | --- |
+| `workflow-authoring` | JSX workflow authoring | `fixed` | `feature` | [JSX overview](/jsx/overview) |
+| `init-workflow-pack` | Init workflow pack and starters | `fixed` | `feature` | [Workflow pack](/workflows/overview) |
+| `cli` | smithers CLI | `partial` | `feature` | [CLI overview](/cli/overview) |
+| `mcp-agent-control` | MCP server and agent wiring | `partial` | `feature` | [MCP server](/integrations/mcp-server) |
+| `durable-engine` | Durable engine, scheduler, and driver | `fixed` | `platform` | [How it works](/how-it-works) |
+| `approvals-human-gates` | Approvals, human tasks, and durable waits | `fixed` | `feature` | [Approval](/components/approval) |
+| `gateway-server` | Gateway, RPC, and server | `partial` | `platform` | [Gateway](/integrations/gateway) |
+| `workflow-uis` | Custom workflow UIs and monitor surfaces | `fixed` | `feature` | [Custom workflow UI](/guides/custom-workflow-ui) |
+| `crash-recovery-resume` | Crash recovery, supervisor, and resume | `partial` | `feature` | [Durability and resume](/how-it-works#durability--resume) |
+| `time-travel-replay` | Time travel, rewind, replay, and snapshots | `partial` | `feature` | [Time travel quickstart](/guides/time-travel-quickstart) |
+| `sandbox-vcs` | Local sandboxes, worktrees, and VCS | `partial` | `platform` | [Execution model](/concepts/execution-model) |
+| `remote-sandbox-providers` | Remote sandbox providers | `partial` | `platform` | [Sandbox providers](/components/sandbox-providers) |
+| `storage-backends` | Storage backends and migration | `partial` | `platform` | [Database reference](/reference/db) |
+| `agent-adapters` | Agent adapters and account pools | `partial` | `feature` | [CLI agents](/integrations/cli-agents) |
+| `open-code-review` | Open code review | `partial` | `feature` | [Review workflow](/workflows/review) |
+| `evals-scorers` | Eval suites, scorers, and optimization | `partial` | `feature` | [Evals quickstart](/guides/evals-quickstart) |
+| `openapi-tools` | OpenAPI tool generation | `fixed` | `feature` | [OpenAPI tools](/concepts/openapi-tools) |
+| `memory` | Agent memory | `partial` | `feature` | [Memory](/concepts/memory) |
+| `observability` | Observability and tracing | `partial` | `platform` | [Observability reference](/reference/observability) |
+| `control-plane` | Hosted control-plane primitives | `partial` | `platform` | [Control plane](/deployment/control-plane) |
+| `docs-pipeline` | Docs pipeline and LLM bundles | `fixed` | `reference` | [Reference overview](/reference/overview) |
+| `docs-driven-development` | Docs driven development | `partial` | `feature` | [DDD workflow](/workflows/docs-driven-development) |
+| `workflow-packs` | Workflow packs | `partial` | `feature` | [Workflow packs](/reference/packs) |
+| `runtime-portability` | Runtime portability and browser execution | `fixed` | `platform` | [Browser runtime](/runtime/browser) |
+| `workflow-testing` | Workflow testing and durability scenarios | `fixed` | `feature` | [Testing workflows](/guides/testing-workflows) |
+| `external-integrations` | External event and messaging integrations | `partial` | `feature` | [Integrations](/integrations/integrations) |
+| `schedules-alerts` | Schedules and durable alerts | `partial` | `feature` | [Alerting](/guides/alerting) |
+
+## Coverage contract
+
+Repository checks keep this page and the feature ledger tied to the shipped
+surface:
+
+- Every non-private package under `packages/` and `apps/` must be assigned to
+  at least one feature through an architecture or diff path.
+- Every feature id in `.smithers/spec/features.json` must appear exactly once
+  in this table and link to an existing Mintlify source page.
+- Public component guides, Gateway RPC pages, workspace packages, and selected
+  component prop types are compared directly with their source exports.
+- The agent-facing `llms-*` bundles include this inventory plus browser,
+  testing, Trellis, and provenance documentation.
+
+Use the [docs-driven-development workflow](/workflows/docs-driven-development)
+to audit evidence and turn a `partial` record's open gaps into durable work.
+
+---
+
 ## Package Configuration
 
 > Reference for the smithers-orchestrator package exports, TypeScript configuration, and Bun preload setup.
@@ -9541,7 +10238,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/gateway-ui` | `./src/gateway-ui.js` | Prebuilt React components for gateway-backed UIs (`RunList`, `RunTree`, `ApprovalPanel`, and more) |
 | `smithers-orchestrator/ui` | `./src/ui.js` | Shared shadcn-anatomy component library (`Button`, `Card`, `Dialog`, `Tabs`, `StatusPill`, and more) styled through the ui-styleguide theme tokens |
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
-| `smithers-orchestrator/browser` | `./src/browser.js` | Runtime-agnostic core (`WorkflowDriver`, `SmithersRenderer`, graph extraction) running under a browser `RuntimeAdapter`: `createBrowserSmithers`, `runBrowserWorkflow`, `createBrowserRuntime`, `defineBrowserWorkflow`, and the browser-safe `Task`/`Workflow`/`Sequence`/`Worktree` primitives. Supports static, compute, and in-process `AgentLike.generate` tasks with Map-backed run/output storage and Web Crypto UUIDs. Does not include the Node engine, database factories, CLI agents, tools, or server code -- `filesystem`, `subprocess`, `worktree`, and `sandbox` operations fail closed with a typed `RuntimeCapabilityError` (code `RUNTIME_CAPABILITY_UNAVAILABLE`) |
+| `smithers-orchestrator/browser` | `./src/browser.js` | Portable browser runner, `RuntimeAdapter`, browser-safe workflow primitives, Map-backed default storage, and typed fail-closed host capabilities. See [Browser runtime](/runtime/browser) |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
 | `smithers-orchestrator/microsandbox` | `./src/microsandbox.js` | Microsandbox provider: run child workflows in local hardware-isolated microVMs |
@@ -9569,7 +10266,7 @@ The PI plugin is published as the separate `@smithers-orchestrator/pi-plugin` pa
 
 ## Workspace Packages
 
-Most applications should import from `smithers-orchestrator`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. Some app workspaces are private and are not published packages.
+Most applications should import from `smithers-orchestrator`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. This table is a repository map, not the core feature inventory. Private apps and examples are implementation consumers and are not published Smithers features. See [Feature inventory](/reference/feature-inventory) for the core product boundary.
 
 | Package | Primary surface | Related docs |
 |---|---|---|
@@ -9611,16 +10308,8 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the full-screen Smithers TUI monitor marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/observability` | Event types, logging, tracing, metrics, Prometheus rendering, and runtime observability layers | [Events](/runtime/events), [Event Types](/reference/event-types) |
 | `@smithers-orchestrator/openapi` | OpenAPI parsing, operation extraction, AI SDK tool generation, schema conversion, and metrics | [OpenAPI Tools](/concepts/openapi-tools), [Tools](/integrations/tools) |
-| `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the automation marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/ddd-site` | Private Cloudflare Worker deployment for the docs-driven-development marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the init marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/kimi-benchmarks-site` | Private Cloudflare Worker serving the Kimi K3 RoadmapBench report and its evidence bundle | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the monitor marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/openclaw-site` | Private Cloudflare Worker deployment for the OpenClaw marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the plugins marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/self-healing-site` | Private Cloudflare Worker deployment for the self-healing marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Telegram marketing site | [Ecosystem](/integrations/ecosystem) |
-| `@smithers-orchestrator/ui-site` | Private Cloudflare Worker deployment for the UI marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/pi-plugin` | PI extension runtime, views, API wrappers, and workflow inspection integration | [PI Integration](/integrations/pi-integration) |
 | `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the Smithers plugins marketing site (Claude Code and Codex) | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | [Types](/reference/types), [Errors](/reference/errors) |
@@ -9631,12 +10320,12 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | [Evals](/guides/evals-quickstart), [Evals Quickstart](/guides/evals-quickstart) |
 | `@smithers-orchestrator/self-healing-site` | Private Cloudflare Worker deployment for the self-healing agent runs marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/server` | HTTP, WebSocket, Gateway, cron, webhook, metrics, and single-workflow serving APIs | [Server](/integrations/server), [Serve](/integrations/serve) |
-| `@smithers-orchestrator/signal` | Private Cloudflare deployment of The Smithers Signal: the daily-ceo-intel runner container, cron/watchdog scheduler Worker, and reports site | [Serverless](/deployment/serverless) |
+| `@smithers-orchestrator/signal` | Repository-only example deployment for The Smithers Signal and its daily CEO intel workflow; not part of the core Smithers product or init pack | [Serverless](/deployment/serverless) |
 | `@smithers-orchestrator/smithers-ui` | Private local-only UI app: the full run/approval/memory control surface, served by `bunx smithers-orchestrator ui --app` against a local Gateway | [Gateway UI Components](/reference/gateway-ui) |
 | `@smithers-orchestrator/telegram` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes | [Telegram](/integrations/telegram) |
 | `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Smithers on Telegram marketing site, including the reference approval Mini App | [Telegram](/integrations/telegram), [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/telegram-summary` | Private Cloudflare app: Telegram Bot API ingestion, Kimi daily digests, D1 storage, and the `telegram-summary.smithers.sh` dashboard | [Custom Workflow UI](/guides/custom-workflow-ui), [CLI Overview](/cli/overview) |
-| `@smithers-orchestrator/testing` | Source-shipped workflow test helpers for fake agents, frame rendering, prompt rendering, and descriptor task execution | This page, [Render Frame](/runtime/render-frame) |
+| `@smithers-orchestrator/testing` | Workflow simulation, scripted agents, render/task helpers, matchers, and unit/integration/e2e durability scenario harnesses | [Testing workflows](/guides/testing-workflows), [Render Frame](/runtime/render-frame) |
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | [Time Travel](/recipes), [Time Travel Quickstart](/guides/time-travel-quickstart) |
 | `@smithers-orchestrator/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smithers-orchestrator` without a dependency cycle | [Execution Model](/how-it-works) |
 | `@smithers-orchestrator/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smithers-orchestrator up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | [CLI Overview](/cli/overview) |
@@ -11025,6 +11714,116 @@ diagnostics.
 - On macOS, `runWorkflow` acquires a `caffeinate` lock to prevent idle sleep and releases it on completion. On other platforms this is a no-op.
 - Set `SMITHERS_LOG_LEVEL=debug` to enable verbose engine logging.
 - For lifecycle events, pass `onProgress` (see [Events](/runtime/events)).
+
+---
+
+## Browser runtime
+
+> Run portable Smithers workflows in a browser through the RuntimeAdapter contract.
+
+Import the browser-safe facade from `smithers-orchestrator/browser`. It runs the
+real Smithers driver, scheduler, renderer, graph extractor, schema validation,
+and task dependency semantics without pulling Node database, server, CLI-agent,
+or subprocess code into the bundle.
+
+```tsx
+import React from "react";
+import { z } from "zod";
+import {
+  Task,
+  Workflow,
+  createBrowserRuntime,
+  createBrowserSmithers,
+  defineBrowserWorkflow,
+} from "smithers-orchestrator/browser";
+
+const resultSchema = z.object({ answer: z.number() });
+const workflow = defineBrowserWorkflow(() =>
+  React.createElement(
+    Workflow,
+    { name: "browser-example" },
+    React.createElement(
+      Task,
+      {
+        id: "answer",
+        output: "results",
+        outputSchema: resultSchema,
+        agent: {
+          async generate() {
+            return { answer: 42 };
+          },
+        },
+      },
+      "Return the answer.",
+    ),
+  ),
+);
+
+const runtime = createBrowserRuntime();
+const smithers = createBrowserSmithers({ workflow, runtime });
+const run = await smithers.run({ input: {}, runId: "browser-demo" });
+
+console.log(run.status); // "finished"
+console.log(await smithers.getOutputs(run.runId));
+```
+
+`createBrowserSmithers` creates a fresh driver and scheduler session for every
+`run()` call. `getRun(runId)` and `getOutputs(runId)` read through the selected
+runtime storage adapter. `runBrowserWorkflow(workflow, options)` is the
+one-shot equivalent when you do not need to retain the Smithers wrapper.
+
+## Browser-safe exports
+
+| Export | Purpose |
+| --- | --- |
+| `defineBrowserWorkflow(build, options?)` | Define a portable workflow from a context-to-React builder. |
+| `createBrowserRuntime(options?)` | Create the default browser `RuntimeAdapter`. |
+| `createBrowserSmithers({ workflow, runtime?, runtimeOptions? })` | Create a reusable runner with run and output lookup methods. |
+| `runBrowserWorkflow(workflow, options?)` | Run one workflow once. |
+| `Task`, `Workflow`, `Sequence`, `Worktree` | Browser-safe workflow primitives. |
+| `RuntimeCapabilityError`, `RUNTIME_CAPABILITY_UNAVAILABLE` | Typed failure for unavailable host capabilities. |
+| `RuntimeAdapter`, `BrowserRuntimeOptions`, `BrowserWorkflow`, `BrowserRunOptions`, `BrowserSmithers` | Public TypeScript contracts. |
+
+## Runtime options
+
+The default runtime uses `Date`, `performance`, abortable `setTimeout`, Web
+Crypto UUIDs, and Map-backed run/output storage. Override any portable seam:
+
+```ts
+type BrowserRuntimeOptions = {
+  clock?: RuntimeClock;
+  storage?: RuntimeStorage;
+  uuid?: () => string;
+  executeTask?: (
+    task: TaskDescriptor,
+    context: TaskExecutorContext,
+  ) => Promise<unknown> | unknown;
+};
+```
+
+Provide `storage` when state must outlive a page refresh. Provide
+`executeTask` to route task execution through an application-owned worker,
+provider client, or policy boundary. The default executor supports static and
+compute tasks plus in-process agents exposing `generate`, `execute`, `run`, or
+`call`. It validates Zod-like `outputSchema` values before storing outputs.
+
+## Capability boundary
+
+The browser adapter intentionally fails closed for `filesystem`, `subprocess`,
+`worktree`, and `sandbox`. Calling one of those operations throws a
+`RuntimeCapabilityError` with code `RUNTIME_CAPABILITY_UNAVAILABLE`, the
+runtime name, capability, and operation. The exported `Worktree` primitive is
+portable at graph-render time, but a browser run cannot resolve a real
+worktree unless the application supplies a custom `RuntimeAdapter` that owns
+that capability.
+
+The browser facade does not include Node database factories, server helpers,
+CLI agents, bundled tools, or the full Node component barrel. Use the main
+`smithers-orchestrator` entry point for those surfaces.
+
+---
+
+**Source** [browser engine](https://github.com/smithersai/smithers/blob/main/packages/engine/src/browser.js) · **Tests** [browser runtime tests](https://github.com/smithersai/smithers/blob/main/packages/engine/tests/browser.test.jsx) · **See also** [Run workflow](/runtime/run-workflow), [Testing workflows](/guides/testing-workflows), [Package configuration](/reference/package-configuration)
 
 ---
 

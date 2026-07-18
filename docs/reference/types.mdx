@@ -614,11 +614,13 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   id: string;
   output: Output;
   outputSchema?: import("zod").ZodObject<any>;
+  maxSchemaRetries?: number;        // default 3; correction calls after the initial agent response
   agent?: AgentLike | AgentLike[];
   fallbackAgent?: AgentLike;
   dependsOn?: string[];
   needs?: Record<string, string>;
   deps?: D;
+  depsOptional?: boolean;
   fork?: string;                    // start from another task's final agent session snapshot
   bind?: ProofBinding | ProofBinding[];
   skipIf?: boolean;
@@ -633,10 +635,14 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   continueOnFail?: boolean;
   cache?: CachePolicy;
   scorers?: ScorersMap;
+  groundTruth?: unknown;
+  context?: unknown;
   memory?: TaskMemoryConfig;
   hijack?: boolean;
   onHijackExit?: "complete" | "reopen";
   allowTools?: string[];            // CLI-agent tool allowlist
+  priority?: number;
+  failurePolicy?: "halt" | "quarantine";
   label?: string;
   meta?: Record<string, unknown>;
   // string = prompt literal; Row = static result; () => Row = compute fn;
@@ -644,8 +650,35 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   children: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | React.ReactNode);
 };
 
-type SequenceProps  = { key?: string; skipIf?: boolean; children?: React.ReactNode };
-type ParallelProps  = { id?: string; maxConcurrency?: number; subtreeConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type SequenceProps = {
+  key?: string;
+  label?: string;
+  failurePolicy?: "halt" | "quarantine";
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+type ParallelProps = {
+  id?: string;
+  label?: string;
+  maxConcurrency?: number;
+  subtreeConcurrency?: number;
+  priority?: number;
+  failurePolicy?: "halt" | "quarantine";
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+type MemoryProps = {
+  bank?: string;
+  banks?: string[];
+  tags?: string[];
+  recall?: "auto" | string | false;
+  budget?: "low" | "mid" | "high";
+  maxTokens?: number;
+  primers?: string[];
+  retain?: "on-complete" | "off";
+  tools?: boolean;
+  children?: React.ReactNode;
+};
 type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
 type LoopProps      = {
   key?: string;
@@ -767,6 +800,7 @@ type PollerProps = {
   maxAttempts?: number;
   backoff?: "fixed" | "linear" | "exponential";
   intervalMs?: number;
+  checkTimeoutMs?: number;
   onTimeout?: "fail" | "return-last";
   skipIf?: boolean;
   children?: React.ReactNode;
@@ -952,6 +986,139 @@ type EscalationChainProps = {
 };
 
 type MergeQueueProps = { id?: string; maxConcurrency?: number; priority?: number; failurePolicy?: "halt" | "quarantine"; skipIf?: boolean; children?: React.ReactNode };
+
+type Tier = "fable" | "opus" | "sonnet" | "haiku";
+type DelegationAgents = Partial<Record<Tier, AgentLike | AgentLike[]>>;
+type DelegationOutputs = {
+  dcGoal: OutputTarget;
+  dcQuestion: OutputTarget;
+  dcForecast: OutputTarget;
+  dcGoalApproval: OutputTarget;
+  dcPlan: OutputTarget;
+  dcPreview: OutputTarget;
+  dcDevPreview?: OutputTarget;
+  dcGates: OutputTarget;
+  dcProbe: OutputTarget;
+  dcReplan: OutputTarget;
+  dcExec: OutputTarget;
+  dcReview: OutputTarget;
+  dcApproval?: OutputTarget;
+  dcEdit: OutputTarget;
+  dcSkip: OutputTarget;
+  dcPoll: OutputTarget;
+  dcBudget?: OutputTarget;
+  dcScore?: OutputTarget;
+};
+type DelegationBudget = { maxUsd?: number; maxMinutes?: number };
+type DelegationScorers = {
+  exec?: ScorersMap;
+  review?: ScorersMap;
+  run?: ScorersMap;
+};
+type DelegationSharedProps = {
+  idPrefix?: string;
+  agents: DelegationAgents;
+  outputs: DelegationOutputs;
+  approvalPolicy?: string;
+  tierOrder?: Tier[];
+  maxDepth?: number;
+  maxConcurrency?: number;
+  maxDeriskRounds?: number;
+  poll?: boolean;
+  budget?: DelegationBudget;
+  scorers?: DelegationScorers;
+  skipIf?: boolean;
+};
+type GoalRefinementProps = DelegationSharedProps & {
+  prompt: string;
+  maxQuestions?: number;
+  prefetchDepth?: number;
+};
+type DelegationPlanningProps = DelegationSharedProps & { prompt?: string };
+type DelegationPreviewProps = DelegationSharedProps;
+type BackpressurePlanningProps = DelegationSharedProps;
+type DeriskLoopProps = DelegationSharedProps;
+type DelegationExecutionProps = DelegationSharedProps & { maxAttempts?: number };
+type DelegationScoringProps = DelegationSharedProps;
+type DelegationEditListenerProps = DelegationSharedProps & {
+  until?: boolean;
+  maxEdits?: number;
+};
+type DelegationChainProps = DelegationSharedProps & {
+  prompt: string;
+  maxQuestions?: number;
+  prefetchDepth?: number;
+  maxAttempts?: number;
+  maxEdits?: number;
+};
+
+type DelegationV2Role = "sol" | "fable" | "terra" | "luna";
+type DelegationV2WorkKind =
+  | "refine_goal" | "plan" | "research" | "poc"
+  | "execute" | "review" | "preview" | "synthesize";
+type OutputContractId =
+  | "work_product" | "goal_contract" | "plan" | "evaluation"
+  | "classification" | "issue_scan" | "condition"
+  | "artifact_collection" | "evidence_collection";
+type GoalContract = {
+  objective: string;
+  context: string[];
+  constraints: string[];
+  nonGoals: string[];
+};
+type AcceptanceCriterion = {
+  id: string;
+  requirement: string;
+  verification: string;
+};
+type TrellisCriticalExecutionCategory =
+  | "security_boundary"
+  | "data_integrity"
+  | "concurrency_invariant"
+  | "protocol_core"
+  | "irreversible_migration";
+type TrellisAgents = Record<"sol" | "fable" | "terra" | "luna", AgentLike | AgentLike[]>;
+type TrellisOutputs = {
+  dv2Author: OutputTarget;
+  dv2Worker: OutputTarget;
+  dv2Validation: OutputTarget;
+  dv2Outcome: OutputTarget;
+  dv2Final: OutputTarget;
+  dv2Question: OutputTarget;
+  dv2Answer: OutputTarget;
+};
+type TrellisLimits = {
+  maxTotalAuthorTurns?: number;
+  maxAuthorGenerations?: number;
+  maxAuthorDepth?: number;
+  maxNodesPerProgram?: number;
+  maxProgramDepth?: number;
+  maxFanout?: number;
+  maxPromptBytes?: number;
+  maxTotalPromptBytes?: number;
+};
+type TrellisCriticalExecutionPolicy = {
+  allowedCategories: TrellisCriticalExecutionCategory[];
+  allowedPathPrefixes: string[];
+  maxChangedLines: number;
+};
+type TrellisProps = {
+  prompt: string;
+  goal?: GoalContract;
+  acceptance?: AcceptanceCriterion[];
+  instructions?: string;
+  role?: "sol" | "fable";
+  work?: DelegationV2WorkKind;
+  outputContract?: OutputContractId;
+  agents: TrellisAgents;
+  outputs: TrellisOutputs;
+  idPrefix?: string;
+  semanticRevision?: string;
+  criticalExecutionPolicy?: TrellisCriticalExecutionPolicy;
+  maxConcurrency?: number;
+  limits?: TrellisLimits;
+  skipIf?: boolean;
+};
 
 type OptimizerProps = {
   id?: string;

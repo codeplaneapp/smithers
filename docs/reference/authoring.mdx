@@ -23,10 +23,12 @@ import {
 ```
 
 <Note>
-`smithers`, `Workflow`, `Task`, `useCtx`, `outputs`, `tables`, and `db` are
-**returned by the factory**, not imported. The component set is documented in the
-[Components reference](/reference/components); this page covers the factories
-themselves.
+`smithers`, `useCtx`, `outputs`, `tables`, and `db` are returned by the factory.
+The factory also returns workflow-context-bound component primitives such as
+`Workflow` and `Task`; those primitives are additionally exported from
+`smithers-orchestrator` for direct imports. The [Components
+reference](/reference/components) covers that component set; this page covers
+the factories themselves.
 </Note>
 
 ## createSmithers

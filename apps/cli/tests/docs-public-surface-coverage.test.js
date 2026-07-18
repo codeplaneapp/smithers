@@ -20,6 +20,62 @@ function parseNamedExports(source) {
         .filter(Boolean);
 }
 
+function workspacePackageJsonPaths() {
+    return ["packages", "apps"].flatMap((dir) =>
+        readdirSync(resolve(REPO_ROOT, dir))
+            .map((name) => `${dir}/${name}/package.json`)
+            .filter((path) => existsSync(resolve(REPO_ROOT, path))),
+    );
+}
+
+function extractTypeProps(source, typeName) {
+    const props = tryExtractTypeProps(source, typeName);
+    expect(props).not.toBeNull();
+    return props;
+}
+
+function tryExtractTypeProps(source, typeName) {
+    const markerIndex = source.indexOf(`type ${typeName}`);
+    if (markerIndex < 0) return null;
+    const declarationEnd = source.indexOf("\n", markerIndex);
+    const openingBrace = source.lastIndexOf("{", declarationEnd);
+    const closingBrace = source.indexOf("\n};", openingBrace);
+    if (openingBrace <= markerIndex || closingBrace <= openingBrace) return null;
+
+    const propertyLines = source
+        .slice(openingBrace + 1, closingBrace)
+        .split("\n")
+        .map((line) => line.match(/^(\s+)([A-Za-z][A-Za-z0-9]*)\??:/u))
+        .filter(Boolean);
+    const firstIndent = propertyLines[0]?.[1];
+    if (!firstIndent) return null;
+    return new Set(
+        propertyLines
+            .filter((match) => match[1] === firstIndent)
+            .map((match) => match[2]),
+    );
+}
+
+function componentPropSourcePaths(dir = "packages/components/src") {
+    return readdirSync(resolve(REPO_ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
+        const path = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) return componentPropSourcePaths(path);
+        return entry.name.endsWith("Props.ts") ? [path] : [];
+    });
+}
+
+function propIsDocumented(source, prop) {
+    const escaped = prop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:\`${escaped}\\??\`|\\b${escaped}\\??:)`, "u").test(source);
+}
+
+function collectStrings(value, output = []) {
+    if (typeof value === "string") output.push(value);
+    else if (Array.isArray(value)) value.forEach((item) => collectStrings(item, output));
+    else if (value && typeof value === "object") Object.values(value).forEach((item) => collectStrings(item, output));
+    return output;
+}
+
 test("component reference docs cover exported components", () => {
     const smithersIndex = readRepoFile("packages/smithers/src/index.js");
     const componentExportBlock = smithersIndex.match(
@@ -37,6 +93,7 @@ test("component reference docs cover exported components", () => {
         .split(",")
         .map((name) => name.trim())
         .filter((name) => /^[A-Z]/.test(name));
+    exportedComponents.push("Trellis");
 
     const sagaDoc = readRepoFile("docs/components/saga.mdx");
     for (const component of exportedComponents) {
@@ -111,17 +168,164 @@ test("package configuration docs cover current explicit package exports", () => 
 
 test("package configuration docs cover published workspace packages", () => {
     const packageConfigDoc = readRepoFile("docs/reference/package-configuration.mdx");
-    const packageJsonPaths = ["packages", "apps"].flatMap((dir) =>
-        readdirSync(resolve(REPO_ROOT, dir))
-            .map((name) => `${dir}/${name}/package.json`)
-            .filter((path) => existsSync(resolve(REPO_ROOT, path))),
+    const workspacePackageTable = packageConfigDoc.slice(
+        packageConfigDoc.indexOf("## Workspace Packages"),
+        packageConfigDoc.indexOf("### Usage"),
     );
+    const packageJsonPaths = workspacePackageJsonPaths();
     const packageNames = packageJsonPaths
         .map((path) => JSON.parse(readRepoFile(path)).name)
         .sort();
 
     for (const packageName of packageNames) {
-        expect(packageConfigDoc).toContain(`| \`${packageName}\``);
+        const rowStart = `| \`${packageName}\` |`;
+        expect(workspacePackageTable.split(rowStart).length - 1).toBe(1);
+    }
+});
+
+test("feature inventory covers every spec record and local docs reference", () => {
+    const features = JSON.parse(readRepoFile(".smithers/spec/features.json"));
+    const inventory = readRepoFile("docs/reference/feature-inventory.mdx");
+    const inventoryRows = [...inventory.matchAll(/^\| `([a-z0-9-]+)` \| ([^|]+?) \| `([a-z]+)` \| `([a-z]+)` \|/gm)]
+        .map((match) => ({ id: match[1], title: match[2].trim(), status: match[3], tier: match[4] }));
+    const inventoryIds = inventoryRows.map((row) => row.id);
+    const inventoryById = new Map(inventoryRows.map((row) => [row.id, row]));
+    const featureIds = features.map((feature) => feature.id);
+
+    expect(inventoryIds.length).toBe(new Set(inventoryIds).size);
+    expect([...inventoryIds].sort()).toEqual([...featureIds].sort());
+
+    for (const feature of features) {
+        expect(inventoryById.get(feature.id)).toMatchObject({
+            title: feature.title,
+            status: feature.status,
+            tier: feature.tier,
+        });
+        const mintlifyRefs = [
+            ...feature.endpoints.map((entry) => entry.doc).filter(Boolean),
+            ...feature.links.map((entry) => entry.href),
+        ].filter((path) => /^docs\/.*\.mdx(?:#.*)?$/u.test(path));
+        expect(mintlifyRefs.length).toBeGreaterThan(0);
+        for (const path of mintlifyRefs) {
+            expect(existsSync(resolve(REPO_ROOT, path.split("#", 1)[0]))).toBe(true);
+        }
+
+        for (const testPath of feature.tests) {
+            if (testPath.includes("*") || testPath.includes(" ")) continue;
+            expect(existsSync(resolve(REPO_ROOT, testPath))).toBe(true);
+        }
+
+        for (const hint of feature.diffHints) {
+            const exists = hint.includes("*")
+                ? Array.from(new Bun.Glob(hint).scanSync({ cwd: REPO_ROOT, onlyFiles: false })).length > 0
+                : existsSync(resolve(REPO_ROOT, hint));
+            expect(exists, `${feature.id} diffHint should resolve: ${hint}`).toBe(true);
+        }
+    }
+});
+
+test("feature spec covers public packages and excludes private apps and example workflows", () => {
+    const features = JSON.parse(readRepoFile(".smithers/spec/features.json"));
+    const featureStrings = collectStrings(features);
+    const workspacePackages = workspacePackageJsonPaths()
+        .map((path) => ({ path, manifest: JSON.parse(readRepoFile(path)) }));
+    const publicPackages = workspacePackages
+        .filter(({ manifest }) => manifest.private !== true)
+        .map(({ path }) => path.replace(/\/package\.json$/u, ""));
+    const privateApps = workspacePackages
+        .filter(({ path, manifest }) => path.startsWith("apps/") && manifest.private === true)
+        .map(({ path }) => path.replace(/\/package\.json$/u, ""));
+    const exampleWorkflows = readdirSync(resolve(REPO_ROOT, ".smithers/workflows"))
+        .filter((name) => name.endsWith(".tsx"))
+        .filter((name) => /^\/\/\s*smithers-source:\s*example\b/m.test(readRepoFile(`.smithers/workflows/${name}`)))
+        .map((name) => `.smithers/workflows/${name}`);
+
+    for (const packagePath of publicPackages) {
+        expect(featureStrings.some((value) => value === packagePath || value.startsWith(`${packagePath}/`))).toBe(true);
+    }
+    for (const excludedPath of [...privateApps, ...exampleWorkflows]) {
+        expect(
+            featureStrings.some((value) => value === excludedPath || value.startsWith(`${excludedPath}/`)),
+            `${excludedPath} should stay outside the core feature ledger`,
+        ).toBe(false);
+    }
+});
+
+test("component prop guides cover source prop types", () => {
+    const typesReference = readRepoFile("docs/reference/types.mdx");
+    const cases = [
+        ["TaskProps", "packages/components/src/components/TaskProps.ts", "docs/components/task.mdx", "type"],
+        ["SequenceProps", "packages/components/src/components/SequenceProps.ts", "docs/components/sequence.mdx", "type"],
+        ["ParallelProps", "packages/components/src/components/ParallelProps.ts", "docs/components/parallel.mdx", "type"],
+        ["MemoryProps", "packages/components/src/components/MemoryProps.ts", "docs/components/memory.mdx", "table"],
+        ["TrellisProps", "packages/components/src/components/delegation-v2/TrellisProps.ts", "docs/components/trellis.mdx", "type"],
+    ];
+
+    for (const [typeName, sourcePath, docPath, docKind] of cases) {
+        const sourceProps = extractTypeProps(readRepoFile(sourcePath), typeName);
+        sourceProps.delete("smithersContext");
+        const componentDoc = readRepoFile(docPath);
+        const componentProps = docKind === "table"
+            ? new Set([...componentDoc.matchAll(/^\| `([A-Za-z][A-Za-z0-9]*)` \|/gm)].map((match) => match[1]))
+            : extractTypeProps(componentDoc, typeName);
+        const referenceProps = extractTypeProps(typesReference, typeName);
+
+        for (const prop of sourceProps) {
+            expect(componentProps.has(prop)).toBe(true);
+            expect(referenceProps.has(prop)).toBe(true);
+        }
+    }
+});
+
+test("all concrete component prop sources remain represented in guides and types", () => {
+    const typesReference = readRepoFile("docs/reference/types.mdx");
+
+    for (const sourcePath of componentPropSourcePaths()) {
+        const componentName = sourcePath.match(/\/([^/]+)Props\.ts$/u)?.[1];
+        expect(componentName).toBeTruthy();
+        const typeName = `${componentName}Props`;
+        const sourceProps = tryExtractTypeProps(readRepoFile(sourcePath), typeName);
+        if (!sourceProps) continue; // aliases such as BackpressurePlanningProps = DelegationSharedProps
+        sourceProps.delete("smithersContext");
+
+        const docName = sourcePath.includes("/delegation/")
+            ? "delegation-chain"
+            : componentName === "Ralph"
+                ? "loop"
+                : componentName === "SagaStep"
+                    ? "saga"
+                    : kebabCase(componentName);
+        const docPath = `docs/components/${docName}.mdx`;
+        expect(existsSync(resolve(REPO_ROOT, docPath))).toBe(true);
+        const componentDoc = readRepoFile(docPath);
+
+        for (const prop of sourceProps) {
+            expect(propIsDocumented(componentDoc, prop)).toBe(true);
+            expect(propIsDocumented(typesReference, prop)).toBe(true);
+        }
+    }
+});
+
+test("Mintlify navigation and LLM manifests expose complete public reference surfaces", () => {
+    const docsJson = readRepoFile("docs/docs.json");
+    const llmsManifest = readRepoFile("scripts/generate-llms.ts");
+    const navigatedFamilies = ["components", "rpc"];
+
+    for (const family of navigatedFamilies) {
+        const pages = readdirSync(resolve(REPO_ROOT, `docs/${family}`))
+            .filter((file) => file.endsWith(".mdx"))
+            .map((file) => `${family}/${file.replace(/\.mdx$/u, "")}`);
+        for (const page of pages) expect(docsJson).toContain(`"${page}"`);
+    }
+
+    for (const page of [
+        "concepts/provenance.mdx",
+        "components/trellis.mdx",
+        "guides/testing-workflows.mdx",
+        "runtime/browser.mdx",
+        "reference/feature-inventory.mdx",
+    ]) {
+        expect(llmsManifest).toContain(`"${page}"`);
     }
 });
 
@@ -327,7 +531,7 @@ test("memory docs cover current MemoryStore method names", () => {
 
 test("scorer docs mention current public scorer exports", () => {
     const scorerIndex = readRepoFile("packages/scorers/src/index.js");
-    const docs = `${readRepoFile("docs/how-it-works.mdx")}\n${readRepoFile("docs/reference/types.mdx")}`;
+    const docs = `${readRepoFile("docs/how-it-works.mdx")}\n${readRepoFile("docs/reference/types.mdx")}\n${readRepoFile("docs/reference/scorers.mdx")}`;
     const exportNames = [...scorerIndex.matchAll(/export \{([^}]+)\}/g)]
         .flatMap((match) => match[1].split(","))
         .map((name) => name.trim())

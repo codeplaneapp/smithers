@@ -11,6 +11,7 @@ type BranchProps = {
   then: ReactElement;
   else?: ReactElement | null;
   skipIf?: boolean;
+  children?: never; // branches are supplied through then/else
 };
 ```
 

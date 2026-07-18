@@ -123,6 +123,7 @@
         "pages": [
           "how-it-works",
           "concepts/execution-model",
+          "concepts/provenance",
           "concepts/memory",
           "guides/context-engineering",
           "recipes",
@@ -250,7 +251,8 @@
           {
             "group": "Delegation",
             "pages": [
-              "components/delegation-chain"
+              "components/delegation-chain",
+              "components/trellis"
             ]
           },
           {
@@ -372,7 +374,8 @@
           {
             "group": "Overview",
             "pages": [
-              "reference/overview"
+              "reference/overview",
+              "reference/feature-inventory"
             ]
           },
           {
@@ -400,6 +403,7 @@
           {
             "group": "Runtime",
             "pages": [
+              "runtime/browser",
               "runtime/run-workflow",
               "runtime/render-frame",
               "runtime/run-state",
@@ -466,6 +470,7 @@
           {
             "group": "Changelog",
             "pages": [
+              "changelogs/0.29.0",
               "changelogs/0.28.0",
               "changelogs/0.27.0",
               "changelogs/0.26.1",

@@ -67,10 +67,10 @@ its `recallMemory`, `getPrimers`, or `retainMemory` engine-facing methods.
 <Note>
 The note types (`MemoryNote`, `SaveNoteInput`, `NoteReadFilter`, and
 `MemoryProvenance`) are exported from the `smithers-orchestrator/memory`
-subpath. `WorkingMemoryConfig<T>` is generic over a Zod schema and is documented inline
-below rather than imported. The `memory` prop on `Task` is **returned by the
-factory**, not imported; see [Memory](/concepts/memory) for the declarative
-`<Task memory={...}>` metadata.
+subpath. `WorkingMemoryConfig<T>` is generic over a Zod schema and is documented
+inline below. `Task` can be imported directly or taken from `createSmithers`;
+both expose the same `memory` prop. See [Memory](/concepts/memory) for the
+declarative `<Task memory={...}>` metadata.
 </Note>
 
 ## Concepts

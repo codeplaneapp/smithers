@@ -27,9 +27,10 @@ import type { Scorer, ScoreResult, ScorersMap } from "smithers-orchestrator";
 ```
 
 <Note>
-The component that hosts scorers (`Task`) is **returned by the factory**, not
-imported. See the [Components reference](/reference/components) for the
-`scorers` prop and [`ScorersMap`](/reference/types#scorersmap) for its shape.
+The component that hosts scorers (`Task`) can be imported directly or taken
+from `createSmithers`; the factory form binds it to the workflow context. See
+the [Components reference](/reference/components) for the `scorers` prop and
+[`ScorersMap`](/reference/types#scorersmap) for its shape.
 </Note>
 
 ## Concepts
@@ -271,6 +272,80 @@ Every scorer result is inserted here as a [`ScoreRow`](/reference/types#scorerow
 against your store.
 
 **Source** [`faithfulnessScorer.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/faithfulnessScorer.js) · [`schema.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/schema.js) · **Tests** [`builtins.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/builtins.test.js) · **See also** [`ScoreRow`](/reference/types#scorerow)
+
+## Eval datasets and assertions
+
+The scorer package also owns the shared eval-case domain used by `smithers
+eval`, the `eval-suite-run` workflow, and score-comparison UIs.
+
+```ts
+import {
+  EVAL_CASE_STATUSES,
+  EVAL_PASS_THRESHOLD,
+  evalAssertionScorer,
+  evalCaseRunId,
+  evaluateEvalCase,
+  evaluateEvalCaseAsync,
+  formatEvalError,
+  isPlainObject,
+  jsonContains,
+  jsonEquals,
+  normalizeEvalJudge,
+  normalizeExpected,
+  parseEvalDataset,
+  slugifyEvalToken,
+} from "smithers-orchestrator/scorers";
+```
+
+`parseEvalDataset(text)` accepts a JSON array or JSONL rows, ignores blank and
+`#` comment lines in JSONL, derives missing ids, rejects duplicate ids, and
+validates optional judge assertions. It returns an `EvalDatasetParseResult`
+instead of throwing for malformed authored data.
+
+`evaluateEvalCase(args)` performs deterministic grading. An `expected` object
+using only `status`, `output`, `outputContains`, and `errorContains` is an
+assertion spec. Other objects and arrays use recursive subset matching; scalar
+values use canonical JSON equality. The result contains every `EvalAssertion`
+and a combined `passed` flag.
+
+`evaluateEvalCaseAsync(args, runJudge?)` composes those deterministic
+assertions with an optional `EvalJudge`:
+
+```ts
+type EvalJudge = {
+  instructions: string;
+  threshold?: number; // default EVAL_PASS_THRESHOLD (0.8)
+};
+
+const grade = await evaluateEvalCaseAsync(
+  {
+    input,
+    output,
+    status: "finished",
+    expected: { outputContains: { safe: true } },
+    judge: {
+      instructions: "The answer cites the supplied evidence.",
+      threshold: 0.9,
+    },
+  },
+  async ({ judge, input, output }) => runProjectJudge({ judge, input, output }),
+);
+```
+
+Judge scores are clamped to 0 through 1. Missing runners, invalid judge
+configuration, provider errors, and malformed verdicts become failed
+assertions on that case instead of aborting the suite. `normalizeEvalJudge`
+validates the authored contract; `normalizeExpected`, `jsonContains`,
+`jsonEquals`, `formatEvalError`, `isPlainObject`, and `slugifyEvalToken` are
+the exported low-level helpers for clients that must share the same semantics.
+
+`evalCaseRunId(suiteId, caseId, evalRunId)` builds a readable, bounded,
+collision-resistant child-run id. `evalAssertionScorer()` converts the
+assertions stored on a case task output into the persisted score row read by
+`listScoresForRuns` and `getScoreDetail`. `EVAL_CASE_STATUSES` defines the
+allowed engine statuses for status assertions.
+
+**Source** [`evalCases.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/evalCases.js) · **Tests** [`eval-cases.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/eval-cases.test.js) · **See also** [Evals quickstart](/guides/evals-quickstart), [Score comparison RPC](/rpc/list-scores-for-runs)
 
 ## Running scorers
 
