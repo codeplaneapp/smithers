@@ -25,6 +25,7 @@ import { ExecutionPanel, type TreeNode } from "./monitorExecution.tsx";
 import { HealthStrip } from "./monitorHealth.tsx";
 import { ScoresPanel, type RunScores } from "./monitorScores.tsx";
 import { Elapsed, StatusTag } from "./monitorShared.tsx";
+import { RunCostCard } from "./monitorUsagePanels.tsx";
 
 function CopyableRunId({ runId }: { runId: string }) {
   const [copied, setCopied] = useState(false);
@@ -242,6 +243,8 @@ export function RunDetail({
       </header>
 
       <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} />
+
+      <RunCostCard runId={runId} active={status === "running" || status === "pending"} progressRatio={progress?.fraction} />
 
       <ScoresPanel scores={scores} />
 

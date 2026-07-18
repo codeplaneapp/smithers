@@ -1985,12 +1985,18 @@ importers:
       '@smithers-orchestrator/scheduler':
         specifier: workspace:*
         version: link:../scheduler
+      '@smithers-orchestrator/scorers':
+        specifier: workspace:*
+        version: link:../scorers
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:../time-travel
       '@smithers-orchestrator/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
+      '@smithers-orchestrator/usage':
+        specifier: workspace:*
+        version: link:../usage
       cron-parser:
         specifier: ^5.6.1
         version: 5.6.1

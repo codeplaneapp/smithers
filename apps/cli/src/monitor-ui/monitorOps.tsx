@@ -21,6 +21,7 @@ import {
   type Tone,
 } from "./monitorModel.ts";
 import { Ago, Countdown, useJsonApi, useMetricsScrape, useNowMs } from "./monitorShared.tsx";
+import { AccountUsageCards } from "./monitorUsagePanels.tsx";
 
 // ---------------------------------------------------------------------------
 // Workspace overview: the ops strip (one quiet row of stat cards above the
@@ -130,6 +131,7 @@ export function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }
       />
       <StatCard value={n(memoryCount)} label="memory facts" testId="monitor-stat-memory" />
       <StatCard value={n(ticketsOpen)} label="open tickets" testId="monitor-stat-tickets" />
+      <AccountUsageCards />
     </div>
   );
 }

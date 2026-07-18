@@ -263,6 +263,8 @@ const HTTP_ROUTE_SCOPES = {
   "workflows.list": "run:read",
   "runs.diff": "run:read",
   listNodeStates: "run:read",
+  getRunTokenUsage: "run:read",
+  getAccountUsage: "account:read",
   retryTask: "run:write",
   "frames.list": "run:read",
   "frames.get": "run:read",

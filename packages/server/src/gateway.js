@@ -37,6 +37,8 @@ import { NodeOutputRouteError } from "./gatewayRoutes/NodeOutputRouteError.js";
 import { getNodeDiffRoute } from "./gatewayRoutes/getNodeDiff.js";
 import { getRunDiffRoute } from "./gatewayRoutes/getRunDiff.js";
 import { WhatHappenedRouteError, whatHappenedRoute } from "./gatewayRoutes/whatHappened.js";
+import { aggregateTokenUsageEvents } from "./gatewayRoutes/getRunTokenUsage.js";
+import { getGatewayAccountUsage } from "./gatewayRoutes/getAccountUsage.js";
 import { DevToolsRouteError, getDevToolsSnapshotRoute, validateFrameNoInput, validateFromSeqInput, validateRunId } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
@@ -3903,6 +3905,10 @@ a { color: var(--brand); }</style>
             };
         }
         const runNodeStates = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/node-states$/);
+        const runTokenUsage = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/token-usage$/);
+        if (httpMethod === "GET" && runTokenUsage) {
+            return { method: "getRunTokenUsage", params: { runId: decodeURIComponent(runTokenUsage[1]) } };
+        }
         if (httpMethod === "GET" && runNodeStates) {
             // Flat per-(nodeId, iteration) execution states with latest-attempt
             // timing — the tree route folds these into the snapshot, this
@@ -4055,6 +4061,7 @@ a { color: var(--brand); }</style>
             ["/v1/api/memory-facts", "listMemoryFacts"],
             ["/v1/api/crons", "cronList"],
             ["/v1/api/accounts", "listAccounts"],
+            ["/v1/api/usage", "getAccountUsage"],
             ["/v1/api/schema-signature", "getSchemaSignature"],
         ]);
         const method = simpleReads.get(pathname);
@@ -4064,6 +4071,7 @@ a { color: var(--brand); }</style>
                 params: {
                     hasUi: queryString(url.searchParams, "hasUi") === undefined ? undefined : url.searchParams.get("hasUi") === "true",
                     includeSystem: queryString(url.searchParams, "includeSystem") === undefined ? undefined : url.searchParams.get("includeSystem") === "true",
+                    fresh: queryString(url.searchParams, "fresh") === undefined ? undefined : url.searchParams.get("fresh") === "true",
                     kind: queryString(url.searchParams, "kind"),
                     namespace: queryString(url.searchParams, "namespace"),
                     runId: queryString(url.searchParams, "runId"),
@@ -7783,6 +7791,13 @@ a { color: var(--brand); }</style>
                     };
                 }));
             }
+            case "getRunTokenUsage": {
+                const runId = asString(params.runId);
+                if (!runId) return responseError(frame.id, "INVALID_REQUEST", "runId is required");
+                const resolved = await this.resolveRun(runId);
+                if (!resolved) return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
+                return responseOk(frame.id, aggregateTokenUsageEvents(await resolved.adapter.listEventsByType(runId, "TokenUsageReported")));
+            }
             case "runs.get":
             case "getRun": {
                 const runId = asString(params.runId);
@@ -8677,6 +8692,9 @@ a { color: var(--brand); }</style>
             }
             case "listAccounts": {
                 return responseOk(frame.id, this.listAccountsFromRegistry());
+            }
+            case "getAccountUsage": {
+                return responseOk(frame.id, await getGatewayAccountUsage({ fresh: params.fresh === true }));
             }
             case "listMemoryFacts": {
                 const namespace = asString(params.namespace);
