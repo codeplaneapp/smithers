@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: example
 // smithers-metadata-version: 1
 // smithers-display-name: Daily CEO Intel
 // smithers-description: Fetch the prior 24h of AI-agent/orchestration news, dedupe/cluster/rank it deterministically, and compose, verify, render, and publish The Smithers Signal.
