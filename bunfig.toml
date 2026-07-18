@@ -3,3 +3,6 @@ preload = ["./preload.js"]
 [test]
 root = "."
 preload = ["./preload.js"]
+# Playwright suites only load under the Playwright runner; root-level `bun test`
+# (with [test].root = ".") would otherwise glob their *.spec.ts files and error.
+pathIgnorePatterns = ["apps/smithers/tests/e2e/**"]
