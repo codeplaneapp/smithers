@@ -192,6 +192,15 @@ try {
   audit = { tainted: null, error: String(err).slice(0, 500) };
 }
 
+// ---- foreign contention flag ---------------------------------------------
+// The driver snapshots foreign engine processes into workDir at launch time.
+let foreignContention: string[] = [];
+try {
+  foreignContention = readFileSync(join(workDir, "foreign-at-launch.txt"), "utf8").split("\n").filter(Boolean);
+} catch {
+  /* none recorded */
+}
+
 // ---- result --------------------------------------------------------------
 const result = {
   runId,
@@ -205,6 +214,7 @@ const result = {
   quotaStallS: Math.round(quotaStallMs / 1000),
   quotaPoisoned: quotaStallMs > 0,
   costUsd: Math.round(costUsd * 10000) / 10000,
+  foreignContention,
   usageByModel,
   stages: Object.fromEntries(
     Object.entries(stages).map(([id, s]) => [

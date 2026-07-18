@@ -69,22 +69,31 @@ validate_task() {
 # excluded deliberately: a superseded run can sit parked forever and would
 # deadlock this gate; if one resumes mid-cell the cell's own quotaStall/
 # timing flags catch the contamination.
+# Overlap between OUR measured cells is never allowed (hard block). All other
+# traffic — other runs in this workspace and other workspaces' engines — gets
+# a bounded 10m wait, then we proceed and the cell is flagged contended (cost
+# and reward are contention-immune; wall-clock carries the flag).
+running_workspace_runs() {
+  "${CLI[@]}" ps 2>/dev/null | awk '/- id:/{id=$3} /^\s*status: running$/{print id}'
+}
 wait_no_active_runs() {
   local waited=0
   while :; do
-    local active foreign
-    active="$("${CLI[@]}" ps 2>/dev/null | grep -cE 'status: running')" || active=0
-    # Foreign smithers engines (OTHER workspaces, e.g. ~/smithers4) share the
-    # same provider quotas but are invisible to this workspace's ps. Detect
-    # their engine processes; wait up to 2h, then proceed with a warning (the
-    # cell's own timing/quota flags catch residual contamination).
-    foreign="$(pgrep -fl 'src/index.js up |smithers.js up ' 2>/dev/null | grep -cv orchb-)" || foreign=0
-    if [[ "${active:-0}" -eq 0 && "${foreign:-0}" -eq 0 ]]; then return 0; fi
-    if [[ "${foreign:-0}" -gt 0 && "${active:-0}" -eq 0 && $waited -ge 7200 ]]; then
-      log "gate: WARNING foreign engine process(es) still active after 2h — proceeding (cells may be contaminated)"
+    local runs ours others foreign
+    runs="$(running_workspace_runs)"
+    ours="$(printf '%s\n' "$runs" | grep -c '^orchb-')" || ours=0
+    others="$(printf '%s\n' "$runs" | grep -v '^orchb-' | grep -c .)" || others=0
+    foreign="$(pgrep -f 'src/index.js up |smithers.js up ' 2>/dev/null | wc -l | tr -d ' ')" || foreign=0
+    if [[ "${ours:-0}" -gt 0 ]]; then
+      log "gate: $ours orchbench cell(s) still running — hard wait"
+    elif [[ "${others:-0}" -eq 0 && "${foreign:-0}" -eq 0 ]]; then
       return 0
+    elif [[ $waited -ge 600 ]]; then
+      log "gate: WARNING others=$others foreign=$foreign still active after 10m — proceeding (cell flagged contended)"
+      return 0
+    else
+      log "gate: others=$others workspace run(s), foreign=$foreign engine proc(s) — waiting 120s"
     fi
-    log "gate: active=$active workspace run(s), foreign=$foreign engine proc(s) — waiting 120s"
     sleep 120; waited=$((waited + 120))
   done
 }
@@ -132,6 +141,9 @@ PY
 )"
     mc=1; [[ "$pattern" == "panel-review" ]] && mc=3
     mkdir -p "$work/events"
+    # record concurrent traffic at launch so collect can flag contended wall-clocks
+    { running_workspace_runs | grep -v '^orchb-' | sed 's/^/workspace-run: /';
+      pgrep -f 'src/index.js up |smithers.js up ' 2>/dev/null | sed 's/^/engine-pid: /'; } > "$work/foreign-at-launch.txt" || true
     log "launch $cell run_id=$run_id (max-concurrency $mc)"
     "${CLI[@]}" up "$WF" --input "$input" --run-id "$run_id" --detach \
       --max-concurrency "$mc" --allow-network --tool-timeout-ms 4500000 \
