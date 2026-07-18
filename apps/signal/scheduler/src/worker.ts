@@ -28,13 +28,6 @@ type RunnerControl = {
 
 async function isRunInFlight(env: Env, dateEt: string): Promise<boolean> {
   const marker = await env.SIGNAL_REPORTS.get(`inflight:${dateEt}`);
-  const terminal = await env.SIGNAL_REPORTS.get(`run-status:${dateEt}`, "json") as
-    | { ok?: boolean; completedAt?: string }
-    | null;
-  if (terminal?.completedAt && terminal.ok === false) {
-    await env.SIGNAL_REPORTS.delete(`inflight:${dateEt}`);
-    return false;
-  }
   const container = getContainer(env.RUNNER) as unknown as RunnerControl;
   const schedules = await container.listSchedules("run");
   if (marker === null) return schedules.length > 0;
@@ -52,6 +45,11 @@ async function isRunInFlight(env: Env, dateEt: string): Promise<boolean> {
 }
 
 async function triggerRunner(env: Env, dateEt: string): Promise<TriggerResult> {
+  // Keep this guard inside the shared scheduling path so cron, watchdog, and
+  // manual callers all use the same duplicate-run protection.
+  if (await isRunInFlight(env, dateEt)) {
+    return { ok: false, status: 409, body: { ok: false, error: "already in flight", dateEt } };
+  }
   await env.SIGNAL_REPORTS.put(`inflight:${dateEt}`, "1", { expirationTtl: INFLIGHT_TTL_SECONDS });
   try {
     const container = getContainer(env.RUNNER) as unknown as RunnerControl;

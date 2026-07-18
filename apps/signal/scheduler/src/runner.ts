@@ -32,6 +32,20 @@ export class Runner extends Container<Env> {
     SIGNAL_PUBLISH_MODE: "auto",
   };
 
+  private async alert(message: string): Promise<void> {
+    const webhook = this.env.SIGNAL_ALERT_WEBHOOK_URL;
+    if (!webhook) return;
+    try {
+      await fetch(webhook, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: `[The Smithers Signal] ${message}` }),
+      });
+    } catch (error) {
+      console.error(`[signal-runner-do] alert webhook delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   async run(payload: { dateEt: string }): Promise<void> {
     try {
       const response = await this.containerFetch(new Request("http://runner/run", { method: "POST" }));
@@ -55,7 +69,16 @@ export class Runner extends Container<Env> {
         }),
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
-      if (!response.ok) console.error(`[signal-runner-do] run failed: HTTP ${response.status}`);
+      if (!response.ok) {
+        const message = `run for ${payload.dateEt} failed: HTTP ${response.status}`;
+        console.error(`[signal-runner-do] ${message}`);
+        await this.alert(message);
+      }
+    } catch (error) {
+      const message = `run for ${payload.dateEt} failed before completion: ${error instanceof Error ? error.message : String(error)}`;
+      console.error(`[signal-runner-do] ${message}`);
+      await this.alert(message);
+      throw error;
     } finally {
       await this.env.SIGNAL_REPORTS.delete(`inflight:${payload.dateEt}`);
     }

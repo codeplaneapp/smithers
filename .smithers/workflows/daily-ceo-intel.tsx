@@ -137,7 +137,7 @@ export default smithers((ctx) => {
   const configOut = ctx.outputMaybe(outputs.ceoIntelConfig, { nodeId: "load-config-and-state" });
   const providerSelectionOut = ctx.outputMaybe(outputs.ceoIntelProviderSelection, { nodeId: "select-model-provider" });
   const agentPools = providerSelectionOut
-    ? buildAgentPoolsForSelection(providerSelectionOut, { cheap: agents.ceoIntelCheap, strong: agents.ceoIntelStrong })
+    ? buildAgentPoolsForSelection(providerSelectionOut, { cheap: agents.ceoIntelCheap, strong: agents.ceoIntelStrong }, process.env)
     : null;
 
   const fetchRssOut = ctx.outputMaybe(outputs.ceoIntelFetchRss, { nodeId: "fetch-rss" });
@@ -463,7 +463,8 @@ export default smithers((ctx) => {
             {async () => {
               const runConfig = loadRunConfig(input.configPath);
               const creds = configOut.cfCredsPresent ? resolveCloudflareCreds(runConfig) : null;
-              return archiveIssue(renderOut, windowOut.issueDateEt, configOut.effectiveMode, configOut.cfCredsPresent, creds, runConfig.reportsDir);
+              const { db } = openDb(runConfig.dbPath);
+              return archiveIssue(renderOut, windowOut.issueDateEt, configOut.effectiveMode, configOut.cfCredsPresent, creds, runConfig.reportsDir, db);
             }}
           </Task>
         ) : null}

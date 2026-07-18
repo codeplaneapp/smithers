@@ -10468,7 +10468,7 @@ language these components implement.
 
 ## Custom Workflow UIs
 
-> Build a first-class browser UI for your workflow with bunx smithers-orchestrator ui, the Gateway, gateway-client, and gateway-react.
+> Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
 
 A custom workflow UI is a small browser bundle that *belongs to your workflow*
 and talks to the Smithers Gateway through its domain API, RPC API, and live
@@ -10477,7 +10477,7 @@ event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
 builds and serves it at `/workflows/<key>`. `bunx smithers-orchestrator ui`
 opens it for a run with a stable `?runId=` deep link.
 
-This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through bunx smithers-orchestrator ui and the Gateway.
+This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through smithers ui and the Gateway.
 
 For the underlying RPC and event protocol, see Gateway. For the TanStack DB collection layer that backs the React hooks, see Sync. For two compact end-to-end examples, see Workflow UI (React) and Workflow UI (Vanilla). For the *visual* language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see Workflow UI Design Principles.
 
@@ -10503,7 +10503,7 @@ Three pieces collaborate:
 
 2. **The Gateway serves an HTML shell.** Hitting `/workflows/vcs` returns a tiny HTML document with a `<div id="root">`, the bundled script, and a global `__SMITHERS_GATEWAY_UI__` object (the `GatewayUiBootConfig`) set before your script runs. The shell uses `?runId=<id>` from the query string to scope a session to one run; if it is omitted, your UI is responsible for showing a picker or empty state. The shell is also **theme-aware**: it inlines the workflow UI style-guide tokens (light values, dark overrides, and `color-scheme`) so the document follows the OS `prefers-color-scheme` before your bundle loads, and it honors an explicit `?theme=dark` / `?theme=light` query param by stamping `data-theme` on `<html>` pre-paint. That query param is the channel an embedding host (for example an app rendering the page in an iframe) uses to push its own light/dark toggle into the UI.
 
-3. **bunx smithers-orchestrator ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
+3. **smithers ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
 
 ## Two SDKs: pick by appetite
 

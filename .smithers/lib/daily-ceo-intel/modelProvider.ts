@@ -43,7 +43,10 @@ export const ANTHROPIC_STRONG_MODEL = "claude-fable-5";
 export const OPENAI_STRONG_MODEL = "gpt-5.6";
 export const GEMINI_MODEL = "gemini-2.5-flash";
 export const GEMINI_OPENAI_COMPAT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-const PROBE_TIMEOUT_MS = 12_000;
+// The selection task itself has a 30s budget. Keep the whole sequential probe
+// chain below that budget, rather than giving each request an independent 12s.
+const PROBE_DEADLINE_MS = 25_000;
+const PROBE_TIMEOUT_MS = 8_000;
 
 const NON_CHAT_MODEL_PATTERN = /audio|realtime|embedding|image|transcribe|tts|moderation|whisper|dall-e/i;
 
@@ -92,9 +95,11 @@ async function safeErrorBody(res: Response): Promise<string> {
   }
 }
 
-async function fetchWithTimeout(fetchImpl: FetchLike, input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
+async function fetchWithTimeout(fetchImpl: FetchLike, input: string | URL | Request, deadlineAt: number, init: RequestInit = {}): Promise<Response> {
+  const remaining = Math.min(PROBE_TIMEOUT_MS, deadlineAt - Date.now());
+  if (remaining <= 0) throw new Error("provider probe deadline exceeded");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), remaining);
   try {
     return await fetchImpl(input, { ...init, signal: controller.signal });
   } finally {
@@ -106,15 +111,15 @@ function probeDetail(status: number, classification: ProbeClassification): strin
   return `HTTP ${status} (${classification})`;
 }
 
-async function callAnthropicPing(apiKey: string, model: string, fetchImpl: FetchLike): Promise<Response> {
-  return fetchWithTimeout(fetchImpl, "https://api.anthropic.com/v1/messages", {
+async function callAnthropicPing(apiKey: string, model: string, fetchImpl: FetchLike, deadlineAt: number): Promise<Response> {
+  return fetchWithTimeout(fetchImpl, "https://api.anthropic.com/v1/messages", deadlineAt, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
   });
 }
 
-async function probeAnthropic(apiKey: string | undefined, fetchImpl: FetchLike): Promise<ProviderProbe> {
+async function probeAnthropic(apiKey: string | undefined, fetchImpl: FetchLike, deadlineAt: number): Promise<ProviderProbe> {
   if (!apiKey) return { provider: "anthropic", attempted: false, ok: false, classification: "missing-key", detail: "ANTHROPIC_API_KEY not set" };
   // Probe both the cheap (assess/lighter-side) and strong (compose-editorial)
   // models, not just the cheap one — a billing failure applies account-wide,
@@ -123,7 +128,7 @@ async function probeAnthropic(apiKey: string | undefined, fetchImpl: FetchLike):
   const modelsToVerify = [...new Set([ANTHROPIC_CHEAP_MODEL, ANTHROPIC_STRONG_MODEL])];
   try {
     for (const model of modelsToVerify) {
-      const res = await callAnthropicPing(apiKey, model, fetchImpl);
+      const res = await callAnthropicPing(apiKey, model, fetchImpl, deadlineAt);
       if (!res.ok) {
         const body = await safeErrorBody(res);
         const classification = classifyProbeError(res.status, body);
@@ -136,9 +141,9 @@ async function probeAnthropic(apiKey: string | undefined, fetchImpl: FetchLike):
   }
 }
 
-async function listOpenAIModels(apiKey: string, fetchImpl: FetchLike): Promise<string[]> {
+async function listOpenAIModels(apiKey: string, fetchImpl: FetchLike, deadlineAt: number): Promise<string[]> {
   try {
-    const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${apiKey}` } });
+    const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/models", deadlineAt, { headers: { authorization: `Bearer ${apiKey}` } });
     if (!res.ok) return [];
     const body = (await res.json().catch(() => null)) as { data?: Array<{ id: string }> } | null;
     return (body?.data ?? []).map((m) => m.id);
@@ -147,14 +152,14 @@ async function listOpenAIModels(apiKey: string, fetchImpl: FetchLike): Promise<s
   }
 }
 
-async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike): Promise<{ probe: ProviderProbe; cheapModel: string | null }> {
+async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike, deadlineAt: number): Promise<{ probe: ProviderProbe; cheapModel: string | null }> {
   if (!apiKey) return { probe: { provider: "openai", attempted: false, ok: false, classification: "missing-key", detail: "OPENAI_API_KEY not set" }, cheapModel: null };
-  const modelIds = await listOpenAIModels(apiKey, fetchImpl);
+  const modelIds = await listOpenAIModels(apiKey, fetchImpl, deadlineAt);
   const cheapModel = pickCheapOpenAIModel(modelIds) ?? OPENAI_STRONG_MODEL;
   const modelsToVerify = [...new Set([cheapModel, OPENAI_STRONG_MODEL])];
   try {
     for (const model of modelsToVerify) {
-      const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/chat/completions", {
+      const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/chat/completions", deadlineAt, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
         // 16, not 1: gpt-5.6-family reasoning models spend the first tokens on
@@ -173,14 +178,14 @@ async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike): Pr
   }
 }
 
-async function probeGemini(apiKey: string | undefined, fetchImpl: FetchLike): Promise<ProviderProbe> {
+async function probeGemini(apiKey: string | undefined, fetchImpl: FetchLike, deadlineAt: number): Promise<ProviderProbe> {
   if (!apiKey) return { provider: "gemini", attempted: false, ok: false, classification: "missing-key", detail: "GEMINI_API_KEY not set" };
   try {
     // Probe the OpenAI-compat /chat/completions endpoint the agents actually
     // serve through, not the native generateContent endpoint — probing a
     // different code path than serving let an unusable provider win selection
     // (native probe 200'd while every real call 404'd on /responses).
-    const res = await fetchWithTimeout(fetchImpl, `${GEMINI_OPENAI_COMPAT_BASE_URL}/chat/completions`, {
+    const res = await fetchWithTimeout(fetchImpl, `${GEMINI_OPENAI_COMPAT_BASE_URL}/chat/completions`, deadlineAt, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: GEMINI_MODEL, max_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
@@ -210,24 +215,27 @@ export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = f
     return { mode, provider: "anthropic", cheapModel: ANTHROPIC_CHEAP_MODEL, strongModel: ANTHROPIC_STRONG_MODEL, reason: "SIGNAL_MODEL_PROVIDER=anthropic forced.", probes: [], selectedAt };
   }
   if (mode === "gemini") {
+    if (!env.GEMINI_API_KEY?.trim()) throw new Error("SIGNAL_MODEL_PROVIDER=gemini requires GEMINI_API_KEY");
     return { mode, provider: "gemini", cheapModel: GEMINI_MODEL, strongModel: GEMINI_MODEL, reason: "SIGNAL_MODEL_PROVIDER=gemini forced.", probes: [], selectedAt };
   }
   if (mode === "openai") {
     const apiKey = env.OPENAI_API_KEY?.trim();
-    const modelIds = apiKey ? await listOpenAIModels(apiKey, fetchImpl) : [];
+    if (!apiKey) throw new Error("SIGNAL_MODEL_PROVIDER=openai requires OPENAI_API_KEY");
+    const modelIds = await listOpenAIModels(apiKey, fetchImpl, Date.now() + PROBE_DEADLINE_MS);
     const cheapModel = pickCheapOpenAIModel(modelIds) ?? OPENAI_STRONG_MODEL;
     return { mode, provider: "openai", cheapModel, strongModel: OPENAI_STRONG_MODEL, reason: "SIGNAL_MODEL_PROVIDER=openai forced.", probes: [], selectedAt };
   }
 
   const probes: ProviderProbe[] = [];
 
-  const anthropicProbe = await probeAnthropic(env.ANTHROPIC_API_KEY?.trim(), fetchImpl);
+  const deadlineAt = Date.now() + PROBE_DEADLINE_MS;
+  const anthropicProbe = await probeAnthropic(env.ANTHROPIC_API_KEY?.trim(), fetchImpl, deadlineAt);
   probes.push(anthropicProbe);
   if (anthropicProbe.ok) {
     return { mode, provider: "anthropic", cheapModel: ANTHROPIC_CHEAP_MODEL, strongModel: ANTHROPIC_STRONG_MODEL, reason: "Anthropic probe succeeded (spec-preferred provider).", probes, selectedAt };
   }
 
-  const { probe: openaiProbe, cheapModel: openaiCheapModel } = await probeOpenAI(env.OPENAI_API_KEY?.trim(), fetchImpl);
+  const { probe: openaiProbe, cheapModel: openaiCheapModel } = await probeOpenAI(env.OPENAI_API_KEY?.trim(), fetchImpl, deadlineAt);
   probes.push(openaiProbe);
   if (openaiProbe.ok) {
     return {
@@ -241,7 +249,7 @@ export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = f
     };
   }
 
-  const geminiProbe = await probeGemini(env.GEMINI_API_KEY?.trim(), fetchImpl);
+  const geminiProbe = await probeGemini(env.GEMINI_API_KEY?.trim(), fetchImpl, deadlineAt);
   probes.push(geminiProbe);
   if (geminiProbe.ok) {
     return {
@@ -276,20 +284,24 @@ export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = f
 export function buildAgentPoolsForSelection(
   selection: ProviderSelection,
   anthropicPools: { cheap: readonly AgentLike[]; strong: readonly AgentLike[] },
+  env: EnvLike = process.env,
 ): { cheap: AgentLike[]; strong: AgentLike[] } {
   if (selection.provider === "anthropic") {
     return { cheap: [...anthropicPools.cheap], strong: [...anthropicPools.strong] };
   }
   if (selection.provider === "openai") {
+    const apiKey = env.OPENAI_API_KEY?.trim();
+    if (!apiKey) throw new Error("OpenAI provider selected but OPENAI_API_KEY is not set");
     return {
-      cheap: [new OpenAIAgent({ model: selection.cheapModel, maxOutputTokens: 2_000 })],
-      strong: [new OpenAIAgent({ model: selection.strongModel, maxOutputTokens: 5_000 })],
+      cheap: [new OpenAIAgent({ model: selection.cheapModel, apiKey, maxOutputTokens: 2_000 })],
+      strong: [new OpenAIAgent({ model: selection.strongModel, apiKey, maxOutputTokens: 5_000 })],
     };
   }
   // gemini: routed through OpenAIAgent at Google's OpenAI-compatible endpoint
   // (see module docstring). api: "chat" is load-bearing — the provider default
   // targets /responses, which Gemini's compat layer doesn't implement (404).
-  const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
+  const geminiApiKey = env.GEMINI_API_KEY?.trim();
+  if (!geminiApiKey) throw new Error("Gemini provider selected but GEMINI_API_KEY is not set");
   return {
     cheap: [new OpenAIAgent({ model: selection.cheapModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat", maxOutputTokens: 2_000 })],
     strong: [new OpenAIAgent({ model: selection.strongModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat", maxOutputTokens: 5_000 })],

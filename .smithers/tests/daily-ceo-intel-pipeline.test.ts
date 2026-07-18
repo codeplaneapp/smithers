@@ -596,7 +596,7 @@ describe("modelProvider: SDK-agent provider fallback (auto|anthropic|openai|gemi
 
   test("explicit gemini mode forces the provider without any probe calls", async () => {
     const { impl, calls } = fakeFetch([]);
-    const selection = await selectModelProvider({ SIGNAL_MODEL_PROVIDER: "gemini" }, impl, NOW);
+    const selection = await selectModelProvider({ SIGNAL_MODEL_PROVIDER: "gemini", GEMINI_API_KEY: "g-test" }, impl, NOW);
     expect(selection.provider).toBe("gemini");
     expect(selection.cheapModel).toBe(GEMINI_MODEL);
     expect(selection.strongModel).toBe(GEMINI_MODEL);
@@ -700,7 +700,7 @@ describe("modelProvider: SDK-agent provider fallback (auto|anthropic|openai|gemi
 
   test("buildAgentPoolsForSelection builds a single-agent OpenAI pool for the openai provider", () => {
     const selection: ProviderSelection = { mode: "auto", provider: "openai", cheapModel: "gpt-5.6-mini", strongModel: OPENAI_STRONG_MODEL, reason: "ok", probes: [], selectedAt: NOW() };
-    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] });
+    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] }, { OPENAI_API_KEY: "sk-test" });
     expect(pools.cheap).toHaveLength(1);
     expect(pools.strong).toHaveLength(1);
     expect((pools.cheap[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
@@ -709,14 +709,14 @@ describe("modelProvider: SDK-agent provider fallback (auto|anthropic|openai|gemi
 
   test("buildAgentPoolsForSelection builds a single-agent OpenAI-compat pool for the gemini provider", () => {
     const selection: ProviderSelection = { mode: "auto", provider: "gemini", cheapModel: GEMINI_MODEL, strongModel: GEMINI_MODEL, reason: "ok", probes: [], selectedAt: NOW() };
-    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] });
+    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] }, { GEMINI_API_KEY: "g-test" });
     expect((pools.cheap[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
     expect((pools.strong[0] as { hijackEngine?: string }).hijackEngine).toBe("openai-sdk");
   });
 
   test("gemini pools serve through the chat/completions API, never /responses (Gemini's compat layer 404s on /responses)", () => {
     const selection: ProviderSelection = { mode: "auto", provider: "gemini", cheapModel: GEMINI_MODEL, strongModel: GEMINI_MODEL, reason: "ok", probes: [], selectedAt: NOW() };
-    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] });
+    const pools = buildAgentPoolsForSelection(selection, { cheap: [fakeAgent("x")], strong: [fakeAgent("y")] }, { GEMINI_API_KEY: "g-test" });
     for (const agent of [...pools.cheap, ...pools.strong]) {
       const model = (agent as unknown as { settings?: { model?: { provider?: string; modelId?: string } } }).settings?.model;
       expect(model?.provider).toBe("openai.chat");

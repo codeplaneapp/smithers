@@ -35,6 +35,19 @@ async function attachParsedZodOutput(result, outputSchema, enabled) {
     if (!enabled || !(outputSchema && typeof outputSchema === "object" && "_zod" in outputSchema)) {
         return result;
     }
+    // Recent AI SDK versions already validate native structured output. Do not
+    // run transforms/refinements a second time; stateful transforms can make
+    // `output` disagree with the SDK's parsed value. `result.output` is a
+    // throwing getter (NoOutputSpecifiedError / parse failures), so probe it
+    // defensively — a throw means the SDK did not attach usable output.
+    let sdkOutput;
+    try {
+        sdkOutput = result.output;
+    }
+    catch {
+        sdkOutput = undefined;
+    }
+    if (sdkOutput !== undefined) return result;
     let parsed;
     try {
         parsed = await outputSchema.safeParseAsync(JSON.parse(result.text));

@@ -1,7 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CloudflareCreds } from "./cloudflare";
-import { putR2Object } from "./cloudflare";
+import { getKvValue, putR2Object } from "./cloudflare";
+import { getDelivery } from "./db";
+import type { CeoIntelDb } from "./db";
 import type { ArchiveOutput, RenderOutput } from "./schemas";
 
 function writeLocal(render: RenderOutput, issueDateEt: string, reportsDir: string): ArchiveOutput {
@@ -25,9 +27,31 @@ export async function archiveIssue(
   cfCredsPresent: boolean,
   creds: CloudflareCreds | null,
   reportsDir: string,
+  db?: CeoIntelDb,
 ): Promise<ArchiveOutput> {
   const useR2 = effectiveMode === "publish" && cfCredsPresent && creds !== null;
   if (!useR2) return writeLocal(render, issueDateEt, reportsDir);
+
+  // Delivery is the idempotency boundary. A retry may have a newly rendered
+  // (or empty) issue in memory, but must never overwrite the canonical R2
+  // artifacts belonging to an already delivered date.
+  const existing = db ? getDelivery(db, issueDateEt) : null;
+  // The KV report is the canonical delivery record and survives a runner
+  // database reset. Check it before touching R2 so a retry cannot replace a
+  // delivered issue even when the local delivery ledger is unavailable.
+  const canonicalKvReport = await getKvValue(creds, `report:${issueDateEt}`);
+  if (existing || canonicalKvReport !== null) {
+    return {
+      mode: "r2",
+      paths: {
+        md: `r2:artifacts/${issueDateEt}/report.md`,
+        html: `r2:artifacts/${issueDateEt}/report.html`,
+        json: `r2:artifacts/${issueDateEt}/report.json`,
+      },
+      bytesWritten: 0,
+      summary: `Issue ${issueDateEt} was already delivered; preserved canonical R2 artifacts.`,
+    };
+  }
 
   const keys = {
     md: `artifacts/${issueDateEt}/report.md`,
