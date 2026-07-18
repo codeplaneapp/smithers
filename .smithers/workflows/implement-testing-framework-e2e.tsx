@@ -332,6 +332,15 @@ const fable: AgentLike = new ClaudeCodeAgent({
     ANTHROPIC_AUTH_TOKEN: "",
   },
 });
+const fableImplementation: AgentLike = new ClaudeCodeAgent({
+  model: "claude-fable-5",
+  yolo: false,
+  permissionMode: "acceptEdits",
+  env: {
+    ANTHROPIC_API_KEY: "",
+    ANTHROPIC_AUTH_TOKEN: "",
+  },
+});
 
 type CheckKind = z.infer<typeof check>["kind"];
 type CheckResult = z.infer<typeof check>;
@@ -759,7 +768,7 @@ export default smithers((ctx) => {
           }
         />
 
-        <Task id="implement" output={outputs.implementation} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task id="implement" output={outputs.implementation} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
           <ImplementPrompt
             objective={objective}
             contract={DEFAULT_OBJECTIVE}
@@ -786,7 +795,7 @@ export default smithers((ctx) => {
           if={initialNeedsFix}
           then={
             <Sequence>
-              <Task id="initial-luna-fix" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task id="initial-luna-fix" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                 <InitialFixPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -887,7 +896,7 @@ export default smithers((ctx) => {
             <Branch
               if={solNeedsImprovement && nextReadinessRound <= maxRounds}
               then={
-                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                   <ConsensusImprovementPrompt
                     objective={objective}
                     contract={DEFAULT_OBJECTIVE}
@@ -1015,7 +1024,7 @@ export default smithers((ctx) => {
               if={consensusNeedsImprovement && nextConsensusRound <= maxRounds}
               then={
                 <Sequence>
-                  <Task id="consensus-luna-improvement" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                  <Task id="consensus-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                     <ConsensusImprovementPrompt
                       objective={objective}
                       contract={DEFAULT_OBJECTIVE}
