@@ -2185,6 +2185,30 @@ export class SmithersDb {
         }));
     }
     /**
+   * List every human request recorded for one run. Expiry is reconciled before
+   * reading so a timed-out pending request is reported honestly to operators.
+   * @param {string} runId
+   * @param {number} [nowMs]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listHumanRequestsForRun(runId, nowMs = Date.now()) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            yield* self.expireStaleHumanRequests(nowMs);
+            return yield* self.read(`list human requests for run ${runId}`, () => self.internalStorage.queryAll(`SELECT
+             h.request_id, h.run_id, h.node_id, h.iteration, h.kind, h.status,
+             h.prompt, h.schema_json, h.options_json, h.response_json,
+             h.requested_at_ms, h.answered_at_ms, h.answered_by, h.timeout_at_ms,
+             r.workflow_name, r.status AS run_status, n.label AS node_label
+           FROM _smithers_human_requests h
+           LEFT JOIN _smithers_runs r ON h.run_id = r.run_id
+           LEFT JOIN _smithers_nodes n ON h.run_id = n.run_id
+            AND h.node_id = n.node_id AND h.iteration = n.iteration
+           WHERE h.run_id = ?
+           ORDER BY h.requested_at_ms ASC`, [runId]));
+        }));
+    }
+    /**
    * @param {string} requestId
    * @param {string} responseJson
    * @param {number} answeredAtMs
@@ -3413,6 +3437,18 @@ export class SmithersDb {
          FROM _smithers_memory_facts
          WHERE namespace = ?
          ORDER BY namespace, key`, [ns]));
+    }
+    /**
+   * List facts explicitly stamped with this run's provenance. Legacy facts
+   * without a run id are intentionally excluded rather than guessed by time.
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listMemoryFactsForRun(runId) {
+        return this.read(`list memory facts for run ${runId}`, () => this.internalStorage.queryAll(`SELECT namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms, run_id, node_id, iteration
+         FROM _smithers_memory_facts
+         WHERE run_id = ?
+         ORDER BY updated_at_ms ASC`, [runId]));
     }
     // ---------------------------------------------------------------------------
     // Docs (tickets / plans / specs / proposals)

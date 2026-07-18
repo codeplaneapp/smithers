@@ -25,6 +25,7 @@ import { ExecutionPanel, type TreeNode } from "./monitorExecution.tsx";
 import { HealthStrip } from "./monitorHealth.tsx";
 import { ScoresPanel, type RunScores } from "./monitorScores.tsx";
 import { FootprintPanel } from "./monitorFootprint.tsx";
+import { DecisionsPanel } from "./monitorDecisions.tsx";
 import { Elapsed, StatusTag } from "./monitorShared.tsx";
 import { RunCostCard } from "./monitorUsagePanels.tsx";
 import { RunEtaLine } from "./monitorEta.tsx";
@@ -253,6 +254,8 @@ export function RunDetail({
       <RecapPanel runId={runId} status={status} />
       <ScoresPanel scores={scores} />
       <FootprintPanel runId={runId} live={status === "running"} onFocusNode={setFootprintFocusNodeId} />
+
+      <DecisionsPanel runId={runId} runStatus={status} onSelectNode={onSelectNode} />
 
       {showCustomUi && customUiUrl ? (
         <div className="mon-modal-backdrop" onClick={closeCustomUi} data-testid="monitor-ui-modal">

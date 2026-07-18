@@ -41,6 +41,7 @@ import { WhatHappenedRouteError, whatHappenedRoute } from "./gatewayRoutes/whatH
 import { aggregateTokenUsageEvents } from "./gatewayRoutes/getRunTokenUsage.js";
 import { getGatewayAccountUsage } from "./gatewayRoutes/getAccountUsage.js";
 import { RunRecapRouteError, runRecapRoute } from "./gatewayRoutes/runRecap.js";
+import { ListRunDecisionsRouteError, listRunDecisionsRoute } from "./gatewayRoutes/listRunDecisions.js";
 import { DevToolsRouteError, getDevToolsSnapshotRoute, validateFrameNoInput, validateFromSeqInput, validateRunId } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
@@ -3926,6 +3927,10 @@ a { color: var(--brand); }</style>
                 method: "listNodeStates",
                 params: { runId: decodeURIComponent(runNodeStates[1]) },
             };
+        }
+        const runDecisions = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/decisions$/);
+        if (httpMethod === "GET" && runDecisions) {
+            return { method: "listRunDecisions", params: { runId: decodeURIComponent(runDecisions[1]) } };
         }
         const runTree = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(?:tree|devtools)$/);
         if (httpMethod === "GET" && runTree) {
@@ -7993,6 +7998,17 @@ a { color: var(--brand); }</style>
             case "runRecap": {
                 try { return responseOk(frame.id, await runRecapRoute({ ...params, resolveRun: this.resolveRun.bind(this), summarize: this.runRecapNarrator, cache: this.runRecapCache, history: this.runRecapHistory })); }
                 catch (error) { if (error instanceof RunRecapRouteError) return responseError(frame.id, error.code, error.message); throw error; }
+            }
+            // HTTP-mapped monitor read (like listNodeStates): not in the RPC
+            // catalog, so scope falls back to the run:read default.
+            case "listRunDecisions": {
+                try {
+                    return responseOk(frame.id, await listRunDecisionsRoute({ runId: params.runId, resolveRun: this.resolveRun.bind(this) }));
+                }
+                catch (error) {
+                    if (error instanceof ListRunDecisionsRouteError) return responseError(frame.id, error.code, error.message);
+                    throw error;
+                }
             }
             case "getDevToolsSnapshot": {
                 const runId = asString(params.runId);

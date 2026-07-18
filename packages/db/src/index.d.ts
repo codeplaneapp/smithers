@@ -1024,6 +1024,12 @@ declare class SmithersDb {
    */
     listPendingHumanRequests(nowMs?: number): RunnableEffect<PendingHumanRequestRow[], SmithersError$1>;
     /**
+   * @param {string} runId
+   * @param {number} [nowMs]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listHumanRequestsForRun(runId: string, nowMs?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
    * @param {string} requestId
    * @param {string} responseJson
    * @param {number} answeredAtMs
@@ -1411,6 +1417,11 @@ declare class SmithersDb {
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listMemoryFacts(namespace?: string | null): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listMemoryFactsForRun(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * List LIVE docs from `_smithers_docs` (tombstones — `deleted_at_ms IS NOT
    * NULL` — are NEVER returned), optionally scoped to one `kind`. Backs the
