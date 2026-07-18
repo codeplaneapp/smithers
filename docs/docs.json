@@ -149,6 +149,7 @@
           "cli/overview",
           "guides/agent-operating-playbook",
           "guides/evals-quickstart",
+          "guides/testing-workflows",
           "guides/workflow-optimization",
           "guides/monitor",
           "guides/tui",
