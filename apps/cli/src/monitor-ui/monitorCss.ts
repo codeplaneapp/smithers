@@ -314,6 +314,17 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-footprint-file { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) 0 var(--sp-1) var(--sp-4); border-bottom: 1px solid var(--border); font-size: var(--fs-1); font-variant-numeric: tabular-nums; color: var(--muted); }
 .mon-footprint-file:last-child { border-bottom: 0; }
 
+/* Run recap: the plain-language band mirrors the inspector's "what happened"
+   treatment; earlier recaps stack as quiet bordered rows underneath. */
+.mon-recap-summary { white-space: pre-wrap; font-size: var(--fs-3); line-height: var(--lh-body); background: color-mix(in srgb, var(--brand) 6%, transparent); border-radius: var(--r-1); padding: var(--sp-2) var(--sp-3); margin: 0 0 var(--sp-1); }
+.mon-recap-history { padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); color: var(--muted); white-space: pre-wrap; font-size: var(--fs-2); }
+.mon-recap-history:last-child { border-bottom: 0; }
+
+/* Decisions & deviations: one row per entry; the tone pill carries state. */
+.mon-decision { display: grid; gap: var(--sp-1); justify-items: start; padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); font-size: var(--fs-2); }
+.mon-decision:last-child { border-bottom: 0; padding-bottom: 0; }
+.mon-pre { margin: 0; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--bg); font-size: var(--fs-1); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
+
 /* Metrics view: sections of label/value rows, monospace numbers. */
 .mon-metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-4) var(--sp-6); }
 .mon-metrics-section .mon-kicker { margin: 0 0 var(--sp-2); }
@@ -331,7 +342,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-attention button { border: 0; border-radius: var(--r-1); padding: var(--sp-1) var(--sp-2); background: color-mix(in srgb, var(--tone) 12%, transparent); color: var(--tone, var(--text)); cursor: pointer; text-align: left; }
 .mon-attention .tone-crit { --tone: var(--err); }
 .mon-attention .tone-warn { --tone: var(--warn); }
-.mon-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 0 var(--sp-1); font-size: var(--fs-1); font-weight: 600; white-space: nowrap; }
+.mon-badge { display: inline-flex; align-items: center; border-radius: var(--r-full); padding: 0 var(--sp-1); font-size: var(--fs-1); font-weight: 600; white-space: nowrap; }
 .mon-badge.tone-failed { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
 
 /* Overview has three deliberate layouts: a persistent rail on desktop, a

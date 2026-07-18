@@ -26,7 +26,7 @@ import { RunDetail } from "./monitorRunDetail.tsx";
 import { ApprovalsInbox, RunsRail, RunsTable } from "./monitorRuns.tsx";
 import { useRunScores } from "./monitorScores.tsx";
 import { ConnectionBadge, useNowMs } from "./monitorShared.tsx";
-import { AttentionBannerView } from "./monitorAttentionBanner.tsx";
+import { AttentionBannerView, MAX_ATTENTION_ITEMS } from "./monitorAttentionBanner.tsx";
 import { workspaceAttention } from "./monitorAttentionModel.ts";
 
 export const monitorMode = embedModeFromSearch(typeof location === "undefined" ? "" : location.search);
@@ -186,7 +186,7 @@ export function App() {
             />
           ) : (
             <div className="mon-overview">
-              <AttentionBannerView items={attention.items.slice(0, 8)} total={attention.total} onSelectRun={selectRun} />
+              <AttentionBannerView items={attention.items.slice(0, MAX_ATTENTION_ITEMS)} total={attention.total} onSelectRun={selectRun} />
               <OpsStrip runs={allRuns} loading={runsQuery.loading ?? false} attentionTotal={attention.total} />
               <RunsTable
                 runs={visibleRuns}

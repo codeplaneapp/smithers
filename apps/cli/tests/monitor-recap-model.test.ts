@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { formatRecapAge, latestSeqOf, mergeRecapHistory, notableEventCount, shouldRefreshRecap } from "../src/monitor-ui/monitorRecapModel.ts";
+import { formatRecapAge, latestNotableSeqOf, latestSeqOf, shouldRefreshRecap } from "../src/monitor-ui/monitorRecapModel.ts";
 
 describe("monitor recap model", () => {
-  test("counts notable events and reads tolerant sequences", () => {
-    expect(notableEventCount([{ event: "Heartbeat" }, { type: "NodeFinished" }, { type: "ApprovalGranted" }])).toBe(2);
+  test("filters notable events and reads tolerant sequences", () => {
+    expect(latestNotableSeqOf([{ event: "Heartbeat", seq: 9 }, { type: "NodeFinished", seq: 4 }, { type: "ApprovalGranted", sequence: 2 }])).toBe(4);
+    expect(latestNotableSeqOf(undefined)).toBe(-1);
     expect(latestSeqOf([{ sequence: 2 }, { seq: 4 }])).toBe(4);
     expect(latestSeqOf(undefined)).toBe(-1);
     expect(formatRecapAge(0, 59_000)).toBe("just now");
@@ -23,8 +24,5 @@ describe("monitor recap model", () => {
     expect(shouldRefreshRecap({ ...base, nowMs: 30_000, consecutiveFailures: 2 })).toBe(true);
     expect(shouldRefreshRecap({ ...base, nowMs: 179_999, consecutiveFailures: 99 })).toBe(false);
     expect(shouldRefreshRecap({ ...base, nowMs: 180_000, consecutiveFailures: 99 })).toBe(true);
-  });
-  test("merges recap history newest first", () => {
-    expect(mergeRecapHistory([{ toSeq: 1 }], [{ toSeq: 2 }, { toSeq: 1 }]).map((item) => item.toSeq)).toEqual([2, 1]);
   });
 });

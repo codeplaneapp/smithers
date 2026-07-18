@@ -1,8 +1,8 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState } from "react";
 import { useGatewayRpc, useGatewayRunEvents } from "smithers-orchestrator/gateway-react";
-import { formatRecapAge, latestSeqOf, shouldRefreshRecap } from "./monitorRecapModel.ts";
-import { isNotableEvent } from "./monitorModel.ts";
+import { formatRecapAge, latestNotableSeqOf, shouldRefreshRecap } from "./monitorRecapModel.ts";
+import { isTerminalStatus } from "./monitorModel.ts";
 
 export function RecapPanel({ runId, status }: { runId: string; status?: string }) {
   const { events } = useGatewayRunEvents(runId, { maxEvents: 500 });
@@ -10,7 +10,7 @@ export function RecapPanel({ runId, status }: { runId: string; status?: string }
   const lastAttempt = useRef(0);
   const failures = useRef(0);
   const [pollTick, setPollTick] = useState(0);
-  const live = !["finished", "failed", "cancelled"].includes(String(status));
+  const live = !isTerminalStatus(status);
   useEffect(() => {
     if (!live) return;
     // Event streams can go quiet while a run is still active; retain a bounded
@@ -29,8 +29,7 @@ export function RecapPanel({ runId, status }: { runId: string; status?: string }
   }, [recap.error]);
   useEffect(() => {
     const data: any = recap.data;
-    const notableEvents = events.filter((event: any) => isNotableEvent(String(event?.event ?? event?.type ?? "")));
-    if (shouldRefreshRecap({ lastToSeq: data?.toSeq, latestNotableSeq: latestSeqOf(notableEvents), lastFetchedAtMs: lastAttempt.current, lastAttemptAtMs: lastAttempt.current, consecutiveFailures: failures.current, nowMs: Date.now(), live, inFlight: recap.loading })) {
+    if (shouldRefreshRecap({ lastToSeq: data?.toSeq, latestNotableSeq: latestNotableSeqOf(events), lastFetchedAtMs: lastAttempt.current, lastAttemptAtMs: lastAttempt.current, consecutiveFailures: failures.current, nowMs: Date.now(), live, inFlight: recap.loading })) {
       lastAttempt.current = Date.now();
       void recap.refetch();
     }

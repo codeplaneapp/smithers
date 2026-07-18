@@ -1,8 +1,11 @@
 /** @jsxImportSource react */
-import { useGatewayApprovals } from "smithers-orchestrator/gateway-react";
-import { Countdown, useNowMs } from "./monitorShared.tsx";
-import { shortRunId, type RunRow } from "./monitorModel.ts";
-import { workspaceAttention, type AttentionItem } from "./monitorAttentionModel.ts";
+import { Countdown } from "./monitorShared.tsx";
+import { shortRunId } from "./monitorModel.ts";
+import { type AttentionItem } from "./monitorAttentionModel.ts";
+
+// A workspace sweep can flag dozens of stale runs at once; keep the banner a
+// glanceable strip (crit-first ordering means the cap drops the mildest items).
+export const MAX_ATTENTION_ITEMS = 8;
 
 export function AttentionBannerView({
   items,
@@ -34,21 +37,5 @@ export function AttentionBannerView({
       ))}
       {total > items.length ? <span>+{total - items.length} more</span> : null}
     </section>
-  );
-}
-
-// A workspace sweep can flag dozens of stale runs at once; keep the banner a
-// glanceable strip (crit-first ordering means the cap drops the mildest items).
-const MAX_ATTENTION_ITEMS = 8;
-
-export function AttentionBanner({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (id: string) => void }) {
-  const approvals = useGatewayApprovals().data ?? [];
-  const attention = workspaceAttention(runs, approvals, useNowMs());
-  return (
-    <AttentionBannerView
-      items={attention.items.slice(0, MAX_ATTENTION_ITEMS)}
-      total={attention.total}
-      onSelectRun={onSelectRun}
-    />
   );
 }

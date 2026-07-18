@@ -1,12 +1,11 @@
 /** @jsxImportSource react */
 import { useJsonApi } from "./monitorShared.tsx";
 import { Chip } from "./monitorShell.tsx";
+import { isTerminalStatus } from "./monitorModel.ts";
 import { decisionEntriesOf, decisionTone, formatDecisionResolution, pendingDecisionCount, sortDecisions, summarizeDecisionValue } from "./monitorDecisionsModel.ts";
 
-const terminal = new Set(["finished", "failed", "cancelled", "canceled"]);
-
 export function DecisionsPanel({ runId, runStatus, onSelectNode }: { runId: string; runStatus?: string; onSelectNode: (node: { id: string; key: string; iteration?: number }) => void }) {
-  const read = useJsonApi(`/v1/api/runs/${encodeURIComponent(runId)}/decisions`, terminal.has((runStatus ?? "").toLowerCase()) ? null : 5_000);
+  const read = useJsonApi(`/v1/api/runs/${encodeURIComponent(runId)}/decisions`, isTerminalStatus(runStatus) ? null : 5_000);
   const entries = sortDecisions(decisionEntriesOf(read.body));
   const pending = pendingDecisionCount(entries);
   return <section className="mon-panel mon-decisions" data-testid="monitor-decisions">
