@@ -23,7 +23,9 @@ describe("RunOptions public type", () => {
     writeFileSync(
       join(dir, "run-options.ts"),
       `
-        import type { RunOptions } from "@smithers-orchestrator/driver";
+        import type { RunOptions, SmithersErrorReport } from "@smithers-orchestrator/driver";
+
+        const reports: SmithersErrorReport[] = [];
 
         const options: RunOptions = {
           input: {},
@@ -36,9 +38,24 @@ describe("RunOptions public type", () => {
           initialIterations: {
             task: 2,
           },
+          onError: (report) => {
+            reports.push(report);
+            report.error.code;
+            report.rawError;
+            if (report.phase === "node") {
+              const nodeId: string = report.nodeId;
+              const attempt: number = report.attempt;
+              void nodeId;
+              void attempt;
+            } else {
+              const nodeId: undefined = report.nodeId;
+              void nodeId;
+            }
+          },
         };
 
         void options;
+        void reports;
       `,
     );
 

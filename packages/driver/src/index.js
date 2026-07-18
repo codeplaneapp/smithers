@@ -14,6 +14,7 @@
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
 /** @typedef {import("./RunOptions.ts").EffectPlatformRuntime} EffectPlatformRuntime */
 /** @typedef {import("./RunOptions.ts").RunOptions} RunOptions */
+/** @typedef {import("./SmithersErrorReport.ts").SmithersErrorReport} SmithersErrorReport */
 /** @typedef {import("./RunResult.ts").RunResult} RunResult */
 /** @typedef {import("./RunStatus.ts").RunStatus} RunStatus */
 /** @typedef {import("./MemoryRuntimeService.ts").MemoryRuntimeService} MemoryRuntimeService */

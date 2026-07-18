@@ -76,6 +76,7 @@ import { buildMemoryPromptBlock, createTaskMemoryTools, retainTaskMemory } from 
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
+/** @typedef {import("@smithers-orchestrator/driver/SmithersErrorReport").SmithersErrorReport} SmithersErrorReport */
 /** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
@@ -2373,12 +2374,62 @@ function shouldFailTimerWakeResume(existingRun, opts) {
     return opts.config?.gatewayTriggeredBy === GATEWAY_TIMER_TRIGGERED_BY;
 }
 /**
+ * @param {unknown} error
+ * @param {{ phase: "run" | "node"; runId: string; nodeId?: string; iteration?: number; attempt?: number }} context
+ */
+function warnErrorReporterFailed(error, context) {
+    let message = "Unknown reporter error";
+    try {
+        message = error instanceof Error ? error.message : String(error);
+    }
+    catch { }
+    try {
+        logWarning("onError callback failed", {
+            ...context,
+            error: message,
+        }, "engine:error-reporter");
+    }
+    catch { }
+}
+/**
+ * Invoke an external error reporter without letting it affect run execution.
+ * Promise returns are tolerated at runtime even though the public callback is
+ * intentionally typed as synchronous.
+ *
+ * @param {RunOptions["onError"]} onError
+ * @param {unknown} rawError
+ * @param {{ phase: "run" | "node"; runId: string; nodeId?: string; iteration?: number; attempt?: number }} context
+ */
+function reportSmithersError(onError, rawError, context) {
+    if (!onError)
+        return;
+    try {
+        const report = /** @type {SmithersErrorReport} */ ({
+            ...context,
+            error: toSmithersError(rawError),
+            rawError,
+        });
+        const pending = /** @type {unknown} */ (onError(report));
+        if (pending &&
+            typeof pending === "object" &&
+            typeof /** @type {{ then?: unknown }} */ (pending).then === "function") {
+            void Promise.resolve(pending).catch((error) => {
+                warnErrorReporterFailed(error, context);
+            });
+        }
+    }
+    catch (error) {
+        warnErrorReporterFailed(error, context);
+    }
+}
+/**
  * @param {SmithersDb} adapter
  * @param {EventBus} eventBus
  * @param {string} runId
  * @param {unknown} error
+ * @param {RunOptions["onError"]} onError
  */
-async function markTimerWakeResumeFailed(adapter, eventBus, runId, error) {
+async function markTimerWakeResumeFailed(adapter, eventBus, runId, error, onError) {
     const errorInfo = errorToJson(error);
     await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
     const failedAtMs = nowMs();
@@ -2399,6 +2450,7 @@ async function markTimerWakeResumeFailed(adapter, eventBus, runId, error) {
             return;
         }
     }
+    reportSmithersError(onError, error, { phase: "run", runId });
     await Effect.runPromise(eventBus.emitEventWithPersist({
         type: "RunFailed",
         runId,
@@ -6056,6 +6108,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 }, "engine:task-circuit-breaker");
             }
         }
+        (/** @type {any} */ (toolConfig)).reportError?.(effectiveError, {
+            phase: "node",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+        });
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFailed",
             runId,
@@ -6531,6 +6590,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         allowNetwork,
         maxOutputBytes,
         toolTimeoutMs,
+        reportError: (rawError, context) => reportSmithersError(opts.onError, rawError, context),
         agentPreflightCache: new WeakMap(),
         memoryService: workflow.memoryService,
         memoryPrefetchCache: new Map(),
@@ -7568,7 +7628,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
             return { runId, status: cancellation.terminalStatus ?? cancellation.status };
         }
         if (result.status === "failed") {
-            const errorInfo = errorToJson(result.error ?? driverTaskError);
+            const rawError = result.error ?? driverTaskError;
+            const errorInfo = errorToJson(rawError);
             if (runOwnedByCurrentProcess) {
                 await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
                 const failed = await Effect.runPromise(adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
@@ -7589,6 +7650,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     }
                     return { runId, status: authoritative?.status ?? "failed" };
                 }
+                reportSmithersError(opts.onError, rawError, { phase: "run", runId });
                 await Effect.runPromise(eventBus.emitEventWithPersist({
                     type: "RunFailed",
                     runId,
@@ -7729,7 +7791,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             catch (error) {
                 if (shouldFailTimerWakeResume(existingRun, opts)) {
                     try {
-                        await markTimerWakeResumeFailed(adapter, eventBus, runId, error);
+                        await markTimerWakeResumeFailed(adapter, eventBus, runId, error, opts.onError);
                     }
                     catch {
                         // If persisting the failed status itself fails (e.g. a
@@ -8203,6 +8265,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 }
                 return { runId, status: authoritative?.status ?? "failed", error: errorInfo };
             }
+            reportSmithersError(opts.onError, err, { phase: "run", runId });
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "RunFailed",
                 runId,

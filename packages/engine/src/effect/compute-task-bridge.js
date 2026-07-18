@@ -736,6 +736,13 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             return true;
         }));
         if (!failureClaimed) return;
+        (/** @type {any} */ (toolConfig)).reportError?.(effectiveError, {
+            phase: "node",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+        });
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFailed",
             runId,

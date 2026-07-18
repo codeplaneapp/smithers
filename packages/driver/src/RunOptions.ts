@@ -1,5 +1,6 @@
 import type { RunAuthContext } from "./RunAuthContext.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
+import type { SmithersErrorReport } from "./SmithersErrorReport.ts";
 import type { SmithersEvent } from "@smithers-orchestrator/observability/SmithersEvent";
 import type { Layer } from "effect";
 
@@ -27,6 +28,8 @@ export type RunOptions = {
   maxConcurrencyPinned?: boolean;
   requireRerenderOnOutputChange?: boolean;
   onProgress?: (e: SmithersEvent) => void;
+  /** Called once for each node or run failure occurrence. */
+  onError?: (report: SmithersErrorReport) => void;
   signal?: AbortSignal;
   /**
    * Separate from {@link signal}: aborting this asks the driver to stop

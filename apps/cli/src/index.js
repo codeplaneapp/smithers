@@ -9550,6 +9550,17 @@ async function main() {
     process.exit(process.exitCode ?? 0);
 }
 /**
+ * Shared funnel for fatal CLI errors. Presentation continues to use rawError
+ * so adding a reporter here cannot change the CLI's output contract.
+ * @param {unknown} err
+ */
+function reportCliError(err) {
+    return {
+        error: toSmithersError(err),
+        rawError: err,
+    };
+}
+/**
  * Last-resort handler for an error that escaped a pre-serve fast path (the
  * raw-JSON timeline/agent paths, MCP mode) or any other unhandled rejection.
  * Without it `main()` rejects unhandled and Bun prints a raw V8 stack, bypassing
@@ -9559,13 +9570,14 @@ async function main() {
  * @param {unknown} err
  */
 function reportFatalCliError(err) {
+    const { rawError } = reportCliError(err);
     const rawArgv = process.argv.slice(2);
     const wantsJson = argvRequestsJsonMode(rawArgv) ||
         rawArgv.some((arg) => arg === "--json" || arg === "-j" || arg === "--jsonl");
-    const code = err instanceof SmithersError ? err.code : "UNEXPECTED_ERROR";
-    const message = err && typeof err === "object" && "message" in err
-        ? String(/** @type {{ message: unknown }} */ (err).message)
-        : String(err);
+    const code = rawError instanceof SmithersError ? rawError.code : "UNEXPECTED_ERROR";
+    const message = rawError && typeof rawError === "object" && "message" in rawError
+        ? String(/** @type {{ message: unknown }} */ (rawError).message)
+        : String(rawError);
     if (wantsJson) {
         writeStdoutSync(`${JSON.stringify({ code, message })}\n`);
     }

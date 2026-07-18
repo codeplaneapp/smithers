@@ -1,8 +1,8 @@
 import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
 import { TaskDescriptor as TaskDescriptor$2, WorkflowGraph } from '@smithers-orchestrator/graph/types';
+import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEvent';
 import { Layer } from 'effect';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 import * as _smithers_orchestrator_scheduler from '@smithers-orchestrator/scheduler';
 import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smithers-orchestrator/scheduler';
 import { z } from 'zod';
@@ -22,6 +22,22 @@ type RunAuthContext$2 = {
 type OutputSnapshot$2<TFallback = unknown> = {
     [tableName: string]: Array<TFallback>;
 };
+
+type SmithersErrorReport$1 = {
+    readonly error: SmithersError;
+    readonly rawError: unknown;
+    readonly runId: string;
+} & ({
+    readonly phase: "run";
+    readonly nodeId?: undefined;
+    readonly iteration?: undefined;
+    readonly attempt?: undefined;
+} | {
+    readonly phase: "node";
+    readonly nodeId: string;
+    readonly iteration: number;
+    readonly attempt: number;
+});
 
 type EffectPlatformRuntime$1 = "bun" | "node" | "worker";
 type HotReloadOptions$1 = {
@@ -45,6 +61,8 @@ type RunOptions$2 = {
     maxConcurrencyPinned?: boolean;
     requireRerenderOnOutputChange?: boolean;
     onProgress?: (e: SmithersEvent) => void;
+    /** Called once for each node or run failure occurrence. */
+    onError?: (report: SmithersErrorReport$1) => void;
     signal?: AbortSignal;
     /**
      * Separate from {@link signal}: aborting this asks the driver to stop
@@ -930,6 +948,7 @@ type ProofBinding = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
 type RunAuthContext = RunAuthContext$2;
 type EffectPlatformRuntime = EffectPlatformRuntime$1;
 type RunOptions = RunOptions$2;
+type SmithersErrorReport = SmithersErrorReport$1;
 type RunResult = RunResult$2;
 type RunStatus = RunStatus$1;
 type MemoryRuntimeService = MemoryRuntimeService$1;
@@ -956,4 +975,4 @@ type RuntimeCapability = RuntimeCapability$1;
 type RuntimeCapabilityErrorDetails = RuntimeCapabilityErrorDetails$1;
 type BrowserRuntimeOptions = BrowserRuntimeOptions$1;
 
-export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };
+export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };

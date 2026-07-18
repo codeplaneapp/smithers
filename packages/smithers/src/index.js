@@ -112,6 +112,7 @@
 /** @typedef {import("@smithers-orchestrator/vcs/jj").RunJjOptions} RunJjOptions */
 /** @typedef {import("@smithers-orchestrator/vcs/jj").RunJjResult} RunJjResult */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
+/** @typedef {import("@smithers-orchestrator/driver/SmithersErrorReport").SmithersErrorReport} SmithersErrorReport */
 /** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
 /** @typedef {import("@smithers-orchestrator/driver/RunStatus").RunStatus} RunStatus */
 /** @typedef {import("@smithers-orchestrator/components").SagaProps} SagaProps */
