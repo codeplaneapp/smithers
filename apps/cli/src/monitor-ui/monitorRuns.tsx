@@ -24,6 +24,7 @@ import {
 } from "./monitorModel.ts";
 import { RunRailRow, RunsPagination } from "./monitorShell.tsx";
 import { Ago, Elapsed, LiveElapsed, StatusTag, useNowMs } from "./monitorShared.tsx";
+import { RunEtaCell } from "./monitorEta.tsx";
 
 function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) {
   const now = useNowMs();
@@ -277,6 +278,7 @@ export function RunsTable({
               <TableHead scope="col">Run</TableHead>
               <TableHead scope="col">Workflow</TableHead>
               <TableHead scope="col">Progress</TableHead>
+              <TableHead scope="col">ETA</TableHead>
               <TableHead scope="col">Started</TableHead>
               <TableHead scope="col">Duration</TableHead>
             </TableRow>
@@ -299,6 +301,7 @@ export function RunsTable({
                 <TableCell>
                   <RunProgressCell run={run} />
                 </TableCell>
+                <TableCell><RunEtaCell run={run} /></TableCell>
                 <TableCell className="mon-dim">
                   <Ago ms={run.startedAtMs ?? run.createdAtMs} />
                 </TableCell>

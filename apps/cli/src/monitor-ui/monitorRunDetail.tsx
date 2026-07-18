@@ -26,6 +26,7 @@ import { HealthStrip } from "./monitorHealth.tsx";
 import { ScoresPanel, type RunScores } from "./monitorScores.tsx";
 import { Elapsed, StatusTag } from "./monitorShared.tsx";
 import { RunCostCard } from "./monitorUsagePanels.tsx";
+import { RunEtaLine } from "./monitorEta.tsx";
 
 function CopyableRunId({ runId }: { runId: string }) {
   const [copied, setCopied] = useState(false);
@@ -195,6 +196,7 @@ export function RunDetail({
             </span>
           </div>
         ) : null}
+        <RunEtaLine runId={runId} runStatus={status} startedAtMs={startedAtMs} finishedAtMs={finishedAtMs} />
         <div className="mon-detail-actions">
           {customUiUrl ? (
             <Button
