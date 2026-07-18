@@ -5,7 +5,6 @@ import {
   Button,
   Table,
   TableBody,
-  TableCell,
   TableHead,
   TableHeader,
   TableRow,
@@ -13,9 +12,7 @@ import {
 import {
   connectionViewFor,
   groupRuns,
-  isRecord,
   paginateRuns,
-  runProgress,
   RUNS_PAGE_SIZE,
   shortRunId,
   toneForStatus,
@@ -23,8 +20,10 @@ import {
   type RunRow,
 } from "./monitorModel.ts";
 import { RunRailRow, RunsPagination } from "./monitorShell.tsx";
-import { Ago, Elapsed, LiveElapsed, StatusTag, useNowMs } from "./monitorShared.tsx";
-import { RunEtaCell } from "./monitorEta.tsx";
+import { Ago, Elapsed, LiveElapsed, useNowMs } from "./monitorShared.tsx";
+import { FailedTaskBadge } from "./monitorFailedBadge.tsx";
+import { failedTaskCountOf } from "./monitorAttentionModel.ts";
+import { RunProgressCell, RunsTableRow } from "./monitorRunsTableRow.tsx";
 
 function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) {
   const now = useNowMs();
@@ -154,6 +153,7 @@ function RunListRow({
       }
       active={active}
       onSelect={onSelect}
+      badge={<FailedTaskBadge count={failedTaskCountOf(run)} />}
     />
   );
 }
@@ -214,22 +214,7 @@ export function RunsRail({
 // handler as the rail — a scannable overview instead of an empty hero.
 // ---------------------------------------------------------------------------
 
-/** Compact `done+failed/total` from a run row's node-state summary (getRun
- * attaches it; plain listRuns rows without one render an em dash). */
-export function RunProgressCell({ run }: { run: RunRow }) {
-  const progress = isRecord(run) ? runProgress(run.summary) : null;
-  if (!progress) return <span className="mon-dim">—</span>;
-  return (
-    <span
-      className="mon-mono"
-      data-testid="monitor-run-progress"
-      title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}
-    >
-      {progress.done + progress.failed}/{progress.total}
-      {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
-    </span>
-  );
-}
+export { RunProgressCell } from "./monitorRunsTableRow.tsx";
 
 export function RunsTable({
   runs,
@@ -284,32 +269,7 @@ export function RunsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pageRows.map((run) => (
-              <TableRow
-                key={run.runId}
-                className="mon-runs-table-row"
-                data-run-id={run.runId}
-                onClick={() => onSelect(run.runId)}
-              >
-                <TableCell>
-                  <StatusTag status={run.status} />
-                </TableCell>
-                <TableCell className="mon-mono">{shortRunId(run.runId)}</TableCell>
-                <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
-                  {run.workflowKey ?? "unknown"}
-                </TableCell>
-                <TableCell>
-                  <RunProgressCell run={run} />
-                </TableCell>
-                <TableCell><RunEtaCell run={run} /></TableCell>
-                <TableCell className="mon-dim">
-                  <Ago ms={run.startedAtMs ?? run.createdAtMs} />
-                </TableCell>
-                <TableCell className="mon-dim mon-mono">
-                  <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
-                </TableCell>
-              </TableRow>
-            ))}
+            {pageRows.map((run) => <RunsTableRow key={run.runId} run={run} onSelect={onSelect} />)}
           </TableBody>
         </Table>
       </div>

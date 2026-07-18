@@ -12,7 +12,6 @@ import { useEffect, useState, type ComponentProps, type ReactNode } from "react"
 import {
   Button,
   Input,
-  RowButton,
   Select,
   SelectContent,
   SelectItem,
@@ -157,45 +156,7 @@ export function MonitorToolbar({
   );
 }
 
-/** One selectable run row in the rail (the house RowButton run-row recipe). */
-export function RunRailRow({
-  runId,
-  name,
-  title,
-  shortId,
-  tone,
-  pulse,
-  when,
-  active,
-  onSelect,
-}: {
-  runId: string;
-  name: string;
-  title: string;
-  shortId: string;
-  tone: Tone;
-  pulse: boolean;
-  when: ReactNode;
-  active: boolean;
-  onSelect: (runId: string) => void;
-}) {
-  return (
-    <RowButton
-      active={active}
-      className="mon-run-row"
-      data-testid="monitor-run-row"
-      data-run-id={runId}
-      onClick={() => onSelect(runId)}
-    >
-      <ToneDot tone={tone} pulse={pulse} />
-      <span className="mon-run-name" title={title}>
-        {name}
-      </span>
-      <span className="mon-mono mon-dim">{shortId}</span>
-      <span className="mon-run-when mon-dim">{when}</span>
-    </RowButton>
-  );
-}
+export { RunRailRow } from "./monitorRunRailRow.tsx";
 
 /** Landing runs-table pagination footer (client-side pages over the fetched window). */
 export function RunsPagination({

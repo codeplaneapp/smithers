@@ -6743,12 +6743,35 @@ a { color: var(--brand); }</style>
                 byRunId.set(row.runId, {
                     ...row,
                     workflowKey,
+                    __summaryAdapter: adapter,
                 });
             }
         }
         const results = [...byRunId.values()];
         results.sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
-        return results.slice(0, limit);
+        const sliced = results.slice(0, limit);
+        const byAdapter = new Map();
+        for (const row of sliced) {
+            const adapter = row.__summaryAdapter;
+            if (!byAdapter.has(adapter)) byAdapter.set(adapter, []);
+            byAdapter.get(adapter).push(row);
+        }
+        for (const [adapter, rows] of byAdapter) {
+            if (typeof adapter.countNodesByStateForRuns !== "function") continue;
+            try {
+                const counts = await adapter.countNodesByStateForRuns(rows.map((row) => row.runId));
+                const summaries = new Map();
+                for (const count of counts) {
+                    const summary = summaries.get(count.runId) ?? {};
+                    summary[count.state] = count.count;
+                    summaries.set(count.runId, summary);
+                }
+                for (const row of rows) if (summaries.has(row.runId)) row.summary = summaries.get(row.runId);
+            } catch {
+                // Electric pushdown readers see raw rows, so summary is always optional.
+            }
+        }
+        return sliced.map(({ __summaryAdapter, ...row }) => row);
     }
     /**
    * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed

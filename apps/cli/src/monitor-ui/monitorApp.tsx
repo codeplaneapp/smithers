@@ -26,6 +26,7 @@ import { RunDetail } from "./monitorRunDetail.tsx";
 import { ApprovalsInbox, RunsRail, RunsTable } from "./monitorRuns.tsx";
 import { useRunScores } from "./monitorScores.tsx";
 import { ConnectionBadge } from "./monitorShared.tsx";
+import { AttentionBanner } from "./monitorAttentionBanner.tsx";
 
 export const monitorMode = embedModeFromSearch(typeof location === "undefined" ? "" : location.search);
 
@@ -181,6 +182,7 @@ export function App() {
             />
           ) : (
             <div className="mon-overview">
+              <AttentionBanner runs={allRuns} onSelectRun={selectRun} />
               <OpsStrip runs={allRuns} loading={runsQuery.loading ?? false} />
               <RunsTable
                 runs={visibleRuns}

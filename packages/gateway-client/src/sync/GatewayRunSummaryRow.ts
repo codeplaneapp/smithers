@@ -3,4 +3,5 @@ export type GatewayRunSummaryRow = Record<string, unknown> & {
   workflowKey?: string;
   status?: string;
   createdAtMs?: number;
+  summary?: Record<string, number>;
 };

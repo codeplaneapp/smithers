@@ -313,6 +313,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-metric-label.tone-failed, .mon-metric-value.tone-failed { color: var(--err); }
 .mon-metric-value { font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 
+.mon-attention { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-3); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); }
+.mon-attention .mon-kicker { flex-basis: 100%; }
+.mon-attention button { border: 0; border-radius: var(--r-1); padding: var(--sp-1) var(--sp-2); background: color-mix(in srgb, var(--tone) 12%, transparent); color: var(--tone, var(--text)); cursor: pointer; text-align: left; }
+.mon-attention .tone-crit { --tone: var(--err); }
+.mon-attention .tone-warn { --tone: var(--warn); }
+.mon-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 0 var(--sp-1); font-size: var(--fs-1); font-weight: 600; white-space: nowrap; }
+.mon-badge.tone-failed { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
+
 /* Overview has three deliberate layouts: a persistent rail on desktop, a
    narrower rail beside the table on tablet, and vertically stacked controls,
    rail, and table on phones. The table keeps its own horizontal scrollport

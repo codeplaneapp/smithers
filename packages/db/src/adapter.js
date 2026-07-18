@@ -3321,6 +3321,25 @@ export class SmithersDb {
          GROUP BY state`, [runId]));
     }
     /**
+   * @param {string[]} runIds
+    * @returns {RunnableEffect<Array<{ runId: string; state: string; count: number }>, SmithersError>}
+    */
+    countNodesByStateForRuns(runIds) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            if (runIds.length === 0) return [];
+            const result = [];
+            // Keep well below SQLite's bind limit; this SQL is also portable to Postgres.
+            for (let i = 0; i < runIds.length; i += 400) {
+                const ids = runIds.slice(i, i + 400);
+                const rows = yield* self.read("count nodes by state for runs", () => self.internalStorage.queryAll(`SELECT run_id AS runId, state, COUNT(*) AS count
+                 FROM _smithers_nodes WHERE run_id IN (${ids.map(() => "?").join(",")}) GROUP BY run_id, state`, ids));
+                result.push(...rows);
+            }
+            return result;
+        }));
+    }
+    /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */

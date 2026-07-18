@@ -1356,6 +1356,15 @@ declare class SmithersDb {
         count: number;
     }>, SmithersError$1>;
     /**
+     * @param {string[]} runIds
+     * @returns {RunnableEffect<Array<{ runId: string; state: string; count: number }>, SmithersError>}
+     */
+    countNodesByStateForRuns(runIds: string[]): RunnableEffect<Array<{
+        runId: string;
+        state: string;
+        count: number;
+    }>, SmithersError$1>;
+    /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
