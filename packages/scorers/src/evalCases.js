@@ -4,6 +4,8 @@ import { createScorer } from "./createScorer.js";
 /** @typedef {import("./EvalCaseInput.ts").EvalCaseInput} EvalCaseInput */
 /** @typedef {import("./EvalDatasetParseResult.ts").EvalDatasetParseResult} EvalDatasetParseResult */
 /** @typedef {import("./EvalAssertion.ts").EvalAssertion} EvalAssertion */
+/** @typedef {import("./EvalJudge.ts").EvalJudge} EvalJudge */
+/** @typedef {import("./EvalJudgeRunner.ts").EvalJudgeRunner} EvalJudgeRunner */
 
 /**
  * The canonical, server-side EVAL domain — dataset parsing, case grading, and
@@ -14,11 +16,10 @@ import { createScorer } from "./createScorer.js";
  * *.tsx` file can only import `smithers-orchestrator` — `@smithers-orchestrator/*`
  * is not resolvable from a user's project under pnpm's strict install).
  *
- * `parseEvalDataset` mirrors multi's `src/evals/evalReport.ts` byte-for-byte
- * (ported, not reinvented) so the client that authors a dataset and the
- * server that persists/runs it agree on every edge case (id fallback chain,
- * JSONL comments, duplicate-id rejection, ...). Keep the two in lockstep —
- * `packages/scorers/tests/eval-cases.test.js` copies multi's fixtures.
+ * `parseEvalDataset` preserves multi's `src/evals/evalReport.ts` base parsing
+ * semantics so the client that authors a dataset and the server that persists
+ * it agree on id fallback, JSONL comments, and duplicate-id rejection. Judge
+ * validation is the packaged server-side extension to that shared shape.
  */
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,7 @@ const RUN_ID_MAX_LENGTH = 64;
  *  treats an `expected` object whose keys are ALL within this set as an
  *  assertion spec rather than a literal expected-output value. */
 const EVAL_EXPECTED_KEYS = new Set(["status", "output", "outputContains", "errorContains"]);
+const EVAL_JUDGE_KEYS = new Set(["instructions", "threshold"]);
 
 /** Case-run statuses the assertion-spec `expected.status` may target — the
  *  underlying engine/CLI job-state vocabulary (NOT the simplified
@@ -52,6 +54,33 @@ export const EVAL_CASE_STATUSES = [
  *  must clear to count as a pass. Mirrors multi's `EVAL_PASS_THRESHOLD` in
  *  `src/evals/evalReport.ts` so "passed" reads the same on both sides. */
 export const EVAL_PASS_THRESHOLD = 0.8;
+
+/**
+ * Normalize and validate an authored judge assertion.
+ * @param {unknown} value
+ * @param {string} [label]
+ * @returns {{ instructions: string; threshold: number } | undefined}
+ */
+export function normalizeEvalJudge(value, label = "judge") {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (!isPlainObject(value)) {
+        throw new Error(`${label} must be a JSON object.`);
+    }
+    const unknownKeys = Object.keys(value).filter((key) => !EVAL_JUDGE_KEYS.has(key));
+    if (unknownKeys.length > 0) {
+        throw new Error(`${label} contains unsupported assertion keys: ${unknownKeys.join(", ")}.`);
+    }
+    if (typeof value.instructions !== "string" || value.instructions.trim() === "") {
+        throw new Error(`${label}.instructions must be a non-empty string.`);
+    }
+    const threshold = value.threshold === undefined ? EVAL_PASS_THRESHOLD : value.threshold;
+    if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+        throw new Error(`${label}.threshold must be a number between 0 and 1.`);
+    }
+    return { instructions: value.instructions.trim(), threshold };
+}
 
 /**
  * @param {unknown} value
@@ -200,7 +229,7 @@ export function normalizeExpected(value, label = "expected") {
 }
 
 // ---------------------------------------------------------------------------
-// Dataset parsing (ported verbatim from multi's src/evals/evalReport.ts)
+// Dataset parsing (shared base semantics with multi's evalReport.ts)
 // ---------------------------------------------------------------------------
 
 /**
@@ -213,16 +242,24 @@ function caseFromRow(row, index) {
     const explicitName = typeof row.name === "string" && row.name.trim() !== "" ? row.name.trim() : undefined;
     const id = explicitId ?? explicitName ?? `case-${index + 1}`;
     const hasExpected = "expected" in row;
+    const judge = normalizeEvalJudge(row.judge, `Dataset row ${index + 1} judge`);
     if ("input" in row) {
         return {
             id,
             name: explicitName,
             input: row.input,
             ...(hasExpected ? { expected: row.expected } : {}),
+            ...(judge ? { judge } : {}),
         };
     }
-    const { id: _id, name: _name, expected: _expected, ...rest } = row;
-    return { id, name: explicitName, input: rest, ...(hasExpected ? { expected: row.expected } : {}) };
+    const { id: _id, name: _name, expected: _expected, judge: _judge, ...rest } = row;
+    return {
+        id,
+        name: explicitName,
+        input: rest,
+        ...(hasExpected ? { expected: row.expected } : {}),
+        ...(judge ? { judge } : {}),
+    };
 }
 
 /**
@@ -258,8 +295,8 @@ function tryParseJsonl(text) {
  * every row is an object, and no two rows resolve to the same case id.
  * Malformed input (unparseable JSON/JSONL, a non-array/non-object top level,
  * duplicate ids) is reported as an honest `{ ok: false, error }`, never
- * silently dropped or coerced. MUST stay byte-for-byte identical to multi's
- * `parseEvalDataset` (see `packages/scorers/tests/eval-cases.test.js`).
+ * silently dropped or coerced. Judge assertions are normalized and validated
+ * before any cases are returned.
  * @param {string} text
  * @returns {EvalDatasetParseResult}
  */
@@ -300,7 +337,13 @@ export function parseEvalDataset(text) {
     const cases = [];
     const seen = new Set();
     for (const [index, row] of rows.entries()) {
-        const parsedCase = caseFromRow(row, index);
+        let parsedCase;
+        try {
+            parsedCase = caseFromRow(row, index);
+        }
+        catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
         if (seen.has(parsedCase.id)) {
             return { ok: false, error: `Duplicate case id "${parsedCase.id}" (row ${index + 1}).` };
         }
@@ -388,6 +431,85 @@ export function evaluateEvalCase({ expected, status, output, error }) {
         assertions,
         passed: assertions.every((assertion) => assertion.passed),
     };
+}
+
+/**
+ * Compose deterministic case grading with an optional asynchronous LLM-judge
+ * assertion. The synchronous `evaluateEvalCase` API remains unchanged for
+ * callers that cannot or should not resolve an agent.
+ *
+ * Judge-runner errors become failed assertions so an unavailable provider or
+ * malformed response fails the affected case without aborting the suite.
+ * @param {{ expected?: unknown; judge?: EvalJudge; input?: unknown; status?: string; output?: unknown; error?: unknown }} args
+ * @param {EvalJudgeRunner} [runJudge]
+ * @returns {Promise<{ assertions: EvalAssertion[]; passed: boolean }>}
+ */
+export async function evaluateEvalCaseAsync({ expected, judge, input, status, output, error }, runJudge) {
+    const deterministic = evaluateEvalCase({ expected, status, output, error });
+    if (judge === undefined) {
+        return deterministic;
+    }
+    /** @type {{ instructions: string; threshold: number } | undefined} */
+    let normalizedJudge;
+    try {
+        normalizedJudge = normalizeEvalJudge(judge);
+    }
+    catch (err) {
+        const assertion = {
+            description: err instanceof Error ? err.message : String(err),
+            passed: false,
+            score: 0,
+            reason: "Invalid judge assertion.",
+        };
+        return { assertions: [...deterministic.assertions, assertion], passed: false };
+    }
+    if (!normalizedJudge) {
+        return deterministic;
+    }
+    const description = `LLM judge score >= ${normalizedJudge.threshold}: ${normalizedJudge.instructions}`;
+    /** @type {EvalAssertion} */
+    let assertion;
+    if (!runJudge) {
+        assertion = {
+            description,
+            passed: false,
+            score: 0,
+            reason: "No LLM judge runner was provided.",
+        };
+    }
+    else {
+        try {
+            const verdict = await runJudge({
+                judge: normalizedJudge,
+                input,
+                expected,
+                status,
+                output,
+                error,
+            });
+            const score = typeof verdict?.score === "number" && Number.isFinite(verdict.score)
+                ? Math.max(0, Math.min(1, verdict.score))
+                : 0;
+            assertion = {
+                description,
+                passed: score >= normalizedJudge.threshold,
+                score,
+                reason: typeof verdict?.reason === "string" && verdict.reason.trim() !== ""
+                    ? verdict.reason
+                    : "Judge returned no reason.",
+            };
+        }
+        catch (err) {
+            assertion = {
+                description,
+                passed: false,
+                score: 0,
+                reason: `LLM judge failed: ${err instanceof Error ? err.message : String(err)}`,
+            };
+        }
+    }
+    const assertions = [...deterministic.assertions, assertion];
+    return { assertions, passed: assertions.every((entry) => entry.passed) };
 }
 
 /**

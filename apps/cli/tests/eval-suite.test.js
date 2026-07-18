@@ -2,18 +2,27 @@ import { describe, expect, test } from "bun:test";
 import {
     assertEvalRunIdsAvailable,
     buildEvalPlan,
+    createEvalJudgeRunner,
     evaluateEvalCaseResult,
+    evaluateEvalCaseResultAsync,
     evalRunId,
     loadEvalCases,
     renderEvalPlan,
 } from "../src/eval-suite.js";
-import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
+import {
+    createExecutableDir,
+    createTempRepo,
+    prependPath,
+    runSmithers,
+    writeFakeCodexBinary,
+    writeTestWorkflow,
+} from "../../../packages/smithers/tests/e2e-helpers.js";
 
 describe("eval suite helpers", () => {
     test("loads JSONL cases and builds stable run IDs", () => {
         const repo = createTempRepo();
         repo.write("evals/smoke.jsonl", [
-            '{"id":"alpha","input":{"prompt":"A"},"expected":{"status":"finished"}}',
+            '{"id":"alpha","input":{"prompt":"A"},"expected":{"status":"finished"},"judge":{"instructions":"Reply politely"}}',
             '{"name":"Beta Case","input":{"prompt":"B"},"annotations":{"area":"docs"}}',
             "",
         ].join("\n"));
@@ -31,8 +40,10 @@ describe("eval suite helpers", () => {
         expect(plan.runLabel).toBe("ci-123");
         expect(plan.plannedCases).toBe(2);
         expect(plan.cases[0].runId).toBe("eval-release-smoke-ci-123-alpha");
+        expect(plan.cases[0].judge).toEqual({ instructions: "Reply politely", threshold: 0.8 });
         expect(plan.cases[1].id).toBe("beta-case");
         expect(renderEvalPlan(plan)).toContain("Dry run only");
+        expect(renderEvalPlan(plan)).toContain("judge >= 0.8: Reply politely");
     });
 
     test("caps long eval run IDs", () => {
@@ -51,6 +62,9 @@ describe("eval suite helpers", () => {
 
         repo.write("evals/unknown-expected.jsonl", '{"id":"alpha","expected":{"outputsContains":{}}}\n');
         expect(() => loadEvalCases(repo.dir, "evals/unknown-expected.jsonl")).toThrow("unsupported assertion keys");
+
+        repo.write("evals/invalid-judge.jsonl", '{"id":"alpha","judge":{"threshold":0.7}}\n');
+        expect(() => loadEvalCases(repo.dir, "evals/invalid-judge.jsonl")).toThrow("judge.instructions must be a non-empty string");
     });
 
     test("evaluates status, exact output, and partial output assertions", () => {
@@ -152,13 +166,74 @@ describe("eval suite helpers", () => {
         });
         expect(checked).toBe(2);
     });
+
+    test("grades judge assertions through llmJudge with a stubbed agent", async () => {
+        let systemPrompt = "";
+        let judgePrompt = "";
+        const runJudge = createEvalJudgeRunner({
+            candidates: [{
+                id: "fake",
+                build(prompt) {
+                    systemPrompt = prompt;
+                    return {
+                        async generate({ prompt: generatedPrompt }) {
+                            judgePrompt = generatedPrompt;
+                            return { text: '{"score":0.9,"reason":"The response is polite."}' };
+                        },
+                    };
+                },
+            }],
+        });
+        const result = await evaluateEvalCaseResultAsync({
+            id: "judge",
+            name: "judge",
+            input: { prompt: "Say hello" },
+            annotations: {},
+            expected: { status: "finished" },
+            judge: { instructions: "The response must be polite", threshold: 0.8 },
+            metadata: {},
+        }, {
+            status: "finished",
+            output: { message: "Hello, please let me know how I can help." },
+        }, { runJudge });
+
+        expect(result.passed).toBe(true);
+        expect(result.assertions.at(-1)).toEqual({
+            description: "LLM judge score >= 0.8: The response must be polite",
+            passed: true,
+            score: 0.9,
+            reason: "The response is polite.",
+        });
+        expect(systemPrompt).toContain("grade Smithers eval results");
+        expect(judgePrompt).toContain("The response must be polite");
+        expect(judgePrompt).toContain("Say hello");
+    });
+
+    test("turns missing judge credentials into an actionable failed assertion", async () => {
+        const runJudge = createEvalJudgeRunner({ provider: "codex", candidates: [] });
+        const result = await evaluateEvalCaseResultAsync({
+            id: "judge",
+            name: "judge",
+            input: {},
+            annotations: {},
+            expected: { status: "finished" },
+            judge: { instructions: "Be correct", threshold: 0.8 },
+            metadata: {},
+        }, { status: "finished", output: "answer" }, { runJudge });
+
+        expect(result.passed).toBe(false);
+        expect(result.assertions[0].passed).toBe(true);
+        expect(result.assertions.at(-1)).toMatchObject({ passed: false, score: 0 });
+        expect(result.assertions.at(-1)?.reason).toContain("No usable LLM judge agent");
+        expect(result.assertions.at(-1)?.reason).toContain("--judge-provider");
+    });
 });
 
 describe("smithers eval command", () => {
     test("prints a dry-run plan", () => {
         const repo = createTempRepo();
         writeTestWorkflow(repo);
-        repo.write("evals/smoke.jsonl", '{"id":"alpha","input":{"prompt":"A"},"expected":{"status":"finished"}}\n');
+        repo.write("evals/smoke.jsonl", '{"id":"alpha","input":{"prompt":"A"},"expected":{"status":"finished"},"judge":{"instructions":"Mention A","threshold":0.7}}\n');
 
         const result = runSmithers([
             "eval",
@@ -170,6 +245,10 @@ describe("smithers eval command", () => {
             "--run-label",
             "ci",
             "--dry-run",
+            "--judge-provider",
+            "codex",
+            "--judge-model",
+            "fixture-judge",
         ], { cwd: repo.dir, format: null });
 
         if (result.exitCode !== 0) {
@@ -178,7 +257,116 @@ describe("smithers eval command", () => {
         expect(result.stdout).toContain("suiteId: smoke");
         expect(result.stdout).toContain("eval-smoke-ci-alpha");
         expect(result.stdout).toContain("plannedCases: 1");
-    });
+        expect(result.stdout).toContain("instructions: Mention A");
+    }, 20_000);
+
+    test("rejects an invalid judge assertion with exit code 4", () => {
+        const repo = createTempRepo();
+        writeTestWorkflow(repo);
+        repo.write("evals/invalid.jsonl", '{"id":"alpha","input":{},"judge":{"threshold":0.7}}\n');
+
+        const result = runSmithers([
+            "eval",
+            "workflow.tsx",
+            "--cases",
+            "evals/invalid.jsonl",
+            "--dry-run",
+        ], { cwd: repo.dir, format: "json" });
+
+        expect(result.exitCode).toBe(4);
+        expect(result.json?.code).toBe("INVALID_INPUT");
+        expect(result.json?.message).toContain("judge.instructions must be a non-empty string");
+    }, 20_000);
+
+    test("grades judge assertions and persists the verdict in the report", () => {
+        const repo = createTempRepo();
+        const binDir = createExecutableDir();
+        writeTestWorkflow(repo);
+        writeFakeCodexBinary(binDir, '{"score":0.9,"reason":"The output mentions A."}');
+        repo.write("evals/judge.jsonl", '{"id":"alpha","input":{"prompt":"A"},"judge":{"instructions":"Mention A","threshold":0.8}}\n');
+
+        const result = runSmithers([
+            "eval",
+            "workflow.tsx",
+            "--cases",
+            "evals/judge.jsonl",
+            "--suite",
+            "judge",
+            "--run-label",
+            "ci",
+            "--judge-provider",
+            "codex",
+            "--judge-model",
+            "fixture-judge",
+            "--report",
+            "artifacts/judge-report.json",
+            "--force",
+        ], {
+            cwd: repo.dir,
+            format: "json",
+            env: prependPath(binDir, {
+                CODEX_HOME: repo.path(".codex-home"),
+                OPENAI_API_KEY: "sk-test",
+                SMITHERS_HOME: repo.path(".smithers-home"),
+            }),
+        });
+
+        if (result.exitCode !== 0) {
+            throw new Error(`smithers eval exited ${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+        }
+        expect(result.json?.eval.summary).toMatchObject({ total: 1, passed: 1, failed: 0 });
+        expect(result.json?.eval.results[0].assertions.at(-1)).toEqual({
+            description: "LLM judge score >= 0.8: Mention A",
+            passed: true,
+            score: 0.9,
+            reason: "The output mentions A.",
+        });
+        const report = JSON.parse(repo.read("artifacts/judge-report.json"));
+        expect(report.results[0].assertions.at(-1)).toEqual(result.json?.eval.results[0].assertions.at(-1));
+    }, 20_000);
+
+    test("writes an actionable failed assertion when judge credentials are missing", () => {
+        const repo = createTempRepo();
+        const binDir = createExecutableDir();
+        writeTestWorkflow(repo);
+        writeFakeCodexBinary(binDir);
+        repo.write("evals/judge.jsonl", '{"id":"alpha","input":{"prompt":"A"},"judge":{"instructions":"Mention A"}}\n');
+
+        const result = runSmithers([
+            "eval",
+            "workflow.tsx",
+            "--cases",
+            "evals/judge.jsonl",
+            "--suite",
+            "judge-missing",
+            "--run-label",
+            "ci",
+            "--judge-provider",
+            "codex",
+            "--report",
+            "artifacts/judge-missing-report.json",
+            "--force",
+        ], {
+            cwd: repo.dir,
+            format: "json",
+            env: prependPath(binDir, {
+                CODEX_HOME: repo.path(".codex-home"),
+                HOME: repo.path(".home"),
+                OPENAI_API_KEY: "",
+                SMITHERS_HOME: repo.path(".smithers-home"),
+            }),
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(result.json?.eval.summary).toMatchObject({ total: 1, passed: 0, failed: 1 });
+        expect(result.json?.eval.results[0]).toMatchObject({ status: "finished", passed: false });
+        expect(result.json?.eval.results[0].assertions[0].passed).toBe(true);
+        expect(result.json?.eval.results[0].assertions.at(-1)).toMatchObject({ passed: false, score: 0 });
+        expect(result.json?.eval.results[0].assertions.at(-1)?.reason).toContain("No usable LLM judge agent");
+        expect(result.json?.eval.results[0].assertions.at(-1)?.reason).toContain("--judge-provider");
+        const report = JSON.parse(repo.read("artifacts/judge-missing-report.json"));
+        expect(report.results[0].assertions.at(-1).reason).toContain("No usable LLM judge agent");
+    }, 20_000);
 
     test("runs cases, checks outputs, and writes a report", () => {
         const repo = createTempRepo();

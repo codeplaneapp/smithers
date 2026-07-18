@@ -4,8 +4,10 @@ import {
     evalAssertionScorer,
     evalCaseRunId,
     evaluateEvalCase,
+    evaluateEvalCaseAsync,
     parseEvalDataset,
 } from "../src/evalCases.js";
+import { llmJudge } from "../src/llmJudge.js";
 
 describe("EVAL_PASS_THRESHOLD", () => {
     test("is the stable, documented constant", () => {
@@ -55,6 +57,17 @@ describe("parseEvalDataset", () => {
         expect(result.cases[0]).toEqual({ id: "c1", name: undefined, input: { prompt: "hi" }, expected: "hello" });
     });
 
+    test("does not leak a top-level judge assertion into fallback workflow input", () => {
+        const result = parseEvalDataset(JSON.stringify([
+            { id: "c1", prompt: "hi", judge: { instructions: "Reply politely" } },
+        ]));
+        expect(result.ok).toBe(true);
+        if (!result.ok)
+            return;
+        expect(result.cases[0].input).toEqual({ prompt: "hi" });
+        expect(result.cases[0].judge).toEqual({ instructions: "Reply politely", threshold: EVAL_PASS_THRESHOLD });
+    });
+
     test("derives a positional id when neither id nor name is present", () => {
         const result = parseEvalDataset(JSON.stringify([{ input: "a" }, { input: "b" }]));
         expect(result.ok).toBe(true);
@@ -69,6 +82,40 @@ describe("parseEvalDataset", () => {
         if (!result.ok)
             return;
         expect(result.cases[0].id).toBe("addition");
+    });
+
+    test("parses judge assertions and defaults their threshold", () => {
+        const result = parseEvalDataset(JSON.stringify([
+            { id: "default", input: "a", judge: { instructions: "Be polite" } },
+            { id: "custom", input: "b", judge: { instructions: "Mention the deadline", threshold: 0.7 } },
+        ]));
+        expect(result.ok).toBe(true);
+        if (!result.ok)
+            return;
+        expect(result.cases[0].judge).toEqual({ instructions: "Be polite", threshold: EVAL_PASS_THRESHOLD });
+        expect(result.cases[1].judge).toEqual({ instructions: "Mention the deadline", threshold: 0.7 });
+    });
+
+    test("rejects judge assertions with missing or blank instructions", () => {
+        for (const judge of [{}, { instructions: "   " }]) {
+            const result = parseEvalDataset(JSON.stringify([{ id: "bad", input: "a", judge }]));
+            expect(result.ok).toBe(false);
+            if (!result.ok) {
+                expect(result.error).toContain("judge.instructions must be a non-empty string");
+            }
+        }
+    });
+
+    test("rejects judge thresholds outside 0..1 or with the wrong type", () => {
+        for (const threshold of [-0.01, 1.01, "0.7", null]) {
+            const result = parseEvalDataset(JSON.stringify([
+                { id: "bad", input: "a", judge: { instructions: "Be correct", threshold } },
+            ]));
+            expect(result.ok).toBe(false);
+            if (!result.ok) {
+                expect(result.error).toContain("judge.threshold must be a number between 0 and 1");
+            }
+        }
     });
 
     test("rejects empty text", () => {
@@ -202,6 +249,56 @@ describe("evaluateEvalCase — assertion-spec mode ({status, output, outputConta
         expect(result.passed).toBe(false);
         expect(result.assertions).toHaveLength(1);
         expect(result.assertions[0].passed).toBe(false);
+    });
+});
+
+describe("evaluateEvalCaseAsync — LLM-judge assertions", () => {
+    test("combines deterministic assertions and passes a fake llmJudge score equal to the threshold", async () => {
+        const fakeJudge = {
+            generate: async () => ({ text: '{"score":0.7,"reason":"Polite and names Friday."}' }),
+        };
+        const result = await evaluateEvalCaseAsync({
+            expected: { outputContains: { summary: "Friday" } },
+            judge: { instructions: "Be polite and mention the deadline", threshold: 0.7 },
+            input: { prompt: "Summarize" },
+            status: "finished",
+            output: { summary: "Friday" },
+        }, async ({ input, output }) => {
+            const scorer = llmJudge({
+                id: "fake-eval-judge",
+                name: "Fake Eval Judge",
+                description: "Test judge",
+                judge: fakeJudge,
+                instructions: "Return a JSON score and reason.",
+                promptTemplate: () => JSON.stringify({ input, output }),
+            });
+            return scorer.score({ input, output });
+        });
+
+        expect(result.passed).toBe(true);
+        expect(result.assertions).toHaveLength(3);
+        expect(result.assertions.at(-1)).toEqual({
+            description: "LLM judge score >= 0.7: Be polite and mention the deadline",
+            passed: true,
+            score: 0.7,
+            reason: "Polite and names Friday.",
+        });
+    });
+
+    test("fails only the judge assertion when its score is below threshold", async () => {
+        const result = await evaluateEvalCaseAsync({
+            judge: { instructions: "Mention the deadline" },
+            status: "finished",
+            output: "A summary without a date",
+        }, async () => ({ score: 0.7, reason: "No deadline was named." }));
+
+        expect(result.passed).toBe(false);
+        expect(result.assertions[0].passed).toBe(true);
+        expect(result.assertions.at(-1)).toMatchObject({
+            passed: false,
+            score: 0.7,
+            reason: "No deadline was named.",
+        });
     });
 });
 

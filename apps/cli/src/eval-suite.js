@@ -2,9 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import crypto from "node:crypto";
 import { SmithersError } from "@smithers-orchestrator/errors";
-import { EVAL_CASE_STATUSES, formatEvalError, isPlainObject, jsonContains, jsonEquals, slugifyEvalToken, } from "@smithers-orchestrator/scorers/evalCases";
+import { EVAL_CASE_STATUSES, evaluateEvalCaseAsync, formatEvalError, isPlainObject, jsonContains, jsonEquals, normalizeEvalJudge, slugifyEvalToken, } from "@smithers-orchestrator/scorers/evalCases";
+import { listNarratorCandidates } from "./narrator-agents.js";
 
 export { EVAL_CASE_STATUSES };
+export const EVAL_JUDGE_PROVIDER_IDS = ["auto", "codex", "claude", "claude-code", "antigravity", "pi"];
 // `slugifyEvalToken`/`jsonEquals`/`jsonContains`/`formatEvalError` are the
 // ONE shared implementation, also used by the `eval-suite-run` seeded
 // workflow's `evaluateEvalCase` (packages/scorers/src/evalCases.js) — this
@@ -78,6 +80,19 @@ function normalizeExpected(value, label) {
 }
 
 /**
+ * @param {unknown} value
+ * @param {string} label
+ */
+function normalizeJudge(value, label) {
+    try {
+        return normalizeEvalJudge(value, label);
+    }
+    catch (error) {
+        throw new SmithersError("INVALID_INPUT", error instanceof Error ? error.message : String(error), { label });
+    }
+}
+
+/**
  * @param {unknown} raw
  * @param {number} index
  */
@@ -92,6 +107,7 @@ export function normalizeEvalCase(raw, index) {
     const input = object.input === undefined ? {} : assertJsonObject(object.input, `cases[${index}].input`);
     const annotations = normalizeAnnotations(object.annotations, `cases[${index}].annotations`);
     const expected = normalizeExpected(object.expected, `cases[${index}].expected`);
+    const judge = normalizeJudge(object.judge, `cases[${index}].judge`);
     const metadata = object.metadata === undefined || object.metadata === null
         ? {}
         : assertJsonObject(object.metadata, `cases[${index}].metadata`);
@@ -101,6 +117,7 @@ export function normalizeEvalCase(raw, index) {
         input,
         annotations,
         expected,
+        ...(judge ? { judge } : {}),
         metadata,
     };
 }
@@ -332,6 +349,116 @@ export function evaluateEvalCaseResult(testCase, result) {
 }
 
 /**
+ * Preserve the CLI report's deterministic assertion objects while composing
+ * in the packaged async judge seam additively.
+ * @param {ReturnType<typeof normalizeEvalCase>} testCase
+ * @param {{ status?: string; output?: unknown; error?: unknown }} result
+ * @param {{ runJudge?: Parameters<typeof evaluateEvalCaseAsync>[1] }} [options]
+ */
+export async function evaluateEvalCaseResultAsync(testCase, result, options = {}) {
+    const deterministic = evaluateEvalCaseResult(testCase, result);
+    if (!testCase.judge) {
+        return deterministic;
+    }
+    const judged = await evaluateEvalCaseAsync({
+        expected: testCase.expected,
+        judge: testCase.judge,
+        input: testCase.input,
+        status: result.status,
+        output: result.output,
+        error: result.error,
+    }, options.runJudge);
+    const judgeAssertion = judged.assertions.at(-1);
+    const assertions = judgeAssertion
+        ? [...deterministic.assertions, judgeAssertion]
+        : deterministic.assertions;
+    return {
+        assertions,
+        passed: assertions.every((assertion) => assertion.passed),
+    };
+}
+
+/**
+ * @param {unknown} value
+ */
+function formatJudgePromptValue(value) {
+    if (value === undefined) {
+        return "(none)";
+    }
+    try {
+        return JSON.stringify(value, null, 2);
+    }
+    catch {
+        return String(value);
+    }
+}
+
+/**
+ * Resolve the same authenticated, local agent candidates used by CLI run
+ * narration and adapt them to the scorer package's judge-runner seam.
+ *
+ * @param {{
+ *   provider?: string;
+ *   model?: string;
+ *   env?: NodeJS.ProcessEnv;
+ *   cwd?: string;
+ *   candidates?: Array<{ id: string; build: (systemPrompt: string) => { generate: (params: { prompt: string }) => Promise<unknown> } }>;
+ * }} [options]
+ */
+export function createEvalJudgeRunner(options = {}) {
+    const provider = options.provider ?? "auto";
+    const candidateProvider = provider === "claude-code" ? "claude" : provider;
+    const candidates = options.candidates ?? listNarratorCandidates(
+        options.env ?? process.env,
+        options.cwd ?? process.cwd(),
+        { model: options.model },
+    )
+        .filter((candidate) => candidate.id !== "kimi" &&
+        (candidateProvider === "auto" || candidate.id === candidateProvider));
+    const unavailableMessage = provider === "auto"
+        ? "No usable LLM judge agent was detected. Install the Codex CLI and run `codex login`, or select an authenticated agent with --judge-provider."
+        : `No usable LLM judge agent was detected for provider "${provider}". Authenticate that agent, choose another --judge-provider, or omit the flag to auto-detect one.`;
+    return async (input) => {
+        if (candidates.length === 0) {
+            throw new Error(unavailableMessage);
+        }
+        const { llmJudge } = await import("@smithers-orchestrator/scorers/llmJudge");
+        const failures = [];
+        for (const candidate of candidates) {
+            try {
+                const scorer = llmJudge({
+                    id: "eval-case-judge",
+                    name: "Eval Case Judge",
+                    description: "Grades a workflow result against a dataset judge assertion.",
+                    judge: candidate.build("You grade Smithers eval results. Apply the stated requirement precisely and do not use tools."),
+                    instructions: [
+                        "Evaluate the workflow result against this requirement:",
+                        input.judge.instructions,
+                        "Return only JSON with a score from 0 to 1 and a concise reason: {\"score\": <number>, \"reason\": \"<text>\"}.",
+                    ].join("\n"),
+                    promptTemplate: () => [
+                        `Workflow input:\n${formatJudgePromptValue(input.input)}`,
+                        `Workflow status: ${input.status ?? "error"}`,
+                        `Workflow output:\n${formatJudgePromptValue(input.output)}`,
+                        ...(input.error === undefined ? [] : [`Workflow error:\n${formatEvalError(input.error)}`]),
+                    ].join("\n\n"),
+                });
+                return await scorer.score({
+                    input: input.input,
+                    output: input.output,
+                    groundTruth: input.expected,
+                    context: { status: input.status, error: formatEvalError(input.error) },
+                });
+            }
+            catch (error) {
+                failures.push(`${candidate.id}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        throw new Error(`Every resolved LLM judge agent failed. ${failures.join("; ")}. Check judge credentials/model or choose another --judge-provider.`);
+    };
+}
+
+/**
  * @param {{
  *   plan: ReturnType<typeof buildEvalPlan>;
  *   results: Array<Record<string, unknown> & { passed: boolean; status?: string; durationMs?: number }>;
@@ -423,6 +550,9 @@ export function renderEvalPlan(plan) {
     ];
     for (const testCase of plan.cases) {
         lines.push(`- ${testCase.id} -> ${testCase.runId} (expect ${testCase.expected.status})`);
+        if (testCase.judge) {
+            lines.push(`  judge >= ${testCase.judge.threshold}: ${testCase.judge.instructions}`);
+        }
     }
     lines.push("");
     lines.push("Dry run only. Re-run without --dry-run to execute the suite.");

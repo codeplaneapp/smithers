@@ -76,7 +76,9 @@ import {
     assertEvalReportWritable,
     buildEvalPlan,
     buildEvalReport,
-    evaluateEvalCaseResult,
+    createEvalJudgeRunner,
+    EVAL_JUDGE_PROVIDER_IDS,
+    evaluateEvalCaseResultAsync,
     loadEvalCases,
     renderEvalPlan,
     renderEvalReport,
@@ -1701,6 +1703,8 @@ const evalOptions = z.object({
     maxOutputBytes: z.number().int().min(1).optional().describe("Max bytes a single tool call can return"),
     toolTimeoutMs: z.number().int().min(1).optional().describe("Max wall-clock time per tool call in ms"),
     optimization: z.string().optional().describe("Apply a Smithers optimization artifact while running the eval suite"),
+    judgeProvider: z.enum(EVAL_JUDGE_PROVIDER_IDS).default("auto").describe("Agent provider for LLM-judge assertions"),
+    judgeModel: z.string().optional().describe("Model override for LLM-judge assertions"),
 });
 const superviseOptions = z.object({
     run: z.string().optional().describe("Only supervise these run IDs (comma-separated)"),
@@ -5629,6 +5633,13 @@ const cli = Cli.create({
             const rootDir = resolveLaunchRootDir(c.options.root);
             const logDir = c.options.log ? c.options.logDir : null;
             const abort = setupAbortSignal();
+            const judgeRunner = plan.cases.some((testCase) => testCase.judge)
+                ? createEvalJudgeRunner({
+                    provider: c.options.judgeProvider,
+                    model: c.options.judgeModel,
+                    cwd: process.cwd(),
+                })
+                : undefined;
             const startedAtMs = Date.now();
             const results = await withOptimizationArtifactEnv(c.options.optimization, () => runWithLimit(plan.cases, c.options.concurrency, async (testCase) => {
                 const caseStartedAtMs = Date.now();
@@ -5653,10 +5664,10 @@ const cli = Cli.create({
                     }));
                     const output = await loadOutputs(workflow.db, schema, testCase.runId);
                     const durationMs = Date.now() - caseStartedAtMs;
-                    const evaluation = evaluateEvalCaseResult(testCase, {
+                    const evaluation = await evaluateEvalCaseResultAsync(testCase, {
                         ...result,
                         output,
-                    });
+                    }, { runJudge: judgeRunner });
                     return {
                         caseId: testCase.id,
                         runId: testCase.runId,
@@ -5673,10 +5684,10 @@ const cli = Cli.create({
                 catch (err) {
                     const errorMessage = err?.message ?? String(err);
                     const durationMs = Date.now() - caseStartedAtMs;
-                    const evaluation = evaluateEvalCaseResult(testCase, {
+                    const evaluation = await evaluateEvalCaseResultAsync(testCase, {
                         status: "error",
                         error: err,
-                    });
+                    }, { runJudge: judgeRunner });
                     return {
                         caseId: testCase.id,
                         runId: testCase.runId,

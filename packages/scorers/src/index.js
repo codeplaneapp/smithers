@@ -14,6 +14,8 @@
 /** @typedef {import("./EvalAssertion.ts").EvalAssertion} EvalAssertion */
 /** @typedef {import("./EvalCaseInput.ts").EvalCaseInput} EvalCaseInput */
 /** @typedef {import("./EvalDatasetParseResult.ts").EvalDatasetParseResult} EvalDatasetParseResult */
+/** @typedef {import("./EvalJudge.ts").EvalJudge} EvalJudge */
+/** @typedef {import("./EvalJudgeRunner.ts").EvalJudgeRunner} EvalJudgeRunner */
 /** @typedef {import("./LlmJudgeConfig.js").LlmJudgeConfig} LlmJudgeConfig */
 /** @typedef {import("./ModelPrice.js").ModelPrice} ModelPrice */
 /** @typedef {import("./PlanSolidityOptions.js").PlanSolidityOptions} PlanSolidityOptions */
@@ -48,7 +50,7 @@ export { humanPollScorer } from "./humanPollScorer.js";
 export { extractDelegationEvents, resolvePlanningNodes, } from "./delegationEvents.js";
 // Eval suites (issue #77): shared dataset parsing + case grading + the
 // scorer seam the `eval-suite-run` workflow attaches to every case task.
-export { EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, formatEvalError, isPlainObject, jsonContains, jsonEquals, normalizeExpected, parseEvalDataset, slugifyEvalToken, } from "./evalCases.js";
+export { EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, formatEvalError, isPlainObject, jsonContains, jsonEquals, normalizeEvalJudge, normalizeExpected, parseEvalDataset, slugifyEvalToken, } from "./evalCases.js";
 // Execution
 export { runScorersAsync, runScorersBatch } from "./run-scorers.js";
 // Aggregation

@@ -175,14 +175,37 @@ type LlmJudgeConfig$2 = {
     promptTemplate: (input: ScorerInput$2) => string;
 };
 
-/** One row of an authored eval dataset — the input (and optional expected
- *  output) a case run is invoked with. Mirrors multi's `EvalCaseInput`
- *  (`src/evals/evalReport.ts`) byte-for-byte. */
+/** An LLM-judge assertion authored on an eval dataset case. */
+type EvalJudge$2 = {
+    /** The natural-language requirement the case output must satisfy. */
+    instructions: string;
+    /** Minimum passing score from 0 to 1. Defaults to EVAL_PASS_THRESHOLD. */
+    threshold?: number;
+};
+
+/** Async adapter used to grade one normalized eval judge assertion. */
+type EvalJudgeRunner$2 = (input: {
+    judge: EvalJudge$2 & {
+        threshold: number;
+    };
+    input?: unknown;
+    expected?: unknown;
+    status?: string;
+    output?: unknown;
+    error?: unknown;
+}) => Promise<{
+    score: number;
+    reason?: string;
+}>;
+
+/** One row of an authored eval dataset: the input and optional deterministic
+ *  or LLM-judge assertions a case run is invoked with. */
 type EvalCaseInput$1 = {
     id: string;
     name?: string;
     input: unknown;
     expected?: unknown;
+    judge?: EvalJudge$2;
 };
 
 type EvalDatasetParseResult$2 = {
@@ -193,11 +216,13 @@ type EvalDatasetParseResult$2 = {
     error: string;
 };
 
-/** One assertion result within a graded eval case (a scripted expect(), not
- *  an LLM scorer). Mirrors multi's `EvalAssertion` (`src/evals/evalReport.ts`). */
+/** One assertion result within a graded eval case. Judge assertions add their
+ *  normalized score and explanation without changing deterministic rows. */
 type EvalAssertion$2 = {
     description: string;
     passed: boolean;
+    score?: number;
+    reason?: string;
 };
 
 /** The component keys `delegationRunScore` combines. */
@@ -610,6 +635,16 @@ type DelegationEventsPayload$1 = DelegationEventsPayload$2;
 type ScorerInput$1 = ScorerInput$2;
 
 /**
+ * Normalize and validate an authored judge assertion.
+ * @param {unknown} value
+ * @param {string} [label]
+ * @returns {{ instructions: string; threshold: number } | undefined}
+ */
+declare function normalizeEvalJudge(value: unknown, label?: string): {
+    instructions: string;
+    threshold: number;
+} | undefined;
+/**
  * @param {unknown} value
  * @returns {value is Record<string, unknown>}
  */
@@ -663,8 +698,8 @@ declare function normalizeExpected(value: unknown, label?: string): {
  * every row is an object, and no two rows resolve to the same case id.
  * Malformed input (unparseable JSON/JSONL, a non-array/non-object top level,
  * duplicate ids) is reported as an honest `{ ok: false, error }`, never
- * silently dropped or coerced. MUST stay byte-for-byte identical to multi's
- * `parseEvalDataset` (see `packages/scorers/tests/eval-cases.test.js`).
+ * silently dropped or coerced. Judge assertions are normalized and validated
+ * before any cases are returned.
  * @param {string} text
  * @returns {EvalDatasetParseResult}
  */
@@ -695,6 +730,28 @@ declare function evaluateEvalCase({ expected, status, output, error }: {
     assertions: EvalAssertion$1[];
     passed: boolean;
 };
+/**
+ * Compose deterministic case grading with an optional asynchronous LLM-judge
+ * assertion. The synchronous `evaluateEvalCase` API remains unchanged for
+ * callers that cannot or should not resolve an agent.
+ *
+ * Judge-runner errors become failed assertions so an unavailable provider or
+ * malformed response fails the affected case without aborting the suite.
+ * @param {{ expected?: unknown; judge?: EvalJudge; input?: unknown; status?: string; output?: unknown; error?: unknown }} args
+ * @param {EvalJudgeRunner} [runJudge]
+ * @returns {Promise<{ assertions: EvalAssertion[]; passed: boolean }>}
+ */
+declare function evaluateEvalCaseAsync({ expected, judge, input, status, output, error }: {
+    expected?: unknown;
+    judge?: EvalJudge$1;
+    input?: unknown;
+    status?: string;
+    output?: unknown;
+    error?: unknown;
+}, runJudge?: EvalJudgeRunner$1): Promise<{
+    assertions: EvalAssertion$1[];
+    passed: boolean;
+}>;
 /**
  * Readable, collision-free run id for ONE case's child workflow run.
  * Embeds the parent eval run's id (not just the suite+case) so two concurrent
@@ -727,6 +784,8 @@ declare const EVAL_PASS_THRESHOLD: 0.8;
 type Scorer$1 = Scorer$e;
 type EvalDatasetParseResult$1 = EvalDatasetParseResult$2;
 type EvalAssertion$1 = EvalAssertion$2;
+type EvalJudge$1 = EvalJudge$2;
+type EvalJudgeRunner$1 = EvalJudgeRunner$2;
 
 /**
  * Fire-and-forget scorer execution. Runs all scorers via Effect.runFork
@@ -828,6 +887,8 @@ type DelegationRunScoreOptions = DelegationRunScoreOptions$2;
 type EvalAssertion = EvalAssertion$2;
 type EvalCaseInput = EvalCaseInput$1;
 type EvalDatasetParseResult = EvalDatasetParseResult$2;
+type EvalJudge = EvalJudge$2;
+type EvalJudgeRunner = EvalJudgeRunner$2;
 type LlmJudgeConfig = LlmJudgeConfig$2;
 type ModelPrice = ModelPrice$2;
 type PlanSolidityOptions = PlanSolidityOptions$2;
@@ -843,4 +904,4 @@ type ScorerInput = ScorerInput$2;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, extractDelegationEvents, faithfulnessScorer, formatEvalError, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type EvalJudge, type EvalJudgeRunner, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, extractDelegationEvents, faithfulnessScorer, formatEvalError, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeEvalJudge, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore };
