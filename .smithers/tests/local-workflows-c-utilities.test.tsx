@@ -79,6 +79,12 @@ describe("Batch C utility behavior", () => {
     const frame = await render("microsandbox-finish.tsx");
     expect(frame.tasks.map((candidate) => candidate.nodeId)).toEqual(["prep", "summary"]);
     expect(task(frame, "prep").agent).toBeUndefined();
+
+    const source = await readFile(pathFor("microsandbox-finish.tsx"), "utf8");
+    expect(source).toContain("if (!existsSync(gate.cwd))");
+    expect(source).toContain("Gate cwd does not exist:");
+    expect(source).toContain('runProcess("/bin/bash", ["-lc", gate.command]');
+    expect(source).not.toContain('runProcess("bash", ["-lc", gate.command]');
   });
 
   test("review wrappers use exact prompt, distinct configured chains, staged schema rows, and moderator terminal", async () => wait((async () => {

@@ -18,7 +18,7 @@ import {
 	localIdSchema,
 	outputContractIdSchema,
 	workerEnvelopeSchemaFor,
-} from "./delegationV2Schemas.ts";
+} from "./delegationV2SchemasRuntime.js";
 import {
 	DELEGATION_V2_PROMPT_CONTRACT_VERSION,
 	renderContinuationAuthorPrompt,

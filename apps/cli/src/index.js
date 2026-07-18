@@ -9416,11 +9416,13 @@ async function main() {
     // Self-heal the curated agent skill on a normal human-facing invocation:
     // keep ~/.claude/skills (and Pi) in sync with the bundled skill and evict
     // any retired `smithers-orchestrator` copy. Throttled + best-effort; skipped
-    // in JSON mode (machine output / e2e) and for completions/version/help so it
-    // never adds noise or latency to scripted use. Opt out with
+    // in CI, non-TTY use, JSON mode, and for completions/version/help so it
+    // never mutates agent state or adds noise/latency to scripted use. Opt out with
     // SMITHERS_NO_SKILL_REFRESH=1.
     if (command &&
         command !== "completions" &&
+        !process.env.CI &&
+        process.stderr.isTTY &&
         !argvRequestsJsonMode(argv) &&
         !argv.includes("--version") &&
         !argv.includes("--help") &&

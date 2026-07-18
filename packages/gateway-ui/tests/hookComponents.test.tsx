@@ -93,6 +93,20 @@ async function mount(gw: InMemoryGateway, element: ReactElement): Promise<Harnes
   return harness;
 }
 
+async function waitFor(
+  harness: Harness,
+  assertion: () => boolean,
+  label: string,
+  timeoutMs = 10_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (assertion()) return;
+    await harness.flush(25);
+  }
+  throw new Error(`Timed out waiting for: ${label}`);
+}
+
 function click(el: Element | null) {
   if (!el) throw new Error("click: element not found");
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -161,7 +175,11 @@ describe("ConnectionBadge (live SSE)", () => {
   test("renders a connection status derived from the real stream", async () => {
     const gw = boot();
     const harness = await mount(gw, createElement(ConnectionBadge, { className: "chip" }));
-    await harness.flush(60);
+    await waitFor(
+      harness,
+      () => harness.container.querySelector("[data-status]")?.getAttribute("data-status") === "online",
+      "gateway stream to become online",
+    );
     const badge = harness.container.querySelector("[data-status]");
     expect(badge).not.toBeNull();
     // The stream connects against the real gateway, so it reaches online.

@@ -155,7 +155,7 @@ export { Poller } from "./Poller.js";
 export { Supervisor } from "./Supervisor.js";
 export { Runbook } from "./Runbook.js";
 export { Sidecar } from "./Sidecar.js";
-export { computeSidecarDelta } from "./computeSidecarDelta.ts";
+export { computeSidecarDelta } from "./computeSidecarDelta.js";
 // --- Engine-Backed Primitives ---
 export { Subflow } from "./Subflow.js";
 export { Sandbox } from "./Sandbox.js";
@@ -179,7 +179,7 @@ export { DeriskLoop } from "./delegation/DeriskLoop.js";
 export { DelegationExecution } from "./delegation/DelegationExecution.js";
 export { DelegationScoring } from "./delegation/DelegationScoring.js";
 export { DelegationEditListener } from "./delegation/DelegationEditListener.js";
-export { delegationSchemas, tierSchema, estimateSchema, gateSchema, devPreviewKindSchema, dcGoalSchema, dcQuestionSchema, dcForecastSchema, dcGoalApprovalSchema, dcPlanSchema, dcPreviewSchema, dcDevPreviewSchema, dcGatesSchema, dcProbeSchema, dcReplanSchema, dcExecSchema, dcReviewSchema, dcApprovalSchema, dcEditSchema, dcSkipSchema, dcPollSchema, dcBudgetSchema, dcScoreSchema, DEFAULT_TIER_ORDER, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, } from "./delegation/delegationSchemas.ts";
+export { delegationSchemas, tierSchema, estimateSchema, gateSchema, devPreviewKindSchema, dcGoalSchema, dcQuestionSchema, dcForecastSchema, dcGoalApprovalSchema, dcPlanSchema, dcPreviewSchema, dcDevPreviewSchema, dcGatesSchema, dcProbeSchema, dcReplanSchema, dcExecSchema, dcReviewSchema, dcApprovalSchema, dcEditSchema, dcSkipSchema, dcPollSchema, dcBudgetSchema, dcScoreSchema, DEFAULT_TIER_ORDER, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, } from "./delegation/delegationSchemasRuntime.js";
 export * as delegationPrompts from "./delegation/delegationPrompts.js";
 export { withCommitRange, captureWorkingCopyCommit } from "./delegation/withCommitRange.js";
 export { foldPlans, nodeIndex, frontierLeaves, unplannedChunks, planningComplete, foldGates, dependentsOf, planOwnerOf, triggerTargetOf, leavesUnder, probeIdFor, probesRequested, pendingTriggers, chunkGateFailures, replanCountFor, actualTotals, physicalId, devPreviewNodeId, splitGates, leafAttemptState, leafComplete, executionComplete, synthesizeDelegationEvents, agentForTier, } from "./delegation/delegationState.js";
@@ -190,7 +190,7 @@ export {
 	DELEGATION_V2_PROTOCOL_VERSION,
 	DELEGATION_V2_PROGRAM_VERSION,
 	DELEGATION_V2_REGISTRY_VERSION,
-} from "./delegation-v2/delegationV2Schemas.ts";
+} from "./delegation-v2/delegationV2SchemasRuntime.js";
 export { validateWorkflowProgram, DEFAULT_DELEGATION_V2_LIMITS } from "./delegation-v2/delegationV2Validate.js";
 export {
 	compileDelegationV2Program,

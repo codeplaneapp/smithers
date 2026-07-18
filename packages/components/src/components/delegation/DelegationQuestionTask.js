@@ -3,7 +3,7 @@ import { getTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { buildHumanRequestId } from "@smithers-orchestrator/db/buildHumanRequestId";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { dcQuestionSchema } from "./delegationSchemas.ts";
+import { dcQuestionSchema } from "./delegationSchemasRuntime.js";
 /** @typedef {import("../OutputTarget.ts").OutputTarget} OutputTarget */
 
 /**

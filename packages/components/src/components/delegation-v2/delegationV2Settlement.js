@@ -8,7 +8,7 @@ import {
 	roleSchema,
 	workKindSchema,
 	DELEGATION_V2_REGISTRY_VERSION,
-} from "./delegationV2Schemas.ts";
+} from "./delegationV2SchemasRuntime.js";
 import { hashStableValue } from "./delegationV2Ids.js";
 import { DELEGATION_V2_COMPILER_VERSION } from "./delegationV2Compiler.js";
 import {

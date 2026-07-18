@@ -131,10 +131,6 @@ type WorkflowViewProps$1 = {
 type UIProps$1 = WorkflowViewProps$1;
 type TUIProps$1 = Omit<WorkflowViewProps$1, "path">;
 
-/** Wire versions are integers; registry/compiler versions are immutable runtime strings. */
-declare const DELEGATION_V2_PROTOCOL_VERSION$1: 2;
-declare const DELEGATION_V2_PROGRAM_VERSION: 1;
-declare const DELEGATION_V2_REGISTRY_VERSION: "delegation-v2.registry-2";
 declare const roleSchema: z.ZodEnum<{
     fable: "fable";
     sol: "sol";
@@ -155,14 +151,14 @@ declare const workKindSchema: z.ZodEnum<{
 type DelegationV2WorkKind = z.infer<typeof workKindSchema>;
 declare const outputContractIdSchema: z.ZodEnum<{
     plan: "plan";
-    work_product: "work_product";
     goal_contract: "goal_contract";
-    evaluation: "evaluation";
-    classification: "classification";
-    issue_scan: "issue_scan";
-    condition: "condition";
-    artifact_collection: "artifact_collection";
+    work_product: "work_product";
     evidence_collection: "evidence_collection";
+    issue_scan: "issue_scan";
+    classification: "classification";
+    condition: "condition";
+    evaluation: "evaluation";
+    artifact_collection: "artifact_collection";
 }>;
 type OutputContractId = z.infer<typeof outputContractIdSchema>;
 declare const goalContractSchema: z.ZodObject<{
@@ -182,14 +178,14 @@ declare const inputRefSchema: z.ZodObject<{
     from: z.ZodString;
     contract: z.ZodEnum<{
         plan: "plan";
-        work_product: "work_product";
         goal_contract: "goal_contract";
-        evaluation: "evaluation";
-        classification: "classification";
-        issue_scan: "issue_scan";
-        condition: "condition";
-        artifact_collection: "artifact_collection";
+        work_product: "work_product";
         evidence_collection: "evidence_collection";
+        issue_scan: "issue_scan";
+        classification: "classification";
+        condition: "condition";
+        evaluation: "evaluation";
+        artifact_collection: "artifact_collection";
     }>;
     purpose: z.ZodString;
 }, z.core.$strict>;
@@ -266,14 +262,14 @@ declare const workflowProgramSchema: z.ZodObject<{
         from: z.ZodString;
         contract: z.ZodEnum<{
             plan: "plan";
-            work_product: "work_product";
             goal_contract: "goal_contract";
-            evaluation: "evaluation";
-            classification: "classification";
-            issue_scan: "issue_scan";
-            condition: "condition";
-            artifact_collection: "artifact_collection";
+            work_product: "work_product";
             evidence_collection: "evidence_collection";
+            issue_scan: "issue_scan";
+            classification: "classification";
+            condition: "condition";
+            evaluation: "evaluation";
+            artifact_collection: "artifact_collection";
         }>;
     }, z.core.$strict>>;
     supersedes: z.ZodOptional<z.ZodObject<{
@@ -282,2181 +278,6 @@ declare const workflowProgramSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 type WorkflowProgram = z.infer<typeof workflowProgramSchema>;
-/** Registered output tables for the experimental runtime. */
-declare const delegationV2Schemas: {
-    readonly dv2Author: z.ZodObject<{
-        protocolVersion: z.ZodLiteral<2>;
-        outcome: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            tag: z.ZodLiteral<"subworkflow">;
-            value: z.ZodObject<{
-                schemaVersion: z.ZodOptional<z.ZodUnknown>;
-                registryVersion: z.ZodOptional<z.ZodUnknown>;
-                id: z.ZodOptional<z.ZodUnknown>;
-                objective: z.ZodOptional<z.ZodUnknown>;
-                rationale: z.ZodOptional<z.ZodUnknown>;
-                root: z.ZodOptional<z.ZodUnknown>;
-                outputs: z.ZodOptional<z.ZodUnknown>;
-                supersedes: z.ZodOptional<z.ZodUnknown>;
-            }, z.core.$catchall<z.ZodUnknown>>;
-        }, z.core.$strict>, z.ZodObject<{
-            tag: z.ZodLiteral<"complete">;
-            value: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                details: z.ZodObject<{
-                    goal: z.ZodObject<{
-                        objective: z.ZodString;
-                        context: z.ZodArray<z.ZodString>;
-                        constraints: z.ZodArray<z.ZodString>;
-                        nonGoals: z.ZodArray<z.ZodString>;
-                    }, z.core.$strict>;
-                    refinedObjective: z.ZodString;
-                    unresolvedPreferences: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"refine_goal">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    approach: z.ZodString;
-                    steps: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"plan">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    conclusion: z.ZodString;
-                    findings: z.ZodArray<z.ZodString>;
-                    classification: z.ZodOptional<z.ZodObject<{
-                        label: z.ZodString;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                    condition: z.ZodOptional<z.ZodObject<{
-                        state: z.ZodEnum<{
-                            unknown: "unknown";
-                            met: "met";
-                            not_met: "not_met";
-                        }>;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                    issues: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"research">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    hypothesis: z.ZodString;
-                    result: z.ZodEnum<{
-                        supported: "supported";
-                        disproven: "disproven";
-                        inconclusive: "inconclusive";
-                    }>;
-                    observations: z.ZodArray<z.ZodString>;
-                    condition: z.ZodOptional<z.ZodObject<{
-                        state: z.ZodEnum<{
-                            unknown: "unknown";
-                            met: "met";
-                            not_met: "not_met";
-                        }>;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"poc">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    result: z.ZodString;
-                    verification: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"execute">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    verdict: z.ZodEnum<{
-                        fail: "fail";
-                        pass: "pass";
-                        mixed: "mixed";
-                    }>;
-                    findings: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"review">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    verdict: z.ZodEnum<{
-                        fail: "fail";
-                        partial: "partial";
-                        pass: "pass";
-                    }>;
-                    observations: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"preview">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    conclusion: z.ZodString;
-                    disagreements: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"synthesize">;
-            }, z.core.$strict>], "work">;
-        }, z.core.$strict>, z.ZodObject<{
-            tag: z.ZodLiteral<"blocked">;
-            value: z.ZodObject<{
-                summary: z.ZodString;
-                partialWork: z.ZodString;
-                attemptedAlternatives: z.ZodArray<z.ZodString>;
-                whyNoSafeFallbackExists: z.ZodString;
-                requiredNextAction: z.ZodString;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodEnum<{
-                    synthesize: "synthesize";
-                    plan: "plan";
-                    review: "review";
-                    preview: "preview";
-                    poc: "poc";
-                    research: "research";
-                    refine_goal: "refine_goal";
-                    execute: "execute";
-                }>;
-            }, z.core.$strict>;
-        }, z.core.$strict>], "tag">;
-        state: z.ZodObject<{
-            summary: z.ZodString;
-            retainedFacts: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-        }, z.core.$strict>;
-    }, z.core.$strict>;
-    readonly dv2Worker: z.ZodObject<{
-        protocolVersion: z.ZodLiteral<2>;
-        outcome: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            tag: z.ZodLiteral<"complete">;
-            value: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                details: z.ZodObject<{
-                    goal: z.ZodObject<{
-                        objective: z.ZodString;
-                        context: z.ZodArray<z.ZodString>;
-                        constraints: z.ZodArray<z.ZodString>;
-                        nonGoals: z.ZodArray<z.ZodString>;
-                    }, z.core.$strict>;
-                    refinedObjective: z.ZodString;
-                    unresolvedPreferences: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"refine_goal">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    approach: z.ZodString;
-                    steps: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"plan">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    conclusion: z.ZodString;
-                    findings: z.ZodArray<z.ZodString>;
-                    classification: z.ZodOptional<z.ZodObject<{
-                        label: z.ZodString;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                    condition: z.ZodOptional<z.ZodObject<{
-                        state: z.ZodEnum<{
-                            unknown: "unknown";
-                            met: "met";
-                            not_met: "not_met";
-                        }>;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                    issues: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"research">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    hypothesis: z.ZodString;
-                    result: z.ZodEnum<{
-                        supported: "supported";
-                        disproven: "disproven";
-                        inconclusive: "inconclusive";
-                    }>;
-                    observations: z.ZodArray<z.ZodString>;
-                    condition: z.ZodOptional<z.ZodObject<{
-                        state: z.ZodEnum<{
-                            unknown: "unknown";
-                            met: "met";
-                            not_met: "not_met";
-                        }>;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"poc">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    result: z.ZodString;
-                    verification: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"execute">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    verdict: z.ZodEnum<{
-                        fail: "fail";
-                        pass: "pass";
-                        mixed: "mixed";
-                    }>;
-                    findings: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"review">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    verdict: z.ZodEnum<{
-                        fail: "fail";
-                        partial: "partial";
-                        pass: "pass";
-                    }>;
-                    observations: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"preview">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    conclusion: z.ZodString;
-                    disagreements: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"synthesize">;
-            }, z.core.$strict>], "work">;
-        }, z.core.$strict>, z.ZodObject<{
-            tag: z.ZodLiteral<"blocked">;
-            value: z.ZodObject<{
-                summary: z.ZodString;
-                partialWork: z.ZodString;
-                attemptedAlternatives: z.ZodArray<z.ZodString>;
-                whyNoSafeFallbackExists: z.ZodString;
-                requiredNextAction: z.ZodString;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodEnum<{
-                    synthesize: "synthesize";
-                    plan: "plan";
-                    review: "review";
-                    preview: "preview";
-                    poc: "poc";
-                    research: "research";
-                    refine_goal: "refine_goal";
-                    execute: "execute";
-                }>;
-            }, z.core.$strict>;
-        }, z.core.$strict>], "tag">;
-    }, z.core.$strict>;
-    readonly dv2Validation: z.ZodObject<{
-        invocationKey: z.ZodString;
-        generation: z.ZodNumber;
-        authorNodeId: z.ZodString;
-        status: z.ZodEnum<{
-            accepted: "accepted";
-            rejected: "rejected";
-        }>;
-        programDigest: z.ZodString;
-        registryVersion: z.ZodString;
-        compilerVersion: z.ZodString;
-        criticalExecutionPolicyHash: z.ZodOptional<z.ZodString>;
-        normalizedProgram: z.ZodOptional<z.ZodObject<{
-            schemaVersion: z.ZodLiteral<1>;
-            registryVersion: z.ZodString;
-            id: z.ZodString;
-            objective: z.ZodObject<{
-                objective: z.ZodString;
-                context: z.ZodArray<z.ZodString>;
-                constraints: z.ZodArray<z.ZodString>;
-                nonGoals: z.ZodArray<z.ZodString>;
-            }, z.core.$strict>;
-            rationale: z.ZodString;
-            root: z.ZodType<WorkflowExpr, unknown, z.core.$ZodTypeInternals<WorkflowExpr, unknown>>;
-            outputs: z.ZodArray<z.ZodObject<{
-                from: z.ZodString;
-                contract: z.ZodEnum<{
-                    plan: "plan";
-                    work_product: "work_product";
-                    goal_contract: "goal_contract";
-                    evaluation: "evaluation";
-                    classification: "classification";
-                    issue_scan: "issue_scan";
-                    condition: "condition";
-                    artifact_collection: "artifact_collection";
-                    evidence_collection: "evidence_collection";
-                }>;
-            }, z.core.$strict>>;
-            supersedes: z.ZodOptional<z.ZodObject<{
-                id: z.ZodString;
-                digest: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
-        diagnostics: z.ZodArray<z.ZodObject<{
-            code: z.ZodEnum<{
-                schema_invalid: "schema_invalid";
-                registry_mismatch: "registry_mismatch";
-                duplicate_id: "duplicate_id";
-                reserved_id: "reserved_id";
-                node_limit: "node_limit";
-                depth_limit: "depth_limit";
-                fanout_limit: "fanout_limit";
-                concurrency_limit: "concurrency_limit";
-                unsupported_nested_concurrency: "unsupported_nested_concurrency";
-                prompt_limit: "prompt_limit";
-                total_prompt_limit: "total_prompt_limit";
-                author_fuel_limit: "author_fuel_limit";
-                role_work_forbidden: "role_work_forbidden";
-                acceptance_duplicate: "acceptance_duplicate";
-                author_depth_limit: "author_depth_limit";
-                criticality_required: "criticality_required";
-                criticality_forbidden: "criticality_forbidden";
-                criticality_ungranted: "criticality_ungranted";
-                criticality_policy_mismatch: "criticality_policy_mismatch";
-                critical_review_missing: "critical_review_missing";
-                critical_review_invalid: "critical_review_invalid";
-                critical_review_not_independent: "critical_review_not_independent";
-                critical_review_not_joined: "critical_review_not_joined";
-                reference_missing: "reference_missing";
-                reference_forward: "reference_forward";
-                reference_contract_mismatch: "reference_contract_mismatch";
-                parallel_sibling_reference: "parallel_sibling_reference";
-                prompt_context_missing: "prompt_context_missing";
-                output_missing: "output_missing";
-                output_contract_mismatch: "output_contract_mismatch";
-                output_contract_forbidden: "output_contract_forbidden";
-                output_duplicate: "output_duplicate";
-                parallel_write_conflict: "parallel_write_conflict";
-            }>;
-            path: z.ZodString;
-            message: z.ZodString;
-            nodeId: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>>;
-        stats: z.ZodOptional<z.ZodObject<{
-            nodes: z.ZodNumber;
-            agents: z.ZodNumber;
-            authors: z.ZodNumber;
-            maxDepth: z.ZodNumber;
-            maxFanout: z.ZodNumber;
-            totalPromptBytes: z.ZodNumber;
-        }, z.core.$strict>>;
-    }, z.core.$strict>;
-    readonly dv2Outcome: z.ZodObject<{
-        invocationKey: z.ZodString;
-        logicalId: z.ZodString;
-        generation: z.ZodNumber;
-        role: z.ZodEnum<{
-            fable: "fable";
-            sol: "sol";
-            terra: "terra";
-            luna: "luna";
-        }>;
-        work: z.ZodEnum<{
-            synthesize: "synthesize";
-            plan: "plan";
-            review: "review";
-            preview: "preview";
-            poc: "poc";
-            research: "research";
-            refine_goal: "refine_goal";
-            execute: "execute";
-        }>;
-        outputContract: z.ZodEnum<{
-            plan: "plan";
-            work_product: "work_product";
-            goal_contract: "goal_contract";
-            evaluation: "evaluation";
-            classification: "classification";
-            issue_scan: "issue_scan";
-            condition: "condition";
-            artifact_collection: "artifact_collection";
-            evidence_collection: "evidence_collection";
-        }>;
-        assignmentDigest: z.ZodString;
-        acceptanceCriterionIds: z.ZodArray<z.ZodString>;
-        status: z.ZodEnum<{
-            complete: "complete";
-            blocked: "blocked";
-            runtime_failed: "runtime_failed";
-        }>;
-        sourceNodeId: z.ZodString;
-        programDigest: z.ZodOptional<z.ZodString>;
-        product: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-            details: z.ZodObject<{
-                goal: z.ZodObject<{
-                    objective: z.ZodString;
-                    context: z.ZodArray<z.ZodString>;
-                    constraints: z.ZodArray<z.ZodString>;
-                    nonGoals: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                refinedObjective: z.ZodString;
-                unresolvedPreferences: z.ZodArray<z.ZodString>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"refine_goal">;
-        }, z.core.$strict>, z.ZodObject<{
-            details: z.ZodObject<{
-                approach: z.ZodString;
-                steps: z.ZodArray<z.ZodString>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"plan">;
-        }, z.core.$strict>, z.ZodObject<{
-            details: z.ZodObject<{
-                conclusion: z.ZodString;
-                findings: z.ZodArray<z.ZodString>;
-                classification: z.ZodOptional<z.ZodObject<{
-                    label: z.ZodString;
-                    rationale: z.ZodString;
-                }, z.core.$strict>>;
-                condition: z.ZodOptional<z.ZodObject<{
-                    state: z.ZodEnum<{
-                        unknown: "unknown";
-                        met: "met";
-                        not_met: "not_met";
-                    }>;
-                    rationale: z.ZodString;
-                }, z.core.$strict>>;
-                issues: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"research">;
-        }, z.core.$strict>, z.ZodObject<{
-            details: z.ZodObject<{
-                hypothesis: z.ZodString;
-                result: z.ZodEnum<{
-                    supported: "supported";
-                    disproven: "disproven";
-                    inconclusive: "inconclusive";
-                }>;
-                observations: z.ZodArray<z.ZodString>;
-                condition: z.ZodOptional<z.ZodObject<{
-                    state: z.ZodEnum<{
-                        unknown: "unknown";
-                        met: "met";
-                        not_met: "not_met";
-                    }>;
-                    rationale: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"poc">;
-        }, z.core.$strict>, z.ZodObject<{
-            details: z.ZodObject<{
-                result: z.ZodString;
-                verification: z.ZodArray<z.ZodString>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"execute">;
-        }, z.core.$strict>, z.ZodObject<{
-            details: z.ZodObject<{
-                verdict: z.ZodEnum<{
-                    fail: "fail";
-                    pass: "pass";
-                    mixed: "mixed";
-                }>;
-                findings: z.ZodArray<z.ZodString>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"review">;
-        }, z.core.$strict>, z.ZodObject<{
-            details: z.ZodObject<{
-                verdict: z.ZodEnum<{
-                    fail: "fail";
-                    partial: "partial";
-                    pass: "pass";
-                }>;
-                observations: z.ZodArray<z.ZodString>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"preview">;
-        }, z.core.$strict>, z.ZodObject<{
-            details: z.ZodObject<{
-                conclusion: z.ZodString;
-                disagreements: z.ZodArray<z.ZodString>;
-            }, z.core.$strict>;
-            summary: z.ZodString;
-            acceptance: z.ZodArray<z.ZodObject<{
-                criterionId: z.ZodString;
-                status: z.ZodEnum<{
-                    unknown: "unknown";
-                    passed: "passed";
-                    failed: "failed";
-                }>;
-                evidenceIds: z.ZodArray<z.ZodString>;
-                explanation: z.ZodString;
-            }, z.core.$strict>>;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            artifacts: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    file: "file";
-                    preview: "preview";
-                    url: "url";
-                    report: "report";
-                    diff: "diff";
-                    command_output: "command_output";
-                    other: "other";
-                }>;
-                locator: z.ZodString;
-                summary: z.ZodString;
-            }, z.core.$strict>>;
-            assumptions: z.ZodArray<z.ZodString>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodLiteral<"synthesize">;
-        }, z.core.$strict>], "work">>;
-        blockage: z.ZodOptional<z.ZodObject<{
-            summary: z.ZodString;
-            partialWork: z.ZodString;
-            attemptedAlternatives: z.ZodArray<z.ZodString>;
-            whyNoSafeFallbackExists: z.ZodString;
-            requiredNextAction: z.ZodString;
-            evidence: z.ZodArray<z.ZodObject<{
-                id: z.ZodString;
-                kind: z.ZodEnum<{
-                    source: "source";
-                    artifact: "artifact";
-                    observation: "observation";
-                    test: "test";
-                    analysis: "analysis";
-                    user_input: "user_input";
-                }>;
-                summary: z.ZodString;
-                locator: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            openRisks: z.ZodArray<z.ZodObject<{
-                risk: z.ZodString;
-                impact: z.ZodString;
-                mitigation: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
-            work: z.ZodEnum<{
-                synthesize: "synthesize";
-                plan: "plan";
-                review: "review";
-                preview: "preview";
-                poc: "poc";
-                research: "research";
-                refine_goal: "refine_goal";
-                execute: "execute";
-            }>;
-        }, z.core.$strict>>;
-        runtimeFailure: z.ZodOptional<z.ZodObject<{
-            code: z.ZodEnum<{
-                crash: "crash";
-                timeout: "timeout";
-                invalid_return: "invalid_return";
-                cancelled: "cancelled";
-                budget_exhausted: "budget_exhausted";
-                invalid_subworkflow: "invalid_subworkflow";
-            }>;
-            message: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>;
-    readonly dv2Final: z.ZodObject<{
-        status: z.ZodEnum<{
-            complete: "complete";
-            blocked: "blocked";
-            runtime_failed: "runtime_failed";
-            fuel_exhausted: "fuel_exhausted";
-        }>;
-        summary: z.ZodString;
-        outcome: z.ZodObject<{
-            invocationKey: z.ZodString;
-            logicalId: z.ZodString;
-            generation: z.ZodNumber;
-            role: z.ZodEnum<{
-                fable: "fable";
-                sol: "sol";
-                terra: "terra";
-                luna: "luna";
-            }>;
-            work: z.ZodEnum<{
-                synthesize: "synthesize";
-                plan: "plan";
-                review: "review";
-                preview: "preview";
-                poc: "poc";
-                research: "research";
-                refine_goal: "refine_goal";
-                execute: "execute";
-            }>;
-            outputContract: z.ZodEnum<{
-                plan: "plan";
-                work_product: "work_product";
-                goal_contract: "goal_contract";
-                evaluation: "evaluation";
-                classification: "classification";
-                issue_scan: "issue_scan";
-                condition: "condition";
-                artifact_collection: "artifact_collection";
-                evidence_collection: "evidence_collection";
-            }>;
-            assignmentDigest: z.ZodString;
-            acceptanceCriterionIds: z.ZodArray<z.ZodString>;
-            status: z.ZodEnum<{
-                complete: "complete";
-                blocked: "blocked";
-                runtime_failed: "runtime_failed";
-            }>;
-            sourceNodeId: z.ZodString;
-            programDigest: z.ZodOptional<z.ZodString>;
-            product: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-                details: z.ZodObject<{
-                    goal: z.ZodObject<{
-                        objective: z.ZodString;
-                        context: z.ZodArray<z.ZodString>;
-                        constraints: z.ZodArray<z.ZodString>;
-                        nonGoals: z.ZodArray<z.ZodString>;
-                    }, z.core.$strict>;
-                    refinedObjective: z.ZodString;
-                    unresolvedPreferences: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"refine_goal">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    approach: z.ZodString;
-                    steps: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"plan">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    conclusion: z.ZodString;
-                    findings: z.ZodArray<z.ZodString>;
-                    classification: z.ZodOptional<z.ZodObject<{
-                        label: z.ZodString;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                    condition: z.ZodOptional<z.ZodObject<{
-                        state: z.ZodEnum<{
-                            unknown: "unknown";
-                            met: "met";
-                            not_met: "not_met";
-                        }>;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                    issues: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"research">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    hypothesis: z.ZodString;
-                    result: z.ZodEnum<{
-                        supported: "supported";
-                        disproven: "disproven";
-                        inconclusive: "inconclusive";
-                    }>;
-                    observations: z.ZodArray<z.ZodString>;
-                    condition: z.ZodOptional<z.ZodObject<{
-                        state: z.ZodEnum<{
-                            unknown: "unknown";
-                            met: "met";
-                            not_met: "not_met";
-                        }>;
-                        rationale: z.ZodString;
-                    }, z.core.$strict>>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"poc">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    result: z.ZodString;
-                    verification: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"execute">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    verdict: z.ZodEnum<{
-                        fail: "fail";
-                        pass: "pass";
-                        mixed: "mixed";
-                    }>;
-                    findings: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"review">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    verdict: z.ZodEnum<{
-                        fail: "fail";
-                        partial: "partial";
-                        pass: "pass";
-                    }>;
-                    observations: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"preview">;
-            }, z.core.$strict>, z.ZodObject<{
-                details: z.ZodObject<{
-                    conclusion: z.ZodString;
-                    disagreements: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>;
-                summary: z.ZodString;
-                acceptance: z.ZodArray<z.ZodObject<{
-                    criterionId: z.ZodString;
-                    status: z.ZodEnum<{
-                        unknown: "unknown";
-                        passed: "passed";
-                        failed: "failed";
-                    }>;
-                    evidenceIds: z.ZodArray<z.ZodString>;
-                    explanation: z.ZodString;
-                }, z.core.$strict>>;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                artifacts: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        file: "file";
-                        preview: "preview";
-                        url: "url";
-                        report: "report";
-                        diff: "diff";
-                        command_output: "command_output";
-                        other: "other";
-                    }>;
-                    locator: z.ZodString;
-                    summary: z.ZodString;
-                }, z.core.$strict>>;
-                assumptions: z.ZodArray<z.ZodString>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodLiteral<"synthesize">;
-            }, z.core.$strict>], "work">>;
-            blockage: z.ZodOptional<z.ZodObject<{
-                summary: z.ZodString;
-                partialWork: z.ZodString;
-                attemptedAlternatives: z.ZodArray<z.ZodString>;
-                whyNoSafeFallbackExists: z.ZodString;
-                requiredNextAction: z.ZodString;
-                evidence: z.ZodArray<z.ZodObject<{
-                    id: z.ZodString;
-                    kind: z.ZodEnum<{
-                        source: "source";
-                        artifact: "artifact";
-                        observation: "observation";
-                        test: "test";
-                        analysis: "analysis";
-                        user_input: "user_input";
-                    }>;
-                    summary: z.ZodString;
-                    locator: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                openRisks: z.ZodArray<z.ZodObject<{
-                    risk: z.ZodString;
-                    impact: z.ZodString;
-                    mitigation: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
-                work: z.ZodEnum<{
-                    synthesize: "synthesize";
-                    plan: "plan";
-                    review: "review";
-                    preview: "preview";
-                    poc: "poc";
-                    research: "research";
-                    refine_goal: "refine_goal";
-                    execute: "execute";
-                }>;
-            }, z.core.$strict>>;
-            runtimeFailure: z.ZodOptional<z.ZodObject<{
-                code: z.ZodEnum<{
-                    crash: "crash";
-                    timeout: "timeout";
-                    invalid_return: "invalid_return";
-                    cancelled: "cancelled";
-                    budget_exhausted: "budget_exhausted";
-                    invalid_subworkflow: "invalid_subworkflow";
-                }>;
-                message: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>;
-    }, z.core.$strict>;
-    readonly dv2Question: z.ZodObject<{
-        key: z.ZodString;
-        target: z.ZodEnum<{
-            human: "human";
-            parent: "parent";
-        }>;
-        question: z.ZodString;
-        whyItMatters: z.ZodString;
-        fallbackAssumption: z.ZodString;
-        impactIfWrong: z.ZodString;
-        choices: z.ZodOptional<z.ZodArray<z.ZodObject<{
-            id: z.ZodString;
-            label: z.ZodString;
-            description: z.ZodString;
-        }, z.core.$strict>>>;
-    }, z.core.$strict>;
-    readonly dv2Answer: z.ZodObject<{
-        key: z.ZodString;
-        source: z.ZodEnum<{
-            human: "human";
-            parent: "parent";
-        }>;
-        answer: z.ZodString;
-        answeredAtMs: z.ZodNumber;
-        replacesFallback: z.ZodBoolean;
-    }, z.core.$strict>;
-};
 
 type TrellisAgents = Record<DelegationV2Role, AgentLike$2 | AgentLike$2[]>;
 type TrellisOutputs = {
@@ -2786,7 +607,7 @@ type SidecarProps$2 = {
     children?: string | React__default.ReactNode;
 };
 
-type SidecarDelta$1 = {
+type SidecarDelta$2 = {
     primaryScore: number | null;
     sidecarScore: number | null;
     delta: number | null;
@@ -3296,20 +1117,18 @@ declare const tierSchema: z.ZodEnum<{
     sonnet: "sonnet";
     haiku: "haiku";
 }>;
-type Tier$3 = z.infer<typeof tierSchema>;
 /** Default tier ladder: fable plans root, opus plans chunks, sonnet executes leaves, haiku previews/probes. */
-declare const DEFAULT_TIER_ORDER: readonly Tier$3[];
+declare const DEFAULT_TIER_ORDER: string[];
 /** Durable signal event name for live user edits (fixed by contract — the UI submits to this key). */
-declare const DC_EDIT_SIGNAL = "dc-edit";
+declare const DC_EDIT_SIGNAL: "dc-edit";
 /** Durable signal event name for skipping the zero-backpressure preview phase. */
-declare const DC_SKIP_PREVIEW_SIGNAL = "dc-skip-preview";
+declare const DC_SKIP_PREVIEW_SIGNAL: "dc-skip-preview";
 /** A delegation node's predicted (or measured) resource envelope. */
 declare const estimateSchema: z.ZodObject<{
     tokens: z.ZodNumber;
     costUsd: z.ZodNumber;
     minutes: z.ZodNumber;
 }, z.core.$strip>;
-type Estimate$1 = z.infer<typeof estimateSchema>;
 /** Developer-preview gate kinds: what artifact proves the node's work is showable. */
 declare const devPreviewKindSchema: z.ZodEnum<{
     app: "app";
@@ -3318,7 +1137,6 @@ declare const devPreviewKindSchema: z.ZodEnum<{
     "throwaway-ui": "throwaway-ui";
     slideshow: "slideshow";
 }>;
-type DevPreviewKind$1 = z.infer<typeof devPreviewKindSchema>;
 /**
  * A declared backpressure gate. Approval gates are only honored when an
  * approvalPolicy prompt was provided. A `preview` gate is a DEVELOPER
@@ -3352,7 +1170,6 @@ declare const gateSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     }>;
     brief: z.ZodString;
 }, z.core.$strip>], "method">;
-type Gate$1 = z.infer<typeof gateSchema>;
 /**
  * Final refined goal. Written by the goal-refinement agent, then re-written by
  * the human approval HumanTask. Defaults keep degraded agent output moving
@@ -3365,7 +1182,6 @@ declare const dcGoalSchema: z.ZodObject<{
     assumptions: z.ZodDefault<z.ZodArray<z.ZodString>>;
     questionsAsked: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strip>;
-type DcGoalRow$1 = z.infer<typeof dcGoalSchema>;
 /** Rendered form metadata for one goal-refinement question (haiku prefetch renders these ahead of the user). */
 declare const dcQuestionSchema: z.ZodObject<{
     logicalId: z.ZodString;
@@ -3385,7 +1201,6 @@ declare const dcQuestionSchema: z.ZodObject<{
     reason: z.ZodString;
     resolved: z.ZodBoolean;
 }, z.core.$strip>;
-type DcQuestionRow$1 = z.infer<typeof dcQuestionSchema>;
 /**
  * The goal agent's upfront question forecast (raw JSON batch). Internal to the
  * components package: a smithers task writes exactly one row, so the batch of
@@ -3411,7 +1226,6 @@ declare const dcForecastSchema: z.ZodObject<{
         reason: z.ZodString;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
-type DcForecastRow$1 = z.infer<typeof dcForecastSchema>;
 /**
  * The human's refined-prompt approval (internal): the delegation UI submits
  * `{ approved, refinedPrompt }` to the `dc:<goal>:approve` HumanTask, and the
@@ -3421,7 +1235,6 @@ declare const dcGoalApprovalSchema: z.ZodObject<{
     approved: z.ZodBoolean;
     refinedPrompt: z.ZodString;
 }, z.core.$strip>;
-type DcGoalApprovalRow$1 = z.infer<typeof dcGoalApprovalSchema>;
 /** One row per delegating node: its children, risks, and resource estimates. Replans append superseding rows. */
 declare const dcPlanSchema: z.ZodObject<{
     logicalId: z.ZodString;
@@ -3472,13 +1285,11 @@ declare const dcPlanSchema: z.ZodObject<{
         tasks: "tasks";
     }>>;
 }, z.core.$strip>;
-type DcPlanRow$2 = z.infer<typeof dcPlanSchema>;
 /** Zero-backpressure haiku render of a leaf's expected output. NEVER executed — calibration only. */
 declare const dcPreviewSchema: z.ZodObject<{
     logicalId: z.ZodString;
     expectedOutput: z.ZodString;
 }, z.core.$strip>;
-type DcPreviewRow$1 = z.infer<typeof dcPreviewSchema>;
 /** A node's declared backpressure gates and logical dependencies. */
 declare const dcGatesSchema: z.ZodObject<{
     logicalId: z.ZodString;
@@ -3510,7 +1321,6 @@ declare const dcGatesSchema: z.ZodObject<{
     }, z.core.$strip>], "method">>;
     depsLogical: z.ZodArray<z.ZodString>;
 }, z.core.$strip>;
-type DcGatesRow$2 = z.infer<typeof dcGatesSchema>;
 /**
  * A developer-preview gate's built artifact (physical node phase
  * `dev-preview`). `builtOk: false` fails the gate like a failed review —
@@ -3539,7 +1349,6 @@ declare const dcDevPreviewSchema: z.ZodObject<{
     instructions: z.ZodOptional<z.ZodString>;
     summary: z.ZodString;
 }, z.core.$strip>;
-type DcDevPreviewRow$1 = z.infer<typeof dcDevPreviewSchema>;
 /** A risk probe's finding. The report is delivered to the NEAREST PARENT only. */
 declare const dcProbeSchema: z.ZodObject<{
     probeId: z.ZodString;
@@ -3558,7 +1367,6 @@ declare const dcProbeSchema: z.ZodObject<{
     }>;
     proposedChange: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
-type DcProbeRow$1 = z.infer<typeof dcProbeSchema>;
 /** A replan decision for one affected node. `invalidated` bumps the node version; prior versions stay archived. */
 declare const dcReplanSchema: z.ZodObject<{
     round: z.ZodNumber;
@@ -3577,7 +1385,6 @@ declare const dcReplanSchema: z.ZodObject<{
         ref: z.ZodString;
     }, z.core.$strip>;
 }, z.core.$strip>;
-type DcReplanRow$1 = z.infer<typeof dcReplanSchema>;
 /**
  * One execution attempt of a leaf. `actual` is best-effort self-reported
  * usage; `commitRange` is the working-copy commit measured before/after the
@@ -3603,7 +1410,6 @@ declare const dcExecSchema: z.ZodObject<{
         }>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
-type DcExecRow$1 = z.infer<typeof dcExecSchema>;
 /** A review/check gate verdict for one execution attempt. */
 declare const dcReviewSchema: z.ZodObject<{
     logicalId: z.ZodString;
@@ -3614,7 +1420,6 @@ declare const dcReviewSchema: z.ZodObject<{
     }>;
     feedback: z.ZodString;
 }, z.core.$strip>;
-type DcReviewRow$1 = z.infer<typeof dcReviewSchema>;
 /**
  * Approval-gate decision rows (only materialized when an approvalPolicy was
  * provided). Shape mirrors the stock `<Approval>` decision payload.
@@ -3625,7 +1430,6 @@ declare const dcApprovalSchema: z.ZodObject<{
     decidedBy: z.ZodNullable<z.ZodString>;
     decidedAt: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;
-type DcApprovalRow$1 = z.infer<typeof dcApprovalSchema>;
 /** Live user-edit signal payload (event name `dc-edit`). Each edit triggers a replan round. */
 declare const dcEditSchema: z.ZodObject<{
     editId: z.ZodString;
@@ -3633,12 +1437,10 @@ declare const dcEditSchema: z.ZodObject<{
     editedOutput: z.ZodUnknown;
     note: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
-type DcEditRow$1 = z.infer<typeof dcEditSchema>;
 /** Skip-previews signal payload (event name `dc-skip-preview`). */
 declare const dcSkipSchema: z.ZodObject<{
     skipped: z.ZodBoolean;
 }, z.core.$strip>;
-type DcSkipRow$1 = z.infer<typeof dcSkipSchema>;
 /** End-of-run satisfaction poll (HumanTask json form). */
 declare const dcPollSchema: z.ZodObject<{
     answers: z.ZodArray<z.ZodObject<{
@@ -3647,7 +1449,6 @@ declare const dcPollSchema: z.ZodObject<{
     }, z.core.$strip>>;
     comment: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
-type DcPollRow$1 = z.infer<typeof dcPollSchema>;
 /**
  * Budget-guard checkpoints (internal, written only when a `budget` prop is
  * set): rolled-up dcExec actuals compared against the caller's budget. A hard
@@ -3664,271 +1465,54 @@ declare const dcBudgetSchema: z.ZodObject<{
     totalMinutes: z.ZodNumber;
     maxMinutes: z.ZodNullable<z.ZodNumber>;
 }, z.core.$strip>;
-type DcBudgetRow$1 = z.infer<typeof dcBudgetSchema>;
 /** Run-level scoring digest (internal): the row delegation run scorers evaluate. */
 declare const dcScoreSchema: z.ZodObject<{
     logicalId: z.ZodString;
     summary: z.ZodString;
 }, z.core.$strip>;
+declare namespace delegationSchemas {
+    export { dcGoalSchema as dcGoal };
+    export { dcQuestionSchema as dcQuestion };
+    export { dcForecastSchema as dcForecast };
+    export { dcGoalApprovalSchema as dcGoalApproval };
+    export { dcPlanSchema as dcPlan };
+    export { dcPreviewSchema as dcPreview };
+    export { dcDevPreviewSchema as dcDevPreview };
+    export { dcGatesSchema as dcGates };
+    export { dcProbeSchema as dcProbe };
+    export { dcReplanSchema as dcReplan };
+    export { dcExecSchema as dcExec };
+    export { dcReviewSchema as dcReview };
+    export { dcApprovalSchema as dcApproval };
+    export { dcEditSchema as dcEdit };
+    export { dcSkipSchema as dcSkip };
+    export { dcPollSchema as dcPoll };
+    export { dcBudgetSchema as dcBudget };
+    export { dcScoreSchema as dcScore };
+}
+
+type Tier$3 = z.infer<typeof tierSchema>;
+type Estimate$1 = z.infer<typeof estimateSchema>;
+type DevPreviewKind$1 = z.infer<typeof devPreviewKindSchema>;
+type Gate$1 = z.infer<typeof gateSchema>;
+type DcGoalRow$1 = z.infer<typeof dcGoalSchema>;
+type DcQuestionRow$1 = z.infer<typeof dcQuestionSchema>;
+type DcForecastRow$1 = z.infer<typeof dcForecastSchema>;
+type DcGoalApprovalRow$1 = z.infer<typeof dcGoalApprovalSchema>;
+type DcPlanRow$2 = z.infer<typeof dcPlanSchema>;
+type DcPreviewRow$1 = z.infer<typeof dcPreviewSchema>;
+type DcGatesRow$2 = z.infer<typeof dcGatesSchema>;
+type DcDevPreviewRow$1 = z.infer<typeof dcDevPreviewSchema>;
+type DcProbeRow$1 = z.infer<typeof dcProbeSchema>;
+type DcReplanRow$1 = z.infer<typeof dcReplanSchema>;
+type DcExecRow$1 = z.infer<typeof dcExecSchema>;
+type DcReviewRow$1 = z.infer<typeof dcReviewSchema>;
+type DcApprovalRow$1 = z.infer<typeof dcApprovalSchema>;
+type DcEditRow$1 = z.infer<typeof dcEditSchema>;
+type DcSkipRow$1 = z.infer<typeof dcSkipSchema>;
+type DcPollRow$1 = z.infer<typeof dcPollSchema>;
+type DcBudgetRow$1 = z.infer<typeof dcBudgetSchema>;
 type DcScoreRow$1 = z.infer<typeof dcScoreSchema>;
-/**
- * All delegation-chain tables keyed by table name — spread into
- * `createSmithers({ ...delegationSchemas })` to register them.
- */
-declare const delegationSchemas: {
-    readonly dcGoal: z.ZodObject<{
-        logicalId: z.ZodDefault<z.ZodString>;
-        refinedPrompt: z.ZodDefault<z.ZodString>;
-        assumptions: z.ZodDefault<z.ZodArray<z.ZodString>>;
-        questionsAsked: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strip>;
-    readonly dcQuestion: z.ZodObject<{
-        logicalId: z.ZodString;
-        seq: z.ZodNumber;
-        question: z.ZodString;
-        header: z.ZodString;
-        kind: z.ZodEnum<{
-            text: "text";
-            select: "select";
-            confirm: "confirm";
-        }>;
-        options: z.ZodOptional<z.ZodArray<z.ZodObject<{
-            label: z.ZodString;
-            description: z.ZodString;
-        }, z.core.$strip>>>;
-        recommended: z.ZodString;
-        reason: z.ZodString;
-        resolved: z.ZodBoolean;
-    }, z.core.$strip>;
-    readonly dcForecast: z.ZodObject<{
-        logicalId: z.ZodDefault<z.ZodString>;
-        total: z.ZodDefault<z.ZodNumber>;
-        questions: z.ZodDefault<z.ZodArray<z.ZodObject<{
-            seq: z.ZodNumber;
-            question: z.ZodString;
-            kind: z.ZodEnum<{
-                text: "text";
-                select: "select";
-                confirm: "confirm";
-            }>;
-            options: z.ZodOptional<z.ZodArray<z.ZodObject<{
-                label: z.ZodString;
-                description: z.ZodString;
-            }, z.core.$strip>>>;
-            recommended: z.ZodString;
-            reason: z.ZodString;
-        }, z.core.$strip>>>;
-    }, z.core.$strip>;
-    readonly dcGoalApproval: z.ZodObject<{
-        approved: z.ZodBoolean;
-        refinedPrompt: z.ZodString;
-    }, z.core.$strip>;
-    readonly dcPlan: z.ZodObject<{
-        logicalId: z.ZodString;
-        tier: z.ZodEnum<{
-            fable: "fable";
-            opus: "opus";
-            sonnet: "sonnet";
-            haiku: "haiku";
-        }>;
-        title: z.ZodString;
-        brief: z.ZodString;
-        children: z.ZodArray<z.ZodObject<{
-            logicalId: z.ZodString;
-            tier: z.ZodEnum<{
-                fable: "fable";
-                opus: "opus";
-                sonnet: "sonnet";
-                haiku: "haiku";
-            }>;
-            kind: z.ZodEnum<{
-                chunk: "chunk";
-                leaf: "leaf";
-            }>;
-            title: z.ZodString;
-            brief: z.ZodString;
-            estimate: z.ZodObject<{
-                tokens: z.ZodNumber;
-                costUsd: z.ZodNumber;
-                minutes: z.ZodNumber;
-            }, z.core.$strip>;
-        }, z.core.$strip>>;
-        subtreeEstimate: z.ZodObject<{
-            tokens: z.ZodNumber;
-            costUsd: z.ZodNumber;
-            minutes: z.ZodNumber;
-        }, z.core.$strip>;
-        risks: z.ZodArray<z.ZodObject<{
-            id: z.ZodString;
-            description: z.ZodString;
-            probe: z.ZodNullable<z.ZodEnum<{
-                poc: "poc";
-                research: "research";
-            }>>;
-            reason: z.ZodString;
-        }, z.core.$strip>>;
-        orchestration: z.ZodOptional<z.ZodEnum<{
-            workflow: "workflow";
-            tasks: "tasks";
-        }>>;
-    }, z.core.$strip>;
-    readonly dcPreview: z.ZodObject<{
-        logicalId: z.ZodString;
-        expectedOutput: z.ZodString;
-    }, z.core.$strip>;
-    readonly dcDevPreview: z.ZodObject<{
-        logicalId: z.ZodString;
-        kind: z.ZodEnum<{
-            app: "app";
-            terminal: "terminal";
-            api: "api";
-            "throwaway-ui": "throwaway-ui";
-            slideshow: "slideshow";
-        }>;
-        title: z.ZodString;
-        builtOk: z.ZodBoolean;
-        artifact: z.ZodObject<{
-            type: z.ZodEnum<{
-                html: "html";
-                url: "url";
-                markdown: "markdown";
-            }>;
-            content: z.ZodOptional<z.ZodString>;
-            url: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>;
-        instructions: z.ZodOptional<z.ZodString>;
-        summary: z.ZodString;
-    }, z.core.$strip>;
-    readonly dcGates: z.ZodObject<{
-        logicalId: z.ZodString;
-        gates: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
-            method: z.ZodLiteral<"review">;
-            tier: z.ZodEnum<{
-                fable: "fable";
-                opus: "opus";
-                sonnet: "sonnet";
-                haiku: "haiku";
-            }>;
-            brief: z.ZodString;
-        }, z.core.$strip>, z.ZodObject<{
-            method: z.ZodLiteral<"check">;
-            command: z.ZodString;
-        }, z.core.$strip>, z.ZodObject<{
-            method: z.ZodLiteral<"approval">;
-            policyMatch: z.ZodString;
-        }, z.core.$strip>, z.ZodObject<{
-            method: z.ZodLiteral<"preview">;
-            kind: z.ZodEnum<{
-                app: "app";
-                terminal: "terminal";
-                api: "api";
-                "throwaway-ui": "throwaway-ui";
-                slideshow: "slideshow";
-            }>;
-            brief: z.ZodString;
-        }, z.core.$strip>], "method">>;
-        depsLogical: z.ZodArray<z.ZodString>;
-    }, z.core.$strip>;
-    readonly dcProbe: z.ZodObject<{
-        probeId: z.ZodString;
-        parentLogicalId: z.ZodString;
-        kind: z.ZodEnum<{
-            poc: "poc";
-            research: "research";
-        }>;
-        question: z.ZodString;
-        answer: z.ZodString;
-        report: z.ZodString;
-        planImpact: z.ZodEnum<{
-            none: "none";
-            changes: "changes";
-            confirms: "confirms";
-        }>;
-        proposedChange: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>;
-    readonly dcReplan: z.ZodObject<{
-        round: z.ZodNumber;
-        logicalId: z.ZodString;
-        decision: z.ZodEnum<{
-            invalidated: "invalidated";
-            reaffirmed: "reaffirmed";
-        }>;
-        reason: z.ZodString;
-        trigger: z.ZodObject<{
-            type: z.ZodEnum<{
-                probe: "probe";
-                "user-edit": "user-edit";
-                "review-fail": "review-fail";
-            }>;
-            ref: z.ZodString;
-        }, z.core.$strip>;
-    }, z.core.$strip>;
-    readonly dcExec: z.ZodObject<{
-        logicalId: z.ZodString;
-        attempt: z.ZodNumber;
-        summary: z.ZodString;
-        artifacts: z.ZodArray<z.ZodString>;
-        actual: z.ZodOptional<z.ZodObject<{
-            tokens: z.ZodOptional<z.ZodNumber>;
-            costUsd: z.ZodOptional<z.ZodNumber>;
-            minutes: z.ZodOptional<z.ZodNumber>;
-        }, z.core.$strip>>;
-        commitRange: z.ZodOptional<z.ZodObject<{
-            from: z.ZodString;
-            to: z.ZodString;
-            vcs: z.ZodEnum<{
-                jj: "jj";
-                git: "git";
-            }>;
-        }, z.core.$strip>>;
-    }, z.core.$strip>;
-    readonly dcReview: z.ZodObject<{
-        logicalId: z.ZodString;
-        attempt: z.ZodNumber;
-        verdict: z.ZodEnum<{
-            fail: "fail";
-            pass: "pass";
-        }>;
-        feedback: z.ZodString;
-    }, z.core.$strip>;
-    readonly dcApproval: z.ZodObject<{
-        approved: z.ZodBoolean;
-        note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        decidedBy: z.ZodNullable<z.ZodString>;
-        decidedAt: z.ZodNullable<z.ZodString>;
-    }, z.core.$strip>;
-    readonly dcEdit: z.ZodObject<{
-        editId: z.ZodString;
-        logicalId: z.ZodString;
-        editedOutput: z.ZodUnknown;
-        note: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>;
-    readonly dcSkip: z.ZodObject<{
-        skipped: z.ZodBoolean;
-    }, z.core.$strip>;
-    readonly dcPoll: z.ZodObject<{
-        answers: z.ZodArray<z.ZodObject<{
-            question: z.ZodString;
-            rating: z.ZodNumber;
-        }, z.core.$strip>>;
-        comment: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>;
-    readonly dcBudget: z.ZodObject<{
-        logicalId: z.ZodString;
-        level: z.ZodEnum<{
-            warn: "warn";
-            ok: "ok";
-        }>;
-        totalUsd: z.ZodNumber;
-        maxUsd: z.ZodNullable<z.ZodNumber>;
-        totalMinutes: z.ZodNumber;
-        maxMinutes: z.ZodNullable<z.ZodNumber>;
-    }, z.core.$strip>;
-    readonly dcScore: z.ZodObject<{
-        logicalId: z.ZodString;
-        summary: z.ZodString;
-    }, z.core.$strip>;
-};
 
 /** One agent (or failover chain) per intelligence tier. Tiers are labels only. */
 type DelegationAgents$1 = Partial<Record<Tier$3, AgentLike$2 | AgentLike$2[]>>;
@@ -4632,7 +2216,14 @@ type RunbookProps$1 = RunbookProps$2;
 declare function Sidecar(props: SidecarProps$1): React__default.FunctionComponentElement<ParallelProps$2> | null;
 type SidecarProps$1 = SidecarProps$2;
 
-type RowLike = {
+/**
+ * @param {RowLike[]} rows
+ * @param {ComputeSidecarDeltaOptions} opts
+ * @returns {SidecarDelta}
+ */
+declare function computeSidecarDelta(rows: RowLike[], opts: ComputeSidecarDeltaOptions): SidecarDelta$1;
+type SidecarDelta$1 = SidecarDelta$2;
+type RowLike = Record<string, unknown> & {
     nodeId?: string;
     node_id?: string;
     scorerId?: string;
@@ -4640,13 +2231,12 @@ type RowLike = {
     score?: number;
     scoredAtMs?: number;
     scored_at_ms?: number;
-} & Record<string, unknown>;
+};
 type ComputeSidecarDeltaOptions = {
     primaryNodeId: string;
     sidecarNodeId: string;
-    scorerId?: string;
+    scorerId?: string | undefined;
 };
-declare function computeSidecarDelta(rows: RowLike[], opts: ComputeSidecarDeltaOptions): SidecarDelta$1;
 
 /** @typedef {import("./SubflowProps.ts").SubflowProps} SubflowProps */
 /**
@@ -5838,23 +3428,14 @@ declare function settleDelegationV2Envelope({ envelope, assignment, identity, ta
     generation: number;
     role: "fable" | "sol" | "terra" | "luna";
     work: "synthesize" | "plan" | "review" | "preview" | "poc" | "research" | "refine_goal" | "execute";
-    outputContract: "plan" | "work_product" | "goal_contract" | "evaluation" | "classification" | "issue_scan" | "condition" | "artifact_collection" | "evidence_collection";
+    outputContract: "plan" | "goal_contract" | "work_product" | "evidence_collection" | "issue_scan" | "classification" | "condition" | "evaluation" | "artifact_collection";
     assignmentDigest: string;
     acceptanceCriterionIds: string[];
     status: "complete" | "blocked" | "runtime_failed";
     sourceNodeId: string;
     programDigest?: string | undefined;
     product?: {
-        details: {
-            goal: {
-                objective: string;
-                context: string[];
-                constraints: string[];
-                nonGoals: string[];
-            };
-            refinedObjective: string;
-            unresolvedPreferences: string[];
-        };
+        [x: string]: any;
         summary: string;
         acceptance: {
             criterionId: string;
@@ -5880,238 +3461,7 @@ declare function settleDelegationV2Envelope({ envelope, assignment, identity, ta
             impact: string;
             mitigation?: string | undefined;
         }[];
-        work: "refine_goal";
-    } | {
-        details: {
-            approach: string;
-            steps: string[];
-        };
-        summary: string;
-        acceptance: {
-            criterionId: string;
-            status: "unknown" | "passed" | "failed";
-            evidenceIds: string[];
-            explanation: string;
-        }[];
-        evidence: {
-            id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
-            summary: string;
-            locator?: string | undefined;
-        }[];
-        artifacts: {
-            id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
-            locator: string;
-            summary: string;
-        }[];
-        assumptions: string[];
-        openRisks: {
-            risk: string;
-            impact: string;
-            mitigation?: string | undefined;
-        }[];
-        work: "plan";
-    } | {
-        details: {
-            conclusion: string;
-            findings: string[];
-            classification?: {
-                label: string;
-                rationale: string;
-            } | undefined;
-            condition?: {
-                state: "unknown" | "met" | "not_met";
-                rationale: string;
-            } | undefined;
-            issues?: string[] | undefined;
-        };
-        summary: string;
-        acceptance: {
-            criterionId: string;
-            status: "unknown" | "passed" | "failed";
-            evidenceIds: string[];
-            explanation: string;
-        }[];
-        evidence: {
-            id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
-            summary: string;
-            locator?: string | undefined;
-        }[];
-        artifacts: {
-            id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
-            locator: string;
-            summary: string;
-        }[];
-        assumptions: string[];
-        openRisks: {
-            risk: string;
-            impact: string;
-            mitigation?: string | undefined;
-        }[];
-        work: "research";
-    } | {
-        details: {
-            hypothesis: string;
-            result: "supported" | "disproven" | "inconclusive";
-            observations: string[];
-            condition?: {
-                state: "unknown" | "met" | "not_met";
-                rationale: string;
-            } | undefined;
-        };
-        summary: string;
-        acceptance: {
-            criterionId: string;
-            status: "unknown" | "passed" | "failed";
-            evidenceIds: string[];
-            explanation: string;
-        }[];
-        evidence: {
-            id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
-            summary: string;
-            locator?: string | undefined;
-        }[];
-        artifacts: {
-            id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
-            locator: string;
-            summary: string;
-        }[];
-        assumptions: string[];
-        openRisks: {
-            risk: string;
-            impact: string;
-            mitigation?: string | undefined;
-        }[];
-        work: "poc";
-    } | {
-        details: {
-            result: string;
-            verification: string[];
-        };
-        summary: string;
-        acceptance: {
-            criterionId: string;
-            status: "unknown" | "passed" | "failed";
-            evidenceIds: string[];
-            explanation: string;
-        }[];
-        evidence: {
-            id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
-            summary: string;
-            locator?: string | undefined;
-        }[];
-        artifacts: {
-            id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
-            locator: string;
-            summary: string;
-        }[];
-        assumptions: string[];
-        openRisks: {
-            risk: string;
-            impact: string;
-            mitigation?: string | undefined;
-        }[];
-        work: "execute";
-    } | {
-        details: {
-            verdict: "fail" | "pass" | "mixed";
-            findings: string[];
-        };
-        summary: string;
-        acceptance: {
-            criterionId: string;
-            status: "unknown" | "passed" | "failed";
-            evidenceIds: string[];
-            explanation: string;
-        }[];
-        evidence: {
-            id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
-            summary: string;
-            locator?: string | undefined;
-        }[];
-        artifacts: {
-            id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
-            locator: string;
-            summary: string;
-        }[];
-        assumptions: string[];
-        openRisks: {
-            risk: string;
-            impact: string;
-            mitigation?: string | undefined;
-        }[];
-        work: "review";
-    } | {
-        details: {
-            verdict: "fail" | "partial" | "pass";
-            observations: string[];
-        };
-        summary: string;
-        acceptance: {
-            criterionId: string;
-            status: "unknown" | "passed" | "failed";
-            evidenceIds: string[];
-            explanation: string;
-        }[];
-        evidence: {
-            id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
-            summary: string;
-            locator?: string | undefined;
-        }[];
-        artifacts: {
-            id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
-            locator: string;
-            summary: string;
-        }[];
-        assumptions: string[];
-        openRisks: {
-            risk: string;
-            impact: string;
-            mitigation?: string | undefined;
-        }[];
-        work: "preview";
-    } | {
-        details: {
-            conclusion: string;
-            disagreements: string[];
-        };
-        summary: string;
-        acceptance: {
-            criterionId: string;
-            status: "unknown" | "passed" | "failed";
-            evidenceIds: string[];
-            explanation: string;
-        }[];
-        evidence: {
-            id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
-            summary: string;
-            locator?: string | undefined;
-        }[];
-        artifacts: {
-            id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
-            locator: string;
-            summary: string;
-        }[];
-        assumptions: string[];
-        openRisks: {
-            risk: string;
-            impact: string;
-            mitigation?: string | undefined;
-        }[];
-        work: "synthesize";
+        work: any;
     } | undefined;
     blockage?: {
         summary: string;
@@ -6217,7 +3567,7 @@ declare function renderWorkerPrompt({ authority, goal, instructions, evidence }:
  * fuel; prompt text is never treated as a capability boundary.
  */
 declare const DELEGATION_V2_PROMPT_CONTRACT_VERSION: "delegation-v2.prompt/3";
-declare const DELEGATION_V2_PROTOCOL_VERSION: 2;
+declare const DELEGATION_V2_PROTOCOL_VERSION$1: 2;
 declare const DELEGATION_V2_PLAYBOOK_VERSION: "delegation-v2.playbooks/1";
 declare const DELEGATION_V2_PATTERN_INDEX_VERSION: "delegation-v2.patterns/1";
 /**
@@ -6320,7 +3670,6 @@ declare const delegationV2Prompts_CORE_PATTERN_INDEX: typeof CORE_PATTERN_INDEX;
 declare const delegationV2Prompts_DELEGATION_V2_PATTERN_INDEX_VERSION: typeof DELEGATION_V2_PATTERN_INDEX_VERSION;
 declare const delegationV2Prompts_DELEGATION_V2_PLAYBOOK_VERSION: typeof DELEGATION_V2_PLAYBOOK_VERSION;
 declare const delegationV2Prompts_DELEGATION_V2_PROMPT_CONTRACT_VERSION: typeof DELEGATION_V2_PROMPT_CONTRACT_VERSION;
-declare const delegationV2Prompts_DELEGATION_V2_PROTOCOL_VERSION: typeof DELEGATION_V2_PROTOCOL_VERSION;
 type delegationV2Prompts_DelegationV2Authority = DelegationV2Authority;
 declare const delegationV2Prompts_renderContinuationAuthorPrompt: typeof renderContinuationAuthorPrompt;
 declare const delegationV2Prompts_renderDelegationV2SystemPrompt: typeof renderDelegationV2SystemPrompt;
@@ -6330,7 +3679,7 @@ declare const delegationV2Prompts_renderRepairAuthorPrompt: typeof renderRepairA
 declare const delegationV2Prompts_renderWorkKindPlaybook: typeof renderWorkKindPlaybook;
 declare const delegationV2Prompts_renderWorkerPrompt: typeof renderWorkerPrompt;
 declare namespace delegationV2Prompts {
-  export { delegationV2Prompts_CORE_PATTERN_INDEX as CORE_PATTERN_INDEX, delegationV2Prompts_DELEGATION_V2_PATTERN_INDEX_VERSION as DELEGATION_V2_PATTERN_INDEX_VERSION, delegationV2Prompts_DELEGATION_V2_PLAYBOOK_VERSION as DELEGATION_V2_PLAYBOOK_VERSION, delegationV2Prompts_DELEGATION_V2_PROMPT_CONTRACT_VERSION as DELEGATION_V2_PROMPT_CONTRACT_VERSION, delegationV2Prompts_DELEGATION_V2_PROTOCOL_VERSION as DELEGATION_V2_PROTOCOL_VERSION, type delegationV2Prompts_DelegationV2Authority as DelegationV2Authority, delegationV2Prompts_renderContinuationAuthorPrompt as renderContinuationAuthorPrompt, delegationV2Prompts_renderDelegationV2SystemPrompt as renderDelegationV2SystemPrompt, delegationV2Prompts_renderInitialAuthorPrompt as renderInitialAuthorPrompt, delegationV2Prompts_renderPatternIndexPrompt as renderPatternIndexPrompt, delegationV2Prompts_renderRepairAuthorPrompt as renderRepairAuthorPrompt, delegationV2Prompts_renderWorkKindPlaybook as renderWorkKindPlaybook, delegationV2Prompts_renderWorkerPrompt as renderWorkerPrompt };
+  export { delegationV2Prompts_CORE_PATTERN_INDEX as CORE_PATTERN_INDEX, delegationV2Prompts_DELEGATION_V2_PATTERN_INDEX_VERSION as DELEGATION_V2_PATTERN_INDEX_VERSION, delegationV2Prompts_DELEGATION_V2_PLAYBOOK_VERSION as DELEGATION_V2_PLAYBOOK_VERSION, delegationV2Prompts_DELEGATION_V2_PROMPT_CONTRACT_VERSION as DELEGATION_V2_PROMPT_CONTRACT_VERSION, DELEGATION_V2_PROTOCOL_VERSION$1 as DELEGATION_V2_PROTOCOL_VERSION, type delegationV2Prompts_DelegationV2Authority as DelegationV2Authority, delegationV2Prompts_renderContinuationAuthorPrompt as renderContinuationAuthorPrompt, delegationV2Prompts_renderDelegationV2SystemPrompt as renderDelegationV2SystemPrompt, delegationV2Prompts_renderInitialAuthorPrompt as renderInitialAuthorPrompt, delegationV2Prompts_renderPatternIndexPrompt as renderPatternIndexPrompt, delegationV2Prompts_renderRepairAuthorPrompt as renderRepairAuthorPrompt, delegationV2Prompts_renderWorkKindPlaybook as renderWorkKindPlaybook, delegationV2Prompts_renderWorkerPrompt as renderWorkerPrompt };
 }
 
 /** @typedef {import("./LoopProps.ts").LoopProps} LoopProps */
@@ -6467,6 +3816,1939 @@ declare function withCommitRange(agent: AgentLike | AgentLike[], probe?: (cwd: s
     vcs: "jj" | "git";
 } | null>): AgentLike | AgentLike[];
 type AgentLike = _smithers_orchestrator_agents_AgentLike.AgentLike;
+
+/** Wire versions are integers; registry/compiler versions are immutable runtime strings. */
+declare const DELEGATION_V2_PROTOCOL_VERSION: 2;
+declare const DELEGATION_V2_PROGRAM_VERSION: 1;
+declare const DELEGATION_V2_REGISTRY_VERSION: "delegation-v2.registry-2";
+declare const authorEnvelopeSchema: z.ZodObject<{
+    protocolVersion: z.ZodLiteral<2>;
+    outcome: z.ZodDiscriminatedUnion<[z.ZodObject<{
+        tag: z.ZodLiteral<"subworkflow">;
+        value: z.ZodObject<{
+            schemaVersion: z.ZodOptional<z.ZodUnknown>;
+            registryVersion: z.ZodOptional<z.ZodUnknown>;
+            id: z.ZodOptional<z.ZodUnknown>;
+            objective: z.ZodOptional<z.ZodUnknown>;
+            rationale: z.ZodOptional<z.ZodUnknown>;
+            root: z.ZodOptional<z.ZodUnknown>;
+            outputs: z.ZodOptional<z.ZodUnknown>;
+            supersedes: z.ZodOptional<z.ZodUnknown>;
+        }, z.core.$catchall<z.ZodUnknown>>;
+    }, z.core.$strict>, z.ZodObject<{
+        tag: z.ZodLiteral<"complete">;
+        value: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>], "work">;
+    }, z.core.$strict>, z.ZodObject<{
+        tag: z.ZodLiteral<"blocked">;
+        value: z.ZodObject<{
+            summary: z.ZodString;
+            partialWork: z.ZodString;
+            attemptedAlternatives: z.ZodArray<z.ZodString>;
+            whyNoSafeFallbackExists: z.ZodString;
+            requiredNextAction: z.ZodString;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodEnum<{
+                synthesize: "synthesize";
+                plan: "plan";
+                review: "review";
+                preview: "preview";
+                poc: "poc";
+                research: "research";
+                refine_goal: "refine_goal";
+                execute: "execute";
+            }>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "tag">;
+    state: z.ZodObject<{
+        summary: z.ZodString;
+        retainedFacts: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+declare const workerEnvelopeSchema: z.ZodObject<{
+    protocolVersion: z.ZodLiteral<2>;
+    outcome: z.ZodDiscriminatedUnion<[z.ZodObject<{
+        tag: z.ZodLiteral<"complete">;
+        value: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>], "work">;
+    }, z.core.$strict>, z.ZodObject<{
+        tag: z.ZodLiteral<"blocked">;
+        value: z.ZodObject<{
+            summary: z.ZodString;
+            partialWork: z.ZodString;
+            attemptedAlternatives: z.ZodArray<z.ZodString>;
+            whyNoSafeFallbackExists: z.ZodString;
+            requiredNextAction: z.ZodString;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodEnum<{
+                synthesize: "synthesize";
+                plan: "plan";
+                review: "review";
+                preview: "preview";
+                poc: "poc";
+                research: "research";
+                refine_goal: "refine_goal";
+                execute: "execute";
+            }>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "tag">;
+}, z.core.$strict>;
+/** Nonblocking ask-question tool payload. Runtime identity is attached outside model output. */
+declare const dv2QuestionSchema: z.ZodObject<{
+    key: z.ZodString;
+    target: z.ZodEnum<{
+        human: "human";
+        parent: "parent";
+    }>;
+    question: z.ZodString;
+    whyItMatters: z.ZodString;
+    fallbackAssumption: z.ZodString;
+    impactIfWrong: z.ZodString;
+    choices: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        label: z.ZodString;
+        description: z.ZodString;
+    }, z.core.$strict>>>;
+}, z.core.$strict>;
+declare const dv2AnswerSchema: z.ZodObject<{
+    key: z.ZodString;
+    source: z.ZodEnum<{
+        human: "human";
+        parent: "parent";
+    }>;
+    answer: z.ZodString;
+    answeredAtMs: z.ZodNumber;
+    replacesFallback: z.ZodBoolean;
+}, z.core.$strict>;
+/** Trusted validation row. Rejected programs retain a digest but never normalized IR. */
+declare const dv2ValidationSchema: z.ZodObject<{
+    invocationKey: z.ZodString;
+    generation: z.ZodNumber;
+    authorNodeId: z.ZodString;
+    status: z.ZodEnum<{
+        accepted: "accepted";
+        rejected: "rejected";
+    }>;
+    programDigest: z.ZodString;
+    registryVersion: z.ZodString;
+    compilerVersion: z.ZodString;
+    criticalExecutionPolicyHash: z.ZodOptional<z.ZodString>;
+    normalizedProgram: z.ZodOptional<z.ZodObject<{
+        schemaVersion: z.ZodLiteral<1>;
+        registryVersion: z.ZodString;
+        id: z.ZodString;
+        objective: z.ZodObject<{
+            objective: z.ZodString;
+            context: z.ZodArray<z.ZodString>;
+            constraints: z.ZodArray<z.ZodString>;
+            nonGoals: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>;
+        rationale: z.ZodString;
+        root: any;
+        outputs: z.ZodArray<z.ZodObject<{
+            from: z.ZodString;
+            contract: z.ZodEnum<{
+                plan: "plan";
+                goal_contract: "goal_contract";
+                work_product: "work_product";
+                evidence_collection: "evidence_collection";
+                issue_scan: "issue_scan";
+                classification: "classification";
+                condition: "condition";
+                evaluation: "evaluation";
+                artifact_collection: "artifact_collection";
+            }>;
+        }, z.core.$strict>>;
+        supersedes: z.ZodOptional<z.ZodObject<{
+            id: z.ZodString;
+            digest: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+    diagnostics: z.ZodArray<z.ZodObject<{
+        code: z.ZodEnum<{
+            schema_invalid: "schema_invalid";
+            registry_mismatch: "registry_mismatch";
+            duplicate_id: "duplicate_id";
+            reserved_id: "reserved_id";
+            node_limit: "node_limit";
+            depth_limit: "depth_limit";
+            fanout_limit: "fanout_limit";
+            concurrency_limit: "concurrency_limit";
+            unsupported_nested_concurrency: "unsupported_nested_concurrency";
+            prompt_limit: "prompt_limit";
+            total_prompt_limit: "total_prompt_limit";
+            author_fuel_limit: "author_fuel_limit";
+            role_work_forbidden: "role_work_forbidden";
+            acceptance_duplicate: "acceptance_duplicate";
+            author_depth_limit: "author_depth_limit";
+            criticality_required: "criticality_required";
+            criticality_forbidden: "criticality_forbidden";
+            criticality_ungranted: "criticality_ungranted";
+            criticality_policy_mismatch: "criticality_policy_mismatch";
+            critical_review_missing: "critical_review_missing";
+            critical_review_invalid: "critical_review_invalid";
+            critical_review_not_independent: "critical_review_not_independent";
+            critical_review_not_joined: "critical_review_not_joined";
+            reference_missing: "reference_missing";
+            reference_forward: "reference_forward";
+            reference_contract_mismatch: "reference_contract_mismatch";
+            parallel_sibling_reference: "parallel_sibling_reference";
+            prompt_context_missing: "prompt_context_missing";
+            output_missing: "output_missing";
+            output_contract_mismatch: "output_contract_mismatch";
+            output_contract_forbidden: "output_contract_forbidden";
+            output_duplicate: "output_duplicate";
+            parallel_write_conflict: "parallel_write_conflict";
+        }>;
+        path: z.ZodString;
+        message: z.ZodString;
+        nodeId: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+    stats: z.ZodOptional<z.ZodObject<{
+        nodes: z.ZodNumber;
+        agents: z.ZodNumber;
+        authors: z.ZodNumber;
+        maxDepth: z.ZodNumber;
+        maxFanout: z.ZodNumber;
+        totalPromptBytes: z.ZodNumber;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+/** Uniform trusted settlement row consumed by author continuations. */
+declare const dv2OutcomeSchema: z.ZodObject<{
+    invocationKey: z.ZodString;
+    logicalId: z.ZodString;
+    generation: z.ZodNumber;
+    role: z.ZodEnum<{
+        fable: "fable";
+        sol: "sol";
+        terra: "terra";
+        luna: "luna";
+    }>;
+    work: z.ZodEnum<{
+        synthesize: "synthesize";
+        plan: "plan";
+        review: "review";
+        preview: "preview";
+        poc: "poc";
+        research: "research";
+        refine_goal: "refine_goal";
+        execute: "execute";
+    }>;
+    outputContract: z.ZodEnum<{
+        plan: "plan";
+        goal_contract: "goal_contract";
+        work_product: "work_product";
+        evidence_collection: "evidence_collection";
+        issue_scan: "issue_scan";
+        classification: "classification";
+        condition: "condition";
+        evaluation: "evaluation";
+        artifact_collection: "artifact_collection";
+    }>;
+    assignmentDigest: z.ZodString;
+    acceptanceCriterionIds: z.ZodArray<z.ZodString>;
+    status: z.ZodEnum<{
+        complete: "complete";
+        blocked: "blocked";
+        runtime_failed: "runtime_failed";
+    }>;
+    sourceNodeId: z.ZodString;
+    programDigest: z.ZodOptional<z.ZodString>;
+    product: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>, z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>, z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>, z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>, z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>, z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>, z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>, z.ZodObject<{
+        details: any;
+        summary: z.ZodString;
+        acceptance: z.ZodArray<z.ZodObject<{
+            criterionId: z.ZodString;
+            status: z.ZodEnum<{
+                unknown: "unknown";
+                passed: "passed";
+                failed: "failed";
+            }>;
+            evidenceIds: z.ZodArray<z.ZodString>;
+            explanation: z.ZodString;
+        }, z.core.$strict>>;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        artifacts: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                file: "file";
+                preview: "preview";
+                url: "url";
+                report: "report";
+                diff: "diff";
+                command_output: "command_output";
+                other: "other";
+            }>;
+            locator: z.ZodString;
+            summary: z.ZodString;
+        }, z.core.$strict>>;
+        assumptions: z.ZodArray<z.ZodString>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodLiteral<any>;
+    }, z.core.$strict>], "work">>;
+    blockage: z.ZodOptional<z.ZodObject<{
+        summary: z.ZodString;
+        partialWork: z.ZodString;
+        attemptedAlternatives: z.ZodArray<z.ZodString>;
+        whyNoSafeFallbackExists: z.ZodString;
+        requiredNextAction: z.ZodString;
+        evidence: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                source: "source";
+                artifact: "artifact";
+                observation: "observation";
+                test: "test";
+                analysis: "analysis";
+                user_input: "user_input";
+            }>;
+            summary: z.ZodString;
+            locator: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        openRisks: z.ZodArray<z.ZodObject<{
+            risk: z.ZodString;
+            impact: z.ZodString;
+            mitigation: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        work: z.ZodEnum<{
+            synthesize: "synthesize";
+            plan: "plan";
+            review: "review";
+            preview: "preview";
+            poc: "poc";
+            research: "research";
+            refine_goal: "refine_goal";
+            execute: "execute";
+        }>;
+    }, z.core.$strict>>;
+    runtimeFailure: z.ZodOptional<z.ZodObject<{
+        code: z.ZodEnum<{
+            crash: "crash";
+            timeout: "timeout";
+            invalid_return: "invalid_return";
+            cancelled: "cancelled";
+            budget_exhausted: "budget_exhausted";
+            invalid_subworkflow: "invalid_subworkflow";
+        }>;
+        message: z.ZodString;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+declare const dv2FinalSchema: z.ZodObject<{
+    status: z.ZodEnum<{
+        complete: "complete";
+        blocked: "blocked";
+        runtime_failed: "runtime_failed";
+        fuel_exhausted: "fuel_exhausted";
+    }>;
+    summary: z.ZodString;
+    outcome: z.ZodObject<{
+        invocationKey: z.ZodString;
+        logicalId: z.ZodString;
+        generation: z.ZodNumber;
+        role: z.ZodEnum<{
+            fable: "fable";
+            sol: "sol";
+            terra: "terra";
+            luna: "luna";
+        }>;
+        work: z.ZodEnum<{
+            synthesize: "synthesize";
+            plan: "plan";
+            review: "review";
+            preview: "preview";
+            poc: "poc";
+            research: "research";
+            refine_goal: "refine_goal";
+            execute: "execute";
+        }>;
+        outputContract: z.ZodEnum<{
+            plan: "plan";
+            goal_contract: "goal_contract";
+            work_product: "work_product";
+            evidence_collection: "evidence_collection";
+            issue_scan: "issue_scan";
+            classification: "classification";
+            condition: "condition";
+            evaluation: "evaluation";
+            artifact_collection: "artifact_collection";
+        }>;
+        assignmentDigest: z.ZodString;
+        acceptanceCriterionIds: z.ZodArray<z.ZodString>;
+        status: z.ZodEnum<{
+            complete: "complete";
+            blocked: "blocked";
+            runtime_failed: "runtime_failed";
+        }>;
+        sourceNodeId: z.ZodString;
+        programDigest: z.ZodOptional<z.ZodString>;
+        product: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>, z.ZodObject<{
+            details: any;
+            summary: z.ZodString;
+            acceptance: z.ZodArray<z.ZodObject<{
+                criterionId: z.ZodString;
+                status: z.ZodEnum<{
+                    unknown: "unknown";
+                    passed: "passed";
+                    failed: "failed";
+                }>;
+                evidenceIds: z.ZodArray<z.ZodString>;
+                explanation: z.ZodString;
+            }, z.core.$strict>>;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            artifacts: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    file: "file";
+                    preview: "preview";
+                    url: "url";
+                    report: "report";
+                    diff: "diff";
+                    command_output: "command_output";
+                    other: "other";
+                }>;
+                locator: z.ZodString;
+                summary: z.ZodString;
+            }, z.core.$strict>>;
+            assumptions: z.ZodArray<z.ZodString>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodLiteral<any>;
+        }, z.core.$strict>], "work">>;
+        blockage: z.ZodOptional<z.ZodObject<{
+            summary: z.ZodString;
+            partialWork: z.ZodString;
+            attemptedAlternatives: z.ZodArray<z.ZodString>;
+            whyNoSafeFallbackExists: z.ZodString;
+            requiredNextAction: z.ZodString;
+            evidence: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    source: "source";
+                    artifact: "artifact";
+                    observation: "observation";
+                    test: "test";
+                    analysis: "analysis";
+                    user_input: "user_input";
+                }>;
+                summary: z.ZodString;
+                locator: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            openRisks: z.ZodArray<z.ZodObject<{
+                risk: z.ZodString;
+                impact: z.ZodString;
+                mitigation: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            work: z.ZodEnum<{
+                synthesize: "synthesize";
+                plan: "plan";
+                review: "review";
+                preview: "preview";
+                poc: "poc";
+                research: "research";
+                refine_goal: "refine_goal";
+                execute: "execute";
+            }>;
+        }, z.core.$strict>>;
+        runtimeFailure: z.ZodOptional<z.ZodObject<{
+            code: z.ZodEnum<{
+                crash: "crash";
+                timeout: "timeout";
+                invalid_return: "invalid_return";
+                cancelled: "cancelled";
+                budget_exhausted: "budget_exhausted";
+                invalid_subworkflow: "invalid_subworkflow";
+            }>;
+            message: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+declare namespace delegationV2Schemas {
+    export { authorEnvelopeSchema as dv2Author };
+    export { workerEnvelopeSchema as dv2Worker };
+    export { dv2ValidationSchema as dv2Validation };
+    export { dv2OutcomeSchema as dv2Outcome };
+    export { dv2FinalSchema as dv2Final };
+    export { dv2QuestionSchema as dv2Question };
+    export { dv2AnswerSchema as dv2Answer };
+}
 
 /** @param {import("./delegationV2Schemas.ts").WorkflowProgram} program */
 declare function delegationV2ProgramDigest(program: WorkflowProgram): string;
@@ -6610,7 +5892,7 @@ declare function compileDelegationV2Program(options: {
     completionOutcomeNodeIds: string[];
     declaredOutputs: {
         from: string;
-        contract: "plan" | "work_product" | "goal_contract" | "evaluation" | "classification" | "issue_scan" | "condition" | "artifact_collection" | "evidence_collection";
+        contract: "plan" | "goal_contract" | "work_product" | "evidence_collection" | "issue_scan" | "classification" | "condition" | "evaluation" | "artifact_collection";
         outcomeNodeId: any;
     }[];
     declaredOutputNodeIds: any[];
@@ -6740,7 +6022,7 @@ type SandboxWorkspaceSpec = SandboxWorkspaceSpec$1;
 type ScanFixVerifyProps = ScanFixVerifyProps$2;
 type ScorersMap = _smithers_orchestrator_graph_types.ScorersMap;
 type SequenceProps = SequenceProps$2;
-type SidecarDelta = SidecarDelta$1;
+type SidecarDelta = SidecarDelta$2;
 type SidecarProps = SidecarProps$2;
 type SignalProps<Schema> = SignalProps$2<Schema>;
 type SourceDef = SourceDef$1;

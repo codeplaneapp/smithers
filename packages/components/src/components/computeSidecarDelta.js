@@ -1,26 +1,31 @@
-import type { SidecarDelta } from "./SidecarDelta.ts";
+/** @typedef {import("./SidecarDelta.ts").SidecarDelta} SidecarDelta */
 
-type RowLike = {
-	nodeId?: string;
-	node_id?: string;
-	scorerId?: string;
-	scorer_id?: string;
-	score?: number;
-	scoredAtMs?: number;
-	scored_at_ms?: number;
-} & Record<string, unknown>;
+/**
+ * @typedef {Record<string, unknown> & {
+ *   nodeId?: string,
+ *   node_id?: string,
+ *   scorerId?: string,
+ *   scorer_id?: string,
+ *   score?: number,
+ *   scoredAtMs?: number,
+ *   scored_at_ms?: number,
+ * }} RowLike
+ */
 
-type ComputeSidecarDeltaOptions = {
-	primaryNodeId: string;
-	sidecarNodeId: string;
-	scorerId?: string;
-};
+/**
+ * @typedef {object} ComputeSidecarDeltaOptions
+ * @property {string} primaryNodeId
+ * @property {string} sidecarNodeId
+ * @property {string} [scorerId]
+ */
 
-function getNodeId(row: RowLike): string | undefined {
+/** @param {RowLike} row */
+function getNodeId(row) {
 	return typeof row.nodeId === "string" ? row.nodeId : typeof row.node_id === "string" ? row.node_id : undefined;
 }
 
-function getScorerId(row: RowLike): string | undefined {
+/** @param {RowLike} row */
+function getScorerId(row) {
 	return typeof row.scorerId === "string"
 		? row.scorerId
 		: typeof row.scorer_id === "string"
@@ -28,22 +33,34 @@ function getScorerId(row: RowLike): string | undefined {
 			: undefined;
 }
 
-function getScoredAtMs(row: RowLike): number {
+/** @param {RowLike} row */
+function getScoredAtMs(row) {
 	const value = row.scoredAtMs ?? row.scored_at_ms;
 	return typeof value === "number" ? value : 0;
 }
 
-function getScore(row: RowLike | undefined): number | null {
+/** @param {RowLike | undefined} row */
+function getScore(row) {
 	return typeof row?.score === "number" ? row.score : null;
 }
 
-function latestMatching(rows: RowLike[], nodeId: string, scorerId?: string): RowLike | undefined {
+/**
+ * @param {RowLike[]} rows
+ * @param {string} nodeId
+ * @param {string} [scorerId]
+ */
+function latestMatching(rows, nodeId, scorerId) {
 	return rows
 		.filter((row) => getNodeId(row) === nodeId && (!scorerId || getScorerId(row) === scorerId))
 		.sort((a, b) => getScoredAtMs(b) - getScoredAtMs(a))[0];
 }
 
-export function computeSidecarDelta(rows: RowLike[], opts: ComputeSidecarDeltaOptions): SidecarDelta {
+/**
+ * @param {RowLike[]} rows
+ * @param {ComputeSidecarDeltaOptions} opts
+ * @returns {SidecarDelta}
+ */
+export function computeSidecarDelta(rows, opts) {
 	const primaryScore = getScore(latestMatching(rows, opts.primaryNodeId, opts.scorerId));
 	const sidecarScore = getScore(latestMatching(rows, opts.sidecarNodeId, opts.scorerId));
 	const delta =

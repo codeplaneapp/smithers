@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { Sandbox } from "microsandbox";
+// Keep the production SDK optional, but make this exact-version compatibility
+// check available even when a package manager omits optional dependencies.
+import { Sandbox } from "microsandbox-test-sdk";
 
 test("published microsandbox SDK exposes the adapter surface without booting a VM", async () => {
 	expect(typeof Sandbox.get).toBe("function");

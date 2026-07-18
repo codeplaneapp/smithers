@@ -273,17 +273,14 @@ function readablePackageRoot(path: string): string {
   if (nvm?.[1]) return nvm[1];
   const bun = normalized.match(/^(.*\/\.bun\/bin)(?:\/|$)/);
   if (bun?.[1]) return bun[1];
-  // A parent pnpm process prepends its selected project-version binary to
-  // PATH. That binary is a symlink into a self-contained package whose entry
-  // point requires ../dist/pnpm.cjs, so admitting only its bin directory makes
-  // a valid install look corrupt inside the sandbox. Reopen this exact package
-  // root, never the containing PNPM_HOME or shared .tools directory.
-  const managedPnpm = normalized.match(
-    /^(.*\/\.tools\/pnpm\/[^/]+\/node_modules\/pnpm)(?:\/|$)/,
-  );
-  if (managedPnpm?.[1]) return managedPnpm[1];
+  // pnpm's entry point requires ../dist/pnpm.cjs. Whether it came from a
+  // project-version manager or a conventional global npm install, admitting
+  // only the resolved bin directory makes a valid install look corrupt inside
+  // the sandbox. Reopen this exact package root, never its node_modules parent.
   const cellar = normalized.match(/^(.*\/Cellar\/[^/]+\/[^/]+)/);
   if (cellar?.[1]) return cellar[1];
+  const packagedPnpm = normalized.match(/^(.*\/node_modules\/pnpm)(?:\/|$)/);
+  if (packagedPnpm?.[1]) return packagedPnpm[1];
   return dirname(path);
 }
 

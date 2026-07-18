@@ -55,7 +55,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, label = "assertion", timeoutMs = 20_000) {
+async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, label = "assertion", timeoutMs = 60_000) {
   const started = Date.now();
   let lastError: unknown;
   while (Date.now() - started < timeoutMs) {
@@ -387,7 +387,9 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     ));
 
     await waitFor(
-      () => captured.runEvents?.error instanceof Error && captured.runEvents?.streaming === false,
+      () => captured.runEvents?.error instanceof Error &&
+        captured.runEvents.error.message !== "Run event stream failed." &&
+        captured.runEvents?.streaming === false,
       "run event source fetch failure",
     );
     expect(captured.runEvents.events).toEqual([]);

@@ -6,7 +6,7 @@ import React from "react";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Loop } from "../Ralph.js";
 import { Signal } from "../Signal.js";
-import { DC_EDIT_SIGNAL } from "./delegationSchemas.ts";
+import { DC_EDIT_SIGNAL } from "./delegationSchemasRuntime.js";
 import { executionComplete, foldGates, foldPlans, readRows } from "./delegationState.js";
 
 /**

@@ -2,7 +2,7 @@ import {
 	DELEGATION_V2_OUTPUT_CONTRACTS_BY_WORK,
 	DELEGATION_V2_REGISTRY_VERSION,
 	workflowProgramSchema,
-} from "./delegationV2Schemas.ts";
+} from "./delegationV2SchemasRuntime.js";
 import { hashStableValue } from "./delegationV2Ids.js";
 import {
 	deriveCriticalExecutionGrant,

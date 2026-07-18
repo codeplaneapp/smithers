@@ -409,6 +409,72 @@ describe("public issue agent policy", () => {
     }
   });
 
+  test.skipIf(process.platform === "win32")("reopens only the exact package for a conventionally installed pnpm binary", async () => {
+    const installRoot = await mkdtemp(join(tmpdir(), "smithers-global-pnpm-policy-"));
+    const packageRoot = join(installRoot, "lib", "node_modules", "pnpm");
+    const binaryDirectory = join(installRoot, "bin");
+    await Promise.all([
+      mkdir(join(packageRoot, "bin"), { recursive: true }),
+      mkdir(join(packageRoot, "dist"), { recursive: true }),
+      mkdir(binaryDirectory, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(packageRoot, "bin", "pnpm.cjs"), "require('../dist/pnpm.cjs')\n"),
+      writeFile(join(packageRoot, "dist", "pnpm.cjs"), "module.exports = {}\n"),
+      symlink("../lib/node_modules/pnpm/bin/pnpm.cjs", join(binaryDirectory, "pnpm"), "file"),
+    ]);
+
+    try {
+      const canonicalPackageRoot = await realpath(packageRoot);
+      const roots = resolvePublicIssueToolchainReadPaths(
+        { PATH: binaryDirectory },
+        ["pnpm"],
+      );
+
+      expect(roots).toContain(binaryDirectory);
+      expect(roots).toContain(canonicalPackageRoot);
+      expect(roots).not.toContain(installRoot);
+      expect(roots).not.toContain(join(installRoot, "lib", "node_modules"));
+    } finally {
+      await rm(installRoot, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("keeps the exact Homebrew formula root for a pnpm package entry point", async () => {
+    const prefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-pnpm-policy-"));
+    const formulaRoot = join(prefix, "Cellar", "pnpm", "10.10.0");
+    const packageRoot = join(formulaRoot, "libexec", "lib", "node_modules", "pnpm");
+    const formulaBin = join(formulaRoot, "libexec", "bin");
+    const binaryDirectory = join(prefix, "bin");
+    await Promise.all([
+      mkdir(join(packageRoot, "bin"), { recursive: true }),
+      mkdir(join(packageRoot, "dist"), { recursive: true }),
+      mkdir(formulaBin, { recursive: true }),
+      mkdir(binaryDirectory, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(packageRoot, "bin", "pnpm.cjs"), "require('../dist/pnpm.cjs')\n"),
+      writeFile(join(packageRoot, "dist", "pnpm.cjs"), "module.exports = {}\n"),
+      symlink("../lib/node_modules/pnpm/bin/pnpm.cjs", join(formulaBin, "pnpm"), "file"),
+      symlink("../Cellar/pnpm/10.10.0/libexec/bin/pnpm", join(binaryDirectory, "pnpm"), "file"),
+    ]);
+
+    try {
+      const canonicalFormulaRoot = await realpath(formulaRoot);
+      const canonicalPackageRoot = await realpath(packageRoot);
+      const roots = resolvePublicIssueToolchainReadPaths(
+        { PATH: binaryDirectory },
+        ["pnpm"],
+      );
+
+      expect(roots).toContain(canonicalFormulaRoot);
+      expect(roots).not.toContain(canonicalPackageRoot);
+      expect(roots).not.toContain(join(prefix, "Cellar", "pnpm"));
+    } finally {
+      await rm(prefix, { recursive: true, force: true });
+    }
+  });
+
   test.skipIf(process.platform === "win32")("adds only Homebrew opt traversal and exact linked Cellar roots", async () => {
     const prefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-policy-"));
     const llhttpCellarRoot = join(prefix, "Cellar", "llhttp", "9.3.1");

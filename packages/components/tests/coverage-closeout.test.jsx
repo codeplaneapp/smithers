@@ -7,7 +7,7 @@ import { SMITHERS_WORKFLOW_VIEW_KIND, TUI, UI } from "../src/components/index.js
 import { Loop as LoopFromModule, Ralph as RalphFromModule } from "../src/components/Loop.js";
 import { Task } from "../src/components/index.js";
 import { Saga, SagaStep } from "../src/components/Saga.js";
-import { computeSidecarDelta } from "../src/components/computeSidecarDelta.ts";
+import { computeSidecarDelta } from "../src/components/computeSidecarDelta.js";
 import { zodSchemaToJsonExample } from "../src/zod-to-example.js";
 import {
 	actualTotals,

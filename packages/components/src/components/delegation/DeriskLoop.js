@@ -7,7 +7,7 @@ import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context
 import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
 import { Task } from "../Task.js";
-import { DEFAULT_TIER_ORDER } from "./delegationSchemas.ts";
+import { DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
 import { agentForTier, chunkGateFailures, delegatingTierFor, dependentsOf, foldGates, foldPlans, nodeIndex, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, readRows, replanCountFor, triggerTargetOf, } from "./delegationState.js";
 import { planPrompt, probePrompt, replanPrompt } from "./delegationPrompts.js";
 /** @typedef {import("./delegationState.js").DeriskTrigger} DeriskTrigger */

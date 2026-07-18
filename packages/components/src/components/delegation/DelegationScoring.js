@@ -7,7 +7,7 @@ import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context
 import { Sequence } from "../Sequence.js";
 import { Task } from "../Task.js";
 import { HumanTask } from "../HumanTask.js";
-import { dcPollSchema } from "./delegationSchemas.ts";
+import { dcPollSchema } from "./delegationSchemasRuntime.js";
 import { actualTotals, executionComplete, foldGates, foldPlans, latestRow, nodeIndex, physicalId, readRows, synthesizeDelegationEvents, } from "./delegationState.js";
 import { pollPrompt } from "./delegationPrompts.js";
 

@@ -40,6 +40,58 @@ function streamingFetch(emit: (controller: ReadableStreamDefaultController<Uint8
 }
 
 describe("createSmithersDataClient change stream", () => {
+  test("keeps native fetch cancellation when a DOM shim replaces AbortController", async () => {
+    const NativeAbortController = globalThis.AbortController;
+    const nativeSignalConstructor = new NativeAbortController().signal.constructor;
+    let receivedSignal: AbortSignal | null | undefined;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+
+    class ForeignAbortController {
+      readonly signal = {
+        aborted: false,
+        addEventListener() {},
+        removeEventListener() {},
+      };
+      abort() {
+        this.signal.aborted = true;
+      }
+    }
+
+    Object.defineProperty(globalThis, "AbortController", {
+      configurable: true,
+      value: ForeignAbortController,
+    });
+    try {
+      const client = createSmithersDataClient({
+        mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
+        fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+          receivedSignal = init?.signal;
+          const body = new ReadableStream<Uint8Array>({
+            start(next) { controller = next; },
+          });
+          init?.signal?.addEventListener("abort", () => {
+            try { controller.close(); } catch { /* already closed */ }
+          });
+          return new Response(body, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }) as unknown as typeof fetch,
+      });
+
+      const unsubscribe = client.stream.subscribe(() => {});
+      await waitFor(() => client.stream.status().status === "online");
+      expect(receivedSignal?.constructor).toBe(nativeSignalConstructor);
+      unsubscribe();
+      client.close();
+    } finally {
+      Object.defineProperty(globalThis, "AbortController", {
+        configurable: true,
+        value: NativeAbortController,
+      });
+    }
+  });
+
   test("parses change/reset/heartbeat frames, tracks seq, and resolves waitForSeq", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const events: SmithersStreamEvent[] = [];

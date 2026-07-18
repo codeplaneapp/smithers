@@ -8,7 +8,7 @@ import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
 import { Task } from "../Task.js";
 import { HumanTask } from "../HumanTask.js";
-import { DEFAULT_TIER_ORDER, dcGoalApprovalSchema } from "./delegationSchemas.ts";
+import { DEFAULT_TIER_ORDER, dcGoalApprovalSchema } from "./delegationSchemasRuntime.js";
 import { agentForTier, latestRow, readRows, rowsForNode } from "./delegationState.js";
 import { DelegationQuestionTask } from "./DelegationQuestionTask.js";
 import { answerPrompt, goalApprovalPrompt, goalQuestionsPrompt, goalRefinePrompt, questionFormPrompt, } from "./delegationPrompts.js";

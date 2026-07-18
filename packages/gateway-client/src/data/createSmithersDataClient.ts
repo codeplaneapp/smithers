@@ -47,6 +47,12 @@ type StreamHttpError = Error & { status: number };
 
 const unavailableFetch = (() => Promise.reject(new Error("fetch is not available in this environment."))) as unknown as typeof fetch;
 
+// Capture the runtime constructor while this module is initialized. DOM test
+// environments can replace the global AbortController later; passing one of
+// those cross-realm signals to the native fetch implementation makes the SSE
+// request fail before it reaches the gateway.
+const RuntimeAbortController = globalThis.AbortController;
+
 // Exponential backoff for the SSE change stream. Deliberately NOT
 // gatewayBackoffDelay — that helper applies symmetric ±jitter, while this
 // stream adds a small flat jitter on top of the capped exponential delay.
@@ -185,7 +191,7 @@ function fetchEventSource(
   init: { fetchImpl: typeof fetch; token?: string; onError?: (cause: unknown) => void },
 ): EventSourceLike {
   const listeners = new Map<string, Set<(event: MessageEvent) => void>>();
-  const abort = new AbortController();
+  const abort = new RuntimeAbortController();
   const source: EventSourceLike = {
     onopen: null,
     onerror: null,

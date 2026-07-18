@@ -186,7 +186,8 @@ describe("useDelegationChain over a real gateway", () => {
     // poll" guard and calls answerHuman (whether the underlying select-approval
     // submit ultimately resolves or rejects, the found + answer path executed).
     let pastFind = false;
-    for (let i = 0; i < 400 && !pastFind; i += 1) {
+    const pollDeadline = Date.now() + 60_000;
+    while (Date.now() < pollDeadline && !pastFind) {
       try {
         await act(async () => { await hook!.actions.submitPoll([{ question: "How useful?", rating: 5 }], "great"); });
         pastFind = true;

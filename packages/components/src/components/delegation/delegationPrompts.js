@@ -1,5 +1,5 @@
 import { zodSchemaToJsonExample } from "../../zod-to-example.js";
-import { dcDevPreviewSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, } from "./delegationSchemas.ts";
+import { dcDevPreviewSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, } from "./delegationSchemasRuntime.js";
 /** @typedef {import("./delegationSchemas.ts").Tier} Tier */
 /** @typedef {import("./delegationState.js").DelegationNodeInfo} DelegationNodeInfo */
 /** @typedef {import("./delegationState.js").DeriskTrigger} DeriskTrigger */

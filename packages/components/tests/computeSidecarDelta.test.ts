@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computeSidecarDelta } from "../src/components/computeSidecarDelta.ts";
+import { computeSidecarDelta } from "../src/components/computeSidecarDelta.js";
 
 describe("computeSidecarDelta", () => {
 	test("returns primary, sidecar, delta, and cheaperWins from persisted rows", () => {

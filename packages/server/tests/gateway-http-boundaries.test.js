@@ -386,37 +386,30 @@ describe("auth header edge cases (gateway HTTP)", () => {
         expect(json.error.code).toBe("UNAUTHORIZED");
     });
 
-    test("header values with CRLF are rejected by the runtime (header-injection prevention)", async () => {
+    test("header values with CRLF are rejected by fetch (header-injection prevention)", async () => {
         await startTokenGateway();
-        // fetch() throws synchronously (TypeError) for invalid header values;
-        // the malformed Authorization never reaches the gateway. This is the
-        // layer that prevents response splitting / header injection.
-        expect(() => {
-            fetch(`http://127.0.0.1:${port}/rpc`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: "Bearer secret\r\nX-Injected: yes",
-                },
-                body: "{}",
-            });
-        }).toThrow(/invalid value|invalid header/i);
+        // Fetch rejects asynchronously, so asserting on the promise is what
+        // proves the malformed value never reaches the gateway.
+        await expect(fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer secret\r\nX-Injected: yes",
+            },
+            body: "{}",
+        })).rejects.toThrow(/invalid value|invalid header/i);
     });
 
-    test("x-smithers-key with embedded null byte is rejected by fetch (sanitisation at runtime)", async () => {
+    test("x-smithers-key with embedded null byte is rejected by fetch", async () => {
         await startTokenGateway();
-        // Bun/Node refuses to send a header whose value contains a null byte.
-        // We document that this is rejected before the gateway sees it.
-        expect(() => {
-            fetch(`http://127.0.0.1:${port}/rpc`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-smithers-key": "secret-token\u0000extra",
-                },
-                body: "{}",
-            });
-        }).toThrow(/invalid value|invalid header/i);
+        await expect(fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-smithers-key": "secret-token\u0000extra",
+            },
+            body: "{}",
+        })).rejects.toThrow(/invalid value|invalid header/i);
     });
 });
 

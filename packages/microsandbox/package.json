@@ -33,7 +33,13 @@
     "microsandbox": "0.6.6"
   },
   "devDependencies": {
+    "@superradcompany/microsandbox-darwin-arm64": "0.6.6",
+    "@superradcompany/microsandbox-linux-arm64-gnu": "0.6.6",
+    "@superradcompany/microsandbox-linux-x64-gnu": "0.6.6",
+    "@superradcompany/microsandbox-win32-arm64-msvc": "0.6.6",
+    "@superradcompany/microsandbox-win32-x64-msvc": "0.6.6",
     "@types/bun": "latest",
+    "microsandbox-test-sdk": "npm:microsandbox@0.6.6",
     "typescript": "~6.0.3"
   }
 }

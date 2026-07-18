@@ -5,7 +5,7 @@
 /** @typedef {import("./delegationSchemas.ts").Tier} Tier */
 // @smithers-type-exports-end
 
-import { DEFAULT_TIER_ORDER } from "./delegationSchemas.ts";
+import { DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
 /** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
 
 /**

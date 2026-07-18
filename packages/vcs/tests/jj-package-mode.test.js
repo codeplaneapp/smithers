@@ -110,6 +110,7 @@ describe("bundled jj package executable mode", () => {
 					"pack",
 					sourceDir,
 					"--json",
+					"--silent",
 					"--pack-destination",
 					packDir,
 				], root));

@@ -8,7 +8,7 @@ import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
 import { Task } from "../Task.js";
 import { Signal } from "../Signal.js";
-import { DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER } from "./delegationSchemas.ts";
+import { DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
 import { agentForTier, foldPlans, frontierLeaves, physicalId, planningComplete, readRows, rowsForNode, } from "./delegationState.js";
 import { previewPrompt } from "./delegationPrompts.js";
 

@@ -10,7 +10,7 @@ import { Parallel } from "../Parallel.js";
 import { Loop } from "../Ralph.js";
 import { Task } from "../Task.js";
 import { Approval } from "../Approval.js";
-import { DEFAULT_TIER_ORDER } from "./delegationSchemas.ts";
+import { DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
 import { actualTotals, agentForTier, devPreviewNodeId, foldGates, foldPlans, frontierLeaves, leafAttemptState, leafComplete, leavesUnder, nodeIndex, physicalId, planningComplete, readRows, rowsForNode, splitGates, } from "./delegationState.js";
 import { checkPrompt, chunkReviewPrompt, devPreviewPrompt, execPrompt, reviewPrompt } from "./delegationPrompts.js";
 import { withCommitRange } from "./withCommitRange.js";

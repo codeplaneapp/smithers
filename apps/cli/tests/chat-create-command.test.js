@@ -26,7 +26,7 @@ test("chat create starts an auto-hijacked run and returns JSON metadata", async 
     const binDir = createExecutableDir();
     writeExecutable(binDir, "codex", [
         "#!/usr/bin/env node",
-        'import { writeFileSync } from "node:fs";',
+        'const { writeFileSync } = require("node:fs");',
         'const target = process.env.SMITHERS_CHAT_CREATE_FILE;',
         'if (target) writeFileSync(target, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }), "utf8");',
         'process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "chat-thread-1" }) + "\\n");',

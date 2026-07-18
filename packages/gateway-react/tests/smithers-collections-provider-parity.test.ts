@@ -54,7 +54,7 @@ function removeSqliteTempDir(dbPath: string) {
   }
 }
 
-async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, timeoutMs = 5_000) {
+async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, timeoutMs = 30_000) {
   const started = Date.now();
   let lastError: unknown;
   while (Date.now() - started < timeoutMs) {

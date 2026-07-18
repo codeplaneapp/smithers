@@ -8,7 +8,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
 import { Task } from "../Task.js";
-import { DEFAULT_TIER_ORDER } from "./delegationSchemas.ts";
+import { DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
 import { agentForTier, foldPlans, latestRow, nodeIndex, physicalId, readRows, rowsForNode, unplannedChunks, } from "./delegationState.js";
 import { planPrompt } from "./delegationPrompts.js";
 
