@@ -161,6 +161,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-panel-head .mon-kicker { margin-right: auto; }
 
 .mon-detail-head { display: flex; flex-direction: column; gap: var(--sp-2); }
+.mon-detail-header-band { margin-bottom: var(--sp-3); }
+.mon-detail-cost-eta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .mon-detail-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-detail-workflow { font-weight: 700; font-size: var(--fs-4); line-height: var(--lh-tight); letter-spacing: -0.01em; }
 .mon-detail-actions { display: flex; gap: var(--sp-2); }

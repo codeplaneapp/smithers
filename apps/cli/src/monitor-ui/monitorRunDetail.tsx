@@ -179,7 +179,9 @@ export function RunDetail({
 
   return (
     <div className="mon-detail" data-testid="monitor-run-detail">
-      <header className="mon-detail-head mon-panel">
+      <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} />
+
+      <header className="mon-detail-head mon-detail-header-band mon-panel">
         <div className="mon-detail-title">
           <StatusTag status={status} />
           {unhealthy ? <StatusTag status={healthState} label={healthState} /> : null}
@@ -200,7 +202,10 @@ export function RunDetail({
             </span>
           </div>
         ) : null}
-        <RunEtaLine runId={runId} runStatus={status} startedAtMs={startedAtMs} finishedAtMs={finishedAtMs} />
+        <div className="mon-detail-cost-eta">
+          <RunCostCard runId={runId} active={status === "running" || status === "pending"} progressRatio={progress?.fraction} />
+          <RunEtaLine runId={runId} runStatus={status} startedAtMs={startedAtMs} finishedAtMs={finishedAtMs} />
+        </div>
         <div className="mon-detail-actions">
           {customUiUrl ? (
             <Button
@@ -248,14 +253,10 @@ export function RunDetail({
         </div>
       </header>
 
-      <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} />
-
-      <RunCostCard runId={runId} active={status === "running" || status === "pending"} progressRatio={progress?.fraction} />
       <RecapPanel runId={runId} status={status} />
+      <DecisionsPanel runId={runId} runStatus={status} onSelectNode={onSelectNode} />
       <ScoresPanel scores={scores} />
       <FootprintPanel runId={runId} live={status === "running"} onFocusNode={setFootprintFocusNodeId} />
-
-      <DecisionsPanel runId={runId} runStatus={status} onSelectNode={onSelectNode} />
 
       {showCustomUi && customUiUrl ? (
         <div className="mon-modal-backdrop" onClick={closeCustomUi} data-testid="monitor-ui-modal">

@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Table,
   TableBody,
@@ -9,19 +9,15 @@ import {
   TableRow,
 } from "smithers-orchestrator/ui";
 import {
-  accountRowsOf,
   cronRowsOf,
-  dataRowsOf,
-  formatLatencyMs,
-  histogramStats,
-  nextCron,
-  openTicketCount,
   opsStats,
   type RunRow,
   type Tone,
 } from "./monitorModel.ts";
-import { Ago, Countdown, useJsonApi, useMetricsScrape, useNowMs } from "./monitorShared.tsx";
+import { Ago, Countdown, useJsonApi, useNowMs } from "./monitorShared.tsx";
 import { AccountUsageCards } from "./monitorUsagePanels.tsx";
+import { capCostFetchSet, foldWorkspaceCost, runIdOf, runsStartedTodayOf } from "./monitorOpsModel.ts";
+import { formatUsd } from "./monitorUsageModel.ts";
 
 // ---------------------------------------------------------------------------
 // Workspace overview: the ops strip (one quiet row of stat cards above the
@@ -51,35 +47,59 @@ export function StatCard({
   );
 }
 
-export function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }) {
-  const now = useNowMs();
-  const metrics = useMetricsScrape(true);
-  const cronsApi = useJsonApi("/v1/api/crons", 30_000);
-  const accountsApi = useJsonApi("/v1/api/accounts", 60_000);
-  const memoryApi = useJsonApi("/v1/api/memory-facts", 60_000);
-  const ticketsApi = useJsonApi("/v1/api/tickets", 60_000);
-  const stats = useMemo(() => opsStats(runs as Array<Record<string, unknown>>, now), [runs, now]);
-  const crons = useMemo(() => cronRowsOf(cronsApi.body), [cronsApi.body]);
-  const accounts = useMemo(() => accountRowsOf(accountsApi.body), [accountsApi.body]);
-  const agentLatency = useMemo(
-    () => (metrics.scrape ? histogramStats(metrics.scrape, "smithers_agent_duration_ms", ["engine", "model"]) : []),
-    [metrics.scrape],
+export function WorkspaceCostCard({ runs, now }: { runs: RunRow[]; now: number }) {
+  const todays = useMemo(() => runsStartedTodayOf(runs, now), [runs, now]);
+  const capped = useMemo(
+    () => capCostFetchSet(todays.map(runIdOf).filter((runId): runId is string => runId !== undefined)),
+    [todays],
   );
-  const upcoming = nextCron(crons);
-  const accountsReady = accounts.filter((account) => account.ready).length;
-  const memoryCount = memoryApi.loaded ? dataRowsOf(memoryApi.body).length : undefined;
-  const ticketsOpen = ticketsApi.loaded ? openTicketCount(ticketsApi.body) : undefined;
+  const fetchKey = `${capped.runIds.join(",")}:${capped.skippedCount}`;
+  const [result, setResult] = useState<ReturnType<typeof foldWorkspaceCost> | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    // A live run can report more tokens without changing the landing run set.
+    // Keep this deliberately aligned with subscription-window polling.
+    const timer = setInterval(() => setRefresh((value) => value + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      const envelopes: Array<{ body?: unknown; failed?: boolean }> = [];
+      for (let index = 0; index < capped.runIds.length; index += 4) {
+        const batch = capped.runIds.slice(index, index + 4);
+        const rows = await Promise.all(batch.map(async (runId) => {
+          try {
+            const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/token-usage`, { signal: controller.signal });
+            return response.ok ? { body: await response.json() } : { failed: true };
+          } catch { return { failed: true }; }
+        }));
+        envelopes.push(...rows);
+      }
+      if (!controller.signal.aborted) setResult(foldWorkspaceCost(envelopes, capped.skippedCount));
+    };
+    void load();
+    return () => controller.abort();
+  }, [fetchKey, refresh]);
+  const omitted = (result?.skippedCount ?? capped.skippedCount) + (result?.failedRuns ?? 0);
+  return <StatCard
+    value={!result ? "…" : result.unpricedRuns ? "unpriced" : formatUsd(result.totalUsd)}
+    label="workspace cost today"
+    sub={!result ? "runs started today on this gateway" : `${result.fetchedCount} runs · runs started today on this gateway${omitted ? ` · +${omitted} not counted` : ""}`}
+    testId="monitor-workspace-cost"
+  />;
+}
+
+export function OpsStrip({ runs, loading, attentionTotal }: { runs: RunRow[]; loading: boolean; attentionTotal?: number }) {
+  const now = useNowMs();
+  const stats = useMemo(() => opsStats(runs as Array<Record<string, unknown>>, now), [runs, now]);
   const pending = loading && runs.length === 0;
   const n = (value: number | undefined): string => (value === undefined || pending ? "…" : String(value));
   return (
     <div className="mon-ops-strip" data-testid="monitor-ops-strip">
-      <StatCard
-        value={n(stats.active)}
-        label="active runs"
-        sub={stats.attention > 0 ? `${stats.attention} need attention` : undefined}
-        tone={stats.active > 0 ? "running" : undefined}
-        testId="monitor-stat-active"
-      />
+      <AccountUsageCards />
+      <WorkspaceCostCard runs={runs} now={now} />
+      <StatCard value={n(attentionTotal ?? stats.attention)} label="needs attention" testId="monitor-stat-attention" />
       <StatCard
         value={n(stats.enginesLive)}
         label="engines live"
@@ -87,51 +107,11 @@ export function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }
         testId="monitor-stat-engines"
       />
       <StatCard
-        value={n(stats.completedToday)}
-        label="completed today"
-        sub={stats.failedToday > 0 ? `${stats.failedToday} failed` : undefined}
-        testId="monitor-stat-completed"
+        value={n(stats.active)}
+        label="active runs"
+        tone={stats.active > 0 ? "running" : undefined}
+        testId="monitor-stat-active"
       />
-      {agentLatency.slice(0, 2).map((stat) => (
-        <StatCard
-          key={stat.key}
-          value={`${formatLatencyMs(stat.p50)} / ${formatLatencyMs(stat.p95)}`}
-          label={`agent p50/p95 · ${stat.key}`}
-          sub={`${stat.count} runs (this gateway)`}
-          testId="monitor-stat-latency"
-        />
-      ))}
-      {agentLatency.length === 0 ? (
-        <StatCard
-          value={metrics.scrape ? "—" : "…"}
-          label="agent latency"
-          sub={metrics.failed ? "metrics unreachable" : metrics.scrape ? "no samples this gateway yet" : "scraping…"}
-          testId="monitor-stat-latency"
-        />
-      ) : null}
-      <StatCard
-        value={
-          cronsApi.loaded
-            ? upcoming?.nextRunAtMs !== undefined
-              ? now >= upcoming.nextRunAtMs
-                ? "due now"
-                : `in ${Math.max(1, Math.round((upcoming.nextRunAtMs - now) / 60_000))}m`
-              : "—"
-            : "…"
-        }
-        label={upcoming ? `next cron · ${upcoming.workflow}` : "next cron"}
-        sub={upcoming ? upcoming.pattern : cronsApi.loaded ? "none registered" : undefined}
-        testId="monitor-stat-cron"
-      />
-      <StatCard
-        value={accountsApi.loaded ? `${accountsReady}/${accounts.length}` : "…"}
-        label="accounts ready"
-        tone={accountsApi.loaded && accountsReady < accounts.length ? "waiting" : undefined}
-        testId="monitor-stat-accounts"
-      />
-      <StatCard value={n(memoryCount)} label="memory facts" testId="monitor-stat-memory" />
-      <StatCard value={n(ticketsOpen)} label="open tickets" testId="monitor-stat-tickets" />
-      <AccountUsageCards />
     </div>
   );
 }

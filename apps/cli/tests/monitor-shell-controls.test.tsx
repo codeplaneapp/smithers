@@ -156,7 +156,7 @@ describe("migrated monitor surfaces", () => {
     summary: { finished: 3, failed: 1, pending: 1 },
   };
 
-  test("preserves status tones, data-status, stat-card testids, and failed progress", async () => {
+  test("preserves status tones, data-status, stat-card testids, and compact progress", async () => {
     await render(
       <div>
         <StatusTag status="running" />
@@ -174,7 +174,7 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-stat-test").className).toContain("tone-waiting");
     expect(byTestId("monitor-stat-test").textContent).toContain("active runs");
     expect(byTestId("monitor-run-progress").textContent).toContain("4/5");
-    expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
+    expect(byTestId("monitor-run-progress").textContent).not.toContain("failed");
   });
 
   test("renders populated, loading, empty, offline, and unauthorized run-rail states", async () => {
@@ -203,7 +203,8 @@ describe("migrated monitor surfaces", () => {
     await rerender(<RunsTable runs={[run]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-runs-table")).toBeDefined();
     expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
-    expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
+    expect(byTestId("monitor-runs-table").textContent).toContain("Failed");
+    expect(byTestId("monitor-runs-table").textContent).toContain("1 failed");
   });
 });
 

@@ -17,12 +17,12 @@ export function RunProgressCell({ run }: { run: RunRow }) {
       title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}
     >
       {progress.done + progress.failed}/{progress.total}
-      {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
     </span>
   );
 }
 
 export function RunsTableRow({ run, onSelect }: { run: RunRow; onSelect: (runId: string) => void }) {
+  const failedTasks = failedTaskCountOf(run);
   return (
     <TableRow className="mon-runs-table-row" data-run-id={run.runId} onClick={() => onSelect(run.runId)}>
       <TableCell>
@@ -32,8 +32,9 @@ export function RunsTableRow({ run, onSelect }: { run: RunRow; onSelect: (runId:
       <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
         {run.workflowKey ?? "unknown"}
       </TableCell>
+      <TableCell><RunProgressCell run={run} /></TableCell>
       <TableCell>
-        <RunProgressCell run={run} /> <FailedTaskBadge count={failedTaskCountOf(run)} />
+        {failedTasks === undefined ? <span className="mon-dim">unknown</span> : failedTasks === 0 ? <span className="mon-dim">—</span> : <FailedTaskBadge count={failedTasks} />}
       </TableCell>
       <TableCell><RunEtaCell run={run} /></TableCell>
       <TableCell className="mon-dim">

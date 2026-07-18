@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useGatewayConnectionStatus, useGatewayRuns } from "smithers-orchestrator/gateway-react";
+import { useGatewayApprovals, useGatewayConnectionStatus, useGatewayRuns } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 import { SmithersUiStyles } from "smithers-orchestrator/ui";
 // Inlined at bundle time (Bun.build) — the gateway serves one self-contained
@@ -25,8 +25,9 @@ import { CronsPanel, OpsStrip } from "./monitorOps.tsx";
 import { RunDetail } from "./monitorRunDetail.tsx";
 import { ApprovalsInbox, RunsRail, RunsTable } from "./monitorRuns.tsx";
 import { useRunScores } from "./monitorScores.tsx";
-import { ConnectionBadge } from "./monitorShared.tsx";
-import { AttentionBanner } from "./monitorAttentionBanner.tsx";
+import { ConnectionBadge, useNowMs } from "./monitorShared.tsx";
+import { AttentionBannerView } from "./monitorAttentionBanner.tsx";
+import { workspaceAttention } from "./monitorAttentionModel.ts";
 
 export const monitorMode = embedModeFromSearch(typeof location === "undefined" ? "" : location.search);
 
@@ -73,6 +74,9 @@ export function App() {
   // window and let the landing table paginate client-side (RUNS_PAGE_SIZE).
   const runsQuery = useGatewayRuns({ filter: { limit: 1000 } });
   const allRuns = (runsQuery.data ?? []) as RunRow[];
+  const approvals = useGatewayApprovals().data ?? [];
+  const now = useNowMs();
+  const attention = useMemo(() => workspaceAttention(allRuns, approvals, now), [allRuns, approvals, now]);
   const [runsPage, setRunsPage] = useState(1);
   const selectedRun = allRuns.find((run) => run.runId === selectedRunId);
   const scores = useRunScores(selectedRunId, !isTerminalStatus(selectedRun?.status));
@@ -182,8 +186,8 @@ export function App() {
             />
           ) : (
             <div className="mon-overview">
-              <AttentionBanner runs={allRuns} onSelectRun={selectRun} />
-              <OpsStrip runs={allRuns} loading={runsQuery.loading ?? false} />
+              <AttentionBannerView items={attention.items.slice(0, 8)} total={attention.total} onSelectRun={selectRun} />
+              <OpsStrip runs={allRuns} loading={runsQuery.loading ?? false} attentionTotal={attention.total} />
               <RunsTable
                 runs={visibleRuns}
                 loading={runsQuery.loading ?? false}

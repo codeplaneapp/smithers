@@ -263,6 +263,7 @@ export function RunsTable({
               <TableHead scope="col">Run</TableHead>
               <TableHead scope="col">Workflow</TableHead>
               <TableHead scope="col">Progress</TableHead>
+              <TableHead scope="col">Failed</TableHead>
               <TableHead scope="col">ETA</TableHead>
               <TableHead scope="col">Started</TableHead>
               <TableHead scope="col">Duration</TableHead>

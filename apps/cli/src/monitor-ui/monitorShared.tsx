@@ -24,6 +24,9 @@ let clockTimer: ReturnType<typeof setInterval> | null = null;
 export function subscribeClock(callback: () => void): () => void {
   clockSubscribers.add(callback);
   if (!clockTimer) {
+    // The clock freezes whenever the last subscriber leaves, so a component
+    // mounting after an idle gap must not read that stale instant as "now".
+    clockNowMs = Date.now();
     clockTimer = setInterval(() => {
       clockNowMs = Date.now();
       for (const subscriber of clockSubscribers) subscriber();

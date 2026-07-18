@@ -12186,12 +12186,15 @@ The command resolves the workspace's singleton gateway the same way `bunx smithe
 
 ## What you see
 
-- **Workspace operations view**: a paginated all-runs landing page with search and filters, grouped run states, an operations summary, scheduled crons, and a Metrics view.
-- **Run health and controls**: an always-on health diagnosis with one-click recovery where available, plus Pause, Resume, Cancel, approvals, and run-level Scores.
-- **Execution history**: the live expandable tree or XML view, a chronological Timeline, and a frame scrubber for inspecting earlier committed states.
-- **Node investigation**: live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal for hijacking or reopening supported agent sessions.
-- **Events and navigation**: a filterable live event log with follow mode; shareable `?runId=` / `&nodeId=` deep links; and `?embed=1` for the focused embeddable run surface.
-- **Connection truth**: distinct Live, Connecting, Offline, and Unauthorized states with state-specific recovery guidance.
+The landing page is an operator-first surface. An attention banner leads with failed runs, waiting approvals, quota waits, and stale engines. The quiet operations strip then shows subscription windows and projected runout, workspace cost today, the shared attention count, active runs, and live engines. Subscription usage comes from `packages/usage`, the same normalized source used by `bunx smithers-orchestrator usage`.
+
+Workspace cost today is a capped client-side sum of runs started today on this gateway. It is not a billing total. The monitor fetches a bounded recent set of run token-usage records and labels skipped, failed, and unpriced coverage instead of presenting false precision. Costs are derived from persisted `TokenUsageReported` events and scorer `modelTokenPrices`; models without a price are shown as unpriced.
+
+The runs table has dedicated ETA and Failed columns alongside status, progress, start time, and duration. Selecting a run keeps every investigation surface on the same page: health, one compact identity/cost/ETA header band, recap, decisions, scores, footprint, execution tree with XML, timeline and frames, then the event log. The node inspector remains available at the right on desktop.
+
+The Metrics toggle is the only alternate landing branch. The runs rail, approvals inbox, URL deep links (`?runId=` and `?nodeId=`), and embed mode remain available.
+
+On desktop the rail and node inspector sit beside the main surface. Tablet uses an overlay inspector, and phone layouts stack panels. Tables, execution views, timelines, and event logs retain their own horizontal scrollports.
 
 ## How it relates to the other surfaces
 
