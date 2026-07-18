@@ -122,6 +122,9 @@ scripts/worktree-feature/*.db*
 smithers.db
 smithers.db-shm
 smithers.db-wal
+smithers.db.bak
+smithers.db.compact
+smithers.db.compact-journal
 workflows/*.db
 workflows/*.db-shm
 workflows/*.db-wal
