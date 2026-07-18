@@ -7534,6 +7534,25 @@ type RunAuthContext = {
 // Run
 // =============================================================================
 
+type SmithersErrorReport = {
+  readonly error: SmithersError;
+  readonly rawError: unknown;
+  readonly runId: string;
+} & (
+  | {
+      readonly phase: "run";
+      readonly nodeId?: undefined;
+      readonly iteration?: undefined;
+      readonly attempt?: undefined;
+    }
+  | {
+      readonly phase: "node";
+      readonly nodeId: string;
+      readonly iteration: number;
+      readonly attempt: number;
+    }
+);
+
 type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
@@ -7542,6 +7561,7 @@ type RunOptions = {
   maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
+  onError?: (report: SmithersErrorReport) => void;  // once per NodeFailed or RunFailed occurrence
   signal?: AbortSignal;
   pauseSignal?: AbortSignal;        // graceful pause: stop scheduling, let in-flight finish, park `paused`
   resume?: boolean;
@@ -9183,6 +9203,22 @@ type SmithersLogFormat = "json" | "pretty";
 type SmithersObservabilityService = { emit(event: SmithersEvent): void | Promise<void> };
 type SmithersObservabilityOptions = { service?: SmithersObservabilityService; logFormat?: SmithersLogFormat };
 type ResolvedSmithersObservabilityOptions = SmithersObservabilityOptions & { metricsPort?: number; metricsPath?: string };
+```
+
+## Error reporting
+
+`RunOptions.onError` receives a normalized `SmithersError` plus the original
+error value and the available run, node, iteration, and attempt context. It
+fires once for each `NodeFailed` or `RunFailed` event. A retrying task therefore
+produces one node report per failed attempt, and a terminal run failure adds a
+run report. Smithers catches reporter failures so they cannot change the run
+outcome.
+
+```ts
+runWorkflow(workflow, {
+  input: {},
+  onError: (r) => Sentry.captureException(r.error, { extra: { runId: r.runId, nodeId: r.nodeId, phase: r.phase } }),
+});
 ```
 
 For canonical, machine-checked types, install `smithers-orchestrator` and use editor go-to-definition. For runtime errors, see [Errors](/reference/errors).
