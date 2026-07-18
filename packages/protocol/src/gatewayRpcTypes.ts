@@ -54,6 +54,7 @@ export type GatewayRpcMethod =
   | "getNodeDiff"
   | "getRunDiff"
   | "whatHappened"
+  | "runRecap"
   | "cronList"
   | "cronCreate"
   | "cronDelete"
@@ -327,6 +328,10 @@ export type WhatHappenedResponse = {
   cached: boolean;
   generatedAtMs: number;
 };
+
+export type RunRecapRequest = { runId: string; sinceSeq?: number };
+export type RunRecapHistoryEntry = { fromSeq: number; toSeq: number; summary: string; agentId: string | null; source: "agent" | "facts"; generatedAtMs: number };
+export type RunRecapResponse = RunRecapHistoryEntry & { runId: string; scope: "run"; eventsConsidered: number; notableEvents: number; cached: boolean; history: RunRecapHistoryEntry[] };
 
 export type CronListRequest = {
   filter?: {

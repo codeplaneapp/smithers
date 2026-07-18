@@ -42,6 +42,8 @@
 /** @typedef {import("./gatewayRpcTypes.ts").NodeRequest} NodeRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").WhatHappenedRequest} WhatHappenedRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").WhatHappenedResponse} WhatHappenedResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").RunRecapRequest} RunRecapRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").RunRecapResponse} RunRecapResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").CronListRequest} CronListRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").CronCreateRequest} CronCreateRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").CronDeleteRequest} CronDeleteRequest */

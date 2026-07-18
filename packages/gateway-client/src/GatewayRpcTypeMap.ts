@@ -46,6 +46,8 @@ import type {
   SubmitSignalRequest,
   WhatHappenedRequest,
   WhatHappenedResponse,
+  RunRecapRequest,
+  RunRecapResponse,
   GetRunRequest,
   GetRunDiffRequest,
   GetRunDiffResponse,
@@ -79,6 +81,7 @@ export type GatewayRpcRequestMap = {
   getNodeDiff: NodeRequest;
   getRunDiff: GetRunDiffRequest;
   whatHappened: WhatHappenedRequest;
+  runRecap: RunRecapRequest;
   cronList: CronListRequest;
   cronCreate: CronCreateRequest;
   cronDelete: CronDeleteRequest;
@@ -117,6 +120,7 @@ export type GatewayRpcResponseMap = {
   getNodeDiff: Record<string, unknown>;
   getRunDiff: GetRunDiffResponse;
   whatHappened: WhatHappenedResponse;
+  runRecap: RunRecapResponse;
   cronList: GatewayCronRow[];
   cronCreate: Record<string, unknown>;
   cronDelete: Record<string, unknown>;

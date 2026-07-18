@@ -535,6 +535,10 @@ export class SmithersGatewayClient {
     return this.rpc("whatHappened", params);
   }
 
+  runRecap(params: GatewayRpcParams<"runRecap">) {
+    return this.rpc("runRecap", params);
+  }
+
   cronList(params: GatewayRpcParams<"cronList"> = {}) {
     return this.rpc("cronList", params);
   }

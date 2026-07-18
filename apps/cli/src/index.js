@@ -63,7 +63,7 @@ import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
 import { buildAgentNextSteps } from "./agentNextSteps.js";
 import { generateRunReport } from "./runReport.js";
-import { whatHappened } from "./what-happened.js";
+import { runRecap, whatHappened } from "./what-happened.js";
 import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
@@ -3393,6 +3393,7 @@ async function runGatewayCommand(options) {
             });
             return { summary: result.summary, agentId: result.agentId, source: result.source };
         },
+        runRecap: async ({ runId, fromSeq, toSeq, events, adapter }) => runRecap({ adapter, runId, fromSeq, toSeq, events, cwd: workspace }),
         ...(auth ? { auth } : {}),
         // `--insecure` (a deliberate unauthenticated non-loopback bind) must
         // trust any Host, or the daemon binds but 403s every LAN request.

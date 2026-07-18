@@ -330,3 +330,42 @@ export async function whatHappened(params) {
     }
     return { summary: renderWhatFallback(facts), agentId: null, source: "facts", facts };
 }
+
+const RECAP_SYSTEM_PROMPT = [
+    "Summarize new workflow-run activity for an operator using only the supplied event facts.",
+    "State the outcome first, then short plain-text bullets for failures, retries, approvals, and handoffs.",
+    "Do not use markdown headings, invent details, or exceed 120 words.",
+].join("\n");
+
+/** Build a bounded, tolerant event transcript supplied by the Gateway route. */
+export function buildRecapContext(events) {
+    let size = 0;
+    const lines = [];
+    for (const event of (Array.isArray(events) ? events : []).slice(0, 250)) {
+        const payload = event?.payloadJson ?? event?.payload_json ?? event?.payload ?? {};
+        let printed;
+        try { printed = typeof payload === "string" ? payload : JSON.stringify(payload); } catch { printed = "{}"; }
+        const line = `#${event?.seq ?? event?.sequence ?? "?"} ${event?.type ?? "Event"}: ${String(printed).slice(0, 600)}`;
+        if (size + line.length > MAX_CONTEXT_CHARS) break;
+        size += line.length;
+        lines.push(line);
+    }
+    return lines.join("\n");
+}
+
+/** Host narrator for the Gateway runRecap route; it never throws for agent failures. */
+export async function runRecap(params) {
+    const context = buildRecapContext(params.events);
+    const candidates = params.candidates ?? listNarratorCandidates(params.env ?? process.env, params.cwd ?? process.cwd());
+    for (const candidate of candidates) {
+        try {
+            const generated = await candidate.build(RECAP_SYSTEM_PROMPT).generate({
+                prompt: `Run ${params.runId}, events ${params.fromSeq} through ${params.toSeq}:\n\n${context}`,
+                timeout: { totalMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+            });
+            const summary = cleanWhatSummary(typeof generated === "string" ? generated : (generated?.text ?? ""));
+            if (summary) return { summary, agentId: candidate.id, source: "agent" };
+        } catch { /* Try the next configured narrator. */ }
+    }
+    return { summary: "", agentId: null, source: "facts" };
+}

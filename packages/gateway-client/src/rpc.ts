@@ -75,4 +75,6 @@ export type {
   UpdateTicketRequest,
   WhatHappenedRequest,
   WhatHappenedResponse,
+  RunRecapRequest,
+  RunRecapResponse,
 } from "@smithers-orchestrator/protocol/gateway-rpc";

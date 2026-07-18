@@ -45,6 +45,8 @@
 /** @typedef {import("./gatewayRpcTypes.ts").NodeRequest} NodeRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").WhatHappenedRequest} WhatHappenedRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").WhatHappenedResponse} WhatHappenedResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").RunRecapRequest} RunRecapRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").RunRecapResponse} RunRecapResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").CronListRequest} CronListRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").CronCreateRequest} CronCreateRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").CronDeleteRequest} CronDeleteRequest */
@@ -679,6 +681,25 @@ export const GATEWAY_RPC_DEFINITIONS = [
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "NodeNotFound", "Internal"],
     exampleRequest: { runId: "run_01", nodeId: "implement", iteration: 0 },
     exampleResponse: { runId: "run_01", nodeId: "implement", iteration: 0, scope: "node", summary: "The implement step finished in 42s after one retry.", agentId: "codex", source: "agent", cached: false, generatedAtMs: 1751000000000 },
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "runRecap",
+    title: "Run Recap",
+    description: "Summarize notable new activity in a run. The Gateway keeps a per-run watermark and recap history in memory.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "run:read",
+    requestSchema: objectSchema({ runId, sinceSeq: integerSchema("Optional exclusive scan watermark; the recap covers events with seq greater than this.", 0) }, ["runId"]),
+    responseSchema: objectSchema({
+      runId, scope: { type: "string", enum: ["run"] }, fromSeq: integerSchema("Starting event watermark."), toSeq: integerSchema("Ending event watermark."),
+      eventsConsidered: integerSchema("Event rows read."), notableEvents: integerSchema("Notable event rows summarized."), summary: stringSchema("Plain-text recap."),
+      agentId: { type: ["string", "null"] }, source: { type: "string", enum: ["agent", "facts"] }, cached: booleanSchema("Whether this recap was cached."), generatedAtMs: integerSchema("Unix epoch milliseconds.", 0),
+      history: arraySchema(objectSchema({ fromSeq: integerSchema("Starting watermark."), toSeq: integerSchema("Ending watermark."), summary: stringSchema("Recap."), agentId: { type: ["string", "null"] }, source: { type: "string", enum: ["agent", "facts"] }, generatedAtMs: integerSchema("Unix epoch milliseconds.", 0) }, ["fromSeq", "toSeq", "summary", "agentId", "source", "generatedAtMs"])),
+    }, ["runId", "scope", "fromSeq", "toSeq", "eventsConsidered", "notableEvents", "summary", "agentId", "source", "cached", "generatedAtMs", "history"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "Internal"],
+    exampleRequest: { runId: "run_01" },
+    exampleResponse: { runId: "run_01", scope: "run", fromSeq: 0, toSeq: 12, eventsConsidered: 12, notableEvents: 3, summary: "The run started and completed.", agentId: "codex", source: "agent", cached: false, generatedAtMs: 1751000000000, history: [] },
   },
   {
     version: SMITHERS_API_VERSION,

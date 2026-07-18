@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { buildWhatContext, cleanWhatSummary, renderWhatFallback, whatHappened } from "../src/what-happened.js";
+import { buildRecapContext, buildWhatContext, cleanWhatSummary, renderWhatFallback, runRecap, whatHappened } from "../src/what-happened.js";
 
 const NOW = Date.UTC(2026, 0, 2, 3, 4, 5);
 
@@ -232,5 +232,19 @@ describe("renderWhatFallback", () => {
         expect(summary).toContain("Run run-1 (deploy) failed in 3m 2s; 4 steps recorded.");
         expect(summary).toContain("run error: SESSION_ERROR");
         expect(summary).toContain('step "push" failed: rejected');
+    });
+});
+
+describe("runRecap narrator", () => {
+    test("bounds and formats the route-supplied event delta", () => {
+        const context = buildRecapContext([{ seq: 2, type: "NodeFailed", payload_json: "{\"message\":\"boom\"}" }]);
+        expect(context).toContain("#2 NodeFailed");
+        expect(context).toContain("boom");
+        expect(buildRecapContext(Array.from({ length: 300 }, (_, seq) => ({ seq, type: "NodeFinished", payload: "x".repeat(600) }))).length).toBeLessThanOrEqual(12_000);
+    });
+
+    test("returns a deterministic facts signal when no narrator can answer", async () => {
+        const result = await runRecap({ runId: "run-what", fromSeq: 1, toSeq: 2, events: [], candidates: [{ id: "mute", build: () => ({ generate: async () => "  " }) }] });
+        expect(result).toEqual({ summary: "", agentId: null, source: "facts" });
     });
 });

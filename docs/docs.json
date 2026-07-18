@@ -451,6 +451,7 @@
               "rpc/get-node-diff",
               "rpc/get-run-diff",
               "rpc/what-happened",
+              "rpc/run-recap",
               "rpc/get-dev-tools-snapshot",
               "rpc/list-tickets",
               "rpc/create-ticket",

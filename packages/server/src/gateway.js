@@ -39,6 +39,7 @@ import { getRunDiffRoute } from "./gatewayRoutes/getRunDiff.js";
 import { WhatHappenedRouteError, whatHappenedRoute } from "./gatewayRoutes/whatHappened.js";
 import { aggregateTokenUsageEvents } from "./gatewayRoutes/getRunTokenUsage.js";
 import { getGatewayAccountUsage } from "./gatewayRoutes/getAccountUsage.js";
+import { RunRecapRouteError, runRecapRoute } from "./gatewayRoutes/runRecap.js";
 import { DevToolsRouteError, getDevToolsSnapshotRoute, validateFrameNoInput, validateFromSeqInput, validateRunId } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
@@ -2447,8 +2448,11 @@ export class Gateway {
         // agent here). Null means the whatHappened RPC answers with the
         // deterministic fact summary only — the Gateway itself never calls an LLM.
         this.whatHappenedNarrator = typeof options.whatHappened === "function" ? options.whatHappened : null;
+        this.runRecapNarrator = typeof options.runRecap === "function" ? options.runRecap : null;
         /** @type {Map<string, { payload: Record<string, unknown> }>} */
         this.whatHappenedCache = new Map();
+        this.runRecapCache = new Map();
+        this.runRecapHistory = new Map();
         // Host-injected PTY hijack launcher (the smithers CLI wires `smithers
         // hijack <runId> [--target <nodeId>]` here). Null disables the
         // /v1/pty/hijack websocket channel — the Gateway itself never guesses
@@ -7972,6 +7976,10 @@ a { color: var(--brand); }</style>
                     }
                     throw error;
                 }
+            }
+            case "runRecap": {
+                try { return responseOk(frame.id, await runRecapRoute({ ...params, resolveRun: this.resolveRun.bind(this), summarize: this.runRecapNarrator, cache: this.runRecapCache, history: this.runRecapHistory })); }
+                catch (error) { if (error instanceof RunRecapRouteError) return responseError(frame.id, error.code, error.message); throw error; }
             }
             case "getDevToolsSnapshot": {
                 const runId = asString(params.runId);

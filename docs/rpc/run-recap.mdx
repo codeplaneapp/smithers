@@ -1,0 +1,25 @@
+---
+title: runRecap
+description: Gateway RPC for a plain-language recap of new run activity.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `runRecap`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, sinceSeq? }`
+- Response: `{ runId, scope, fromSeq, toSeq, eventsConsidered, notableEvents, summary, agentId, source, cached, generatedAtMs, history }`
+
+The Gateway summarizes notable activity after `sinceSeq` (exclusive), or after
+the latest in-memory scan watermark. That watermark tracks how far the Gateway
+has read, independently of the recap history: a scan that finds nothing
+notable still advances it, and replays report the scan frontier as `toSeq` so
+pollers stop once the Gateway has looked at their events. A `sinceSeq` past
+the end of the run clamps to the last event, so `fromSeq` never exceeds
+`toSeq`. Watermark-pinned cache entries are safe for live runs because their
+event interval cannot change. It retains the 20 most recent recaps per run,
+for at most 500 runs. A Gateway restart resets that in-memory history, so the
+next recap covers the whole run again.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, and `Internal`.
