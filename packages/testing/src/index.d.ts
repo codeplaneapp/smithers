@@ -300,13 +300,22 @@ type E2eRealProcessHarnessConfig = Readonly<{
     readonly killSignal?: string;
     readonly resumeOwner?: string;
 }>;
+/** Transition context handed to an adapter's injectFault at the exact operation/phase boundary. */
+type AdapterFaultContext = Readonly<{
+    readonly operation?: string;
+    readonly phase?: string;
+    readonly stepId?: string;
+    readonly input?: unknown;
+    readonly invoked?: boolean;
+    readonly result?: unknown;
+}>;
 type HarnessAdapter = Readonly<{
     readonly identity: string;
     readonly verifiedProductionIdentity?: string;
     readonly admissionProbe: () => void | Promise<void>;
     readonly cleanup?: () => void | Promise<void>;
     readonly runStep?: (...args: readonly unknown[]) => unknown | Promise<unknown>;
-    readonly injectFault?: (fault: ScenarioFault) => unknown | Promise<unknown>;
+    readonly injectFault?: (fault: ScenarioFault, context?: AdapterFaultContext) => unknown | Promise<unknown>;
     readonly supportedCutPoints?: ReadonlySet<string>;
     readonly serializeError?: (error: unknown) => unknown;
     readonly extensions?: ReadonlySet<string>;
@@ -355,6 +364,32 @@ declare class SimulationError extends Error {
     readonly fidelity = "simulation";
     constructor(message: string, code: string, details?: unknown | undefined);
 }
+type SimulationNativeErrorSpec = Readonly<{
+    readonly className: string;
+    readonly message: string;
+    readonly name?: string;
+    readonly code?: string;
+    readonly summary?: string;
+    readonly details?: unknown;
+    readonly docsUrl?: string;
+    readonly cause?: unknown;
+    /** Extra native own-fields (for example SQLite `errno`). */
+    readonly extra?: Readonly<Record<string, unknown>>;
+}>;
+declare const simulationNativeError: (spec: SimulationNativeErrorSpec) => Error;
+/**
+ * Simulation double for the production `SmithersError` boundary shape:
+ * `message = summary + " See " + docsUrl` with own name/code/summary/docsUrl/
+ * details/cause fields, mirroring packages/errors SmithersError.
+ */
+declare const simulationSmithersError: (code: string, summary: string, options?: Readonly<{
+    readonly details?: unknown;
+    readonly cause?: unknown;
+    readonly docsUrl?: string;
+    readonly name?: string;
+}>) => Error;
+declare const serializeSimulationDurableError: (value: unknown) => unknown;
+declare const serializeBoundaryError: (value: unknown) => unknown;
 
 type AmbiguityOutcome = "duplicate-delivery" | "effect-applied-journal-missing" | "journal-applied-ack-missing" | "lease-lost" | "cancellation-race" | "restart-in-task" | "lost-wakeup";
 type AmbiguityResult = Readonly<{
@@ -768,7 +803,14 @@ type RealProcessObservation = Readonly<{
     readonly resumedOutputPersisted?: boolean;
 }>;
 type RealProcessAdapterOptions = Readonly<{
+    /** Launch input for the ACTUAL production runWorkflow child. Invoked only by
+     * runStep("runWorkflow") — never during admission — so a scenario that
+     * schedules no runWorkflow step provably executes no target workflow. */
     readonly spawn: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
+    /** Launch input for the admission identity/liveness probe: a child of the
+     * same repository-owned runner that completes the `probe:<nonce>` handshake
+     * and exits 0 WITHOUT executing the target workflow. */
+    readonly probe: (nonce: string) => RealProcessResource | Promise<RealProcessResource>;
     /** Absolute path to the repository-owned engineChildRunner. Required proof of identity. */
     readonly runnerPath: string;
     readonly identity?: string;
@@ -777,4 +819,4 @@ type RealProcessAdapterOptions = Readonly<{
 }>;
 declare const realProcessAdapter: (options: RealProcessAdapterOptions) => HarnessAdapter;
 
-export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, type ClaimAttemptCompletionInput, type ClaimRunForResumeInput, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, type E2eRealProcessHarnessConfig, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, type HeartbeatRunInput, type IntegrationRealDbHarnessConfig, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbOperationMap, type RealDbResource, type RealProcessAdapterOptions, type RealProcessObservation, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, type UnitSimHarnessConfig, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectAmbiguity, expectEffect, expectTrace, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realDbCutPoints, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };
+export { type AdapterFaultContext, type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, type ClaimAttemptCompletionInput, type ClaimRunForResumeInput, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, type E2eRealProcessHarnessConfig, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, type HeartbeatRunInput, type IntegrationRealDbHarnessConfig, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbOperationMap, type RealDbResource, type RealProcessAdapterOptions, type RealProcessObservation, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type SimulationNativeErrorSpec, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, type UnitSimHarnessConfig, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectAmbiguity, expectEffect, expectTrace, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realDbCutPoints, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeBoundaryError, serializeReplayBundle, serializeSimulationDurableError, shrink, simulationNativeError, simulationSmithersError, step, unitSimHarness };

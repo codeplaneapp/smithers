@@ -30,7 +30,7 @@ describe("testing framework real-db admission", () => {
       close: () => { client.close(); },
     });
     const harness = integrationHarness({ adapter: realDbAdapter({ open: async () => productionResource }) });
-    const result = await runScenario(scenario("real-db", { steps: [step("observed", { run: async (_runtime, input) => input ?? "executed" })] }), { harness });
+    const result = await runScenario(scenario("real-db", { steps: [step("observed", { runnerBinding: "e2e:real-db:admission-observed:v1", run: (_runtime, input) => input ?? "executed" })] }), { harness });
     expect(result.status).toBe("finished"); expect(result.outputs.observed).toBe("executed");
     const verify = new SmithersDb(new (await import("bun:sqlite")).Database(dbPath));
     try { const durableRows = await verify.listRuns(20, "running", "testing-framework"); expect(durableRows.some((row) => row.runId.startsWith("testing-admission-"))).toBe(true); } finally { verify.db.close(); }

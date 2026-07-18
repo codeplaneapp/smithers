@@ -46,6 +46,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260701.1",
     "@effect/platform-bun": "^0.90.0",
+    "@smithers-orchestrator/errors": "workspace:*",
     "@types/better-sqlite3": "^7.6.11",
     "@types/bun": "latest",
     "@types/ws": "^8.18.1",

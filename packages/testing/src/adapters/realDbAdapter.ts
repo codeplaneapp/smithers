@@ -1,5 +1,5 @@
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { registerTrustedAdapter, type HarnessAdapter } from "../harness/Harness.ts";
+import { registerTrustedAdapter, type AdapterFaultContext, type HarnessAdapter } from "../harness/Harness.ts";
 import { realDbCutPoints } from "./realDbCutPoints.ts";
 import { existsSync } from "node:fs";
 
@@ -32,13 +32,25 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
     if (value && typeof (value as unknown as { then?: unknown }).then === "function") return await value;
     return value as T;
   };
+  // Advertise ONLY the cut points this adapter can execute at a production
+  // SmithersDb transition (claimAttemptCompletion/completeRun ↦
+  // completion-cas, claimRunForResume ↦ resume, heartbeatRun ↦ heartbeat,
+  // requestRunCancel/claimRunCancellation ↦ cancellation).
+  // heartbeat:during-task executes a REAL claimRunForResume takeover whose
+  // fencing rejects the old owner's production heartbeat, and
+  // cancellation:during-task executes the REAL completion CAS against the
+  // committed cancel request; both outcomes are read back from durable state
+  // in injectFault. A free-standing `lease:*` operation has no production
+  // seam of its own here, so it is deliberately absent and fails admission
+  // instead of degrading to simulation.
+  const executableCutPoints = new Set([
+    "completion-cas:before-task", "completion-cas:after-task", "completion-cas:after-journal-before-ack",
+    "resume:before-task", "heartbeat:during-task", "cancellation:during-task",
+  ]);
   return registerTrustedAdapter({
     identity: options.identity ?? "real-db:sqlite",
     verifiedProductionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
-    supportedCutPoints: new Set([
-      "completion-cas:after-task", "completion-cas:after-journal-before-ack", "resume:before-task",
-      "heartbeat:during-task", "lease:during-task", "cancellation:during-task",
-    ]),
+    supportedCutPoints: executableCutPoints,
     admissionProbe: async () => {
       resource = await options.open();
       if (!(resource instanceof SmithersDb) || !resource.db || typeof resource.insertRun !== "function" || typeof resource.heartbeatRun !== "function" || typeof resource.close !== "function") {
@@ -94,11 +106,75 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
       if (!fn) throw new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)}`);
       return (fn as (...values: readonly unknown[]) => unknown).apply(resource, [...args]);
     },
-    injectFault: async (fault) => {
+    injectFault: async (fault, context?: AdapterFaultContext) => {
       if (!resource) throw new Error("REAL_DB_NOT_ADMITTED");
-      const operation = resource.operations?.[`${fault.operation}:${fault.phase}`];
-      if (!operation) throw Object.assign(new Error(`REAL_DB_FAULT_UNAVAILABLE:${fault.operation}:${fault.phase}`), { code: "ADMISSION_FAILED" });
-      await (operation as (...values: readonly unknown[]) => unknown)(fault);
+      const pair = `${fault.operation}:${fault.phase}`;
+      if (!executableCutPoints.has(pair)) throw Object.assign(new Error(`REAL_DB_FAULT_UNAVAILABLE:${pair}`), { code: "ADMISSION_FAILED" });
+      // The fault fires AT the production transition; the adapter's part is a
+      // native durable-state observation read back through the admitted
+      // SmithersDb, so receipts prove what the real database recorded on each
+      // side of the cut point rather than echoing the fault declaration.
+      const input = (context?.input ?? undefined) as Readonly<{ runId?: string; nodeId?: string; iteration?: number; attempt?: number }> | undefined;
+      const production = resource as unknown as Record<string, (...values: readonly unknown[]) => unknown>;
+      const readRun = async (runId: string) => await runDb(production.getRun(runId)) as Readonly<{ status?: string; runtimeOwnerId?: string | null; heartbeatAtMs?: number | null; cancelRequestedAtMs?: number | null }> | undefined;
+      const runProjection = (run: Awaited<ReturnType<typeof readRun>>) => ({ status: run?.status ?? null, runtimeOwnerId: run?.runtimeOwnerId ?? null, heartbeatAtMs: run?.heartbeatAtMs ?? null, cancelRequestedAtMs: run?.cancelRequestedAtMs ?? null });
+      const observed: Record<string, unknown> = {};
+      if (input?.runId && input.nodeId !== undefined && typeof production.getAttempt === "function") {
+        const attempt = await runDb(production.getAttempt(input.runId, input.nodeId, input.iteration ?? 0, input.attempt ?? 1)) as Readonly<{ state?: string; finishedAtMs?: number | null; runtimeOwnerId?: string | null }> | undefined;
+        if (attempt) observed.attempt = { state: attempt.state, finishedAtMs: attempt.finishedAtMs ?? null, runtimeOwnerId: attempt.runtimeOwnerId ?? null };
+      }
+      // During-task ambiguities are EXECUTED production transitions, never
+      // declaration echoes: lease loss is a real claimRunForResume takeover
+      // whose fencing then rejects the old owner's production heartbeat, and a
+      // cancellation race is the production completion CAS genuinely losing to
+      // the committed cancel request. Each outcome is read back from durable
+      // state so the middleware can refuse to claim an ambiguity the database
+      // never recorded.
+      if (fault.phase === "during-task" && context?.invoked === true && input?.runId && typeof production.getRun === "function") {
+        if (fault.operation === "heartbeat" && typeof resource.claimRunForResume === "function" && typeof resource.heartbeatRun === "function") {
+          const before = await readRun(input.runId);
+          const fencingOwner = "testing-fencing-owner";
+          // A lease nobody holds cannot be lost: without a current owner the
+          // takeover is not attempted and the receipt reports it un-executed.
+          const previousOwner = typeof before?.runtimeOwnerId === "string" ? before.runtimeOwnerId : null;
+          const claimHeartbeatAtMs = (before?.heartbeatAtMs ?? 0) + 1;
+          const takeoverClaimed = previousOwner !== null && await runDb(resource.claimRunForResume({
+            runId: input.runId, expectedStatus: before?.status ?? "running", expectedRuntimeOwnerId: previousOwner,
+            expectedHeartbeatAtMs: before?.heartbeatAtMs ?? null, staleBeforeMs: claimHeartbeatAtMs,
+            claimOwnerId: fencingOwner, claimHeartbeatAtMs, requireStale: false,
+          })) === true;
+          const rejectedHeartbeatAtMs = claimHeartbeatAtMs + 1;
+          if (takeoverClaimed && previousOwner !== null) await runDb(resource.heartbeatRun(input.runId, previousOwner, rejectedHeartbeatAtMs));
+          const after = await readRun(input.runId);
+          observed.leaseTakeover = {
+            executed: takeoverClaimed,
+            previousOwner,
+            fencingOwner,
+            oldOwnerHeartbeatRejected: takeoverClaimed && after?.runtimeOwnerId === fencingOwner && after?.heartbeatAtMs === claimHeartbeatAtMs,
+            before: runProjection(before),
+            after: runProjection(after),
+          };
+        }
+        if (fault.operation === "cancellation" && typeof resource.completeRun === "function") {
+          const before = await readRun(input.runId);
+          const completionOwner = before?.runtimeOwnerId ?? "owner";
+          const completionAdmitted = await runDb(resource.completeRun(input.runId, completionOwner, (before?.cancelRequestedAtMs ?? 0) + 1)) === true;
+          const after = await readRun(input.runId);
+          observed.cancellationRace = {
+            executed: true,
+            cancelRequested: (before?.cancelRequestedAtMs ?? null) !== null,
+            completionRejected: !completionAdmitted && after?.status !== "finished",
+            winner: completionAdmitted ? "completion" : "cancellation",
+            before: runProjection(before),
+            after: runProjection(after),
+          };
+        }
+      }
+      if (input?.runId && typeof production.getRun === "function") {
+        const run = await readRun(input.runId);
+        if (run) observed.run = { status: run.status, runtimeOwnerId: run.runtimeOwnerId ?? null, heartbeatAtMs: run.heartbeatAtMs ?? null, cancelRequestedAtMs: run.cancelRequestedAtMs ?? null };
+      }
+      return { operation: fault.operation, phase: fault.phase, executed: true, invoked: context?.invoked === true, productionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb", result: context?.result, observed };
     },
     serializeError: options.serializeError,
     extensionExecutors: options.extensionExecutors,

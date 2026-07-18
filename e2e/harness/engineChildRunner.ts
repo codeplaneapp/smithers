@@ -13,7 +13,15 @@ import {
  * (or resumes) it.
  *
  * Usage:
- *   bun engineChildRunner.ts <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs]
+ *   bun engineChildRunner.ts <dbPath> <runId> <initial|resume|probe> <markerDir> <counterFile> [bSleepMs]
+ *
+ * Mode "probe" is the realProcessAdapter ADMISSION protocol: it proves the
+ * repository production runner boots and can open/bootstrap the real on-disk
+ * database (production createSmithers + ensureSmithersTables), prints
+ * `SMITHERS_ENGINE_HANDSHAKE=probe:<nonce>` and `PROBE_STATUS=ok`, and exits 0
+ * WITHOUT executing the target workflow — admission liveness probing is
+ * deliberately separated from the runWorkflow transition, which only a
+ * runStep-spawned "initial" child performs.
  *
  * It prints a single machine-readable line to stdout when the run resolves:
  *   RESULT_STATUS=<status>
@@ -43,14 +51,26 @@ async function main(): Promise<void> {
       "missing args: <dbPath> <runId> <initial|resume> <markerDir> <counterFile> [bSleepMs]",
     );
   }
-  if (modeArg !== "initial" && modeArg !== "resume") {
-    fail(`invalid mode ${modeArg}; expected "initial" or "resume"`);
+  if (modeArg !== "initial" && modeArg !== "resume" && modeArg !== "probe") {
+    fail(`invalid mode ${modeArg}; expected "initial", "resume", or "probe"`);
+  }
+  // These are the authenticated production-runner protocol markers consumed by
+  // realProcessAdapter; an arbitrary long-lived child cannot pass real-process
+  // admission or the runWorkflow transition by merely claiming a name in
+  // memory. The probe and runWorkflow phases use DISTINCT markers so an
+  // admission probe can never be replayed as workflow-transition evidence.
+  if (!nonce) fail("missing adapter nonce");
+  if (modeArg === "probe") {
+    process.stdout.write(`SMITHERS_ENGINE_HANDSHAKE=probe:${nonce}\n`);
+    // Prove the production system is executable from this runner — real db
+    // bootstrap through production modules — without running the target
+    // workflow: no marker files, no attempt rows, no runWorkflow call.
+    const { db } = buildKillResumeWorkflow({ dbPath, markerDir, counterFile, mode: "resume" });
+    ensureSmithersTables(db);
+    process.stdout.write("PROBE_STATUS=ok\n");
+    process.exit(0);
   }
   const mode: EngineChildMode = modeArg;
-  // This is the authenticated production-runner protocol marker consumed by
-  // realProcessAdapter admission; an arbitrary long-lived child cannot pass
-  // real-process admission by merely claiming a name in memory.
-  if (!nonce) fail("missing adapter nonce");
   process.stdout.write(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}\n`);
   const bSleepMs = bSleepMsArg ? Number(bSleepMsArg) : undefined;
 
