@@ -190,9 +190,11 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
         const workflow = <Workflow name="consumer"><Task id="task" output="task">hi</Task></Workflow>;
         const create: typeof createSmithers = createSmithers;
         const api = create({}) satisfies CreateSmithersApi<Record<string, never>>;
-        const props: TaskProps = { id: "typed", output: "typed", children: "ok" };
+        const props: TaskProps<unknown> = { id: "typed", output: "typed", children: "ok" };
+        // @ts-expect-error The published TaskProps facade must reject a missing id.
+        const invalidProps: TaskProps<unknown> = { output: "typed" };
         let flow: SmithersWorkflow<Record<string, never>> | undefined;
-        void [api, defineTool, jsx, runTask, gatewayClient, gatewayReact, scorers, sandbox, cloudflare, props, flow, workflow];
+        void [api, defineTool, jsx, runTask, gatewayClient, gatewayReact, scorers, sandbox, cloudflare, props, invalidProps, flow, workflow];
       `,
     );
 
