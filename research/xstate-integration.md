@@ -1,9 +1,10 @@
 # XState integration: durable derived control state
 
-Status: proposed, revision 2 (2026-07-18) — revised after an adversarial sol
-(GPT-5.6) review returned NEEDS-REWORK on rev 1. Direction upheld; five
-blockers accepted and folded in below. Rev 1's per-finding dispositions are in
-the "Review response" section at the end.
+Status: revision 3 (2026-07-18) — rev 1 reviewed by sol (NEEDS-REWORK, all
+findings folded into rev 2); rev 2 + the landed Phase 0 implementation
+reviewed by a Fable subagent (APPROVE-WITH-CHANGES, all findings folded in
+here). Phase 0 is implemented; Phase 1 not yet started. Per-finding
+dispositions for both reviews are in the "Review response" sections at the end.
 Owner: will@tevm.tech
 
 ## Verdict
@@ -12,7 +13,8 @@ Ship XState as an **optional derived-state layer** over the existing durable
 rows — not as a backend, not as a scheduler, and not as a persisted actor. The
 machine's current state is **recomputed as a pure fold over durable output
 rows** using XState v5's pure `initialTransition` / `transition` functions
-(xstate ≥ 5.19, current 5.32.x). Nothing about the machine is persisted;
+(peer range `^5.19.0`; pin the concrete version in Phase 1's lockfile).
+Nothing about the machine is persisted;
 resume, fork, and (once a known core defect is fixed) rewind are correct
 because the fold's inputs are exactly the rows those features restore.
 
@@ -23,18 +25,19 @@ unsound ordering and signal/timeout semantics.
 
 ```tsx
 import { setup } from "xstate";
-import { useSmithersMachine, taskOutput, approvalDecided, eventReceived } from "smithers-orchestrator/xstate";
+import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smithers-orchestrator/xstate";
 
 function Release() {
   const ctx = useCtx();
+  // Event sources are pure functions of ctx — never of machine state.
   const state = useSmithersMachine(releaseMachine, {
     id: "release",
     input: ctx.input,
     events: [
       taskOutput(researchSchema, { nodeId: "research" }, () => ({ type: "RESEARCH_DONE" })),
       approvalDecided(gateSchema, { nodeId: "gate" }, (d) => (d.approved ? { type: "APPROVED" } : { type: "REJECTED" })),
-      eventReceived(reviseSchema, { nodeId: revisionListenerId }, (r) =>
-        r.kind === "timeout" ? { type: "TIMEOUT" } : { type: "REVISE", feedback: r.payload.feedback }),
+      eventReceived("REVISE", reviseSchema, (p) => ({ type: "REVISE", feedback: p.feedback })),
+      timedOut(reviseWaitSchema, { scope: "revise" }, () => ({ type: "TIMEOUT" })),
     ],
   });
   // revision counter lives in machine context; it versions task identity below
@@ -57,7 +60,10 @@ function Release() {
           <Task id={`draft-r${rev}`} output={draftSchema} agent={writer} deps={{ research: researchSchema }}>
             {(deps) => `Write a report from:\n${deps.research.findings}`}
           </Task>
-          <WaitForEvent id={`revise-r${rev}`} event="REVISE" output={reviseSchema} timeoutMs={86_400_000} onTimeout="continue" async />
+          {/* Wake-and-park plumbing: keeps the run alive while awaiting REVISE and
+              wakes a frame on delivery. The machine's REVISE events come from the
+              durable signal table, not from this node's output. */}
+          <WaitForEvent id={`revise-r${rev}`} event="REVISE" output={reviseWaitSchema} timeoutMs={86_400_000} onTimeout="continue" async />
         </>
       )}
     </Workflow>
@@ -119,31 +125,86 @@ verified engine contract:
    Output-row availability gets a branch-aware, monotonically assigned
    completion sequence exposed to render. Raw `_smithers_events` seq is NOT
    usable (rewind appends `TimeTravelJumped` rather than truncating, and fork
-   starts a new run); the sequence must be recorded on (or derivable for)
-   each output row version so fork copies it and rewind's surviving row set
-   remains consistently ordered. Design detail (row column vs node/attempt
-   join) decided at implementation; requirement: same rows ⇒ same order, on
-   every branch, in every process.
+   starts a new run); the sequence must be recorded so fork copies it and
+   rewind's surviving row set remains consistently ordered. Requirement: same
+   rows ⇒ same order, on every branch, in every process — and "in every
+   process" means every persistence path that carries rows to a render
+   (engine snapshot load, incremental frame cache, driver-storage
+   `saveOutputs`/`loadOutputs` round-trips) must carry seq intact; a
+   non-enumerable symbol dropped by JSON round-trips or object spreads does
+   not satisfy this.
+
+   **Chosen design:** a dedicated `_smithers_output_provenance` row per
+   `(runId, outputTable, nodeId, iteration)`. The first successful upsert
+   allocates the next run-local sequence; a later upsert of the same key
+   retains its original sequence — positions never reorder. Allocation and
+   output upsert commit together, so crash/resume sees neither or both.
+   Forks copy provenance rows before allocating new child completions;
+   rewind filters them to the target snapshot's row set. Rejected options:
+   a user-visible column in every output schema (leaks runtime bookkeeping
+   into user tables) and a node/attempt join (never viable — fork copies
+   neither attempts nor per-node timing, and snapshot hydration stamps every
+   restored node with one shared `restoredAtMs`).
+
+   **Legacy rows:** pre-upgrade runs have output rows with no provenance.
+   The migration must backfill deterministically (by rowid within each
+   table's key order) and must resolve schema-key vs physical-table naming
+   when it does; rows that still lack seq after backfill are excluded from
+   `ctx.outputRows` with a surfaced warning, never silently.
+
+   **Signals join the same clock (added rev 3):** signal ingestion allocates
+   from the same run-local sequence space, so machine folds can merge signal
+   events and output events on one total order. Rewind filters signal
+   provenance to the same horizon as outputs.
 2. **`ctx.outputRows(output, { nodeId?, scope? })`** — a public typed reader
-   returning `{ payload, nodeId, iteration, seq }[]` exactly once per row
-   (current `ctx.outputs` exposes payload arrays without row identity, and
-   table-name/schema-key aliases can double-count). New public surface ⇒
-   check-docs.
+   returning `{ payload, nodeId, iteration, seq }[]` exactly once per row.
+   `ctx.outputs` already exposes full raw rows (including nodeId/iteration);
+   the reader exists for dedup (table-name/schema-key aliases double-count),
+   durable completion order, and typed payload separation. It must resolve
+   real Drizzle output targets (table names live under
+   `Symbol(drizzle:Name)`, not `.name`) and must never fall back to an
+   enumerable `seq` field in user payloads as if it were provenance. New
+   public surface ⇒ check-docs, and the emitted driver `.d.ts` must be
+   consumer-tested (the generic-alias emit is a known tsup trap).
 3. **Tagged wait results.** `onTimeout: "continue"` currently writes raw
    `null` through normal output validation — it fails typed schemas and is
    indistinguishable from a legitimately null payload
    (engine deferred-state-bridge). Change the wait-result envelope to a
    tagged shape (`{ kind: "signal", payload } | { kind: "timeout" }`) so
    timeouts are first-class, typed machine events.
-4. **Rewind spanning-attempt fix (pre-existing core defect, blocks the
-   time-travel claim).** Rewind deletes attempts by
-   `startedAtMs > targetFrame.createdAtMs` and outputs only for those
-   attempts — a parallel task that started before the target but completed
-   after it survives rewind although its output was absent from the target
-   snapshot. This breaks snapshot-consistency for ALL ctx-derived state, not
-   just machines. Fix: restore/diff the exact target snapshot's node/output
-   set; add a parallel spanning-attempt regression test. File as its own
-   issue; the integration depends on it only for exact rewind semantics.
+
+   **Compatibility contract (rev 3, hardened after review):** envelope
+   selection must be EXPLICIT, not sniffed and not try-tagged-then-fallback.
+   Review probes showed both failure modes: a schema that coincidentally
+   declares `kind`+`payload` silently receives the envelope, and an
+   envelope-first-with-fallback write can corrupt permissive legacy schemas
+   (an optional field accepted the envelope shape and persisted `null`
+   instead of the signaled payload). The selection mechanism is an explicit
+   opt-in (e.g. a `waitResult(schema)` wrapper or component flag) — schemas
+   not opted in keep the raw legacy payload; `onTimeout: "continue"` on a
+   non-opted-in typed schema is a hard, well-named error rather than a
+   silent null row. The break vs old behavior (legacy `continue` used to
+   write a null row) is documented in the changelog and the WaitForEvent
+   docs.
+4. **Rewind spanning-attempt fix (pre-existing core defect, issue #1351).**
+   Rewind deletes attempts by `startedAtMs > targetFrame.createdAtMs` and
+   outputs only for those attempts — a parallel task that started before the
+   target but completed after it survives rewind although its output was
+   absent from the target snapshot. This breaks snapshot-consistency for ALL
+   ctx-derived state, not just machines. Fix: restore the exact target
+   snapshot's node/attempt/output set. Constraints learned in
+   implementation review (rev 3): the legacy `resetNodesToPending` pass must
+   NOT run after exact-snapshot restore (it stomps restored finished nodes
+   that have post-target attempts back to pending — confirmed by repro);
+   provenance filtering and row restore must land together (filtering alone
+   would strand rows visible to `ctx.outputs` but invisible to
+   `ctx.outputRows`); provenance cleanup failures must not be swallowed
+   (a stale surviving seq can be reused and reorder a new branch); and the
+   no-target-snapshot fallback must be explicit — fail loudly or document
+   legacy-heuristic behavior, never silently degrade. Regression tests must
+   include the retried-after-rewind-point case (finished on attempt 1
+   pre-target, retried post-target, rewound ⇒ finished/lastAttempt=1), not
+   only the fully-deleted-node case.
 
 ### The fold
 
@@ -158,48 +219,75 @@ Each frame, `useSmithersMachine(machine, { id, input, events })`:
      the fold. `map` may return an event, an array, or `null` (skip).
    - `approvalDecided(output, { nodeId }, map)` — decision rows (denials
      require `onDeny: "continue"` to persist a row).
-   - `eventReceived(output, { nodeId }, map)` — tagged wait results from
-     `<WaitForEvent>`/`<Signal>` (signal payloads and timeouts).
-2. Orders them by **(completion seq, declaration index, mapped-event
+   - `eventReceived(signalName, schema, map)` — **rev 3 design change:**
+     folds directly over durable `_smithers_signals` rows (which share the
+     provenance clock per Phase 0 item 1), NOT over `<WaitForEvent>` output
+     rows. Signal rows are already durable and ordered; reading them
+     directly makes every delivered signal visible to the fold regardless
+     of listener mount timing, eliminating the one-shot-listener loss and
+     delivery races entirely. `timedOut(output, { nodeId }, map)` reads
+     tagged timeout rows from opted-in waits.
+   - **Event-source declarations must be pure functions of `ctx` — never of
+     machine state.** Deriving a source's nodeId from the fold's own output
+     is circular and rejected.
+2. Orders them by **(provenance seq, declaration index, mapped-event
    subindex)** — causal arrival order, with deterministic tiebreaks. This is
    a total order that is a pure function of rows on every branch.
 3. Folds: `initialTransition(machine, input)`, then
    `transition(machine, snapshot, event)` per event (both return
    `[snapshot, actions]`; returned actions are discarded — see constraints;
    builtin `assign` applies inside `transition`). Events not accepted in the
-   current state are discarded, matching live-actor semantics — and because
-   ordering is causal-arrival, a discarded event stays discarded on every
-   refold (no retroactive acceptance).
+   current state are discarded, matching live-actor semantics. Because
+   ordering is causal-arrival, positions never reorder across refolds —
+   with one carved-out exception: an in-place payload replacement at the
+   same `(nodeId, iteration)` (manual `retry-task` of a completed node,
+   HumanTask reopen) keeps its seq but changes its payload, so folded
+   history from that position REINTERPRETS. This is documented; workflows
+   feeding machines from replaceable tasks should prefer fork-and-migrate.
 4. Returns the final `MachineSnapshot` — `state.matches()`, `state.can()`,
    `state.context`, `state.hasTag()` work as `@xstate/react` users expect.
 
 Performance: refolding history each frame is O(N²) total across a run's
-frames in the worst case. In-process, causal-seq ordering makes the event
-list append-only, so a validated-prefix cache folds only new events per
-frame; full refold happens on resume/rewind/edit or when the derived prefix
-changes. CI includes a benchmark at 10k+ events on a representative
-hierarchical machine, and the docs publish practical limits.
+frames in the worst case. In-process the event list is append-only EXCEPT
+for in-place payload replacement (above), so the validated-prefix cache
+must validate by **content** (a payload hash per event), not by
+`(count, maxSeq)` — a replacement that preserves both would otherwise serve
+a stale snapshot for a frame. Full refold happens on resume/rewind/edit or
+any prefix-content mismatch. CI includes a benchmark at 10k+ events on a
+representative hierarchical machine, and the docs publish practical limits.
 
 ### External events, listeners, and re-entry (semantics, not vibes)
 
-- **Listeners are not durable inboxes.** Signal delivery matches only
-  currently-parked waiters; a later-mounted waiter matches only signals
-  received after its attempt started, and each `(nodeId, iteration)` waiter
-  is one-shot. v1 therefore defines: **a signal delivered while no matching
-  listener is mounted is dropped** — documented, and defensible because a
-  live XState actor also discards events its current state doesn't handle.
-  A durable inbox/cursor (buffer-while-unmounted) is v2, if demanded.
-- **Repeated events need fresh listener identity.** A stable `revise` id can
-  receive exactly one REVISE ever. The pattern (shown in the example): keep a
-  counter in machine context via `assign`, and mint listener/task ids from it
-  (`revise-r${rev}`).
-- **Machine re-entry never re-executes a completed Smithers task.** A
-  transition back into `drafting` changes derived state only; a completed
-  `(nodeId, iteration)` is never re-run ("a completed task is never
-  re-executed", docs/how-it-works.mdx:197). Loops that redo work MUST version
-  task identity from machine context (as above) — the docs page shows this
-  as THE revision-loop pattern and warns against expecting actor-style
-  re-entry semantics.
+- **The signal table is the event source; listeners are wake-and-park
+  plumbing (rev 3).** The earlier "drop-while-unmounted, actor-consistent"
+  framing was wrong on both counts: waiters are one-shot per
+  `(nodeId, iteration)`, delivery matches only currently-parked waiters, a
+  replacement waiter matches only signals received AT OR AFTER its attempt
+  start, concurrent deliveries race last-wins in memory vs first-by-seq on
+  resume, and a signal in the gap between one generation's resolution and
+  the next generation's attempt insert is lost — while a live actor in the
+  same state would have processed all of them. Rather than document that
+  loss, v1 removes it: `eventReceived` folds over `_smithers_signals`
+  directly, so every delivered signal reaches the machine in seq order no
+  matter when listeners were mounted. A parked `<WaitForEvent>` still
+  matters for LIVENESS — an idle machine state with nothing rendered makes
+  the graph quiescent and ends the run — so states awaiting external events
+  render a listener to keep the run parked and to wake a new frame on
+  delivery; a missed wake delays the fold by one frame but never loses the
+  event.
+- **Machine re-entry never re-executes a completed Smithers task — for ANY
+  re-enterable state.** A transition back into a state changes derived
+  state only; a completed `(nodeId, iteration)` is never re-run ("a
+  completed task is never re-executed", docs/how-it-works.mdx:197). The
+  general rule (docs page + lint): any task rendered inside a machine state
+  that the machine can re-enter needs context-versioned identity
+  (`draft-r${rev}` minted from an `assign` counter). A bare-constant task
+  id in a state on a machine cycle deadlocks the machine (no new row ⇒ no
+  new event ⇒ quiescent graph ends the run mid-flight); the lint flags it.
+- **`id` option semantics:** `useSmithersMachine({ id })` namespaces the
+  machine instance for error messages, caching, and the (v1.5)
+  `smithers machine` timeline — multiple machines per workflow are
+  supported and must use distinct ids.
 
 ### Final states (derived-only semantics)
 
@@ -272,9 +360,47 @@ deliberate mid-run machine changes.
 
 ## Implementation plan
 
-- **Phase 0 — core prerequisites (~2–3 days).** Completion-seq provenance,
+- **Phase 0 — core prerequisites.** Completion-seq provenance,
   `ctx.outputRows`, tagged wait results, rewind spanning-attempt fix (+
   regression test). Each is independently valuable; land separately.
+  **Status (2026-07-18):** first implementation pass complete on a local
+  branch (one commit per item) but NOT pushed — final validation and the
+  review moderator rejected it with a confirmed critical rewind regression
+  and the correction backlog below. A superior rewind fix exists in the
+  run's earlier unmerged lineage; the correction pass reconciles them.
+
+### Phase 0 correction backlog (from validation + moderator + Fable review)
+
+1. **CRITICAL — rewind:** remove the unconditional legacy
+   `resetNodesToPending` pass after exact-snapshot restore (repro: finished
+   pre-target on attempt 1, retried post-target, rewound ⇒ stomped to
+   pending). Prefer the fix already written in the unmerged lineage
+   (8bc9c18da6..6350d630d8). Add the retried-after-rewind-point regression.
+2. **CRITICAL — `ctx.outputRows` unusable in practice:** resolve Drizzle
+   targets via `Symbol(drizzle:Name)`; carry provenance seq through every
+   row path (the non-enumerable symbol is dropped by
+   `coerceBooleanColumns`'s spread and by driver-storage JSON round-trips —
+   carry it as real data, not a symbol); never treat an enumerable user
+   `seq` field as provenance; consumer-test the emitted driver `.d.ts`
+   (current emit has a non-generic `OutputRowsReader` applied as generic,
+   TS2315).
+3. **MAJOR — legacy backfill:** migration 0030 must actually run (table
+   pre-creation currently marks it applied), resolve schema-key vs physical
+   table names, not swallow query errors, and cover external-SQLite init.
+4. **MAJOR — tagged-wait selection:** replace envelope-first-fallback and
+   shape-sniffing with the explicit opt-in contract (Phase 0 item 3);
+   repro showed a permissive legacy schema persisting `null` instead of the
+   signaled payload.
+5. **MAJOR — rewind hardening:** no-snapshot fallback must be explicit;
+   provenance cleanup failures must not be swallowed (stale seq reuse
+   reorders new-branch history).
+6. **MAJOR — test coverage:** same-key replacement retains seq; rewind
+   provenance retention/deletion with ordering assertions; fork allocating
+   child completions after inherited rows; crash-mid-transaction (not just
+   clean close/reopen); real runtime rows (not artificial enumerable seq).
+7. **MINOR — hygiene:** regen + commit llms bundles with the docs changes;
+   signal-provenance clock extension (Phase 0 item 1, rev 3); WaitForEvent
+   tagged-migration docs.
 - **Phase 1 — the package (~2–3 days).** Fold + prefix cache, source
   helpers, lint, conformance/durability tests (crash/resume identity;
   rewind; fork; real signal e2e; benchmark). Both lockfiles in one commit.
@@ -307,6 +433,35 @@ free" into v1 and added the rewind fix).
 - Persisting actor snapshots as truth, or imperative `send()` from workflow
   code. Human/UI interaction stays on durable channels: signals, approvals,
   `ask-human`.
+
+## Review response (Fable subagent, 2026-07-18, rev 2 → rev 3)
+
+Verdict was APPROVE-WITH-CHANGES; all findings accepted. Dispositions:
+1 (signal drop semantics unsound; listener races lose signals a live actor
+would process) — ACCEPTED, and its recommendation (b) adopted as a design
+change: `eventReceived` folds over `_smithers_signals` directly on the
+shared provenance clock; listeners demoted to wake-and-park plumbing.
+2 (retain-seq falsifies no-retroactivity + append-only claims under
+payload replacement) — ACCEPTED; exception carved out, prefix cache must
+validate by content hash. 3 (flagship example circular/undefined
+identifier) — ACCEPTED; example fixed, "sources are pure functions of ctx"
+rule added. 4 (migration paragraph didn't match landed contract; sniffing
+hazard) — ACCEPTED; explicit opt-in contract specified, landed sniffing
+implementation queued for correction. 5 (legacy/absent provenance silently
+dropped; symbol seq lost on driver-storage round-trip) — ACCEPTED; spec
+requires data-carried seq + surfaced warnings; correction backlog item 2.
+6 (Phase 0 internal inconsistency) — ACCEPTED; decision moved into item 1
+with rejected options recorded. 7 (rewind/provenance coupling +
+no-snapshot fallback) — ACCEPTED; item 4 + backlog item 5. 8 (`ctx.outputs`
+parenthetical inaccurate) — ACCEPTED; corrected. 9 (re-entry rule
+generalizes; `id` unspecified) — ACCEPTED; general rule + lint + `id`
+semantics added. 10 (boundary-inclusive `>=`) — ACCEPTED. 11 (version pin
+unverifiable) — ACCEPTED; pin moved to Phase 1 lockfile.
+
+The Phase 0 validation report and review moderator (run-1784406237546)
+independently confirmed findings 5/7 at implementation level and added the
+critical rewind regression, backfill, tagged-selection, `.d.ts`, and
+coverage items — all captured in the correction backlog above.
 
 ## Review response (sol, 2026-07-18, rev 1 → rev 2)
 
