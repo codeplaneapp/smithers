@@ -67,6 +67,7 @@ OpenAPI tool calls, errors, and duration are tracked for successful and failing 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 adversarial review: `bun test --timeout`=120000 --max-concurrency=1 `packages/openapi/tests/e2e.test.js` `packages/openapi/tests/tool-factory.test.js` `packages/openapi/tests/relative-server-url.test.js` `packages/openapi/tests/metrics.test.js` `apps/cli/tests/openapi-generate-command.test.js` passed with 34 tests, 0 failures.
 - `packages/openapi/src`
-- `apps/cli/src/index.js` openapiCli
+- `apps/cli/src/index.js`
 - `apps/cli/tests/openapi-generate-command.test.js`
 - `docs/llms-openapi.txt`
+- `packages/openapi`

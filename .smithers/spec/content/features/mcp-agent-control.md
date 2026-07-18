@@ -26,6 +26,10 @@ Structured tools return { ok, data, error } envelopes with zod schemas and MCP a
 
 mcp add, skills add, and agent-specific supplementary wiring update supported agent configs without hand-editing `JSON/TOML/YAML`.
 
+### Native agent bridges
+
+Codex, Claude Code, Hermes, PI, and other supported clients can install Smithers MCP, skills, plugins, or session wiring through agent-specific commands.
+
 ## Endpoints and commands
 
 - `CLI smithers --mcp` ([docs](docs/integrations/mcp-server.mdx))
@@ -37,6 +41,7 @@ mcp add, skills add, and agent-specific supplementary wiring update supported ag
 - [MCP server](docs/integrations/mcp-server.mdx)
 - [Agent support](docs/agents/overview.mdx)
 - [MCP toolset](docs/integrations/mcp-toolset.mdx)
+- [PI integration](docs/integrations/pi-integration.mdx)
 
 ## Test cases
 
@@ -47,6 +52,7 @@ mcp add, skills add, and agent-specific supplementary wiring update supported ag
 - `apps/cli/tests/hermes-plugin-tools.e2e.test.js`
 - `apps/cli/tests/smithers-skill-contract.test.js`
 - `apps/cli/tests/installCuratedSkill.test.js`
+- `packages/pi-plugin/tests/indexBarrel.test.ts`
 
 ## Observability
 
@@ -67,11 +73,13 @@ mcp add, skills add, and agent-specific supplementary wiring update supported ag
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: mapped the published PI plugin and native coding-agent bridges into this feature.
 - `apps/cli/src/mcp`
 - `apps/cli/src/agent-wiring`
 - `apps/cli/tests/semantic-mcp.test.js`
 - `docs/integrations/mcp-server.mdx`
 - `docs/agents/*.mdx`
+- `packages/pi-plugin`
 
 ## Open gaps
 

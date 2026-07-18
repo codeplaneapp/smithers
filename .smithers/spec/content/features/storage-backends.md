@@ -26,6 +26,10 @@ createSmithersPostgres returns the same createSmithers API against pg or embedde
 
 DB schema signatures and input bounds protect `gateway/client` assumptions around table shape and payload size.
 
+### Electric shape proxy
+
+The Electric proxy scopes cloud-sync shape access, strips forwarded auth, applies rate limits, and records shape metrics.
+
 ## Endpoints and commands
 
 - `API openSmithersBackend` ([docs](docs/deployment/production-hardening.mdx))
@@ -70,12 +74,15 @@ DB schema signatures and input bounds protect `gateway/client` assumptions aroun
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: mapped the published Electric shape proxy and its managed sync boundary.
 - `packages/db/src/dialect.js`
 - `packages/smithers/src/openSmithersBackend.js`
 - `packages/smithers/src/create.js`
 - `packages/smithers/src/migrateSmithersStore.js`
 - `apps/cli/src/argv-utils.js`
 - `apps/cli/tests/migrate-command.test.js`
+- `packages/db`
+- `packages/electric-proxy`
 
 ## Open gaps
 

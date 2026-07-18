@@ -39,11 +39,13 @@ docs-driven-development.tsx runs bootstrap, metaTicket, audit, spec update, tria
 - `SCRIPT bun .smithers/lib/ddd/build.ts` ([docs](.smithers/lib/ddd/build.ts))
 - `WORKFLOW docs-driven-development` ([docs](.smithers/workflows/docs-driven-development.tsx))
 - `UI .smithers/ui/docs-driven-development.tsx` ([docs](.smithers/ui/docs-driven-development.tsx))
+- `DOCS docs-driven-development workflow` ([docs](docs/workflows/docs-driven-development.mdx))
 
 ## Related docs
 
 - [Product overview](.smithers/spec/content/overview.md)
 - [Feature source](.smithers/spec/features.json)
+- [Mintlify workflow guide](docs/workflows/docs-driven-development.mdx)
 
 ## Test cases
 
@@ -75,6 +77,7 @@ docs-driven-development.tsx runs bootstrap, metaTicket, audit, spec update, tria
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 adversarial review: reran `bun .smithers/lib/ddd/build.ts after spec corrections`; it validated 22 features and regenerated derived `docs/UI` modules.
+- 2026-07-18 feature and docs audit: linked the structured product spec to its public Mintlify workflow guide.
 - `.smithers/spec/features.json`
 - `.smithers/spec/content/overview.md`
 - `.smithers/lib/ddd/*.ts`

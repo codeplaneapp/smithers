@@ -1,6 +1,6 @@
 # Docs pipeline and LLM bundles
 
-> **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Learn & integrate | **Tier:** Reference
+> **Status:** Fixed | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Learn & integrate | **Tier:** Reference
 
 Mintlify docs, generated `API/reference` material, llms-\*.txt bundles, docs checks, and public-surface coverage tests keep human and agent documentation in sync with the published packages.
 
@@ -22,6 +22,10 @@ scripts generate llms.txt, llms-full.txt, and opt-in fragments for core, events,
 
 check-docs, check-llms, docs-public-surface-coverage, docs-cli-overview-coverage, and docs examples smoke tests catch drift.
 
+### Feature coverage ledger
+
+The Mintlify feature inventory is checked against every id in `.smithers/spec/features.json`, while public packages and component props are checked against source.
+
 ## Endpoints and commands
 
 - `CLI smithers docs` ([docs](docs/cli/overview.mdx))
@@ -33,6 +37,7 @@ check-docs, check-llms, docs-public-surface-coverage, docs-cli-overview-coverage
 - [Docs index](docs/index.mdx)
 - [LLMS](docs/llms.txt)
 - [Full LLMS](docs/llms-full.txt)
+- [Feature inventory](docs/reference/feature-inventory.mdx)
 
 ## Test cases
 
@@ -64,14 +69,10 @@ check-docs, check-llms, docs-public-surface-coverage, docs-cli-overview-coverage
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 adversarial review: downgraded from fixed to partial; node `scripts/check-docs.mjs`, node `scripts/check-llms.mjs`, and `apps/cli/tests/docs-cli-overview-coverage.test.js` passed, but `apps/cli/tests/docs-examples-smoke.test.js` failed.
+- 2026-07-18 feature and docs audit: removed the stale docs-example failure after the smoke suite passed and added package, feature, navigation, and prop-level drift gates.
 - `docs/**/*.mdx`
 - `scripts/generate-llms.ts`
 - `scripts/check-docs.mjs`
 - `scripts/check-llms.mjs`
 - `apps/cli/src/docs-command.js`
 - `skills/smithers/llms-full.txt`
-
-## Open gaps
-
-- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 `apps/cli/tests/docs-examples-smoke.test.js` fails for `docs/examples/workflow-ui-react.mdx#2` with `GRAPH_FAILED/Object.entries` on undefined input.
-- Keep docs-pipeline partial until the docs examples smoke gate passes together with `check-docs/check-llms` and CLI overview coverage.

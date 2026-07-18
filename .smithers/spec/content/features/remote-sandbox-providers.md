@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Isolate execution | **Tier:** Platform
 
-Cloudflare, Vercel, AWS, GCP, and Daytona packages register provider-backed Sandbox runtimes that ship request bundles to remote `containers/jobs` and return result bundles with secret redaction.
+Cloudflare, Vercel, AWS, GCP, Daytona, and Microsandbox packages register provider-backed Sandbox runtimes that transport `request/result` bundles to remote jobs or local hardware-isolated microVMs with normalized cleanup and error handling.
 
 ## What you can do
 
@@ -26,6 +26,10 @@ createVercelSandboxProvider supports `OIDC/access-token` auth, domains, duration
 
 AWS `ECS/Fargate` or CodeBuild, GCP Cloud Run `Jobs/GCS`, and Daytona workspace providers use injected clients and mocks for deterministic tests.
 
+### Microsandbox microVMs
+
+createMicrosandboxSandboxProvider runs child workflows in local hardware-isolated microVMs and implements the shared provider contract.
+
 ## Endpoints and commands
 
 - `API createCloudflareSandboxProvider` ([docs](docs/integrations/cloudflare.mdx))
@@ -33,6 +37,7 @@ AWS `ECS/Fargate` or CodeBuild, GCP Cloud Run `Jobs/GCS`, and Daytona workspace 
 - `API createAwsSandboxProvider` ([docs](docs/integrations/aws-sandbox-provider.mdx))
 - `API createGcpSandboxProvider` ([docs](docs/integrations/gcp-sandbox-provider.mdx))
 - `API createDaytonaSandboxProvider` ([docs](docs/integrations/daytona-sandbox-provider.mdx))
+- `API createMicrosandboxSandboxProvider` ([docs](docs/integrations/microsandbox-sandbox-provider.mdx))
 
 ## Related docs
 
@@ -41,6 +46,7 @@ AWS `ECS/Fargate` or CodeBuild, GCP Cloud Run `Jobs/GCS`, and Daytona workspace 
 - [GCP sandbox provider](docs/integrations/gcp-sandbox-provider.mdx)
 - [Vercel sandbox provider](docs/integrations/vercel-sandbox-provider.mdx)
 - [Daytona sandbox provider](docs/integrations/daytona-sandbox-provider.mdx)
+- [Microsandbox](docs/integrations/microsandbox-sandbox-provider.mdx)
 
 ## Test cases
 
@@ -53,6 +59,8 @@ AWS `ECS/Fargate` or CodeBuild, GCP Cloud Run `Jobs/GCS`, and Daytona workspace 
 - `packages/aws/tests/awsSandboxProviderContract.test.js`
 - `packages/gcp/tests/gcpSandboxProviderContract.test.js`
 - `packages/daytona/tests/daytonaSandboxProviderContract.test.js`
+- `packages/microsandbox/tests/microsandboxSandboxProviderContract.test.js`
+- `packages/microsandbox/tests/realMicrosandbox.test.js`
 
 ## Observability
 
@@ -66,19 +74,26 @@ AWS `ECS/Fargate` or CodeBuild, GCP Cloud Run `Jobs/GCS`, and Daytona workspace 
 
 ## Architecture
 
-- `packages/cloudflare`, `packages/vercel`, `packages/aws`, `packages/gcp`, and `packages/daytona` are separate optional provider packages re-exported by smithers-orchestrator subpaths.
+- `packages/cloudflare`, `packages/vercel`, `packages/aws`, `packages/gcp`, `packages/daytona`, and `packages/microsandbox` are optional provider packages re-exported by smithers-orchestrator subpaths.
 - `packages/sandbox/src/provider-kit` supplies shared transport and provider contracts.
 - Docs distinguish storage descriptors from remote execution providers, especially on Cloudflare.
 
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: added the shipped Microsandbox provider, tests, Mintlify page, and public package mapping.
 - `packages/cloudflare/src`
 - `packages/vercel/src`
 - `packages/aws/src`
 - `packages/gcp/src`
 - `packages/daytona/src`
 - `packages/sandbox/src/provider-kit`
+- `packages/cloudflare`
+- `packages/vercel`
+- `packages/aws`
+- `packages/gcp`
+- `packages/daytona`
+- `packages/microsandbox`
 
 ## Open gaps
 

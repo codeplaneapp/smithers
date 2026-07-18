@@ -1,8 +1,8 @@
 # Custom workflow UIs and monitor surfaces
 
-> **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Run & observe
+> **Status:** Fixed | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Run & observe
 
-Workflow-owned `.smithers/ui/*.tsx` browser dashboards are declared with <UI>, served by `smithers ui/gateway`, backed by `gateway-client/gateway-react` hooks, and complemented by `monitor/gui/TUI` run inspectors.
+Workflow-owned `.smithers/ui` browser dashboards are declared with UI, served by the Gateway, composed from gateway hooks and shared `run/chat` primitives, and complemented by monitor, GUI, and full-screen TUI inspectors.
 
 ## What you can do
 
@@ -34,6 +34,14 @@ gateway-client handles typed RPC, abortable calls, `reconnect/resume` streams, b
 
 `smithers monitor`, ui, gui, and TUI modes provide zero-setup run views over the same gateway data.
 
+### Shared UI libraries
+
+gateway-ui, ui, and ui-styleguide provide run, approval, score, diff, chat, layout, and themed browser primitives on top of gateway-react.
+
+### Terminal UI
+
+The TUI reuses Gateway hooks for live tree, graph, logs, timeline, and hijack views.
+
 ## Endpoints and commands
 
 - `CLI smithers ui <runId>` ([docs](docs/integrations/custom-ui.mdx))
@@ -61,6 +69,7 @@ gateway-client handles typed RPC, abortable calls, `reconnect/resume` streams, b
 - `apps/cli/tests/workflow-ui-all.e2e.test.js`
 - `apps/cli/tests/workflow-pack-ui-coverage.test.js`
 - `.smithers/tests/open-code-review-ui.e2e.test.ts`
+- `apps/cli/tests/docs-examples-smoke.test.js`
 
 ## Observability
 
@@ -76,19 +85,22 @@ gateway-client handles typed RPC, abortable calls, `reconnect/resume` streams, b
 
 - `packages/gateway-react/src/index.ts` exports provider components, collection hooks, run tree folding, connection status, and action hooks.
 - `packages/gateway-client/src/index.ts` exports SmithersGatewayClient, typed RPC maps, resilient streams, and data collection helpers.
-- `apps/cli/src/localUiServer.js` and workflowUiSources.js serve local workflow UI bundles.
+- `packages/server/src/gateway.js` discovers and serves workflow-declared UI and TUI views; `apps/cli/src/localUiServer.js` launches the local operator UI.
 
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 adversarial review: downgraded from fixed to partial after cited `UI/graph` proof failed.
+- 2026-07-18 feature and docs audit: removed two stale `UI/doc-smoke` failures after 12 focused tests passed and mapped the shared UI, chat, DevTools, and TUI packages.
 - `packages/gateway-react/src`
 - `packages/gateway-client/src`
 - `apps/cli/src/localUiServer.js`
-- `apps/cli/src/workflowUiSources.js`
+- `packages/server/src/gateway.js`
 - `.smithers/ui/*.tsx`
-
-## Open gaps
-
-- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 `apps/cli/tests/ui-command.test.js` fails; the `smithers ui` autostart case times out waiting for the local Gateway.
-- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 `apps/cli/tests/docs-examples-smoke.test.js` fails for `docs/examples/workflow-ui-react.mdx#2` with `GRAPH_FAILED/Object.entries` on undefined input.
+- `packages/gateway-client`
+- `packages/gateway-react`
+- `packages/gateway-ui`
+- `packages/devtools`
+- `packages/tui`
+- `packages/ui`
+- `packages/ui-styleguide`

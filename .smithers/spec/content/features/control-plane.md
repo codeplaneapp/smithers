@@ -65,6 +65,7 @@ Record audit events and export org data, usage summaries, secret refs, and audit
 - `packages/control-plane/tests/control-plane.test.js`
 - `docs/deployment/control-plane.mdx`
 - `apps/cli/src/token-store.js`
+- `packages/control-plane`
 
 ## Open gaps
 

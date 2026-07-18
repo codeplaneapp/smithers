@@ -3,7 +3,7 @@ export const featuresData = [
   {
     "id": "workflow-authoring",
     "title": "JSX workflow authoring",
-    "summary": "Author durable coding-agent workflows as React/JSX trees with Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, HumanTask, Timer, Sandbox, Worktree, and higher-level components, backed by createSmithers and zod-typed outputs.",
+    "summary": "Author durable agent workflows as typed React/JSX trees with control flow, waits, memory, isolation, reusable composites, and bounded dynamic Trellis delegation. createSmithers binds Zod outputs and task dependencies to the workflow context.",
     "status": "fixed",
     "priority": "p0",
     "owner": "smithers-maintainers",
@@ -38,6 +38,14 @@ export const featuresData = [
       {
         "title": "Higher-level patterns",
         "detail": "Components export review loops, supervisors, kanban, merge queues, sagas, panels, delegation chains, and other workflow macros."
+      },
+      {
+        "title": "Scheduling and failure controls",
+        "detail": "Task and container props cover priority scheduling, halt or quarantine failure policy, typed dependencies, bounded schema correction, retries, timeouts, and caching."
+      },
+      {
+        "title": "Dynamic delegation",
+        "detail": "Trellis validates and compiles fuel-bounded model-authored sequence and parallel programs into ordinary durable tasks."
       }
     ],
     "endpoints": [
@@ -69,6 +77,14 @@ export const featuresData = [
       {
         "label": "Components",
         "href": "docs/components/workflow.mdx"
+      },
+      {
+        "label": "Trellis",
+        "href": "docs/components/trellis.mdx"
+      },
+      {
+        "label": "Provenance",
+        "href": "docs/concepts/provenance.mdx"
       }
     ],
     "tests": [
@@ -77,7 +93,12 @@ export const featuresData = [
       "packages/engine/tests/duplicate-output-schemas.test.jsx",
       "packages/driver/tests/ctx-utils.test.js",
       "apps/cli/tests/cli-workflows-validate.test.js",
-      "apps/cli/tests/seeded-workflows-graph.e2e.test.js"
+      "apps/cli/tests/seeded-workflows-graph.e2e.test.js",
+      "packages/components/tests/delegation-v2-trellis.test.jsx",
+      "packages/components/tests/memory-component.test.jsx",
+      "packages/components/tests/priority-props.test.jsx",
+      "packages/components/tests/failure-policy-props.test.jsx",
+      "packages/engine/tests/schema-retries.test.jsx"
     ],
     "observability": [
       "Frame snapshots and task descriptors are persisted in _smithers_* tables and can be inspected with smithers graph, inspect, tree, and DevTools streams.",
@@ -94,7 +115,8 @@ export const featuresData = [
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed."
+      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed.",
+      "2026-07-18 feature and docs audit: added Memory, Trellis, priority, quarantine, schema-correction, and provenance surfaces to the inventory and Mintlify references."
     ],
     "diffHints": [
       "packages/smithers/src/create.js",
@@ -102,15 +124,19 @@ export const featuresData = [
       "packages/react-reconciler/src",
       "packages/graph/src/extract.js",
       "docs/components/*.mdx",
-      ".smithers/workflows/*.tsx"
+      ".smithers/workflows/*.tsx",
+      "packages/smithers",
+      "packages/components",
+      "packages/graph",
+      "packages/react-reconciler"
     ],
     "missing": []
   },
   {
     "id": "init-workflow-pack",
     "title": "Init workflow pack and starters",
-    "summary": "smithers init installs the local or global .smithers pack, curated skills, agent guidance, prompts, ready workflows, and per-workflow UIs; starters and workflow list expose the installed catalog.",
-    "status": "partial",
+    "summary": "smithers init installs the local or global .smithers pack, curated agent guidance and skills, system workflows, editable workflow sources, and workflow-owned UIs; starters and workflow list expose the installed catalog.",
+    "status": "fixed",
     "priority": "p0",
     "owner": "smithers-maintainers",
     "tier": "feature",
@@ -123,7 +149,7 @@ export const featuresData = [
       },
       {
         "title": "Seeded workflows",
-        "detail": "The generated pack includes hello, plan, implement, review, debug, kanban, tickets-create, research, mission, audit, feature-enum, and more."
+        "detail": "The generated pack includes curated create-workflow, create-skill, create-ui, and docs-driven-development workflows plus durable init, add, share, upgrade, eval, and post-failure system workflows."
       },
       {
         "title": "Starter gallery",
@@ -194,7 +220,8 @@ export const featuresData = [
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 adversarial review: downgraded from fixed to partial after the cited init tests failed in the aggregate fixed-feature test run."
+      "2026-07-06 adversarial review: downgraded from fixed to partial after the cited init tests failed in the aggregate fixed-feature test run.",
+      "2026-07-18 core-surface correction: restored fixed status after the curated init-pack generator and 45 focused init, seeded-workflow, freshness, and starter tests passed; repository examples are excluded from core feature evidence."
     ],
     "diffHints": [
       "apps/cli/src/init-command.js",
@@ -204,15 +231,12 @@ export const featuresData = [
       ".smithers/ui/*.tsx",
       "docs/workflows/*.mdx"
     ],
-    "missing": [
-      "2026-07-06 review: apps/cli/tests/workflow-pack-subset.test.js fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus init/post-failure.",
-      "2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing."
-    ]
+    "missing": []
   },
   {
     "id": "cli",
     "title": "smithers CLI",
-    "summary": "The smithers binary in apps/cli drives init, workflow run/list/create, up, ps, logs, events, inspect, node, why, approvals, signals, memory, eval, optimize, openapi, gateway, monitor, ui, MCP, migration, tokens, and agent account management.",
+    "summary": "The smithers CLI installs and shares workflow packs, launches and controls runs, inspects durable state, manages worktrees, approvals, schedules, alerts, memory, evals, gateways, UIs, accounts, MCP, migrations, and operational diagnostics.",
     "status": "partial",
     "priority": "p0",
     "owner": "smithers-maintainers",
@@ -239,6 +263,18 @@ export const featuresData = [
       {
         "title": "Operational subcommands",
         "detail": "gateway, monitor, ui, migrate, eval, optimize, openapi, memory, usage, token, agents, cron, alerts, docs, and upgrade cover the product surface."
+      },
+      {
+        "title": "Workflow pack lifecycle",
+        "detail": "add, remove, eject, share, packs list, and packs update manage local, GitHub, npm, and file-based packs."
+      },
+      {
+        "title": "Worktree ownership",
+        "detail": "worktree list and worktree prune inspect and reclaim worktrees owned by Smithers runs."
+      },
+      {
+        "title": "Run narration",
+        "detail": "status, what, why, node, chat, tree, diff, and timeline turn persisted state into concise operator diagnostics."
       }
     ],
     "endpoints": [
@@ -266,6 +302,16 @@ export const featuresData = [
         "method": "CLI",
         "path": "smithers gateway",
         "doc": "docs/cli/overview.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers add|remove|eject|share|packs",
+        "doc": "docs/reference/packs.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers worktree list|prune",
+        "doc": "docs/components/worktree.mdx"
       }
     ],
     "links": [
@@ -304,13 +350,15 @@ export const featuresData = [
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed."
+      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed.",
+      "2026-07-18 feature and docs audit: expanded the command inventory for packs, worktree ownership, status, and narration commands."
     ],
     "diffHints": [
       "apps/cli/src/index.js",
       "apps/cli/src/*.js",
       "apps/cli/tests/*.test.js",
-      "docs/cli/overview.mdx"
+      "docs/cli/overview.mdx",
+      "apps/cli"
     ],
     "missing": [
       "The CLI surface is broad; keep pglite/postgres parity covered for every read and mutation command, not just launch/read round-trips.",
@@ -343,6 +391,10 @@ export const featuresData = [
       {
         "title": "Agent config writers",
         "detail": "mcp add, skills add, and agent-specific supplementary wiring update supported agent configs without hand-editing JSON/TOML/YAML."
+      },
+      {
+        "title": "Native agent bridges",
+        "detail": "Codex, Claude Code, Hermes, PI, and other supported clients can install Smithers MCP, skills, plugins, or session wiring through agent-specific commands."
       }
     ],
     "endpoints": [
@@ -374,6 +426,10 @@ export const featuresData = [
       {
         "label": "MCP toolset",
         "href": "docs/integrations/mcp-toolset.mdx"
+      },
+      {
+        "label": "PI integration",
+        "href": "docs/integrations/pi-integration.mdx"
       }
     ],
     "tests": [
@@ -383,7 +439,8 @@ export const featuresData = [
       "apps/cli/tests/agent-wiring.test.js",
       "apps/cli/tests/hermes-plugin-tools.e2e.test.js",
       "apps/cli/tests/smithers-skill-contract.test.js",
-      "apps/cli/tests/installCuratedSkill.test.js"
+      "apps/cli/tests/installCuratedSkill.test.js",
+      "packages/pi-plugin/tests/indexBarrel.test.ts"
     ],
     "observability": [
       "MCP tools echo structuredContent and text JSON payloads so clients can persist exact tool results.",
@@ -399,14 +456,16 @@ export const featuresData = [
       "docs/agents/overview.mdx lists skill, MCP, and instruction surfaces by agent."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: mapped the published PI plugin and native coding-agent bridges into this feature."
     ],
     "diffHints": [
       "apps/cli/src/mcp",
       "apps/cli/src/agent-wiring",
       "apps/cli/tests/semantic-mcp.test.js",
       "docs/integrations/mcp-server.mdx",
-      "docs/agents/*.mdx"
+      "docs/agents/*.mdx",
+      "packages/pi-plugin"
     ],
     "missing": [
       "The support matrix spans many external agents; not every agent-specific config path can be exercised end to end in CI."
@@ -415,7 +474,7 @@ export const featuresData = [
   {
     "id": "durable-engine",
     "title": "Durable engine, scheduler, and driver",
-    "summary": "The core control plane renders workflow frames, schedules ready nodes, executes agent/compute/static tasks, validates structured outputs, persists every state transition, and resumes from durable state after failures.",
+    "summary": "The core control plane renders workflow frames, schedules priority-aware nodes, executes and validates tasks, quarantines configured failures, persists every transition, reports structured errors, and resumes from durable state after process failures.",
     "status": "fixed",
     "priority": "p0",
     "owner": "smithers-maintainers",
@@ -446,6 +505,22 @@ export const featuresData = [
       {
         "title": "Postgres/PGlite path",
         "detail": "createSmithersPostgres and the SQL dialect layer run the same engine against managed or embedded Postgres-family stores."
+      },
+      {
+        "title": "Structured error reporting",
+        "detail": "RunOptions.onError reports node and run failures with phase, run, node, iteration, and attempt context without replacing durable failure state."
+      },
+      {
+        "title": "Provenance-bound actions",
+        "detail": "ctx.prove and Task bind attach content digests to authority rows so stale approvals or evidence cannot silently authorize execution."
+      },
+      {
+        "title": "Priority and quarantine",
+        "detail": "Runnable tasks claim free slots by priority, while failurePolicy can quarantine failed branches without stopping unrelated work."
+      },
+      {
+        "title": "Schema correction",
+        "detail": "maxSchemaRetries bounds structured-output correction calls separately from ordinary task retries."
       }
     ],
     "endpoints": [
@@ -477,6 +552,10 @@ export const featuresData = [
       {
         "label": "Runtime events",
         "href": "docs/runtime/events.mdx"
+      },
+      {
+        "label": "Provenance",
+        "href": "docs/concepts/provenance.mdx"
       }
     ],
     "tests": [
@@ -487,7 +566,12 @@ export const featuresData = [
       "packages/scheduler/tests/workflowSession-quota.test.js",
       "packages/scheduler/tests/workflowSession-degraded.test.js",
       "packages/driver/tests/pause-drain.test.js",
-      "e2e/faults/case31-real-engine-kill-resume.test.ts"
+      "e2e/faults/case31-real-engine-kill-resume.test.ts",
+      "packages/engine/tests/error-reporting-hook.test.jsx",
+      "packages/engine/tests/provenance-binding.test.jsx",
+      "packages/engine/tests/schema-retries.test.jsx",
+      "packages/scheduler/tests/scheduleTasks-priority.test.js",
+      "packages/scheduler/tests/failure-policy.test.js"
     ],
     "observability": [
       "Engine metrics include runsTotal, nodesStarted, nodesFinished, nodesFailed, nodeDuration, attemptDuration, cacheHits/cacheMisses, and tool duration.",
@@ -504,14 +588,21 @@ export const featuresData = [
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 for the eight listed durable-engine test files passed."
+      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 for the eight listed durable-engine test files passed.",
+      "2026-07-18 feature and docs audit: added shipped error-hook, provenance, priority, quarantine, and schema-correction contracts."
     ],
     "diffHints": [
       "packages/engine/src/engine.js",
       "packages/driver/src/WorkflowDriver.js",
       "packages/scheduler/src/makeWorkflowSession.js",
       "packages/db/src/adapter.js",
-      "e2e/faults/*.test.ts"
+      "e2e/faults/*.test.ts",
+      "packages/engine",
+      "packages/driver",
+      "packages/scheduler",
+      "packages/errors",
+      "packages/protocol",
+      "packages/tool-context"
     ],
     "missing": []
   },
@@ -519,7 +610,7 @@ export const featuresData = [
     "id": "approvals-human-gates",
     "title": "Approvals, human tasks, and durable waits",
     "summary": "Smithers supports approval gates, typed Approval decision nodes, HumanTask requests, ask-human CLI/MCP waits, signals, timers, denial policies, and resume from waiting states.",
-    "status": "partial",
+    "status": "fixed",
     "priority": "p0",
     "owner": "smithers-maintainers",
     "tier": "feature",
@@ -541,6 +632,10 @@ export const featuresData = [
       {
         "title": "External waits",
         "detail": "Signal, WaitForEvent, and Timer persist waits so foreground and detached owners can exit cleanly."
+      },
+      {
+        "title": "Bound approval authority",
+        "detail": "Proof bindings and replay-unsafe approval checks prevent changed evidence from reusing an earlier authorization."
       }
     ],
     "endpoints": [
@@ -582,6 +677,10 @@ export const featuresData = [
       {
         "label": "Signal",
         "href": "docs/components/signal.mdx"
+      },
+      {
+        "label": "Provenance-bound actions",
+        "href": "docs/concepts/provenance.mdx"
       }
     ],
     "tests": [
@@ -595,7 +694,9 @@ export const featuresData = [
       "apps/cli/tests/ask-human-mcp.test.js",
       "e2e/faults/case03-restart-waiting-approval.test.ts",
       "e2e/faults/case04-restart-waiting-event.test.ts",
-      "e2e/faults/case05-restart-waiting-timer.test.ts"
+      "e2e/faults/case05-restart-waiting-timer.test.ts",
+      "e2e/faults/case24-replay-unsafe-approval.test.ts",
+      "packages/engine/tests/provenance-binding.test.jsx"
     ],
     "observability": [
       "Approval request/decision rows are exposed through listApprovals, workflow UIs, CLI ps/why/inspect, and approval metrics.",
@@ -612,7 +713,8 @@ export const featuresData = [
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 adversarial review: downgraded from fixed to partial because only part of the cited approval proof was observed passing."
+      "2026-07-06 adversarial review: downgraded from fixed to partial because only part of the cited approval proof was observed passing.",
+      "2026-07-18 feature and docs audit: removed the stale restart failure after case03 passed and recorded replay-unsafe, provenance-bound approval coverage."
     ],
     "diffHints": [
       "packages/engine/src/approvals.js",
@@ -621,9 +723,7 @@ export const featuresData = [
       "apps/cli/src/ask-human.js",
       "apps/cli/tests/approval-command.test.js"
     ],
-    "missing": [
-      "2026-07-06 review: the targeted approval proof failed e2e/faults/case03-restart-waiting-approval.test.ts with Timed out waiting for resumed run to finish, so durable waiting-approval restart is not proven."
-    ]
+    "missing": []
   },
   {
     "id": "gateway-server",
@@ -659,6 +759,14 @@ export const featuresData = [
       {
         "title": "Webhook and cron paths",
         "detail": "Server integrations can verify signed webhooks, enqueue external events, and drive cron ticks."
+      },
+      {
+        "title": "Run diffs",
+        "detail": "getRunDiff returns bounded run-wide diff bundles for DevTools and review UIs."
+      },
+      {
+        "title": "Score comparison",
+        "detail": "listScoresForRuns and getScoreDetail expose cross-run scorer rows and detailed evidence through the stable RPC contract."
       }
     ],
     "endpoints": [
@@ -686,6 +794,16 @@ export const featuresData = [
         "method": "HTTP",
         "path": "/metrics",
         "doc": "docs/deployment/production-hardening.mdx"
+      },
+      {
+        "method": "RPC",
+        "path": "getRunDiff",
+        "doc": "docs/rpc/get-run-diff.mdx"
+      },
+      {
+        "method": "RPC",
+        "path": "listScoresForRuns",
+        "doc": "docs/rpc/list-scores-for-runs.mdx"
       }
     ],
     "links": [
@@ -711,7 +829,8 @@ export const featuresData = [
       "apps/cli/tests/gateway-root-and-workflow-ui.e2e.test.js",
       "e2e/faults/case14-gateway-rpc-roundtrip.test.ts",
       "e2e/faults/case15-ws-drop-reconnect.test.ts",
-      "e2e/faults/case16-n5-subscribers-bounded-memory.test.ts"
+      "e2e/faults/case16-n5-subscribers-bounded-memory.test.ts",
+      "packages/server/tests/gateway-score-rpcs.test.jsx"
     ],
     "observability": [
       "Gateway tracks httpRequests, httpRequestDuration, gatewayApprovalDecisionsTotal, gatewaySignalsTotal, gatewayWebhooksVerifiedTotal, and stream backpressure events.",
@@ -723,19 +842,23 @@ export const featuresData = [
       "Use e2e websocket drop and bounded subscriber fault cases for stream regressions."
     ],
     "architecture": [
-      "packages/gateway/src/rpc/index.ts defines the stable v1 method union, request/response types, schemas, scopes, and errors.",
+      "packages/gateway/src/rpc/index.js defines the stable v1 method union, request/response schemas, scopes, and errors; index.d.ts publishes the corresponding types.",
       "packages/server/src/index.js implements node:http routes, request bounds, webhook verification, metrics, and workflow loading.",
       "packages/gateway-client and packages/gateway-react consume the same RPC contract for non-React and React clients."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: added run-wide diffs, score comparison RPCs, and the shared protocol package."
     ],
     "diffHints": [
-      "packages/gateway/src/rpc/index.ts",
+      "packages/gateway/src/rpc/index.js",
       "packages/server/src/index.js",
       "packages/server/src/gateway.js",
       "packages/gateway-client/src/SmithersGatewayClient.ts",
-      "packages/gateway-react/src/*.ts"
+      "packages/gateway-react/src/*.ts",
+      "packages/gateway",
+      "packages/server",
+      "packages/protocol"
     ],
     "missing": [
       "Serverless resume/cron tick and run-lease claims need broader end-to-end proof beyond unit/RPC contract tests.",
@@ -745,8 +868,8 @@ export const featuresData = [
   {
     "id": "workflow-uis",
     "title": "Custom workflow UIs and monitor surfaces",
-    "summary": "Workflow-owned .smithers/ui/*.tsx browser dashboards are declared with <UI>, served by smithers ui/gateway, backed by gateway-client/gateway-react hooks, and complemented by monitor/gui/TUI run inspectors.",
-    "status": "partial",
+    "summary": "Workflow-owned .smithers/ui browser dashboards are declared with UI, served by the Gateway, composed from gateway hooks and shared run/chat primitives, and complemented by monitor, GUI, and full-screen TUI inspectors.",
+    "status": "fixed",
     "priority": "p1",
     "owner": "smithers-maintainers",
     "tier": "feature",
@@ -776,6 +899,14 @@ export const featuresData = [
       {
         "title": "Operator monitors",
         "detail": "smithers monitor, ui, gui, and TUI modes provide zero-setup run views over the same gateway data."
+      },
+      {
+        "title": "Shared UI libraries",
+        "detail": "gateway-ui, ui, and ui-styleguide provide run, approval, score, diff, chat, layout, and themed browser primitives on top of gateway-react."
+      },
+      {
+        "title": "Terminal UI",
+        "detail": "The TUI reuses Gateway hooks for live tree, graph, logs, timeline, and hijack views."
       }
     ],
     "endpoints": [
@@ -826,7 +957,8 @@ export const featuresData = [
       "apps/cli/tests/local-ui-gateway-csrf.test.js",
       "apps/cli/tests/workflow-ui-all.e2e.test.js",
       "apps/cli/tests/workflow-pack-ui-coverage.test.js",
-      ".smithers/tests/open-code-review-ui.e2e.test.ts"
+      ".smithers/tests/open-code-review-ui.e2e.test.ts",
+      "apps/cli/tests/docs-examples-smoke.test.js"
     ],
     "observability": [
       "Custom UIs receive pushed run events, approval rows, node outputs, diffs, scores, memory facts, tickets, and workflow metadata through gateway streams/RPC.",
@@ -839,23 +971,28 @@ export const featuresData = [
     "architecture": [
       "packages/gateway-react/src/index.ts exports provider components, collection hooks, run tree folding, connection status, and action hooks.",
       "packages/gateway-client/src/index.ts exports SmithersGatewayClient, typed RPC maps, resilient streams, and data collection helpers.",
-      "apps/cli/src/localUiServer.js and workflowUiSources.js serve local workflow UI bundles."
+      "packages/server/src/gateway.js discovers and serves workflow-declared UI and TUI views; apps/cli/src/localUiServer.js launches the local operator UI."
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 adversarial review: downgraded from fixed to partial after cited UI/graph proof failed."
+      "2026-07-06 adversarial review: downgraded from fixed to partial after cited UI/graph proof failed.",
+      "2026-07-18 feature and docs audit: removed two stale UI/doc-smoke failures after 12 focused tests passed and mapped the shared UI, chat, DevTools, and TUI packages."
     ],
     "diffHints": [
       "packages/gateway-react/src",
       "packages/gateway-client/src",
       "apps/cli/src/localUiServer.js",
-      "apps/cli/src/workflowUiSources.js",
-      ".smithers/ui/*.tsx"
+      "packages/server/src/gateway.js",
+      ".smithers/ui/*.tsx",
+      "packages/gateway-client",
+      "packages/gateway-react",
+      "packages/gateway-ui",
+      "packages/devtools",
+      "packages/tui",
+      "packages/ui",
+      "packages/ui-styleguide"
     ],
-    "missing": [
-      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/ui-command.test.js fails; the smithers ui autostart case times out waiting for the local Gateway.",
-      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input."
-    ]
+    "missing": []
   },
   {
     "id": "crash-recovery-resume",
@@ -944,7 +1081,8 @@ export const featuresData = [
       "docs/how-it-works.mdx documents stable task IDs and resume hash validation."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: removed an expected workflow-hash safety rule from the gap list and retained the one unproved dogfood workflow path."
     ],
     "diffHints": [
       "apps/cli/src/supervisor.js",
@@ -954,8 +1092,7 @@ export const featuresData = [
       "e2e/faults/case06-concurrent-resume-vs-supervisor.test.ts"
     ],
     "missing": [
-      "Crash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is not part of the read survey and still needs explicit end-to-end proof if it remains a shipped workflow.",
-      "Resume across edited workflow source intentionally fails; hot-reload and stopped-run resume remain separate concepts that need clear docs whenever changed."
+      "The built-in crash-recovery dogfood workflow still lacks a dedicated workflow-level e2e; real engine kill/resume behavior is covered independently by fault case31."
     ]
   },
   {
@@ -1105,6 +1242,10 @@ export const featuresData = [
       {
         "title": "jj/git pointer capture",
         "detail": "VCS helpers detect jj and git, capture stable pointers, and restore files for time-travel operations."
+      },
+      {
+        "title": "Worktree lifecycle",
+        "detail": "The CLI lists Smithers-owned worktrees and prunes reclaimable or stale worktrees without treating unrelated VCS workspaces as owned."
       }
     ],
     "endpoints": [
@@ -1122,6 +1263,11 @@ export const featuresData = [
         "method": "API",
         "path": "runJj/workspaceAdd/revertToJjPointer",
         "doc": "docs/workflows/vcs.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers worktree list|prune",
+        "doc": "docs/components/worktree.mdx"
       }
     ],
     "links": [
@@ -1163,14 +1309,22 @@ export const featuresData = [
       "docs/concepts/execution-model.mdx clearly distinguishes tool sandbox, CLI agent internal sandbox, and <Sandbox> compute isolation."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: added worktree ownership/reclamation and mapped every shipped jj binary package."
     ],
     "diffHints": [
       "packages/sandbox/src",
       "packages/vcs/src",
       "packages/components/src/components/Sandbox.js",
       "packages/components/src/components/Worktree.js",
-      "e2e/faults/case22-secret-injection-no-leak.test.ts"
+      "e2e/faults/case22-secret-injection-no-leak.test.ts",
+      "packages/sandbox",
+      "packages/vcs",
+      "packages/jj-darwin-arm64",
+      "packages/jj-darwin-x64",
+      "packages/jj-linux-arm64",
+      "packages/jj-linux-x64",
+      "packages/jj-win32-x64"
     ],
     "missing": [
       "jj bookmark conflicts from git commits in chained worktrees need an automated repair path.",
@@ -1180,7 +1334,7 @@ export const featuresData = [
   {
     "id": "remote-sandbox-providers",
     "title": "Remote sandbox providers",
-    "summary": "Cloudflare, Vercel, AWS, GCP, and Daytona packages register provider-backed Sandbox runtimes that ship request bundles to remote containers/jobs and return result bundles with secret redaction.",
+    "summary": "Cloudflare, Vercel, AWS, GCP, Daytona, and Microsandbox packages register provider-backed Sandbox runtimes that transport request/result bundles to remote jobs or local hardware-isolated microVMs with normalized cleanup and error handling.",
     "status": "partial",
     "priority": "p1",
     "owner": "smithers-maintainers",
@@ -1203,6 +1357,10 @@ export const featuresData = [
       {
         "title": "AWS/GCP/Daytona providers",
         "detail": "AWS ECS/Fargate or CodeBuild, GCP Cloud Run Jobs/GCS, and Daytona workspace providers use injected clients and mocks for deterministic tests."
+      },
+      {
+        "title": "Microsandbox microVMs",
+        "detail": "createMicrosandboxSandboxProvider runs child workflows in local hardware-isolated microVMs and implements the shared provider contract."
       }
     ],
     "endpoints": [
@@ -1230,6 +1388,11 @@ export const featuresData = [
         "method": "API",
         "path": "createDaytonaSandboxProvider",
         "doc": "docs/integrations/daytona-sandbox-provider.mdx"
+      },
+      {
+        "method": "API",
+        "path": "createMicrosandboxSandboxProvider",
+        "doc": "docs/integrations/microsandbox-sandbox-provider.mdx"
       }
     ],
     "links": [
@@ -1252,6 +1415,10 @@ export const featuresData = [
       {
         "label": "Daytona sandbox provider",
         "href": "docs/integrations/daytona-sandbox-provider.mdx"
+      },
+      {
+        "label": "Microsandbox",
+        "href": "docs/integrations/microsandbox-sandbox-provider.mdx"
       }
     ],
     "tests": [
@@ -1263,7 +1430,9 @@ export const featuresData = [
       "packages/daytona/tests/createDaytonaSandboxProvider.test.js",
       "packages/aws/tests/awsSandboxProviderContract.test.js",
       "packages/gcp/tests/gcpSandboxProviderContract.test.js",
-      "packages/daytona/tests/daytonaSandboxProviderContract.test.js"
+      "packages/daytona/tests/daytonaSandboxProviderContract.test.js",
+      "packages/microsandbox/tests/microsandboxSandboxProviderContract.test.js",
+      "packages/microsandbox/tests/realMicrosandbox.test.js"
     ],
     "observability": [
       "Provider implementations surface remote ids and heartbeat metadata so gateway/CLI views can correlate a Smithers sandbox with provider resources.",
@@ -1274,12 +1443,13 @@ export const featuresData = [
       "For Cloudflare, read docs/integrations/cloudflare.mdx warning: Worker-native storage plus SDK agents works, but a Workers-native run driver for CLI workflows is not shipped."
     ],
     "architecture": [
-      "packages/cloudflare, packages/vercel, packages/aws, packages/gcp, and packages/daytona are separate optional provider packages re-exported by smithers-orchestrator subpaths.",
+      "packages/cloudflare, packages/vercel, packages/aws, packages/gcp, packages/daytona, and packages/microsandbox are optional provider packages re-exported by smithers-orchestrator subpaths.",
       "packages/sandbox/src/provider-kit supplies shared transport and provider contracts.",
       "Docs distinguish storage descriptors from remote execution providers, especially on Cloudflare."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: added the shipped Microsandbox provider, tests, Mintlify page, and public package mapping."
     ],
     "diffHints": [
       "packages/cloudflare/src",
@@ -1287,7 +1457,13 @@ export const featuresData = [
       "packages/aws/src",
       "packages/gcp/src",
       "packages/daytona/src",
-      "packages/sandbox/src/provider-kit"
+      "packages/sandbox/src/provider-kit",
+      "packages/cloudflare",
+      "packages/vercel",
+      "packages/aws",
+      "packages/gcp",
+      "packages/daytona",
+      "packages/microsandbox"
     ],
     "missing": [
       "Provider tests use injected clients and mock environments; real cloud-account integration tests are not part of CI.",
@@ -1320,6 +1496,10 @@ export const featuresData = [
       {
         "title": "Schema signatures",
         "detail": "DB schema signatures and input bounds protect gateway/client assumptions around table shape and payload size."
+      },
+      {
+        "title": "Electric shape proxy",
+        "detail": "The Electric proxy scopes cloud-sync shape access, strips forwarded auth, applies rate limits, and records shape metrics."
       }
     ],
     "endpoints": [
@@ -1377,7 +1557,8 @@ export const featuresData = [
       "docs/deployment/production-hardening.mdx explains SQLite, PGlite, Postgres, Electric Cloud Sync, and D1 limitations."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: mapped the published Electric shape proxy and its managed sync boundary."
     ],
     "diffHints": [
       "packages/db/src/dialect.js",
@@ -1385,7 +1566,9 @@ export const featuresData = [
       "packages/smithers/src/create.js",
       "packages/smithers/src/migrateSmithersStore.js",
       "apps/cli/src/argv-utils.js",
-      "apps/cli/tests/migrate-command.test.js"
+      "apps/cli/tests/migrate-command.test.js",
+      "packages/db",
+      "packages/electric-proxy"
     ],
     "missing": [
       "Electric Cloud Sync is documented for managed Postgres but needs deployment-level proof in the target hosted environment.",
@@ -1426,6 +1609,10 @@ export const featuresData = [
       {
         "title": "Account management",
         "detail": "smithers agents add/list/remove/test and usage commands manage local account config and quota visibility."
+      },
+      {
+        "title": "Optional agent runtimes",
+        "detail": "The agent-eliza package owns the opt-in elizaOS dependency, while accounts and usage packages keep subscription credentials and quota reporting outside core adapters."
       }
     ],
     "endpoints": [
@@ -1491,18 +1678,23 @@ export const featuresData = [
       "docs/concepts/execution-model.mdx documents in-process SDK vs subprocess CLI vs Sandbox execution."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: removed an obsolete Kimi pool gap and mapped accounts, usage, and the optional elizaOS runtime."
     ],
     "diffHints": [
       "packages/agents/src",
       "apps/cli/src/agent-commands",
       "apps/cli/src/agent-detection.js",
       "docs/integrations/cli-agents.mdx",
-      "docs/integrations/sdk-agents.mdx"
+      "docs/integrations/sdk-agents.mdx",
+      "packages/accounts",
+      "packages/agent-eliza",
+      "packages/agents",
+      "packages/usage"
     ],
     "missing": [
-      "Kimi auth-setup errors should fail over to the next pool agent instead of failing the run.",
-      "Many vendor CLI behaviors depend on locally installed binaries and subscription/API-key modes that cannot all be covered in clean CI."
+      "Many vendor CLI behaviors depend on locally installed binaries and subscription or API-key modes that cannot all be covered in clean CI.",
+      "External CLI releases can change flags and capability behavior; keep adapter capability reports and live smoke checks current."
     ]
   },
   {
@@ -1576,7 +1768,8 @@ export const featuresData = [
       "apps/review/src",
       "apps/review/tests",
       ".smithers/workflows/open-code-review.tsx",
-      ".smithers/tests/open-code-review.test.ts"
+      ".smithers/tests/open-code-review.test.ts",
+      "apps/review"
     ],
     "missing": [
       "Hosted/cloud review path is blocked on funded provider credentials and deployment-specific verification.",
@@ -1609,6 +1802,14 @@ export const featuresData = [
       {
         "title": "Score persistence",
         "detail": "smithersScorers table and listScores RPC expose stored score rows to UIs."
+      },
+      {
+        "title": "LLM judge assertions",
+        "detail": "llmJudge and batch scorer helpers support rubric-based assertions with structured evidence and failure reporting."
+      },
+      {
+        "title": "Cross-run comparison",
+        "detail": "listScoresForRuns and getScoreDetail let UIs compare scored runs without reconstructing rows client-side."
       }
     ],
     "endpoints": [
@@ -1636,6 +1837,11 @@ export const featuresData = [
         "method": "API",
         "path": "runScorersAsync",
         "doc": "docs/reference/scorers.mdx"
+      },
+      {
+        "method": "RPC",
+        "path": "listScoresForRuns",
+        "doc": "docs/rpc/list-scores-for-runs.mdx"
       }
     ],
     "links": [
@@ -1657,7 +1863,10 @@ export const featuresData = [
       "apps/cli/tests/optimize-suite.test.js",
       "packages/scorers/tests/scorers-builtins-llm.test.js",
       "packages/scorers/tests/scorers-llm-judge-parse.test.js",
-      "e2e/faults/case27-scorer-failure-blocks-downstream.test.ts"
+      "e2e/faults/case27-scorer-failure-blocks-downstream.test.ts",
+      "packages/scorers/tests/scorers-builtins-llm.test.js",
+      "packages/scorers/tests/scorers-llm-judge-parse.test.js",
+      "packages/server/tests/gateway-score-rpcs.test.jsx"
     ],
     "observability": [
       "Scorer metrics include scorersStarted, scorersFinished, scorersFailed, scorerDuration, and scorerEventsFailed.",
@@ -1673,13 +1882,15 @@ export const featuresData = [
       "docs/guides/evals-quickstart.mdx documents supported expected checks and production options."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: added LLM-judge assertions and score-comparison RPCs."
     ],
     "diffHints": [
       "apps/cli/src/eval-suite.js",
       "apps/cli/src/optimize-suite.js",
       "packages/scorers/src",
-      "docs/guides/evals-quickstart.mdx"
+      "docs/guides/evals-quickstart.mdx",
+      "packages/scorers"
     ],
     "missing": [
       "Optimizer tests prove helper behavior but production provider quality/cost needs suite-specific monitoring.",
@@ -1772,16 +1983,17 @@ export const featuresData = [
     ],
     "diffHints": [
       "packages/openapi/src",
-      "apps/cli/src/index.js openapiCli",
+      "apps/cli/src/index.js",
       "apps/cli/tests/openapi-generate-command.test.js",
-      "docs/llms-openapi.txt"
+      "docs/llms-openapi.txt",
+      "packages/openapi"
     ],
     "missing": []
   },
   {
     "id": "memory",
     "title": "Agent memory",
-    "summary": "The memory package persists namespaced facts, threads, and messages, provides Effect service layers, TTL/token/summarizer processors, metrics, a CLI, and Gateway memory fact listings.",
+    "summary": "Smithers provides local durable facts and threads plus declarative Memory and Task memory configuration for Hindsight-backed multi-bank recall, mental-model primers, agent memory tools, scoped tags, and asynchronous retention.",
     "status": "partial",
     "priority": "p2",
     "owner": "smithers-maintainers",
@@ -1804,6 +2016,18 @@ export const featuresData = [
       {
         "title": "CLI and Gateway read paths",
         "detail": "smithers memory commands and listMemoryFacts expose memory to operators and UIs."
+      },
+      {
+        "title": "Declarative task memory",
+        "detail": "Memory provides inherited banks, tags, recall mode, search budget, token cap, primers, retention, and remember or recall tools to descendant tasks."
+      },
+      {
+        "title": "Hindsight backend",
+        "detail": "HINDSIGHT_URL enables semantic multi-bank recall, mental-model primers, filtered tool access, and asynchronous retained task digests."
+      },
+      {
+        "title": "Scoped recall",
+        "detail": "User and project banks apply stable branch, stream, source, and scope filters without mixing volatile run identity into tags."
       }
     ],
     "endpoints": [
@@ -1826,6 +2050,11 @@ export const featuresData = [
         "method": "RPC",
         "path": "listMemoryFacts",
         "doc": "docs/rpc/list-memory-facts.mdx"
+      },
+      {
+        "method": "API",
+        "path": "<Memory>",
+        "doc": "docs/components/memory.mdx"
       }
     ],
     "links": [
@@ -1836,6 +2065,14 @@ export const featuresData = [
       {
         "label": "Memory LLM fragment",
         "href": "docs/llms-memory.txt"
+      },
+      {
+        "label": "Memory component",
+        "href": "docs/components/memory.mdx"
+      },
+      {
+        "label": "Memory reference",
+        "href": "docs/reference/memory.mdx"
       }
     ],
     "tests": [
@@ -1843,7 +2080,12 @@ export const featuresData = [
       "packages/memory/tests/service.test.js",
       "packages/memory/tests/processors.test.js",
       "packages/memory/tests/types.test.js",
-      "apps/cli/tests/memory-cli.e2e.test.js"
+      "apps/cli/tests/memory-cli.e2e.test.js",
+      "packages/components/tests/memory-component.test.jsx",
+      "packages/engine/tests/memory-runtime.test.jsx",
+      "packages/memory/tests/hindsight-store.test.js",
+      "packages/memory/tests/hindsight-docker.integration.test.js",
+      "packages/memory/tests/local-memory-runtime.test.js"
     ],
     "observability": [
       "Memory metrics include memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, and memoryRecallDuration.",
@@ -1858,17 +2100,21 @@ export const featuresData = [
       "docs/concepts/memory.mdx and docs/llms-memory.txt are the human/agent references."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: replaced the obsolete no-semantic-recall claim with the shipped Memory and Hindsight runtime, filters, primers, tools, and retention behavior; 32 focused component, engine, Hindsight, and local-runtime tests passed."
     ],
     "diffHints": [
       "packages/memory/src",
       "packages/memory/tests",
-      "apps/cli/src/index.js memoryCli",
-      "docs/concepts/memory.mdx"
+      "apps/cli/src/index.js",
+      "docs/concepts/memory.mdx",
+      "packages/memory",
+      "packages/components/src/components/Memory.js",
+      "packages/engine/src/memory-runtime.js"
     ],
     "missing": [
-      "No end-to-end proof that seeded workflows read and write memory across separate real runs.",
-      "Semantic recall is intentionally not exposed on the current public API; keep docs clear to avoid overpromising retrieval behavior."
+      "Separate HindsightMemoryStore writer instances do not share a durable same-document version fence; use one writer instance per transactional contract store.",
+      "The real Hindsight Docker integration requires an external Postgres 15 or later service with pgvector and is not available in every CI environment."
     ]
   },
   {
@@ -1897,6 +2143,10 @@ export const featuresData = [
       {
         "title": "Local stack",
         "detail": "smithers observability can start Prometheus/Grafana/Tempo/OTLP Collector assets from apps/observability."
+      },
+      {
+        "title": "Authenticated OTLP export",
+        "detail": "OTLP HTTP exporters accept explicit headers or OTEL_EXPORTER_OTLP_HEADERS for authenticated tracing and log backends."
       }
     ],
     "endpoints": [
@@ -1929,6 +2179,10 @@ export const featuresData = [
       {
         "label": "Production hardening",
         "href": "docs/deployment/production-hardening.mdx"
+      },
+      {
+        "label": "Observability reference",
+        "href": "docs/reference/observability.mdx"
       }
     ],
     "tests": [
@@ -1954,14 +2208,16 @@ export const featuresData = [
       "packages/smithers/src/index.js re-exports observability through smithers-orchestrator/observability."
     ],
     "changes": [
-      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories."
+      "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
+      "2026-07-18 feature and docs audit: added authenticated OTLP headers and linked the full Mintlify API reference."
     ],
     "diffHints": [
       "apps/observability/src",
       "apps/observability/tests",
       "apps/observability/docker-compose.otel.yml",
       "docs/llms-observability.txt",
-      "apps/cli/src/index.js observability command"
+      "apps/cli/src/index.js",
+      "apps/observability"
     ],
     "missing": [
       "OTLP exporter installation into real reference deployments is uneven; prove a production export path per deployment target.",
@@ -2047,7 +2303,8 @@ export const featuresData = [
       "packages/control-plane/src/index.js",
       "packages/control-plane/tests/control-plane.test.js",
       "docs/deployment/control-plane.mdx",
-      "apps/cli/src/token-store.js"
+      "apps/cli/src/token-store.js",
+      "packages/control-plane"
     ],
     "missing": [
       "This is a data-contract package, not a complete hosted control plane: SSO enforcement, billing checkout, tenant-isolated gateway deployment, object storage, and compliance operations live outside this repo.",
@@ -2058,7 +2315,7 @@ export const featuresData = [
     "id": "docs-pipeline",
     "title": "Docs pipeline and LLM bundles",
     "summary": "Mintlify docs, generated API/reference material, llms-*.txt bundles, docs checks, and public-surface coverage tests keep human and agent documentation in sync with the published packages.",
-    "status": "partial",
+    "status": "fixed",
     "priority": "p1",
     "owner": "smithers-maintainers",
     "tier": "reference",
@@ -2076,6 +2333,10 @@ export const featuresData = [
       {
         "title": "Coverage gates",
         "detail": "check-docs, check-llms, docs-public-surface-coverage, docs-cli-overview-coverage, and docs examples smoke tests catch drift."
+      },
+      {
+        "title": "Feature coverage ledger",
+        "detail": "The Mintlify feature inventory is checked against every id in .smithers/spec/features.json, while public packages and component props are checked against source."
       }
     ],
     "endpoints": [
@@ -2107,6 +2368,10 @@ export const featuresData = [
       {
         "label": "Full LLMS",
         "href": "docs/llms-full.txt"
+      },
+      {
+        "label": "Feature inventory",
+        "href": "docs/reference/feature-inventory.mdx"
       }
     ],
     "tests": [
@@ -2133,7 +2398,8 @@ export const featuresData = [
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 adversarial review: downgraded from fixed to partial; node scripts/check-docs.mjs, node scripts/check-llms.mjs, and apps/cli/tests/docs-cli-overview-coverage.test.js passed, but apps/cli/tests/docs-examples-smoke.test.js failed."
+      "2026-07-06 adversarial review: downgraded from fixed to partial; node scripts/check-docs.mjs, node scripts/check-llms.mjs, and apps/cli/tests/docs-cli-overview-coverage.test.js passed, but apps/cli/tests/docs-examples-smoke.test.js failed.",
+      "2026-07-18 feature and docs audit: removed the stale docs-example failure after the smoke suite passed and added package, feature, navigation, and prop-level drift gates."
     ],
     "diffHints": [
       "docs/**/*.mdx",
@@ -2143,10 +2409,7 @@ export const featuresData = [
       "apps/cli/src/docs-command.js",
       "skills/smithers/llms-full.txt"
     ],
-    "missing": [
-      "2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.",
-      "Keep docs-pipeline partial until the docs examples smoke gate passes together with check-docs/check-llms and CLI overview coverage."
-    ]
+    "missing": []
   },
   {
     "id": "docs-driven-development",
@@ -2199,6 +2462,11 @@ export const featuresData = [
         "method": "UI",
         "path": ".smithers/ui/docs-driven-development.tsx",
         "doc": ".smithers/ui/docs-driven-development.tsx"
+      },
+      {
+        "method": "DOCS",
+        "path": "docs-driven-development workflow",
+        "doc": "docs/workflows/docs-driven-development.mdx"
       }
     ],
     "links": [
@@ -2209,6 +2477,10 @@ export const featuresData = [
       {
         "label": "Feature source",
         "href": ".smithers/spec/features.json"
+      },
+      {
+        "label": "Mintlify workflow guide",
+        "href": "docs/workflows/docs-driven-development.mdx"
       }
     ],
     "tests": [
@@ -2235,7 +2507,8 @@ export const featuresData = [
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
-      "2026-07-06 adversarial review: reran bun .smithers/lib/ddd/build.ts after spec corrections; it validated 22 features and regenerated derived docs/UI modules."
+      "2026-07-06 adversarial review: reran bun .smithers/lib/ddd/build.ts after spec corrections; it validated 22 features and regenerated derived docs/UI modules.",
+      "2026-07-18 feature and docs audit: linked the structured product spec to its public Mintlify workflow guide."
     ],
     "diffHints": [
       ".smithers/spec/features.json",
@@ -2247,6 +2520,457 @@ export const featuresData = [
     "missing": [
       "Image upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server, so uploads are disabled when absent.",
       "Spec statuses can drift if refresh tasks do not run the package/e2e tests they cite; keep missing[] explicit when proof is absent."
+    ]
+  },
+  {
+    "id": "workflow-packs",
+    "title": "Workflow packs",
+    "summary": "Install read-only workflow packs from GitHub, npm, or local files; lock and update versions; run namespaced workflows; eject editable copies; remove packs; and publish a project pack through the registry workflow.",
+    "status": "partial",
+    "priority": "p0",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Start a workflow",
+    "userValue": "Reuse and share complete workflows, prompts, libraries, and UIs without copying them into every project.",
+    "capabilities": [
+      {
+        "title": "Install and lock",
+        "detail": "add accepts GitHub, npm, and file specs, validates smithers.toon, scans imports, and records resolved sources in packs.lock.toon."
+      },
+      {
+        "title": "Namespaced resolution",
+        "detail": "Pack workflows run by unqualified id when unambiguous or explicit pack:workflow id; local workflows shadow only the unqualified name."
+      },
+      {
+        "title": "Update and remove",
+        "detail": "packs update refreshes one or all locked packs, while remove deletes the selected installed pack and lock entry."
+      },
+      {
+        "title": "Eject and share",
+        "detail": "eject copies a workflow and its imported assets into editable local paths; share prepares a registry entry and opens a GitHub pull request."
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "CLI",
+        "path": "smithers add <spec>",
+        "doc": "docs/reference/packs.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers packs list|update",
+        "doc": "docs/reference/packs.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers eject <pack:workflow>",
+        "doc": "docs/reference/packs.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers remove <pack>",
+        "doc": "docs/reference/packs.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers share",
+        "doc": "docs/reference/packs.mdx"
+      }
+    ],
+    "links": [
+      {
+        "label": "Workflow packs",
+        "href": "docs/reference/packs.mdx"
+      },
+      {
+        "label": "Add system workflow",
+        "href": "docs/workflows/add.mdx"
+      },
+      {
+        "label": "Share-pack workflow",
+        "href": "docs/workflows/share-pack.mdx"
+      }
+    ],
+    "tests": [
+      "apps/cli/tests/packs.test.js",
+      "apps/cli/tests/packs-cli.e2e.test.js",
+      "apps/cli/tests/packs-eject.test.js"
+    ],
+    "observability": [
+      "packs list reports installed versions, source specs, scopes, and lock state from packs.lock.toon.",
+      "Durable add and share-pack system workflows expose their installation or publishing steps as ordinary run state."
+    ],
+    "debug": [
+      "Use smithers packs list and inspect packs.lock.toon when a workflow resolves to an unexpected pack version.",
+      "Use smithers eject for a local editable copy; local workflow ids intentionally shadow unqualified pack ids."
+    ],
+    "architecture": [
+      "apps/cli/src/packs.js owns spec parsing, trust checks, manifests, lockfiles, install/update/remove/eject, and registry sharing.",
+      "apps/cli/src/workflow-pack.js seeds durable add and share-pack system workflows into initialized projects."
+    ],
+    "changes": [
+      "2026-07-18 feature and docs audit: added the shipped pack lifecycle as a first-class product feature; 30 install, lock, update, remove, eject, and CLI lifecycle tests passed."
+    ],
+    "diffHints": [
+      "apps/cli",
+      "apps/cli/src/packs.js",
+      "docs/reference/packs.mdx",
+      "docs/workflows/add.mdx",
+      "docs/workflows/share-pack.mdx"
+    ],
+    "missing": [
+      "The normal share path requires an authenticated gh CLI and a live registry repository; CI primarily proves dry-run and local repository behavior."
+    ]
+  },
+  {
+    "id": "runtime-portability",
+    "title": "Runtime portability and browser execution",
+    "summary": "Run the portable Smithers driver, scheduler, renderer, dependency model, schema validation, and in-process tasks in browsers or custom hosts through an explicit RuntimeAdapter capability contract.",
+    "status": "fixed",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "platform",
+    "group": "Platform & delivery",
+    "userValue": "Embed real Smithers workflow execution in a browser or non-Node host while unavailable filesystem and process capabilities fail explicitly.",
+    "capabilities": [
+      {
+        "title": "Browser facade",
+        "detail": "smithers-orchestrator/browser exports workflow definition, runtime construction, reusable and one-shot runners, and browser-safe primitives."
+      },
+      {
+        "title": "RuntimeAdapter",
+        "detail": "Clock, storage, UUID, task execution, filesystem, subprocess, worktree, and sandbox are explicit host seams."
+      },
+      {
+        "title": "Fail-closed capabilities",
+        "detail": "The default browser runtime throws typed errors for filesystem, subprocess, worktree, and sandbox operations."
+      },
+      {
+        "title": "Conformance proof",
+        "detail": "Node and browser proofs exercise unique runs, durable save semantics, dependency outputs, engine-owned schema rejection, and capability errors."
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "API",
+        "path": "createBrowserSmithers",
+        "doc": "docs/runtime/browser.mdx"
+      },
+      {
+        "method": "API",
+        "path": "runBrowserWorkflow",
+        "doc": "docs/runtime/browser.mdx"
+      },
+      {
+        "method": "API",
+        "path": "createBrowserRuntime",
+        "doc": "docs/runtime/browser.mdx"
+      },
+      {
+        "method": "API",
+        "path": "RuntimeAdapter",
+        "doc": "docs/runtime/browser.mdx"
+      }
+    ],
+    "links": [
+      {
+        "label": "Browser runtime",
+        "href": "docs/runtime/browser.mdx"
+      },
+      {
+        "label": "Package exports",
+        "href": "docs/reference/package-configuration.mdx"
+      }
+    ],
+    "tests": [
+      "packages/engine/tests/browser.test.jsx",
+      "packages/driver/tests/browser-runtime.test.js",
+      "packages/driver/tests/runtime-adapter-threading.test.js",
+      "packages/testing/tests/runtimeConformance.test.ts",
+      "e2e/browser/run-browser.mjs"
+    ],
+    "observability": [
+      "RuntimeCapabilityError records the runtime name, capability, and attempted operation for unavailable host services.",
+      "BrowserSmithers exposes persisted run state and output snapshots through its selected RuntimeStorage adapter."
+    ],
+    "debug": [
+      "Catch RuntimeCapabilityError and inspect capability and operation when portable code reaches a Node-only boundary.",
+      "Inject deterministic clock, storage, UUID, or executeTask adapters to reproduce host-specific failures."
+    ],
+    "architecture": [
+      "packages/driver defines RuntimeAdapter and the default browser and Node runtime implementations.",
+      "packages/engine/src/browser.js composes the production driver, scheduler, renderer, graph extractor, and browser-safe component exports.",
+      "packages/smithers/src/browser.js is the browser-safe public facade and deliberately avoids the Node barrel."
+    ],
+    "changes": [
+      "2026-07-18 feature and docs audit: added browser and RuntimeAdapter portability as a first-class platform feature with a dedicated Mintlify page; 22 focused browser, adapter-threading, and conformance tests passed."
+    ],
+    "diffHints": [
+      "packages/driver",
+      "packages/engine",
+      "packages/smithers/src/browser.js",
+      "packages/testing/src/runtimeConformance.ts",
+      "docs/runtime/browser.mdx"
+    ],
+    "missing": []
+  },
+  {
+    "id": "workflow-testing",
+    "title": "Workflow testing and durability scenarios",
+    "summary": "Test workflows with scripted agents, in-memory simulation, prompt and frame rendering, single-task execution, Bun matchers, and a tiered durability scenario harness with real database and process adapters.",
+    "status": "fixed",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Improve quality",
+    "userValue": "Catch graph, prompt, output, retry, crash, and replay regressions before running expensive live agents or deploying a workflow.",
+    "capabilities": [
+      {
+        "title": "Simulation and fake agents",
+        "detail": "simulate and fakeAgent execute real workflow rendering with explicit scripted outputs and no accidental provider calls."
+      },
+      {
+        "title": "Render and task helpers",
+        "detail": "renderWorkflow, renderPrompt, and runTask expose frames, descriptors, prompts, and isolated task execution."
+      },
+      {
+        "title": "Durability scenarios",
+        "detail": "scenario, step, fault, barriers, cut points, and mediated effects model timing, crashes, ambiguity, and replay."
+      },
+      {
+        "title": "Real capability tiers",
+        "detail": "Integration and e2e harnesses require executable database and process adapters and report unsupported capability instead of silently mocking it."
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "API",
+        "path": "simulate/fakeAgent",
+        "doc": "docs/guides/testing-workflows.mdx"
+      },
+      {
+        "method": "API",
+        "path": "renderWorkflow/renderPrompt/runTask",
+        "doc": "docs/guides/testing-workflows.mdx"
+      },
+      {
+        "method": "API",
+        "path": "runScenario",
+        "doc": "docs/guides/testing-workflows.mdx"
+      }
+    ],
+    "links": [
+      {
+        "label": "Testing workflows",
+        "href": "docs/guides/testing-workflows.mdx"
+      }
+    ],
+    "tests": [
+      "packages/testing/tests/simulate.test.ts",
+      "packages/testing/tests/fakeAgent.test.ts",
+      "packages/testing/tests/runtimeConformance.test.ts",
+      "packages/testing/tests/replay-identity-fresh-process.test.ts",
+      "e2e/testing-framework/real-db-integration.test.ts",
+      "e2e/testing-framework/real-process-kill-resume.test.ts",
+      "e2e/testing-framework/cutpoint-conformance.test.ts"
+    ],
+    "observability": [
+      "Scenario results include structured traces, control logs, capability reports, ambiguity records, replay identity, and determinism reports.",
+      "Simulation records executed task ids, prompts, validated output rows, unused mocks, and final status for assertions."
+    ],
+    "debug": [
+      "Start with renderWorkflow or simulate for prompt and graph failures, then move durability behavior to the scenario harness tier that owns the required capability.",
+      "Use the replay bundle and first-divergence report to diagnose nondeterministic scenarios across fresh processes."
+    ],
+    "architecture": [
+      "packages/testing exports consumer-facing simulation, fake-agent, render, single-task, matcher, scenario, replay, and conformance APIs.",
+      "Unit, integration, and e2e harnesses use virtual time, real database adapters, or real process adapters without representing mocks as production backends."
+    ],
+    "changes": [
+      "2026-07-18 feature and docs audit: added the complete workflow testing and durability scenario surface to the feature ledger and LLM bundle; the full package suite passed 144 tests."
+    ],
+    "diffHints": [
+      "packages/testing",
+      "e2e/testing-framework",
+      "docs/guides/testing-workflows.mdx"
+    ],
+    "missing": []
+  },
+  {
+    "id": "external-integrations",
+    "title": "External event and messaging integrations",
+    "summary": "Connect GitHub, Linear, and Telegram webhooks or polling sources to durable workflow signals with cursor storage, signature verification, normalized events, outbound actions, and Telegram approval components.",
+    "status": "partial",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Integrate APIs",
+    "userValue": "Start and steer durable workflows from real provider events while keeping cursors, signatures, retries, and message formatting in reusable adapters.",
+    "capabilities": [
+      {
+        "title": "Provider-neutral sources",
+        "detail": "EventSource, PollingSource, CursorStore, verifySignature, and deliverEvents provide reusable ingestion contracts."
+      },
+      {
+        "title": "GitHub and Linear",
+        "detail": "Typed clients, webhook sources, schemas, and workflow components cover inbound and outbound provider operations."
+      },
+      {
+        "title": "Telegram workflows",
+        "detail": "OnMessage, SendMessage, and TelegramApproval connect bot updates and Mini App approval data to workflows."
+      },
+      {
+        "title": "Telegram Bot API",
+        "detail": "The standalone package handles secret verification, update normalization, typed calls, retry hints, MarkdownV2, and message chunking."
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "API",
+        "path": "@smithers-orchestrator/integrations/github",
+        "doc": "docs/integrations/integrations.mdx"
+      },
+      {
+        "method": "API",
+        "path": "@smithers-orchestrator/integrations/linear",
+        "doc": "docs/integrations/integrations.mdx"
+      },
+      {
+        "method": "API",
+        "path": "@smithers-orchestrator/integrations/telegram",
+        "doc": "docs/integrations/telegram.mdx"
+      },
+      {
+        "method": "API",
+        "path": "smithers-orchestrator/telegram",
+        "doc": "docs/integrations/telegram.mdx"
+      }
+    ],
+    "links": [
+      {
+        "label": "Integration patterns",
+        "href": "docs/integrations/integrations.mdx"
+      },
+      {
+        "label": "Telegram",
+        "href": "docs/integrations/telegram.mdx"
+      }
+    ],
+    "tests": [
+      "packages/integrations/tests/github-webhook.test.js",
+      "packages/integrations/tests/linear-pipeline.test.js",
+      "packages/integrations/tests/telegram-pipeline.test.js",
+      "packages/integrations/tests/pollingSource.test.js",
+      "packages/integrations/tests/deliverEvents.test.js",
+      "packages/telegram/tests/telegram.test.js"
+    ],
+    "observability": [
+      "IntegrationRuntime exposes source start/stop state, cursor progression, delivery failures, and interruption-safe shutdown through Effect services.",
+      "Provider events are normalized to stable external event and signal names before delivery to workflows."
+    ],
+    "debug": [
+      "Verify webhook secrets and normalized event ids before debugging downstream workflow signals.",
+      "Inspect the cursor store when a polling source repeats or skips provider records."
+    ],
+    "architecture": [
+      "packages/integrations owns the provider-neutral event source, cursor, signature, delivery, GitHub, Linear, and Telegram workflow components.",
+      "packages/telegram provides lower-level Bot API verification, normalization, retries, MarkdownV2, chunking, and deterministic test fakes."
+    ],
+    "changes": [
+      "2026-07-18 feature and docs audit: added the published integration and Telegram packages as a first-class feature; the full integrations package passed 264 tests."
+    ],
+    "diffHints": [
+      "packages/integrations",
+      "packages/telegram",
+      "docs/integrations/integrations.mdx",
+      "docs/integrations/telegram.mdx"
+    ],
+    "missing": [
+      "Provider test suites use deterministic fixtures; live GitHub, Linear, and Telegram credential paths require deployment-specific smoke tests."
+    ]
+  },
+  {
+    "id": "schedules-alerts",
+    "title": "Schedules and durable alerts",
+    "summary": "Create, list, delete, and manually run cron schedules for workflows, and persist operator-managed alert instances with typed policy metadata, severity, dedupe, silence, acknowledgement, and resolution state.",
+    "status": "partial",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Run & observe",
+    "userValue": "Run workflows on durable schedules and give operators persistent alert state without hiding the current boundary between policy metadata and notification automation.",
+    "capabilities": [
+      {
+        "title": "Cron lifecycle",
+        "detail": "CLI and Gateway RPC create, list, delete, and manually run schedule rows with overlap-safe execution."
+      },
+      {
+        "title": "Durable alert instances",
+        "detail": "Alerts support firing, acknowledged, silenced, and resolved states with recurrence and operator attribution."
+      },
+      {
+        "title": "Typed alert policy",
+        "detail": "Workflow options carry defaults, rules, labels, runbooks, severity, and emit, pause, cancel, approval, or delivery reaction metadata."
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "CLI",
+        "path": "smithers cron",
+        "doc": "docs/cli/overview.mdx"
+      },
+      {
+        "method": "CLI",
+        "path": "smithers alerts",
+        "doc": "docs/guides/alerting.mdx"
+      },
+      {
+        "method": "RPC",
+        "path": "cronList|cronCreate|cronDelete|cronRun",
+        "doc": "docs/rpc/cron-list.mdx"
+      }
+    ],
+    "links": [
+      {
+        "label": "Alerting",
+        "href": "docs/guides/alerting.mdx"
+      },
+      {
+        "label": "Cron RPC",
+        "href": "docs/rpc/cron-create.mdx"
+      }
+    ],
+    "tests": [
+      "apps/cli/tests/cron-command-scheduler.test.js",
+      "packages/db/tests/alert-instances.test.js",
+      "e2e/faults/case18-cron-manual-overlap.test.ts",
+      "e2e/faults/case29-soak-cron-2h-no-stuck.test.ts"
+    ],
+    "observability": [
+      "Cron rows record schedule, input, enabled state, next run time, and manual execution state through CLI and Gateway RPC.",
+      "Durable alert rows retain severity, fingerprint, occurrence count, owner, runbook, reaction metadata, and acknowledgement or resolution state."
+    ],
+    "debug": [
+      "Use smithers cron list and cron run to distinguish schedule calculation from workflow launch failures.",
+      "Use smithers alerts list --format json to inspect firing, acknowledged, silenced, and resolved state."
+    ],
+    "architecture": [
+      "apps/cli and packages/server expose cron scheduling through CLI, Gateway RPC, and server tick paths.",
+      "packages/db stores cron and alert instances; workflow alertPolicy remains declarative metadata consumed by runtime integrations."
+    ],
+    "changes": [
+      "2026-07-18 feature and docs audit: added cron schedules and durable alert instances as a first-class operator feature; focused cron and alert suites passed 17 tests, while the policy-gated real-overlap case remained skipped in this environment."
+    ],
+    "diffHints": [
+      "apps/cli",
+      "packages/db",
+      "packages/server",
+      "packages/gateway",
+      "docs/guides/alerting.mdx",
+      "docs/rpc/cron-list.mdx"
+    ],
+    "missing": [
+      "Alert policy is stored and an AlertRuntime wrapper exists, but core does not yet evaluate rules, poll approval age, deliver notifications, or execute pause, cancel, and approval reactions automatically."
     ]
   }
 ];

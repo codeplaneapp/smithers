@@ -26,6 +26,10 @@ Agent session events are `normalized/redacted` into Smithers events and OTLP log
 
 smithers observability can start `Prometheus/Grafana/Tempo/OTLP` Collector assets from `apps/observability`.
 
+### Authenticated OTLP export
+
+OTLP HTTP exporters accept explicit headers or OTEL\_EXPORTER\_OTLP\_HEADERS for authenticated tracing and log backends.
+
 ## Endpoints and commands
 
 - `API createSmithersObservabilityLayer` ([docs](docs/llms-observability.txt))
@@ -37,6 +41,7 @@ smithers observability can start `Prometheus/Grafana/Tempo/OTLP` Collector asset
 
 - [Observability LLM fragment](docs/llms-observability.txt)
 - [Production hardening](docs/deployment/production-hardening.mdx)
+- [Observability reference](docs/reference/observability.mdx)
 
 ## Test cases
 
@@ -67,11 +72,13 @@ smithers observability can start `Prometheus/Grafana/Tempo/OTLP` Collector asset
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: added authenticated OTLP headers and linked the full Mintlify API reference.
 - `apps/observability/src`
 - `apps/observability/tests`
 - `apps/observability/docker-compose.otel.yml`
 - `docs/llms-observability.txt`
-- `apps/cli/src/index.js` observability command
+- `apps/cli/src/index.js`
+- `apps/observability`
 
 ## Open gaps
 

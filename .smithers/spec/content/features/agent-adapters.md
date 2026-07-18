@@ -34,6 +34,10 @@ Adapters expose structured-output, tool, image, transcription, web-search, and s
 
 `smithers agent`s `add/list/remove/test` and usage commands manage local account config and quota visibility.
 
+### Optional agent runtimes
+
+The agent-eliza package owns the opt-in elizaOS dependency, while accounts and usage packages keep subscription credentials and quota reporting outside core adapters.
+
 ## Endpoints and commands
 
 - `API <Task agent={...}>` ([docs](docs/integrations/cli-agents.mdx))
@@ -80,13 +84,18 @@ Adapters expose structured-output, tool, image, transcription, web-search, and s
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: removed an obsolete Kimi pool gap and mapped accounts, usage, and the optional elizaOS runtime.
 - `packages/agents/src`
 - `apps/cli/src/agent-commands`
 - `apps/cli/src/agent-detection.js`
 - `docs/integrations/cli-agents.mdx`
 - `docs/integrations/sdk-agents.mdx`
+- `packages/accounts`
+- `packages/agent-eliza`
+- `packages/agents`
+- `packages/usage`
 
 ## Open gaps
 
-- Kimi auth-setup errors should fail over to the next pool agent instead of failing the run.
-- Many vendor CLI behaviors depend on locally installed binaries and `subscription/API-key` modes that cannot all be covered in clean CI.
+- Many vendor CLI behaviors depend on locally installed binaries and subscription or API-key modes that cannot all be covered in clean CI.
+- External CLI releases can change flags and capability behavior; keep adapter capability reports and live smoke checks current.

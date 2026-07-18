@@ -2,26 +2,6 @@
 // One ticket per open gap (features.json broken/partial/missing* + each missing[] item).
 export const ticketsBacklog: { path: string; kind: string; status: string; priority: string; updatedAtMs: number; featureId: string; featureTitle: string; content: string }[] = [
   {
-    "path": "tickets/init-workflow-pack--01-2026-07-06-review-apps-cli-tests-workflow-pack-subset.test.j-561fe005.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p0",
-    "updatedAtMs": 0,
-    "featureId": "init-workflow-pack",
-    "featureTitle": "Init workflow pack and starters",
-    "content": "# 2026-07-06 review: apps/cli/tests/workflow-pack-subset.test.js fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus init/post-failure.\n\nFeature: Init workflow pack and starters (init-workflow-pack)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: apps/cli/tests/workflow-pack-subset.test.js fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus init/post-failure.\n"
-  },
-  {
-    "path": "tickets/init-workflow-pack--02-2026-07-06-review-apps-cli-tests-init.e2e.test.js-workflow-p-3ea34dc4.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p0",
-    "updatedAtMs": 0,
-    "featureId": "init-workflow-pack",
-    "featureTitle": "Init workflow pack and starters",
-    "content": "# 2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.\n\nFeature: Init workflow pack and starters (init-workflow-pack)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.\n"
-  },
-  {
     "path": "tickets/cli--01-the-cli-surface-is-broad-keep-pglite-postgres-parity-covered-c81f0bd8.md",
     "kind": "issue",
     "status": "todo",
@@ -52,16 +32,6 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# The support matrix spans many external agents; not every agent-specific config path can be exercised end to end in CI.\n\nFeature: MCP server and agent wiring (mcp-agent-control)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nThe support matrix spans many external agents; not every agent-specific config path can be exercised end to end in CI.\n"
   },
   {
-    "path": "tickets/approvals-human-gates--01-2026-07-06-review-the-targeted-approval-proof-failed-e2e-fau-b16665fc.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p0",
-    "updatedAtMs": 0,
-    "featureId": "approvals-human-gates",
-    "featureTitle": "Approvals, human tasks, and durable waits",
-    "content": "# 2026-07-06 review: the targeted approval proof failed e2e/faults/case03-restart-waiting-approval.test.ts with Timed out waiting for resumed run to finish, so durable waiting-approval restart is not proven.\n\nFeature: Approvals, human tasks, and durable waits (approvals-human-gates)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: the targeted approval proof failed e2e/faults/case03-restart-waiting-approval.test.ts with Timed out waiting for resumed run to finish, so durable waiting-approval restart is not proven.\n"
-  },
-  {
     "path": "tickets/gateway-server--01-serverless-resume-cron-tick-and-run-lease-claims-need-broade-94117994.md",
     "kind": "e2e",
     "status": "todo",
@@ -82,44 +52,14 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Hosted gateway deployments still need explicit production hardening around TLS, token rotation, and multi-tenant boundaries.\n\nFeature: Gateway, RPC, and server (gateway-server)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nHosted gateway deployments still need explicit production hardening around TLS, token rotation, and multi-tenant boundaries.\n"
   },
   {
-    "path": "tickets/workflow-uis--01-2026-07-06-review-bun-test---timeout-120000---max-concurrenc-02e8b76f.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p1",
-    "updatedAtMs": 0,
-    "featureId": "workflow-uis",
-    "featureTitle": "Custom workflow UIs and monitor surfaces",
-    "content": "# 2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/ui-command.test.js fails; the smithers ui autostart case times out waiting for the local Gateway.\n\nFeature: Custom workflow UIs and monitor surfaces (workflow-uis)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/ui-command.test.js fails; the smithers ui autostart case times out waiting for the local Gateway.\n"
-  },
-  {
-    "path": "tickets/workflow-uis--02-2026-07-06-review-bun-test---timeout-120000---max-concurrenc-a515c2f1.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p1",
-    "updatedAtMs": 0,
-    "featureId": "workflow-uis",
-    "featureTitle": "Custom workflow UIs and monitor surfaces",
-    "content": "# 2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n\nFeature: Custom workflow UIs and monitor surfaces (workflow-uis)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n"
-  },
-  {
-    "path": "tickets/crash-recovery-resume--01-crash-recovery-workflow-.smithers-workflows-crash-recovery.t-5c9738f2.md",
+    "path": "tickets/crash-recovery-resume--01-the-built-in-crash-recovery-dogfood-workflow-still-lacks-a-d-2aef8aec.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p0",
     "updatedAtMs": 0,
     "featureId": "crash-recovery-resume",
     "featureTitle": "Crash recovery, supervisor, and resume",
-    "content": "# Crash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is not part of the read survey and still needs explicit end-to-end proof if it remains a shipped workflow.\n\nFeature: Crash recovery, supervisor, and resume (crash-recovery-resume)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nCrash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is not part of the read survey and still needs explicit end-to-end proof if it remains a shipped workflow.\n"
-  },
-  {
-    "path": "tickets/crash-recovery-resume--02-resume-across-edited-workflow-source-intentionally-fails-hot-ecad6396.md",
-    "kind": "fix",
-    "status": "todo",
-    "priority": "p0",
-    "updatedAtMs": 0,
-    "featureId": "crash-recovery-resume",
-    "featureTitle": "Crash recovery, supervisor, and resume",
-    "content": "# Resume across edited workflow source intentionally fails; hot-reload and stopped-run resume remain separate concepts that need clear docs whenever changed.\n\nFeature: Crash recovery, supervisor, and resume (crash-recovery-resume)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nResume across edited workflow source intentionally fails; hot-reload and stopped-run resume remain separate concepts that need clear docs whenever changed.\n"
+    "content": "# The built-in crash-recovery dogfood workflow still lacks a dedicated workflow-level e2e; real engine kill/resume behavior is covered independently by fault case31.\n\nFeature: Crash recovery, supervisor, and resume (crash-recovery-resume)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nThe built-in crash-recovery dogfood workflow still lacks a dedicated workflow-level e2e; real engine kill/resume behavior is covered independently by fault case31.\n"
   },
   {
     "path": "tickets/time-travel-replay--01-durability-snapshots-phase-2-for-restore-in-test-only-tool-c-db26e176.md",
@@ -202,24 +142,24 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Cloudflare D1 descriptor is read-mostly/non-atomic by design and should not be presented as durable run-of-record storage.\n\nFeature: Storage backends and migration (storage-backends)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nCloudflare D1 descriptor is read-mostly/non-atomic by design and should not be presented as durable run-of-record storage.\n"
   },
   {
-    "path": "tickets/agent-adapters--01-kimi-auth-setup-errors-should-fail-over-to-the-next-pool-age-340cc6fd.md",
-    "kind": "fix",
-    "status": "todo",
-    "priority": "p0",
-    "updatedAtMs": 0,
-    "featureId": "agent-adapters",
-    "featureTitle": "Agent adapters and account pools",
-    "content": "# Kimi auth-setup errors should fail over to the next pool agent instead of failing the run.\n\nFeature: Agent adapters and account pools (agent-adapters)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nKimi auth-setup errors should fail over to the next pool agent instead of failing the run.\n"
-  },
-  {
-    "path": "tickets/agent-adapters--02-many-vendor-cli-behaviors-depend-on-locally-installed-binari-4233fd95.md",
+    "path": "tickets/agent-adapters--01-many-vendor-cli-behaviors-depend-on-locally-installed-binari-ba8b065c.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p0",
     "updatedAtMs": 0,
     "featureId": "agent-adapters",
     "featureTitle": "Agent adapters and account pools",
-    "content": "# Many vendor CLI behaviors depend on locally installed binaries and subscription/API-key modes that cannot all be covered in clean CI.\n\nFeature: Agent adapters and account pools (agent-adapters)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nMany vendor CLI behaviors depend on locally installed binaries and subscription/API-key modes that cannot all be covered in clean CI.\n"
+    "content": "# Many vendor CLI behaviors depend on locally installed binaries and subscription or API-key modes that cannot all be covered in clean CI.\n\nFeature: Agent adapters and account pools (agent-adapters)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nMany vendor CLI behaviors depend on locally installed binaries and subscription or API-key modes that cannot all be covered in clean CI.\n"
+  },
+  {
+    "path": "tickets/agent-adapters--02-external-cli-releases-can-change-flags-and-capability-behavi-a5bb9490.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "agent-adapters",
+    "featureTitle": "Agent adapters and account pools",
+    "content": "# External CLI releases can change flags and capability behavior; keep adapter capability reports and live smoke checks current.\n\nFeature: Agent adapters and account pools (agent-adapters)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nExternal CLI releases can change flags and capability behavior; keep adapter capability reports and live smoke checks current.\n"
   },
   {
     "path": "tickets/open-code-review--01-hosted-cloud-review-path-is-blocked-on-funded-provider-crede-a81d9638.md",
@@ -262,24 +202,24 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# More seeded workflows should ship checked-in eval suites for their intended behavior.\n\nFeature: Eval suites, scorers, and optimization (evals-scorers)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nMore seeded workflows should ship checked-in eval suites for their intended behavior.\n"
   },
   {
-    "path": "tickets/memory--01-no-end-to-end-proof-that-seeded-workflows-read-and-write-mem-00009d32.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p2",
-    "updatedAtMs": 0,
-    "featureId": "memory",
-    "featureTitle": "Agent memory",
-    "content": "# No end-to-end proof that seeded workflows read and write memory across separate real runs.\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: e2e · Priority: P2 · Feature status: partial\n\n## Gap\n\nNo end-to-end proof that seeded workflows read and write memory across separate real runs.\n"
-  },
-  {
-    "path": "tickets/memory--02-semantic-recall-is-intentionally-not-exposed-on-the-current--bba42575.md",
+    "path": "tickets/memory--01-separate-hindsightmemorystore-writer-instances-do-not-share--52286eaa.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p2",
     "updatedAtMs": 0,
     "featureId": "memory",
     "featureTitle": "Agent memory",
-    "content": "# Semantic recall is intentionally not exposed on the current public API; keep docs clear to avoid overpromising retrieval behavior.\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: issue · Priority: P2 · Feature status: partial\n\n## Gap\n\nSemantic recall is intentionally not exposed on the current public API; keep docs clear to avoid overpromising retrieval behavior.\n"
+    "content": "# Separate HindsightMemoryStore writer instances do not share a durable same-document version fence; use one writer instance per transactional contract store.\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: issue · Priority: P2 · Feature status: partial\n\n## Gap\n\nSeparate HindsightMemoryStore writer instances do not share a durable same-document version fence; use one writer instance per transactional contract store.\n"
+  },
+  {
+    "path": "tickets/memory--02-the-real-hindsight-docker-integration-requires-an-external-p-a29eadf5.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p2",
+    "updatedAtMs": 0,
+    "featureId": "memory",
+    "featureTitle": "Agent memory",
+    "content": "# The real Hindsight Docker integration requires an external Postgres 15 or later service with pgvector and is not available in every CI environment.\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: issue · Priority: P2 · Feature status: partial\n\n## Gap\n\nThe real Hindsight Docker integration requires an external Postgres 15 or later service with pgvector and is not available in every CI environment.\n"
   },
   {
     "path": "tickets/observability--01-otlp-exporter-installation-into-real-reference-deployments-i-0b38c7fd.md",
@@ -322,26 +262,6 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Usage command covers account/provider usage, not a full multi-tenant billing UI.\n\nFeature: Hosted control-plane primitives (control-plane)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nUsage command covers account/provider usage, not a full multi-tenant billing UI.\n"
   },
   {
-    "path": "tickets/docs-pipeline--01-2026-07-06-review-bun-test---timeout-120000---max-concurrenc-a1c96b06.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p1",
-    "updatedAtMs": 0,
-    "featureId": "docs-pipeline",
-    "featureTitle": "Docs pipeline and LLM bundles",
-    "content": "# 2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n\nFeature: Docs pipeline and LLM bundles (docs-pipeline)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n"
-  },
-  {
-    "path": "tickets/docs-pipeline--02-keep-docs-pipeline-partial-until-the-docs-examples-smoke-gat-1e847fc9.md",
-    "kind": "e2e",
-    "status": "todo",
-    "priority": "p1",
-    "updatedAtMs": 0,
-    "featureId": "docs-pipeline",
-    "featureTitle": "Docs pipeline and LLM bundles",
-    "content": "# Keep docs-pipeline partial until the docs examples smoke gate passes together with check-docs/check-llms and CLI overview coverage.\n\nFeature: Docs pipeline and LLM bundles (docs-pipeline)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nKeep docs-pipeline partial until the docs examples smoke gate passes together with check-docs/check-llms and CLI overview coverage.\n"
-  },
-  {
     "path": "tickets/docs-driven-development--01-image-upload-target-crepe-imageblock-needs-an-asset-server-v-75fd2614.md",
     "kind": "issue",
     "status": "todo",
@@ -360,5 +280,35 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "featureId": "docs-driven-development",
     "featureTitle": "Docs driven development",
     "content": "# Spec statuses can drift if refresh tasks do not run the package/e2e tests they cite; keep missing[] explicit when proof is absent.\n\nFeature: Docs driven development (docs-driven-development)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nSpec statuses can drift if refresh tasks do not run the package/e2e tests they cite; keep missing[] explicit when proof is absent.\n"
+  },
+  {
+    "path": "tickets/workflow-packs--01-the-normal-share-path-requires-an-authenticated-gh-cli-and-a-06c9e39c.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "workflow-packs",
+    "featureTitle": "Workflow packs",
+    "content": "# The normal share path requires an authenticated gh CLI and a live registry repository; CI primarily proves dry-run and local repository behavior.\n\nFeature: Workflow packs (workflow-packs)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nThe normal share path requires an authenticated gh CLI and a live registry repository; CI primarily proves dry-run and local repository behavior.\n"
+  },
+  {
+    "path": "tickets/external-integrations--01-provider-test-suites-use-deterministic-fixtures-live-github--a4b1ef76.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "external-integrations",
+    "featureTitle": "External event and messaging integrations",
+    "content": "# Provider test suites use deterministic fixtures; live GitHub, Linear, and Telegram credential paths require deployment-specific smoke tests.\n\nFeature: External event and messaging integrations (external-integrations)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nProvider test suites use deterministic fixtures; live GitHub, Linear, and Telegram credential paths require deployment-specific smoke tests.\n"
+  },
+  {
+    "path": "tickets/schedules-alerts--01-alert-policy-is-stored-and-an-alertruntime-wrapper-exists-bu-e6574b34.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "schedules-alerts",
+    "featureTitle": "Schedules and durable alerts",
+    "content": "# Alert policy is stored and an AlertRuntime wrapper exists, but core does not yet evaluate rules, poll approval age, deliver notifications, or execute pause, cancel, and approval reactions automatically.\n\nFeature: Schedules and durable alerts (schedules-alerts)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nAlert policy is stored and an AlertRuntime wrapper exists, but core does not yet evaluate rules, poll approval age, deliver notifications, or execute pause, cancel, and approval reactions automatically.\n"
   }
 ];

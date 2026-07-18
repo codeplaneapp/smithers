@@ -26,6 +26,14 @@ Relevancy, toxicity, faithfulness, schema adherence, latency, LLM judge, and del
 
 smithersScorers table and listScores RPC expose stored score rows to UIs.
 
+### LLM judge assertions
+
+llmJudge and batch scorer helpers support rubric-based assertions with structured evidence and failure reporting.
+
+### Cross-run comparison
+
+listScoresForRuns and getScoreDetail let UIs compare scored runs without reconstructing rows client-side.
+
 ## Endpoints and commands
 
 - `CLI smithers eval` ([docs](docs/guides/evals-quickstart.mdx))
@@ -33,6 +41,7 @@ smithersScorers table and listScores RPC expose stored score rows to UIs.
 - `CLI smithers scores` ([docs](docs/cli/overview.mdx))
 - `RPC listScores` ([docs](docs/rpc/list-scores.mdx))
 - `API runScorersAsync` ([docs](docs/reference/scorers.mdx))
+- `RPC listScoresForRuns` ([docs](docs/rpc/list-scores-for-runs.mdx))
 
 ## Related docs
 
@@ -47,6 +56,9 @@ smithersScorers table and listScores RPC expose stored score rows to UIs.
 - `packages/scorers/tests/scorers-builtins-llm.test.js`
 - `packages/scorers/tests/scorers-llm-judge-parse.test.js`
 - `e2e/faults/case27-scorer-failure-blocks-downstream.test.ts`
+- `packages/scorers/tests/scorers-builtins-llm.test.js`
+- `packages/scorers/tests/scorers-llm-judge-parse.test.js`
+- `packages/server/tests/gateway-score-rpcs.test.jsx`
 
 ## Observability
 
@@ -67,10 +79,12 @@ smithersScorers table and listScores RPC expose stored score rows to UIs.
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: added LLM-judge assertions and score-comparison RPCs.
 - `apps/cli/src/eval-suite.js`
 - `apps/cli/src/optimize-suite.js`
 - `packages/scorers/src`
 - `docs/guides/evals-quickstart.mdx`
+- `packages/scorers`
 
 ## Open gaps
 

@@ -6,20 +6,23 @@ The product in this repository is the runtime and local control plane: published
 
 ## What it is
 
-A workflow is React for work: Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, HumanTask, Timer, Signal, Sandbox, Worktree, and higher-level components describe what can happen next. createSmithers binds zod schemas to outputs so downstream steps read structured rows through ctx instead of scraping prose. Tasks can call SDK agents in-process, spawn CLI agents such as Claude Code or Codex, run local compute, or run behind an explicit Sandbox provider.
+A workflow is React for work: Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, HumanTask, Timer, Signal, Memory, Sandbox, Worktree, and higher-level components describe what can happen next. Trellis can compile bounded model-authored delegation programs when the graph itself must adapt at runtime. createSmithers binds zod schemas to outputs so downstream steps read structured rows through ctx instead of scraping prose. Tasks can call SDK agents in-process, spawn CLI agents such as Claude Code or Codex, run local compute, recall and retain Hindsight memory, or run behind an explicit Sandbox provider.
 
 Durability is the core contract. State lives in SQLite, PGlite, or Postgres tables, not process memory. A completed task is not re-executed on resume; a killed or paused run reloads persisted input, outputs, frames, attempts, waits, approvals, events, and owner state. Time travel, replay, fork, snapshots, run inspection, custom UIs, and the gateway all build on that event and frame history.
 
-Around the engine is the operator surface. The smithers CLI installs workflow packs, launches and resumes runs, watches logs, answers approvals, sends signals, manages agent accounts, runs evals, generates OpenAPI tools, migrates storage, starts gateways, opens monitors, and serves MCP tools for other agents. The gateway exposes versioned RPC and WebSocket APIs for runs, approvals, prompts, docs, tickets, memory, scores, cron, and DevTools. gateway-client and gateway-react let browser or desktop UIs consume that API without inventing a second contract.
+Around the engine is the operator surface. The smithers CLI installs, updates, ejects, removes, and shares workflow packs; launches and resumes runs; reclaims owned worktrees; watches logs; answers approvals; sends signals; manages schedules and durable alerts; manages agent accounts; runs evals; generates OpenAPI tools; migrates storage; starts gateways; opens monitors; and serves MCP tools for other agents. The gateway exposes versioned RPC and WebSocket APIs for runs, approvals, prompts, docs, tickets, memory, score comparisons, run diffs, cron, and DevTools. gateway-client and gateway-react let browser or desktop UIs consume that API without inventing a second contract.
+
+The runtime is also portable. smithers-orchestrator/browser runs the real driver, scheduler, renderer, dependency semantics, and schema validation through a RuntimeAdapter while filesystem, subprocess, worktree, and sandbox capabilities fail closed unless the host provides them. The testing package covers quick workflow simulation and a durability scenario kernel with virtual-time, real-database, and real-process tiers.
 
 ## What ships here
 
 - packages/smithers: the public facade and package exports.
 - packages/engine, scheduler, driver, db, graph, components, react-reconciler: the durable workflow runtime.
 - packages/agents, accounts, usage: SDK/CLI agent adapters, capability reports, account and usage helpers.
-- packages/gateway, server, gateway-client, gateway-react, gateway-ui: RPC, HTTP/WebSocket, and workflow UI client layers.
+- packages/gateway, protocol, server, gateway-client, gateway-react, gateway-ui, devtools, tui, ui, ui-styleguide: RPC, HTTP/WebSocket, DevTools, and workflow/operator UI layers.
 - packages/time-travel, vcs, sandbox plus cloud provider packages: rewind, replay, worktrees, local and remote execution boundaries.
-- packages/memory, scorers, openapi, integrations, control-plane: optional product modules for memory, evaluation, API tools, webhooks, hosted primitives, and external systems.
+- packages/memory, scorers, openapi, integrations, telegram, testing, control-plane: optional product modules for Hindsight/local memory, evaluation, API tools, provider events, messaging, workflow tests, and hosted primitives.
+- packages/accounts, agent-eliza, pi-plugin, usage, tool-context, errors, electric-proxy: published account, agent, plugin, runtime-context, error, and sync support surfaces.
 - apps/cli, apps/observability, apps/review: the command-line product, metrics/tracing stack, and open-code-review support.
 - .smithers/: the built-in workflow pack, workflow UIs, DDD spec workflow, and local dogfooding assets.
 - docs/, skills/, e2e/: human/agent docs and no-mocks fault/regression coverage.

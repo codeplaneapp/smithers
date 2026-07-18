@@ -75,6 +75,7 @@ Foreground and detached owners exit at `waiting-approval/event/timer` states whi
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: removed an expected workflow-hash safety rule from the gap list and retained the one unproved dogfood workflow path.
 - `apps/cli/src/supervisor.js`
 - `apps/cli/src/resume-detached.js`
 - `packages/engine/src/runtime-owner.js`
@@ -83,5 +84,4 @@ Foreground and detached owners exit at `waiting-approval/event/timer` states whi
 
 ## Open gaps
 
-- Crash-recovery workflow (`.smithers/workflows/crash-recovery.tsx`) is not part of the read survey and still needs explicit end-to-end proof if it remains a shipped workflow.
-- Resume across edited workflow source intentionally fails; hot-reload and stopped-run resume remain separate concepts that need clear docs whenever changed.
+- The built-in crash-recovery dogfood workflow still lacks a dedicated workflow-level e2e; real engine `kill/resume` behavior is covered independently by fault case31.

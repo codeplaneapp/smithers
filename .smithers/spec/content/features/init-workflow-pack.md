@@ -1,8 +1,8 @@
 # Init workflow pack and starters
 
-> **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Start a workflow
+> **Status:** Fixed | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Start a workflow
 
-`smithers init` installs the local or global .smithers pack, curated skills, agent guidance, prompts, ready workflows, and per-workflow UIs; starters and workflow list expose the installed catalog.
+`smithers init` installs the local or global .smithers pack, curated agent guidance and skills, system workflows, editable workflow sources, and workflow-owned UIs; starters and workflow list expose the installed catalog.
 
 ## What you can do
 
@@ -16,7 +16,7 @@ init can scaffold .smithers locally or ~/.smithers globally, update drifted file
 
 ### Seeded workflows
 
-The generated pack includes hello, plan, implement, review, debug, kanban, tickets-create, research, mission, audit, feature-enum, and more.
+The generated pack includes curated create-workflow, create-skill, create-ui, and docs-driven-development workflows plus durable init, add, share, upgrade, eval, and post-failure system workflows.
 
 ### Starter gallery
 
@@ -69,14 +69,10 @@ smithers starters maps plain-English intents to copy-paste workflow run commands
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 adversarial review: downgraded from fixed to partial after the cited init tests failed in the aggregate fixed-feature test run.
+- 2026-07-18 core-surface correction: restored fixed status after the curated init-pack generator and 45 focused init, seeded-workflow, freshness, and starter tests passed; repository examples are excluded from core feature evidence.
 - `apps/cli/src/init-command.js`
 - `apps/cli/src/workflow-pack.js`
 - `scripts/generate-workflow-pack.ts`
 - `.smithers/workflows/*.tsx`
 - `.smithers/ui/*.tsx`
 - `docs/workflows/*.mdx`
-
-## Open gaps
-
-- 2026-07-06 review: `apps/cli/tests/workflow-pack-subset.test.js` fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus `init/post-failure`.
-- 2026-07-06 review: `apps/cli/tests/init.e2e.test.js` workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.

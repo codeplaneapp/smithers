@@ -64,6 +64,7 @@ Review publish tests cover local service paths and artifact output; cloud deploy
 - `apps/review/tests`
 - `.smithers/workflows/open-code-review.tsx`
 - `.smithers/tests/open-code-review.test.ts`
+- `apps/review`
 
 ## Open gaps
 

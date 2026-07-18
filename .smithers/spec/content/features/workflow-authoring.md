@@ -2,7 +2,7 @@
 
 > **Status:** Fixed | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Author workflows
 
-Author durable coding-agent workflows as `React/JSX` trees with Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, HumanTask, Timer, Sandbox, Worktree, and higher-level components, backed by createSmithers and zod-typed outputs.
+Author durable agent workflows as typed `React/JSX` trees with control flow, waits, memory, isolation, reusable composites, and bounded dynamic Trellis delegation. createSmithers binds Zod outputs and task dependencies to the workflow context.
 
 ## What you can do
 
@@ -38,6 +38,14 @@ Approval, HumanTask, Signal, WaitForEvent, and Timer model durable pauses withou
 
 Components export review loops, supervisors, kanban, merge queues, sagas, panels, delegation chains, and other workflow macros.
 
+### Scheduling and failure controls
+
+Task and container props cover priority scheduling, halt or quarantine failure policy, typed dependencies, bounded schema correction, retries, timeouts, and caching.
+
+### Dynamic delegation
+
+Trellis validates and compiles fuel-bounded model-authored sequence and parallel programs into ordinary durable tasks.
+
 ## Endpoints and commands
 
 - `API createSmithers(schemas, options)` ([docs](docs/jsx/overview.mdx))
@@ -49,6 +57,8 @@ Components export review loops, supervisors, kanban, merge queues, sagas, panels
 - [How it works](docs/how-it-works.mdx)
 - [Execution model](docs/concepts/execution-model.mdx)
 - [Components](docs/components/workflow.mdx)
+- [Trellis](docs/components/trellis.mdx)
+- [Provenance](docs/concepts/provenance.mdx)
 
 ## Test cases
 
@@ -58,6 +68,11 @@ Components export review loops, supervisors, kanban, merge queues, sagas, panels
 - `packages/driver/tests/ctx-utils.test.js`
 - `apps/cli/tests/cli-workflows-validate.test.js`
 - `apps/cli/tests/seeded-workflows-graph.e2e.test.js`
+- `packages/components/tests/delegation-v2-trellis.test.jsx`
+- `packages/components/tests/memory-component.test.jsx`
+- `packages/components/tests/priority-props.test.jsx`
+- `packages/components/tests/failure-policy-props.test.jsx`
+- `packages/engine/tests/schema-retries.test.jsx`
 
 ## Observability
 
@@ -79,9 +94,14 @@ Components export review loops, supervisors, kanban, merge queues, sagas, panels
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed.
+- 2026-07-18 feature and docs audit: added Memory, Trellis, priority, quarantine, schema-correction, and provenance surfaces to the inventory and Mintlify references.
 - `packages/smithers/src/create.js`
 - `packages/components/src/components/Task.js`
 - `packages/react-reconciler/src`
 - `packages/graph/src/extract.js`
 - `docs/components/*.mdx`
 - `.smithers/workflows/*.tsx`
+- `packages/smithers`
+- `packages/components`
+- `packages/graph`
+- `packages/react-reconciler`

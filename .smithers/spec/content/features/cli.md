@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Run & observe
 
-The smithers binary in `apps/cli` drives init, workflow `run/list/create`, up, ps, logs, events, inspect, node, why, approvals, signals, memory, eval, optimize, openapi, gateway, monitor, ui, MCP, migration, tokens, and agent account management.
+The smithers CLI installs and shares workflow packs, launches and controls runs, inspects durable state, manages worktrees, approvals, schedules, alerts, memory, evals, gateways, UIs, accounts, MCP, migrations, and operational diagnostics.
 
 ## What you can do
 
@@ -30,6 +30,18 @@ approve, deny, ask-human, signal, pause, cancel, down, retry-task, revert, resto
 
 gateway, monitor, ui, migrate, eval, optimize, openapi, memory, usage, token, agents, cron, alerts, docs, and upgrade cover the product surface.
 
+### Workflow pack lifecycle
+
+add, remove, eject, share, packs list, and packs update manage local, GitHub, npm, and file-based packs.
+
+### Worktree ownership
+
+worktree list and worktree prune inspect and reclaim worktrees owned by Smithers runs.
+
+### Run narration
+
+status, what, why, node, chat, tree, diff, and timeline turn persisted state into concise operator diagnostics.
+
 ## Endpoints and commands
 
 - `CLI smithers up` ([docs](docs/cli/overview.mdx))
@@ -37,6 +49,8 @@ gateway, monitor, ui, migrate, eval, optimize, openapi, memory, usage, token, ag
 - `CLI smithers inspect` ([docs](docs/cli/overview.mdx))
 - `CLI smithers why` ([docs](docs/cli/overview.mdx))
 - `CLI smithers gateway` ([docs](docs/cli/overview.mdx))
+- `CLI smithers add|remove|eject|share|packs` ([docs](docs/reference/packs.mdx))
+- `CLI smithers worktree list|prune` ([docs](docs/components/worktree.mdx))
 
 ## Related docs
 
@@ -75,10 +89,12 @@ gateway, monitor, ui, migrate, eval, optimize, openapi, memory, usage, token, ag
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed.
+- 2026-07-18 feature and docs audit: expanded the command inventory for packs, worktree ownership, status, and narration commands.
 - `apps/cli/src/index.js`
 - `apps/cli/src/*.js`
 - `apps/cli/tests/*.test.js`
 - `docs/cli/overview.mdx`
+- `apps/cli`
 
 ## Open gaps
 

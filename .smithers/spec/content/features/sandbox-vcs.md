@@ -34,11 +34,16 @@ Built-in `read/write/edit/grep/bash` tools are jailed to rootDir with symlink, n
 
 VCS helpers detect jj and git, capture stable pointers, and restore files for time-travel operations.
 
+### Worktree lifecycle
+
+The CLI lists Smithers-owned worktrees and prunes reclaimable or stale worktrees without treating unrelated VCS workspaces as owned.
+
 ## Endpoints and commands
 
 - `API <Sandbox runtime=...>` ([docs](docs/components/sandbox.mdx))
 - `API <Worktree>` ([docs](docs/components/worktree.mdx))
 - `API runJj/workspaceAdd/revertToJjPointer` ([docs](docs/workflows/vcs.mdx))
+- `CLI smithers worktree list|prune` ([docs](docs/components/worktree.mdx))
 
 ## Related docs
 
@@ -77,11 +82,19 @@ VCS helpers detect jj and git, capture stable pointers, and restore files for ti
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
+- 2026-07-18 feature and docs audit: added worktree `ownership/reclamation` and mapped every shipped jj binary package.
 - `packages/sandbox/src`
 - `packages/vcs/src`
 - `packages/components/src/components/Sandbox.js`
 - `packages/components/src/components/Worktree.js`
 - `e2e/faults/case22-secret-injection-no-leak.test.ts`
+- `packages/sandbox`
+- `packages/vcs`
+- `packages/jj-darwin-arm64`
+- `packages/jj-darwin-x64`
+- `packages/jj-linux-arm64`
+- `packages/jj-linux-x64`
+- `packages/jj-win32-x64`
 
 ## Open gaps
 

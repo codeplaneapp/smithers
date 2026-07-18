@@ -1,6 +1,6 @@
 # Approvals, human tasks, and durable waits
 
-> **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Approve & steer
+> **Status:** Fixed | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Approve & steer
 
 Smithers supports approval gates, typed Approval decision nodes, HumanTask requests, ask-human `CLI/MCP` waits, signals, timers, denial policies, and resume from waiting states.
 
@@ -26,6 +26,10 @@ Richer human requests collect structured JSON through CLI and MCP surfaces with 
 
 Signal, WaitForEvent, and Timer persist waits so foreground and detached owners can exit cleanly.
 
+### Bound approval authority
+
+Proof bindings and replay-unsafe approval checks prevent changed evidence from reusing an earlier authorization.
+
 ## Endpoints and commands
 
 - `CLI smithers approve` ([docs](docs/cli/overview.mdx))
@@ -39,6 +43,7 @@ Signal, WaitForEvent, and Timer persist waits so foreground and detached owners 
 - [Approval component](docs/components/approval.mdx)
 - [Human task](docs/components/human-task.mdx)
 - [Signal](docs/components/signal.mdx)
+- [Provenance-bound actions](docs/concepts/provenance.mdx)
 
 ## Test cases
 
@@ -53,6 +58,8 @@ Signal, WaitForEvent, and Timer persist waits so foreground and detached owners 
 - `e2e/faults/case03-restart-waiting-approval.test.ts`
 - `e2e/faults/case04-restart-waiting-event.test.ts`
 - `e2e/faults/case05-restart-waiting-timer.test.ts`
+- `e2e/faults/case24-replay-unsafe-approval.test.ts`
+- `packages/engine/tests/provenance-binding.test.jsx`
 
 ## Observability
 
@@ -74,12 +81,9 @@ Signal, WaitForEvent, and Timer persist waits so foreground and detached owners 
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
 - 2026-07-06 adversarial review: downgraded from fixed to partial because only part of the cited approval proof was observed passing.
+- 2026-07-18 feature and docs audit: removed the stale restart failure after case03 passed and recorded replay-unsafe, provenance-bound approval coverage.
 - `packages/engine/src/approvals.js`
 - `packages/engine/src/human-requests.js`
 - `packages/components/src/components/Approval.js`
 - `apps/cli/src/ask-human.js`
 - `apps/cli/tests/approval-command.test.js`
-
-## Open gaps
-
-- 2026-07-06 review: the targeted approval proof failed `e2e/faults/case03-restart-waiting-approval.test.ts` with Timed out waiting for resumed run to finish, so durable waiting-approval restart is not proven.

@@ -34,6 +34,14 @@ Gateway scopes gate run, approval, cron, memory, ticket, observability, and acco
 
 Server integrations can verify signed webhooks, enqueue external events, and drive cron ticks.
 
+### Run diffs
+
+getRunDiff returns bounded run-wide diff bundles for DevTools and review UIs.
+
+### Score comparison
+
+listScoresForRuns and getScoreDetail expose cross-run scorer rows and detailed evidence through the stable RPC contract.
+
 ## Endpoints and commands
 
 - `RPC launchRun` ([docs](docs/rpc/launch-run.mdx))
@@ -41,6 +49,8 @@ Server integrations can verify signed webhooks, enqueue external events, and dri
 - `RPC getRun` ([docs](docs/rpc/get-run.mdx))
 - `RPC listWorkflows` ([docs](docs/rpc/list-workflows.mdx))
 - `HTTP /metrics` ([docs](docs/deployment/production-hardening.mdx))
+- `RPC getRunDiff` ([docs](docs/rpc/get-run-diff.mdx))
+- `RPC listScoresForRuns` ([docs](docs/rpc/list-scores-for-runs.mdx))
 
 ## Related docs
 
@@ -59,6 +69,7 @@ Server integrations can verify signed webhooks, enqueue external events, and dri
 - `e2e/faults/case14-gateway-rpc-roundtrip.test.ts`
 - `e2e/faults/case15-ws-drop-reconnect.test.ts`
 - `e2e/faults/case16-n5-subscribers-bounded-memory.test.ts`
+- `packages/server/tests/gateway-score-rpcs.test.jsx`
 
 ## Observability
 
@@ -73,18 +84,22 @@ Server integrations can verify signed webhooks, enqueue external events, and dri
 
 ## Architecture
 
-- `packages/gateway/src/rpc/index.ts` defines the stable v1 method union, `request/response` types, schemas, scopes, and errors.
+- `packages/gateway/src/rpc/index.js` defines the stable v1 method union, `request/response` schemas, scopes, and errors; index.d.ts publishes the corresponding types.
 - `packages/server/src/index.js` implements node:http routes, request bounds, webhook verification, metrics, and workflow loading.
 - `packages/gateway-client` and `packages/gateway-react` consume the same RPC contract for non-React and React clients.
 
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
-- `packages/gateway/src/rpc/index.ts`
+- 2026-07-18 feature and docs audit: added run-wide diffs, score comparison RPCs, and the shared protocol package.
+- `packages/gateway/src/rpc/index.js`
 - `packages/server/src/index.js`
 - `packages/server/src/gateway.js`
 - `packages/gateway-client/src/SmithersGatewayClient.ts`
 - `packages/gateway-react/src/*.ts`
+- `packages/gateway`
+- `packages/server`
+- `packages/protocol`
 
 ## Open gaps
 
