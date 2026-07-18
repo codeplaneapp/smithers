@@ -108,6 +108,9 @@ apps/observability/data/
 packages/server/tests/.test-serve-*/
 packages/server/tests/.test-workflows-*/
 packages/server/tests/.test-lifecycle-*/
+# Engine dynamic-workflow e2e scratch dirs (sqlite + generated tsx, cleaned after the run
+# but visible to mid-test jj snapshots).
+packages/engine/tests/.tmp-dynamic-wf-*/
 **/cov*/
 **/tmp/verification/
 .context/
