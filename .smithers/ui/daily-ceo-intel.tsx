@@ -129,7 +129,7 @@ function Dashboard({ runId }: { runId: string }) {
     () =>
       tree.nodes
         .map((node) => asString((node as { id?: unknown }).id))
-        .filter((id): id is string => Boolean(id) && /^assess-relevance-b\d+$/.test(id))
+        .filter((id): id is string => id !== undefined && /^assess-relevance-b\d+$/.test(id))
         .sort((a, b) => Number(a.replace("assess-relevance-b", "")) - Number(b.replace("assess-relevance-b", ""))),
     [tree.nodes],
   );
