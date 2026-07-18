@@ -1,4 +1,5 @@
 /** @jsxImportSource react */
+import { Chip } from "./monitorShell.tsx";
 import { useJsonApi } from "./monitorShared.tsx";
 import {
   footprintNodeKey,
@@ -36,20 +37,30 @@ function ChangeBar({ added, removed }: Pick<FootprintDirectory, "added" | "remov
   );
 }
 
+function Counts({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span className="mon-footprint-counts">
+      <span className="mon-footprint-plus">+{added}</span> <span className="mon-footprint-minus">−{removed}</span>
+    </span>
+  );
+}
+
 function FootprintFileRow({ file, onFocusNode }: { file: FootprintFile; onFocusNode: (id: string) => void }) {
   return (
     <div className="mon-footprint-file" data-testid="footprint-file">
-      <span>{file.path} +{file.added}/−{file.removed}</span>
-      {file.owner ? (
-        <button
-          type="button"
-          className="mon-chip"
-          data-testid="footprint-node"
-          onClick={() => onFocusNode(footprintNodeKey(file.owner!.nodeId, file.owner!.iteration))}
-        >
-          {file.owner.nodeId}
-        </button>
-      ) : null}
+      <span className="mon-footprint-name" title={file.path}>{file.path}</span>
+      <Counts added={file.added} removed={file.removed} />
+      <span className="mon-footprint-owner">
+        {file.owner ? (
+          <Chip
+            data-testid="footprint-node"
+            title={`Inspect ${file.owner.nodeId}`}
+            onClick={() => onFocusNode(footprintNodeKey(file.owner!.nodeId, file.owner!.iteration))}
+          >
+            {file.owner.nodeId}
+          </Chip>
+        ) : null}
+      </span>
     </div>
   );
 }
@@ -59,21 +70,42 @@ export function FootprintPanel({ runId, live, onFocusNode }: FootprintPanelProps
   const footprint = footprintOf(api.body);
   const files = rankedFiles(footprint);
   const note = footprintNote(footprint);
-  const summary = !api.loaded && !api.failed ? "loading footprint…" : formatFootprintSummary(footprint);
+
+  // Nothing to drill into yet (still loading, unavailable, or genuinely no
+  // changes): collapse to one quiet row instead of a bare lowercase line.
+  if (!footprint || footprint.totalFiles === 0) {
+    const status = !api.loaded && !api.failed
+      ? "loading…"
+      : !footprint ? "footprint unavailable" : "no changes yet";
+    return (
+      <section className="mon-panel mon-panel-quiet" data-testid="footprint-panel">
+        <h2 className="mon-kicker">Footprint</h2>
+        <span className="mon-dim" data-testid="footprint-summary">{status}</span>
+      </section>
+    );
+  }
 
   return (
     <details className="mon-panel mon-footprint-panel" data-testid="footprint-panel">
-      <summary data-testid="footprint-summary">{summary}</summary>
+      <summary data-testid="footprint-summary" title={formatFootprintSummary(footprint)}>
+        <span className="mon-diff-caret" aria-hidden>▸</span>
+        <span className="mon-kicker">Footprint</span>
+        <span className="mon-footprint-rollup">
+          {footprint.totalFiles} {footprint.totalFiles === 1 ? "file" : "files"} ·{" "}
+          <span className="mon-footprint-plus">+{footprint.added}</span>{" "}
+          <span className="mon-footprint-minus">−{footprint.removed}</span>
+        </span>
+      </summary>
       <div data-testid="footprint-content">
-        {api.failed && api.loaded ? <div data-testid="footprint-degraded">refresh failed; showing last good data</div> : null}
+        {api.failed && api.loaded ? <div className="mon-dim" data-testid="footprint-degraded">refresh failed; showing last good data</div> : null}
         {note ? <div className="mon-dim" data-testid="footprint-note">{note}</div> : null}
         {rankedDirectories(footprint).map((directory) => {
           const directoryFiles = files.filter((file) => directoryFor(file.path) === directory.path);
           return (
             <section key={directory.path} data-testid="footprint-directory">
               <div className="mon-footprint-directory">
-                <strong>{directory.path}</strong>
-                <span>+{directory.added}/−{directory.removed}</span>
+                <strong className="mon-footprint-name" title={directory.path}>{directory.path}</strong>
+                <Counts added={directory.added} removed={directory.removed} />
                 <ChangeBar added={directory.added} removed={directory.removed} />
               </div>
               {directoryFiles.map((file) => <FootprintFileRow key={file.path} file={file} onFocusNode={onFocusNode} />)}

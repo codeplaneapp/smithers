@@ -161,6 +161,11 @@ browserTest("monitor renders an out-of-band approval run without a reload", asyn
       () => (document.body.textContent ?? "").includes("monitor-live-update-probe"),
       { timeout: 30_000 },
     );
+    // The approvals inbox lives behind the topbar bell now: the pending count
+    // badge appearing proves the live approvals push; opening it shows the
+    // request itself.
+    await page.waitForSelector('[data-testid="monitor-notif-count"]', { timeout: 30_000 });
+    await page.click('[data-testid="monitor-notif-bell"]');
     await page.waitForFunction(
       () => (document.body.textContent ?? "").includes("Live monitor approval"),
       { timeout: 30_000 },

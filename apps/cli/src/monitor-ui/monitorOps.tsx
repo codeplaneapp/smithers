@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState } from "react";
 import {
+  RowButton,
   Table,
   TableBody,
   TableCell,
@@ -31,18 +32,37 @@ export function StatCard({
   sub,
   tone,
   testId,
+  onClick,
+  title,
 }: {
   value: string;
   label: string;
   sub?: string;
   tone?: Tone;
   testId?: string;
+  onClick?: () => void;
+  title?: string;
 }) {
-  return (
-    <div className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
+  const className = `mon-stat${tone ? ` tone-${tone}` : ""}`;
+  const body = (
+    <>
       <div className="mon-stat-value mon-mono">{value}</div>
       <div className="mon-stat-label">{label}</div>
       {sub ? <div className="mon-stat-sub mon-dim">{sub}</div> : null}
+    </>
+  );
+  // A card with an action is the shared clickable-card row (keyboard + hover),
+  // same anatomy as its static siblings.
+  if (onClick) {
+    return (
+      <RowButton className={className} data-testid={testId ?? "monitor-stat"} onClick={onClick} title={title}>
+        {body}
+      </RowButton>
+    );
+  }
+  return (
+    <div className={className} data-testid={testId ?? "monitor-stat"} title={title}>
+      {body}
     </div>
   );
 }
@@ -84,22 +104,41 @@ export function WorkspaceCostCard({ runs, now }: { runs: RunRow[]; now: number }
   const omitted = (result?.skippedCount ?? capped.skippedCount) + (result?.failedRuns ?? 0);
   return <StatCard
     value={!result ? "…" : result.unpricedRuns ? "unpriced" : formatUsd(result.totalUsd)}
-    label="workspace cost today"
-    sub={!result ? "runs started today on this gateway" : `${result.fetchedCount} runs · runs started today on this gateway${omitted ? ` · +${omitted} not counted` : ""}`}
+    label="cost today"
+    sub={!result ? undefined : `${result.fetchedCount} runs${omitted ? ` · +${omitted} not counted` : ""}`}
+    title="Runs started today on this gateway"
     testId="monitor-workspace-cost"
   />;
 }
 
-export function OpsStrip({ runs, loading, attentionTotal }: { runs: RunRow[]; loading: boolean; attentionTotal?: number }) {
+export function OpsStrip({
+  runs,
+  loading,
+  attentionTotal,
+  onAttentionClick,
+}: {
+  runs: RunRow[];
+  loading: boolean;
+  attentionTotal?: number;
+  onAttentionClick?: () => void;
+}) {
   const now = useNowMs();
   const stats = useMemo(() => opsStats(runs as Array<Record<string, unknown>>, now), [runs, now]);
   const pending = loading && runs.length === 0;
   const n = (value: number | undefined): string => (value === undefined || pending ? "…" : String(value));
+  const attention = attentionTotal ?? stats.attention;
   return (
     <div className="mon-ops-strip" data-testid="monitor-ops-strip">
       <AccountUsageCards />
       <WorkspaceCostCard runs={runs} now={now} />
-      <StatCard value={n(attentionTotal ?? stats.attention)} label="needs attention" testId="monitor-stat-attention" />
+      <StatCard
+        value={n(attention)}
+        label="needs attention"
+        tone={!pending && (attention ?? 0) > 0 ? "failed" : undefined}
+        onClick={onAttentionClick}
+        title="Show only failed runs in the table"
+        testId="monitor-stat-attention"
+      />
       <StatCard
         value={n(stats.enginesLive)}
         label="engines live"

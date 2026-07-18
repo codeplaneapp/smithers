@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { burnRateTokensPerMin, costRowsOf, formatTokensCompact, formatUsd, percentBurnPerMin, projectWindowRunout, projectedRunTokens, pushPercentSample, runTokenUsageOf, runoutWarning, usageReportsOf } from "../src/monitor-ui/monitorUsageModel.ts";
+import { burnRateTokensPerMin, costRowsOf, formatDurationCoarse, formatTokensCompact, formatUsd, percentBurnPerMin, projectWindowRunout, projectedRunTokens, pushPercentSample, runTokenUsageOf, runoutWarning, usageReportsOf } from "../src/monitor-ui/monitorUsageModel.ts";
 
 test("reads usage and labels unknown price honestly", () => {
   const body = { totals: { tokens: 100, cost_usd: 1 }, groups: [{ model: "x", agent: "a", tokens: 100, cost_usd: 1, priced: false }], buckets: [] };
@@ -34,4 +34,13 @@ test("all readers and percentage sampling are tolerant and preserve a five-minut
   expect(runoutWarning(1_000, 121 * 60_000 + 1_000)).toBe("runs out ~2h before reset");
   expect(formatTokensCompact(999)).toBe("999");
   expect(formatUsd(0)).toBe("$0.00");
+});
+
+test("reset countdowns are coarse two-unit durations, never a minute pile", () => {
+  expect(formatDurationCoarse(8_887 * 60_000)).toBe("6d 4h");
+  expect(formatDurationCoarse(59 * 60_000)).toBe("59m");
+  expect(formatDurationCoarse(60 * 60_000)).toBe("1h");
+  expect(formatDurationCoarse(3 * 3_600_000 + 5 * 60_000)).toBe("3h 5m");
+  expect(formatDurationCoarse(48 * 3_600_000)).toBe("2d");
+  expect(formatDurationCoarse(-5)).toBe("0m");
 });

@@ -27,8 +27,7 @@ import { ScoresPanel, type RunScores } from "./monitorScores.tsx";
 import { FootprintPanel } from "./monitorFootprint.tsx";
 import { DecisionsPanel } from "./monitorDecisions.tsx";
 import { Elapsed, StatusTag } from "./monitorShared.tsx";
-import { RunCostCard } from "./monitorUsagePanels.tsx";
-import { RunEtaLine } from "./monitorEta.tsx";
+import { RunFactsBand } from "./monitorUsagePanels.tsx";
 import { RecapPanel } from "./monitorRecapPanel.tsx";
 
 function CopyableRunId({ runId }: { runId: string }) {
@@ -202,10 +201,14 @@ export function RunDetail({
             </span>
           </div>
         ) : null}
-        <div className="mon-detail-cost-eta">
-          <RunCostCard runId={runId} active={status === "running" || status === "pending"} progressRatio={progress?.fraction} />
-          <RunEtaLine runId={runId} runStatus={status} startedAtMs={startedAtMs} finishedAtMs={finishedAtMs} />
-        </div>
+        <RunFactsBand
+          runId={runId}
+          runStatus={status}
+          active={status === "running" || status === "pending"}
+          progressRatio={progress?.fraction}
+          startedAtMs={startedAtMs}
+          finishedAtMs={finishedAtMs}
+        />
         <div className="mon-detail-actions">
           {customUiUrl ? (
             <Button
@@ -254,9 +257,6 @@ export function RunDetail({
       </header>
 
       <RecapPanel runId={runId} status={status} />
-      <DecisionsPanel runId={runId} runStatus={status} onSelectNode={onSelectNode} />
-      <ScoresPanel scores={scores} />
-      <FootprintPanel runId={runId} live={status === "running"} onFocusNode={setFootprintFocusNodeId} />
 
       {showCustomUi && customUiUrl ? (
         <div className="mon-modal-backdrop" onClick={closeCustomUi} data-testid="monitor-ui-modal">
@@ -291,6 +291,10 @@ export function RunDetail({
         autoSelectNodeId={footprintFocusNodeId ?? autoSelectNodeId}
         onAutoSelected={() => { setFootprintFocusNodeId(undefined); onAutoSelected?.(); }}
       />
+
+      <DecisionsPanel runId={runId} runStatus={status} onSelectNode={onSelectNode} />
+      <FootprintPanel runId={runId} live={status === "running"} onFocusNode={setFootprintFocusNodeId} />
+      <ScoresPanel scores={scores} />
 
       <EventLog runId={runId} />
     </div>

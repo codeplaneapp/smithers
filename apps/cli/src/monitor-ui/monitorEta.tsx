@@ -1,29 +1,35 @@
 /** @jsxImportSource react */
-import { useGatewayRunTree } from "smithers-orchestrator/gateway-react";
 import { buildTimeline, formatDurationMs, isTerminalStatus, nodeStateRowsOf, type RunRow } from "./monitorModel.ts";
-import { estimateRun, etaRefreshMs, formatEta, hasOpenEndedWork, workloadExtent } from "./monitorEtaModel.ts";
-import { useJsonApi, useNowMs } from "./monitorShared.tsx";
+import { estimateRun, etaRefreshMs, formatEtaShort, hasOpenEndedWork, workloadExtent } from "./monitorEtaModel.ts";
+import { FactCell, useJsonApi, useNowMs } from "./monitorShared.tsx";
 
 type Estimate = ReturnType<typeof estimateRun>;
 type Extent = ReturnType<typeof workloadExtent>;
 
-export function RunEtaLineView({ estimate, extent, showEstimate = true }: { estimate: Estimate; extent: Extent; showEstimate?: boolean }) {
-  const tasks = extent.atLeast ? `${extent.settled} settled · at least ${extent.totalKnown} known tasks` : `${extent.settled}/${extent.totalKnown} tasks`;
-  const agentTasks = extent.agentTasks === undefined ? "" : ` · ${extent.agentTasks} agent task${extent.agentTasks === 1 ? "" : "s"}`;
-  return <div className="mon-dim mon-mono">{showEstimate ? <>{formatEta(estimate)} · </> : null}{tasks}{agentTasks}{extent.elapsedMs !== undefined ? ` · ${formatDurationMs(extent.elapsedMs)} elapsed` : ""}</div>;
-}
-
-export function RunEtaLine({ runId, runStatus, startedAtMs, finishedAtMs }: { runId: string; runStatus: string | undefined; startedAtMs: number | undefined; finishedAtMs: number | undefined }) {
-  const { body, loaded } = useJsonApi(`/v1/api/runs/${encodeURIComponent(runId)}/node-states`, etaRefreshMs(runStatus));
-  const tree = useGatewayRunTree(runId);
-  const now = useNowMs();
-  if (!loaded) return null;
-  const rows = nodeStateRowsOf(body);
-  // An empty collection is only a real zero once the tree query is ready.
-  // Until then, omit the agent count instead of briefly claiming there are none.
-  const nodes = tree.isLoading || tree.error ? undefined : tree.nodes;
-  const extent = workloadExtent(rows, nodes, startedAtMs, finishedAtMs ?? now);
-  return <RunEtaLineView estimate={estimateRun(buildTimeline(rows, now), now, { openEnded: extent.atLeast })} extent={extent} showEstimate={!isTerminalStatus(runStatus)} />;
+/**
+ * The ETA/Tasks/Elapsed cells of the header facts band. Values are compact
+ * numerics ("~8m", "0/5+", "10m 46s") — labels carry the words, so the
+ * header never renders an inline prose dot-chain.
+ */
+export function EtaFactCells({ estimate, extent, showEstimate = true }: { estimate: Estimate; extent: Extent; showEstimate?: boolean }) {
+  const tasksValue = `${extent.settled}/${extent.totalKnown}${extent.atLeast ? "+" : ""}`;
+  const agentSub = extent.agentTasks === undefined ? undefined : `${extent.agentTasks} agent`;
+  return (
+    <>
+      {showEstimate ? (
+        <FactCell
+          value={formatEtaShort(estimate)}
+          label="eta"
+          sub={estimate.kind === "at-least" ? "lower bound" : undefined}
+          testId="monitor-fact-eta"
+        />
+      ) : null}
+      <FactCell value={tasksValue} label="tasks settled" sub={agentSub} testId="monitor-fact-tasks" />
+      {extent.elapsedMs !== undefined ? (
+        <FactCell value={formatDurationMs(extent.elapsedMs)} label="elapsed" testId="monitor-fact-elapsed" />
+      ) : null}
+    </>
+  );
 }
 
 export function RunEtaCell({ run }: { run: RunRow }) {
@@ -39,5 +45,5 @@ export function RunEtaCell({ run }: { run: RunRow }) {
   // header. It has no tree subscription, but iterations still make its ETA a
   // lower bound; loop/foreach kinds are additionally detected in the header.
   const estimate = estimateRun(buildTimeline(rows, now), now, { openEnded: hasOpenEndedWork(rows) });
-  return estimate.kind === "unknown" ? <span className="mon-dim">—</span> : <span className="mon-mono">{formatEta(estimate)}</span>;
+  return estimate.kind === "unknown" ? <span className="mon-dim">—</span> : <span className="mon-mono">{formatEtaShort(estimate)}</span>;
 }

@@ -32,7 +32,10 @@ describe("RecapPanel", () => {
   test("renders loading, narrated and facts recaps, plus scrollback", async () => {
     state.rpc = { data: undefined, loading: true, refetch: async () => {} };
     await render();
-    expect(container.textContent).toContain("Preparing recap");
+    // Loading is the kicker plus two shimmer bars — never a full empty panel.
+    const loading = container.querySelector('[data-testid="monitor-recap-loading"]');
+    expect(loading?.textContent).toContain("Run recap");
+    expect(loading?.querySelectorAll(".mon-skeleton").length).toBe(2);
     state.rpc = { loading: false, refetch: async () => {}, data: { summary: "Agent answer", source: "agent", agentId: "terra", toSeq: 4, generatedAtMs: Date.now(), history: [{ summary: "Agent answer", toSeq: 4 }, { summary: "Earlier answer", toSeq: 2 }] } };
     await render();
     expect(container.textContent).toContain("Narrated by terra");

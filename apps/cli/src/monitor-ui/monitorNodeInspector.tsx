@@ -709,11 +709,13 @@ export function NodeInspector({
   node,
   scores,
   onResult,
+  onClose,
 }: {
   runId: string;
   node: TreeNode;
   scores: RunScores;
   onResult: (kind: "ok" | "err", text: string) => void;
+  onClose: () => void;
 }) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
@@ -830,6 +832,9 @@ export function NodeInspector({
           </Button>
         ) : null}
         <StatusTag status={node.status} />
+        <Chip onClick={onClose} data-testid="monitor-inspector-close" aria-label="Close inspector">
+          Close
+        </Chip>
       </header>
       {showHijack && hijackAction && candidate ? (
         <HijackModal
@@ -873,8 +878,13 @@ export function NodeInspector({
         {agentChain.length > 1 ? (
           <>
             <dt>failover</dt>
-            <dd className="mon-mono" data-testid="monitor-agent-chain">
-              {agentChain.join(" → ")}
+            <dd className="mon-chain" data-testid="monitor-agent-chain">
+              {agentChain.map((entry, index) => (
+                <span key={`${entry}-${index}`} className="mon-chain-step">
+                  {index > 0 ? <span className="mon-chain-arrow" aria-hidden>→</span> : null}
+                  <span className="mon-chip">{entry}</span>
+                </span>
+              ))}
             </dd>
           </>
         ) : null}

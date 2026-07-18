@@ -113,6 +113,19 @@ export function runoutWarning(runoutAtMs: number | null, resetsAtMs: number): st
   return `runs out ~${lead} before reset`;
 }
 
+/**
+ * Coarse duration for reset countdowns: the two largest units only, so a
+ * six-day window reads "6d 4h", never "8887m".
+ */
+export function formatDurationCoarse(ms: number): string {
+  const mins = Math.max(0, Math.floor(ms / 60_000));
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return mins % 60 ? `${hours}h ${mins % 60}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 ? `${days}d ${hours % 24}h` : `${days}d`;
+}
+
 export function formatTokensCompact(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;

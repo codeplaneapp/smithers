@@ -56,12 +56,17 @@ const payload = {
 test("renders a collapsed summary, expanded directory drill-down, and iteration focus chip", async () => {
   let focused = "";
   await render((async () => new Response(JSON.stringify(payload), { status: 200 })) as typeof fetch, (key) => { focused = key; });
-  expect(container?.querySelector("summary")?.textContent).toContain("2 files across 1 dir");
+  // The summary row has real anatomy: kicker + right-aligned ± rollup.
+  const summary = container?.querySelector("summary");
+  expect(summary?.querySelector(".mon-kicker")?.textContent).toBe("Footprint");
+  expect(summary?.querySelector(".mon-footprint-rollup")?.textContent).toContain("2 files");
+  expect(summary?.querySelector(".mon-footprint-plus")?.textContent).toBe("+5");
+  expect(summary?.querySelector(".mon-footprint-minus")?.textContent).toBe("−1");
   const details = container?.querySelector("details") as HTMLDetailsElement;
   await act(async () => {
     details.open = true;
   });
-  expect(container?.querySelector('[data-testid="footprint-directory"]')?.textContent).toContain("src+5/−1");
+  expect(container?.querySelector('[data-testid="footprint-directory"]')?.textContent).toContain("src+5 −1");
   expect(container?.querySelectorAll('[data-testid="footprint-file"]')).toHaveLength(2);
   const focusButton = container?.querySelector('[data-testid="footprint-node"]') as HTMLButtonElement;
   await act(async () => focusButton.click());
@@ -70,7 +75,11 @@ test("renders a collapsed summary, expanded directory drill-down, and iteration 
 
 test("keeps the honest empty state when the API returns no changes", async () => {
   await render((async () => new Response(JSON.stringify({ ok: true, data: { filesChanged: 0, directories: [], files: [] } }), { status: 200 })) as typeof fetch);
-  expect(container?.textContent).toContain("no file changes yet");
+  // Loaded-but-empty is the quiet row: kicker + dim status, no reserved void.
+  const quiet = container?.querySelector('[data-testid="footprint-panel"]');
+  expect(quiet?.classList.contains("mon-panel-quiet")).toBe(true);
+  expect(quiet?.querySelector(".mon-kicker")?.textContent).toBe("Footprint");
+  expect(quiet?.textContent).toContain("no changes yet");
 });
 
 test("does not claim to retain data when the first fetch fails", async () => {
@@ -89,10 +98,16 @@ test("every mon-footprint-* class the panel renders is defined in the monitor st
   expect([...used].sort()).toEqual([
     "mon-footprint-added",
     "mon-footprint-bar",
+    "mon-footprint-counts",
     "mon-footprint-directory",
     "mon-footprint-file",
+    "mon-footprint-minus",
+    "mon-footprint-name",
+    "mon-footprint-owner",
     "mon-footprint-panel",
+    "mon-footprint-plus",
     "mon-footprint-removed",
+    "mon-footprint-rollup",
   ]);
   for (const cls of used) expect(monitorCss).toContain(`.${cls}`);
 });

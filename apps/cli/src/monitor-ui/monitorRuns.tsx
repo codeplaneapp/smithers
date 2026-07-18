@@ -1,8 +1,5 @@
 /** @jsxImportSource react */
-import { useState } from "react";
-import { useGatewayActions, useGatewayApprovals } from "smithers-orchestrator/gateway-react";
 import {
-  Button,
   Table,
   TableBody,
   TableHead,
@@ -16,114 +13,16 @@ import {
   RUNS_PAGE_SIZE,
   shortRunId,
   toneForStatus,
-  waitTone,
   type RunRow,
 } from "./monitorModel.ts";
 import { RunRailRow, RunsPagination } from "./monitorShell.tsx";
-import { Ago, Elapsed, LiveElapsed, useNowMs } from "./monitorShared.tsx";
+import { Ago, Elapsed } from "./monitorShared.tsx";
 import { FailedTaskBadge } from "./monitorFailedBadge.tsx";
 import { failedTaskCountOf } from "./monitorAttentionModel.ts";
-import { RunProgressCell, RunsTableRow } from "./monitorRunsTableRow.tsx";
+import { RunsTableRow } from "./monitorRunsTableRow.tsx";
 
-function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) {
-  const now = useNowMs();
-  if (!requestedAtMs) return <span className="mon-dim">—</span>;
-  const tone = waitTone(now - requestedAtMs);
-  return (
-    <span className={`mon-wait tone-${tone}`}>
-      waiting <LiveElapsed startMs={requestedAtMs} />
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Approvals inbox (all pending gates across every run).
-// ---------------------------------------------------------------------------
-
-type ApprovalLike = {
-  runId: string;
-  nodeId: string;
-  iteration?: number;
-  workflowKey?: string;
-  requestTitle?: string;
-  requestSummary?: string;
-  requestedAtMs?: number;
-};
-
-export function ApprovalsInbox({
-  onSelectRun,
-  onResult,
-}: {
-  onSelectRun: (runId: string) => void;
-  onResult: (kind: "ok" | "err", text: string) => void;
-}) {
-  const approvalsQuery = useGatewayApprovals();
-  const actions = useGatewayActions();
-  const [decidingKey, setDecidingKey] = useState<string | null>(null);
-  const approvals = (approvalsQuery.data ?? []) as ApprovalLike[];
-  if (approvals.length === 0) return null;
-
-  const decide = async (approval: ApprovalLike, approved: boolean) => {
-    if (!approved && !window.confirm(`Deny "${approval.requestTitle ?? approval.nodeId}"? This fails the waiting gate.`)) {
-      return;
-    }
-    const key = `${approval.runId}:${approval.nodeId}:${approval.iteration ?? 0}`;
-    setDecidingKey(key);
-    try {
-      await actions.submitApproval({
-        runId: approval.runId,
-        nodeId: approval.nodeId,
-        iteration: approval.iteration ?? 0,
-        approved,
-        decision: { approved },
-      });
-      onResult("ok", `${approved ? "Approved" : "Denied"} ${approval.nodeId} on ${shortRunId(approval.runId)}.`);
-    } catch (error) {
-      onResult("err", `Approval failed: ${error instanceof Error ? error.message : String(error)}`);
-      await approvalsQuery.refetch();
-    } finally {
-      setDecidingKey(null);
-    }
-  };
-
-  return (
-    <section className="mon-inbox" data-testid="monitor-approvals">
-      <h2 className="mon-kicker">
-        Approvals <span className="mon-count">{approvals.length}</span>
-      </h2>
-      {approvals.map((approval) => {
-        const key = `${approval.runId}:${approval.nodeId}:${approval.iteration ?? 0}`;
-        const busy = decidingKey === key;
-        return (
-          <div className="mon-approval" key={key}>
-            <button type="button" className="mon-approval-main" onClick={() => onSelectRun(approval.runId)}>
-              <div className="mon-approval-title">{approval.requestTitle ?? approval.nodeId}</div>
-              <div className="mon-approval-meta">
-                <span className="mon-mono">{approval.workflowKey ?? "workflow"}</span>
-                <span className="mon-mono mon-dim">{shortRunId(approval.runId)}</span>
-                <ApprovalWait requestedAtMs={approval.requestedAtMs} />
-              </div>
-              {approval.requestSummary ? <div className="mon-approval-summary">{approval.requestSummary}</div> : null}
-            </button>
-            <div className="mon-approval-actions">
-              <Button
-                variant="outline"
-                className="mon-btn-ok"
-                disabled={busy}
-                onClick={() => void decide(approval, true)}
-              >
-                Approve
-              </Button>
-              <Button variant="destructive" disabled={busy} onClick={() => void decide(approval, false)}>
-                Deny
-              </Button>
-            </div>
-          </div>
-        );
-      })}
-    </section>
-  );
-}
+// The approvals inbox lives in the topbar notification popover now — see
+// ./monitorNotifications.tsx. The rail is runs-only.
 
 // ---------------------------------------------------------------------------
 // Runs rail.
@@ -263,10 +162,9 @@ export function RunsTable({
               <TableHead scope="col">Run</TableHead>
               <TableHead scope="col">Workflow</TableHead>
               <TableHead scope="col">Progress</TableHead>
-              <TableHead scope="col">Failed</TableHead>
               <TableHead scope="col">ETA</TableHead>
               <TableHead scope="col">Started</TableHead>
-              <TableHead scope="col">Duration</TableHead>
+              <TableHead scope="col" className="mon-table-duration">Duration</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

@@ -27,6 +27,7 @@ const runs = await import("../src/monitor-ui/monitorRuns.tsx");
 const ops = await import("../src/monitor-ui/monitorOps.tsx");
 const scores = await import("../src/monitor-ui/monitorScores.tsx");
 const entry = await import("../src/monitor-ui/monitor.tsx");
+const notifications = await import("../src/monitor-ui/monitorNotifications.tsx");
 const modules = await Promise.all([
   import("../src/monitor-ui/monitorMetrics.tsx"),
   import("../src/monitor-ui/monitorExecution.tsx"),
@@ -77,7 +78,11 @@ describe("monitor UI module seams", () => {
     expect(runs.RunsTable).toBe(entry.RunsTable);
     expect(runs.RunProgressCell).toBe(entry.RunProgressCell);
     expect(typeof shared.useJsonApi).toBe("function");
-    expect(typeof runs.ApprovalsInbox).toBe("function");
+    // The approvals inbox moved from the rail to the topbar notification
+    // popover; the runs module is runs-only now.
+    expect(typeof notifications.NotificationsBell).toBe("function");
+    expect(typeof notifications.ApprovalsList).toBe("function");
+    expect("ApprovalsInbox" in runs).toBe(false);
     expect(typeof ops.OpsStrip).toBe("function");
     expect(typeof scores.ScoresPanel).toBe("function");
     expect(typeof modules[0].MetricsPanel).toBe("function");

@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState } from "react";
 import { useGatewayRpc, useGatewayRunEvents } from "smithers-orchestrator/gateway-react";
-import { formatRecapAge, latestNotableSeqOf, shouldRefreshRecap } from "./monitorRecapModel.ts";
+import { formatRecapAge, latestNotableSeqOf, parseRecapSummary, shouldRefreshRecap } from "./monitorRecapModel.ts";
 import { isTerminalStatus } from "./monitorModel.ts";
 
 export function RecapPanel({ runId, status }: { runId: string; status?: string }) {
@@ -36,14 +36,33 @@ export function RecapPanel({ runId, status }: { runId: string; status?: string }
   }, [events, live, recap, pollTick]);
   const data: any = recap.data;
   // A transient RPC failure keeps the last recap on screen; only a failure
-  // with nothing to show yet hides the panel.
-  if (!data && recap.loading) return <section className="mon-panel"><div className="mon-empty">Preparing recap…</div></section>;
+  // with nothing to show yet hides the panel. Loading is two shimmer bars,
+  // never a full empty panel.
+  if (!data && recap.loading) {
+    return (
+      <section className="mon-panel" data-testid="monitor-recap-loading">
+        <header className="mon-panel-head"><h2 className="mon-kicker">Run recap</h2></header>
+        <div className="mon-skeleton" />
+        <div className="mon-skeleton" />
+      </section>
+    );
+  }
   if (!data) return null;
   const history = Array.isArray(data.history) ? data.history.slice(1) : [];
+  const view = parseRecapSummary(String(data.summary ?? ""));
+  const byline = data.source === "agent" ? `Narrated by ${data.agentId ?? "agent"}` : "Facts recap";
   return <section className="mon-panel" data-testid="monitor-recap">
-    <header className="mon-panel-head"><h2 className="mon-kicker">Run recap</h2><span className="mon-dim">{formatRecapAge(data.generatedAtMs)}</span></header>
-    <div className="mon-recap-summary">{data.summary}</div>
-    <div className="mon-dim">{data.source === "agent" ? `Narrated by ${data.agentId ?? "agent"}` : "Facts recap"}</div>
+    <header className="mon-panel-head">
+      <h2 className="mon-kicker">Run recap</h2>
+      <span className="mon-dim">{byline} · {formatRecapAge(data.generatedAtMs)}</span>
+    </header>
+    <div className="mon-recap-summary">{view.lede}</div>
+    {view.notable.map((fact) => (
+      <div className="mon-recap-line" key={fact.label}>
+        <span className="mon-dim">{fact.label}</span> {fact.value}
+      </div>
+    ))}
+    {view.factsLine ? <div className="mon-recap-facts">{view.factsLine}</div> : null}
     {history.length ? <details><summary>Earlier recaps ({history.length})</summary>{history.map((entry: any) => <div key={entry.toSeq} className="mon-recap-history">{entry.summary}</div>)}</details> : null}
   </section>;
 }

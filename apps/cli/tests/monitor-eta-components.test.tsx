@@ -9,7 +9,7 @@ globalThis.fetch = nativeFetch;
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { RunEtaCell, RunEtaLineView } = await import("../src/monitor-ui/monitorEta.tsx");
+const { RunEtaCell, EtaFactCells } = await import("../src/monitor-ui/monitorEta.tsx");
 type Root = import("react-dom/client").Root;
 let root: Root | undefined;
 let container: HTMLElement | undefined;
@@ -37,14 +37,15 @@ describe("monitor ETA surfaces", () => {
     ]))) as typeof fetch;
     await render(<RunEtaCell run={{ runId: "r", status: "running", startedAtMs: current, summary: { finished: 99 } }} />);
     await settle();
-    expect(container?.textContent).toBe("~1m 00s left");
+    // Table cells carry the compact value alone; the column header says "ETA".
+    expect(container?.textContent).toBe("~1m 00s");
     globalThis.fetch = (async () => new Response(JSON.stringify([
       { nodeId: "done", iteration: 1, state: "finished", startedAtMs: current - 60_000, finishedAtMs: current },
       { nodeId: "next", iteration: 0, state: "queued" },
     ]))) as typeof fetch;
     await render(<RunEtaCell run={{ runId: "iterating", status: "running" }} />);
     await settle();
-    expect(container?.textContent).toBe("at least ~1m 00s left");
+    expect(container?.textContent).toBe("≥1m 00s");
     globalThis.fetch = (async () => new Response(JSON.stringify([]))) as typeof fetch;
     await render(<RunEtaCell run={{ runId: "summary-less", status: "running" }} />);
     await settle();
@@ -55,15 +56,27 @@ describe("monitor ETA surfaces", () => {
     expect(container?.textContent).toBe("—");
     expect(terminalFetches).toBe(0);
   });
-  test("renders estimate wording and extent variants", async () => {
-    await render(<RunEtaLineView estimate={estimate} extent={extent} />);
-    expect(container?.textContent).toBe("~2m 00s left · 12/30 tasks · 5 agent tasks · 22m 00s elapsed");
-    await render(<RunEtaLineView estimate={{ ...estimate, kind: "at-least" }} extent={{ ...extent, atLeast: true, agentTasks: undefined }} />);
-    expect(container?.textContent).toBe("at least ~2m 00s left · 12 settled · at least 30 known tasks · 22m 00s elapsed");
-    await render(<RunEtaLineView estimate={{ kind: "unknown", sampleSize: 0, remainingTasks: 1, inFlightTasks: 0 }} extent={extent} />);
-    expect(container?.textContent).toContain("estimating…");
-    await render(<RunEtaLineView estimate={estimate} extent={extent} showEstimate={false} />);
-    expect(container?.textContent).not.toContain("left");
-    expect(container?.textContent).toContain("12/30 tasks");
+  test("renders facts cells for estimate and extent variants, never inline prose", async () => {
+    const cell = (testId: string) => container?.querySelector(`[data-testid="${testId}"]`);
+    await render(<div className="mon-facts"><EtaFactCells estimate={estimate} extent={extent} /></div>);
+    expect(cell("monitor-fact-eta")?.textContent).toContain("~2m 00s");
+    expect(cell("monitor-fact-eta")?.textContent).toContain("eta");
+    expect(cell("monitor-fact-tasks")?.textContent).toContain("12/30");
+    expect(cell("monitor-fact-tasks")?.textContent).toContain("5 agent");
+    expect(cell("monitor-fact-elapsed")?.textContent).toContain("22m 00s");
+
+    await render(<div className="mon-facts"><EtaFactCells estimate={{ ...estimate, kind: "at-least" }} extent={{ ...extent, atLeast: true, agentTasks: undefined }} /></div>);
+    // Open-ended work: the value carries the ≥ bound, tasks gets the + suffix.
+    expect(cell("monitor-fact-eta")?.textContent).toContain("≥2m 00s");
+    expect(cell("monitor-fact-eta")?.textContent).toContain("lower bound");
+    expect(cell("monitor-fact-tasks")?.textContent).toContain("12/30+");
+    expect(cell("monitor-fact-tasks")?.textContent).not.toContain("agent");
+
+    await render(<div className="mon-facts"><EtaFactCells estimate={{ kind: "unknown", sampleSize: 0, remainingTasks: 1, inFlightTasks: 0 }} extent={extent} /></div>);
+    expect(cell("monitor-fact-eta")?.textContent).toContain("estimating…");
+
+    await render(<div className="mon-facts"><EtaFactCells estimate={estimate} extent={extent} showEstimate={false} /></div>);
+    expect(cell("monitor-fact-eta")).toBeNull();
+    expect(cell("monitor-fact-tasks")?.textContent).toContain("12/30");
   });
 });

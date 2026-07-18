@@ -13,6 +13,7 @@ import {
   isRecord,
   nodeErrorOf,
   quotaInfoOf,
+  toneForStatus,
 } from "./monitorModel.ts";
 import { Countdown } from "./monitorShared.tsx";
 
@@ -86,6 +87,21 @@ export function HealthStrip({
     failureSample: failedNodeId && sampleError ? { nodeId: failedNodeId, message: sampleError.message } : null,
   });
   const tone = diagnosis.tone === "ok" ? "tone-ok" : diagnosis.tone === "crit" ? "tone-failed" : "tone-waiting";
+  // Healthy runs get one slim line — done/in-flight counts and nothing else.
+  // The tinted multi-line banner is reserved for states that need the operator.
+  if (diagnosis.tone === "ok") {
+    const tones = treeNodes.map((node) => toneForStatus(asString(node.status)));
+    const done = tones.filter((value) => value === "ok").length;
+    const inFlight = tones.filter((value) => value === "running").length;
+    return (
+      <div className="mon-health-slim tone-ok" data-testid="monitor-health-strip" title={diagnosis.headline}>
+        <span className="mon-dot" aria-hidden />
+        <span>
+          {done}/{treeNodes.length} done{inFlight > 0 ? ` · ${inFlight} in flight` : ""}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className={`mon-banner ${tone} mon-health`} data-testid="monitor-health-strip">
       <div className="mon-health-headline">

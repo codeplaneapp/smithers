@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useGatewayConnectionStatus } from "smithers-orchestrator/gateway-react";
 import {
   connectionViewFor,
@@ -72,6 +72,27 @@ export function Countdown({ untilMs }: { untilMs: number }) {
 // ---------------------------------------------------------------------------
 // Shared atoms.
 // ---------------------------------------------------------------------------
+
+/** One header facts-band cell: numeric value over a small dim label. */
+export function FactCell({
+  value,
+  label,
+  sub,
+  testId,
+}: {
+  value: ReactNode;
+  label: string;
+  sub?: string;
+  testId?: string;
+}) {
+  return (
+    <div className="mon-fact" data-testid={testId ?? "monitor-fact"}>
+      <div className="mon-stat-value">{value}</div>
+      <div className="mon-stat-label">{label}</div>
+      {sub ? <div className="mon-stat-sub mon-dim">{sub}</div> : null}
+    </div>
+  );
+}
 
 export function StatusTag({ status, label }: { status: string | undefined; label?: string }) {
   const tone = toneForStatus(status);

@@ -23,10 +23,11 @@ import { MetricsPanel } from "./monitorMetrics.tsx";
 import { NodeInspector } from "./monitorNodeInspector.tsx";
 import { CronsPanel, OpsStrip } from "./monitorOps.tsx";
 import { RunDetail } from "./monitorRunDetail.tsx";
-import { ApprovalsInbox, RunsRail, RunsTable } from "./monitorRuns.tsx";
+import { RunsRail, RunsTable } from "./monitorRuns.tsx";
+import { NotificationsBell } from "./monitorNotifications.tsx";
 import { useRunScores } from "./monitorScores.tsx";
 import { ConnectionBadge, useNowMs } from "./monitorShared.tsx";
-import { AttentionBannerView, MAX_ATTENTION_ITEMS } from "./monitorAttentionBanner.tsx";
+import { AttentionBannerView } from "./monitorAttentionBanner.tsx";
 import { workspaceAttention } from "./monitorAttentionModel.ts";
 
 export const monitorMode = embedModeFromSearch(typeof location === "undefined" ? "" : location.search);
@@ -106,6 +107,20 @@ export function App() {
     emitSelection(selectedRunId, node ? (node.id ?? treeNodeKey(node)) : undefined);
   };
 
+  // Escape deselects the node (closing the inspector) — but never while a
+  // modal or the approvals popover is open; those own their own Escape.
+  useEffect(() => {
+    if (!selectedNode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (document.querySelector(".mon-modal-backdrop, .mon-notif-pop")) return;
+      setSelectedNode(undefined);
+      emitSelection(selectedRunId, undefined);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedNode, selectedRunId]);
+
   const showResult = (kind: "ok" | "err", text: string) => {
     setBanner({ kind, text });
     if (bannerTimer.current) clearTimeout(bannerTimer.current);
@@ -133,6 +148,7 @@ export function App() {
           <h1>Smithers Monitor</h1>
           <ConnectionBadge />
         </div>
+        <NotificationsBell onSelectRun={selectRun} onResult={showResult} />
         <MonitorToolbar
           filterText={filterText}
           onFilterText={setFilterText}
@@ -157,9 +173,8 @@ export function App() {
         </div>
       ) : null}
 
-      <div className="mon-body">
+      <div className={`mon-body${!monitorMode.embed && selectedRunId && selectedNode ? " has-inspector" : ""}`}>
         {!monitorMode.embed ? <div className="mon-rail">
-          <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
           <RunsRail
             runs={visibleRuns}
             loading={runsQuery.loading ?? false}
@@ -186,8 +201,18 @@ export function App() {
             />
           ) : (
             <div className="mon-overview">
-              <AttentionBannerView items={attention.items.slice(0, MAX_ATTENTION_ITEMS)} total={attention.total} onSelectRun={selectRun} />
-              <OpsStrip runs={allRuns} loading={runsQuery.loading ?? false} attentionTotal={attention.total} />
+              <AttentionBannerView
+                items={attention.items}
+                total={attention.total}
+                onSelectRun={selectRun}
+                onViewAll={() => setStatusFilter("failed")}
+              />
+              <OpsStrip
+                runs={allRuns}
+                loading={runsQuery.loading ?? false}
+                attentionTotal={attention.total}
+                onAttentionClick={() => setStatusFilter("failed")}
+              />
               <RunsTable
                 runs={visibleRuns}
                 loading={runsQuery.loading ?? false}
@@ -201,7 +226,13 @@ export function App() {
         </div>
 
         {!monitorMode.embed && selectedRunId && selectedNode ? (
-          <NodeInspector runId={selectedRunId} node={selectedNode} scores={scores} onResult={showResult} />
+          <NodeInspector
+            runId={selectedRunId}
+            node={selectedNode}
+            scores={scores}
+            onResult={showResult}
+            onClose={() => selectNode(undefined)}
+          />
         ) : null}
       </div>
     </main>

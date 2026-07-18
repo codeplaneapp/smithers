@@ -55,7 +55,11 @@ describe("DecisionsPanel", () => {
 
   test("renders empty and fetch-failure states without crashing", async () => {
     await render(async () => response({ ok: true, data: { entries: [] } }));
-    expect(container?.textContent).toContain("No decisions recorded for this run");
+    // Loaded-but-empty collapses to the quiet single row, not a centered void.
+    const quiet = container?.querySelector('[data-testid="monitor-decisions"]');
+    expect(quiet?.classList.contains("mon-panel-quiet")).toBe(true);
+    expect(quiet?.textContent).toContain("Decisions");
+    expect(quiet?.textContent).toContain("None yet");
     await render(async () => { throw new Error("offline"); });
     expect(container?.textContent).toContain("Couldn’t load decisions");
   });

@@ -32,15 +32,43 @@ test("attention banner renders actionable quota attention and hides when empty",
   await act(async () => root?.render(<AttentionBannerView items={[]} total={0} onSelectRun={() => {}} />)); expect(host?.querySelector('[data-testid="monitor-attention"]')).toBeNull();
 });
 
-test("attention banner reports overflow beyond the rendered cap", async () => {
-  await render(<AttentionBannerView items={[{ kind: "failed", tone: "crit", runId: "run-1", headline: "Run failed" }]} total={3} onSelectRun={() => {}} />);
-  expect(host?.textContent).toContain("+2 more");
-  expect(host?.querySelectorAll("button").length).toBe(1);
+test("attention banner groups repeats, caps rows crit-first, and hands the rest to View all", async () => {
+  const failed = (runId: string, workflowKey: string, tone: "crit" | "warn" = "crit") =>
+    ({ kind: "failed" as const, tone, runId, workflowKey, headline: "Run failed" });
+  let viewedAll = 0;
+  await render(
+    <AttentionBannerView
+      items={[
+        failed("run-1", "implement"), failed("run-2", "implement"), failed("run-3", "implement"),
+        failed("run-4", "review", "warn"),
+        failed("run-5", "kanban"), failed("run-6", "trellis"), failed("run-7", "hello"), failed("run-8", "debug"),
+      ]}
+      total={157}
+      onSelectRun={() => {}}
+      onViewAll={() => { viewedAll++; }}
+    />,
+  );
+  // (workflow, headline) groups digest into ≤4 quiet rows: ×N badge + headline
+  // + short run ids — never one chip per run.
+  const rows = [...(host?.querySelectorAll(".mon-attention-row") ?? [])];
+  expect(rows.length).toBe(4);
+  expect(rows[0]?.textContent).toContain("×3");
+  expect(rows[0]?.textContent).toContain("implement — Run failed");
+  expect(rows[0]?.textContent).toContain("+1");
+  // Crit groups sort ahead of warn even when the warn item arrived earlier.
+  expect(rows.every((row, index) => index === rows.length - 1 || !row.className.includes("tone-warn") || rows[index + 1]?.className.includes("tone-warn"))).toBe(true);
+  const viewAll = host?.querySelector('[data-testid="monitor-attention-viewall"]') as HTMLButtonElement;
+  expect(viewAll.textContent).toContain("View all 157");
+  await act(async () => viewAll.click());
+  expect(viewedAll).toBe(1);
 });
 
 test("failed badges render in rail and table rows", async () => {
   let selected = "";
   await render(<div><FailedTaskBadge count={0} /><FailedTaskBadge count={2} /><RunRailRow runId="r" name="wf" title="wf" shortId="r" tone="failed" pulse={false} when={<>now</>} active={false} badge={<FailedTaskBadge count={1} />} onSelect={(id) => { selected = id; }} /><table><tbody><RunsTableRow run={{ runId: "table-run", status: "finished", summary: { failed: 2 } }} onSelect={(id) => { selected = id; }} /></tbody></table></div>);
-  expect(host?.textContent).toContain("2 failed"); expect(host?.querySelectorAll(".mon-badge").length).toBe(3);
+  // Two badges: the standalone count and the rail row's. The table row folds
+  // its failed count into the Progress cell instead of a badge column.
+  expect(host?.textContent).toContain("2 failed"); expect(host?.querySelectorAll(".mon-badge").length).toBe(2);
+  expect(host?.querySelector(".mon-progress-failed")?.textContent).toContain("2 failed");
   await act(async () => (host?.querySelector('[data-run-id="table-run"]') as HTMLElement).click()); expect(selected).toBe("table-run");
 });

@@ -1,11 +1,15 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState } from "react";
+import { useGatewayRunTree } from "smithers-orchestrator/gateway-react";
 import { StatCard } from "./monitorOps.tsx";
-import { asNumber } from "./monitorModel.ts";
-import { useJsonApi, useNowMs } from "./monitorShared.tsx";
+import { asNumber, buildTimeline, isTerminalStatus, nodeStateRowsOf } from "./monitorModel.ts";
+import { estimateRun, etaRefreshMs, workloadExtent } from "./monitorEtaModel.ts";
+import { EtaFactCells } from "./monitorEta.tsx";
+import { FactCell, useJsonApi, useNowMs } from "./monitorShared.tsx";
 import {
   burnRateTokensPerMin,
   costRowsOf,
+  formatDurationCoarse,
   formatTokensCompact,
   formatUsd,
   projectedRunTokens,
@@ -17,51 +21,80 @@ import {
   type PercentSample,
 } from "./monitorUsageModel.ts";
 
-export function RunCostCard({
+/**
+ * The run header's facts band: Cost · Tokens · ETA · Tasks · Elapsed as one
+ * grid of aligned numerics. Per-model cost rows fold into a "by model"
+ * disclosure beneath the band instead of stacking inside a floating card.
+ */
+export function RunFactsBand({
   runId,
+  runStatus,
   active = true,
   progressRatio,
+  startedAtMs,
+  finishedAtMs,
 }: {
   runId: string;
+  runStatus?: string;
   active?: boolean;
   progressRatio?: number;
+  startedAtMs?: number;
+  finishedAtMs?: number;
 }) {
   const api = useJsonApi(`/v1/api/runs/${encodeURIComponent(runId)}/token-usage`, active ? 10_000 : null);
+  const nodeStates = useJsonApi(`/v1/api/runs/${encodeURIComponent(runId)}/node-states`, etaRefreshMs(runStatus));
+  const tree = useGatewayRunTree(runId);
   const now = useNowMs();
   const usage = useMemo(() => runTokenUsageOf(api.body), [api.body]);
-  if (!api.loaded) {
-    return (
-      <div className="mon-stat" data-testid="monitor-run-cost">
-        {api.failed ? "gateway did not answer" : "loading cost…"}
-      </div>
-    );
-  }
-  if (!usage) {
-    return <div className="mon-stat" data-testid="monitor-run-cost">gateway did not answer</div>;
-  }
   const costs = costRowsOf(api.body);
-  const burn = burnRateTokensPerMin(usage.buckets, now);
-  const projected = projectedRunTokens(usage.totals, progressRatio, active);
+  const burn = usage ? burnRateTokensPerMin(usage.buckets, now) : null;
+  const projected = usage ? projectedRunTokens(usage.totals, progressRatio, active) : null;
+  const costValue = !api.loaded
+    ? api.failed ? "—" : "…"
+    : !usage ? "—" : costs.unpriced ? "unpriced" : formatUsd(costs.totalUsd);
+  const costSub = api.failed || (api.loaded && !usage)
+    ? "gateway did not answer"
+    : projected === null ? undefined : `~${formatTokensCompact(projected)} projected`;
+
+  const rows = nodeStateRowsOf(nodeStates.body);
+  // An empty collection is only a real zero once the tree query is ready.
+  // Until then, omit the agent count instead of briefly claiming there are none.
+  const nodes = tree.isLoading || tree.error ? undefined : tree.nodes;
+  const extent = workloadExtent(rows, nodes, startedAtMs, finishedAtMs ?? now);
+  const estimate = estimateRun(buildTimeline(rows, now), now, { openEnded: extent.atLeast });
+
   return (
-    <div className="mon-stat" data-testid="monitor-run-cost">
-      <div className="mon-stat-value mon-mono">{costs.unpriced ? "unpriced" : formatUsd(costs.totalUsd)}</div>
-      <div className="mon-stat-label">run cost</div>
-      <div className="mon-stat-sub mon-dim">
-        {formatTokensCompact(usage.totals.tokens)} tokens
-        {burn === null ? "" : ` · ${formatTokensCompact(burn)}/min`}
-        {projected === null ? "" : ` · ~${formatTokensCompact(projected)} projected`}
+    <div data-testid="monitor-run-facts">
+      <div className="mon-facts">
+        <FactCell value={costValue} label="run cost" sub={costSub} testId="monitor-run-cost" />
+        {usage ? (
+          <FactCell
+            value={formatTokensCompact(usage.totals.tokens)}
+            label="tokens"
+            sub={burn === null ? undefined : `${formatTokensCompact(burn)}/min`}
+            testId="monitor-fact-tokens"
+          />
+        ) : null}
+        {nodeStates.loaded ? (
+          <EtaFactCells estimate={estimate} extent={extent} showEstimate={!isTerminalStatus(runStatus)} />
+        ) : null}
       </div>
-      {costs.rows.map((row) => (
-        <div
-          className="mon-stat-sub mon-dim"
-          key={`${row.engine}-${row.model}`}
-          data-testid="monitor-run-cost-model"
-        >
-          {row.engine} · {row.model}: {formatTokensCompact(row.tokens)}
-          {row.priced ? ` · ${formatUsd(row.costUsd)}` : " · unpriced"}
-        </div>
-      ))}
-      {api.failed ? <div className="mon-stat-sub mon-dim">gateway did not answer</div> : null}
+      {costs.rows.length > 0 ? (
+        <details className="mon-facts-models">
+          <summary>
+            <span className="mon-diff-caret" aria-hidden>▸</span> by model
+          </summary>
+          {costs.rows.map((row) => (
+            <div className="mon-fact-model-row" key={`${row.engine}-${row.model}`} data-testid="monitor-run-cost-model">
+              <span>{row.engine} · {row.model}</span>
+              <span>
+                {formatTokensCompact(row.tokens)}
+                {row.priced ? ` · ${formatUsd(row.costUsd)}` : " · unpriced"}
+              </span>
+            </div>
+          ))}
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -78,7 +111,7 @@ function AccountWindowCard({ report, window, now }: { report: Record<string, unk
   const account = String(report.accountLabel ?? report.account_label ?? "account");
   const label = String(window.label ?? window.name ?? window.window ?? "quota");
   const resetLabel = Number.isFinite(reset)
-    ? `reset in ${Math.max(0, Math.round((reset - now) / 60_000))}m`
+    ? `resets in ${formatDurationCoarse(reset - now)}`
     : "reset unknown";
   return (
     <StatCard

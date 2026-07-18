@@ -157,6 +157,47 @@ export function diagnoseRunLite(row: RunRow, approvals: Approval[], nowMs: numbe
   return items;
 }
 
+export type AttentionGroup = {
+  key: string;
+  tone: "crit" | "warn";
+  workflowKey?: string;
+  headline: string;
+  count: number;
+  runIds: string[];
+  resetAtMs?: number;
+};
+
+/**
+ * The banner digest: one row per (workflow, headline) instead of one chip per
+ * run. Crit groups sort first, then by size, so a workspace sweep that flags
+ * 150 stale runs reads as a handful of lines, not a wall of red.
+ */
+export function groupAttention(items: AttentionItem[]): AttentionGroup[] {
+  const groups = new Map<string, AttentionGroup>();
+  for (const item of items) {
+    const key = `${item.workflowKey ?? ""}|${item.headline}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.runIds.push(item.runId);
+      if (item.tone === "crit") existing.tone = "crit";
+    } else {
+      groups.set(key, {
+        key,
+        tone: item.tone,
+        ...(item.workflowKey ? { workflowKey: item.workflowKey } : {}),
+        headline: item.headline,
+        count: 1,
+        runIds: [item.runId],
+        ...(item.resetAtMs !== undefined ? { resetAtMs: item.resetAtMs } : {}),
+      });
+    }
+  }
+  return [...groups.values()].sort((a, b) =>
+    a.tone === b.tone ? b.count - a.count : a.tone === "crit" ? -1 : 1,
+  );
+}
+
 export function workspaceAttention(rows: RunRow[], approvals: Approval[], nowMs: number) {
   const grouped = new Map<string, Approval[]>();
   for (const approval of approvals) {

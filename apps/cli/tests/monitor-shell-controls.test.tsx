@@ -174,7 +174,9 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-stat-test").className).toContain("tone-waiting");
     expect(byTestId("monitor-stat-test").textContent).toContain("active runs");
     expect(byTestId("monitor-run-progress").textContent).toContain("4/5");
-    expect(byTestId("monitor-run-progress").textContent).not.toContain("failed");
+    // The failed count folds into the progress cell (tone-failed) instead of
+    // owning a table column of dashes.
+    expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
   });
 
   test("renders populated, loading, empty, offline, and unauthorized run-rail states", async () => {
@@ -203,7 +205,9 @@ describe("migrated monitor surfaces", () => {
     await rerender(<RunsTable runs={[run]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-runs-table")).toBeDefined();
     expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
-    expect(byTestId("monitor-runs-table").textContent).toContain("Failed");
+    // No dedicated FAILED column of dashes — the count lives in Progress.
+    expect(byTestId("monitor-runs-table").textContent).not.toContain("Failed");
+    expect(byTestId("monitor-runs-table").textContent).toContain("ETA");
     expect(byTestId("monitor-runs-table").textContent).toContain("1 failed");
   });
 });
@@ -224,10 +228,10 @@ describe("monitor theme contract", () => {
       [".mon-shell", "overflow: hidden"],
       [".mon-filter-input", "min-width"],
       [".mon-pill", "var(--tone)"],
-      [".mon-stat", "var(--surface)"],
+      [".mon-stat ", "var(--surface)"],
       [".mon-banner", "var(--tone)"],
       [".mon-progress-fill", "var(--brand)"],
-      [".mon-modal", "var(--surface)"],
+      ["\n.mon-modal ", "var(--surface)"],
       [".mon-empty", "var(--muted)"],
       [".mon-hijack-terminal", "var(--sp-2)"],
     ];

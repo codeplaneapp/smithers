@@ -91,3 +91,10 @@ export function formatEta(estimate: ReturnType<typeof estimateRun>): string {
   const phrase = `~${formatDurationMs(estimate.remainingMs)} left`;
   return estimate.kind === "at-least" ? `at least ${phrase}` : phrase;
 }
+
+/** Compact form for facts-band cells: the value alone, never inline prose. */
+export function formatEtaShort(estimate: ReturnType<typeof estimateRun>): string {
+  if (estimate.kind === "unknown") return "estimating…";
+  const duration = formatDurationMs(estimate.remainingMs);
+  return estimate.kind === "at-least" ? `≥${duration}` : `~${duration}`;
+}

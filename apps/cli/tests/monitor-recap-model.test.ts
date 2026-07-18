@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatRecapAge, latestNotableSeqOf, latestSeqOf, shouldRefreshRecap } from "../src/monitor-ui/monitorRecapModel.ts";
+import { formatRecapAge, latestNotableSeqOf, latestSeqOf, parseRecapSummary, shouldRefreshRecap } from "../src/monitor-ui/monitorRecapModel.ts";
 
 describe("monitor recap model", () => {
   test("filters notable events and reads tolerant sequences", () => {
@@ -24,5 +24,31 @@ describe("monitor recap model", () => {
     expect(shouldRefreshRecap({ ...base, nowMs: 30_000, consecutiveFailures: 2 })).toBe(true);
     expect(shouldRefreshRecap({ ...base, nowMs: 179_999, consecutiveFailures: 99 })).toBe(false);
     expect(shouldRefreshRecap({ ...base, nowMs: 180_000, consecutiveFailures: 99 })).toBe(true);
+  });
+  test("parses the Outcome lede and folds zero-fact bullets into one dim line", () => {
+    const view = parseRecapSummary([
+      "Outcome: Shipped the fix and reran the suite.",
+      "- Failures: None recorded.",
+      "- Retries: 2 on the build task.",
+      "- Approvals: None recorded.",
+    ].join("\n"));
+    expect(view.lede).toBe("Shipped the fix and reran the suite.");
+    expect(view.notable).toEqual([{ label: "Retries", value: "2 on the build task." }]);
+    expect(view.factsLine).toBe("Failures 0 · Approvals 0");
+  });
+  test("all-zero bullets collapse to 'Nothing notable yet.'", () => {
+    const view = parseRecapSummary("Outcome: Nothing ran.\n- Failures: None recorded.\n- Handoffs: None recorded.");
+    expect(view.notable).toEqual([]);
+    expect(view.factsLine).toBe("Nothing notable yet.");
+    // Narrators vary the filler verb; "reported"/"noted" fold the same way.
+    const reported = parseRecapSummary("Done.\n- Failures: None reported.\n- Retries: None noted.");
+    expect(reported.notable).toEqual([]);
+    expect(reported.factsLine).toBe("Nothing notable yet.");
+  });
+  test("summaries without bullets render verbatim as the lede", () => {
+    const view = parseRecapSummary("The agent completed useful work.\nAnd then stopped.");
+    expect(view.lede).toBe("The agent completed useful work.\nAnd then stopped.");
+    expect(view.notable).toEqual([]);
+    expect(view.factsLine).toBeNull();
   });
 });

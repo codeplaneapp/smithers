@@ -61,12 +61,24 @@ describe("Monitor single-surface composition", () => {
     expect(orderOf("[data-testid=monitor-attention]", "[data-testid=monitor-ops-strip]", "[data-testid=monitor-runs-table]", "[data-testid=monitor-crons]")).toEqual([...orderOf("[data-testid=monitor-attention]", "[data-testid=monitor-ops-strip]", "[data-testid=monitor-runs-table]", "[data-testid=monitor-crons]")].sort((a, b) => a - b));
     expect(container.querySelector("[data-testid=monitor-account-usage]")?.textContent).toContain("Codex · weekly");
     expect(container.querySelector("[data-testid=monitor-account-usage]")?.textContent).toContain("32%");
-    expect(container.querySelector("[data-testid=monitor-workspace-cost]")?.textContent).toContain("workspace cost today");
+    expect(container.querySelector("[data-testid=monitor-workspace-cost]")?.textContent).toContain("cost today");
     expect(container.querySelector("[data-testid=monitor-stat-attention]")?.textContent).toContain("needs attention");
     expect(container.querySelector("[data-testid=monitor-stat-engines]")).not.toBeNull();
     for (const id of ["memory", "tickets", "latency", "cron", "accounts"]) expect(container.querySelector(`[data-testid=monitor-stat-${id}]`)).toBeNull();
     expect(container.querySelector("[data-testid=monitor-runs-table]")?.textContent).toContain("ETA");
-    expect(container.querySelector("[data-testid=monitor-runs-table]")?.textContent).toContain("Failed");
+    // The failed count folds into Progress; no dedicated column of dashes.
+    expect(container.querySelector("[data-testid=monitor-runs-table]")?.textContent).not.toContain("Failed");
+    expect(container.querySelector("[data-testid=monitor-run-progress]")?.textContent).toContain("1 failed");
+
+    // Approvals live behind the topbar bell, not an always-expanded rail inbox.
+    expect(container.querySelector(".mon-rail [data-testid=monitor-approvals]")).toBeNull();
+    const bell = container.querySelector("[data-testid=monitor-notif-bell]") as HTMLElement;
+    expect(bell.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(container.querySelector("[data-testid=monitor-notif-count]")?.textContent).toBe("1");
+    await act(async () => bell.click());
+    expect(container.querySelector("[data-testid=monitor-notif-pop] [data-testid=monitor-approvals]")).not.toBeNull();
+    await act(async () => bell.click());
+    expect(container.querySelector("[data-testid=monitor-notif-pop]")).toBeNull();
 
     await act(async () => (container.querySelector("[data-run-id] button, [data-run-id]") as HTMLElement).click());
     await act(async () => {});
@@ -74,10 +86,18 @@ describe("Monitor single-surface composition", () => {
     expect(container.querySelector(".mon-detail-header-band")).not.toBeNull();
     expect(container.querySelector(".mon-detail-header-band")?.textContent).toContain("run cost");
     expect(container.querySelector(".mon-detail-header-band")?.textContent).toContain("estimating");
-    const detailOrder = orderOf("[data-testid=monitor-health-strip]", ".mon-detail-header-band", "[data-testid=monitor-recap]", "[data-testid=monitor-decisions]", "[data-testid=monitor-scores]", "[data-testid=footprint-panel]", ".mon-tree-panel", ".mon-events-panel");
+    // Execution is the hero directly under the recap lede; the quiet/summary
+    // panels stack beneath it.
+    const detailOrder = orderOf("[data-testid=monitor-health-strip]", ".mon-detail-header-band", "[data-testid=monitor-recap]", ".mon-tree-panel", "[data-testid=monitor-decisions]", "[data-testid=footprint-panel]", "[data-testid=monitor-scores]", ".mon-events-panel");
     expect(detailOrder).toEqual([...detailOrder].sort((a, b) => a - b));
     expect(container.textContent).toContain("Frames"); expect(container.textContent).toContain("XML"); expect(container.textContent).toContain("Timeline");
+    // No reserved inspector track until a node is selected.
+    expect(container.querySelector(".mon-body")?.classList.contains("has-inspector")).toBe(false);
     await act(async () => (container.querySelector("[data-testid=monitor-tree] .mon-tree-main") as HTMLElement).click());
     expect(container.querySelector("[data-testid=monitor-inspector]")).not.toBeNull();
+    expect(container.querySelector(".mon-body")?.classList.contains("has-inspector")).toBe(true);
+    await act(async () => (container.querySelector("[data-testid=monitor-inspector-close]") as HTMLElement).click());
+    expect(container.querySelector("[data-testid=monitor-inspector]")).toBeNull();
+    expect(container.querySelector(".mon-body")?.classList.contains("has-inspector")).toBe(false);
   });
 });
