@@ -24,6 +24,7 @@ import { EventLog } from "./monitorEventLog.tsx";
 import { ExecutionPanel, type TreeNode } from "./monitorExecution.tsx";
 import { HealthStrip } from "./monitorHealth.tsx";
 import { ScoresPanel, type RunScores } from "./monitorScores.tsx";
+import { FootprintPanel } from "./monitorFootprint.tsx";
 import { Elapsed, StatusTag } from "./monitorShared.tsx";
 import { RunCostCard } from "./monitorUsagePanels.tsx";
 import { RunEtaLine } from "./monitorEta.tsx";
@@ -83,6 +84,7 @@ export function RunDetail({
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);
+  const [footprintFocusNodeId, setFootprintFocusNodeId] = useState<string | undefined>();
   const customUiDialogRef = useRef<HTMLDivElement | null>(null);
   const customUiReturnFocusRef = useRef<HTMLElement | null>(null);
   const workflowsRefetch = workflowsQuery.refetch;
@@ -250,6 +252,7 @@ export function RunDetail({
       <RunCostCard runId={runId} active={status === "running" || status === "pending"} progressRatio={progress?.fraction} />
       <RecapPanel runId={runId} status={status} />
       <ScoresPanel scores={scores} />
+      <FootprintPanel runId={runId} live={status === "running"} onFocusNode={setFootprintFocusNodeId} />
 
       {showCustomUi && customUiUrl ? (
         <div className="mon-modal-backdrop" onClick={closeCustomUi} data-testid="monitor-ui-modal">
@@ -281,8 +284,8 @@ export function RunDetail({
         runStatus={status}
         selectedNode={selectedNode}
         onSelectNode={onSelectNode}
-        autoSelectNodeId={autoSelectNodeId}
-        onAutoSelected={onAutoSelected}
+        autoSelectNodeId={footprintFocusNodeId ?? autoSelectNodeId}
+        onAutoSelected={() => { setFootprintFocusNodeId(undefined); onAutoSelected?.(); }}
       />
 
       <EventLog runId={runId} />

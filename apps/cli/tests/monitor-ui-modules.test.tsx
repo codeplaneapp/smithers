@@ -33,6 +33,7 @@ const modules = await Promise.all([
   import("../src/monitor-ui/monitorEventLog.tsx"),
   import("../src/monitor-ui/monitorHealth.tsx"),
   import("../src/monitor-ui/monitorNodeInspector.tsx"),
+  import("../src/monitor-ui/monitorFootprint.tsx"),
   import("../src/monitor-ui/monitorRunDetail.tsx"),
 ]);
 
@@ -85,7 +86,8 @@ describe("monitor UI module seams", () => {
     expect(typeof modules[2].EventLog).toBe("function");
     expect(typeof modules[3].HealthStrip).toBe("function");
     expect(typeof modules[4].NodeInspector).toBe("function");
-    expect(typeof modules[5].RunDetail).toBe("function");
+    expect(typeof modules[5].FootprintPanel).toBe("function");
+    expect(typeof modules[6].RunDetail).toBe("function");
   });
 
   test("renders compatibility panels with status, empty/loading, pagination, and score contracts", async () => {

@@ -51,6 +51,13 @@ export type TreeNode = TreeNodeLike & {
   children?: TreeNode[] | null;
 };
 
+/** Accept the API's nodeId::iteration links even when DevTools' React key is structural. */
+export function matchesAutoSelectNode(candidate: TreeNode, autoSelectNodeId: string): boolean {
+  return candidate.id === autoSelectNodeId
+    || treeNodeKey(candidate) === autoSelectNodeId
+    || `${candidate.id ?? ""}::${candidate.iteration ?? 0}` === autoSelectNodeId;
+}
+
 /**
  * React-DevTools-style XML rendering of the execution tree: colored tags and
  * attributes, clickable chevrons, click-to-inspect — sharing the exact same
@@ -278,9 +285,7 @@ function ExecutionTree({
   // ?nodeId= deep link: select the node once it exists in the live tree.
   useEffect(() => {
     if (isStatic || !autoSelectNodeId || nodes.length === 0) return;
-    const match = (nodes as TreeNode[]).find(
-      (candidate) => candidate.id === autoSelectNodeId || treeNodeKey(candidate) === autoSelectNodeId,
-    );
+    const match = (nodes as TreeNode[]).find((candidate) => matchesAutoSelectNode(candidate, autoSelectNodeId));
     if (match) {
       onSelectNode(match);
       onAutoSelected?.();

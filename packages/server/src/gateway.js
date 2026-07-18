@@ -35,6 +35,7 @@ import { diffRawSnapshots } from "@smithers-orchestrator/time-travel/diff";
 import { getNodeOutputRoute } from "./gatewayRoutes/getNodeOutput.js";
 import { NodeOutputRouteError } from "./gatewayRoutes/NodeOutputRouteError.js";
 import { getNodeDiffRoute } from "./gatewayRoutes/getNodeDiff.js";
+import { getRunFootprintRoute } from "./gatewayRoutes/getRunFootprint.js";
 import { getRunDiffRoute } from "./gatewayRoutes/getRunDiff.js";
 import { WhatHappenedRouteError, whatHappenedRoute } from "./gatewayRoutes/whatHappened.js";
 import { aggregateTokenUsageEvents } from "./gatewayRoutes/getRunTokenUsage.js";
@@ -3908,6 +3909,10 @@ a { color: var(--brand); }</style>
                 params: { runId: decodeURIComponent(runHijackCandidates[1]) },
             };
         }
+        const runFootprint = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/footprint$/);
+        if (httpMethod === "GET" && runFootprint) {
+            return { method: "getRunFootprint", direct: "runFootprint", params: { runId: decodeURIComponent(runFootprint[1]) } };
+        }
         const runNodeStates = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/node-states$/);
         const runTokenUsage = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/token-usage$/);
         if (httpMethod === "GET" && runTokenUsage) {
@@ -4202,6 +4207,14 @@ a { color: var(--brand); }</style>
                     }
                     const attempts = await resolved.adapter.listAttemptsForRun(runId);
                     return responseOk(requestId, { runId, candidates: hijackCandidatesFromAttempts(attempts) });
+                }
+                if (route.direct === "runFootprint") {
+                    try {
+                        return responseOk(requestId, await getRunFootprintRoute({ runId: route.params.runId, resolveRun: this.resolveRun.bind(this) }));
+                    }
+                    catch (error) {
+                        return responseError(requestId, error?.code ?? "InternalError", error instanceof Error ? error.message : String(error));
+                    }
                 }
                 return this.routeRequest(context, frame);
             });

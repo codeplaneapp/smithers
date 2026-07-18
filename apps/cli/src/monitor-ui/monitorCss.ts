@@ -301,6 +301,17 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-node-scores { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0 0 var(--sp-3); }
 .mon-score-chip { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 40%, var(--border)); }
 
+/* Footprint: collapsed one-line rollup; open = per-directory sections with an
+   added/removed ratio bar and per-file rows that focus the owning node. */
+.mon-footprint-panel > summary { cursor: pointer; list-style: none; font-size: var(--fs-2); font-weight: 600; padding: var(--sp-1) 0; }
+.mon-footprint-panel > summary::-webkit-details-marker { display: none; }
+.mon-footprint-directory { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; font-size: var(--fs-2); font-variant-numeric: tabular-nums; }
+.mon-footprint-bar { display: inline-flex; width: 96px; height: 6px; border-radius: var(--r-full); overflow: hidden; background: var(--border); flex: none; }
+.mon-footprint-added { background: var(--ok); }
+.mon-footprint-removed { background: var(--err); }
+.mon-footprint-file { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) 0 var(--sp-1) var(--sp-4); border-bottom: 1px solid var(--border); font-size: var(--fs-1); font-variant-numeric: tabular-nums; color: var(--muted); }
+.mon-footprint-file:last-child { border-bottom: 0; }
+
 /* Metrics view: sections of label/value rows, monospace numbers. */
 .mon-metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-4) var(--sp-6); }
 .mon-metrics-section .mon-kicker { margin: 0 0 var(--sp-2); }
