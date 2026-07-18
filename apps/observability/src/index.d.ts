@@ -12,6 +12,7 @@ type SmithersLogFormat$1 = "json" | "pretty" | "string" | "logfmt";
 type ResolvedSmithersObservabilityOptions$2 = {
     readonly enabled: boolean;
     readonly endpoint: string;
+    readonly headers: Record<string, string> | undefined;
     readonly serviceName: string;
     readonly logFormat: SmithersLogFormat$1;
     readonly logLevel: LogLevel.LogLevel;
@@ -27,6 +28,7 @@ type SmithersObservabilityService$1 = {
 type SmithersObservabilityOptions$4 = {
     readonly enabled?: boolean;
     readonly endpoint?: string;
+    readonly headers?: Record<string, string>;
     readonly serviceName?: string;
     readonly logFormat?: SmithersLogFormat$1;
     readonly logLevel?: LogLevel.LogLevel | string;

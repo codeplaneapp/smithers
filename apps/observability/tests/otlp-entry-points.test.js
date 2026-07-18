@@ -26,6 +26,34 @@ describe("createSmithersOtelLayer", () => {
         });
         expect(layer).toBeDefined();
     });
+
+    test("forwards configured headers to OTLP requests", async () => {
+        let traceAuthorization;
+        const server = Bun.serve({
+            port: 0,
+            fetch(request) {
+                if (new URL(request.url).pathname === "/v1/traces") {
+                    traceAuthorization = request.headers.get("authorization");
+                }
+                return new Response(null, { status: 200 });
+            },
+        });
+        try {
+            const layer = createSmithersOtelLayer({
+                enabled: true,
+                endpoint: server.url.origin,
+                headers: { Authorization: "Basic test-token" },
+                serviceName: "test-service",
+            });
+            await Effect.runPromise(
+                Effect.succeed("ok").pipe(Effect.withSpan("header-test"), Effect.provide(layer)),
+            );
+            expect(traceAuthorization).toBe("Basic test-token");
+        }
+        finally {
+            server.stop(true);
+        }
+    });
 });
 
 describe("createSmithersObservabilityLayer", () => {

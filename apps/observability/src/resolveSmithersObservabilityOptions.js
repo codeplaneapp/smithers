@@ -65,6 +65,34 @@ function resolveEnabled(value) {
     return env === "1" || env === "true";
 }
 /**
+ * @param {string | undefined} value
+ * @returns {Record<string, string> | undefined}
+ */
+export function parseOtlpHeaders(value) {
+    if (!value) {
+        return undefined;
+    }
+    /** @type {Record<string, string>} */
+    const headers = {};
+    for (const entry of value.split(",")) {
+        const separator = entry.indexOf("=");
+        if (separator === -1) {
+            continue;
+        }
+        const key = entry.slice(0, separator).trim();
+        if (!key) {
+            continue;
+        }
+        try {
+            headers[key] = decodeURIComponent(entry.slice(separator + 1).trim());
+        }
+        catch {
+            continue;
+        }
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
+}
+/**
  * @param {SmithersObservabilityOptions} [options]
  * @returns {ResolvedSmithersObservabilityOptions}
  */
@@ -74,6 +102,7 @@ export function resolveSmithersObservabilityOptions(options = {}) {
         endpoint: options.endpoint ??
             process.env.OTEL_EXPORTER_OTLP_ENDPOINT ??
             DEFAULT_OTLP_HTTP_ENDPOINT,
+        headers: options.headers ?? parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
         serviceName: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? "smithers",
         logFormat: options.logFormat
             ? resolveLogFormat(options.logFormat)

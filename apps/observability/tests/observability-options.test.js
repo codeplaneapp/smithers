@@ -1,11 +1,13 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { resolveSmithersObservabilityOptions, renderPrometheusMetrics, } from "../src/index.js";
+import { parseOtlpHeaders } from "../src/resolveSmithersObservabilityOptions.js";
 import { LogLevel } from "effect";
 describe("resolveSmithersObservabilityOptions", () => {
     const savedEnv = {};
     const envKeys = [
         "SMITHERS_OTEL_ENABLED",
         "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_HEADERS",
         "OTEL_SERVICE_NAME",
         "SMITHERS_LOG_FORMAT",
         "SMITHERS_LOG_LEVEL",
@@ -30,6 +32,7 @@ describe("resolveSmithersObservabilityOptions", () => {
         const result = resolveSmithersObservabilityOptions();
         expect(result.enabled).toBe(false);
         expect(result.endpoint).toBe("http://localhost:4318");
+        expect(result.headers).toBeUndefined();
         expect(result.serviceName).toBe("smithers");
         expect(result.logFormat).toBe("logfmt");
         expect(result.logLevel).toBe(LogLevel.Info);
@@ -50,6 +53,48 @@ describe("resolveSmithersObservabilityOptions", () => {
         expect(result.logFormat).toBe("json");
         expect(result.logLevel).toBe(LogLevel.Debug);
         expect(result.installLogger).toBe(false);
+    });
+    test("parses simple OTLP header pairs", () => {
+        expect(parseOtlpHeaders("x-honeycomb-team=key,Authorization=Basic token")).toEqual({
+            "x-honeycomb-team": "key",
+            Authorization: "Basic token",
+        });
+    });
+    test("decodes percent-encoded OTLP header values", () => {
+        expect(parseOtlpHeaders("Authorization=Basic%20dG9rZW46c2VjcmV0%3D")).toEqual({
+            Authorization: "Basic dG9rZW46c2VjcmV0=",
+        });
+    });
+    test("trims surrounding OTLP header whitespace", () => {
+        expect(parseOtlpHeaders(" x-honeycomb-team = key , Authorization = Basic token ")).toEqual({
+            "x-honeycomb-team": "key",
+            Authorization: "Basic token",
+        });
+    });
+    test("skips malformed OTLP header entries", () => {
+        expect(parseOtlpHeaders("missing-equals,=empty-key,bad-percent=%ZZ,valid=value,also-missing")).toEqual({
+            valid: "value",
+        });
+    });
+    test("resolves OTLP headers from the environment", () => {
+        process.env.OTEL_EXPORTER_OTLP_HEADERS = "x-honeycomb-team=env-key,Authorization=Basic%20token";
+        const result = resolveSmithersObservabilityOptions();
+        expect(result.headers).toEqual({
+            "x-honeycomb-team": "env-key",
+            Authorization: "Basic token",
+        });
+    });
+    test("explicit OTLP headers override the environment", () => {
+        process.env.OTEL_EXPORTER_OTLP_HEADERS = "x-honeycomb-team=env-key";
+        const result = resolveSmithersObservabilityOptions({
+            headers: { Authorization: "Basic explicit-token" },
+        });
+        expect(result.headers).toEqual({ Authorization: "Basic explicit-token" });
+    });
+    test("explicit empty OTLP headers override the environment", () => {
+        process.env.OTEL_EXPORTER_OTLP_HEADERS = "x-honeycomb-team=env-key";
+        const result = resolveSmithersObservabilityOptions({ headers: {} });
+        expect(result.headers).toEqual({});
     });
     test("env vars used when no options provided", () => {
         process.env.SMITHERS_OTEL_ENABLED = "true";

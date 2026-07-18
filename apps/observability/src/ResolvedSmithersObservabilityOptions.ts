@@ -4,6 +4,7 @@ import type { SmithersLogFormat } from "./SmithersLogFormat";
 export type ResolvedSmithersObservabilityOptions = {
   readonly enabled: boolean;
   readonly endpoint: string;
+  readonly headers: Record<string, string> | undefined;
   readonly serviceName: string;
   readonly logFormat: SmithersLogFormat;
   readonly logLevel: LogLevel.LogLevel;

@@ -122,8 +122,8 @@ function createSmithersOtelLayer(
 ```
 
 <ParamField path="options" type="SmithersObservabilityOptions">
-  Same options object. Only `enabled`, `endpoint`, and `serviceName` affect this
-  layer.
+  Same options object. Only `enabled`, `endpoint`, `headers`, and `serviceName`
+  affect this layer.
 </ParamField>
 
 ```ts
@@ -162,6 +162,10 @@ function resolveSmithersObservabilityOptions(
       OTLP HTTP endpoint. Defaults from `OTEL_EXPORTER_OTLP_ENDPOINT`, otherwise
       `http://localhost:4318`.
     </ParamField>
+    <ParamField path="headers" type="Record<string, string>">
+      OTLP export headers. Defaults from `OTEL_EXPORTER_OTLP_HEADERS`, parsed as
+      comma-separated `key=value` pairs with percent-encoded values decoded.
+    </ParamField>
     <ParamField path="serviceName" type="string">
       Resource service name. Defaults from `OTEL_SERVICE_NAME`, otherwise
       `smithers`.
@@ -181,12 +185,24 @@ function resolveSmithersObservabilityOptions(
   </Expandable>
 </ParamField>
 
+For authenticated SaaS exporters, set `OTEL_EXPORTER_OTLP_HEADERS`:
+
+```sh
+# Honeycomb
+export OTEL_EXPORTER_OTLP_HEADERS='x-honeycomb-team=<key>'
+
+# Grafana Cloud
+export OTEL_EXPORTER_OTLP_HEADERS='Authorization=Basic <base64 token>'
+```
+
 <ResponseField name="ResolvedSmithersObservabilityOptions" type="object">
-  Every field present and concrete.
+  Every field is present after resolution. `headers` is `undefined` when no
+  headers are configured.
 
   <Expandable title="ResolvedSmithersObservabilityOptions">
     <ResponseField name="enabled" type="boolean" />
     <ResponseField name="endpoint" type="string" />
+    <ResponseField name="headers" type="Record<string, string> | undefined" />
     <ResponseField name="serviceName" type="string" />
     <ResponseField name="logFormat" type='"json" | "pretty" | "string" | "logfmt"' />
     <ResponseField name="logLevel" type="LogLevel" />

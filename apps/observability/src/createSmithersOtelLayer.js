@@ -15,6 +15,9 @@ export function createSmithersOtelLayer(options = {}) {
     }
     return Otlp.layerJson({
         baseUrl: resolved.endpoint,
+        ...(resolved.headers && Object.keys(resolved.headers).length > 0
+            ? { headers: resolved.headers }
+            : {}),
         resource: { serviceName: resolved.serviceName },
         tracerContext: (execute, span) => smithersTraceSpanStorage.run(span, execute),
     }).pipe(Layer.provide(FetchHttpClient.layer));
