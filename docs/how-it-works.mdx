@@ -136,7 +136,7 @@ function useReviewState(ticketId: string) {
 }
 ```
 
-`useState` and `useMemo` are process-local; they reset on every render frame. Use them for ephemeral render-time state. **Anything the workflow must remember across crashes goes through `ctx` and a Task output.**
+`useState` and `useMemo` are process-local: the engine reuses one React root across frames, so hook state survives frame-to-frame within a live process — but it is never persisted, and a crash, resume, rewind, or fork starts a fresh process where every hook reinitializes. Use them for ephemeral render-time state only. **Anything the workflow must remember across crashes goes through `ctx` and a Task output.**
 
 Conditional mounting matters: a Task that doesn't render is not in the plan. No "skipped" placeholder unless you use `<Branch>` or `skipIf`. That's what lets `{analysis ? <Task .../> : null}` work as a clean dependency check. For the common case of one Task consuming one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more ergonomic form of the same check.
 
@@ -341,7 +341,7 @@ agent documents a native structured-output opt-in.
 ## Common gotchas
 
 - **Stable task IDs.** `id="implement-${i}"` or `id={Math.random()}` breaks resume. Derive from data.
-- **`useState` is not durable.** Resets on every render. Persist via `ctx` and a Task.
+- **`useState` is not durable.** Hook state survives re-renders within one process but is lost on crash/resume/rewind/fork. Persist via `ctx` and a Task.
 - **Input is immutable.** Resuming with different `--input` is an error; the input is persisted at first run.
 - **Adding a schema field auto-migrates (SQLite).** Adding a field to a typed input or output Zod schema does not require recreating `smithers.db`. On every boot the runtime runs `CREATE TABLE IF NOT EXISTS` and then `ALTER TABLE ... ADD COLUMN` for any column the schema introduced, so new fields are added in place. If you still see `SQLiteError: table input has no column named X`, you are on a build before this boot-time migration landed (or a Postgres-backed DB, which does not auto-add columns yet); upgrade with `bunx smithers-orchestrator --version` or start a fresh run. Renaming or removing a field, or changing a field's type, is not migrated and does need a fresh DB.
 - **Code changes block resume.** A workflow source change = a different workflow. Hot reload applies changes within a running frame; resume validates the source hash of the original run. If you stop a run and the source has changed, resume is blocked. Start a new run, don't resume across edits.
