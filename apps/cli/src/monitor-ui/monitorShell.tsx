@@ -5,7 +5,8 @@
  * pieces of the monitor's topbar filters, runs rail, pagination, and run
  * lifecycle actions. The small lifecycle controller owns only the cancel
  * confirmation state so rendered tests can exercise its wiring without
- * booting a gateway; RPC wiring stays in ./monitor.tsx.
+ * booting a gateway; RPC wiring stays in the panel modules (monitorApp,
+ * monitorRuns, monitorRunDetail, ...).
  */
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import {

@@ -1202,7 +1202,7 @@ export function formatDurationMs(durationMs: number | undefined): string {
 // serves an interactive hand-off over the /v1/pty/hijack websocket, which
 // spawns `smithers hijack <runId> --target <nodeId>` in a real PTY. These
 // helpers decide when the inspector shows the affordance and build the
-// websocket URL; the terminal itself lives in ./monitor.tsx.
+// websocket URL; the terminal itself lives in ./monitorNodeInspector.tsx.
 // ---------------------------------------------------------------------------
 
 export type HijackCandidate = {
