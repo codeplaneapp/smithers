@@ -5,6 +5,7 @@
 /** @typedef {import("./EventSource.ts").OutputRowMeta} OutputRowMeta */
 /** @typedef {import("./EventSource.ts").SignalRowMeta} SignalRowMeta */
 /** @typedef {import("./EventSource.ts").OutputSourceOptions} OutputSourceOptions */
+/** @typedef {import("./EventSource.ts").EventReceivedOptions} EventReceivedOptions */
 /** @typedef {import("./FoldEvent.ts").FoldEvent} FoldEvent */
 // @smithers-type-exports-end
 

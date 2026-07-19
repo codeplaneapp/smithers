@@ -241,7 +241,7 @@ describe("computeMachineState over ctx", () => {
             id: "release",
             events: [
                 taskOutput("gate", { nodeId: "gate" }, (d) => (d.approved ? { type: "APPROVED" } : null)),
-                eventReceived("REVISE", null, (p) => ({ type: "REVISE", note: p.feedback })),
+                eventReceived("REVISE", null, {}, (p) => ({ type: "REVISE", note: p.feedback })),
             ],
         });
         // seq 2 REVISE folds before seq 4 APPROVED; seq 9 REVISE lands post-final and is discarded.
@@ -281,8 +281,8 @@ describe("computeMachineState over ctx", () => {
             states: { off: { on: { FLIP: "on" } }, on: { on: { FLIP: "off" } } },
         });
         const ctx = fakeCtx({ signals: [{ payload: {}, signalName: "FLIP_A", seq: 1, receivedAtMs: 1 }] });
-        const a = computeMachineState(ctx, toggle, { id: "a", events: [eventReceived("FLIP_A", null, () => ({ type: "FLIP" }))] });
-        const b = computeMachineState(ctx, toggle, { id: "b", events: [eventReceived("FLIP_B", null, () => ({ type: "FLIP" }))] });
+        const a = computeMachineState(ctx, toggle, { id: "a", events: [eventReceived("FLIP_A", null, {}, () => ({ type: "FLIP" }))] });
+        const b = computeMachineState(ctx, toggle, { id: "b", events: [eventReceived("FLIP_B", null, {}, () => ({ type: "FLIP" }))] });
         expect(a.matches("on")).toBe(true);
         expect(b.matches("off")).toBe(true);
     });

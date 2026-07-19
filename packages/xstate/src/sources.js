@@ -87,13 +87,18 @@ export function approvalDecided(output, options, map) {
 export function timedOut(output, options, map) {
     const base = outputRowSource("timedOut", output, options, map);
     return {
-        kind: "timedOut",
+        ...base,
         collect(ctx) {
             return base.collect({
                 outputRows: (target, opts) => ctx.outputRows(target, opts).filter((row) => row.payload !== null &&
                     typeof row.payload === "object" &&
                     (/** @type {{ kind?: unknown }} */ (row.payload)).kind === "timeout"),
-                signalRows: ctx.signalRows.bind(ctx),
+                // timedOut's own collect() never calls signalRows (it only reads
+                // outputRows), but the wrapped ctx shape must still satisfy
+                // SmithersCtxLike. Bind defensively: an older runtime without the
+                // durable signal read path must not crash a source that never
+                // touches it.
+                signalRows: typeof ctx.signalRows === "function" ? ctx.signalRows.bind(ctx) : undefined,
             });
         },
     };
@@ -106,26 +111,38 @@ export function timedOut(output, options, map) {
  * timing; a parked listener is wake-and-park plumbing, not the event source.
  * Signal payloads that fail `schema.safeParse` are skipped deterministically
  * (same rows ⇒ same skips) so a malformed external delivery can never brick
- * every future render of the run.
+ * every future render of the run. `_smithers_signals.seq` is assigned
+ * atomically at insert on the same clock as output provenance — unlike output
+ * rows there is no pre-provenance table to backfill, so there is no legacy
+ * "row with no seq" state to handle here.
  *
  * @template Payload
  * @param {string} signalName
  * @param {{ safeParse(value: unknown): { success: boolean; data?: unknown } } | null} schema Zod (or zod-shaped) payload schema; pass null to accept any payload.
+ * @param {import("./EventSource.ts").EventReceivedOptions} options `correlationId` scopes the fold to signals delivered with a matching
+ *   correlation id — required when the same signal name is used by more than
+ *   one concurrent wait (e.g. per-subflow instances), or every concurrent
+ *   waiter's machine would see every other waiter's deliveries too.
  * @param {(payload: Payload, meta: import("./EventSource.ts").SignalRowMeta) => MappedEvents} map
  * @returns {SmithersEventSource}
  */
-export function eventReceived(signalName, schema, map) {
+export function eventReceived(signalName, schema, options, map) {
     if (typeof signalName !== "string" || signalName.trim() === "") {
         throw new SmithersError("XSTATE_EVENT_SOURCE_INVALID", "eventReceived() requires a non-empty signal name.", { sourceKind: "eventReceived" });
     }
+    if (typeof map !== "function") {
+        throw new SmithersError("XSTATE_EVENT_SOURCE_INVALID", `eventReceived("${signalName}") requires a map callback producing machine events.`, { sourceKind: "eventReceived", signalName });
+    }
+    const correlationId = options?.correlationId;
     return {
         kind: "eventReceived",
+        hashSeed: { sourceKind: "eventReceived", signalName, schema, options, map },
         collect(ctx) {
             if (typeof ctx.signalRows !== "function") {
                 throw new SmithersError("XSTATE_EVENT_SOURCE_INVALID", `eventReceived("${signalName}") needs ctx.signalRows, which this runtime does not provide. Upgrade the engine/driver to a version with the durable signal read path.`, { sourceKind: "eventReceived", signalName });
             }
             const entries = [];
-            for (const row of ctx.signalRows(signalName)) {
+            for (const row of ctx.signalRows(signalName, correlationId !== undefined ? { correlationId } : undefined)) {
                 let payload = row.payload;
                 if (schema) {
                     const parsed = schema.safeParse(row.payload);
@@ -158,6 +175,7 @@ function outputRowSource(sourceKind, output, options, map) {
     }
     return {
         kind: sourceKind,
+        hashSeed: { sourceKind, output, options, map },
         collect(ctx) {
             const entries = [];
             for (const row of ctx.outputRows(output, options)) {

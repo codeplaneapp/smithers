@@ -16,6 +16,13 @@ export type SignalRowMeta = {
 
 export type OutputSourceOptions = { nodeId?: string; scope?: string };
 
+/** Scoping options for `eventReceived`. */
+export type EventReceivedOptions = {
+  /** Fold only signals delivered with a matching correlation id — required
+   * when the same signal name is used by more than one concurrent wait. */
+  correlationId?: string;
+};
+
 /**
  * A declared event source: a pure function of `ctx` (never of machine state)
  * that yields `{ seq, events }` entries for the fold. Construct these with
