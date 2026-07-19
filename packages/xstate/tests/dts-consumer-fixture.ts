@@ -28,10 +28,11 @@ const sources: SmithersEventSource[] = [
   approvalDecided<{ approved: boolean }>("gate", { nodeId: "gate" }, (decision) =>
     decision.approved ? { type: "APPROVED" } : [{ type: "REJECTED" }, { type: "LOG" }],
   ),
-  eventReceived("REVISE", reviseSchema, (payload, meta) => {
+  eventReceived("REVISE", reviseSchema, { correlationId: "subflow-a" }, (payload, meta) => {
     meta.signalName satisfies string;
     meta.seq satisfies number;
     meta.receivedAtMs satisfies number;
+    meta.correlationId satisfies string | undefined;
     return { type: "REVISE", feedback: (payload as z.infer<typeof reviseSchema>).feedback };
   }),
   timedOut("reviseWait", { scope: "revise" }, (payload) => {

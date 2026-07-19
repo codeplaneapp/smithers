@@ -32,12 +32,18 @@ type OutputSourceOptions$2 = {
     nodeId?: string;
     scope?: string;
 };
+/** Scoping options for `eventReceived`. */
+type EventReceivedOptions$1 = {
+    /** Fold only signals delivered with a matching correlation id — required
+     * when the same signal name is used by more than one concurrent wait. */
+    correlationId?: string;
+};
 /**
  * A declared event source: a pure function of `ctx` (never of machine state)
  * that yields `{ seq, events }` entries for the fold. Construct these with
  * `taskOutput` / `approvalDecided` / `eventReceived` / `timedOut`.
  */
-type SmithersEventSource$3 = {
+type SmithersEventSource$4 = {
     kind: "taskOutput" | "approvalDecided" | "eventReceived" | "timedOut";
     collect(ctx: SmithersCtxLike$1): Array<{
         seq: number;
@@ -78,6 +84,23 @@ type SmithersCtxLike$1 = {
  * @param {import("xstate").AnyStateMachine} machine
  */
 declare function lintMachine(machineId: string, machine: xstate.AnyStateMachine): void;
+
+/** @typedef {import("./EventSource.ts").SmithersEventSource} SmithersEventSource */
+/**
+ * Content hash of the whole reducer definition — machine (config +
+ * setup() implementations) plus every declared event source (kind, target,
+ * options, and `map`/`schema` function source) in declaration order. This is
+ * the prefix cache's true identity: a mid-run machine edit changes the hash,
+ * which both keeps the cache from serving a stale fold under a different
+ * reducer and drives the mid-run-edit reinterpretation warning
+ * (docs: "Mid-run edits").
+ *
+ * @param {import("xstate").AnyStateMachine} machine
+ * @param {SmithersEventSource[]} sources
+ * @returns {string}
+ */
+declare function hashReducer(machine: xstate.AnyStateMachine, sources: SmithersEventSource$3[]): string;
+type SmithersEventSource$3 = SmithersEventSource$4;
 
 /**
  * Compute an XState machine's state as a pure fold over durable Smithers
@@ -121,27 +144,35 @@ declare function computeMachineState<TMachine extends xstate.AnyStateMachine>(ct
 }): xstate.SnapshotFrom<TMachine>;
 declare namespace __machineCacheInternals {
     export { foldCache };
+    export { hashReducer };
+    export { MAX_CACHE_ENTRIES };
 }
-type SmithersEventSource$2 = SmithersEventSource$3;
+type SmithersEventSource$2 = SmithersEventSource$4;
 /** @typedef {import("./EventSource.ts").SmithersEventSource} SmithersEventSource */
 /** @typedef {import("./FoldEvent.ts").FoldEvent} FoldEvent */
 /**
- * In-process memoized folds keyed by `${runId}::${machine id}`. Entries
- * validate by CONTENT (a payload hash per ordered event), never by
- * (count, maxSeq): an in-place payload replacement at the same
- * (nodeId, iteration) retains its seq but must invalidate the folded prefix.
- * Resume/rewind/fork always land in a fresh process or fail the content
- * check, so they refold from rows — the cache is a per-frame cost saver,
- * never a source of truth.
- * @type {Map<string, { machine: import("xstate").AnyStateMachine; inputHash: string; eventHashes: string[]; snapshot: import("xstate").AnyMachineSnapshot; folded: number }>}
+ * In-process memoized folds keyed by `${runId}::${machine id}::${reducer
+ * hash}` — one process hosts many runs (and a fork inherits its parent's row
+ * history plus its machine id verbatim), so runId and id alone are not a safe
+ * key, and a mid-run machine edit must not reuse a fold computed under the
+ * old reducer. Entries validate by CONTENT (a payload hash per ordered
+ * event), never by (count, maxSeq): an in-place payload replacement at the
+ * same (nodeId, iteration) retains its seq but must invalidate the folded
+ * prefix. Resume/rewind/fork always land in a fresh process or fail the
+ * content check, so they refold from rows — the cache is a per-frame cost
+ * saver, never a source of truth. Bounded: least-recently-used entries are
+ * evicted past MAX_CACHE_ENTRIES so a long-lived process hosting many runs
+ * does not retain every historical snapshot forever.
+ * @type {Map<string, { inputHash: string; eventHashes: string[]; snapshot: import("xstate").AnyMachineSnapshot; folded: number }>}
  */
 declare const foldCache: Map<string, {
-    machine: xstate.AnyStateMachine;
     inputHash: string;
     eventHashes: string[];
     snapshot: xstate.AnyMachineSnapshot;
     folded: number;
 }>;
+
+declare const MAX_CACHE_ENTRIES: 500;
 
 /**
  * One machine event (or several) per durable output row, read via
@@ -192,11 +223,18 @@ declare function timedOut(output: unknown, options: OutputSourceOptions$1, map: 
  * timing; a parked listener is wake-and-park plumbing, not the event source.
  * Signal payloads that fail `schema.safeParse` are skipped deterministically
  * (same rows ⇒ same skips) so a malformed external delivery can never brick
- * every future render of the run.
+ * every future render of the run. `_smithers_signals.seq` is assigned
+ * atomically at insert on the same clock as output provenance — unlike output
+ * rows there is no pre-provenance table to backfill, so there is no legacy
+ * "row with no seq" state to handle here.
  *
  * @template Payload
  * @param {string} signalName
  * @param {{ safeParse(value: unknown): { success: boolean; data?: unknown } } | null} schema Zod (or zod-shaped) payload schema; pass null to accept any payload.
+ * @param {import("./EventSource.ts").EventReceivedOptions} options `correlationId` scopes the fold to signals delivered with a matching
+ *   correlation id — required when the same signal name is used by more than
+ *   one concurrent wait (e.g. per-subflow instances), or every concurrent
+ *   waiter's machine would see every other waiter's deliveries too.
  * @param {(payload: Payload, meta: import("./EventSource.ts").SignalRowMeta) => MappedEvents} map
  * @returns {SmithersEventSource}
  */
@@ -205,8 +243,8 @@ declare function eventReceived<Payload>(signalName: string, schema: {
         success: boolean;
         data?: unknown;
     };
-} | null, map: (payload: Payload, meta: SignalRowMeta$1) => MappedEvents$1): SmithersEventSource$1;
-type SmithersEventSource$1 = SmithersEventSource$3;
+} | null, options: EventReceivedOptions$1, map: (payload: Payload, meta: SignalRowMeta$1) => MappedEvents$1): SmithersEventSource$1;
+type SmithersEventSource$1 = SmithersEventSource$4;
 type MappedEvents$1 = MappedEvents$2;
 type OutputSourceOptions$1 = OutputSourceOptions$2;
 
@@ -273,12 +311,13 @@ declare function stableHash(value: unknown): string;
  */
 declare function stableStringify(value: unknown): string;
 
-type SmithersEventSource = SmithersEventSource$3;
+type SmithersEventSource = SmithersEventSource$4;
 type SmithersCtxLike = SmithersCtxLike$1;
 type MappedEvents = MappedEvents$2;
 type OutputRowMeta = OutputRowMeta$1;
 type SignalRowMeta = SignalRowMeta$1;
 type OutputSourceOptions = OutputSourceOptions$2;
+type EventReceivedOptions = EventReceivedOptions$1;
 type FoldEvent = FoldEvent$2;
 
-export { type FoldEvent, type MappedEvents, type OutputRowMeta, type OutputSourceOptions, type SignalRowMeta, type SmithersCtxLike, type SmithersEventSource, __machineCacheInternals, approvalDecided, computeMachineState, eventReceived, foldMachineState, hashFoldEvents, lintMachine, orderFoldEvents, stableHash, stableStringify, taskOutput, timedOut, useSmithersMachine };
+export { type EventReceivedOptions, type FoldEvent, type MappedEvents, type OutputRowMeta, type OutputSourceOptions, type SignalRowMeta, type SmithersCtxLike, type SmithersEventSource, __machineCacheInternals, approvalDecided, computeMachineState, eventReceived, foldMachineState, hashFoldEvents, lintMachine, orderFoldEvents, stableHash, stableStringify, taskOutput, timedOut, useSmithersMachine };
