@@ -331,6 +331,7 @@
     "ui-layer-placement :: packages/ui/src/button.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/card.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/cn.ts is outside the target UI layers",
+    "ui-layer-placement :: packages/ui/src/collapsible-panel.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/dialog.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/empty-state.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/input.tsx is outside the target UI layers",

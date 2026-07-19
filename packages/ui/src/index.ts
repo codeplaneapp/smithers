@@ -117,3 +117,4 @@ export { EmptyState, type EmptyStateProps } from "./empty-state";
 export { SectionHeader, Eyebrow, type SectionHeaderProps } from "./section-header";
 export { RowButton, type RowButtonProps } from "./row-button";
 export { KpiStat, type KpiStatProps } from "./kpi-stat";
+export { CollapsiblePanel, type CollapsiblePanelProps } from "./collapsible-panel";

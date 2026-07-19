@@ -303,6 +303,19 @@ export const kpiStatCss = `
 .sui-kpi-hint { color:${t.textFaint}; font-size:11px; }
 `;
 
+export const collapsiblePanelCss = `
+.sui-collapsible { min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; box-shadow:${shadowCard}; overflow:hidden; }
+.sui-collapsible-header { min-width:0; display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; user-select:none; }
+.sui-collapsible-header:hover { background:${t.secondary}; }
+.sui-collapsible-header:focus-visible { outline:none; box-shadow:inset 0 0 0 2px ${t.ringBorder}; }
+.sui-collapsible-heading { min-width:0; flex:1; display:flex; align-items:center; gap:8px; }
+.sui-collapsible-title { min-width:0; color:${t.cardForeground}; font-size:13px; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sui-collapsible-meta { flex:none; color:${t.mutedForeground}; font-size:11px; }
+.sui-collapsible-toggle { flex:none; color:${t.mutedForeground}; font-size:11px; }
+.sui-collapsible-body { min-width:0; display:grid; align-content:start; gap:8px; padding:0 14px 14px; }
+.sui-collapsible-empty { color:${t.mutedForeground}; font-size:12.5px; line-height:1.45; padding:0 14px 14px; }
+`;
+
 /** All component sheets, composed in a stable order. */
 export const smithersUiCss = [
   buttonCss,
@@ -324,6 +337,7 @@ export const smithersUiCss = [
   sectionHeaderCss,
   rowButtonCss,
   kpiStatCss,
+  collapsiblePanelCss,
 ]
   .map((block) => block.trim())
   .join("\n");

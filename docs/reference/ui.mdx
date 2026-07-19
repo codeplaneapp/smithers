@@ -95,6 +95,7 @@ All components accept `className` and `style`, forward refs, and carry
 | `SectionHeader`, `Eyebrow` | Section heading row: eyebrow plus title on the left, actions on the right. | `title`, `eyebrow`, `actions` |
 | `RowButton` | Full-width selectable list row with button semantics (the house run-row recipe). | `active` |
 | `KpiStat` | Compact stat card. | `label`, `value`, `hint` |
+| `CollapsiblePanel` | A collapsible titled section with a status pill/glyph, an optional meta line, and a pending/empty fallback. The shared shape workflow UIs previously hand-rolled as `Panel`/`PhaseCard`. Status drives a `StatusPill` (no re-derived classes). | `title`, `status`, `statusLabel`, `meta`, `defaultOpen`, `open`, `onOpenChange`, `pending`, `emptyText` |
 
 ### Chat surface
 

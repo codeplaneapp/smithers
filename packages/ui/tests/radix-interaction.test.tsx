@@ -11,6 +11,7 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   Button,
+  CollapsiblePanel,
   Dialog,
   DialogClose,
   DialogContent,
@@ -216,6 +217,46 @@ describe("Tooltip", () => {
     expect(content).not.toBeNull();
     expect(content!.className).toContain("sui-tooltip-content");
     expect(document.body.textContent).toContain("Explain the thing");
+  });
+});
+
+describe("CollapsiblePanel", () => {
+  const panel = () => document.querySelector('[data-slot="collapsible-panel"]');
+  const header = () => document.querySelector('[data-slot="collapsible-panel"] .sui-collapsible-header');
+
+  test("toggles children visibility on header click", async () => {
+    await render(
+      <CollapsiblePanel title="Implementation" status="ok">
+        <div>implementation body</div>
+      </CollapsiblePanel>,
+    );
+    expect(document.body.textContent).toContain("implementation body");
+    expect(panel()!.getAttribute("data-state")).toBe("open");
+    expect(header()!.getAttribute("aria-expanded")).toBe("true");
+
+    await click(header()!);
+    expect(document.body.textContent).not.toContain("implementation body");
+    expect(panel()!.getAttribute("data-state")).toBe("closed");
+    expect(header()!.getAttribute("aria-expanded")).toBe("false");
+
+    await click(header()!);
+    expect(document.body.textContent).toContain("implementation body");
+    expect(panel()!.getAttribute("data-state")).toBe("open");
+  });
+
+  test("controlled panel defers to onOpenChange and does not self-toggle", async () => {
+    const changes: boolean[] = [];
+    await render(
+      <CollapsiblePanel title="Merge" open={false} onOpenChange={(next) => changes.push(next)}>
+        <div>merge body</div>
+      </CollapsiblePanel>,
+    );
+    expect(document.body.textContent).not.toContain("merge body");
+
+    await click(header()!);
+    // Controlled: still closed (parent owns state), but the request fired as `true`.
+    expect(panel()!.getAttribute("data-state")).toBe("closed");
+    expect(changes).toEqual([true]);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   ChatComposer,
   ChatMessage,
   ChatTranscript,
+  CollapsiblePanel,
   composeSmithersUiStyles,
   EmptyState,
   Eyebrow,
@@ -332,6 +333,86 @@ describe("misc primitives", () => {
     expect(html).toContain("sui-kpi-label");
     expect(html).toContain("sui-kpi-value");
     expect(html).toContain("sui-kpi-hint");
+  });
+});
+
+describe("CollapsiblePanel", () => {
+  test("renders title, status pill glyph, meta, and children (open by default)", () => {
+    const html = renderToStaticMarkup(
+      <CollapsiblePanel title="Research" status="ok" statusLabel="ready" meta="2 findings">
+        <div>context body</div>
+      </CollapsiblePanel>,
+    );
+    expect(html).toContain("sui-collapsible");
+    expect(html).toContain('data-slot="collapsible-panel"');
+    expect(html).toContain('data-state="open"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("Research");
+    expect(html).toContain("2 findings");
+    // The status prop drives a StatusPill: tint + glyph come from status.ts,
+    // not a locally re-derived class.
+    expect(html).toContain("sui-badge-success");
+    expect(html).toContain('data-status="ok"');
+    expect(html).toContain("sui-status-dot");
+    expect(html).toContain("ready");
+    expect(html).toContain("sui-collapsible-body");
+    expect(html).toContain("context body");
+    expect(html).toContain("collapse");
+  });
+
+  test("status prop maps buckets onto the StatusPill tint", () => {
+    expect(renderToStaticMarkup(<CollapsiblePanel title="Run" status="running">x</CollapsiblePanel>)).toContain(
+      "sui-badge-warning",
+    );
+    expect(renderToStaticMarkup(<CollapsiblePanel title="Run" status="failed">x</CollapsiblePanel>)).toContain(
+      "sui-badge-destructive",
+    );
+    // No status prop -> no pill.
+    expect(renderToStaticMarkup(<CollapsiblePanel title="Run">x</CollapsiblePanel>)).not.toContain("sui-status-dot");
+  });
+
+  test("renders the empty fallback when no children are supplied", () => {
+    const html = renderToStaticMarkup(<CollapsiblePanel title="Plan" emptyText="Creating plan." />);
+    expect(html).toContain("sui-collapsible-empty");
+    expect(html).toContain("Creating plan.");
+    expect(html).not.toContain("sui-collapsible-body");
+  });
+
+  test("pending forces the fallback even with children present", () => {
+    const html = renderToStaticMarkup(
+      <CollapsiblePanel title="Validate" pending emptyText="Validating.">
+        <div>should be hidden</div>
+      </CollapsiblePanel>,
+    );
+    expect(html).toContain("Validating.");
+    expect(html).not.toContain("should be hidden");
+  });
+
+  test("defaultOpen={false} starts collapsed and hides the body", () => {
+    const html = renderToStaticMarkup(
+      <CollapsiblePanel title="Review" defaultOpen={false}>
+        <div>hidden until expanded</div>
+      </CollapsiblePanel>,
+    );
+    expect(html).toContain('data-state="closed"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("expand");
+    expect(html).not.toContain("hidden until expanded");
+  });
+
+  test("controlled open renders per the open prop", () => {
+    const closed = renderToStaticMarkup(
+      <CollapsiblePanel title="Merge" open={false}>
+        <div>merge body</div>
+      </CollapsiblePanel>,
+    );
+    expect(closed).not.toContain("merge body");
+    const open = renderToStaticMarkup(
+      <CollapsiblePanel title="Merge" open>
+        <div>merge body</div>
+      </CollapsiblePanel>,
+    );
+    expect(open).toContain("merge body");
   });
 });
 
