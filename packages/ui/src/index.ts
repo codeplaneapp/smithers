@@ -117,6 +117,13 @@ export { EmptyState, type EmptyStateProps } from "./empty-state";
 export { SectionHeader, Eyebrow, type SectionHeaderProps } from "./section-header";
 export { RowButton, type RowButtonProps } from "./row-button";
 export { KpiStat, type KpiStatProps } from "./kpi-stat";
+export {
+  StageStrip,
+  stageTone,
+  type StageStripProps,
+  type StageStripItem,
+  type StageTone,
+} from "./stage-strip";
 export { CollapsiblePanel, type CollapsiblePanelProps } from "./collapsible-panel";
 export { DiffHunks, type DiffHunksProps } from "./diff-hunks";
 export type { Diff, DiffFile, DiffFileStatus, DiffLine, DiffLineKind, Hunk } from "./diff";

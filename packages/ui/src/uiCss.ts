@@ -392,6 +392,19 @@ export const pierreDiffCss = `
 .sui-pierre-diff-stat { font-family:${t.fontMono}; font-size:11px; color:${t.mutedForeground}; }
 `;
 
+/* -------------------------------------------------------------------------- */
+/* StageStrip: horizontal pipeline-stage chips                                */
+/* -------------------------------------------------------------------------- */
+
+export const stageStripCss = `
+.sui-stage-strip { min-width:0; display:grid; gap:8px; }
+.sui-stage-strip-summary { display:flex; align-items:baseline; gap:6px; min-width:0; }
+.sui-stage-strip-summary-label { color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
+.sui-stage-strip-summary-count { color:${t.foreground}; font-size:12px; font-variant-numeric:tabular-nums; }
+.sui-stage-strip-chips { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:0; }
+.sui-stage-chip { flex:0 0 auto; text-transform:none; letter-spacing:0; }
+`;
+
 /** All component sheets, composed in a stable order. */
 export const smithersUiCss = [
   buttonCss,
@@ -418,6 +431,7 @@ export const smithersUiCss = [
   fileTreeCss,
   markdownCss,
   pierreDiffCss,
+  stageStripCss,
 ]
   .map((block) => block.trim())
   .join("\n");
