@@ -36,6 +36,11 @@
   "peerDependencies": {
     "xstate": "^5.19.0"
   },
+  "peerDependenciesMeta": {
+    "xstate": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",

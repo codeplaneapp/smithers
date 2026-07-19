@@ -1261,6 +1261,9 @@
       "peerDependencies": {
         "xstate": "^5.19.0",
       },
+      "optionalPeers": [
+        "xstate",
+      ],
     },
   },
   "trustedDependencies": [

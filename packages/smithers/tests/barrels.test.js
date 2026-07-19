@@ -153,3 +153,28 @@ describe("public re-export barrels", () => {
     expect(examples.approvalDecisionSchema).toBeDefined();
   });
 });
+
+describe("xstate stays a subpath-only optional integration", () => {
+  test("the root barrel never references xstate, so importing smithers-orchestrator resolves with the peer absent", async () => {
+    // The real consumer scenario: smithers-orchestrator installed, the
+    // optional `xstate` peer NOT installed. The root barrel (runtime and
+    // types) must never touch the integration or the install breaks. The
+    // subpath is the only doorway, and its peer is declared optional so
+    // package managers never warn on installs that skip it.
+    const indexSource = await Bun.file(new URL("../src/index.js", import.meta.url)).text();
+    const indexTypes = await Bun.file(new URL("../src/index.d.ts", import.meta.url)).text();
+    expect(indexSource.includes("xstate")).toBe(false);
+    expect(indexTypes.includes("xstate")).toBe(false);
+
+    const facade = await Bun.file(new URL("../package.json", import.meta.url)).json();
+    expect(facade.exports["./xstate"]).toEqual({
+      types: "./src/xstate.d.ts",
+      import: "./src/xstate.js",
+      default: "./src/xstate.js",
+    });
+
+    const integration = await Bun.file(new URL("../../xstate/package.json", import.meta.url)).json();
+    expect(integration.peerDependencies.xstate).toBe("^5.19.0");
+    expect(integration.peerDependenciesMeta.xstate).toEqual({ optional: true });
+  });
+});
