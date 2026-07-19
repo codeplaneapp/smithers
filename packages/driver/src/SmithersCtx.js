@@ -41,7 +41,7 @@ function stripAutoColumns(row) {
     if (!row || typeof row !== "object" || Array.isArray(row)) {
         return row;
     }
-    const { runId: _runId, nodeId: _nodeId, iteration: _iteration, ...rest } = /** @type {Record<string, unknown>} */ (row);
+    const { runId: _runId, nodeId: _nodeId, iteration: _iteration, [OUTPUT_PROVENANCE_SEQ]: _provenanceSeq, ...rest } = /** @type {Record<string, unknown>} */ (row);
     return rest;
 }
 /**

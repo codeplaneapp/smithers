@@ -4,7 +4,7 @@ import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/re
 import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
 import { resolveWorktreePath } from "@smithers-orchestrator/graph";
 import { createNodeRuntime } from "./node-runtime.js";
-import { coerceOutputRowForSnapshot, loadInput, loadOutputs, loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
+import { coerceOutputRowForSnapshot, loadInput, loadOutputs, loadRunOutputRowsEffect, OUTPUT_PROVENANCE_SEQ } from "@smithers-orchestrator/db/snapshot";
 import { FRAME_KEYFRAME_INTERVAL } from "@smithers-orchestrator/db/frame-codec";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
@@ -6882,7 +6882,19 @@ async function runWorkflowBodyDriver(workflow, opts) {
         if (outputRow) {
             noteTaskOutputRowForFrameCache(task, /** @type {Record<string, unknown>} */ (outputRow));
         }
-        return outputRow ? stripAutoColumns(outputRow) : undefined;
+        if (!outputRow)
+            return undefined;
+        const stripped = stripAutoColumns(outputRow);
+        // This return value becomes the scheduler's live context row for the
+        // very next frame (before any DB reload), so it must keep the durable
+        // completion seq that ctx.outputRows orders the fold by.
+        // stripAutoColumns hides the seq from user-facing payloads; the
+        // driver's ctx views re-hide it at their own boundary.
+        const rawSeq = (/** @type {Record<string, unknown>} */ (outputRow))[OUTPUT_PROVENANCE_SEQ];
+        if (rawSeq !== undefined && stripped && typeof stripped === "object" && !Array.isArray(stripped)) {
+            (/** @type {Record<string, unknown>} */ (stripped))[OUTPUT_PROVENANCE_SEQ] = rawSeq;
+        }
+        return stripped;
     };
     /**
    * @param {TaskDescriptor} task
