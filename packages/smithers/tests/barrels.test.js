@@ -95,6 +95,17 @@ describe("public re-export barrels", () => {
     expect(typeof telegram.splitTelegramText).toBe("function");
   });
 
+  test("xstate barrel re-exports the hook and event sources", async () => {
+    const xstate = await importBarrel("../src/xstate.js");
+    expect(typeof xstate.useSmithersMachine).toBe("function");
+    expect(typeof xstate.computeMachineState).toBe("function");
+    expect(typeof xstate.taskOutput).toBe("function");
+    expect(typeof xstate.approvalDecided).toBe("function");
+    expect(typeof xstate.eventReceived).toBe("function");
+    expect(typeof xstate.timedOut).toBe("function");
+    expect(typeof xstate.lintMachine).toBe("function");
+  });
+
   test("observability, openapi, scorers, and ui barrels resolve their surfaces", async () => {
     const observability = await importBarrel("../src/observability.js");
     expect(Object.keys(observability).length).toBeGreaterThan(0);

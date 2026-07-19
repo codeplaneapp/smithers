@@ -214,6 +214,7 @@
     "@smithers-orchestrator/usage": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
     "@smithers-orchestrator/vercel": "workspace:*",
+    "@smithers-orchestrator/xstate": "workspace:*",
     "@tanstack/react-query": "^5.101.2",
     "@types/bun": "latest",
     "@types/dagre": "^0.7.54",

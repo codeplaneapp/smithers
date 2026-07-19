@@ -26,6 +26,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
 | `smithers-orchestrator/browser` | `./src/browser.js` | Portable browser runner, `RuntimeAdapter`, browser-safe workflow primitives, Map-backed default storage, and typed fail-closed host capabilities. See [Browser runtime](/runtime/browser) |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
+| `smithers-orchestrator/xstate` | `./src/xstate.js` | XState v5 machines as durable derived control state: `useSmithersMachine` folds a machine over output and signal rows each frame. See [XState](/integrations/xstate) |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
 | `smithers-orchestrator/microsandbox` | `./src/microsandbox.js` | Microsandbox provider: run child workflows in local hardware-isolated microVMs |
 | `smithers-orchestrator/daytona` | `./src/daytona.js` | Daytona sandbox provider: run child workflows in Daytona workspaces |
@@ -64,6 +65,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/gcp` | GCP sandbox provider: Cloud Run Jobs execution with GCS bundle transport | [Sandbox](/components/sandbox), [GCP](/integrations/gcp-sandbox-provider) |
 | `@smithers-orchestrator/microsandbox` | Microsandbox provider: run child workflows in local hardware-isolated microVMs | [Sandbox](/components/sandbox), [Microsandbox](/integrations/microsandbox-sandbox-provider) |
 | `@smithers-orchestrator/vercel` | Vercel Sandbox provider: run child workflows in Vercel sandboxes | [Sandbox](/components/sandbox), [Vercel](/integrations/vercel-sandbox-provider) |
+| `@smithers-orchestrator/xstate` | XState v5 machines as durable derived control state for workflows: pure folds over output and signal rows | [XState](/integrations/xstate) |
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | [CLI Agents](/integrations/cli-agents) |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | [SDK Agents](/integrations/sdk-agents) |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | [CLI Agents](/integrations/cli-agents), [SDK Agents](/integrations/sdk-agents) |
