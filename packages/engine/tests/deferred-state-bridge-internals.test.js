@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import React from "react";
 import { Effect } from "effect";
 import { z } from "zod";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
@@ -502,13 +503,31 @@ describe("deferred state bridge state transitions", () => {
 
             const continueDesc = makeDesc(tables, {
                 nodeId: "wait-continue",
-                meta: { __waitForEvent: true, __eventName: "ready", __onTimeout: "continue" },
+                meta: { __waitForEvent: true, __eventName: "ready", __onTimeout: "continue", __taggedResult: true },
             });
-            await insertAttempt(adapter, "continue-run", continueDesc, "waiting-event");
-            expect(await I.resolveWaitForEventTimeoutBridge(adapter, "continue-run", continueDesc, 1, {
+            const taggedTable = sqliteTable("wait_tagged", {
+                runId: text("run_id").notNull(),
+                nodeId: text("node_id").notNull(),
+                iteration: integer("iteration").notNull(),
+                kind: text("kind").notNull(),
+                payload: text("payload", { mode: "json" }),
+            });
+            (db.session.client).exec(`CREATE TABLE wait_tagged (run_id TEXT NOT NULL, node_id TEXT NOT NULL, iteration INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT, PRIMARY KEY (run_id, node_id, iteration))`);
+            const taggedDesc = {
+                ...continueDesc,
+                outputTable: taggedTable,
+                outputTableName: "wait_tagged",
+                outputSchema: z.object({ kind: z.enum(["signal", "timeout"]), payload: z.unknown().optional() }),
+            };
+            await insertAttempt(adapter, "continue-run", taggedDesc, "waiting-event");
+            expect(await I.resolveWaitForEventTimeoutBridge(adapter, "continue-run", taggedDesc, 1, {
                 ...baseSnapshot,
                 onTimeout: "continue",
-            })).toEqual({ handled: true, state: "failed" });
+            })).toEqual({ handled: true, state: "finished" });
+            expect((db.session.client.query(`SELECT kind, payload FROM wait_tagged WHERE run_id = ?`).all("continue-run"))[0]).toMatchObject({ kind: "timeout" });
+            await insertAttempt(adapter, "signal-run", taggedDesc, "waiting-event");
+            await I.finishWaitForEventTaskBridge(adapter, "signal-run", taggedDesc, 1, { answer: 42 }, { ...baseSnapshot, waitResultKind: "signal" });
+            expect((db.session.client.query(`SELECT kind, payload FROM wait_tagged WHERE run_id = ?`).all("signal-run"))[0]).toMatchObject({ kind: "signal" });
 
             const failDesc = makeDesc(tables, {
                 nodeId: "wait-timeout-fail",

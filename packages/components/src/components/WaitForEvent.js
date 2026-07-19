@@ -30,5 +30,6 @@ export function WaitForEvent(props) {
         __smithersEventName: props.event,
         __smithersCorrelationId: props.correlationId,
         __smithersOnTimeout: props.onTimeout ?? "fail",
+        __smithersTaggedResult: props.tagged === true,
     });
 }

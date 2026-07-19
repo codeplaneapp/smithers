@@ -572,6 +572,12 @@ function validateDeferredOutputPayload(desc, runId, payload) {
     }
     return validation.data;
 }
+
+/** Tagged wait results are an explicit component contract, never inferred
+ * from whether a permissive legacy schema happens to accept the envelope. */
+function usesTaggedWaitResult(desc) {
+    return desc?.meta?.__taggedResult === true;
+}
 /**
  * @param {_SmithersDb} adapter
  * @param {string} runId
@@ -814,7 +820,13 @@ async function failWaitForEventTaskBridge(adapter, runId, desc, attemptNo, error
  * @returns {Promise<DeferredBridgeResolution>}
  */
 async function finishWaitForEventTaskBridge(adapter, runId, desc, attemptNo, payload, snapshot) {
-    const outputPayload = validateDeferredOutputPayload(desc, runId, payload);
+    const result = snapshot?.waitResultKind === "timeout"
+        ? { kind: "timeout" }
+        : { kind: "signal", payload };
+    if (result.kind === "timeout" && !usesTaggedWaitResult(desc)) {
+        throw new SmithersError("TASK_OUTPUT_SCHEMA_INVALID", `WaitForEvent ${desc.nodeId} uses onTimeout=continue without tagged=true; opt into the tagged wait-result envelope.`, { nodeId: desc.nodeId });
+    }
+    const outputPayload = validateDeferredOutputPayload(desc, runId, usesTaggedWaitResult(desc) ? result : payload);
     const finishedAtMs = nowMs();
     await adapter.withTransaction("wait-event-finish", Effect.gen(function* () {
         yield* adapter.upsertOutputRow(desc.outputTable, { runId, nodeId: desc.nodeId, iteration: desc.iteration }, outputPayload);
@@ -857,7 +869,7 @@ async function resolveWaitForEventTimeoutBridge(adapter, runId, desc, attemptNo,
     };
     if (snapshot.onTimeout === "continue") {
         try {
-            return await finishWaitForEventTaskBridge(adapter, runId, desc, attemptNo, null, timeoutSnapshot);
+            return await finishWaitForEventTaskBridge(adapter, runId, desc, attemptNo, null, { ...timeoutSnapshot, waitResultKind: "timeout" });
         }
         catch (error) {
             return failWaitForEventTaskBridge(adapter, runId, desc, attemptNo, error, timeoutSnapshot, emitStateEvent);
@@ -1034,7 +1046,7 @@ async function resolveWaitForEventTaskStateBridge(adapter, db, runId, desc, _eve
                 receivedAtMs: signal.receivedAtMs,
             };
             try {
-                return await finishWaitForEventTaskBridge(adapter, runId, desc, latest.attempt, JSON.parse(signal.payloadJson), resolvedSnapshot);
+                return await finishWaitForEventTaskBridge(adapter, runId, desc, latest.attempt, JSON.parse(signal.payloadJson), { ...resolvedSnapshot, waitResultKind: "signal" });
             }
             catch (error) {
                 return failWaitForEventTaskBridge(adapter, runId, desc, latest.attempt, error, resolvedSnapshot, emitStateEvent);
@@ -1409,4 +1421,5 @@ export const __deferredStateBridgeInternals = {
     syncWaitForEventDurableDeferredFromDb,
     updateAsyncExternalWaitPendingSafe,
     validateDeferredOutputPayload,
+    usesTaggedWaitResult,
 };

@@ -13,8 +13,10 @@ export type WaitForEventProps = {
 	outputSchema?: z.ZodObject<z.ZodRawShape>;
 	/** Max wait time in ms before timing out. */
 	timeoutMs?: number;
-	/** Behavior on timeout: fail (default), skip the node, or continue with null. */
+	/** Behavior on timeout: fail (default), skip the node, or continue with a tagged timeout result. */
 	onTimeout?: "fail" | "skip" | "continue";
+	/** Opt into the tagged `{ kind, payload }` wait-result envelope. */
+	tagged?: boolean;
 	/** Do not block unrelated downstream flow while waiting for the event. */
 	async?: boolean;
 	skipIf?: boolean;

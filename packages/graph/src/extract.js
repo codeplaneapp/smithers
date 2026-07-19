@@ -692,6 +692,7 @@ export function extractGraph(root, opts) {
                     __eventName: raw.__smithersEventName ?? raw.event,
                     __correlationId: raw.__smithersCorrelationId ?? raw.correlationId,
                     __onTimeout: onTimeout,
+                    __taggedResult: raw.__smithersTaggedResult === true || raw.tagged === true,
                 },
             });
         }
