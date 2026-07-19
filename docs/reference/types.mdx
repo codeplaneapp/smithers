@@ -764,6 +764,7 @@ type WaitForEventProps = {
   outputSchema?: import("zod").ZodObject<any>;
   timeoutMs?: number;
   onTimeout?: "fail" | "skip" | "continue";
+  tagged?: boolean;
   async?: boolean;
   skipIf?: boolean;
   dependsOn?: string[];

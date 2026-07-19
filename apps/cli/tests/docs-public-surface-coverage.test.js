@@ -300,8 +300,8 @@ test("all concrete component prop sources remain represented in guides and types
         const componentDoc = readRepoFile(docPath);
 
         for (const prop of sourceProps) {
-            expect(propIsDocumented(componentDoc, prop)).toBe(true);
-            expect(propIsDocumented(typesReference, prop)).toBe(true);
+            expect(propIsDocumented(componentDoc, prop), `${typeName}.${prop} is missing from ${docPath}`).toBe(true);
+            expect(propIsDocumented(typesReference, prop), `${typeName}.${prop} is missing from docs/reference/types.mdx`).toBe(true);
         }
     }
 });
