@@ -38,6 +38,12 @@
     "./OutputKey": {
       "types": "./src/index.d.ts"
     },
+    "./SignalRows": {
+      "types": "./src/index.d.ts"
+    },
+    "./RawSignalRow": {
+      "types": "./src/index.d.ts"
+    },
     "./workflow-types": {
       "types": "./src/index.d.ts"
     },

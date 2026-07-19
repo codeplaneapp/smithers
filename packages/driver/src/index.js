@@ -11,6 +11,10 @@
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./OutputSnapshot.ts").OutputSnapshot} OutputSnapshot */
 /** @template Schema @typedef {import("./OutputRows.ts").OutputRowsReader<Schema>} OutputRowsReader */
+/** @template [Payload=unknown] @typedef {import("./SignalRows.ts").SignalRow<Payload>} SignalRow */
+/** @typedef {import("./SignalRows.ts").SignalRowsOptions} SignalRowsOptions */
+/** @typedef {import("./SignalRows.ts").SignalRowsReader} SignalRowsReader */
+/** @typedef {import("./RawSignalRow.ts").RawSignalRow} RawSignalRow */
 /** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
 /** @typedef {import("./RunOptions.ts").EffectPlatformRuntime} EffectPlatformRuntime */

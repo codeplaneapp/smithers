@@ -35,6 +35,7 @@ The frame is the unit of progress. Time travel, observability, hot reload, and r
 | `ctx.outputMaybe(table, { nodeId, iteration? })` | `Row \| undefined` | Conditional rendering; returns `undefined` until the upstream task completes. |
 | `ctx.output(table, { nodeId, iteration? })` | `Row` | Same, but throws if missing. Use inside a Task body where the dep is guaranteed. |
 | `ctx.outputRows(output, { nodeId?, scope? })` | `{ payload, nodeId, iteration, seq }[]` | Reads each durable row once in completion order. `seq` is stable across resume, rewind, and fork. |
+| `ctx.signalRows(signalName, { correlationId? })` | `{ payload, signalName, seq, correlationId?, receivedAtMs }[]` | Reads durable delivered signals in the same `seq` clock as `ctx.outputRows`, regardless of listener mount timing. |
 | `ctx.latest(table, nodeId)` | `Row \| undefined` | Highest iteration of a node, used inside `<Loop>` to read the previous iteration's output. |
 | `ctx.latestArray(value, schema)` | `unknown[]` | Parse a JSON string, scalar, or array and keep entries accepted by `schema.safeParse`. |
 | `ctx.iterationCount(table, nodeId)` | `number` | Number of completed iterations for a loop node. |

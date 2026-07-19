@@ -1,4 +1,5 @@
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
+import type { RawSignalRow } from "./RawSignalRow.ts";
 import type { RunAuthContext } from "./RunAuthContext.ts";
 import type { SmithersRuntimeConfig } from "./SmithersRuntimeConfig.ts";
 
@@ -9,6 +10,7 @@ export type SmithersCtxOptions = {
   input: unknown;
   auth?: RunAuthContext | null;
   outputs: OutputSnapshot;
+  signals?: RawSignalRow[];
   taskStates?: ReadonlyMap<string, unknown> | Record<string, unknown>;
   taskIterations?: ReadonlyMap<string, number> | Record<string, number>;
   zodToKeyName?: Map<any, string>;

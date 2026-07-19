@@ -145,6 +145,14 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     iteration: number;
     seq: number;
   }>;
+  // Durable delivered signals in the same seq clock as outputRows.
+  signalRows: (signalName: string, options?: { correlationId?: string }) => Array<{
+    payload: unknown;
+    signalName: string;
+    seq: number;
+    correlationId?: string;
+    receivedAtMs: number;
+  }>;
 
   // table is the schema key or output target from createSmithers,
   // such as "review" or outputs.review, not the generated SQL table name.

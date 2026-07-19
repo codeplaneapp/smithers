@@ -345,6 +345,20 @@ type WaitHandler$1 = (reason: WaitReason$1, context: {
     options: RunOptions$2;
 }) => Promise<EngineDecision$1 | RunResult$2> | EngineDecision$1 | RunResult$2;
 
+type SignalRow$1<Payload = unknown> = {
+    payload: Payload;
+    signalName: string;
+    seq: number;
+    correlationId?: string;
+    receivedAtMs: number;
+};
+type SignalRowsOptions$1 = {
+    correlationId?: string;
+};
+type SignalRowsReader$2 = {
+    (signalName: string, options?: SignalRowsOptions$1): Array<SignalRow$1<unknown>>;
+};
+
 type InferRow<TTable> = TTable extends {
     $inferSelect: infer R;
 } ? R : never;
@@ -421,6 +435,21 @@ type SmithersRuntimeConfig$1 = {
     }) => string;
 };
 
+/**
+ * The raw `_smithers_signals` row shape a `RuntimeAdapter`/`WorkflowDriver`
+ * carries into `SmithersCtx` for a render — mirrors
+ * `@smithers-orchestrator/db`'s `SignalRow` (camelCase) without importing the
+ * db package, so this portable driver core stays free of sqlite/postgres
+ * modules (see `stripAutoColumns` in SmithersCtx.js for the same rationale).
+ */
+type RawSignalRow$1 = {
+    seq: number;
+    signalName: string;
+    correlationId?: string | null;
+    payloadJson: string;
+    receivedAtMs: number;
+};
+
 type SmithersCtxOptions$2 = {
     runId: string;
     iteration: number;
@@ -428,6 +457,7 @@ type SmithersCtxOptions$2 = {
     input: unknown;
     auth?: RunAuthContext$2 | null;
     outputs: OutputSnapshot$2;
+    signals?: RawSignalRow$1[];
     taskStates?: ReadonlyMap<string, unknown> | Record<string, unknown>;
     taskIterations?: ReadonlyMap<string, number> | Record<string, number>;
     zodToKeyName?: Map<any, string>;
@@ -477,6 +507,8 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     outputs: OutputAccessor$1<Schema>;
     /** @type {OutputRowsReader<Schema>} */
     outputRows: OutputRowsReader$1<Schema>;
+    /** @type {SignalRowsReader} */
+    signalRows: SignalRowsReader$1;
     /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
     _outputs: OutputSnapshot$2;
     /** @type {Map<unknown, string> | undefined} */
@@ -648,7 +680,8 @@ type TableRef = unknown;
 type OutputRow = Record<string, unknown>;
 type ResolveOutputRow<Schema, T> = ResolveOutputRow$1<Schema, T>;
 type OutputAccessor$1<Schema> = OutputAccessor$2<Schema>;
-type OutputRowsReader$1<Schema = unknown> = OutputRowsReader$2<Schema>;
+type OutputRowsReader$1<Schema> = OutputRowsReader$2<Schema>;
+type SignalRowsReader$1 = SignalRowsReader$2;
 
 type WorkflowElement = {
     type: unknown;
@@ -883,6 +916,18 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
    */
     initializeSession(runId: string, options: RunOptions$1): Promise<WorkflowSession$1>;
     /**
+   * Fresh `_smithers_signals` rows for this run, loaded every render (unlike
+   * outputs, signals arrive out-of-band from `smithers signal` and must be
+   * visible to the fold the very next frame regardless of which node, if
+   * any, is currently parked waiting on them). A no-op when `this.db` has no
+   * `listSignals` (in-memory test harnesses that never wire a real db).
+   * The explicit high limit overrides `listSignals`' default 200-row cap —
+   * a machine fold needs the full durable history, not just the tail.
+   * @param {string} runId
+   * @returns {Promise<import("./RawSignalRow.ts").RawSignalRow[]>}
+   */
+    loadSignalRows(runId: string): Promise<RawSignalRow$1[]>;
+    /**
    * @param {RenderContext} context
    * @returns {Promise<EngineDecision>}
    */
@@ -967,6 +1012,10 @@ type InferOutputEntry<T> = InferOutputEntry$1<T>;
 type OutputKey = OutputKey$2;
 type OutputSnapshot = OutputSnapshot$2;
 type OutputRowsReader<Schema> = OutputRowsReader$2<Schema>;
+type SignalRow<Payload = unknown> = SignalRow$1<Payload>;
+type SignalRowsOptions = SignalRowsOptions$1;
+type SignalRowsReader = SignalRowsReader$2;
+type RawSignalRow = RawSignalRow$1;
 type ProofBinding = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
 type RunAuthContext = RunAuthContext$2;
 type EffectPlatformRuntime = EffectPlatformRuntime$1;
@@ -998,4 +1047,4 @@ type RuntimeCapability = RuntimeCapability$1;
 type RuntimeCapabilityErrorDetails = RuntimeCapabilityErrorDetails$1;
 type BrowserRuntimeOptions = BrowserRuntimeOptions$1;
 
-export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };
+export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RawSignalRow, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, type SignalRow, type SignalRowsOptions, type SignalRowsReader, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };

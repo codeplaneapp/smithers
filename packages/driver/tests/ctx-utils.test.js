@@ -370,6 +370,28 @@ describe("SmithersCtx output access", () => {
       { payload: { value: 2, seq: 900 }, nodeId: "b", iteration: 0, seq: 2 },
     ]);
   });
+  test("signalRows filters by name, parses payloads, and sorts by durable seq", () => {
+    const ctx = makeCtx({
+      signals: [
+        { seq: 5, signalName: "REVISE", correlationId: null, payloadJson: '{"round":2}', receivedAtMs: 2_000 },
+        { seq: 3, signalName: "REVISE", correlationId: "pr-9", payloadJson: '{"round":1}', receivedAtMs: 1_000 },
+        { seq: 4, signalName: "OTHER", correlationId: null, payloadJson: "{}", receivedAtMs: 1_500 },
+      ],
+    });
+    expect(ctx.signalRows("REVISE")).toEqual([
+      { payload: { round: 1 }, signalName: "REVISE", seq: 3, correlationId: "pr-9", receivedAtMs: 1_000 },
+      { payload: { round: 2 }, signalName: "REVISE", seq: 5, correlationId: undefined, receivedAtMs: 2_000 },
+    ]);
+    expect(ctx.signalRows("REVISE", { correlationId: "pr-9" }).map((row) => row.seq)).toEqual([3]);
+    expect(ctx.signalRows("MISSING")).toEqual([]);
+  });
+  test("signalRows returns empty without signals and throws typed errors on bad rows", () => {
+    expect(makeCtx().signalRows("REVISE")).toEqual([]);
+    const noSeq = makeCtx({ signals: [{ signalName: "X", payloadJson: "{}", receivedAtMs: 1 }] });
+    expect(() => noSeq.signalRows("X")).toThrow(/SIGNAL_PROVENANCE_MISSING|durable completion sequence/);
+    const badJson = makeCtx({ signals: [{ seq: 1, signalName: "X", payloadJson: "{nope", receivedAtMs: 1 }] });
+    expect(() => badJson.signalRows("X")).toThrow(/SIGNAL_PAYLOAD_INVALID|invalid JSON payload/);
+  });
   test("normalizes input payload rows in constructor", () => {
     const ctx = makeCtx({ input: { runId: "r1", payload: '{"ok":true}' } });
     expect(ctx.input).toEqual({ ok: true });

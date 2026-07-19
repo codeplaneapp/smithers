@@ -7,3 +7,11 @@ row.payload.title satisfies string;
 row.payload.count satisfies number;
 // @ts-expect-error schema-derived payloads must reject incompatible fields
 row.payload.count satisfies string;
+const signal = ctx.signalRows("REVISE", { correlationId: "abc" })[0];
+signal.signalName satisfies string;
+signal.seq satisfies number;
+signal.receivedAtMs satisfies number;
+signal.correlationId satisfies string | undefined;
+signal.payload satisfies unknown;
+// @ts-expect-error signal seq is a number, not a string
+signal.seq satisfies string;

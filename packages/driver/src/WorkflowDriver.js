@@ -534,6 +534,23 @@ export class WorkflowDriver {
         return this.runEffect(created);
     }
     /**
+   * Fresh `_smithers_signals` rows for this run, loaded every render (unlike
+   * outputs, signals arrive out-of-band from `smithers signal` and must be
+   * visible to the fold the very next frame regardless of which node, if
+   * any, is currently parked waiting on them). A no-op when `this.db` has no
+   * `listSignals` (in-memory test harnesses that never wire a real db).
+   * The explicit high limit overrides `listSignals`' default 200-row cap —
+   * a machine fold needs the full durable history, not just the tail.
+   * @param {string} runId
+   * @returns {Promise<import("./RawSignalRow.ts").RawSignalRow[]>}
+   */
+    async loadSignalRows(runId) {
+        if (!this.db || typeof (/** @type {{ listSignals?: unknown }} */ (this.db)).listSignals !== "function") {
+            return [];
+        }
+        return /** @type {import("./RawSignalRow.ts").RawSignalRow[]} */ (await /** @type {{ listSignals: (runId: string, query?: unknown) => Promise<unknown[]> }} */ (this.db).listSignals(runId, { limit: 1_000_000 }));
+    }
+    /**
    * @param {RenderContext} context
    * @returns {Promise<EngineDecision>}
    */
@@ -550,6 +567,7 @@ export class WorkflowDriver {
         // RuntimeCapabilityError) rather than imported here directly, so this
         // portable driver never statically pulls in a Node-only path resolver.
         const resolveWorktreePathFn = this.runtimeAdapter?.worktree?.resolve;
+        const signals = await this.loadSignalRows(context.runId);
         const ctx = new SmithersCtx({
             runId: context.runId,
             iteration,
@@ -557,6 +575,7 @@ export class WorkflowDriver {
             input: context.input ?? this.activeOptions?.input ?? {},
             auth: context.auth,
             outputs: mergeOutputSnapshots(this.baseOutputs, snapshotFromContext(context, this.outputTablesByNodeId)),
+            signals,
             taskStates: context.taskStates,
             taskIterations: buildTaskIterationLookup(context),
             zodToKeyName: this.workflow.zodToKeyName,
