@@ -198,7 +198,12 @@ export function captureSnapshot(adapter, runId, frameNo, data, options = {}) {
     return Effect.gen(function* () {
         const start = performance.now();
         const nodesJson = JSON.stringify(data.nodes);
-        const outputsJson = JSON.stringify(data.outputs);
+        const signalHorizon = yield* Effect.tryPromise({
+            try: async () => Number((await adapter.internalStorage.queryOne("SELECT COALESCE(MAX(seq), -1) AS seq FROM _smithers_signals WHERE run_id = ?", [runId]))?.seq ?? -1),
+            catch: (cause) => cause,
+        });
+        const snapshotOutputs = { ...data.outputs, __smithersSignalProvenanceHorizon: signalHorizon };
+        const outputsJson = JSON.stringify(snapshotOutputs);
         const ralphJson = JSON.stringify(data.ralph);
         const inputJson = JSON.stringify(data.input);
         const contentHash = snapshotContentHashFromJson(nodesJson, outputsJson, ralphJson, inputJson);

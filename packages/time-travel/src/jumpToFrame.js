@@ -18,6 +18,7 @@ import { acquireRewindLock } from "./acquireRewindLock.js";
 import { evaluateRewindRateLimit } from "./evaluateRewindRateLimit.js";
 import { writeRewindAuditRow } from "./writeRewindAuditRow.js";
 import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
+import { loadSnapshot } from "./snapshot/index.js";
 
 export { JUMP_RUN_ID_PATTERN };
 export { JUMP_MAX_FRAME_NO };
@@ -197,6 +198,22 @@ async function readFrameByNo(adapter, runId, frameNo) {
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
+ * @param {number} frameNo
+ * @returns {Promise<{ found: boolean; nodes: Array<Record<string, unknown>>; outputs: Record<string, Array<Record<string, unknown>>> }>}
+ */
+async function readTargetSnapshotSets(adapter, runId, frameNo) {
+  const row = await loadSnapshot(adapter, runId, frameNo);
+  if (!row) return { found: false, nodes: [], outputs: {} };
+  return {
+    found: true,
+    nodes: JSON.parse(row.nodesJson),
+    outputs: JSON.parse(row.outputsJson),
+  };
+}
+
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
  * @param {number} targetFrameNo
  */
 async function countFramesAfter(adapter, runId, targetFrameNo) {
@@ -312,6 +329,121 @@ async function deleteOutputTargets(adapter, targets, runId) {
     }
   }
   return deleted;
+}
+
+/** @param {SmithersDb} adapter @param {string} runId @param {Record<string, Array<Record<string, unknown>>>} snapshotOutputs */
+async function restoreOutputSet(adapter, runId, snapshotOutputs) {
+  const storage = resolveStorage(adapter);
+  const physicalTableRows = adapter.internalStorage?.dialect === "postgres"
+    ? await storage.queryAll("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT LIKE '_smithers_%' ORDER BY table_name")
+    : await storage.queryAll("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_smithers_%' ORDER BY name");
+  const physicalTables = new Set(physicalTableRows.map((row) => asString(row.name)).filter(Boolean));
+  const resolveTable = (name) => physicalTables.has(name) ? name : [...physicalTables].find((candidate) => candidate === name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+  const rowsByPhysical = new Map();
+  for (const [name, rows] of Object.entries(snapshotOutputs)) {
+    if (!Array.isArray(rows)) continue;
+    const physical = resolveTable(name);
+    if (physical) rowsByPhysical.set(physical, [...(rowsByPhysical.get(physical) ?? []), ...rows]);
+  }
+  const tables = await storage.queryAll(`SELECT DISTINCT output_table FROM _smithers_nodes WHERE run_id = ?`, [runId]);
+  const tableNames = new Set(tables.map((entry) => {
+    const name = asString(entry.outputTable ?? entry.output_table);
+    return name ? (resolveTable(name) ?? name) : undefined;
+  }).filter((name) => name && OUTPUT_TABLE_PATTERN.test(name)));
+  for (const name of rowsByPhysical.keys()) if (OUTPUT_TABLE_PATTERN.test(name)) tableNames.add(name);
+  let deleted = 0;
+  for (const tableName of tableNames) {
+    if (!(await adapter.hasPhysicalTable(tableName))) continue;
+    const snapshotRows = rowsByPhysical.get(tableName) ?? [];
+    const keep = new Set(snapshotRows.map((row) => `${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`));
+    let rows;
+    try {
+      rows = await storage.queryAll(`SELECT node_id, iteration FROM ${quoteIdentifier(tableName)} WHERE run_id = ?`, [runId]);
+    } catch (error) {
+      if (/no such table|does not exist/i.test(formatError(error))) continue;
+      throw error;
+    }
+    const desired = new Map(snapshotRows.map((row) => [`${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`, row]));
+    for (const row of rows) {
+      const key = `${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`;
+      if (!desired.has(key)) {
+        await storage.execute(`DELETE FROM ${quoteIdentifier(tableName)} WHERE run_id = ? AND node_id = ? AND iteration = ?`, [runId, row.nodeId ?? row.node_id, Number(row.iteration ?? 0)]);
+        deleted += 1;
+      }
+    }
+    // Restore overwritten payloads as well as deletions. The snapshot is the
+    // source of truth, so a post-target upsert cannot survive by sharing a key.
+    for (const [key, row] of desired) {
+      const [nodeId, iterationText] = key.split("::");
+      const { __smithersProvenanceSeq: provenanceSeq, ...snapshotRow } = row;
+      const values = { ...snapshotRow, runId, nodeId, iteration: Number(iterationText) };
+      try {
+        await storage.upsert(tableName, values, ["runId", "nodeId", "iteration"]);
+        if (Number.isFinite(Number(provenanceSeq))) {
+          await storage.upsert("_smithers_output_provenance", {
+            runId,
+            outputTable: tableName,
+            nodeId,
+            iteration: Number(iterationText),
+            seq: Number(provenanceSeq),
+          }, ["runId", "outputTable", "nodeId", "iteration"]);
+        }
+      } catch (error) {
+        if (/no such table|does not exist/i.test(formatError(error))) continue;
+        throw error;
+      }
+    }
+  }
+  const predicates = [];
+  const params = [];
+  for (const tableName of tableNames) for (const row of (rowsByPhysical.get(tableName) ?? [])) {
+    predicates.push("(output_table = ? AND node_id = ? AND iteration = ?)");
+    params.push(tableName, row.nodeId ?? row.node_id, Number(row.iteration ?? 0));
+  }
+  if (predicates.length) await storage.execute(`DELETE FROM _smithers_output_provenance WHERE run_id = ? AND NOT (${predicates.join(" OR ")})`, [runId, ...params]);
+  else await storage.execute(`DELETE FROM _smithers_output_provenance WHERE run_id = ?`, [runId]);
+  // Signals use the same run-local provenance clock. Snapshot output rows
+  // carry the clock value through JSON, so the durable signal inbox is
+  // rewound to the same horizon rather than leaking post-target events.
+  const outputHorizon = Object.values(snapshotOutputs)
+    .filter((rows) => Array.isArray(rows))
+    .flatMap((rows) => rows)
+    .map((row) => Number(row.__smithersProvenanceSeq))
+    .filter(Number.isFinite)
+    .reduce((max, seq) => Math.max(max, seq), -1);
+  const horizon = Number.isFinite(Number(snapshotOutputs.__smithersSignalProvenanceHorizon))
+    ? Number(snapshotOutputs.__smithersSignalProvenanceHorizon)
+    : outputHorizon;
+  await storage.execute(`DELETE FROM _smithers_signals WHERE run_id = ? AND seq > ?`, [runId, horizon]);
+  return deleted;
+}
+
+/** Restore the exact node set represented by the target snapshot. */
+async function restoreNodeSet(adapter, runId, snapshotNodes) {
+  const storage = resolveStorage(adapter);
+  const desired = new Map(snapshotNodes.map((node) => [`${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`, node]));
+  const current = await storage.queryAll(`SELECT node_id, iteration FROM _smithers_nodes WHERE run_id = ?`, [runId]);
+  for (const node of current) {
+    const key = `${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`;
+    if (!desired.has(key)) await storage.execute(`DELETE FROM _smithers_nodes WHERE run_id = ? AND node_id = ? AND iteration = ?`, [runId, node.nodeId ?? node.node_id, Number(node.iteration ?? 0)]);
+  }
+  for (const node of desired.values()) await storage.upsert("_smithers_nodes", {
+    ...node,
+    runId,
+    updatedAtMs: Number(node.updatedAtMs ?? node.updated_at_ms ?? Date.now()),
+  }, ["runId", "nodeId", "iteration"]);
+}
+
+/** Attempts are not part of the public snapshot; trim them to each target node's lastAttempt. */
+async function restoreAttemptsToNodeSnapshot(adapter, runId, snapshotNodes) {
+  const storage = resolveStorage(adapter);
+  const limits = new Map(snapshotNodes.map((node) => [`${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`, node.lastAttempt ?? node.last_attempt]));
+  const attempts = await storage.queryAll(`SELECT node_id, iteration, attempt FROM _smithers_attempts WHERE run_id = ?`, [runId]);
+  for (const attempt of attempts) {
+    const key = `${attempt.nodeId ?? attempt.node_id}::${Number(attempt.iteration ?? 0)}`;
+    const limit = limits.get(key);
+    if (limit == null || Number(attempt.attempt) > Number(limit)) await storage.execute(`DELETE FROM _smithers_attempts WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`, [runId, attempt.nodeId ?? attempt.node_id, Number(attempt.iteration ?? 0), Number(attempt.attempt)]);
+  }
 }
 
 /**
@@ -624,6 +756,7 @@ export async function jumpToFrame(input) {
 
         await runStepHook(input.hooks, "before", "snapshot-pre-jump");
         const attemptsForRun = await input.adapter.listAttemptsForRun(runId);
+        const targetSnapshotSets = await readTargetSnapshotSets(input.adapter, runId, targetFrameNo);
         const attemptsToDelete = attemptsForRun.filter(
           (attempt) => Number(attempt?.startedAtMs ?? -1) > targetFrame.createdAtMs,
         );
@@ -797,13 +930,18 @@ export async function jumpToFrame(input) {
                   yield* Effect.promise(() =>
                     runStepHook(input.hooks, "before", "truncate-outputs"),
                   );
+                  if (!targetSnapshotSets.found) {
+                    yield* Effect.logWarning("rewind using legacy heuristic because the target has no exact snapshot").pipe(Effect.annotateLogs({ runId, targetFrameNo }));
+                  }
                   const deletedOutputs = yield* Effect.promise(() =>
-                    deleteOutputTargets(
-                      input.adapter,
-                      [...outputTargetsMap.values()],
-                      runId,
-                    ),
+                    targetSnapshotSets.found
+                      ? restoreOutputSet(input.adapter, runId, targetSnapshotSets.outputs)
+                      : deleteOutputTargets(input.adapter, [...outputTargetsMap.values()], runId),
                   );
+                  if (targetSnapshotSets.found) {
+                    yield* Effect.promise(() => restoreNodeSet(input.adapter, runId, targetSnapshotSets.nodes));
+                    yield* Effect.promise(() => restoreAttemptsToNodeSnapshot(input.adapter, runId, targetSnapshotSets.nodes));
+                  }
                   yield* Effect.promise(() =>
                     runStepHook(input.hooks, "after", "truncate-outputs"),
                   );
@@ -820,14 +958,9 @@ export async function jumpToFrame(input) {
                     runStepHook(input.hooks, "after", "rebuild-reconciler"),
                   );
 
-                  yield* Effect.promise(() =>
-                    resetNodesToPending(
-                      input.adapter,
-                      runId,
-                      [...nodeResetMap.values()],
-                      nowMs(),
-                    ),
-                  );
+                  if (!targetSnapshotSets.found) {
+                    yield* Effect.promise(() => resetNodesToPending(input.adapter, runId, [...nodeResetMap.values()], nowMs()));
+                  }
 
                   yield* input.adapter.updateRun(runId, {
                     status: "running",

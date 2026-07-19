@@ -29,6 +29,15 @@ function sampleData(overrides = {}) {
     };
 }
 describe("forkRun", () => {
+    test("copies only provenance for rows present in the selected snapshot", async () => {
+        const { adapter } = createTestDb();
+        await captureSnapshot(adapter, "parent-provenance", 1, sampleData({ outputs: { out_analyze: [{ nodeId: "analyze", iteration: 0, text: "analysis" }] } }));
+        const client = adapter.db.session.client;
+        client.query(`INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`).run("parent-provenance", "out_analyze", "analyze", 0, 4, "parent-provenance", "out_later", "later", 0, 5);
+        const result = await forkRun(adapter, { parentRunId: "parent-provenance", frameNo: 1 });
+        const rows = client.query(`SELECT output_table, node_id, seq FROM _smithers_output_provenance WHERE run_id = ? ORDER BY seq`).all(result.runId);
+        expect(rows).toEqual([{ output_table: "out_analyze", node_id: "analyze", seq: 4 }]);
+    });
     test("creates a new run with snapshot at frame 0", async () => {
         const { adapter } = createTestDb();
         await captureSnapshot(adapter, "parent-run", 3, sampleData());

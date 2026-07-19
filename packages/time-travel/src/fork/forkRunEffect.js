@@ -172,6 +172,43 @@ export function forkRun(adapter, params) {
                     details: { frameNo: 0, runId: childRunId },
                 }),
             });
+            // Output provenance is part of the snapshot's durable identity.
+            // Copy it verbatim so a fork cannot reorder inherited rows.
+            yield* Effect.tryPromise({
+                try: async () => {
+                    const snapshotOutputs = JSON.parse(source.outputsJson);
+                    const present = new Set();
+                    for (const [tableName, outputRows] of Object.entries(snapshotOutputs)) {
+                        if (!Array.isArray(outputRows)) continue;
+                        for (const row of outputRows) present.add(`${tableName}::${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`);
+                    }
+                    const rows = await adapter.internalStorage.queryAll(
+                        `SELECT output_table, node_id, iteration, seq FROM _smithers_output_provenance WHERE run_id = ?`, [parentRunId],
+                    );
+                    for (const row of rows) {
+                        const tableName = row.outputTable ?? row.output_table;
+                        if (!present.has(`${tableName}::${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`)) continue;
+                        await adapter.internalStorage.insertIgnore("_smithers_output_provenance", {
+                            runId: childRunId, outputTable: tableName,
+                            nodeId: row.nodeId ?? row.node_id, iteration: Number(row.iteration ?? 0), seq: Number(row.seq),
+                        });
+                    }
+                    const signalHorizon = Number(snapshotOutputs.__smithersSignalProvenanceHorizon ?? -1);
+                    if (signalHorizon >= 0) {
+                        const signals = await adapter.internalStorage.queryAll(
+                            `SELECT seq, signal_name, correlation_id, payload_json, received_at_ms, received_by FROM _smithers_signals WHERE run_id = ? AND seq <= ? ORDER BY seq`, [parentRunId, signalHorizon],
+                        );
+                        for (const signal of signals) {
+                            await adapter.internalStorage.insertIgnore("_smithers_signals", {
+                                runId: childRunId, seq: Number(signal.seq), signalName: signal.signalName ?? signal.signal_name,
+                                correlationId: signal.correlationId ?? signal.correlation_id, payloadJson: signal.payloadJson ?? signal.payload_json,
+                                receivedAtMs: Number(signal.receivedAtMs ?? signal.received_at_ms), receivedBy: signal.receivedBy ?? signal.received_by,
+                            });
+                        }
+                    }
+                },
+                catch: (cause) => toSmithersError(cause, "copy output provenance", { code: "DB_WRITE_FAILED", details: { parentRunId, childRunId } }),
+            });
             if (childRun) {
                 yield* adapter.insertRun(childRun);
             }

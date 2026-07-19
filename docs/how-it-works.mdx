@@ -34,6 +34,7 @@ The frame is the unit of progress. Time travel, observability, hot reload, and r
 | `ctx.outputs(table)` / `ctx.outputs.<key>` | `Row[]` | All rows for an output schema key or output target. |
 | `ctx.outputMaybe(table, { nodeId, iteration? })` | `Row \| undefined` | Conditional rendering; returns `undefined` until the upstream task completes. |
 | `ctx.output(table, { nodeId, iteration? })` | `Row` | Same, but throws if missing. Use inside a Task body where the dep is guaranteed. |
+| `ctx.outputRows(output, { nodeId?, scope? })` | `{ payload, nodeId, iteration, seq }[]` | Reads each durable row once in completion order. `seq` is stable across resume, rewind, and fork. |
 | `ctx.latest(table, nodeId)` | `Row \| undefined` | Highest iteration of a node, used inside `<Loop>` to read the previous iteration's output. |
 | `ctx.latestArray(value, schema)` | `unknown[]` | Parse a JSON string, scalar, or array and keep entries accepted by `schema.safeParse`. |
 | `ctx.iterationCount(table, nodeId)` | `number` | Number of completed iterations for a loop node. |
@@ -136,7 +137,7 @@ function useReviewState(ticketId: string) {
 }
 ```
 
-`useState` and `useMemo` are process-local: the engine reuses one React root across frames, so hook state survives frame-to-frame within a live process, but it is never persisted, and a crash, resume, rewind, or fork starts a fresh process where every hook reinitializes. Use them for ephemeral render-time state only. **Anything the workflow must remember across crashes goes through `ctx` and a Task output.**
+`useState` and `useMemo` are process-local: the engine reuses one React root across frames, so hook state survives frame-to-frame within a live process; it is never persisted, and a crash, resume, rewind, or fork starts a fresh process where every hook reinitializes. Use them for ephemeral render-time state only. **Anything the workflow must remember across crashes goes through `ctx` and a Task output.**
 
 Conditional mounting matters: a Task that doesn't render is not in the plan. No "skipped" placeholder unless you use `<Branch>` or `skipIf`. That's what lets `{analysis ? <Task .../> : null}` work as a clean dependency check. For the common case of one Task consuming one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more ergonomic form of the same check.
 

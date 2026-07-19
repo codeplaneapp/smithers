@@ -7,6 +7,7 @@ import {
   JumpToFrameError,
   jumpToFrame,
 } from "../src/jumpToFrame.js";
+import { captureSnapshot } from "../src/snapshot/index.js";
 import { listRewindAuditRows } from "../src/rewindAudit.js";
 
 function setupDb() {
@@ -143,6 +144,26 @@ function makeNoVcsHooks() {
 }
 
 describe("jumpToFrame", () => {
+  test("removes output from a parallel attempt spanning the target frame", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-spanning");
+      await captureSnapshot(adapter, "run-spanning", 1, {
+        nodes: [{ runId: "run-spanning", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }],
+        outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
+        ralph: [], input: {}, vcsPointer: null, workflowHash: null,
+      } as never);
+      const client = (adapter as any).db.session.client;
+      client.query(`UPDATE _smithers_attempts SET started_at_ms = ?, finished_at_ms = ? WHERE run_id = ? AND node_id = ?`).run(150, 250, "run-spanning", "task:two");
+      await jumpToFrame({ adapter, runId: "run-spanning", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
+      expect(client.query(`SELECT * FROM out_b WHERE run_id = ?`).all("run-spanning")).toHaveLength(0);
+      expect(await adapter.getNode("run-spanning", "task:two", 0)).toBeUndefined();
+      expect((await adapter.listAttemptsForRun("run-spanning")).some((attempt) => attempt.nodeId === "task:two")).toBe(false);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("truncates frames/attempts/outputs, invalidates diffs, writes audit row", async () => {
     const { adapter, sqlite } = setupDb();
     try {
@@ -186,6 +207,25 @@ describe("jumpToFrame", () => {
 
       const events = await adapter.listEventsByType("run-truncate", "TimeTravelJumped");
       expect(events).toHaveLength(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("restores an overwritten target payload, not only the target key set", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-overwrite");
+      await captureSnapshot(adapter, "run-overwrite", 1, {
+        nodes: [{ runId: "run-overwrite", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }],
+        outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
+        ralph: [], input: {}, vcsPointer: null, workflowHash: null,
+      });
+      const client = adapter.db.session.client;
+      client.query(`UPDATE out_a SET value = ? WHERE run_id = ? AND node_id = ?`).run(99, "run-overwrite", "task:one");
+      await jumpToFrame({ adapter, runId: "run-overwrite", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
+      expect(client.query(`SELECT value FROM out_a WHERE run_id = ? AND node_id = ?`).get("run-overwrite", "task:one").value).toBe(1);
+      expect(await adapter.getNode("run-overwrite", "task:two", 0)).toBeUndefined();
     } finally {
       sqlite.close();
     }

@@ -14,6 +14,7 @@ type WaitForEventProps = {
   outputSchema?: z.ZodObject;
   timeoutMs?: number;
   onTimeout?: "fail" | "skip" | "continue"; // default "fail"
+  tagged?: boolean; // opt into { kind: "signal" | "timeout", payload? }
   async?: boolean; // unrelated downstream may proceed while pending
   skipIf?: boolean;
   dependsOn?: string[];
@@ -46,6 +47,11 @@ type WaitForEventProps = {
 ## Notes
 
 - Push-based; for poll-based checks use `<Task>` with a compute function.
+- `tagged` is an explicit migration opt-in. With `tagged`, signal completion
+  stores `{ kind: "signal", payload }` and timeout continuation stores
+  `{ kind: "timeout" }`. A schema that merely happens to contain `kind` and
+  `payload` is not treated as tagged. `onTimeout="continue"` without
+  `tagged` fails clearly instead of persisting an ambiguous `null` row.
 - External integration webhooks (the `@smithers-orchestrator/integrations` package) deliver these events. A source signals `integration:<service>:<event>` (for example `integration:github:pull_request`) with a `correlationId` that is `owner/repo#number`, `owner/repo`, or `null` depending on the payload, so set `signalName` and `correlationId` to match.
 - With `async`, dependents via `dependsOn`/`needs` still block until payload arrives.
 - Async waits are tracked by the `smithers_external_wait_async_pending{kind="event"}` gauge while pending (it rises on start, falls on completion).

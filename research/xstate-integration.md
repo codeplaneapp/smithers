@@ -488,3 +488,4 @@ scoped to reducer-hash-matched reconstruction. 15 (prop-stripping wording;
 TaskProps=any) — ACCEPTED; wording fixed, defect filed. 16 (purity is
 contract; trigger list illustrative) — ACCEPTED. 17 (initialTransition
 signature; conformance tests) — ACCEPTED.
+**Correction status (2026-07-18):** Phase 0 correction backlog implemented and validated on this stack.

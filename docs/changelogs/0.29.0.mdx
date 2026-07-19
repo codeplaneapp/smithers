@@ -59,3 +59,8 @@ See the [Memory component docs](/components/memory) and the updated
   limitation and its invariant tests are documented in the memory guides.
 - `defineTool` moved to a shared `@smithers-orchestrator/tool-context` package
   re-exported from the existing entry points: imports keep working.
+## Phase 0 XState prerequisites
+
+- Wait-for-event tagged results are now an explicit `tagged` opt-in. Existing
+  waits keep their raw signal payload, while timeout continuation requires the
+  tagged envelope and no longer writes an ambiguous `null`.

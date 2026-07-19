@@ -723,6 +723,7 @@ The frame is the unit of progress. Time travel, observability, hot reload, and r
 | `ctx.outputs(table)` / `ctx.outputs.<key>` | `Row[]` | All rows for an output schema key or output target. |
 | `ctx.outputMaybe(table, { nodeId, iteration? })` | `Row \| undefined` | Conditional rendering; returns `undefined` until the upstream task completes. |
 | `ctx.output(table, { nodeId, iteration? })` | `Row` | Same, but throws if missing. Use inside a Task body where the dep is guaranteed. |
+| `ctx.outputRows(output, { nodeId?, scope? })` | `{ payload, nodeId, iteration, seq }[]` | Reads each durable row once in completion order. `seq` is stable across resume, rewind, and fork. |
 | `ctx.latest(table, nodeId)` | `Row \| undefined` | Highest iteration of a node, used inside `<Loop>` to read the previous iteration's output. |
 | `ctx.latestArray(value, schema)` | `unknown[]` | Parse a JSON string, scalar, or array and keep entries accepted by `schema.safeParse`. |
 | `ctx.iterationCount(table, nodeId)` | `number` | Number of completed iterations for a loop node. |
@@ -825,7 +826,7 @@ function useReviewState(ticketId: string) {
 }
 ```
 
-`useState` and `useMemo` are process-local: the engine reuses one React root across frames, so hook state survives frame-to-frame within a live process, but it is never persisted, and a crash, resume, rewind, or fork starts a fresh process where every hook reinitializes. Use them for ephemeral render-time state only. **Anything the workflow must remember across crashes goes through `ctx` and a Task output.**
+`useState` and `useMemo` are process-local: the engine reuses one React root across frames, so hook state survives frame-to-frame within a live process; it is never persisted, and a crash, resume, rewind, or fork starts a fresh process where every hook reinitializes. Use them for ephemeral render-time state only. **Anything the workflow must remember across crashes goes through `ctx` and a Task output.**
 
 Conditional mounting matters: a Task that doesn't render is not in the plan. No "skipped" placeholder unless you use `<Branch>` or `skipIf`. That's what lets `{analysis ? <Task .../> : null}` work as a clean dependency check. For the common case of one Task consuming one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more ergonomic form of the same check.
 
@@ -4709,6 +4710,7 @@ type WaitForEventProps = {
   outputSchema?: z.ZodObject;
   timeoutMs?: number;
   onTimeout?: "fail" | "skip" | "continue"; // default "fail"
+  tagged?: boolean; // opt into { kind: "signal" | "timeout", payload? }
   async?: boolean; // unrelated downstream may proceed while pending
   skipIf?: boolean;
   dependsOn?: string[];
@@ -4741,6 +4743,11 @@ type WaitForEventProps = {
 ## Notes
 
 - Push-based; for poll-based checks use `<Task>` with a compute function.
+- `tagged` is an explicit migration opt-in. With `tagged`, signal completion
+  stores `{ kind: "signal", payload }` and timeout continuation stores
+  `{ kind: "timeout" }`. A schema that merely happens to contain `kind` and
+  `payload` is not treated as tagged. `onTimeout="continue"` without
+  `tagged` fails clearly instead of persisting an ambiguous `null` row.
 - External integration webhooks (the `@smithers-orchestrator/integrations` package) deliver these events. A source signals `integration:<service>:<event>` (for example `integration:github:pull_request`) with a `correlationId` that is `owner/repo#number`, `owner/repo`, or `null` depending on the payload, so set `signalName` and `correlationId` to match.
 - With `async`, dependents via `dependsOn`/`needs` still block until payload arrives.
 - Async waits are tracked by the `smithers_external_wait_async_pending{kind="event"}` gauge while pending (it rises on start, falls on completion).
@@ -7944,6 +7951,12 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
   input: Schema extends { input: infer T } ? T : unknown;
   auth: RunAuthContext | null;
   outputs: OutputAccessor<Schema>;
+  outputRows: (output: any, options?: { nodeId?: string; scope?: string }) => Array<{
+    payload: unknown;
+    nodeId: string;
+    iteration: number;
+    seq: number;
+  }>;
 
   // table is the schema key or output target from createSmithers,
   // such as "review" or outputs.review, not the generated SQL table name.
