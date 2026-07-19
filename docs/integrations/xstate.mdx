@@ -111,8 +111,8 @@ call a distinct `id`.
 | --- | --- | --- |
 | `taskOutput(output, { nodeId?, scope? }, map)` | Durable output rows via `ctx.outputRows` | One `map` call per row; return an event, an array, or `null` to skip. "A durable row exists", not "the task completed": failed attempts write no row, and `(nodeId, iteration)` writes are upserts. |
 | `approvalDecided(output, { nodeId?, scope? }, map)` | Approval decision rows | Denials persist a row only with `onDeny: "continue"`; a failing gate ends the branch and writes nothing. |
-| `eventReceived(signalName, schema, { correlationId? }, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table directly on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing — including a signal delivered before its listener has ever mounted. `correlationId` scopes the fold to signals delivered with a matching id, required when the same signal name is used by more than one concurrent wait. Payloads failing `schema.safeParse` are skipped deterministically (same rows ⇒ same skips), so a malformed external delivery can never brick every future render of the run. Rewinding past a delivered signal makes the machine forget it, the same as output rows. |
-| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires the wait to opt into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`) — pointing `timedOut()` at a non-tagged wait is a hard render-time error (`TASK_OUTPUT_SCHEMA_INVALID`), not a silent no-op. |
+| `eventReceived(signalName, schema, { correlationId? }, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table directly on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing, including a signal delivered before its listener has ever mounted. `correlationId` scopes the fold to signals delivered with a matching id, required when the same signal name is used by more than one concurrent wait. Payloads failing `schema.safeParse` are skipped deterministically (same rows ⇒ same skips), so a malformed external delivery can never brick every future render of the run. Rewinding past a delivered signal makes the machine forget it, the same as output rows. |
+| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires the wait to opt into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`); pointing `timedOut()` at a non-tagged wait is a hard render-time error (`TASK_OUTPUT_SCHEMA_INVALID`), not a silent no-op. |
 
 All sources are pure functions of `ctx`; deriving a source's `nodeId` from
 the fold's own output is circular and unsupported.
@@ -159,7 +159,7 @@ crash deep inside the fold.
   the machine: no new row, no new event, and the quiescent graph ends the run.
   The lint catches this for any state that declares `meta.smithersTaskId`: a
   re-enterable state (reachable back to itself through the machine's
-  transition graph — a direct self-transition or a longer cycle) may only
+  transition graph, whether a direct self-transition or a longer cycle) may only
   declare it as a function of context, never a bare string.
 - **Final states are derived-only.** Smithers can finish while the machine is
   non-final (graph quiescent); a machine final state does not cancel
@@ -180,7 +180,8 @@ position **reinterprets**. The in-process cache validates by content hash and
 refolds automatically; workflows feeding machines from replaceable tasks
 should prefer fork-and-migrate.
 
-The prefix cache key is `(runId, machine id, reducer hash)` — a content hash
+The prefix cache key is `(runId, machine id, reducer hash)`, where the
+reducer hash is a content hash
 of the machine (config + `setup()` implementations) plus every declared
 event source (kind, target, options, `map`/`schema` source), so one process
 hosting many runs (or a fork, which inherits its parent's row history and
@@ -188,7 +189,7 @@ machine `id` verbatim) never serves one run's snapshot to another, and a
 mid-run machine or event-source edit can't reuse a fold computed under the
 old reducer. The cache is bounded (LRU-evicted) so a long-running process
 does not retain every historical snapshot. Mid-run machine edits ride the
-`acceptWorkflowChange` gate — the reducer hash changing for an already-folded
+`acceptWorkflowChange` gate: the reducer hash changing for an already-folded
 `(runId, id)` logs a machine-history reinterpretation warning instead of
 silently reinterpreting.
 
@@ -200,7 +201,7 @@ frame. The CI benchmark (`packages/xstate/tests/fold-benchmark.test.js`)
 folds 10,000 events on a parallel + nested-compound machine in well under a
 second full-refold (~20µs/event), and proves an incremental frame folds only
 the new suffix by counting actual transitions executed (immune to machine
-load), not by timing it — a wall-clock threshold is logged but kept
+load), not by timing it; a wall-clock threshold is logged but kept
 deliberately generous and non-strict, since it isn't the real gate. Practical
 limit: tens of thousands of events per machine per run; beyond that, prefer
 summarizing history into machine context via coarser events.
