@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mdxPlugin } from "smithers-orchestrator";
-import { canonicalGithubRemote, commitPatchId, completeCandidateSnapshot, disposeIsolatedGateDependencies, dryRunMainIsCurrent, exactCommitMessage, exactLandingProvenance, fixpointDecision, focusedCommands, pathsOverlap, pathsWithinEnvelope, peerPathOverlaps, prepareIsolatedGateDependencies, protectedPaths, publicationBoundaryAuthorized, resolveExecutable, risklessProofId, runIsolatedGate, sanitizedGateEnv, sha256, stableOperationMarker } from "../lib/risklessGithubIssueSweep";
+import { canonicalGithubRemote, commitPatchId, completeCandidateSnapshot, disposeIsolatedGateDependencies, dryRunMainIsCurrent, exactCommitMessage, exactLandingProvenance, fixpointDecision, focusedCommands, pathsOverlap, pathsWithinEnvelope, peerPathOverlaps, prepareIsolatedGateDependencies, protectedPaths, publicationBoundaryAuthorized, resolveExecutable, risklessProofId, runIsolatedGate, sanitizedGateEnv, sealedToolchainPath, sha256, stableOperationMarker } from "../lib/risklessGithubIssueSweep";
 
 mdxPlugin();
 const { renderWorkflow, runTask } = await import("smithers-orchestrator/testing");
@@ -214,6 +214,18 @@ function lateOutputs() {
 }
 
 describe("riskless GitHub issue sweep production graph", () => {
+  test("seals gate PATH to allowlisted toolchain directories", () => {
+    const poison = mkdtempSync(join(tmpdir(), "riskless-path-poison-"));
+    try {
+      const source = `${poison}${delimiter}${process.env.PATH ?? ""}`;
+      const sealed = sealedToolchainPath(source, ["bun"]);
+      expect(sealed.split(delimiter)).not.toContain(realpathSync(poison));
+      expect(resolveExecutable(sealed, "bun")).toBe(resolveExecutable(source, "bun"));
+    } finally {
+      rmSync(poison, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
   test("renders frame zero with concrete table schemas and null runtime defaults", async () => {
     const frame = await renderWorkflow(workflow, { input: { repo: null, excludeNumbers: null, laneConcurrency: null, reviewIterations: null, landingRetries: null, dryRun: null, conservativeLabelHints: null, prompt: null }, workflowPath: ".smithers/workflows/riskless-github-issue-sweep.tsx" });
     expect(frame.tasks.map((task) => task.nodeId)).toEqual(["normalize-inputs"]); expect(frame.tasks[0].outputSchema).toBeDefined(); expect(frame.tasks[0].outputTable).toBeDefined();

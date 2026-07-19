@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PUBLIC_ISSUE_TOOLCHAIN_BINARIES, resolvePublicIssueToolchainReadPaths } from "./publicIssueAgentPolicy";
 
 export const CANONICAL_REPOSITORY = "smithersai/smithers";
@@ -116,6 +116,34 @@ export function resolveExecutable(pathValue: string, executable: string): string
     } catch { /* keep searching the sanitized PATH */ }
   }
   throw new Error(`executable is absent from sanitized PATH: ${executable}`);
+}
+
+/**
+ * Build a deterministic PATH containing only directories that provide an
+ * allowlisted gate executable. macOS sandbox-exec returns EPERM (rather than
+ * continuing the search) when execvp encounters an unreadable PATH entry, so
+ * passing the operator's full PATH can prevent an otherwise allowed child
+ * such as `bun` from launching.
+ */
+export function sealedToolchainPath(pathValue: string, required: readonly string[] = []): string {
+  const directories = pathValue.split(delimiter).filter(Boolean);
+  const selected: string[] = [];
+  for (const executable of [...PUBLIC_ISSUE_TOOLCHAIN_BINARIES, ...required]) {
+    if (!executable || executable.includes("/")) throw new Error(`invalid executable name: ${executable}`);
+    const directory = directories.find((candidate) => {
+      try {
+        const resolved = realpathSync(join(candidate, executable));
+        const stat = statSync(resolved);
+        return stat.isFile() && (process.platform === "win32" || (stat.mode & 0o111) !== 0);
+      } catch {
+        return false;
+      }
+    });
+    if (directory) selected.push(resolve(directory));
+  }
+  const sealed = [...new Set(selected)];
+  if (sealed.length === 0) throw new Error("sanitized PATH contains no allowlisted toolchain executables");
+  return sealed.join(delimiter);
 }
 
 export function canonicalGithubRemote(remote: string): boolean {
@@ -438,7 +466,8 @@ export function prepareIsolatedGateDependencies(cwd: string, options: { path?: s
     const sourceDigest = sourceTreeDigest(copy);
     const copiedLock = join(copy, "pnpm-lock.yaml");
     if (sha256(readFileSync(copiedLock)) !== lockfileSha256) throw new Error("candidate lockfile changed during dependency copy");
-    const pathValue = options.path ?? process.env.PATH ?? "/usr/bin:/bin";
+    const sourcePathValue = options.path ?? process.env.PATH ?? "/usr/bin:/bin";
+    const pathValue = sealedToolchainPath(sourcePathValue, ["pnpm"]);
     const pnpm = resolveExecutable(pathValue, "pnpm");
     const store = resolvePnpmStore(pathValue, options.storeDir);
     const argv = ["pnpm", "install", "--offline", "--frozen-lockfile", "--ignore-scripts", "--ignore-pnpmfile", "--verify-store-integrity", "--package-import-method=clone", "--store-dir", store];
@@ -548,7 +577,8 @@ export function runIsolatedGate(cwd: string, argv: readonly string[], options: {
     if (sourceTreeDigest(copy) !== binding.sourceDigest) throw new Error("fresh gate copy differs from the dependency-bound candidate source");
     linkPreparedDependencies(binding, copy);
     mkdirSync(join(copy, ".smithers-riskless-gate-output"), { recursive: true });
-    const pathValue = options.path ?? process.env.PATH ?? "/usr/bin:/bin";
+    const sourcePathValue = options.path ?? process.env.PATH ?? "/usr/bin:/bin";
+    const pathValue = sealedToolchainPath(sourcePathValue, [argv[0]!]);
     const executable = resolveExecutable(pathValue, argv[0]!);
     const env = sanitizedGateEnv(process.env, home, pathValue);
     const toolchainReads = resolvePublicIssueToolchainReadPaths({ ...process.env, PATH: pathValue });
