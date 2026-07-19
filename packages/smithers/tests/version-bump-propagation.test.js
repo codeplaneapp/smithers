@@ -1,6 +1,6 @@
 // Behavioral unit coverage for scripts/bump.mjs (the `pnpm version` lifecycle
 // hook behind NPM_SCRIPT_RELEASE): workspace version propagation and the two
-// drift guards that must refuse a release when the pinned-version regexes stop
+// drift guards that must refuse a release when pinned-version regexes stop
 // matching their source files. Both guards throw BEFORE the script reaches
 // `pnpm install`/`docs:llms`/`git add`, so every case here stays offline and
 // never spawns a package manager — the fixtures deliberately break a guard to
@@ -97,5 +97,17 @@ describe("bump.mjs version propagation and drift guards", () => {
     expect(result.status).not.toBe(0);
     expect(result.stdout).not.toContain("synced DEFAULT_ORCHESTRATOR_VERSION");
     expect(readFileSync(join(dir, ".smithers/lib/plue-provider.ts"), "utf8")).toBe(pinned);
+  });
+
+  test("syncs the React DevTools renderer version and guards its source pattern", () => {
+    const dir = scaffoldFixture();
+    write(dir, ".smithers/lib/plue-provider.ts", 'export const DEFAULT_ORCHESTRATOR_VERSION = "9.9.9";\n');
+    write(dir, "packages/gateway-client/src/SmithersGatewayClient.ts", 'const DEFAULT_CLIENT_VERSION = "9.9.9";\n');
+    write(dir, "packages/react-reconciler/src/reconciler.js", "const noRendererVersionHere = true;\n");
+    const result = runBump(dir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("could not sync the React DevTools renderer version");
+    expect(result.stderr).toContain("update the regex in scripts/bump.mjs");
   });
 });

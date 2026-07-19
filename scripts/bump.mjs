@@ -149,6 +149,25 @@ function main() {
     console.log(`  synced DEFAULT_CLIENT_VERSION in ${clientPath}`);
   }
 
+  // react-reconciler identifies its renderer version to React DevTools. Keep
+  // that runtime value aligned with the package manifest on every release.
+  const reconcilerPath = join(root, "packages", "react-reconciler", "src", "reconciler.js");
+  const reconcilerSource = readFileSync(reconcilerPath, "utf8");
+  const syncedReconciler = reconcilerSource.replace(
+    /(const injectedDevToolsConfig = \{[\s\S]*?\n\s*version: ")[^"]+(")/,
+    `$1${version}$2`,
+  );
+  if (!syncedReconciler.includes(`version: "${version}"`)) {
+    throw new Error(
+      `bump.mjs could not sync the React DevTools renderer version in ${reconcilerPath} — the pin pattern no longer matches; update the regex in scripts/bump.mjs`,
+    );
+  }
+  if (syncedReconciler !== reconcilerSource) {
+    writeFileSync(reconcilerPath, syncedReconciler);
+    changed.push(reconcilerPath);
+    console.log(`  synced React DevTools renderer version in ${reconcilerPath}`);
+  }
+
   execSync("pnpm install --prefer-offline", { cwd: root, stdio: "inherit" });
 
   console.log("▸ regenerating llms bundles for the new version");
