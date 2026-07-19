@@ -246,6 +246,7 @@ type RunOptions = {
   effectPlatformLayer?: Layer.Layer<any, never, never>;  // e.g. NodeContext.layer from a Node serverless entrypoint
   cliAgentToolsDefault?: "all" | "explicit-only";  // default "all"
   initialOutputs?: OutputSnapshot;  // seed prior outputs (resume/fork)
+  signals?: SignalRowInput[];       // fallback signal rows when the runtime adapter has no durable signal capability
   initialIteration?: number;        // seed the starting loop iteration
   initialIterations?: Record<string, number> | ReadonlyMap<string, number>;  // per-loop iteration seeds
   resumeClaim?: {                   // internal supervisor coordination
