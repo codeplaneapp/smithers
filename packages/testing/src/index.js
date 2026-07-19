@@ -300,7 +300,7 @@ var init_builder = __esm({
         if (!provablyStatelessSource(source)) {
           throw Object.assign(new Error("RUNNER_BINDING_AMBIGUOUS: callback statelessness is not provable from source; provide an explicit stable runnerBinding"), { code: "RUNNER_BINDING_AMBIGUOUS" });
         }
-        throw Object.assign(new Error(`RUNNER_BINDING_REQUIRED: anonymous executable identities are retired — every run callback requires an explicit caller-supplied stable runnerBinding (step ${id}); the caller owns keeping the binding pointed at one behavior across processes`), { code: "RUNNER_BINDING_REQUIRED", details: { step: id } });
+        throw Object.assign(new Error(`RUNNER_BINDING_REQUIRED: anonymous executable identities are retired \u2014 every run callback requires an explicit caller-supplied stable runnerBinding (step ${id}); the caller owns keeping the binding pointed at one behavior across processes`), { code: "RUNNER_BINDING_REQUIRED", details: { step: id } });
       }
       const runnerBinding = options.runnerBinding;
       if (options.run && runnerBinding !== void 0) {
@@ -441,13 +441,13 @@ var init_canonicalize = __esm({
 });
 
 // src/scenario/replayIdentity.ts
-import { createHash as createHash2 } from "crypto";
+import { createHash } from "crypto";
 var replayIdentity;
 var init_replayIdentity = __esm({
   "src/scenario/replayIdentity.ts"() {
     "use strict";
     init_canonicalize();
-    replayIdentity = (input) => "ri1:" + createHash2("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
+    replayIdentity = (input) => "ri1:" + createHash("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
   }
 });
 
