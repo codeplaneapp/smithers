@@ -174,6 +174,9 @@ importers:
       '@smithers-orchestrator/vercel':
         specifier: workspace:*
         version: link:packages/vercel
+      '@smithers-orchestrator/xstate':
+        specifier: workspace:*
+        version: link:packages/xstate
       '@tanstack/react-query':
         specifier: ^5.101.2
         version: 5.101.2(react@19.2.7)
@@ -2136,6 +2139,9 @@ importers:
       '@smithers-orchestrator/vercel':
         specifier: workspace:*
         version: link:../vercel
+      '@smithers-orchestrator/xstate':
+        specifier: workspace:*
+        version: link:../xstate
       ai:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)
@@ -2447,6 +2453,52 @@ importers:
       '@vercel/sandbox':
         specifier: ^2.0.0
         version: 2.4.0
+
+  packages/xstate:
+    dependencies:
+      '@smithers-orchestrator/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@smithers-orchestrator/react-reconciler':
+        specifier: workspace:*
+        version: link:../react-reconciler
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
+    devDependencies:
+      '@smithers-orchestrator/db':
+        specifier: workspace:*
+        version: link:../db
+      '@smithers-orchestrator/driver':
+        specifier: workspace:*
+        version: link:../driver
+      '@smithers-orchestrator/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@smithers-orchestrator/time-travel':
+        specifier: workspace:*
+        version: link:../time-travel
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
+      effect:
+        specifier: 3.21.4
+        version: 3.21.4
+      smithers-orchestrator:
+        specifier: workspace:*
+        version: link:../smithers
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      xstate:
+        specifier: ^5.32.5
+        version: 5.32.5
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
 packages:
 
@@ -5843,31 +5895,26 @@ packages:
   '@superradcompany/microsandbox-darwin-arm64@0.6.6':
     resolution: {integrity: sha512-rw7cg0G9mj1c9/14K/K6PMg78H11rGRA5tDzRbx67kAeoKWpAJnFsIYLvOCHcD+6aM0Xdxote90FVVlt1Kknjw==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [darwin]
 
   '@superradcompany/microsandbox-linux-arm64-gnu@0.6.6':
     resolution: {integrity: sha512-y4CdSPkSOtCwBNbG8Yhkahxg9yh/jpp4cBMOItCOj0JshU7luE2r4+6ceIrPNAkb8sF0fX7tNTXMDK4fJA8iFA==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [linux]
 
   '@superradcompany/microsandbox-linux-x64-gnu@0.6.6':
     resolution: {integrity: sha512-9yo6/G454L8ebzZP1qMxjIXRD3zJqQ68w2p9Ust7B7MOj5hr+VyuVZ0kYjSJAc4GSI0fno2xQe5z2tp5ynk78A==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [linux]
 
   '@superradcompany/microsandbox-win32-arm64-msvc@0.6.6':
     resolution: {integrity: sha512-q22t1DVlB8FR90adjBxTf0i//f3yzm7QYsKbsar29zoUAHC/24h6R4LE6YfIDWtPKB8jvTSpCeMehFoyXyLN1Q==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [win32]
 
   '@superradcompany/microsandbox-win32-x64-msvc@0.6.6':
     resolution: {integrity: sha512-m2ir3DNw+Sc7i2DEg1kgY9bFmFHCFt2KamnXzJMUL9qtkE2n11GqIUhQJtKXwcWyM7nH0AxooMmnbx7UDMG8Ww==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [win32]
 
   '@tanstack/ai-event-client@0.6.8':
@@ -10126,6 +10173,9 @@ packages:
   xml-naming@0.1.0:
     resolution: {integrity: sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw==}
     engines: {node: '>=16.0.0'}
+
+  xstate@5.32.5:
+    resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==}
 
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
@@ -19204,6 +19254,8 @@ snapshots:
     optional: true
 
   xml-naming@0.1.0: {}
+
+  xstate@5.32.5: {}
 
   xtend@4.0.2: {}
 

@@ -115,6 +115,11 @@
       "import": "./src/telegram.js",
       "default": "./src/telegram.js"
     },
+    "./xstate": {
+      "types": "./src/xstate.d.ts",
+      "import": "./src/xstate.js",
+      "default": "./src/xstate.js"
+    },
     "./control-plane": {
       "types": "./src/control-plane.d.ts",
       "import": "./src/control-plane.js",
@@ -214,6 +219,7 @@
     "@smithers-orchestrator/ui": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
     "@smithers-orchestrator/vercel": "workspace:*",
+    "@smithers-orchestrator/xstate": "workspace:*",
     "ai": "^7.0.10",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
