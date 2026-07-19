@@ -2322,6 +2322,15 @@ importers:
 
   packages/ui:
     dependencies:
+      '@milkdown/crepe':
+        specifier: 7.21.2
+        version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@6.0.3)
+      '@milkdown/kit':
+        specifier: 7.21.2
+        version: 7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@6.0.3)
+      '@milkdown/plugin-listener':
+        specifier: 7.21.2
+        version: 7.21.2
       '@smithers-orchestrator/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
@@ -5825,26 +5834,31 @@ packages:
   '@superradcompany/microsandbox-darwin-arm64@0.6.6':
     resolution: {integrity: sha512-rw7cg0G9mj1c9/14K/K6PMg78H11rGRA5tDzRbx67kAeoKWpAJnFsIYLvOCHcD+6aM0Xdxote90FVVlt1Kknjw==}
     engines: {node: '>= 22'}
+    cpu: [arm64]
     os: [darwin]
 
   '@superradcompany/microsandbox-linux-arm64-gnu@0.6.6':
     resolution: {integrity: sha512-y4CdSPkSOtCwBNbG8Yhkahxg9yh/jpp4cBMOItCOj0JshU7luE2r4+6ceIrPNAkb8sF0fX7tNTXMDK4fJA8iFA==}
     engines: {node: '>= 22'}
+    cpu: [arm64]
     os: [linux]
 
   '@superradcompany/microsandbox-linux-x64-gnu@0.6.6':
     resolution: {integrity: sha512-9yo6/G454L8ebzZP1qMxjIXRD3zJqQ68w2p9Ust7B7MOj5hr+VyuVZ0kYjSJAc4GSI0fno2xQe5z2tp5ynk78A==}
     engines: {node: '>= 22'}
+    cpu: [x64]
     os: [linux]
 
   '@superradcompany/microsandbox-win32-arm64-msvc@0.6.6':
     resolution: {integrity: sha512-q22t1DVlB8FR90adjBxTf0i//f3yzm7QYsKbsar29zoUAHC/24h6R4LE6YfIDWtPKB8jvTSpCeMehFoyXyLN1Q==}
     engines: {node: '>= 22'}
+    cpu: [arm64]
     os: [win32]
 
   '@superradcompany/microsandbox-win32-x64-msvc@0.6.6':
     resolution: {integrity: sha512-m2ir3DNw+Sc7i2DEg1kgY9bFmFHCFt2KamnXzJMUL9qtkE2n11GqIUhQJtKXwcWyM7nH0AxooMmnbx7UDMG8Ww==}
     engines: {node: '>= 22'}
+    cpu: [x64]
     os: [win32]
 
   '@tanstack/ai-event-client@0.6.8':
@@ -8603,11 +8617,6 @@ packages:
 
   mz@2.7.0:
     resolution: {integrity: sha512-z81GNO7nnYMEhrGh9LeymoE4+Yr0Wn5McHIZMK5cfQCl+NDX08sCZgUc9/6MHni9IWuFLm1Z3HTCXu2z9fN62Q==}
-
-  nanoid@3.3.12:
-    resolution: {integrity: sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
 
   nanoid@3.3.15:
     resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
@@ -17451,8 +17460,6 @@ snapshots:
       object-assign: 4.1.1
       thenify-all: 1.6.0
 
-  nanoid@3.3.12: {}
-
   nanoid@3.3.15: {}
 
   nanoid@5.1.16: {}
@@ -17786,7 +17793,7 @@ snapshots:
 
   postcss@8.5.15:
     dependencies:
-      nanoid: 3.3.12
+      nanoid: 3.3.15
       picocolors: 1.1.1
       source-map-js: 1.2.1
 

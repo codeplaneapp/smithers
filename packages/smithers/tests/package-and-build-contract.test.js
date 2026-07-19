@@ -82,6 +82,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "./scorers",
       "./gateway-ui",
       "./ui",
+      "./ui/adapters/markdown-editor",
       "./sandbox",
       "./telegram",
       "./control-plane",

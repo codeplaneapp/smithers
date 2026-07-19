@@ -145,6 +145,42 @@ can build a `DiffFile` from a raw patch and reason about it without a runtime:
 | `cn` | clsx class composition. |
 | `buttonVariants`, `badgeVariants`, `alertVariants`, `spinnerVariants` | CVA variant builders for styling your own elements like the components. |
 
+### Adapters
+
+Heavy third-party editor widgets live behind explicit
+`@smithers-orchestrator/ui/adapters/*` subpaths, so importing the base library
+never pulls their runtime. Import them from the matching
+`smithers-orchestrator/ui/adapters/*` subpath instead of the root `ui` barrel.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `MarkdownEditor` | The shared WYSIWYG Milkdown Crepe markdown editor: the user edits rendered markdown directly, never raw source. It is the single replacement for the former per-app editors. Under server render and test DOMs (no ProseMirror layout) it degrades to a controlled `<textarea>` honoring the same contract. | `value`, `onChange`, `readOnly`, `resetKey`, plus an imperative `getMarkdown` / `setMarkdown` handle |
+
+The editor is generic and store-free: multiplayer sync, draft reconciliation,
+and persistence stay a caller concern, wired through `onChange` and the
+imperative `setMarkdown` (which is echo-suppressed, so an external update never
+loops back out as a local edit). Ship its Crepe theme CSS with
+`MarkdownEditorStyles` alongside `SmithersUiStyles`, or rely on the browser
+self-injection fallback every editor performs.
+
+```tsx
+import { useRef } from "react";
+import { Button, SmithersUiStyles } from "smithers-orchestrator/ui";
+import { MarkdownEditor, MarkdownEditorStyles } from "smithers-orchestrator/ui/adapters/markdown-editor";
+
+function DocEditor({ initial, onSave }: { initial: string; onSave: (markdown: string) => void }) {
+  const editor = useRef<{ getMarkdown: () => string } | null>(null);
+  return (
+    <div>
+      <SmithersUiStyles />
+      <MarkdownEditorStyles />
+      <MarkdownEditor ref={editor} value={initial} onChange={(markdown) => onSave(markdown)} />
+      <Button onClick={() => onSave(editor.current?.getMarkdown() ?? "")}>Save</Button>
+    </div>
+  );
+}
+```
+
 ## A complete workflow UI
 
 Gateway data via [`gateway-react`](/reference/gateway-react) hooks and
