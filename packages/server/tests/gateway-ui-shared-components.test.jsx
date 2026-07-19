@@ -128,10 +128,10 @@ describe("Gateway UI with shared components", () => {
       expect(htmlResponse.status).toBe(200);
       const html = await htmlResponse.text();
       expect(html).toContain("color-scheme:light");
-      expect(html).toContain("--bg:#ffffff");
+      expect(html).toContain("--bg:#fafafa");
       expect(html).toContain("@media (prefers-color-scheme: dark)");
       expect(html).toContain(":root[data-theme='dark']");
-      expect(html).toContain("--bg:#0b0b0d");
+      expect(html).toContain("--bg:#09090b");
       expect(html).toContain('new URLSearchParams(location.search).get("theme")');
       expect(html).toContain("document.documentElement.dataset.theme=t");
     }
