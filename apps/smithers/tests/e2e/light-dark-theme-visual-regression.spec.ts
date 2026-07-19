@@ -35,34 +35,34 @@ const PALETTE: Record<Theme, Palette> = {
   light: {
     root: {
       colorScheme: "light",
-      background: "#ffffff",
+      background: "#fafafa",
       surface: "#ffffff",
-      text: "#0a0a0a",
+      text: "#18181b",
       brand: "#6d56d8",
     },
     shell: {
-      backgroundColor: "rgb(255, 255, 255)",
-      color: "rgb(10, 10, 10)",
+      backgroundColor: "rgb(250, 250, 250)",
+      color: "rgb(24, 24, 27)",
     },
     surface: {
       backgroundColor: "rgb(255, 255, 255)",
-      color: "rgb(10, 10, 10)",
+      color: "rgb(24, 24, 27)",
     },
   },
   dark: {
     root: {
       colorScheme: "dark",
-      background: "#0b0b0d",
-      surface: "#18181b",
+      background: "#09090b",
+      surface: "#141417",
       text: "#f4f4f5",
       brand: "#8b78e6",
     },
     shell: {
-      backgroundColor: "rgb(11, 11, 13)",
+      backgroundColor: "rgb(9, 9, 11)",
       color: "rgb(244, 244, 245)",
     },
     surface: {
-      backgroundColor: "rgb(24, 24, 27)",
+      backgroundColor: "rgb(20, 20, 23)",
       color: "rgb(244, 244, 245)",
     },
   },

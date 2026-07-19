@@ -2,35 +2,58 @@
   color-scheme: light;
 
   /* Color tokens. Dark-mode overrides live in the prefers-color-scheme block
-     and under :root[data-theme="dark"] further down. */
-  --bg: #ffffff;
-  --text: #0a0a0a;
-  --text-muted: #525252;
-  --text-faint: #6f6f6f;
-  --text-placeholder: #767676;
+     and under :root[data-theme="dark"] further down. Values mirror the house
+     design system in packages/ui-styleguide — keep them in sync. */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --bg: #fafafa;
+  --text: #18181b;
+  --text-muted: #52525b;
+  --text-faint: #71717a;
+  --text-placeholder: #9f9fa8;
   --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #ffffff;
   --surface-glass: rgba(255, 255, 255, 0.72);
   --surface-glass-strong: rgba(255, 255, 255, 0.85);
-  --border: rgba(10, 10, 10, 0.08);
-  --border-strong: rgba(10, 10, 10, 0.14);
-  --border-solid: #ededed;
-  --hover: #f4f4f4;
-  --hover-subtle: rgba(10, 10, 10, 0.03);
-  --bubble-user-bg: #0a0a0a;
-  --bubble-user-text: #ffffff;
-  --bubble-assistant-bg: #f4f4f4;
-  --bubble-assistant-text: #0a0a0a;
-  --inverse-bg: #0a0a0a;
-  --inverse-bg-hover: #262626;
-  --inverse-text: #ffffff;
-  --code-bg: #0a0a0a;
-  --code-text: #f4f4f4;
-  --inline-code-bg: rgba(10, 10, 10, 0.07);
+  --border: rgba(24, 24, 27, 0.08);
+  --border-strong: rgba(24, 24, 27, 0.14);
+  --border-solid: #e4e4e7;
+  --hover: #f4f4f5;
+  --hover-subtle: rgba(24, 24, 27, 0.04);
+  --bubble-user-bg: #18181b;
+  --bubble-user-text: #fafafa;
+  --bubble-assistant-bg: #f4f4f5;
+  --bubble-assistant-text: #18181b;
+  --inverse-bg: #18181b;
+  --inverse-bg-hover: #3f3f46;
+  --inverse-text: #fafafa;
+  --code-bg: #18181b;
+  --code-text: #f4f4f5;
+  --inline-code-bg: rgba(24, 24, 27, 0.06);
   --brand: #6d56d8;
   --success: #0f8f78;
   --danger: #e5484d;
+  --warning: #bf7100;
+  --info: #2f6fde;
+  --brand-soft: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  --brand-soft-strong: color-mix(in srgb, var(--brand) 16%, var(--surface));
+  --brand-border: color-mix(in srgb, var(--brand) 40%, transparent);
+  --success-soft: color-mix(in srgb, var(--success) 12%, var(--surface));
+  --success-border: color-mix(in srgb, var(--success) 40%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  --danger-border: color-mix(in srgb, var(--danger) 40%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 12%, var(--surface));
+  --warning-border: color-mix(in srgb, var(--warning) 40%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 10%, var(--surface));
+  --info-border: color-mix(in srgb, var(--info) 40%, transparent);
+  --ring: color-mix(in srgb, var(--brand) 22%, transparent);
+  --ring-border: color-mix(in srgb, var(--brand) 50%, transparent);
   /* Space-separated channels so shadows can vary alpha via rgb(... / a). */
-  --shadow-rgb: 10 10 10;
+  --shadow-rgb: 24 24 27;
+  --shadow-1: 0 1px 2px rgb(var(--shadow-rgb) / 0.05);
+  --shadow-2: 0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.07);
+  --shadow-3: 0 4px 12px rgb(var(--shadow-rgb) / 0.10), 0 16px 48px rgb(var(--shadow-rgb) / 0.14);
   --graph-bg: #fafbfc;
   --graph-border: #eef0f3;
   --graph-dots: #e2e7ef;
@@ -49,9 +72,7 @@
 
   color: var(--text);
   background: var(--bg);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -2084,6 +2105,25 @@ button {
   gap: 12px;
 }
 
+.workspace-picker-head svg {
+  display: block;
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+
+.workspace-mark-bg {
+  fill: var(--logo-bg);
+}
+
+.workspace-mark-ring {
+  stroke: var(--logo-ring);
+}
+
+.workspace-mark-stem {
+  stroke: var(--logo-stem);
+}
+
 .workspace-picker-head h1 {
   margin: 0;
   font-size: 1.35rem;
@@ -2615,38 +2655,42 @@ button {
    from the OS preference and from an explicit toggle. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b0b0d;
+  --bg: #09090b;
   --text: #f4f4f5;
   --text-muted: #a1a1aa;
-  --text-faint: #b0b0b8;
-  --text-placeholder: #a6a6ad;
-  --surface: #18181b;
-  --surface-glass: rgba(24, 24, 27, 0.72);
-  --surface-glass-strong: rgba(24, 24, 27, 0.85);
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --border-solid: #2a2a2e;
-  --hover: #26262b;
+  --text-faint: #71717a;
+  --text-placeholder: #63636b;
+  --surface: #141417;
+  --surface-2: #1b1b20;
+  --surface-3: #232329;
+  --surface-glass: rgba(20, 20, 23, 0.72);
+  --surface-glass-strong: rgba(20, 20, 23, 0.85);
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-solid: #2a2a30;
+  --hover: #1f1f24;
   --hover-subtle: rgba(255, 255, 255, 0.05);
   --bubble-user-bg: #f4f4f5;
-  --bubble-user-text: #0a0a0a;
-  --bubble-assistant-bg: #26262b;
+  --bubble-user-text: #18181b;
+  --bubble-assistant-bg: #232329;
   --bubble-assistant-text: #f4f4f5;
   --inverse-bg: #f4f4f5;
   --inverse-bg-hover: #d4d4d8;
-  --inverse-text: #0a0a0a;
-  --code-bg: #09090b;
+  --inverse-text: #18181b;
+  --code-bg: #0c0c0e;
   --code-text: #e4e4e7;
-  --inline-code-bg: rgba(255, 255, 255, 0.1);
+  --inline-code-bg: rgba(255, 255, 255, 0.08);
   --brand: #8b78e6;
   --success: #2ec9a8;
   --danger: #f2555a;
+  --warning: #e0a23a;
+  --info: #6aa5f8;
   --shadow-rgb: 0 0 0;
   --graph-bg: #0e0e11;
-  --graph-border: #2a2a2e;
-  --graph-dots: #2a2a2e;
-  --node-bg: #18181b;
-  --node-border: #2a2a2e;
+  --graph-border: #2a2a30;
+  --graph-dots: #2a2a30;
+  --node-bg: #141417;
+  --node-border: #2a2a30;
   --node-title: #f4f4f5;
   --node-muted: #9a9aa6;
   --node-shadow: rgb(0 0 0 / 45%);
@@ -2655,38 +2699,42 @@ button {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0b0b0d;
+    --bg: #09090b;
     --text: #f4f4f5;
     --text-muted: #a1a1aa;
-    --text-faint: #b0b0b8;
-    --text-placeholder: #a6a6ad;
-    --surface: #18181b;
-    --surface-glass: rgba(24, 24, 27, 0.72);
-    --surface-glass-strong: rgba(24, 24, 27, 0.85);
-    --border: rgba(255, 255, 255, 0.1);
-    --border-strong: rgba(255, 255, 255, 0.18);
-    --border-solid: #2a2a2e;
-    --hover: #26262b;
+    --text-faint: #71717a;
+    --text-placeholder: #63636b;
+    --surface: #141417;
+    --surface-2: #1b1b20;
+    --surface-3: #232329;
+    --surface-glass: rgba(20, 20, 23, 0.72);
+    --surface-glass-strong: rgba(20, 20, 23, 0.85);
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --border-solid: #2a2a30;
+    --hover: #1f1f24;
     --hover-subtle: rgba(255, 255, 255, 0.05);
     --bubble-user-bg: #f4f4f5;
-    --bubble-user-text: #0a0a0a;
-    --bubble-assistant-bg: #26262b;
+    --bubble-user-text: #18181b;
+    --bubble-assistant-bg: #232329;
     --bubble-assistant-text: #f4f4f5;
     --inverse-bg: #f4f4f5;
     --inverse-bg-hover: #d4d4d8;
-    --inverse-text: #0a0a0a;
-    --code-bg: #09090b;
+    --inverse-text: #18181b;
+    --code-bg: #0c0c0e;
     --code-text: #e4e4e7;
-    --inline-code-bg: rgba(255, 255, 255, 0.1);
+    --inline-code-bg: rgba(255, 255, 255, 0.08);
     --brand: #8b78e6;
     --success: #2ec9a8;
     --danger: #f2555a;
+    --warning: #e0a23a;
+    --info: #6aa5f8;
     --shadow-rgb: 0 0 0;
     --graph-bg: #0e0e11;
-    --graph-border: #2a2a2e;
-    --graph-dots: #2a2a2e;
-    --node-bg: #18181b;
-    --node-border: #2a2a2e;
+    --graph-border: #2a2a30;
+    --graph-dots: #2a2a30;
+    --node-bg: #141417;
+    --node-border: #2a2a30;
     --node-title: #f4f4f5;
     --node-muted: #9a9aa6;
     --node-shadow: rgb(0 0 0 / 45%);
