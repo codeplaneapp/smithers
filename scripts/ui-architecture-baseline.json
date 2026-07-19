@@ -19,7 +19,10 @@
       "apps/smithers/package.json#dependencies:dagre@^0.8.5",
       "package.json#dependencies:@milkdown/crepe@7.21.2",
       "package.json#dependencies:@xyflow/react@^12.10.2",
-      "package.json#dependencies:dagre@^0.8.5"
+      "package.json#dependencies:dagre@^0.8.5",
+      "packages/ui/package.json#dependencies:@milkdown/crepe@7.21.2",
+      "packages/ui/package.json#dependencies:@milkdown/kit@7.21.2",
+      "packages/ui/package.json#dependencies:@milkdown/plugin-listener@7.21.2"
     ],
     "legacyPackageUsage": [
       "apps/cli/src/monitor-ui/monitor.tsx -> smithers-orchestrator/gateway-ui",
@@ -132,6 +135,7 @@
       "packages/smithers/package.json#./telegram={\"default\":\"./src/telegram.js\",\"import\":\"./src/telegram.js\",\"types\":\"./src/telegram.d.ts\"}",
       "packages/smithers/package.json#./testing={\"default\":\"./src/testing.js\",\"import\":\"./src/testing.js\",\"types\":\"./src/testing.d.ts\"}",
       "packages/smithers/package.json#./tools={\"default\":\"./src/tools.js\",\"import\":\"./src/tools.js\",\"types\":\"./src/tools.d.ts\"}",
+      "packages/smithers/package.json#./ui/adapters/markdown-editor={\"default\":\"./src/ui/adapters/markdown-editor.js\",\"import\":\"./src/ui/adapters/markdown-editor.js\",\"types\":\"./src/ui/adapters/markdown-editor.d.ts\"}",
       "packages/smithers/package.json#./ui={\"default\":\"./src/ui.js\",\"import\":\"./src/ui.js\",\"types\":\"./src/ui.d.ts\"}",
       "packages/smithers/package.json#./vercel={\"default\":\"./src/vercel.js\",\"import\":\"./src/vercel.js\",\"types\":\"./src/vercel.d.ts\"}",
       "packages/smithers/package.json#.={\"default\":\"./src/index.js\",\"import\":\"./src/index.js\",\"types\":\"./src/index.d.ts\"}",
@@ -143,6 +147,7 @@
       "packages/tui/package.json#name=\"@smithers-orchestrator/tui\"",
       "packages/ui-styleguide/package.json#.={\"default\":\"./src/index.ts\",\"import\":\"./src/index.ts\",\"types\":\"./src/index.ts\"}",
       "packages/ui-styleguide/package.json#name=\"@smithers-orchestrator/ui-styleguide\"",
+      "packages/ui/package.json#./adapters/markdown-editor={\"default\":\"./src/adapters/markdown-editor/index.ts\",\"import\":\"./src/adapters/markdown-editor/index.ts\",\"types\":\"./src/adapters/markdown-editor/index.ts\"}",
       "packages/ui/package.json#.={\"default\":\"./src/index.ts\",\"import\":\"./src/index.ts\",\"types\":\"./src/index.ts\"}",
       "packages/ui/package.json#name=\"@smithers-orchestrator/ui\"",
       "packages/usage/package.json#name=\"@smithers-orchestrator/usage\"",
@@ -251,6 +256,7 @@
       "packages/smithers/src/gateway-react.js -> @smithers-orchestrator/gateway-react",
       "packages/smithers/src/gateway-ui.js -> @smithers-orchestrator/gateway-ui",
       "packages/smithers/src/ui.js -> @smithers-orchestrator/ui",
+      "packages/smithers/src/ui/adapters/markdown-editor.js -> @smithers-orchestrator/ui/adapters/markdown-editor",
       "packages/tui/src/data.ts -> @smithers-orchestrator/gateway-react",
       "packages/tui/src/index.tsx -> @smithers-orchestrator/gateway-react",
       "packages/ui/src/styles.tsx -> @smithers-orchestrator/ui-styleguide"

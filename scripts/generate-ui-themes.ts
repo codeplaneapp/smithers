@@ -37,8 +37,8 @@ async function bundleCss(entryCss: string): Promise<string> {
   return css;
 }
 
-function emit(file: string, exportName: string, css: string, note: string) {
-  const outPath = resolve(uiDir, file);
+function emitTo(dir: string, file: string, exportName: string, css: string, note: string) {
+  const outPath = resolve(dir, file);
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(
     outPath,
@@ -46,6 +46,15 @@ function emit(file: string, exportName: string, css: string, note: string) {
   );
   console.log(`${file}: ${css.length} chars -> ${outPath}`);
 }
+
+function emit(file: string, exportName: string, css: string, note: string) {
+  emitTo(uiDir, file, exportName, css, note);
+}
+
+// The shared @smithers-orchestrator/ui markdown-editor adapter ships the same
+// Crepe theme through its own <style> injector, so keep its pre-bundled copy in
+// lockstep with the .smithers/ui one below.
+const uiAdapterDir = resolve(root, "packages/ui/src/adapters/markdown-editor");
 
 // ---- Crepe (Milkdown) theme: structural common + light/dark frame ----
 const crepeCommon = await bundleCss(`@import "@milkdown/crepe/theme/common/style.css";`);
@@ -61,6 +70,13 @@ emit(
   "crepeThemeCss",
   crepeCss,
   "Milkdown Crepe theme CSS (common + light/dark frame), pre-bundled for the Smithers UI <style> injection.",
+);
+emitTo(
+  uiAdapterDir,
+  "crepeTheme.generated.ts",
+  "crepeThemeCss",
+  crepeCss,
+  "Milkdown Crepe theme CSS (common + light/dark frame), pre-bundled for the @smithers-orchestrator/ui markdown-editor adapter <style> injection.",
 );
 
 // ---- xyflow base stylesheet (required for canvas/edges/controls) ----

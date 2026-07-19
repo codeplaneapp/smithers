@@ -90,6 +90,11 @@
       "import": "./src/ui.js",
       "default": "./src/ui.js"
     },
+    "./ui/adapters/markdown-editor": {
+      "types": "./src/ui/adapters/markdown-editor.d.ts",
+      "import": "./src/ui/adapters/markdown-editor.js",
+      "default": "./src/ui/adapters/markdown-editor.js"
+    },
     "./sandbox": {
       "types": "./src/sandbox.d.ts",
       "import": "./src/sandbox.js",

@@ -9,6 +9,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./adapters/markdown-editor": {
+      "types": "./src/adapters/markdown-editor/index.ts",
+      "import": "./src/adapters/markdown-editor/index.ts",
+      "default": "./src/adapters/markdown-editor/index.ts"
     }
   },
   "files": [
@@ -20,6 +25,9 @@
     "test": "bun test tests"
   },
   "dependencies": {
+    "@milkdown/crepe": "7.21.2",
+    "@milkdown/kit": "7.21.2",
+    "@milkdown/plugin-listener": "7.21.2",
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
