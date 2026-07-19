@@ -316,6 +316,27 @@ export const collapsiblePanelCss = `
 .sui-collapsible-empty { color:${t.mutedForeground}; font-size:12.5px; line-height:1.45; padding:0 14px 14px; }
 `;
 
+/* -------------------------------------------------------------------------- */
+/* Diff hunks                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export const diffCss = `
+.sui-diff { border:1px solid ${t.border}; border-radius:10px; overflow:hidden; font:500 12px/1.7 ${t.fontMono}; }
+.sui-diff-line { display:flex; padding:0 10px; }
+.sui-diff-line.sui-diff-add { background:color-mix(in srgb, ${t.success} 10%, ${t.card}); color:color-mix(in srgb, ${t.success} 80%, ${t.foreground}); }
+.sui-diff-line.sui-diff-del { background:color-mix(in srgb, ${t.destructive} 9%, ${t.card}); color:color-mix(in srgb, ${t.destructive} 80%, ${t.foreground}); }
+.sui-diff-ln { flex:none; width:34px; padding-right:12px; text-align:right; color:${t.placeholder}; user-select:none; }
+.sui-diff-ln-old, .sui-diff-ln-new { width:30px; }
+.sui-diff-sign { flex:none; width:14px; }
+.sui-diff-text { white-space:pre; overflow-x:auto; }
+.sui-diff-hunk-head { display:flex; align-items:center; gap:8px; padding:2px 10px; background:color-mix(in srgb, ${t.primary} 7%, ${t.card}); color:color-mix(in srgb, ${t.primary} 80%, ${t.mutedForeground}); border-top:1px solid ${t.border}; }
+.sui-diff-hunk-gutter { flex:none; width:60px; text-align:center; color:${t.placeholder}; user-select:none; }
+.sui-diff-hunk-header { white-space:pre; overflow-x:auto; }
+.sui-diff-paginate { display:grid; place-items:center; padding:8px; border-top:1px solid ${t.border}; }
+.sui-diff-paginate-btn { padding:5px 12px; border:1px solid ${t.border}; border-radius:8px; background:${t.card}; color:${t.primary}; font:600 12px/1 ${t.fontSans}; cursor:pointer; }
+.sui-diff-paginate-btn:hover { background:${t.secondary}; }
+`;
+
 /** All component sheets, composed in a stable order. */
 export const smithersUiCss = [
   buttonCss,
@@ -338,6 +359,7 @@ export const smithersUiCss = [
   rowButtonCss,
   kpiStatCss,
   collapsiblePanelCss,
+  diffCss,
 ]
   .map((block) => block.trim())
   .join("\n");

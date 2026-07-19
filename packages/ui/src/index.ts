@@ -118,3 +118,26 @@ export { SectionHeader, Eyebrow, type SectionHeaderProps } from "./section-heade
 export { RowButton, type RowButtonProps } from "./row-button";
 export { KpiStat, type KpiStatProps } from "./kpi-stat";
 export { CollapsiblePanel, type CollapsiblePanelProps } from "./collapsible-panel";
+export { DiffHunks, type DiffHunksProps } from "./diff-hunks";
+export type { Diff, DiffFile, DiffFileStatus, DiffLine, DiffLineKind, Hunk } from "./diff";
+export {
+  binaryBodyLabel,
+  byteCountString,
+  detectBinary,
+  diffTotals,
+  fileLineCount,
+  fileStatus,
+  groupHunks,
+  initialExpanded,
+  isLargeDiff,
+  paginateHunks,
+  parseHunks,
+  parseUnifiedFile,
+  statusLetter,
+  totalBytes,
+  LARGE_BYTE_LIMIT,
+  LARGE_FILE_COUNT,
+  PAGINATE_THRESHOLD,
+  PAGINATE_VISIBLE,
+  type ParseUnifiedFileOverrides,
+} from "./diff-paginate";
