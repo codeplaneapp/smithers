@@ -147,3 +147,4 @@ export {
   type FileTreeNode,
   type FileTreeItem,
 } from "./file-tree";
+export { Markdown, type MarkdownProps, type MarkdownLinkClick } from "./primitives/markdown";

@@ -11095,6 +11095,9 @@ All components accept `className` and `style`, forward refs, and carry
 | `SectionHeader`, `Eyebrow` | Section heading row: eyebrow plus title on the left, actions on the right. | `title`, `eyebrow`, `actions` |
 | `RowButton` | Full-width selectable list row with button semantics (the house run-row recipe). | `active` |
 | `KpiStat` | Compact stat card. | `label`, `value`, `hint` |
+| `CollapsiblePanel` | A collapsible titled section with a status pill/glyph, an optional meta line, and a pending/empty fallback. The shared shape workflow UIs previously hand-rolled as `Panel`/`PhaseCard`. Status drives a `StatusPill` (no re-derived classes). | `title`, `status`, `statusLabel`, `meta`, `defaultOpen`, `open`, `onOpenChange`, `pending`, `emptyText` |
+| `FileTree` | A flat list of `/`-delimited paths grouped into a nested, collapsible directory tree with controlled single selection and an optional per-leaf trailing affordance slot. | `nodes`, `selected`, `onSelect`, `renderAffordance`, `defaultCollapsed` |
+| `Markdown` | Dependency-free Markdown renderer for the subset a chat model emits: headings, ordered/unordered lists, fenced and inline code, bold, italics, and links. Renders through React children (never `innerHTML`) so it is XSS-safe by construction, and memoized on the source string. | `content`, `onLinkClick` |
 
 ### Chat surface
 
@@ -11107,6 +11110,30 @@ hooks into the visual layer.
 | `ChatTranscript` | Scrollable, accessible transcript container. | `pending`, `pendingLabel`, `empty` |
 | `ChatMessage` | One chat row with the Multi bubble geometry. | `role` (`assistant`, `user`, `system`), `label`, `meta`, `variant` (`default`, `terminal`), `pending` |
 | `ChatComposer` | Controlled glass composer. Enter submits, Shift+Enter inserts a newline. | `value`, `onValueChange`, `onSubmit`, `status`, `actions`, `disabled`, `docked` |
+
+### Diff viewer
+
+`DiffHunks` renders one file's unified diff, grouped into `@@ … @@` hunks with
+dual old/new line-number gutters, sign glyphs, and per-file line pagination. It
+is dependency-free (pure React over the ported diff domain) and keeps no store:
+thread the reveal state yourself with `revealed` / `onReveal`.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `DiffHunks` | A `DiffFile` as `@@`-grouped hunks with dual gutters and sign glyphs. Over `PAGINATE_THRESHOLD` lines it renders the first `PAGINATE_VISIBLE` and an "Expand remaining N lines" button unless `revealed`. | `file`, `revealed`, `onReveal` |
+
+The diff domain that feeds it is exported alongside the component, so callers
+can build a `DiffFile` from a raw patch and reason about it without a runtime:
+
+| Export | What it does |
+| --- | --- |
+| `parseUnifiedFile`, `parseHunks` | Parse a raw unified patch into a `DiffFile` (add/del totals, per-line numbering, status, rename `oldPath`, mode changes); `parseHunks` returns just the flat lines. |
+| `groupHunks`, `fileLineCount` | Split a `DiffFile`'s flat lines back into `@@`-headed hunks; count the rendered lines. |
+| `paginateHunks`, `PAGINATE_THRESHOLD`, `PAGINATE_VISIBLE` | Trim a file to a line budget (whole hunks then partials), returning kept hunks plus the hidden count. |
+| `detectBinary`, `binaryBodyLabel`, `byteCountString` | Binary-marker detection and the human-readable size placeholder. |
+| `fileStatus`, `statusLetter` | Normalized A/M/D/R/? status and its badge letter. |
+| `isLargeDiff`, `initialExpanded`, `diffTotals`, `totalBytes` | Whole-`Diff` helpers: large-diff detection, the expand seed, and aggregate counts. |
+| `DiffFile`, `DiffLine`, `DiffLineKind`, `DiffFileStatus`, `Diff`, `Hunk` | The diff domain types. |
 
 ### Utilities
 
