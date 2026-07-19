@@ -21,6 +21,7 @@ import {
   EmptyState,
   Eyebrow,
   Field,
+  FileTree,
   Input,
   KpiStat,
   Label,
@@ -333,6 +334,22 @@ describe("misc primitives", () => {
     expect(html).toContain("sui-kpi-label");
     expect(html).toContain("sui-kpi-value");
     expect(html).toContain("sui-kpi-hint");
+  });
+
+  test("FileTree nests a flat path list and marks the selected leaf", () => {
+    const html = renderToStaticMarkup(
+      <FileTree
+        nodes={["src/app/main.ts", "README.md"]}
+        selected="README.md"
+        renderAffordance={(node) => (node.path === "README.md" ? <span className="dot" /> : null)}
+      />,
+    );
+    expect(html).toContain('role="tree"');
+    expect(html).toContain('data-slot="file-tree"');
+    expect(html).toContain("sui-file-tree-dir-toggle");
+    expect(html).toContain("main.ts");
+    expect(html).toContain('data-active="true"');
+    expect(html).toContain("sui-file-tree-affordance");
   });
 });
 

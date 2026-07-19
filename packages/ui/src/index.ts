@@ -141,3 +141,9 @@ export {
   PAGINATE_VISIBLE,
   type ParseUnifiedFileOverrides,
 } from "./diff-paginate";
+export {
+  FileTree,
+  type FileTreeProps,
+  type FileTreeNode,
+  type FileTreeItem,
+} from "./file-tree";

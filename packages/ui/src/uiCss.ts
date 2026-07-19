@@ -337,6 +337,25 @@ export const diffCss = `
 .sui-diff-paginate-btn:hover { background:${t.secondary}; }
 `;
 
+export const fileTreeCss = `
+.sui-file-tree { min-width:0; display:flex; flex-direction:column; gap:1px; font-size:13px; color:${t.foreground}; }
+.sui-file-tree-children { display:flex; flex-direction:column; gap:1px; margin-left:10px; padding-left:8px; border-left:1px solid ${t.border}; }
+.sui-file-tree-dir { min-width:0; display:flex; flex-direction:column; gap:1px; }
+.sui-file-tree-dir-toggle { min-width:0; display:flex; align-items:center; gap:6px; width:100%; padding:4px 6px; border:none; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:12.5px; font-weight:650; text-align:left; cursor:pointer; }
+.sui-file-tree-dir-toggle:hover { background:${t.secondary}; color:${t.foreground}; }
+.sui-file-tree-dir-toggle:focus-visible { ${focusRing} }
+.sui-file-tree-caret { flex:none; width:0; height:0; border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:5px solid currentColor; transform:rotate(90deg); transition:transform .12s ease; }
+.sui-file-tree-dir-toggle[aria-expanded='false'] .sui-file-tree-caret { transform:rotate(0deg); }
+.sui-file-tree-dir-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sui-file-tree-row { min-width:0; display:flex; align-items:center; gap:4px; }
+.sui-file-tree-file { min-width:0; flex:1 1 auto; display:flex; align-items:center; gap:6px; padding:4px 6px; border:none; border-radius:${t.radiusControl}; background:transparent; color:${t.foreground}; font:inherit; font-size:13px; text-align:left; cursor:pointer; }
+.sui-file-tree-file:hover { background:${t.secondary}; }
+.sui-file-tree-file:focus-visible { ${focusRing} }
+.sui-file-tree-file[data-active='true'] { background:color-mix(in srgb, ${t.primary} 12%, transparent); color:${t.primary}; font-weight:600; }
+.sui-file-tree-file-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sui-file-tree-affordance { flex:none; display:inline-flex; align-items:center; }
+`;
+
 /** All component sheets, composed in a stable order. */
 export const smithersUiCss = [
   buttonCss,
@@ -360,6 +379,7 @@ export const smithersUiCss = [
   kpiStatCss,
   collapsiblePanelCss,
   diffCss,
+  fileTreeCss,
 ]
   .map((block) => block.trim())
   .join("\n");

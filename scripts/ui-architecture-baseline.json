@@ -337,6 +337,7 @@
     "ui-layer-placement :: packages/ui/src/diff-paginate.ts is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/diff.ts is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/empty-state.tsx is outside the target UI layers",
+    "ui-layer-placement :: packages/ui/src/file-tree.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/input.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/kpi-stat.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/label.tsx is outside the target UI layers",

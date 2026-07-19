@@ -20,8 +20,12 @@ How the pieces fit, infrastructure first:
   browser fallback, deduped via `SMITHERS_UI_STYLE_ATTR`.
 - One file per component (`button`, `badge`, `card`, `dialog`, `select`, ...)
   plus house compositions (`status-pill`, `empty-state`, `section-header`,
-  `row-button`, `kpi-stat`). `index.ts` is the only entry point and defines the
-  public API.
+  `row-button`, `kpi-stat`, `file-tree`). `index.ts` is the only entry point and
+  defines the public API.
+- `file-tree.tsx` — the generic collapsible `FileTree`: a flat list of
+  `/`-delimited paths grouped into nested directories with expand/collapse,
+  controlled single selection (`selected` + `onSelect`), and an optional
+  per-leaf trailing affordance slot. Props-driven, with no app/store coupling.
 - `chat/` contains the shared Multi-style conversation surface:
   `ChatTranscript`, `ChatMessage`, and the controlled glass `ChatComposer`.
   These are transport-neutral so workflow UIs can feed them Gateway events,
