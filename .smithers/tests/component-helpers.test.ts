@@ -473,17 +473,17 @@ describe("extract-prompt barrel and roles", () => {
         ...Array(4).fill("active-terra"),
         ...Array(20).fill("active-sol"),
       ]);
-      expect(active.implementer.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "KimiAgent"]);
-      expect(active.validator.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "KimiAgent"]);
-      expect(active.synthesizer.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent", "KimiAgent"]);
-      expect(active.fableAuthor.map((a) => a.type)).toEqual(["ClaudeCodeAgent", "CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "KimiAgent"]);
-      expect(active.panelists.map((seat) => seat.map((a) => a.type))).toEqual([["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent", "KimiAgent"], ["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent", "KimiAgent"]]);
-      expect(active.polishReviewer.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent", "KimiAgent"]);
+      expect(active.implementer.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent"]);
+      expect(active.validator.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent"]);
+      expect(active.synthesizer.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent"]);
+      expect(active.fableAuthor.map((a) => a.type)).toEqual(["ClaudeCodeAgent", "CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent"]);
+      expect(active.panelists.map((seat) => seat.map((a) => a.type))).toEqual([["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent"], ["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent"]]);
+      expect(active.polishReviewer.map((a) => a.type)).toEqual(["CodexAgent", "CodexAgent", "CodexAgent", "CodexAgent", "ClaudeCodeAgent", "ClaudeCodeAgent"]);
       expect(fallback.models).toEqual(["sol-override", "terra-override", "luna-override"]);
       const fallbackAgentEnv = expect.objectContaining({ SMITHERS_ROLE_SENTINEL: "preserved", PATH: fakeBin });
-      expect(fallback.implementer).toEqual([{ type: "ClaudeCodeAgent", model: "claude-sonnet-5", opts: { env: fallbackAgentEnv } }, { type: "KimiAgent", model: "kimi-k2.7-code", opts: { env: fallbackAgentEnv } }]);
+      expect(fallback.implementer).toEqual([{ type: "ClaudeCodeAgent", model: "claude-sonnet-5", opts: { env: fallbackAgentEnv } }, { type: "ClaudeCodeAgent", model: "claude-fable-5", opts: { env: fallbackAgentEnv } }]);
       expect(fallback.validator).toEqual(fallback.implementer);
-      const fallbackSol = [{ type: "ClaudeCodeAgent", model: "claude-fable-5", opts: { env: fallbackAgentEnv } }, { type: "ClaudeCodeAgent", model: "claude-opus-4-8", opts: { env: fallbackAgentEnv } }, { type: "KimiAgent", model: "kimi-k2.7-code", opts: { env: fallbackAgentEnv } }];
+      const fallbackSol = [{ type: "ClaudeCodeAgent", model: "claude-fable-5", opts: { env: fallbackAgentEnv } }, { type: "ClaudeCodeAgent", model: "claude-opus-4-8", opts: { env: fallbackAgentEnv } }];
       expect(fallback.synthesizer).toEqual(fallbackSol);
       expect(fallback.fableAuthor).toEqual(fallbackSol);
       expect(fallback.polishReviewer).toEqual(fallbackSol);
