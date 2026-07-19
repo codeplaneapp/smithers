@@ -357,6 +357,31 @@ export const fileTreeCss = `
 .sui-file-tree-affordance { flex:none; display:inline-flex; align-items:center; }
 `;
 
+/* -------------------------------------------------------------------------- */
+/* Markdown                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const markdownCss = `
+.sui-md { min-width:0; color:${t.foreground}; font-size:13px; line-height:1.55; overflow-wrap:anywhere; }
+.sui-md > :first-child { margin-top:0; }
+.sui-md > :last-child { margin-bottom:0; }
+.sui-md-p { margin:6px 0; }
+.sui-md-heading { margin:14px 0 6px; color:${t.foreground}; font-weight:650; line-height:1.3; }
+.sui-md-h1 { font-size:1.5em; }
+.sui-md-h2 { font-size:1.3em; }
+.sui-md-h3 { font-size:1.15em; }
+.sui-md-h4 { font-size:1em; }
+.sui-md-h5 { font-size:.9em; }
+.sui-md-h6 { font-size:.85em; color:${t.mutedForeground}; }
+.sui-md-list { margin:6px 0; padding-left:22px; }
+.sui-md-list li { margin:2px 0; }
+.sui-md-inline-code { padding:1px 5px; border-radius:5px; background:color-mix(in srgb, ${t.foreground} 7%, transparent); font-family:${t.fontMono}; font-size:.9em; }
+.sui-md-code-block { margin:8px 0; padding:12px 14px; border-radius:${t.radius}; background:${t.codeBg}; color:${t.codeText}; font-family:${t.fontMono}; font-size:12px; line-height:1.5; overflow:auto; tab-size:4; }
+.sui-md-code-block code { padding:0; background:none; font:inherit; color:inherit; }
+.sui-md-link { color:${t.primary}; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.sui-md-link:hover { text-decoration-thickness:2px; }
+`;
+
 /** All component sheets, composed in a stable order. */
 export const smithersUiCss = [
   buttonCss,
@@ -381,6 +406,7 @@ export const smithersUiCss = [
   collapsiblePanelCss,
   diffCss,
   fileTreeCss,
+  markdownCss,
 ]
   .map((block) => block.trim())
   .join("\n");
