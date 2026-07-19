@@ -20,7 +20,8 @@ Component map:
   `@smithers-orchestrator/ui-styleguide` CSS and the `WorkflowUiShell` scaffold.
 - Pure components: `StatusPill`, `NodeRow`.
 - Hook-driven: `RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`,
-  `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`.
+  `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`,
+  `NodeOutputCard`.
 - `SimpleWorkflowDashboard` — the batteries-included composition of the above.
 - `WorkflowGraph` — an n8n-style ReactFlow + dagre DAG canvas built from a
   `WorkflowSpecNode[]`; each node is a self-styled `SmithersTaskNode` card (kind
@@ -28,6 +29,12 @@ Component map:
   util. Unlike the rest of the package it pulls in `@xyflow/react` + `dagre`, so
   its required base stylesheet ships inline as `workflowGraphCss` (rendered in a
   `<style>` tag) to survive the gateway's `Bun.build` (which drops `.css`).
+
+`NodeOutputCard` wraps `NodeOutputView`'s envelope handling (`unwrapNodeOutput`)
+in card chrome with an ok/fail/pending status glyph and a render-prop body given
+the unwrapped row — the generic form of the `OutputCard`/`SummaryPanel` shape
+hand-rolled across `.smithers/ui/*` (ticket-fleet, issue-train, orchbench, …).
+It also folds in the `key={remountKey + ":" + nodeId}` remount convention.
 
 Gotchas: list-shaped RPCs (runs, approvals) are pull-only on the local gateway
 path, so those components poll via `pollMs` (default 2000, `0` disables).

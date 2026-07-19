@@ -25,6 +25,7 @@ import {
   ApprovalPanel,
   ConnectionBadge,
   LaunchButton,
+  NodeOutputCard,
   NodeOutputView,
   RunEventLog,
   RunList,
@@ -390,6 +391,113 @@ describe("NodeOutputView", () => {
     await harness.flush(60);
     // GatewayRpcError surfaces the gateway's own error message.
     expect(harness.container.textContent).toContain("Forced failure");
+  });
+});
+
+describe("NodeOutputCard", () => {
+  // A fake node-output hook so pending/produced/failed chrome is driven
+  // deterministically, matching RunList's injectable `useRuns` seam.
+  const hookReturning = (data: unknown, extra: Record<string, unknown> = {}) =>
+    (() => ({ data, error: undefined, loading: false, refetch: async () => {}, ...extra })) as never;
+
+  test("pending → produced → failed chrome transitions", async () => {
+    const gw = boot();
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputCard, {
+        runId: "run-a",
+        nodeId: "n1",
+        useNodeOutput: hookReturning({ status: "pending" }),
+      }),
+    );
+    await harness.flush(20);
+    expect(harness.container.querySelector('[data-status="pending"]')).not.toBeNull();
+
+    await harness.render(
+      createElement(NodeOutputCard, {
+        runId: "run-a",
+        nodeId: "n1",
+        useNodeOutput: hookReturning({ status: "produced", row: { output: "the-output" } }),
+      }),
+    );
+    expect(harness.container.querySelector('[data-status="produced"]')).not.toBeNull();
+    expect(harness.container.textContent).toContain("the-output");
+
+    await harness.render(
+      createElement(NodeOutputCard, {
+        runId: "run-a",
+        nodeId: "n1",
+        useNodeOutput: hookReturning({ status: "failed" }),
+      }),
+    );
+    expect(harness.container.querySelector('[data-status="failed"]')).not.toBeNull();
+  });
+
+  test("the render prop receives the unwrapped row object", async () => {
+    const gw = boot();
+    let received: unknown;
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputCard, {
+        runId: "run-a",
+        nodeId: "n1",
+        useNodeOutput: hookReturning({ status: "produced", row: { foo: 42 } }),
+        children: (row: unknown) => {
+          received = row;
+          return createElement("span", null, "custom body");
+        },
+      }),
+    );
+    await harness.flush(20);
+    expect(received).toEqual({ foo: 42 });
+    expect(harness.container.textContent).toContain("custom body");
+  });
+
+  test("renders default title/summary when no body is provided", async () => {
+    const gw = boot();
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputCard, {
+        runId: "run-a",
+        nodeId: "plan-node",
+        useNodeOutput: hookReturning({ status: "produced", row: { output: "the-body" } }),
+      }),
+    );
+    await harness.flush(20);
+    // Default title falls back to the nodeId; default summary is the status label;
+    // the default body reuses NodeOutputView's formatOutput on the row.
+    expect(harness.container.textContent).toContain("plan-node");
+    expect(harness.container.textContent).toContain("Produced");
+    expect(harness.container.textContent).toContain("the-body");
+  });
+
+  test("surfaces the hook error as failed chrome", async () => {
+    const gw = boot();
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputCard, {
+        runId: "run-a",
+        nodeId: "n1",
+        useNodeOutput: hookReturning(undefined, { error: new Error("boom") }),
+      }),
+    );
+    await harness.flush(20);
+    expect(harness.container.querySelector('[data-status="failed"]')).not.toBeNull();
+    expect(harness.container.textContent).toContain("boom");
+  });
+
+  test("reads live output through the real gateway hook", async () => {
+    const gw = boot({ outputs: { "run-a:n1": { status: "produced", row: { output: "live-value" } } } });
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputCard, { runId: "run-a", nodeId: "n1", iteration: 0 }),
+    );
+    await waitFor(
+      harness,
+      () => harness.container.textContent?.includes("live-value") ?? false,
+      "live node output to load",
+    );
+    expect(harness.container.querySelector('[data-status="produced"]')).not.toBeNull();
   });
 });
 
