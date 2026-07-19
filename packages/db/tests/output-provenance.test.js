@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { Effect } from "effect";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -80,6 +81,44 @@ describe("durable output completion provenance", () => {
     } finally {
       sqlite.close();
     }
+  });
+
+  test("signals and outputs allocate unique seqs from one shared clock under concurrent delivery, stable across resume", async () => {
+    // The machine fold's total order (provenance seq, declaration index,
+    // mapped subindex) is deterministic only if seq is genuinely unique
+    // across BOTH allocation spaces. Race three signal deliveries against
+    // three output upserts on one run, then prove uniqueness across the
+    // union and that the order survives a close/reopen unchanged.
+    const path = join(tmpdir(), `smithers-shared-clock-${randomUUID()}.db`);
+    const first = open(path);
+    await first.adapter.insertRun({ runId: "clock", workflowName: "wf", status: "running", createdAtMs: 1 });
+    await Promise.all([
+      ...[0, 1, 2].map((i) => first.adapter.upsertOutputRow(outputs, { runId: "clock", nodeId: `task${i}`, iteration: 0 }, { value: i })),
+      ...[0, 1, 2].map((i) => Effect.runPromise(first.adapter.insertSignalWithNextSeq({
+        runId: "clock",
+        signalName: "PING",
+        correlationId: `c${i}`,
+        payloadJson: JSON.stringify({ i }),
+        receivedAtMs: 1000 + i,
+        receivedBy: null,
+      }))),
+    ]);
+    const readUnion = (sqlite) => sqlite.query(
+      `SELECT seq, src, key FROM (
+         SELECT seq, 'output' AS src, node_id AS key FROM _smithers_output_provenance WHERE run_id = 'clock'
+         UNION ALL
+         SELECT seq, 'signal' AS src, correlation_id AS key FROM _smithers_signals WHERE run_id = 'clock'
+       ) ORDER BY seq`,
+    ).all();
+    const before = readUnion(first.sqlite);
+    first.sqlite.close();
+    expect(before).toHaveLength(6);
+    expect(new Set(before.map((row) => row.seq)).size).toBe(6);
+    expect(before.filter((row) => row.src === "signal")).toHaveLength(3);
+    const second = open(path);
+    try {
+      expect(readUnion(second.sqlite)).toEqual(before);
+    } finally { second.sqlite.close(); }
   });
 
   test("same-key replacement retains its original completion sequence", async () => {
