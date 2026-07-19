@@ -19,6 +19,11 @@
       "types": "./src/adapters/pierre-diff-view.tsx",
       "import": "./src/adapters/pierre-diff-view.tsx",
       "default": "./src/adapters/pierre-diff-view.tsx"
+    },
+    "./adapters/terminal": {
+      "types": "./src/adapters/terminal.tsx",
+      "import": "./src/adapters/terminal.tsx",
+      "default": "./src/adapters/terminal.tsx"
     }
   },
   "files": [
@@ -35,6 +40,8 @@
     "@milkdown/plugin-listener": "7.21.2",
     "@pierre/diffs": "^1.2.12",
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "radix-ui": "^1.6.1"

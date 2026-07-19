@@ -42,6 +42,14 @@ How the pieces fit, infrastructure first:
     prop toggles `"split"` (side-by-side) vs `"inline"` (unified). The pure
     seams `diffsThemeForMode`, `diffStyleForLayout`, and `patchToCodeViewItems`
     are exported alongside the component.
+  - `Terminal` (`@smithers-orchestrator/ui/adapters/terminal`, also
+    `smithers-orchestrator/ui/adapters/terminal` off the published facade) — a
+    generic xterm.js render surface. The data source is lifted entirely onto
+    props (`lines` snapshot, a `stream` write seam, `onData` out), so it has
+    zero app-store coupling and drops into any workflow UI. The xterm base
+    stylesheet is vendored as a string (`adapters/xtermCss.ts`) and injected
+    through the same style seam the rest of the library uses, never a bare
+    `import "@xterm/xterm/css/xterm.css"` that the gateway bundler drops.
 
 Gotchas (all enforced by `../tests/css-contract.test.ts`):
 
