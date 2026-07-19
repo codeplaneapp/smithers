@@ -1552,18 +1552,38 @@ export class SmithersDb {
         const conflictColumns = cols.iteration
             ? ["runId", "nodeId", "iteration"]
             : ["runId", "nodeId"];
-        return this.write(`upsert output ${tableName}`, () => {
-            if (!isBunSqliteStorage(this.internalStorage)) {
-                return this.internalStorage.upsert(tableName, values, conflictColumns);
+        const persist = async () => {
+            await this.internalStorage.execute(`CREATE TABLE IF NOT EXISTS _smithers_output_provenance (run_id TEXT NOT NULL, output_table TEXT NOT NULL, node_id TEXT NOT NULL, iteration INTEGER NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (run_id, output_table, node_id, iteration), UNIQUE (run_id, seq))`);
+            // Lock the run row before reading MAX(seq). This is the portable
+            // allocator mutex for PostgreSQL and PGlite; SQLite's transaction
+            // writer lock supplies the same serialization.
+            const runsTable = this.internalStorage.dialect === POSTGRES
+                ? await this.internalStorage.queryOneRaw(`SELECT 1 FROM information_schema.tables WHERE table_name = '_smithers_runs' LIMIT 1`)
+                : await this.internalStorage.queryOneRaw(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs' LIMIT 1`);
+            if (runsTable) await this.internalStorage.execute(`UPDATE _smithers_runs SET run_id = run_id WHERE run_id = ?`, [key.runId]);
+            if (!isBunSqliteStorage(this.internalStorage)) await this.internalStorage.upsert(tableName, values, conflictColumns);
+            else await this.db.insert(table).values(values).onConflictDoUpdate({ target, set: values });
+            const iteration = key.iteration ?? 0;
+            const found = await this.internalStorage.queryOne(`SELECT seq FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ? LIMIT 1`, [key.runId, tableName, key.nodeId, iteration]);
+            if (!found) {
+                const signalsTable = this.internalStorage.dialect === POSTGRES
+                    ? await this.internalStorage.queryOneRaw("SELECT 1 FROM information_schema.tables WHERE table_name = '_smithers_signals' LIMIT 1")
+                    : await this.internalStorage.queryOneRaw("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_smithers_signals' LIMIT 1");
+                const next = signalsTable
+                    ? await this.internalStorage.queryOne(`SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = ?)`, [key.runId, key.runId])
+                    : await this.internalStorage.queryOne(`SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_output_provenance WHERE run_id = ?`, [key.runId]);
+                await this.internalStorage.execute(`INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ?)`, [key.runId, tableName, key.nodeId, iteration, Number(next?.seq ?? 0), key.runId, tableName, key.nodeId, iteration]);
             }
-            return this.db
-                .insert(table)
-                .values(values)
-                .onConflictDoUpdate({
-                target: target,
-                set: values,
-            });
-        });
+            const confirmed = await this.internalStorage.queryOne(`SELECT seq FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ? LIMIT 1`, [key.runId, tableName, key.nodeId, iteration]);
+            if (!confirmed) throw new Error("Output provenance allocation did not commit");
+        };
+        const inTransaction = sqliteTransactionContext.getStore() === this;
+        if (inTransaction) return this.write(`upsert output ${tableName}`, persist);
+        // withTransaction serializes SQLite writers and makes the output row
+        // plus its provenance one crash-atomic unit. PostgreSQL unique-seq
+        // conflicts are retried by the transaction wrapper, so MAX(seq)+1 can
+        // never report a successful output without its provenance row.
+        return this.withTransactionEffect(`upsert output ${tableName}`, Effect.promise(persist));
     }
     /**
    * @param {Table} table
@@ -2408,8 +2428,8 @@ export class SmithersDb {
 	                        }
 	                        return Number(existingInTurn.seq);
 	                    }
-	                    const lastSeq = (yield* Effect.tryPromise({
-	                        try: () => self.internalStorage.getLastSignalSeq(row.runId),
+                    const lastSeq = (yield* Effect.tryPromise({
+                        try: () => self.internalStorage.getLastRunProvenanceSeq(row.runId),
 	                        catch: (cause) => toSmithersError(cause, "get fallback last signal seq"),
                     })) ?? -1;
                     const seq = lastSeq + 1;
@@ -2459,8 +2479,8 @@ export class SmithersDb {
                             return Number(existingInTurn.seq);
                         }
                         const res = client
-                            .query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_signals WHERE run_id = ?")
-                            .get(row.runId);
+                            .query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_signals WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_output_provenance WHERE run_id = ?)")
+                            .get(row.runId, row.runId);
                         const seq = Number(res?.seq ?? 0);
                         client
                             .query("INSERT INTO _smithers_signals (run_id, seq, signal_name, correlation_id, payload_json, received_at_ms, received_by) VALUES (?, ?, ?, ?, ?, ?, ?)")

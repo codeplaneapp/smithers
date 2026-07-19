@@ -196,6 +196,50 @@ function tableColumnNames(sqlite, table) {
         .filter((name) => typeof name === "string"));
 }
 
+/**
+ * Backfill legacy output rows after the current schema has pre-created the
+ * provenance table. The migration ledger, rather than table presence, is the
+ * completion marker: table creation happens in the current-schema bootstrap.
+ */
+function backfillOutputProvenanceSqlite(sqlite) {
+    if (!tableExists(sqlite, "_smithers_output_provenance") || !tableExists(sqlite, "_smithers_nodes")) {
+        return { backfilled: 0 };
+    }
+    const outputTables = new Set(sqlite
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_smithers_%' ORDER BY name")
+        .all()
+        .map((row) => row.name)
+        .filter((name) => typeof name === "string"));
+    const nodes = sqlite.query("SELECT DISTINCT run_id, output_table FROM _smithers_nodes WHERE output_table IS NOT NULL ORDER BY run_id, output_table").all();
+    const nextByRun = new Map();
+    let backfilled = 0;
+    for (const node of nodes) {
+        const candidate = String(node.output_table);
+        // Older node rows sometimes stored the schema key instead of the
+        // physical table name. Resolve it from the actual SQLite catalog.
+        const tableName = outputTables.has(candidate)
+            ? candidate
+            : [...outputTables].find((name) => name === candidate.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+        if (!tableName) continue;
+        const columns = tableColumnNames(sqlite, tableName);
+        if (!columns.has("run_id") || !columns.has("node_id") || !columns.has("iteration")) continue;
+        const rows = sqlite.query(`SELECT run_id, node_id, iteration FROM ${quoteIdentifier(tableName)} WHERE run_id = ? ORDER BY rowid`).all(node.run_id);
+        for (const row of rows) {
+            const iteration = Number(row.iteration ?? 0);
+            const found = sqlite.query(`SELECT 1 FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ? LIMIT 1`).get(row.run_id, tableName, row.node_id, iteration);
+            if (found) continue;
+            let next = nextByRun.get(row.run_id);
+            if (next === undefined) {
+                next = Number(sqlite.query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = ?)").get(row.run_id, row.run_id)?.seq ?? 0);
+            }
+            sqlite.run("INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES (?, ?, ?, ?, ?)", row.run_id, tableName, row.node_id, iteration, next);
+            nextByRun.set(row.run_id, next + 1);
+            backfilled += 1;
+        }
+    }
+    return { backfilled };
+}
+
 function indexExists(sqlite, index) {
     return Boolean(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?").get(index));
 }
@@ -1188,6 +1232,54 @@ function buildMigrations(context) {
                 return { table: "_smithers_integration_deliveries", addedColumns };
             },
         },
+        {
+            id: "0030_output_provenance",
+            name: "Add durable output completion provenance and backfill legacy rows",
+            checksum: "packages/db/migrations/0030_output_provenance.sql",
+            // 0001/current-schema bootstrap creates this table before the
+            // migration runner. Presence therefore cannot mean backfill ran.
+            isApplied: () => false,
+            isAppliedPostgres: async () => false,
+            up: (sqlite) => {
+                sqlite.run(createTableStatementFor("_smithers_output_provenance", context.createTableStatements));
+                if (!tableExists(sqlite, "_smithers_nodes")) return { table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
+                const nodes = sqlite.query(`SELECT DISTINCT run_id, output_table FROM _smithers_nodes ORDER BY run_id, output_table`).all();
+                let inserted = 0;
+                for (const node of nodes) {
+                    if (typeof node.output_table !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(node.output_table)) continue;
+                    let rows;
+                    const tableName = tableExists(sqlite, node.output_table)
+                        ? node.output_table
+                        : [...new Set(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_smithers_%'").all().map((row) => row.name))]
+                            .find((name) => name === node.output_table.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+                    if (!tableName) continue;
+                    rows = sqlite.query(`SELECT node_id, COALESCE(iteration, 0) AS iteration FROM ${quoteIdentifier(tableName)} WHERE run_id = ? ORDER BY rowid`).all(node.run_id);
+                    for (const row of rows) {
+                        const next = sqlite.query(`SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = ?)`).get(node.run_id, node.run_id);
+                        sqlite.run(`INSERT OR IGNORE INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES (?, ?, ?, ?, ?)`, node.run_id, tableName, row.node_id, Number(row.iteration ?? 0), Number(next.seq));
+                        inserted += 1;
+                    }
+                }
+                return { table: "_smithers_output_provenance", backfilled: inserted };
+            },
+            upPostgres: async (pgConn) => {
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_output_provenance", context.createTableStatements)) });
+                if (!(await tableExistsPostgres(pgConn, "_smithers_nodes"))) return { table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
+                const nodes = await pgConn.query({ text: `SELECT DISTINCT run_id, output_table FROM _smithers_nodes ORDER BY run_id, output_table` });
+                let inserted = 0;
+                for (const node of nodes.rows ?? []) {
+                    if (typeof node.output_table !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(node.output_table)) continue;
+                    let rows;
+                    rows = (await pgConn.query({ text: `SELECT node_id, COALESCE(iteration, 0) AS iteration FROM "${node.output_table.replaceAll('"', '""')}" WHERE run_id = $1 ORDER BY node_id, iteration`, values: [node.run_id] })).rows;
+                    for (const row of rows) {
+                        const next = await pgConn.query({ text: `SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = $1 UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = $1)`, values: [node.run_id] });
+                        await pgConn.query({ text: `INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`, values: [node.run_id, node.output_table, row.node_id, Number(row.iteration ?? 0), Number(next.rows[0].seq)] });
+                        inserted += 1;
+                    }
+                }
+                return { table: "_smithers_output_provenance", backfilled: inserted };
+            },
+        },
     ];
 }
 
@@ -1216,6 +1308,10 @@ export function runSmithersSchemaMigrations(sqlite, context) {
         recordMigration(sqlite, migration, details);
         applied.add(migration.id);
     }
+    // Databases upgraded by the rejected 0030 implementation may already
+    // have a ledger row because table presence was mistaken for completion.
+    // Re-run the idempotent data backfill so those stores converge too.
+    backfillOutputProvenanceSqlite(sqlite);
     // CREATE TRIGGER IF NOT EXISTS is metadata-only and repairs a manually
     // dropped lifecycle trigger without rerunning any recorded migration.
     for (const trigger of SNAPSHOT_SQLITE_TRIGGERS) sqlite.run(trigger);
@@ -1245,6 +1341,32 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
     await storage.execute(MIGRATION_TABLE_SQL);
     for (const statement of context.createTableStatements) {
         await storage.execute(statement);
+    }
+    // External SQLite stores use this async bootstrap path and may already
+    // contain user output tables. Run the data portion of 0030 explicitly;
+    // CREATE TABLE IF NOT EXISTS above must not make it look applied.
+    const tables = await storage.queryAllRaw("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_smithers_%' ORDER BY name");
+    const outputTables = new Set(tables.map((row) => row.name).filter((name) => typeof name === "string"));
+    const nodes = await storage.queryAllRaw("SELECT DISTINCT run_id, output_table FROM _smithers_nodes WHERE output_table IS NOT NULL ORDER BY run_id, output_table");
+    const nextByRun = new Map();
+    for (const node of nodes) {
+        const candidate = String(node.output_table);
+        const tableName = outputTables.has(candidate)
+            ? candidate
+            : [...outputTables].find((name) => name === candidate.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+        if (!tableName) continue;
+        const columns = new Set((await storage.queryAllRaw(`PRAGMA table_info(${quoteIdentifier(tableName)})`)).map((row) => row.name));
+        if (!columns.has("run_id") || !columns.has("node_id") || !columns.has("iteration")) continue;
+        const rows = await storage.queryAllRaw(`SELECT run_id, node_id, iteration FROM ${quoteIdentifier(tableName)} WHERE run_id = ? ORDER BY rowid`, [node.run_id]);
+        for (const row of rows) {
+            const iteration = Number(row.iteration ?? 0);
+            const found = await storage.queryOneRaw("SELECT 1 FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ? LIMIT 1", [row.run_id, tableName, row.node_id, iteration]);
+            if (found) continue;
+            let next = nextByRun.get(row.run_id);
+            if (next === undefined) next = Number((await storage.queryOneRaw("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = ?)", [row.run_id, row.run_id]))?.seq ?? 0);
+            await storage.execute("INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES (?, ?, ?, ?, ?)", [row.run_id, tableName, row.node_id, iteration, next]);
+            nextByRun.set(row.run_id, next + 1);
+        }
     }
     for (const statement of SNAPSHOT_SQLITE_TRIGGERS) await storage.execute(statement);
     for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {

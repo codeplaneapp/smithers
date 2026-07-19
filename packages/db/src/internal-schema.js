@@ -226,6 +226,7 @@ export const smithersEvents = sqliteTable("_smithers_events", {
 }, (t) => ({
     pk: primaryKey({ columns: [t.runId, t.seq] }),
 }));
+export { smithersOutputProvenance } from "./internal-schema/smithersOutputProvenance.js";
 export const smithersRalph = sqliteTable("_smithers_ralph", {
     runId: text("run_id").notNull(),
     ralphId: text("ralph_id").notNull(),

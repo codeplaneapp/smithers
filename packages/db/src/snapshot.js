@@ -4,6 +4,10 @@ import { Effect, Option } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /** @typedef {Record<string, Array<unknown>>} OutputSnapshot */
+// This is deliberately a distinct, enumerable transport field. A symbol is
+// lost by spreads and JSON storage, while a user-owned `seq` field must never
+// be mistaken for runtime provenance.
+export const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm").Table} _Table */
 
@@ -190,6 +194,31 @@ export function loadOutputsEffect(db, schema, runId) {
             });
             const boolKeys = getBooleanColumnKeys(/** @type {_Table} */ (table));
             const rows = coerceBooleanColumns(rawRows, boolKeys);
+            let provenance = [];
+            try {
+                provenance = isPostgresDb(db)
+                    ? (yield* Effect.promise(() => db.connection.query({ text: `SELECT node_id, iteration, seq FROM _smithers_output_provenance WHERE run_id = $1 AND output_table = $2`, values: [runId, tableName] }))).rows
+                    : db.session.client.query(`SELECT node_id, iteration, seq FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ?`).all(runId, tableName);
+            } catch (cause) {
+                yield* Effect.logWarning("output provenance unavailable; legacy rows will be excluded").pipe(Effect.annotateLogs({
+                    runId,
+                    tableName,
+                    cause: String(cause),
+                }));
+            }
+            const seqByKey = new Map(provenance.map((row) => [`${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`, Number(row.seq)]));
+            for (const row of rows) {
+                const seq = seqByKey.get(`${row.nodeId}::${Number(row.iteration ?? 0)}`);
+                if (seq !== undefined) row[OUTPUT_PROVENANCE_SEQ] = seq;
+            }
+            const missingProvenance = rows.filter((row) => row[OUTPUT_PROVENANCE_SEQ] === undefined).length;
+            if (missingProvenance > 0) {
+                yield* Effect.logWarning("output rows missing durable provenance; outputRows will reject them").pipe(Effect.annotateLogs({
+                    runId,
+                    tableName,
+                    missingProvenance,
+                }));
+            }
             out[tableName] = rows;
             out[key] = rows;
         }

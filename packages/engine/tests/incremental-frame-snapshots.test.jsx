@@ -166,7 +166,14 @@ describe("incremental frame snapshots", () => {
         const finalSnapshot = incremental.snapshots[incremental.snapshots.length - 1];
         const finalOutputs = JSON.parse(finalSnapshot.outputsJson);
         expect(finalOutputs.plan).toEqual([
-            { runId, nodeId: "plan", iteration: 0, title: "kickoff", urgent: true },
+            {
+                runId,
+                nodeId: "plan",
+                iteration: 0,
+                title: "kickoff",
+                urgent: true,
+                __smithersProvenanceSeq: 0,
+            },
         ]);
         expect(finalOutputs.step.length).toBeGreaterThanOrEqual(2);
         expect(finalOutputs.step[0]).toMatchObject({

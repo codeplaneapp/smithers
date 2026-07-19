@@ -5,7 +5,7 @@ import { Cause, Effect, Exit } from "effect";
 import { z } from "zod";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { getJsonColumnKeys, isPostgresDb, pgRowToDrizzle } from "./snapshot.js";
+import { getJsonColumnKeys, isPostgresDb, OUTPUT_PROVENANCE_SEQ, pgRowToDrizzle } from "./snapshot.js";
 import { withSqliteWriteRetryEffect } from "./write-retry.js";
 /** @typedef {import("drizzle-orm").AnyColumn} AnyColumn */
 /** @typedef {import("./output/OutputKey.ts").OutputKey} _OutputKey */
@@ -100,7 +100,22 @@ export function selectOutputRowEffect(db, table, key) {
             code: "DB_QUERY_FAILED",
             details: { outputTable: table["_"]?.name ?? "output" },
         }),
-    }).pipe(Effect.map((rows) => rows[0]), Effect.annotateLogs({
+    }).pipe(Effect.flatMap((rows) => Effect.promise(async () => {
+        const row = rows[0];
+        if (!row) return row;
+        try {
+            const tableName = getTableName(table);
+            const provenance = isPostgresDb(db)
+                ? (await db.connection.query({ text: `SELECT seq FROM _smithers_output_provenance WHERE run_id = $1 AND output_table = $2 AND node_id = $3 AND iteration = $4 LIMIT 1`, values: [key.runId, tableName, key.nodeId, key.iteration ?? 0] })).rows[0]
+                : db.session.client.query(`SELECT seq FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ? LIMIT 1`).get(key.runId, tableName, key.nodeId, key.iteration ?? 0);
+            const seq = provenance?.seq;
+            if (seq !== undefined && seq !== null) row[OUTPUT_PROVENANCE_SEQ] = Number(seq);
+        } catch {
+            // Legacy stores are backfilled by schema migration; a missing table
+            // must not make an otherwise valid output read fail.
+        }
+        return row;
+    })), Effect.annotateLogs({
         outputTable: table["_"]?.name ?? "output",
         runId: key.runId,
         nodeId: key.nodeId,

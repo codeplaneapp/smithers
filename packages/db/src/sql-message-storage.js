@@ -290,13 +290,22 @@ const CREATE_TABLE_STATEMENTS = [
     created_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, node_id, iteration, attempt, seq)
   )`,
-    `CREATE TABLE IF NOT EXISTS _smithers_events (
+  `CREATE TABLE IF NOT EXISTS _smithers_events (
     run_id TEXT NOT NULL,
     seq INTEGER NOT NULL,
     timestamp_ms INTEGER NOT NULL,
     type TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     PRIMARY KEY (run_id, seq)
+  )`,
+  `CREATE TABLE IF NOT EXISTS _smithers_output_provenance (
+    run_id TEXT NOT NULL,
+    output_table TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    iteration INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    PRIMARY KEY (run_id, output_table, node_id, iteration),
+    UNIQUE (run_id, seq)
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_ralph (
     run_id TEXT NOT NULL,
@@ -1231,12 +1240,23 @@ export class SqlMessageStorage {
             row.receivedAtMs,
             ...(row.receivedBy == null ? [] : [row.receivedBy]),
         ];
-        return this.insertWithNextSeqPostgres(
-            "_smithers_signals",
-            { ...row, receivedBy: row.receivedBy ?? null },
-            dedupeWhereSql,
-            dedupeParams,
-        );
+        const values = { ...row, receivedBy: row.receivedBy ?? null };
+        return (async () => {
+            for (let attempt = 0; attempt < POSTGRES_SEQUENCE_ALLOCATION_MAX_ATTEMPTS; attempt += 1) {
+                const existing = await this.queryOne(`SELECT seq FROM _smithers_signals WHERE ${dedupeWhereSql} ORDER BY seq DESC LIMIT 1`, dedupeParams);
+                if (existing?.seq !== undefined) return Number(existing.seq);
+                const inserted = await this.queryAllRaw(`INSERT INTO _smithers_signals (run_id, signal_name, correlation_id, payload_json, received_at_ms, received_by, seq)
+                    SELECT ?, ?, ?, ?, ?, ?, COALESCE(MAX(seq), -1) + 1
+                    FROM (SELECT seq FROM _smithers_signals WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_output_provenance WHERE run_id = ?) AS clock
+                    WHERE NOT EXISTS (SELECT 1 FROM _smithers_signals WHERE ${dedupeWhereSql})
+                    ON CONFLICT (run_id, seq) DO NOTHING RETURNING seq`, [
+                    values.runId, values.signalName, values.correlationId, values.payloadJson, values.receivedAtMs, values.receivedBy,
+                    values.runId, values.runId, ...dedupeParams,
+                ]);
+                if (inserted[0]?.seq !== undefined) return Number(inserted[0].seq);
+            }
+            throw new Error(`PostgreSQL signal sequence allocation did not converge after ${POSTGRES_SEQUENCE_ALLOCATION_MAX_ATTEMPTS} conflicts.`);
+        })();
     }
     /**
    * @param {string} runId
@@ -1316,11 +1336,18 @@ export class SqlMessageStorage {
    * @returns {Promise<number | undefined>}
    */
     async getLastSignalSeq(runId) {
+        return this.getLastRunProvenanceSeq(runId);
+    }
+    /** @param {string} runId @returns {Promise<number | undefined>} */
+    async getLastRunProvenanceSeq(runId) {
         const row = await this.queryOne(`SELECT seq
-       FROM _smithers_signals
-       WHERE run_id = ?
+       FROM (
+         SELECT seq FROM _smithers_signals WHERE run_id = ?
+         UNION ALL
+         SELECT seq FROM _smithers_output_provenance WHERE run_id = ?
+       )
        ORDER BY seq DESC
-       LIMIT 1`, [runId]);
+       LIMIT 1`, [runId, runId]);
         return row?.seq;
     }
 }
