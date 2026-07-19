@@ -13,6 +13,7 @@ const slash = (value: string) => value.split(sep).join("/");
 const sorted = (values: Iterable<string>) => [...values].sort((a, b) => a.localeCompare(b));
 
 const workflowOwners = {
+  "./tests/daily-ceo-intel-pipeline.test.ts": ["daily-ceo-intel.tsx"],
   "./tests/issue-blitz.test.ts": ["issue-blitz.tsx", "issue-train.tsx"],
   "./tests/curated-authoring-workflows.test.tsx": ["create-skill.tsx", "create-workflow.tsx"],
   "./tests/curated-ddd-eval-workflows.test.tsx": ["docs-driven-development.tsx", "eval-suite-run.tsx"],
@@ -36,10 +37,13 @@ const workflowOwners = {
   "./tests/local-workflows-c-control.test.tsx": ["review-cloud-ship.tsx"],
   "./tests/local-workflows-c-progression.test.tsx": ["roadmapbench.tsx", "serverless-refactor.tsx", "ship-pipeline.tsx", "sweep.tsx", "sync-features.tsx", "tanstack-db-migration.tsx", "tanstack-db-sync-engine.tsx", "telegram-daily-digest.tsx"],
   "./tests/local-workflows-c-utilities.test.tsx": ["microsandbox-finish.tsx", "review-codex-antigravity.tsx", "review-nokimi.tsx", "run-on-plue.tsx", "test-fortress-monitor.tsx", "trellis.tsx", "vcs.tsx", "verify-push-safety.tsx"],
-  "./tests/local-workflows-c-orchestration.test.tsx": ["route-and-merge-issues.tsx", "studio-parity-swarm.tsx", "test-fortress.tsx", "ultragrill.tsx", "validated-implement.tsx"],
+  "./tests/local-workflows-c-orchestration.test.tsx": ["monitor-redesign.tsx", "orchbench.tsx", "route-and-merge-issues.tsx", "studio-parity-swarm.tsx", "test-fortress.tsx", "ultragrill.tsx", "validated-implement.tsx"],
   "./tests/ticket-fleet-workflow.test.tsx": ["ticket-fleet.tsx"],
   "./tests/authoring-benchmark-workflow.test.ts": ["authoring-benchmark.tsx"],
+  "./tests/finish-campaigns.test.tsx": ["finish-campaigns.tsx"],
+  "./tests/land-shared-ui.test.tsx": ["land-shared-ui.tsx"],
   "./tests/riskless-github-issue-sweep.test.ts": ["riskless-github-issue-sweep.tsx"],
+  "./tests/shared-ui-library.test.tsx": ["shared-ui-library.tsx"],
 } as const;
 
 const componentOwners = {

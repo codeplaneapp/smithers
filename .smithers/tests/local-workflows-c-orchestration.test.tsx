@@ -51,6 +51,33 @@ const add = (frame: Frame, outputs: Outputs, id: string, value: Record<string, u
 const row = (nodeId: string, iteration: number, value: Record<string, unknown>) => ({ nodeId, iteration, iterationCount: iteration, ...value });
 
 describe("local orchestration workflows C", () => {
+  test("monitor redesign and OrchBench expose their initial orchestration topology", async () => {
+    const monitor = await render("monitor-redesign.tsx", {}, {}, { runId: "Inventory Smoke" });
+    expect(optional(monitor, "shell-split-plan")).toBeDefined();
+    expect(optional(monitor, "shell-split-plan-review")).toBeDefined();
+
+    const root = await mkdtemp(join(tmpdir(), "smithers-orchbench-smoke-"));
+    const instructionPath = join(root, "instruction.md");
+    try {
+      await writeFile(instructionPath, "Implement the benchmark fixture.\n");
+      const bench = await render("orchbench.tsx", {
+        taskId: "smoke-task",
+        image: "smithers/orchbench:test",
+        container: "orchbench-smoke",
+        repoDir: root,
+        instructionPath,
+        testsDir: root,
+        workDir: root,
+        pattern: "solo-sol",
+        smoke: true,
+      });
+      expect(optional(bench, "solo")).toBeDefined();
+      expect(bench.toXml()).toContain('"name":"orchbench"');
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
+    }
+  });
+
   test("route-and-merge pairs the current fix/review, scopes worktrees, and trusts only ancestry verification", async () => {
     const mod = await import("../workflows/route-and-merge-issues.tsx");
     expect(mod.inputSchema.safeParse({ reviewIterations: 0 }).success).toBe(false);

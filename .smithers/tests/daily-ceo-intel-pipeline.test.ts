@@ -3,6 +3,7 @@
 // transitions, malformed/missing dates, tracking-URL dupes, multi-outlet event
 // clustering, source failures, prompt-injection article text, empty-news day,
 // duplicate-publish idempotency, and verifier rejections.
+// Workflow owner: ../workflows/daily-ceo-intel.tsx
 import { afterEach, describe, expect, test } from "bun:test";
 import { canonicalizeAndDedupe, canonicalizeUrl } from "../lib/daily-ceo-intel/dedupe";
 import { clusterEvents } from "../lib/daily-ceo-intel/cluster";
