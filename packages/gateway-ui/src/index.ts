@@ -59,4 +59,17 @@ export { RunTree, type RunTreeProps } from "./RunTree";
 export { ApprovalPanel, type ApprovalPanelProps } from "./ApprovalPanel";
 export { LaunchButton, type LaunchButtonProps } from "./LaunchButton";
 export { WorkflowPicker, type WorkflowPickerProps } from "./WorkflowPicker";
-export { NodeOutputView, type NodeOutputViewProps } from "./NodeOutputView";
+export {
+  NodeOutputView,
+  formatOutput,
+  unwrapNodeOutput,
+  type NodeOutputViewProps,
+  type NodeOutputStatus,
+  type UnwrappedNodeOutput,
+} from "./NodeOutputView";
+export {
+  NodeOutputCard,
+  type NodeOutputCardProps,
+  type NodeOutputCardBody,
+  type NodeOutputCardBodyState,
+} from "./NodeOutputCard";

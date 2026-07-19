@@ -20,8 +20,15 @@ Component map:
   `@smithers-orchestrator/ui-styleguide` CSS and the `WorkflowUiShell` scaffold.
 - Pure components: `StatusPill`, `NodeRow`.
 - Hook-driven: `RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`,
-  `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`.
+  `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`,
+  `NodeOutputCard`.
 - `SimpleWorkflowDashboard` — the batteries-included composition of the above.
+
+`NodeOutputCard` wraps `NodeOutputView`'s envelope handling (`unwrapNodeOutput`)
+in card chrome with an ok/fail/pending status glyph and a render-prop body given
+the unwrapped row — the generic form of the `OutputCard`/`SummaryPanel` shape
+hand-rolled across `.smithers/ui/*` (ticket-fleet, issue-train, orchbench, …).
+It also folds in the `key={remountKey + ":" + nodeId}` remount convention.
 
 Gotchas: list-shaped RPCs (runs, approvals) are pull-only on the local gateway
 path, so those components poll via `pollMs` (default 2000, `0` disables).

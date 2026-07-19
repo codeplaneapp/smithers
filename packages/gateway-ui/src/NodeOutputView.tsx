@@ -11,13 +11,43 @@ export type NodeOutputViewProps = {
   style?: CSSProperties;
 };
 
+/**
+ * The lifecycle bucket a node-output envelope resolves to: `pending` (not run
+ * yet), `failed` (errored before producing), or `produced` (has a row — the
+ * bucket a bare row or string also falls into).
+ */
+export type NodeOutputStatus = "pending" | "failed" | "produced";
+
+export type UnwrappedNodeOutput = {
+  status: NodeOutputStatus;
+  /** The output row once the `{ status, row }` envelope is peeled off (`null` when absent). */
+  row: unknown;
+};
+
+/**
+ * Peel the gateway `getNodeOutput` envelope down to a `{ status, row }` pair.
+ * The gateway returns `{ status: "pending" | "failed" | "produced", row }`, but
+ * older/direct callers may hand back a bare row (object or string); those are
+ * treated as already `produced`. This is the ONE place gateway-ui unwraps the
+ * envelope — {@link formatOutput} and {@link NodeOutputCard} both build on it so
+ * the convention lives in a single spot.
+ */
+export function unwrapNodeOutput(data: unknown): UnwrappedNodeOutput {
+  if (data != null && typeof data === "object") {
+    const envelope = data as Record<string, unknown>;
+    if (envelope.status === "pending") return { status: "pending", row: null };
+    if (envelope.status === "failed") return { status: "failed", row: null };
+    if (envelope.status === "produced") return { status: "produced", row: envelope.row ?? null };
+  }
+  return { status: "produced", row: data ?? null };
+}
+
 export function formatOutput(data: unknown): string {
   if (data == null) return "";
   if (typeof data === "string") return data;
-  const envelope = data as Record<string, unknown>;
-  if (envelope.status === "pending") return "Output is not available yet.";
-  if (envelope.status === "failed") return "This node failed before producing output.";
-  const payload = envelope.status === "produced" ? envelope.row : data;
+  const { status, row: payload } = unwrapNodeOutput(data);
+  if (status === "pending") return "Output is not available yet.";
+  if (status === "failed") return "This node failed before producing output.";
   if (payload == null) return "";
   if (typeof payload === "string") return payload;
   const record = payload as Record<string, unknown>;
