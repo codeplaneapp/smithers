@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { assign, createMachine } from "xstate";
 import { computeMachineState, taskOutput, __machineCacheInternals } from "../src/index.js";
 
-const { foldCache } = __machineCacheInternals;
+const { foldCache, hashReducer, MAX_CACHE_ENTRIES } = __machineCacheInternals;
 
 /** Ctx fixture whose outputRows serve mutable row arrays, so tests can
  * append rows (new frame) or replace payloads in place (retry-task/reopen). */
@@ -15,6 +15,12 @@ function makeHarness(runId) {
         signalRows: () => [],
     });
     return { rows, calls, ctxFor };
+}
+
+/** The cache key is (runId, machine id, reducer hash) — reconstruct it the
+ * same way computeMachineState does, for direct cache assertions. */
+function cacheKeyFor(runId, id, machine, sources) {
+    return `${runId}::${id}::${hashReducer(machine, sources)}`;
 }
 
 const counter = createMachine({
@@ -62,17 +68,18 @@ describe("prefix cache", () => {
         });
 
         const source = taskOutput("rows", {}, (p) => ({ type: "MARK", tag: p.tag }));
+        const key = cacheKeyFor(runId, "m", instrumented, [source]);
         const first = computeMachineState(ctxFor(), instrumented, { id: "m", events: [source] });
         expect(first.context.log).toEqual(["one"]);
         expect(executed.count).toBe(1);
-        expect(foldCache.get(`${runId}::m`).folded).toBe(1);
+        expect(foldCache.get(key).folded).toBe(1);
 
         rows.push({ payload: { tag: "two" }, nodeId: "t2", iteration: 0, seq: 2 });
         const second = computeMachineState(ctxFor(), instrumented, { id: "m", events: [source] });
         expect(second.context.log).toEqual(["one", "two"]);
         // Suffix fold proof: event 1 was NOT refolded — only the new event ran.
         expect(executed.count).toBe(2);
-        expect(foldCache.get(`${runId}::m`).folded).toBe(2);
+        expect(foldCache.get(key).folded).toBe(2);
     });
 
     test("in-place payload replacement at the same key (same seq) invalidates by content", () => {
@@ -121,6 +128,11 @@ describe("prefix cache", () => {
             console.warn = originalWarn;
         }
         expect(warnings.filter((w) => w.includes("reinterpreted")).length).toBe(1);
+        // The reducer hash changed, so this is a genuinely different cache
+        // entry — the original machine's fold is still sitting in the cache
+        // under its own key, not overwritten in place.
+        expect(foldCache.get(cacheKeyFor(runId, "m", counter, [source])).snapshot.context.log).toEqual(["x"]);
+        expect(foldCache.get(cacheKeyFor(runId, "m", editedMachine, [source])).snapshot.context.log).toEqual(["edited-x"]);
     });
 
     test("input change refolds from scratch", () => {
@@ -146,7 +158,64 @@ describe("prefix cache", () => {
         const b = computeMachineState(ctxFor(), counter, { id: "b", events: [] });
         expect(a.context.log).toEqual(["only-a"]);
         expect(b.context.log).toEqual([]);
-        expect(foldCache.has(`${runId}::a`)).toBe(true);
-        expect(foldCache.has(`${runId}::b`)).toBe(true);
+        expect(foldCache.has(cacheKeyFor(runId, "a", counter, [source]))).toBe(true);
+        expect(foldCache.has(cacheKeyFor(runId, "b", counter, []))).toBe(true);
+    });
+
+    test("cache key is (runId, machine id, reducer hash): two concurrent runs plus a fork sharing one machine id fold independently in one process", () => {
+        // A fork inherits its parent's row history AND its machine `id`
+        // verbatim. If the key were bare `id` (or even `${runId}::${id}`
+        // without the reducer hash guarding content), a long-lived process
+        // hosting many runs could serve one run's snapshot to another. Use
+        // the SAME machine id ("shared") for a real, distinct third run and a
+        // simulated "fork" (a run that starts from a copy of the parent's
+        // rows) and assert every snapshot stays independent.
+        const parentRunId = freshRunId();
+        const siblingRunId = freshRunId();
+        const parent = makeHarness(parentRunId);
+        const sibling = makeHarness(siblingRunId);
+        parent.rows.push({ payload: { tag: "p1" }, nodeId: "t", iteration: 0, seq: 1 });
+        sibling.rows.push({ payload: { tag: "s1" }, nodeId: "t", iteration: 0, seq: 1 });
+
+        const source = taskOutput("rows", {}, (p) => ({ type: "MARK", tag: p.tag }));
+        const parentState = computeMachineState(parent.ctxFor(), counter, { id: "shared", events: [source] });
+        const siblingState = computeMachineState(sibling.ctxFor(), counter, { id: "shared", events: [source] });
+        expect(parentState.context.log).toEqual(["p1"]);
+        expect(siblingState.context.log).toEqual(["s1"]);
+
+        // Fork: a new run id whose row history starts as an exact copy of the
+        // parent's rows at fork time, then diverges with its own event.
+        const forkRunId = freshRunId();
+        const fork = makeHarness(forkRunId);
+        fork.rows.push(...parent.rows.map((row) => ({ ...row })));
+        fork.rows.push({ payload: { tag: "fork-only" }, nodeId: "t2", iteration: 0, seq: 2 });
+        const forkState = computeMachineState(fork.ctxFor(), counter, { id: "shared", events: [source] });
+        expect(forkState.context.log).toEqual(["p1", "fork-only"]);
+
+        // The parent's own fold, recomputed now, must be untouched by the
+        // fork or the sibling ever having used the same machine id.
+        const parentAgain = computeMachineState(parent.ctxFor(), counter, { id: "shared", events: [source] });
+        expect(parentAgain.context.log).toEqual(["p1"]);
+        expect(foldCache.get(cacheKeyFor(parentRunId, "shared", counter, [source])).snapshot.context.log).toEqual(["p1"]);
+        expect(foldCache.get(cacheKeyFor(siblingRunId, "shared", counter, [source])).snapshot.context.log).toEqual(["s1"]);
+        expect(foldCache.get(cacheKeyFor(forkRunId, "shared", counter, [source])).snapshot.context.log).toEqual(["p1", "fork-only"]);
+    });
+
+    test("the cache is bounded: it never grows past MAX_CACHE_ENTRIES and evicts least-recently-used entries first", () => {
+        const source = taskOutput("rows", {}, (p) => ({ type: "MARK", tag: p.tag }));
+        /** @type {string[]} */
+        const keysInOrder = [];
+        for (let i = 0; i < MAX_CACHE_ENTRIES + 10; i += 1) {
+            const runId = freshRunId();
+            const { rows, ctxFor } = makeHarness(runId);
+            rows.push({ payload: { tag: `t${i}` }, nodeId: "t", iteration: 0, seq: 1 });
+            computeMachineState(ctxFor(), counter, { id: "m", events: [source] });
+            keysInOrder.push(cacheKeyFor(runId, "m", counter, [source]));
+        }
+        expect(foldCache.size).toBeLessThanOrEqual(MAX_CACHE_ENTRIES);
+        // The oldest entries were evicted first (FIFO/LRU over insertion —
+        // none of these keys were ever re-touched after their first fold).
+        expect(foldCache.has(keysInOrder[0])).toBe(false);
+        expect(foldCache.has(keysInOrder[keysInOrder.length - 1])).toBe(true);
     });
 });

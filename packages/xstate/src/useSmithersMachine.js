@@ -4,24 +4,32 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { foldMachineState, hashFoldEvents, orderFoldEvents } from "./foldMachine.js";
 import { lintMachine } from "./lintMachine.js";
 import { stableHash } from "./stableHash.js";
+import { hashReducer } from "./reducerHash.js";
 
 /** @typedef {import("./EventSource.ts").SmithersEventSource} SmithersEventSource */
 /** @typedef {import("./FoldEvent.ts").FoldEvent} FoldEvent */
 
 /**
- * In-process memoized folds keyed by `${runId}::${machine id}`. Entries
- * validate by CONTENT (a payload hash per ordered event), never by
- * (count, maxSeq): an in-place payload replacement at the same
- * (nodeId, iteration) retains its seq but must invalidate the folded prefix.
- * Resume/rewind/fork always land in a fresh process or fail the content
- * check, so they refold from rows — the cache is a per-frame cost saver,
- * never a source of truth.
- * @type {Map<string, { machine: import("xstate").AnyStateMachine; inputHash: string; eventHashes: string[]; snapshot: import("xstate").AnyMachineSnapshot; folded: number }>}
+ * In-process memoized folds keyed by `${runId}::${machine id}::${reducer
+ * hash}` — one process hosts many runs (and a fork inherits its parent's row
+ * history plus its machine id verbatim), so runId and id alone are not a safe
+ * key, and a mid-run machine edit must not reuse a fold computed under the
+ * old reducer. Entries validate by CONTENT (a payload hash per ordered
+ * event), never by (count, maxSeq): an in-place payload replacement at the
+ * same (nodeId, iteration) retains its seq but must invalidate the folded
+ * prefix. Resume/rewind/fork always land in a fresh process or fail the
+ * content check, so they refold from rows — the cache is a per-frame cost
+ * saver, never a source of truth. Bounded: least-recently-used entries are
+ * evicted past MAX_CACHE_ENTRIES so a long-lived process hosting many runs
+ * does not retain every historical snapshot forever.
+ * @type {Map<string, { inputHash: string; eventHashes: string[]; snapshot: import("xstate").AnyMachineSnapshot; folded: number }>}
  */
 const foldCache = new Map();
 
-/** Machines already warned about reinterpreting an existing fold history. @type {WeakSet<object>} */
-const reinterpretationWarned = new WeakSet();
+const MAX_CACHE_ENTRIES = 500;
+
+/** `${runId}::${id}` pairs already warned about a mid-run reducer change. @type {Set<string>} */
+const reinterpretationWarned = new Set();
 
 /** Per-render-ctx machine registry for duplicate-id detection. @type {WeakMap<object, Map<string, object>>} */
 const machinesByCtx = new WeakMap();
@@ -69,8 +77,9 @@ export function computeMachineState(ctx, machine, options) {
     const id = options.id;
     registerMachineId(ctx, id, machine);
     lintMachine(id, machine);
-    const events = collectEvents(ctx, id, options.events ?? []);
-    return /** @type {import("xstate").SnapshotFrom<TMachine>} */ (foldWithCache(`${ctx.runId}::${id}`, machine, id, options.input, events));
+    const sources = options.events ?? [];
+    const events = collectEvents(ctx, id, sources);
+    return /** @type {import("xstate").SnapshotFrom<TMachine>} */ (foldWithCache(ctx.runId, id, machine, sources, options.input, events));
 }
 
 /**
@@ -114,26 +123,29 @@ function collectEvents(ctx, id, sources) {
 }
 
 /**
- * @param {string} cacheKey
- * @param {import("xstate").AnyStateMachine} machine
+ * @param {string} runId
  * @param {string} id
+ * @param {import("xstate").AnyStateMachine} machine
+ * @param {SmithersEventSource[]} sources
  * @param {unknown} input
  * @param {FoldEvent[]} events
  * @returns {import("xstate").AnyMachineSnapshot}
  */
-function foldWithCache(cacheKey, machine, id, input, events) {
+function foldWithCache(runId, id, machine, sources, input, events) {
+    const reducerHash = hashReducer(machine, sources);
+    const instanceKey = `${runId}::${id}`;
+    const cacheKey = `${instanceKey}::${reducerHash}`;
     const inputHash = stableHash(input);
     const eventHashes = hashFoldEvents(events);
     const cached = foldCache.get(cacheKey);
-    if (cached && cached.machine !== machine && !reinterpretationWarned.has(machine)) {
-        // Mid-run machine edit (hot reload): the fold reinterprets recorded
-        // history under the new reducer. Deliberate migrations should prefer
-        // fork-and-migrate.
-        console.warn(`[smithers-xstate] Machine "${id}" changed identity mid-run; folded history will be reinterpreted under the new machine definition.`);
-        reinterpretationWarned.add(machine);
+    if (!cached) {
+        warnIfReinterpreting(instanceKey, id, cacheKey);
+    }
+    else {
+        // Touch: move to the most-recently-used end for LRU eviction.
+        foldCache.delete(cacheKey);
     }
     if (cached &&
-        cached.machine === machine &&
         cached.inputHash === inputHash &&
         eventHashes.length >= cached.eventHashes.length &&
         cached.eventHashes.every((hash, i) => hash === eventHashes[i])) {
@@ -143,13 +155,50 @@ function foldWithCache(cacheKey, machine, id, input, events) {
             events,
             startAt: { snapshot: cached.snapshot, alreadyFolded: cached.folded },
         });
-        foldCache.set(cacheKey, { machine, inputHash, eventHashes, snapshot, folded });
+        setCacheEntry(cacheKey, { inputHash, eventHashes, snapshot, folded });
         return snapshot;
     }
     const { snapshot, folded } = foldMachineState(machine, { id, input, events });
-    foldCache.set(cacheKey, { machine, inputHash, eventHashes, snapshot, folded });
+    setCacheEntry(cacheKey, { inputHash, eventHashes, snapshot, folded });
     return snapshot;
 }
 
+/**
+ * A cache miss for `cacheKey` is either a first-ever fold for this
+ * (runId, id) — nothing to warn about — or a mid-run reducer change: some
+ * OTHER cache entry already exists for the same (runId, id) under a
+ * different reducer hash. The fold reinterprets recorded history under the
+ * new reducer in that case; deliberate migrations should prefer
+ * fork-and-migrate (docs: "Mid-run edits").
+ * @param {string} instanceKey
+ * @param {string} id
+ * @param {string} cacheKey
+ */
+function warnIfReinterpreting(instanceKey, id, cacheKey) {
+    const prefix = `${instanceKey}::`;
+    for (const key of foldCache.keys()) {
+        if (key !== cacheKey && key.startsWith(prefix)) {
+            if (!reinterpretationWarned.has(instanceKey)) {
+                console.warn(`[smithers-xstate] Machine "${id}" reducer changed mid-run (definition hash mismatch); folded history will be reinterpreted under the new machine/event-source definition. Prefer fork-and-migrate for deliberate mid-run machine changes.`);
+                reinterpretationWarned.add(instanceKey);
+            }
+            return;
+        }
+    }
+}
+
+/**
+ * @param {string} cacheKey
+ * @param {{ inputHash: string; eventHashes: string[]; snapshot: import("xstate").AnyMachineSnapshot; folded: number }} entry
+ */
+function setCacheEntry(cacheKey, entry) {
+    foldCache.set(cacheKey, entry);
+    while (foldCache.size > MAX_CACHE_ENTRIES) {
+        const oldestKey = foldCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        foldCache.delete(oldestKey);
+    }
+}
+
 /** Test seam. */
-export const __machineCacheInternals = { foldCache };
+export const __machineCacheInternals = { foldCache, hashReducer, MAX_CACHE_ENTRIES };
