@@ -382,6 +382,16 @@ export const markdownCss = `
 .sui-md-link:hover { text-decoration-thickness:2px; }
 `;
 
+/* -------------------------------------------------------------------------- */
+/* PierreDiffView adapter (thin frame; CodeView owns the highlighted body)     */
+/* -------------------------------------------------------------------------- */
+
+export const pierreDiffCss = `
+.sui-pierre-diff { display:block; min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; overflow:hidden; }
+.sui-pierre-diff-empty { padding:24px; text-align:center; color:${t.mutedForeground}; font-size:13px; }
+.sui-pierre-diff-stat { font-family:${t.fontMono}; font-size:11px; color:${t.mutedForeground}; }
+`;
+
 /** All component sheets, composed in a stable order. */
 export const smithersUiCss = [
   buttonCss,
@@ -407,6 +417,7 @@ export const smithersUiCss = [
   diffCss,
   fileTreeCss,
   markdownCss,
+  pierreDiffCss,
 ]
   .map((block) => block.trim())
   .join("\n");

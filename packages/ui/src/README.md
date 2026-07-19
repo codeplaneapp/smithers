@@ -31,6 +31,17 @@ How the pieces fit, infrastructure first:
   These are transport-neutral so workflow UIs can feed them Gateway events,
   SSE text, PTY screen snapshots, or stored messages without bringing runtime
   hooks into the visual layer.
+- `adapters/` wraps heavy third-party widgets that must NOT weigh down the base
+  barrel. Each ships behind its own package subpath, never `index.ts`, so
+  `@smithers-orchestrator/ui` stays light and `check-ui-architecture.mjs` keeps
+  the heavy dependency out of the base export:
+  - `PierreDiffView` (`@smithers-orchestrator/ui/adapters/pierre-diff-view`) is
+    the syntax-highlighted diff surface over `@pierre/diffs` `processPatch` +
+    `CodeView`. It is props-driven with no app coupling: an explicit `mode`
+    (`"light" | "dark"`) maps onto a `DiffsThemeNames` value, and a `layout`
+    prop toggles `"split"` (side-by-side) vs `"inline"` (unified). The pure
+    seams `diffsThemeForMode`, `diffStyleForLayout`, and `patchToCodeViewItems`
+    are exported alongside the component.
 
 Gotchas (all enforced by `../tests/css-contract.test.ts`):
 
