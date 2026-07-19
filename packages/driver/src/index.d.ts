@@ -12,6 +12,42 @@ import { SchemaRegistryEntry } from '@smithers-orchestrator/db/SchemaRegistryEnt
 import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
 import { ExtractOptions, WorkflowGraph as WorkflowGraph$1 } from '@smithers-orchestrator/graph';
 
+/**
+ * Raw signal row as loaded by a `RuntimeAdapter.signals.load` implementation
+ * (or seeded via `RunOptions.signals` for tests/replay without a live
+ * adapter). Mirrors `@smithers-orchestrator/db`'s `SignalRow` shape minus
+ * `runId` (the ctx is already run-scoped). `payloadJson` may be a JSON string
+ * (as stored durably) or an already-parsed value (test convenience).
+ */
+type SignalRowInput$1 = {
+    seq: number;
+    signalName: string;
+    correlationId: string | null;
+    payloadJson: string | unknown;
+    receivedAtMs: number;
+    receivedBy?: string | null;
+};
+/**
+ * A signal row as handed to workflow/render code. `payload` is intentionally
+ * `unknown` — signals are not schema-validated at receipt time (a `smithers
+ * signal` call can deliver arbitrary JSON), so typed access belongs to the
+ * caller (e.g. `@smithers-orchestrator/xstate`'s `eventReceived`, which
+ * validates against a supplied schema and reports a typed error naming the
+ * signal on failure) rather than being asserted here.
+ */
+type SignalRow$1 = {
+    payload: unknown;
+    signalName: string;
+    correlationId: string | null;
+    seq: number;
+    receivedAtMs: number;
+};
+type SignalRowsOptions$1 = {
+    /** Only rows delivered with this exact correlation id (or `null` for uncorrelated rows). */
+    correlationId?: string | null;
+};
+type SignalRowsReader$2 = (signalName: string, options?: SignalRowsOptions$1) => SignalRow$1[];
+
 type RunAuthContext$2 = {
     triggeredBy: string;
     scopes: string[];
@@ -111,6 +147,13 @@ type RunOptions$2 = {
     effectPlatformLayer?: Layer.Layer<any, never, never>;
     cliAgentToolsDefault?: "all" | "explicit-only";
     initialOutputs?: OutputSnapshot$2;
+    /**
+     * Fallback signal rows used when no `runtimeAdapter.signals` capability is
+     * configured (e.g. tests, the browser runtime). Ignored once a live
+     * adapter is present — `runtimeAdapter.signals.load` is re-read every
+     * frame and takes priority.
+     */
+    signals?: SignalRowInput$1[];
     initialIteration?: number;
     initialIterations?: Record<string, number> | ReadonlyMap<string, number>;
     resumeClaim?: {
@@ -197,6 +240,18 @@ type RuntimeSandbox$1 = {
     run(config: Record<string, unknown>): Promise<RuntimeSandboxResult$1>;
 };
 /**
+ * Durable signal read capability. When present, `WorkflowDriver.renderAndSubmit`
+ * calls `load` fresh on every render so `ctx.signalRows` always reflects the
+ * latest delivered `_smithers_signals` rows for the run (no separate
+ * invalidation step needed — every frame re-reads). Optional: environments
+ * without a durable signal store (e.g. the browser runtime, or a driver used
+ * purely for tests) fall back to whatever `RunOptions.signals` seeded once at
+ * `run()` start.
+ */
+type RuntimeSignals$1 = {
+    load(runId: string): Promise<SignalRowInput$1[]>;
+};
+/**
  * The full runtime contract the portable Smithers workflow core (driver +
  * scheduler + graph + renderer) depends on instead of reaching for
  * environment globals directly. A concrete adapter (Node, browser, ...) must
@@ -217,6 +272,8 @@ type RuntimeAdapter$1 = {
     readonly subprocess: RuntimeSubprocess$1;
     readonly worktree: RuntimeWorktree$1;
     readonly sandbox: RuntimeSandbox$1;
+    /** Optional: see {@link RuntimeSignals}. Absent in adapters with no durable signal store. */
+    readonly signals?: RuntimeSignals$1;
 };
 
 type TaskDescriptor$1 = _smithers_orchestrator_graph_types.TaskDescriptor;
@@ -428,6 +485,8 @@ type SmithersCtxOptions$2 = {
     input: unknown;
     auth?: RunAuthContext$2 | null;
     outputs: OutputSnapshot$2;
+    /** Durable `_smithers_signals` rows for this run, freshly loaded for the current frame. */
+    signals?: SignalRowInput$1[];
     taskStates?: ReadonlyMap<string, unknown> | Record<string, unknown>;
     taskIterations?: ReadonlyMap<string, number> | Record<string, number>;
     zodToKeyName?: Map<any, string>;
@@ -477,6 +536,8 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     outputs: OutputAccessor$1<Schema>;
     /** @type {OutputRowsReader<Schema>} */
     outputRows: OutputRowsReader$1<Schema>;
+    /** @type {SignalRowsReader} */
+    signalRows: SignalRowsReader$1;
     /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
     _outputs: OutputSnapshot$2;
     /** @type {Map<unknown, string> | undefined} */
@@ -649,6 +710,7 @@ type OutputRow = Record<string, unknown>;
 type ResolveOutputRow<Schema, T> = ResolveOutputRow$1<Schema, T>;
 type OutputAccessor$1<Schema> = OutputAccessor$2<Schema>;
 type OutputRowsReader$1<Schema = unknown> = OutputRowsReader$2<Schema>;
+type SignalRowsReader$1 = SignalRowsReader$2;
 
 type WorkflowElement = {
     type: unknown;
@@ -819,6 +881,8 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
     outputTablesByNodeId: Map<string, string>;
     /** @type {OutputSnapshot} */
     baseOutputs: OutputSnapshot$1;
+    /** @type {import("./SignalRows.ts").SignalRowInput[]} Fallback signal rows when no `runtimeAdapter.signals` capability is configured. */
+    baseSignals: SignalRowInput$1[];
     /** @type {Map<string, Promise<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>>} */
     inflightTasks: Map<string, Promise<{
         key: string;
@@ -966,7 +1030,7 @@ type OutputAccessor<Schema = any> = OutputAccessor$2<Schema>;
 type InferOutputEntry<T> = InferOutputEntry$1<T>;
 type OutputKey = OutputKey$2;
 type OutputSnapshot = OutputSnapshot$2;
-type OutputRowsReader<Schema> = OutputRowsReader$2<Schema>;
+type OutputRowsReader<Schema = unknown> = OutputRowsReader$2<Schema>;
 type ProofBinding = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
 type RunAuthContext = RunAuthContext$2;
 type EffectPlatformRuntime = EffectPlatformRuntime$1;
@@ -993,9 +1057,14 @@ type RuntimeSubprocessResult = RuntimeSubprocessResult$1;
 type RuntimeWorktree = RuntimeWorktree$1;
 type RuntimeSandbox = RuntimeSandbox$1;
 type RuntimeSandboxResult = RuntimeSandboxResult$1;
+type RuntimeSignals = RuntimeSignals$1;
 type StoredRunState = StoredRunState$1;
 type RuntimeCapability = RuntimeCapability$1;
 type RuntimeCapabilityErrorDetails = RuntimeCapabilityErrorDetails$1;
 type BrowserRuntimeOptions = BrowserRuntimeOptions$1;
+type SignalRowInput = SignalRowInput$1;
+type SignalRow = SignalRow$1;
+type SignalRowsOptions = SignalRowsOptions$1;
+type SignalRowsReader = SignalRowsReader$2;
 
-export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };
+export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeSignals, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, type SignalRow, type SignalRowInput, type SignalRowsOptions, type SignalRowsReader, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };

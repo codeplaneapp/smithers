@@ -8119,8 +8119,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
             // Supplies (among other things) `worktree.resolve` — wired here so
             // <Worktree> resolution inside WorkflowDriver.renderAndSubmit keeps
             // using the real, unmodified resolveWorktreePath now that
-            // SmithersCtx/extractGraph no longer import it themselves.
-            runtimeAdapter: createNodeRuntime(),
+            // SmithersCtx/extractGraph no longer import it themselves. Also
+            // wires `signals.load` from the same adapter this run already
+            // opened, so `ctx.signalRows` reads real durable rows every frame.
+            runtimeAdapter: createNodeRuntime({ adapter }),
             executeTask: (task) => executeDriverTask(task),
             onSchedulerWait: (durationMs) => Effect.runPromise(Metric.update(schedulerWaitDuration, durationMs)),
             onWait: (reason) => handleDriverWait(reason),

@@ -1,5 +1,6 @@
 import type { TaskExecutor } from "./TaskExecutor.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
+import type { SignalRowInput } from "./SignalRows.ts";
 
 /**
  * Wall-clock and monotonic timing, abstracted so the portable driver never
@@ -80,6 +81,19 @@ export type RuntimeSandbox = {
 };
 
 /**
+ * Durable signal read capability. When present, `WorkflowDriver.renderAndSubmit`
+ * calls `load` fresh on every render so `ctx.signalRows` always reflects the
+ * latest delivered `_smithers_signals` rows for the run (no separate
+ * invalidation step needed — every frame re-reads). Optional: environments
+ * without a durable signal store (e.g. the browser runtime, or a driver used
+ * purely for tests) fall back to whatever `RunOptions.signals` seeded once at
+ * `run()` start.
+ */
+export type RuntimeSignals = {
+  load(runId: string): Promise<SignalRowInput[]>;
+};
+
+/**
  * The full runtime contract the portable Smithers workflow core (driver +
  * scheduler + graph + renderer) depends on instead of reaching for
  * environment globals directly. A concrete adapter (Node, browser, ...) must
@@ -100,4 +114,6 @@ export type RuntimeAdapter = {
   readonly subprocess: RuntimeSubprocess;
   readonly worktree: RuntimeWorktree;
   readonly sandbox: RuntimeSandbox;
+  /** Optional: see {@link RuntimeSignals}. Absent in adapters with no durable signal store. */
+  readonly signals?: RuntimeSignals;
 };

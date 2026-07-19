@@ -23,7 +23,9 @@ const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
  * @template Schema
  * @typedef {import("./OutputAccessor.ts").OutputAccessor<Schema>} OutputAccessor
  */
-/** @typedef {import("./OutputRows.ts").OutputRowsReader} OutputRowsReader */
+/** @template [Schema=unknown] @typedef {import("./OutputRows.ts").OutputRowsReader<Schema>} OutputRowsReader */
+/** @typedef {import("./SignalRows.ts").SignalRowInput} SignalRowInput */
+/** @typedef {import("./SignalRows.ts").SignalRowsReader} SignalRowsReader */
 
 /**
  * Strip harness metadata columns (runId/nodeId/iteration) from an output row
@@ -86,6 +88,8 @@ export class SmithersCtx {
     outputs;
     /** @type {OutputRowsReader<Schema>} */
     outputRows;
+    /** @type {SignalRowsReader} */
+    signalRows;
     /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
     _outputs;
     /** @type {Map<unknown, string> | undefined} */
@@ -155,6 +159,32 @@ export class SmithersCtx {
                     const payload = payloadFields;
                     result.push({ payload: Object.keys(payload).length === 1 && "payload" in payload ? payload.payload : payload, nodeId, iteration, seq });
                 }
+            }
+            return result.sort((a, b) => a.seq - b.seq);
+        });
+        const signalRowsInput = opts.signals ?? [];
+        this.signalRows = /** @type {SignalRowsReader} */ ((signalName, options = {}) => {
+            const result = [];
+            for (const row of signalRowsInput) {
+                if (row.signalName !== signalName) continue;
+                const correlationId = row.correlationId ?? null;
+                if ("correlationId" in options && options.correlationId !== undefined && correlationId !== (options.correlationId ?? null)) {
+                    continue;
+                }
+                const seq = Number(row.seq);
+                if (!Number.isFinite(seq)) {
+                    throw new SmithersError("SIGNAL_PROVENANCE_MISSING", `Signal row for "${signalName}" has no durable completion sequence.`);
+                }
+                let payload = row.payloadJson;
+                if (typeof payload === "string") {
+                    try {
+                        payload = JSON.parse(payload);
+                    }
+                    catch {
+                        throw new SmithersError("SIGNAL_PAYLOAD_INVALID", `Signal row for "${signalName}" (seq=${seq}) has invalid JSON payload.`);
+                    }
+                }
+                result.push({ payload, signalName: row.signalName, correlationId, seq, receivedAtMs: Number(row.receivedAtMs) });
             }
             return result.sort((a, b) => a.seq - b.seq);
         });

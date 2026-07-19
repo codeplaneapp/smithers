@@ -1,6 +1,7 @@
 import type { RunAuthContext } from "./RunAuthContext.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
 import type { SmithersErrorReport } from "./SmithersErrorReport.ts";
+import type { SignalRowInput } from "./SignalRows.ts";
 import type { SmithersEvent } from "@smithers-orchestrator/observability/SmithersEvent";
 import type { Layer } from "effect";
 
@@ -78,6 +79,13 @@ export type RunOptions = {
   effectPlatformLayer?: Layer.Layer<any, never, never>;
   cliAgentToolsDefault?: "all" | "explicit-only";
   initialOutputs?: OutputSnapshot;
+  /**
+   * Fallback signal rows used when no `runtimeAdapter.signals` capability is
+   * configured (e.g. tests, the browser runtime). Ignored once a live
+   * adapter is present — `runtimeAdapter.signals.load` is re-read every
+   * frame and takes priority.
+   */
+  signals?: SignalRowInput[];
   initialIteration?: number;
   initialIterations?: Record<string, number> | ReadonlyMap<string, number>;
   resumeClaim?: {

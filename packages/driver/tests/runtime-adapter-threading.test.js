@@ -82,6 +82,69 @@ describe("WorkflowDriver runtimeAdapter threading", () => {
     expect(seenCtx.resolveWorktreePath("lane")).toBe("resolved:lane:/root");
   });
 
+  test("re-reads runtimeAdapter.signals.load fresh on every renderAndSubmit call and threads it into ctx.signalRows", async () => {
+    let callCount = 0;
+    const runtimeAdapter = {
+      name: "test-runtime",
+      signals: {
+        load: async (runId) => {
+          callCount += 1;
+          return [{ seq: callCount - 1, signalName: "REVISE", correlationId: null, payloadJson: JSON.stringify({ n: callCount }), receivedAtMs: callCount, runId }];
+        },
+      },
+    };
+    const seenCtxs = [];
+    const driver = new WorkflowDriver({
+      workflow: {
+        db: null,
+        zodToKeyName: new Map(),
+        build: (ctx) => {
+          seenCtxs.push(ctx);
+          return { ctx };
+        },
+      },
+      runtime,
+      renderer: {
+        render: async () => ({ xml: null, tasks: [], mountedTaskIds: [] }),
+      },
+      session: makeSession(),
+      runtimeAdapter,
+    });
+
+    await driver.renderAndSubmit({ runId: "run-1", iteration: 0, outputs: {} });
+    await driver.renderAndSubmit({ runId: "run-1", iteration: 0, outputs: {} });
+
+    expect(callCount).toBe(2);
+    expect(seenCtxs[0].signalRows("REVISE")[0].payload).toEqual({ n: 1 });
+    expect(seenCtxs[1].signalRows("REVISE")[0].payload).toEqual({ n: 2 });
+  });
+
+  test("falls back to RunOptions.signals seeded once at run() start when no runtimeAdapter.signals capability exists", async () => {
+    let seenCtx;
+    const driver = new WorkflowDriver({
+      workflow: {
+        db: null,
+        zodToKeyName: new Map(),
+        build: (ctx) => {
+          seenCtx = ctx;
+          return { ctx };
+        },
+      },
+      runtime,
+      renderer: {
+        render: async () => ({ xml: null, tasks: [], mountedTaskIds: [] }),
+      },
+      session: makeSession(),
+    });
+
+    await driver.run({
+      input: {},
+      signals: [{ seq: 0, signalName: "REVISE", correlationId: null, payloadJson: JSON.stringify({ feedback: "seeded" }), receivedAtMs: 1 }],
+    });
+
+    expect(seenCtx.signalRows("REVISE")[0].payload).toEqual({ feedback: "seeded" });
+  });
+
   test("prefers an explicit executeTask override, then runtimeAdapter.executeTask, then the built-in default", async () => {
     const calls = [];
     const runtimeAdapter = {

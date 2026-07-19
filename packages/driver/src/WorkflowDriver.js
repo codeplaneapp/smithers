@@ -309,6 +309,8 @@ export class WorkflowDriver {
     outputTablesByNodeId = new Map();
     /** @type {OutputSnapshot} */
     baseOutputs = {};
+    /** @type {import("./SignalRows.ts").SignalRowInput[]} Fallback signal rows when no `runtimeAdapter.signals` capability is configured. */
+    baseSignals = [];
     /** @type {Map<string, Promise<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>>} */
     inflightTasks = new Map();
     /** @type {Map<string, TaskDescriptor>} */
@@ -397,6 +399,7 @@ export class WorkflowDriver {
         this.activeRunId = runId;
         this.activeOptions = options;
         this.baseOutputs = normalizeOutputSnapshot(options.initialOutputs ?? options.outputs);
+        this.baseSignals = Array.isArray(options.signals) ? options.signals : [];
         if (this.runtimeAdapter?.storage) {
             // Resume support: seed already-persisted per-task outputs (and the
             // last stored run record) so a resumed run's render sees every prior
@@ -550,6 +553,14 @@ export class WorkflowDriver {
         // RuntimeCapabilityError) rather than imported here directly, so this
         // portable driver never statically pulls in a Node-only path resolver.
         const resolveWorktreePathFn = this.runtimeAdapter?.worktree?.resolve;
+        // Signals have no live in-render tracking analog (nothing in the graph
+        // produces them the way tasks produce outputs), so — unlike outputs,
+        // which merge a durable base with the scheduler's live Map — a fresh
+        // full reload every render is both the simplest and the correct
+        // behavior: it is impossible for a stale cache to miss a delivery.
+        const signals = this.runtimeAdapter?.signals?.load
+            ? await this.runtimeAdapter.signals.load(context.runId)
+            : this.baseSignals;
         const ctx = new SmithersCtx({
             runId: context.runId,
             iteration,
@@ -557,6 +568,7 @@ export class WorkflowDriver {
             input: context.input ?? this.activeOptions?.input ?? {},
             auth: context.auth,
             outputs: mergeOutputSnapshots(this.baseOutputs, snapshotFromContext(context, this.outputTablesByNodeId)),
+            signals,
             taskStates: context.taskStates,
             taskIterations: buildTaskIterationLookup(context),
             zodToKeyName: this.workflow.zodToKeyName,

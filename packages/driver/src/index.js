@@ -10,7 +10,7 @@
  */
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./OutputSnapshot.ts").OutputSnapshot} OutputSnapshot */
-/** @template Schema @typedef {import("./OutputRows.ts").OutputRowsReader<Schema>} OutputRowsReader */
+/** @template [Schema=unknown] @typedef {import("./OutputRows.ts").OutputRowsReader<Schema>} OutputRowsReader */
 /** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
 /** @typedef {import("./RunOptions.ts").EffectPlatformRuntime} EffectPlatformRuntime */
@@ -43,10 +43,15 @@
 /** @typedef {import("./RuntimeAdapter.ts").RuntimeWorktree} RuntimeWorktree */
 /** @typedef {import("./RuntimeAdapter.ts").RuntimeSandbox} RuntimeSandbox */
 /** @typedef {import("./RuntimeAdapter.ts").RuntimeSandboxResult} RuntimeSandboxResult */
+/** @typedef {import("./RuntimeAdapter.ts").RuntimeSignals} RuntimeSignals */
 /** @typedef {import("./RuntimeAdapter.ts").StoredRunState} StoredRunState */
 /** @typedef {import("./RuntimeCapabilityError.js").RuntimeCapability} RuntimeCapability */
 /** @typedef {import("./RuntimeCapabilityError.js").RuntimeCapabilityErrorDetails} RuntimeCapabilityErrorDetails */
 /** @typedef {import("./browser-runtime.js").BrowserRuntimeOptions} BrowserRuntimeOptions */
+/** @typedef {import("./SignalRows.ts").SignalRowInput} SignalRowInput */
+/** @typedef {import("./SignalRows.ts").SignalRow} SignalRow */
+/** @typedef {import("./SignalRows.ts").SignalRowsOptions} SignalRowsOptions */
+/** @typedef {import("./SignalRows.ts").SignalRowsReader} SignalRowsReader */
 // @smithers-type-exports-end
 
 export { WorkflowDriver } from "./WorkflowDriver.js";

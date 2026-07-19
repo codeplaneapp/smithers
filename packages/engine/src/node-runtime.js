@@ -6,10 +6,39 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { Effect } from "effect";
 import { resolveWorktreePath } from "@smithers-orchestrator/graph";
 import { RuntimeCapabilityError } from "@smithers-orchestrator/driver/RuntimeCapabilityError";
 import { createUnsupportedCapability } from "@smithers-orchestrator/driver/unsupportedCapability";
 import { defaultTaskExecutor } from "@smithers-orchestrator/driver/defaultTaskExecutor";
+
+// A run realistically never approaches this many delivered signals; it exists
+// only so `listSignals`'s query-level `LIMIT` (default 200, meant for
+// interactive/paged callers) can't silently truncate the full-history read
+// `ctx.signalRows` depends on for fold completeness.
+const SIGNAL_LOAD_LIMIT = 1_000_000;
+
+/**
+ * @param {{ listSignals(runId: string, query?: Record<string, unknown>): unknown }} adapter
+ * @returns {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSignals}
+ */
+function createAdapterSignals(adapter) {
+    return {
+        async load(runId) {
+            const rows = await Effect.runPromise(
+                /** @type {any} */ (adapter.listSignals(runId, { limit: SIGNAL_LOAD_LIMIT })),
+            );
+            return rows.map((row) => ({
+                seq: Number(row.seq),
+                signalName: row.signalName,
+                correlationId: row.correlationId ?? null,
+                payloadJson: row.payloadJson,
+                receivedAtMs: Number(row.receivedAtMs),
+                receivedBy: row.receivedBy ?? null,
+            }));
+        },
+    };
+}
 
 /**
  * Storage that intentionally does nothing: the concrete Node engine already
@@ -72,9 +101,15 @@ function runSubprocess(command, args = [], opts) {
  * {@link createNoopStorage}) and `sandbox` is not yet bridged to
  * `@smithers-orchestrator/sandbox` from this seam, so it fails closed with a
  * typed `RuntimeCapabilityError` rather than silently doing nothing.
+ * @param {{ adapter?: { listSignals(runId: string, query?: Record<string, unknown>): unknown } }} [opts]
+ *   `adapter` is the `SmithersDb` instance already open for this run — when
+ *   supplied, wires the optional `signals` capability so
+ *   `ctx.signalRows` (via `WorkflowDriver.renderAndSubmit`) reads real durable
+ *   `_smithers_signals` rows every frame. Omitted in callers that don't have
+ *   a live adapter (e.g. isolated driver tests).
  * @returns {RuntimeAdapter}
  */
-export function createNodeRuntime() {
+export function createNodeRuntime(opts = {}) {
     const runtimeName = "node";
     return {
         name: runtimeName,
@@ -122,5 +157,6 @@ export function createNodeRuntime() {
             resolve: (path, opts) => resolveWorktreePath(path, opts),
         },
         sandbox: /** @type {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSandbox} */ (createUnsupportedCapability(runtimeName, "sandbox", ["run"], "async")),
+        ...(opts.adapter ? { signals: createAdapterSignals(opts.adapter) } : {}),
     };
 }
