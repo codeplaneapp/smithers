@@ -13,11 +13,7 @@
 // the active panel instead.
 import { accessSync, constants } from "node:fs";
 import { delimiter, extname, join } from "node:path";
-import {
-  type AgentLike,
-  ClaudeCodeAgent,
-  KimiAgent,
-} from "smithers-orchestrator";
+import { type AgentLike, ClaudeCodeAgent } from "smithers-orchestrator";
 import { codexFirst } from "../lib/codexAccounts";
 
 export const SOL_MODEL = process.env.SMITHERS_SOL_MODEL?.trim() || "gpt-5.6-sol";
@@ -50,7 +46,8 @@ function commandExists(command: string): boolean {
 }
 
 const hasClaude = commandExists("claude");
-const hasKimi = commandExists("kimi");
+// kimi is intentionally never in any chain: a dead credential passes the
+// command-exists check but fails preflight, burning attempt budgets.
 
 const solOptions = {
   model: SOL_MODEL,
@@ -76,11 +73,9 @@ const lunaOptions = {
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5", env: testAgentEnv });
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8", env: testAgentEnv });
 const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5", env: testAgentEnv });
-const kimi = new KimiAgent({ model: "kimi-k2.7-code", env: testAgentEnv });
 
 const implementationFallbacks: AgentLike[] = [
-  ...(hasClaude ? [sonnet] : []),
-  ...(hasKimi ? [kimi] : []),
+  ...(hasClaude ? [sonnet, fable] : []),
 ];
 
 /** Luna implementation chain; non-Codex agents engage only when Luna cannot. */
@@ -91,16 +86,12 @@ export const validator: AgentLike[] = codexFirst(terraOptions, implementationFal
 
 const solFallbacks: AgentLike[] = [
   ...(hasClaude ? [fable, opus] : []),
-  ...(hasKimi ? [kimi] : []),
 ];
 
 /** Fable-first author chain; Sol takes over only when Claude is unavailable. */
 export const fableAuthor: AgentLike[] = [
   ...(hasClaude ? [fable] : []),
-  ...codexFirst(solOptions, [
-    ...(hasClaude ? [opus] : []),
-    ...(hasKimi ? [kimi] : []),
-  ]),
+  ...codexFirst(solOptions, [...(hasClaude ? [opus] : [])]),
 ];
 
 /**
