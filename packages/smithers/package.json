@@ -95,6 +95,11 @@
       "import": "./src/ui/adapters/markdown-editor.js",
       "default": "./src/ui/adapters/markdown-editor.js"
     },
+    "./ui/adapters/pierre-diff-view": {
+      "types": "./src/ui-adapters-pierre-diff-view.d.ts",
+      "import": "./src/ui-adapters-pierre-diff-view.js",
+      "default": "./src/ui-adapters-pierre-diff-view.js"
+    },
     "./sandbox": {
       "types": "./src/sandbox.d.ts",
       "import": "./src/sandbox.js",

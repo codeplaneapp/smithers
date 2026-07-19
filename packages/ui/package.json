@@ -14,6 +14,11 @@
       "types": "./src/adapters/markdown-editor/index.ts",
       "import": "./src/adapters/markdown-editor/index.ts",
       "default": "./src/adapters/markdown-editor/index.ts"
+    },
+    "./adapters/pierre-diff-view": {
+      "types": "./src/adapters/pierre-diff-view.tsx",
+      "import": "./src/adapters/pierre-diff-view.tsx",
+      "default": "./src/adapters/pierre-diff-view.tsx"
     }
   },
   "files": [
@@ -28,6 +33,7 @@
     "@milkdown/crepe": "7.21.2",
     "@milkdown/kit": "7.21.2",
     "@milkdown/plugin-listener": "7.21.2",
+    "@pierre/diffs": "^1.2.12",
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
