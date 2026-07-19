@@ -10258,6 +10258,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
 | `smithers-orchestrator/browser` | `./src/browser.js` | Portable browser runner, `RuntimeAdapter`, browser-safe workflow primitives, Map-backed default storage, and typed fail-closed host capabilities. See Browser runtime |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
+| `smithers-orchestrator/xstate` | `./src/xstate.js` | XState v5 machines as durable derived control state: `useSmithersMachine` folds a machine over output and signal rows each frame. See XState |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
 | `smithers-orchestrator/microsandbox` | `./src/microsandbox.js` | Microsandbox provider: run child workflows in local hardware-isolated microVMs |
 | `smithers-orchestrator/daytona` | `./src/daytona.js` | Daytona sandbox provider: run child workflows in Daytona workspaces |
@@ -10296,6 +10297,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/gcp` | GCP sandbox provider: Cloud Run Jobs execution with GCS bundle transport | Sandbox, GCP |
 | `@smithers-orchestrator/microsandbox` | Microsandbox provider: run child workflows in local hardware-isolated microVMs | Sandbox, Microsandbox |
 | `@smithers-orchestrator/vercel` | Vercel Sandbox provider: run child workflows in Vercel sandboxes | Sandbox, Vercel |
+| `@smithers-orchestrator/xstate` | XState v5 machines as durable derived control state for workflows: pure folds over output and signal rows | XState |
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |
@@ -17262,6 +17264,193 @@ workflows (even small one-task ones), and optimize them like skills with
 - Hermes agent: github.com/NousResearch/hermes-agent
 - Eliza (elizaOS): github.com/elizaOS/eliza
 - Hermes plugin source: [apps/cli/src/hermes-plugin](https://github.com/smithersai/smithers/tree/main/apps/cli/src/hermes-plugin)
+
+---
+
+## XState
+
+> Typed control state for workflows: fold an XState v5 machine over durable output and signal rows with useSmithersMachine
+
+`smithers-orchestrator/xstate` runs [XState v5](https://stately.ai/docs) state
+machines as an **optional derived-state layer** over the rows Smithers already
+persists: not a backend, not a scheduler, and not a persisted actor.
+Each frame, `useSmithersMachine` recomputes the machine's state as a pure fold
+over durable output and signal rows using XState's pure
+`initialTransition` / `transition` functions. Nothing about the machine is
+persisted; resume, fork, and rewind are correct because the fold's inputs are
+exactly the rows those features restore.
+
+Use it when a workflow's control flow outgrows plain conditionals (revision
+loops, approval ladders, multi-phase pipelines with re-entry) and you want
+`state.matches(...)` instead of hand-rolled row checks. For linear pipelines,
+`ctx.outputs` conditionals remain simpler.
+
+```tsx
+import { setup, assign } from "xstate";
+import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smithers-orchestrator/xstate";
+
+const releaseMachine = setup({}).createMachine({
+  context: { revision: 0 },
+  initial: "researching",
+  states: {
+    researching: { on: { RESEARCH_DONE: "awaitingApproval" } },
+    awaitingApproval: { on: { APPROVED: "drafting", REJECTED: "researching" } },
+    drafting: {
+      on: {
+        REVISE: { actions: assign({ revision: ({ context }) => context.revision + 1 }) },
+        TIMEOUT: "done",
+      },
+    },
+    done: { type: "final" },
+  },
+});
+
+function Release() {
+  const ctx = useCtx();
+  // Event sources are pure functions of ctx, never of machine state.
+  const state = useSmithersMachine(releaseMachine, {
+    id: "release",
+    input: ctx.input,
+    events: [
+      taskOutput(researchSchema, { nodeId: "research" }, () => ({ type: "RESEARCH_DONE" })),
+      approvalDecided(gateSchema, { nodeId: "gate" }, (d) => (d.approved ? { type: "APPROVED" } : { type: "REJECTED" })),
+      eventReceived("REVISE", reviseSchema, (p) => ({ type: "REVISE", feedback: p.feedback })),
+      timedOut(reviseWaitSchema, { scope: "revise" }, () => ({ type: "TIMEOUT" })),
+    ],
+  });
+  const rev = state.context.revision;
+
+  return (
+    <Workflow name="release">
+      {state.matches("researching") && (
+        <Task id="research" output={researchSchema} agent={researcher}>Research {ctx.input.topic}</Task>
+      )}
+      {state.matches("awaitingApproval") && (
+        <ApprovalGate id="gate" output={gateSchema} onDeny="continue" request={{ title: "Continue to drafting?" }} />
+      )}
+      {state.matches("drafting") && (
+        <>
+          {/* Machine re-entry never re-executes a completed (nodeId, iteration):
+              version task identity from machine context instead. */}
+          <Task id={`draft-r${rev}`} output={draftSchema} agent={writer}>Write the draft.</Task>
+          {/* Wake-and-park plumbing: keeps the run alive and wakes a frame on
+              delivery. The REVISE events themselves come from the durable
+              signal table, not from this node's output. */}
+          <WaitForEvent id={`revise-r${rev}`} event="REVISE" output={reviseWaitSchema} timeoutMs={86_400_000} onTimeout="continue" tagged async />
+        </>
+      )}
+    </Workflow>
+  );
+}
+```
+
+External events are ordinary signals: `bunx smithers-orchestrator signal RUN_ID REVISE --data '{...}'`.
+There is **no `send()`, no `onDone` prop, and no actor**.
+
+## The fold
+
+Each frame, `useSmithersMachine(machine, { id, input, events })`:
+
+1. Collects events by evaluating each declared source against `ctx`.
+2. Orders them by **(provenance seq, declaration index, mapped-event
+   subindex)**: causal arrival order with deterministic tiebreaks, a total
+   order that is a pure function of rows on every branch.
+3. Folds: `initialTransition(machine, input)`, then
+   `transition(machine, snapshot, event)` per event. Returned actions are
+   discarded; builtin `assign` applies inside `transition`. Events not
+   accepted in the current state are discarded, matching live-actor
+   semantics. Events after the machine reaches a final state are discarded.
+4. Returns the final `MachineSnapshot`; `state.matches()`, `state.can()`,
+   `state.context`, `state.hasTag()` work as `@xstate/react` users expect.
+
+Multiple machines per workflow are supported; give each `useSmithersMachine`
+call a distinct `id`.
+
+## Event sources
+
+| Source | Reads | Notes |
+| --- | --- | --- |
+| `taskOutput(output, { nodeId?, scope? }, map)` | Durable output rows via `ctx.outputRows` | One `map` call per row; return an event, an array, or `null` to skip. "A durable row exists", not "the task completed": failed attempts write no row, and `(nodeId, iteration)` writes are upserts. |
+| `approvalDecided(output, { nodeId?, scope? }, map)` | Approval decision rows | Denials persist a row only with `onDeny: "continue"`; a failing gate ends the branch and writes nothing. |
+| `eventReceived(signalName, schema, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table directly on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing. Payloads failing `schema.safeParse` are skipped deterministically. |
+| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires the wait to opt into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`). |
+
+All sources are pure functions of `ctx`; deriving a source's `nodeId` from
+the fold's own output is circular and unsupported.
+
+## Constraints (enforced at mount)
+
+A mount-time lint runs per machine identity (hot reload re-lints) and rejects
+machine features that cannot exist inside a durable fold, each with a typed
+error naming the Smithers-native alternative. There is no escape hatch.
+
+| Rejected | Use instead |
+| --- | --- |
+| `invoke` | A `<Task>`/`<Subflow>` writing an output row + `taskOutput()` |
+| `spawn` / `spawnChild` (including inside `assign`) | `<Task>` execution + `taskOutput()` |
+| `after` | `<WaitForEvent timeoutMs tagged onTimeout="continue">` + `timedOut()`, or `<Timer>` |
+| `raise` | Model the step as machine states, or a real signal + `eventReceived()` |
+| `sendTo` | Durable channels: outputs, approvals, signals |
+| `emit` | Derive observers from the returned snapshot |
+| `enqueueActions` | Plain `assign`; side effects in tasks |
+| `stopChild` / `stop` | Stop rendering the task (unmounting is the durable equivalent) |
+| `cancel` | `<WaitForEvent timeoutMs>` + `timedOut()` |
+| Custom / `log` actions | Only `assign` runs in the fold; run side effects in tasks |
+
+Every callback in the fold (event mappers, context initializers, guards,
+assigners, machine `output` functions) must be pure, side-effect-free, free
+of time/randomness, and must not mutate inputs. A throwing mapper or guard
+fails the render with a typed error naming the machine and event.
+
+## Listeners, re-entry, and final states
+
+- **The signal table is the event source; listeners are wake-and-park
+  plumbing.** A parked `<WaitForEvent>` matters for liveness: an idle
+  machine state with nothing rendered makes the graph quiescent and ends the
+  run. States awaiting external events should render a listener to keep
+  the run parked and wake a frame on delivery. A missed wake delays the fold
+  by one frame but never loses the event.
+- **Machine re-entry never re-executes a completed Smithers task.** Any task
+  rendered inside a machine state the machine can re-enter needs
+  context-versioned identity (`draft-r${rev}` minted from an `assign`
+  counter). A bare-constant task id in a state on a machine cycle deadlocks
+  the machine: no new row, no new event, and the quiescent graph ends the run.
+- **Final states are derived-only.** Smithers can finish while the machine is
+  non-final (graph quiescent); a machine final state does not cancel
+  in-flight tasks (stop rendering them instead); `snapshot.output` is not the
+  run output; a failure-flavored final state does not fail the run.
+
+## Durability and time travel
+
+The fold's inputs are exactly the rows Smithers restores, so crash/resume
+recomputes an identical machine state; rewinding to an earlier frame yields
+the machine state those earlier rows imply; forked runs fold their copied
+row history and diverge cleanly with their own signals.
+
+One carve-out: an in-place payload replacement at the same
+`(nodeId, iteration)` (manual `retry-task` of a completed node, HumanTask
+reopen) keeps its seq but changes its payload, so folded history from that
+position **reinterprets**. The in-process cache validates by content hash and
+refolds automatically; workflows feeding machines from replaceable tasks
+should prefer fork-and-migrate. Mid-run machine edits ride the
+`acceptWorkflowChange` gate and log a machine-history reinterpretation
+warning.
+
+## Performance
+
+Recomputing per frame is cheap in practice: an in-process prefix cache
+validates folded history by content hash and folds only the new suffix each
+frame. The CI benchmark (`packages/xstate/tests/fold-benchmark.test.js`)
+folds 10,000 events on a parallel + nested-compound machine in well under a
+second full-refold (~80µs/event) with incremental frames far below that;
+budgets are enforced at 30s full / 1s incremental. Practical limit: tens of
+thousands of events per machine per run; beyond that, prefer summarizing
+history into machine context via coarser events.
+
+## Visualization
+
+Machines are plain XState, so Stately Studio import and `xstate/graph` static
+visualization work unmodified on the machine definition.
 
 ---
 
