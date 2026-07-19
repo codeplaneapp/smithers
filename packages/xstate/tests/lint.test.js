@@ -135,3 +135,77 @@ describe("lintMachine rejections", () => {
         expect(() => lintMachine("m", build())).toThrow(/uses invoke/);
     });
 });
+
+describe("lintMachine re-entry task-identity", () => {
+    test("a bare-constant meta.smithersTaskId on a state the machine can re-enter (cycle) is rejected", () => {
+        const machine = createMachine({
+            initial: "a",
+            states: {
+                a: { meta: { smithersTaskId: "draft" }, on: { NEXT: "b" } },
+                b: { on: { BACK: "a", DONE: "c" } },
+                c: { type: "final" },
+            },
+        });
+        expect(() => lintMachine("m", machine)).toThrow(/bare constant|deadlock/);
+    });
+
+    test("a direct self-transition (reenter: true) with a bare-constant id is rejected", () => {
+        const machine = createMachine({
+            initial: "a",
+            states: {
+                a: { meta: { smithersTaskId: "draft" }, on: { RETRY: { target: "a", reenter: true } } },
+            },
+        });
+        expect(() => lintMachine("m", machine)).toThrow(/bare constant|deadlock/);
+    });
+
+    test("a bare-constant id on a descendant of a re-enterable compound state is rejected", () => {
+        const machine = createMachine({
+            initial: "a",
+            states: {
+                a: {
+                    initial: "inner",
+                    states: { inner: { meta: { smithersTaskId: "draft" } } },
+                    on: { AGAIN: { target: "a", reenter: true } },
+                },
+            },
+        });
+        expect(() => lintMachine("m", machine)).toThrow(/bare constant|deadlock/);
+    });
+
+    test("a context-derived (function) smithersTaskId on a re-enterable state is allowed", () => {
+        const machine = createMachine({
+            context: { rev: 0 },
+            initial: "a",
+            states: {
+                a: { meta: { smithersTaskId: (context) => `draft-r${context.rev}` }, on: { NEXT: "b" } },
+                b: { on: { BACK: "a", DONE: "c" } },
+                c: { type: "final" },
+            },
+        });
+        expect(() => lintMachine("m", machine)).not.toThrow();
+    });
+
+    test("a bare-constant smithersTaskId on a state the machine can never re-enter is allowed", () => {
+        const machine = createMachine({
+            initial: "a",
+            states: {
+                a: { meta: { smithersTaskId: "draft" }, on: { NEXT: "b" } },
+                b: { type: "final" },
+            },
+        });
+        expect(() => lintMachine("m", machine)).not.toThrow();
+    });
+
+    test("states without a declared smithersTaskId are unaffected even on a cycle", () => {
+        const machine = createMachine({
+            initial: "a",
+            states: {
+                a: { on: { NEXT: "b" } },
+                b: { on: { BACK: "a", DONE: "c" } },
+                c: { type: "final" },
+            },
+        });
+        expect(() => lintMachine("m", machine)).not.toThrow();
+    });
+});

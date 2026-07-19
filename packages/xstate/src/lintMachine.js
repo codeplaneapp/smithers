@@ -20,17 +20,127 @@ const lintedMachines = new WeakSet();
  */
 export function lintMachine(machineId, machine) {
     if (lintedMachines.has(machine)) return;
-    walkStateNode(machineId, machine, machine.root);
+    const reenterableIds = findReenterableStateIds(machine.root);
+    walkStateNode(machineId, machine, machine.root, reenterableIds);
     lintedMachines.add(machine);
+}
+
+/**
+ * States the machine can transition back into after leaving — a nonzero-
+ * length path from the state back to itself in the resolved transition
+ * graph (a direct self-transition, or a longer cycle through siblings).
+ * Re-entering a state re-mounts every descendant region too, so a
+ * reenterable ancestor marks its whole subtree reenterable.
+ *
+ * @param {any} root Compiled xstate root StateNode.
+ * @returns {Set<string>} State ids the machine can re-enter.
+ */
+function findReenterableStateIds(root) {
+    /** @type {Map<string, any>} */
+    const nodesById = new Map();
+    /** @type {Map<string, Set<string>>} */
+    const adjacency = new Map();
+    /** @type {Map<string, string>} */
+    const parentById = new Map();
+    (function collect(node, parent) {
+        nodesById.set(node.id, node);
+        if (parent) parentById.set(node.id, parent.id);
+        const edges = new Set();
+        const addTargets = (defs) => {
+            for (const def of defs ?? []) {
+                for (const target of def.target ?? []) {
+                    if (target?.id) edges.add(target.id);
+                }
+            }
+        };
+        if (node.transitions instanceof Map) {
+            for (const defs of node.transitions.values()) addTargets(defs);
+        }
+        addTargets(node.always);
+        adjacency.set(node.id, edges);
+        for (const child of Object.values(node.states ?? {})) collect(/** @type {any} */ (child), node);
+    })(root, null);
+    /** @type {Set<string>} */
+    const reenterable = new Set();
+    for (const [id, edges] of adjacency) {
+        if (edges.has(id)) reenterable.add(id);
+    }
+    // Tarjan SCC: any strongly-connected component with more than one node
+    // is a cycle, and every node in it can reach itself via a nonzero path.
+    let index = 0;
+    /** @type {Map<string, number>} */
+    const indices = new Map();
+    /** @type {Map<string, number>} */
+    const lowlink = new Map();
+    /** @type {Set<string>} */
+    const onStack = new Set();
+    /** @type {string[]} */
+    const stack = [];
+    const strongconnect = (id) => {
+        indices.set(id, index);
+        lowlink.set(id, index);
+        index += 1;
+        stack.push(id);
+        onStack.add(id);
+        for (const target of adjacency.get(id) ?? []) {
+            if (!indices.has(target)) {
+                strongconnect(target);
+                lowlink.set(id, Math.min(/** @type {number} */ (lowlink.get(id)), /** @type {number} */ (lowlink.get(target))));
+            }
+            else if (onStack.has(target)) {
+                lowlink.set(id, Math.min(/** @type {number} */ (lowlink.get(id)), /** @type {number} */ (indices.get(target))));
+            }
+        }
+        if (lowlink.get(id) === indices.get(id)) {
+            const scc = [];
+            let member;
+            do {
+                member = /** @type {string} */ (stack.pop());
+                onStack.delete(member);
+                scc.push(member);
+            } while (member !== id);
+            if (scc.length > 1) {
+                for (const member2 of scc) reenterable.add(member2);
+            }
+        }
+    };
+    for (const id of nodesById.keys()) {
+        if (!indices.has(id)) strongconnect(id);
+    }
+    // Propagate down: re-entering a state re-mounts its descendants too.
+    for (const id of [...reenterable]) {
+        for (const [candidateId, parentId] of parentById) {
+            if (parentId === id) reenterable.add(candidateId);
+        }
+    }
+    // The above only walks one level; repeat until no new ids are added.
+    let grew = true;
+    while (grew) {
+        grew = false;
+        for (const [candidateId, parentId] of parentById) {
+            if (reenterable.has(parentId) && !reenterable.has(candidateId)) {
+                reenterable.add(candidateId);
+                grew = true;
+            }
+        }
+    }
+    return reenterable;
 }
 
 /**
  * @param {string} machineId
  * @param {import("xstate").AnyStateMachine} machine
  * @param {any} stateNode Compiled xstate StateNode.
+ * @param {Set<string>} reenterableIds
  */
-function walkStateNode(machineId, machine, stateNode) {
+function walkStateNode(machineId, machine, stateNode, reenterableIds) {
     const where = stateNode.id;
+    const taskId = stateNode.meta && Object.prototype.hasOwnProperty.call(stateNode.meta, "smithersTaskId")
+        ? stateNode.meta.smithersTaskId
+        : undefined;
+    if (taskId !== undefined && typeof taskId !== "function" && reenterableIds.has(where)) {
+        throw new SmithersError("XSTATE_REENTRY_TASK_ID_UNSUPPORTED", `Machine "${machineId}" state "${where}" declares meta.smithersTaskId as a bare constant, but the machine can re-enter this state. A completed Smithers task is never re-executed, so re-entering would deadlock: no new row, no new event, and the quiescent graph ends the run mid-flight. Derive the id from context instead — meta: { smithersTaskId: (context) => \`draft-r\${context.rev}\` } — minted from an assign() counter, and render the <Task id={...}> with that same value.`, { machineId, stateId: where });
+    }
     if (Array.isArray(stateNode.invoke) && stateNode.invoke.length > 0) {
         throw lintError("XSTATE_INVOKE_UNSUPPORTED", machineId, where, "uses invoke", "Actors cannot run inside a durable fold. Execute the work with a Smithers <Task> (or <Subflow>) that writes an output row, and feed it back with the taskOutput() event source.");
     }
@@ -60,7 +170,7 @@ function walkStateNode(machineId, machine, stateNode) {
         }
     }
     for (const child of Object.values(stateNode.states ?? {})) {
-        walkStateNode(machineId, machine, child);
+        walkStateNode(machineId, machine, child, reenterableIds);
     }
 }
 
