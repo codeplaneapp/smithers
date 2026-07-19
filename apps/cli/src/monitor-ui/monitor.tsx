@@ -548,7 +548,7 @@ export function StatCard({
 }) {
   return (
     <div className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
-      <div className="mon-stat-value mon-mono">{value}</div>
+      <div className="mon-stat-value">{value}</div>
       <div className="mon-stat-label">{label}</div>
       {sub ? <div className="mon-stat-sub mon-dim">{sub}</div> : null}
     </div>
@@ -3281,19 +3281,16 @@ function App() {
 // ---------------------------------------------------------------------------
 
 export const monitorCss = `
+/* Geometry, color, and elevation tokens come from the ui-styleguide theme
+   (inlined by the gateway host page). Monitor-specific tokens only. */
 :root {
-  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
-  --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 15px;
-  --lh-tight: 1.35; --lh-body: 1.5;
-  --r-1: 6px; --r-2: 9px; --r-3: 12px; --r-full: 999px;
-  --ctl-h: 28px;
   --panel-pad: var(--sp-4);
 }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-size: var(--fs-3); line-height: var(--lh-body); }
 button, input, select { font: inherit; color: inherit; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-2); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-1); padding: 0 var(--sp-1); }
+code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-1); padding: 0 var(--sp-1); }
 
 .tone-running { --tone: var(--brand); }
 .tone-ok { --tone: var(--ok); }
@@ -3302,10 +3299,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .tone-idle { --tone: var(--muted); }
 
 .mon-shell { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-.mon-topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.mon-topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; background: var(--surface-glass-strong); -webkit-backdrop-filter: blur(18px) saturate(180%); backdrop-filter: blur(18px) saturate(180%); }
 .mon-brand { display: flex; align-items: center; gap: var(--sp-2); }
-.mon-brand h1 { margin: 0; font-size: var(--fs-3); font-weight: 700; letter-spacing: -0.01em; }
-.mon-brand-mark { width: 10px; height: 10px; border-radius: var(--r-full); background: var(--brand); }
+.mon-brand h1 { margin: 0; font-size: var(--fs-4); font-weight: 650; letter-spacing: -0.01em; }
+.mon-brand-mark { width: 10px; height: 10px; border-radius: var(--r-full); background: var(--brand); box-shadow: 0 0 8px color-mix(in srgb, var(--brand) 55%, transparent); }
 .mon-conn { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); font-weight: 600; color: var(--tone); }
 .mon-conn-hint { color: var(--muted); font-weight: 400; }
 .mon-conn .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
@@ -3329,7 +3326,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-child-stat { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); }
 .mon-container-note { font-size: var(--fs-1); }
 .mon-hijack-inline { flex: none; }
-.mon-tree-xml { font-family: var(--mono, ui-monospace, monospace); }
+.mon-tree-xml { font-family: var(--font-mono); }
 .mon-xml-row { display: flex; align-items: baseline; gap: 2px; line-height: 1.7; }
 .mon-xml-row.is-active { background: color-mix(in srgb, var(--brand) 12%, transparent); border-radius: var(--r-1); }
 .mon-xml-open { display: inline; border: 0; background: none; padding: 0; margin: 0; cursor: pointer; font: inherit; text-align: left; color: inherit; }
@@ -3341,7 +3338,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-xml-status { color: var(--tone, var(--ok)); }
 .mon-xml-ellipsis { color: var(--muted); padding: 0 2px; }
 .mon-count { font-variant-numeric: tabular-nums; color: var(--text); }
-.mon-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-1); }
+.mon-mono { font-family: var(--font-mono); font-size: var(--fs-1); }
 .mon-dim { color: var(--muted); }
 
 .mon-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--tone, var(--muted)); flex: none; }
@@ -3384,7 +3381,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
   .mon-modal { width: min(1280px, 100%); height: min(860px, 100%); }
 }
 
-.mon-inbox { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); border-radius: var(--r-3); padding: var(--panel-pad); background: color-mix(in srgb, var(--warn) 5%, var(--surface)); animation: mon-in 140ms ease-out; }
+.mon-inbox { border: 1px solid var(--warning-border); border-radius: var(--r-3); padding: var(--panel-pad); background: var(--warning-soft); animation: mon-in 140ms ease-out; }
 .mon-inbox .mon-kicker { margin-bottom: var(--sp-1); }
 .mon-approval { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0; border-top: 1px solid var(--border); }
 .mon-approval:first-of-type { border-top: 0; }
@@ -3423,7 +3420,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-runs-pagination-controls { display: inline-flex; align-items: center; gap: var(--sp-2); }
 
 /* All panels share one padding, radius, and stacking rhythm. */
-.mon-panel { border: 1px solid var(--border); border-radius: var(--r-3); background: var(--surface); padding: var(--panel-pad); margin: 0 0 var(--sp-4); animation: mon-in 140ms ease-out; }
+.mon-panel { border: 1px solid var(--border); border-radius: var(--r-3); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--panel-pad); margin: 0 0 var(--sp-4); animation: mon-in 140ms ease-out; }
 .mon-panel-head { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--ctl-h); margin-bottom: var(--sp-3); }
 .mon-panel-head .mon-kicker { margin-right: auto; }
 
@@ -3431,7 +3428,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-detail-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-detail-workflow { font-weight: 700; font-size: var(--fs-4); line-height: var(--lh-tight); letter-spacing: -0.01em; }
 .mon-detail-actions { display: flex; gap: var(--sp-2); }
-.mon-runid { align-self: flex-start; background: none; border: 0; padding: 0; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-1); color: var(--muted); }
+.mon-runid { align-self: flex-start; background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-1); color: var(--muted); }
 .mon-runid:hover { color: var(--text); }
 .mon-progress { display: flex; align-items: center; gap: var(--sp-2); }
 .mon-progress-track { flex: 1; max-width: 320px; height: 5px; border-radius: var(--r-full); background: color-mix(in srgb, var(--brand) 12%, transparent); overflow: hidden; }
@@ -3509,7 +3506,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-failure { border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
 .mon-live-output { max-height: 32vh; }
 .mon-live-line { border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); overflow-wrap: anywhere; }
-.mon-live-cmd { font-family: ui-monospace, monospace; color: color-mix(in srgb, var(--text) 82%, transparent); }
+.mon-live-cmd { font-family: var(--font-mono); color: color-mix(in srgb, var(--text) 82%, transparent); }
 .mon-live-text { }
 .mon-live-meta { color: var(--muted); font-style: italic; }
 .mon-live-pending { display: inline-flex; align-items: center; gap: var(--sp-2); }
@@ -3543,10 +3540,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-overview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .mon-overview .mon-runs-table-panel { flex: 1; min-height: 200px; }
 .mon-ops-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
-.mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); padding: var(--sp-2) var(--sp-3); }
-.mon-stat-value { font-size: var(--fs-4); font-weight: 700; font-variant-numeric: tabular-nums; line-height: var(--lh-tight); color: var(--tone, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mon-stat-label { font-size: var(--fs-1); line-height: var(--lh-tight); color: var(--muted); margin-top: var(--sp-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mon-stat-sub { font-size: var(--fs-1); line-height: var(--lh-tight); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--sp-3) var(--sp-3); }
+.mon-stat-value { font-size: var(--fs-6); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: var(--lh-tight); color: var(--tone, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mon-stat-label { font-size: var(--fs-1); font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; line-height: var(--lh-tight); color: var(--muted); margin-top: var(--sp-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mon-stat-sub { font-size: var(--fs-1); color: var(--muted); line-height: var(--lh-tight); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Crons panel: fixed below the table; its own horizontal scroll if narrow. */
 .mon-crons-panel { margin: var(--sp-4) 0 0; flex: none; }

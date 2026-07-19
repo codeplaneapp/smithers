@@ -226,7 +226,7 @@ describe("monitor theme contract", () => {
       [".mon-stat", "var(--surface)"],
       [".mon-banner", "var(--tone)"],
       [".mon-progress-fill", "var(--brand)"],
-      [".mon-modal", "var(--surface)"],
+      [".mon-modal { width: min(1280px, 96vw)", "var(--surface)"],
       [".mon-empty", "var(--muted)"],
       [".mon-hijack-terminal", "var(--sp-2)"],
     ];
