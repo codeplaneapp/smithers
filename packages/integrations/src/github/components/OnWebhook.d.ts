@@ -32,6 +32,7 @@ declare function OnWebhook<Schema extends zod.ZodObject<zod.ZodRawShape>>(props:
     outputSchema?: zod.ZodObject<zod.ZodRawShape>;
     timeoutMs?: number;
     onTimeout?: "fail" | "skip" | "continue";
+    tagged?: boolean;
     async?: boolean;
     skipIf?: boolean;
     dependsOn?: string[];
@@ -59,6 +60,7 @@ declare function OnPullRequest<Schema extends zod.ZodObject<zod.ZodRawShape>>(pr
     outputSchema?: zod.ZodObject<zod.ZodRawShape>;
     timeoutMs?: number;
     onTimeout?: "fail" | "skip" | "continue";
+    tagged?: boolean;
     async?: boolean;
     skipIf?: boolean;
     dependsOn?: string[];
@@ -84,6 +86,7 @@ declare function OnIssueOpened<Schema extends zod.ZodObject<zod.ZodRawShape>>(pr
     outputSchema?: zod.ZodObject<zod.ZodRawShape>;
     timeoutMs?: number;
     onTimeout?: "fail" | "skip" | "continue";
+    tagged?: boolean;
     async?: boolean;
     skipIf?: boolean;
     dependsOn?: string[];
@@ -111,6 +114,7 @@ declare function OnIssueComment<Schema extends zod.ZodObject<zod.ZodRawShape>>(p
     outputSchema?: zod.ZodObject<zod.ZodRawShape>;
     timeoutMs?: number;
     onTimeout?: "fail" | "skip" | "continue";
+    tagged?: boolean;
     async?: boolean;
     skipIf?: boolean;
     dependsOn?: string[];
@@ -136,6 +140,7 @@ declare function OnPush<Schema extends zod.ZodObject<zod.ZodRawShape>>(props: Gi
     outputSchema?: zod.ZodObject<zod.ZodRawShape>;
     timeoutMs?: number;
     onTimeout?: "fail" | "skip" | "continue";
+    tagged?: boolean;
     async?: boolean;
     skipIf?: boolean;
     dependsOn?: string[];
