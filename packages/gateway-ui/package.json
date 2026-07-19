@@ -33,7 +33,9 @@
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/ui": "workspace:*",
-    "@smithers-orchestrator/ui-styleguide": "workspace:*"
+    "@smithers-orchestrator/ui-styleguide": "workspace:*",
+    "@xyflow/react": "^12.10.2",
+    "dagre": "^0.8.5"
   },
   "peerDependencies": {
     "react": "^19.0.0",
@@ -42,6 +44,7 @@
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.6",
     "@types/bun": "latest",
+    "@types/dagre": "^0.7.54",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "react": "^19.2.7",

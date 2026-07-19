@@ -60,3 +60,15 @@ export { ApprovalPanel, type ApprovalPanelProps } from "./ApprovalPanel";
 export { LaunchButton, type LaunchButtonProps } from "./LaunchButton";
 export { WorkflowPicker, type WorkflowPickerProps } from "./WorkflowPicker";
 export { NodeOutputView, type NodeOutputViewProps } from "./NodeOutputView";
+export {
+  WorkflowGraph,
+  SmithersTaskNode,
+  workflowToFlow,
+  type WorkflowGraphProps,
+  type WorkflowSpecNode,
+  type SmithersFlowNode,
+  type FlowNodeData,
+  type FlowNodeStatus,
+  type NodeKind,
+} from "./WorkflowGraph";
+export { workflowGraphCss } from "./workflowGraphCss";

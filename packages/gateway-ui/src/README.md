@@ -22,6 +22,12 @@ Component map:
 - Hook-driven: `RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`,
   `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`.
 - `SimpleWorkflowDashboard` — the batteries-included composition of the above.
+- `WorkflowGraph` — an n8n-style ReactFlow + dagre DAG canvas built from a
+  `WorkflowSpecNode[]`; each node is a self-styled `SmithersTaskNode` card (kind
+  kicker, status dot, title, output). `workflowToFlow` is the pure dagre layout
+  util. Unlike the rest of the package it pulls in `@xyflow/react` + `dagre`, so
+  its required base stylesheet ships inline as `workflowGraphCss` (rendered in a
+  `<style>` tag) to survive the gateway's `Bun.build` (which drops `.css`).
 
 Gotchas: list-shaped RPCs (runs, approvals) are pull-only on the local gateway
 path, so those components poll via `pollMs` (default 2000, `0` disables).

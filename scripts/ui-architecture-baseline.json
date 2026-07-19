@@ -19,7 +19,9 @@
       "apps/smithers/package.json#dependencies:dagre@^0.8.5",
       "package.json#dependencies:@milkdown/crepe@7.21.2",
       "package.json#dependencies:@xyflow/react@^12.10.2",
-      "package.json#dependencies:dagre@^0.8.5"
+      "package.json#dependencies:dagre@^0.8.5",
+      "packages/gateway-ui/package.json#dependencies:@xyflow/react@^12.10.2",
+      "packages/gateway-ui/package.json#dependencies:dagre@^0.8.5"
     ],
     "legacyPackageUsage": [
       "apps/cli/src/monitor-ui/monitor.tsx -> smithers-orchestrator/gateway-ui",
@@ -267,11 +269,13 @@
     "compatibility-facade-file :: packages/gateway-ui/src/RunTree.tsx is legacy facade implementation",
     "compatibility-facade-file :: packages/gateway-ui/src/SimpleWorkflowDashboard.tsx is legacy facade implementation",
     "compatibility-facade-file :: packages/gateway-ui/src/StatusPill.tsx is legacy facade implementation",
+    "compatibility-facade-file :: packages/gateway-ui/src/WorkflowGraph.tsx is legacy facade implementation",
     "compatibility-facade-file :: packages/gateway-ui/src/WorkflowPicker.tsx is legacy facade implementation",
     "compatibility-facade-file :: packages/gateway-ui/src/index.ts is legacy facade implementation",
     "compatibility-facade-file :: packages/gateway-ui/src/styleguide-css.ts is legacy facade implementation",
     "compatibility-facade-file :: packages/gateway-ui/src/styleguide.tsx is legacy facade implementation",
     "compatibility-facade-file :: packages/gateway-ui/src/theme.ts is legacy facade implementation",
+    "compatibility-facade-file :: packages/gateway-ui/src/workflowGraphCss.ts is legacy facade implementation",
     "compatibility-facade-file :: packages/ui-styleguide/src/index.ts is legacy facade implementation",
     "components-non-visual :: packages/components/src/components/SuperSmithers.js renders intrinsic <p>",
     "gateway-react-location :: apps/cli/src/monitor-ui/monitor.tsx imports smithers-orchestrator/gateway-react",
