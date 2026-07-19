@@ -145,6 +145,7 @@
       "packages/smithers/package.json#./ui/adapters/terminal={\"default\":\"./src/ui/adapters/terminal.js\",\"import\":\"./src/ui/adapters/terminal.js\",\"types\":\"./src/ui/adapters/terminal.d.ts\"}",
       "packages/smithers/package.json#./ui={\"default\":\"./src/ui.js\",\"import\":\"./src/ui.js\",\"types\":\"./src/ui.d.ts\"}",
       "packages/smithers/package.json#./vercel={\"default\":\"./src/vercel.js\",\"import\":\"./src/vercel.js\",\"types\":\"./src/vercel.d.ts\"}",
+      "packages/smithers/package.json#./xstate={\"default\":\"./src/xstate.js\",\"import\":\"./src/xstate.js\",\"types\":\"./src/xstate.d.ts\"}",
       "packages/smithers/package.json#.={\"default\":\"./src/index.js\",\"import\":\"./src/index.js\",\"types\":\"./src/index.d.ts\"}",
       "packages/smithers/package.json#name=\"smithers-orchestrator\"",
       "packages/telegram/package.json#name=\"@smithers-orchestrator/telegram\"",
@@ -161,7 +162,8 @@
       "packages/ui/package.json#name=\"@smithers-orchestrator/ui\"",
       "packages/usage/package.json#name=\"@smithers-orchestrator/usage\"",
       "packages/vcs/package.json#name=\"@smithers-orchestrator/vcs\"",
-      "packages/vercel/package.json#name=\"@smithers-orchestrator/vercel\""
+      "packages/vercel/package.json#name=\"@smithers-orchestrator/vercel\"",
+      "packages/xstate/package.json#name=\"@smithers-orchestrator/xstate\""
     ],
     "styleEntryPoints": [
       "apps/cli/src/monitor-ui/monitor.tsx -> @xterm/xterm/css/xterm.css",

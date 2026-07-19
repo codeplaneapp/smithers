@@ -30,6 +30,12 @@ const UI_PACKAGES = new Set([
   "smithers-orchestrator/ui",
   "smithers-orchestrator/ui-styleguide",
 ]);
+// Workflow-render hooks execute inside the reconciler and are not gateway/UI
+// data hooks. Keep this exception explicit so new public React hook packages
+// still fail the single-hook-package policy by default.
+const WORKFLOW_RENDER_HOOK_PACKAGES = new Set([
+  "@smithers-orchestrator/xstate",
+]);
 const LEGACY_UI_PACKAGES = new Set([
   "@smithers-orchestrator/gateway-ui",
   "@smithers-orchestrator/ui-styleguide",
@@ -1106,14 +1112,20 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       }
     }
     const exportKeys = manifest.exports && typeof manifest.exports === "object" ? Object.keys(manifest.exports) : [];
+    const permitsWorkflowRenderHooks = WORKFLOW_RENDER_HOOK_PACKAGES.has(manifest.name);
     if (
       kind === "smithers" &&
       manifest.name !== "@smithers-orchestrator/gateway-react" &&
+      !permitsWorkflowRenderHooks &&
       (/(^|[-/])hooks?$/.test(manifest.name ?? "") || exportKeys.some((key) => /(^|\/)(?:hooks?|use(?:[-_A-Z]|$))/.test(key)))
     ) {
       violations.push(formatViolation("single-public-hook-package", `${path} publishes a hook package or hook export`));
     }
-    if (kind === "smithers" && manifest.name !== "@smithers-orchestrator/gateway-react") {
+    if (
+      kind === "smithers" &&
+      manifest.name !== "@smithers-orchestrator/gateway-react" &&
+      !permitsWorkflowRenderHooks
+    ) {
       for (const entryPath of publicEntryPaths(absoluteRoot, path, manifest, files)) {
         const entrySource = readFileSync(join(absoluteRoot, entryPath), "utf8");
         if (publicEntryExportsHook(entryPath, files, sources)) {

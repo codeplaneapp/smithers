@@ -98,6 +98,28 @@ test("an exact legacy allowlist passes", (context) => {
   });
 });
 
+test("workflow-render hooks are distinct from public gateway data hooks", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/xstate/package.json", {
+    name: "@smithers-orchestrator/xstate",
+    exports: { ".": "./src/index.js" },
+    dependencies: { react: "^19.0.0" },
+  });
+  write(
+    root,
+    "packages/xstate/src/index.js",
+    "export function useSmithersMachine() { return React.useContext(SmithersContext); }\n",
+  );
+  const baseline = snapshot(root);
+  assert.ok(
+    !baseline.allowedLegacyViolations.some((entry) =>
+      entry.includes("packages/xstate/package.json"),
+    ),
+  );
+  assert.equal(check(root).ok, true);
+});
+
 for (const [name, mutate, expected] of [
   [
     "visual imports in packages/components",
