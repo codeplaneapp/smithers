@@ -1255,7 +1255,7 @@
         "effect": "3.21.4",
         "smithers-orchestrator": "workspace:*",
         "typescript": "~6.0.3",
-        "xstate": "^5.32.5",
+        "xstate": "5.32.5",
         "zod": "^4.4.3",
       },
       "peerDependencies": {
