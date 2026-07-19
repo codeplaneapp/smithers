@@ -17,6 +17,9 @@ pre-existing breakage). Full recovery log: memory file
       packages/smithers/src edits changed the entry/module-graph hashes. Recovered with
       `--accept-workflow-change true` (re-blesses metadata); run resumed running-healthy at
       sol-readiness-review. Plain resume command works again unless the file changes anew.)_
+      _(2026-07-19 ~23:52Z: force-resumed again with `--accept-workflow-change true` after
+      restoring the remaining workflow-file improvements. The run is at 39 done / 49 pending,
+      quota-parked on fable until 2026-07-25T16:00:00.226Z.)_
 - [ ] Remaining in-run path: fable-as-sol readiness re-review → (improvement rounds as needed) →
       consensus reviews → assess → `final-verify-and-summarize`. Watch via
       `smithers ui tf-final-replay-identity-20260718` or `smithers status`.
@@ -24,6 +27,11 @@ pre-existing breakage). Full recovery log: memory file
       including the `apps/kimi-benchmarks-site` UI-inventory gate entry and the missing
       `@smithers-orchestrator/microsandbox` workspace link, both judged outside the target diff).
       If the run's improvement rounds don't clear them, fix/land these root-gate failures directly.
+      _(2026-07-19: isolated the contaminated sweep failures and landed fixes for the genuine
+      react-reconciler DevTools version, DB output-provenance leak, stale migration-head tests,
+      CLI fork-provenance fixture, generated type docs, workflow ownership inventory, and sealed
+      gate PATH. `packages/testing` passes 144/144 and `.smithers` passes 590/590; full root
+      `pnpm test` has not yet been re-run.)_
 
 ## After the run finishes
 - [ ] Verify the final summarize output + jj log; confirm all rounds are committed (the workflow
