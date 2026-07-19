@@ -39,7 +39,7 @@ describe("output.js pure helpers", () => {
     });
 
     test("stripAutoColumns: object strips keys; non-objects pass through", () => {
-        expect(stripAutoColumns({ runId: "r", nodeId: "n", iteration: 0, keep: 1 })).toEqual({ keep: 1 });
+        expect(stripAutoColumns({ runId: "r", nodeId: "n", iteration: 0, __smithersProvenanceSeq: 42, keep: 1 })).toEqual({ keep: 1 });
         expect(stripAutoColumns(null)).toBeNull();
         expect(stripAutoColumns([1])).toEqual([1]);
         expect(stripAutoColumns(7)).toBe(7);

@@ -116,7 +116,7 @@ describe("modular output/* copies", () => {
     });
 
     test("stripAutoColumns strips keys, passes non-objects through", () => {
-        expect(mStripAutoColumns({ runId: "r", nodeId: "n", iteration: 0, keep: 1 })).toEqual({ keep: 1 });
+        expect(mStripAutoColumns({ runId: "r", nodeId: "n", iteration: 0, __smithersProvenanceSeq: 42, keep: 1 })).toEqual({ keep: 1 });
         expect(mStripAutoColumns(null)).toBeNull();
         expect(mStripAutoColumns([1, 2])).toEqual([1, 2]);
         expect(mStripAutoColumns("str")).toBe("str");
