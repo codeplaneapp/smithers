@@ -33,6 +33,8 @@ import {
   SmithersUiStyles,
   smithersUiCss,
   Spinner,
+  StageStrip,
+  stageTone,
   StatusPill,
   Table,
   TableBody,
@@ -430,6 +432,58 @@ describe("CollapsiblePanel", () => {
       </CollapsiblePanel>,
     );
     expect(open).toContain("merge body");
+  });
+});
+
+describe("StageStrip", () => {
+  const stages = [
+    { label: "Target", status: "done" },
+    { label: "Preview", status: "active" },
+    { label: "Review", status: "pending" },
+    { label: "Summary", status: "failed" },
+  ];
+
+  test("stageTone buckets the status vocabulary into the four tones", () => {
+    expect(stageTone("done")).toBe("done");
+    expect(stageTone("complete")).toBe("done");
+    expect(stageTone("active")).toBe("active");
+    expect(stageTone("running")).toBe("active");
+    expect(stageTone("pending")).toBe("pending");
+    expect(stageTone(undefined)).toBe("pending");
+    expect(stageTone("failed")).toBe("failed");
+    expect(stageTone("cancelled")).toBe("failed");
+  });
+
+  test("tints each chip via the shared badge variants and carries the tone", () => {
+    const html = renderToStaticMarkup(<StageStrip stages={stages} />);
+    expect(html).toContain("sui-stage-strip");
+    expect(html).toContain("sui-stage-chip");
+    // done -> success, active -> brand default, pending -> muted, failed -> destructive.
+    expect(html).toContain("sui-badge-success");
+    expect(html).toContain("sui-badge-default");
+    expect(html).toContain("sui-badge-muted");
+    expect(html).toContain("sui-badge-destructive");
+    expect(html).toContain('data-tone="done"');
+    expect(html).toContain('data-tone="active"');
+    expect(html).toContain('data-tone="pending"');
+    expect(html).toContain('data-tone="failed"');
+    expect(html).toContain('data-status="active"');
+    expect(html).toContain("Target");
+    expect(html).toContain("Summary");
+  });
+
+  test("optional summary header counts terminal-status stages over the total", () => {
+    // done + failed are terminal; active + pending are not -> 2/4.
+    const html = renderToStaticMarkup(<StageStrip stages={stages} showSummary summaryLabel="Phases" />);
+    expect(html).toContain("sui-stage-strip-summary");
+    expect(html).toContain("Phases");
+    expect(html).toContain("2/4");
+    // No header unless asked for.
+    expect(renderToStaticMarkup(<StageStrip stages={stages} />)).not.toContain("sui-stage-strip-summary");
+  });
+
+  test("renders nothing for an empty stages array", () => {
+    expect(renderToStaticMarkup(<StageStrip stages={[]} />)).toBe("");
   });
 });
 

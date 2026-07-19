@@ -361,6 +361,7 @@
     "ui-layer-placement :: packages/ui/src/separator.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/skeleton.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/spinner.tsx is outside the target UI layers",
+    "ui-layer-placement :: packages/ui/src/stage-strip.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/status-pill.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/status.ts is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/styles.tsx is outside the target UI layers",
