@@ -164,6 +164,41 @@ describe("jumpToFrame", () => {
     }
   });
 
+  test("keeps a snapshot-finished node finished when it was retried after the rewind point", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-retry-survivor");
+      await captureSnapshot(adapter, "run-retry-survivor", 1, {
+        nodes: [{ runId: "run-retry-survivor", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }],
+        outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
+        ralph: [], input: {}, vcsPointer: null, workflowHash: null,
+      } as never);
+      // Retry AFTER the target frame (frame 1 createdAtMs=200): attempt 2 starts
+      // at 250. The legacy heuristic reset any node with a post-target attempt to
+      // pending, stomping the snapshot-restored finished state.
+      await adapter.insertAttempt({
+        runId: "run-retry-survivor",
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 2,
+        state: "finished",
+        startedAtMs: 250,
+        finishedAtMs: 270,
+        jjPointer: "ptr-one-retry",
+        jjCwd: "/tmp/sandbox-a",
+      });
+      const client = (adapter as any).db.session.client;
+      client.query(`UPDATE _smithers_nodes SET last_attempt = ?, updated_at_ms = ? WHERE run_id = ? AND node_id = ?`).run(2, 270, "run-retry-survivor", "task:one");
+      await jumpToFrame({ adapter, runId: "run-retry-survivor", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
+      const node = await adapter.getNode("run-retry-survivor", "task:one", 0);
+      expect(node?.state).toBe("finished");
+      expect(node?.lastAttempt).toBe(1);
+      expect(client.query(`SELECT value FROM out_a WHERE run_id = ? AND node_id = ?`).all("run-retry-survivor", "task:one")).toEqual([{ value: 1 }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("truncates frames/attempts/outputs, invalidates diffs, writes audit row", async () => {
     const { adapter, sqlite } = setupDb();
     try {

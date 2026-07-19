@@ -51,6 +51,37 @@ describe("durable output completion provenance", () => {
     } finally { second.sqlite.close(); }
   });
 
+  test("output row and provenance commit atomically when the provenance write crashes", async () => {
+    const { sqlite, adapter } = open(":memory:");
+    try {
+      await adapter.insertRun({ runId: "atomic", workflowName: "wf", status: "running", createdAtMs: 1 });
+      const originalExecute = adapter.internalStorage.execute.bind(adapter.internalStorage);
+      adapter.internalStorage.execute = (sql, params) => {
+        if (String(sql).includes("INSERT INTO _smithers_output_provenance")) {
+          throw new Error("injected crash between output write and provenance write");
+        }
+        return originalExecute(sql, params);
+      };
+      let crashError;
+      try {
+        await adapter.upsertOutputRow(outputs, { runId: "atomic", nodeId: "task", iteration: 0 }, { value: 1 });
+      } catch (error) {
+        crashError = error;
+      }
+      expect(String(crashError)).toContain("injected crash");
+      // Neither: the transaction must have rolled back the output row too.
+      expect(sqlite.query("SELECT * FROM provenance_output WHERE run_id = ?").all("atomic")).toHaveLength(0);
+      expect(sqlite.query("SELECT * FROM _smithers_output_provenance WHERE run_id = ?").all("atomic")).toHaveLength(0);
+      // Both: with the fault removed, the same upsert commits both writes.
+      adapter.internalStorage.execute = originalExecute;
+      await adapter.upsertOutputRow(outputs, { runId: "atomic", nodeId: "task", iteration: 0 }, { value: 1 });
+      expect(sqlite.query("SELECT value FROM provenance_output WHERE run_id = ?").all("atomic")).toEqual([{ value: 1 }]);
+      expect(sqlite.query("SELECT seq FROM _smithers_output_provenance WHERE run_id = ?").all("atomic")).toHaveLength(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("same-key replacement retains its original completion sequence", async () => {
     const { sqlite, adapter, db } = open(":memory:");
     try {

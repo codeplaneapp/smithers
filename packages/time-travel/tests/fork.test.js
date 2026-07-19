@@ -38,6 +38,27 @@ describe("forkRun", () => {
         const rows = client.query(`SELECT output_table, node_id, seq FROM _smithers_output_provenance WHERE run_id = ? ORDER BY seq`).all(result.runId);
         expect(rows).toEqual([{ output_table: "out_analyze", node_id: "analyze", seq: 4 }]);
     });
+    test("a new child output allocates seq after the max inherited provenance seq", async () => {
+        const { adapter, db, sqlite } = createTestDb();
+        sqlite.exec(`CREATE TABLE IF NOT EXISTS out_analyze (run_id TEXT NOT NULL, node_id TEXT NOT NULL, iteration INTEGER NOT NULL, text TEXT, PRIMARY KEY (run_id, node_id, iteration))`);
+        const { sqliteTable, text: textCol, integer } = await import("drizzle-orm/sqlite-core");
+        const outAnalyze = sqliteTable("out_analyze", {
+            runId: textCol("run_id").notNull(),
+            nodeId: textCol("node_id").notNull(),
+            iteration: integer("iteration").notNull(),
+            text: textCol("text"),
+        });
+        await captureSnapshot(adapter, "parent-alloc", 1, sampleData({ outputs: { out_analyze: [{ nodeId: "analyze", iteration: 0, text: "analysis" }] } }));
+        const client = adapter.db.session.client;
+        client.query(`INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES (?, ?, ?, ?, ?)`).run("parent-alloc", "out_analyze", "analyze", 0, 4);
+        const result = await forkRun(adapter, { parentRunId: "parent-alloc", frameNo: 1 });
+        await adapter.upsertOutputRow(outAnalyze, { runId: result.runId, nodeId: "child-new", iteration: 0 }, { text: "fresh" });
+        const rows = client.query(`SELECT node_id, seq FROM _smithers_output_provenance WHERE run_id = ? ORDER BY seq`).all(result.runId);
+        expect(rows).toEqual([
+            { node_id: "analyze", seq: 4 },
+            { node_id: "child-new", seq: 5 },
+        ]);
+    });
     test("creates a new run with snapshot at frame 0", async () => {
         const { adapter } = createTestDb();
         await captureSnapshot(adapter, "parent-run", 3, sampleData());

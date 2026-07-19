@@ -538,6 +538,35 @@ describe("deferred state bridge state transitions", () => {
                 handled: true,
                 state: "failed",
             });
+
+            // onTimeout=continue WITHOUT the tagged opt-in is a hard, typed
+            // error — never a silent null row (the pre-tagged-envelope trap).
+            const untaggedContinueDesc = makeDesc(tables, {
+                nodeId: "wait-continue-untagged",
+                meta: { __waitForEvent: true, __eventName: "ready", __onTimeout: "continue" },
+            });
+            // The finish bridge itself throws the typed error...
+            let untaggedError;
+            try {
+                await I.finishWaitForEventTaskBridge(adapter, "untagged-continue-run", untaggedContinueDesc, 1, null, {
+                    ...baseSnapshot,
+                    waitResultKind: "timeout",
+                });
+            } catch (error) {
+                untaggedError = error;
+            }
+            expect(untaggedError?.code).toBe("TASK_OUTPUT_SCHEMA_INVALID");
+            // ...and the timeout-resolve path surfaces it as a FAILED wait
+            // attempt with the typed error recorded — never a written row.
+            await insertAttempt(adapter, "untagged-continue-run", untaggedContinueDesc, "waiting-event");
+            expect(await I.resolveWaitForEventTimeoutBridge(adapter, "untagged-continue-run", untaggedContinueDesc, 1, {
+                ...baseSnapshot,
+                onTimeout: "continue",
+            })).toEqual({ handled: true, state: "failed" });
+            const untaggedAttempts = await Effect.runPromise(adapter.listAttemptsForRun("untagged-continue-run"));
+            expect(String(untaggedAttempts.find((attempt) => attempt.nodeId === "wait-continue-untagged")?.errorJson ?? "")).toContain("TASK_OUTPUT_SCHEMA_INVALID");
+            const untaggedRows = await db.select().from(tables.outputA);
+            expect(untaggedRows.some((row) => row.runId === "untagged-continue-run")).toBe(false);
         }
         finally {
             cleanup();
