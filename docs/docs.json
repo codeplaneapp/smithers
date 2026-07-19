@@ -278,6 +278,7 @@
           "integrations/server",
           "integrations/serve",
           "integrations/telegram",
+          "integrations/xstate",
           "integrations/gateway",
           "integrations/cloudflare",
           "integrations/microsandbox-sandbox-provider",
