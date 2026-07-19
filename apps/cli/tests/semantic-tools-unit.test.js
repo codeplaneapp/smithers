@@ -436,6 +436,9 @@ function makePostgresTimeTravelStorage({ snapshots = [], branches = [], contents
     return {
         dialect: "postgres",
         queryAll: async (sql, params) => {
+            if (sql.includes("_smithers_output_provenance")) {
+                return [];
+            }
             if (sql.includes("_smithers_snapshots")) {
                 const runId = params[0];
                 return snapshots
