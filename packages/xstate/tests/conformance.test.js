@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assign, createMachine, setup } from "xstate";
-import { computeMachineState, foldMachineState, orderFoldEvents, __machineCacheInternals } from "../src/index.js";
+import { computeMachineState, foldMachineState, orderFoldEvents, taskOutput, __machineCacheInternals } from "../src/index.js";
 
 /**
  * Minimal ctx-shaped fixture: outputRows/signalRows backed by literal rows.
@@ -189,6 +189,36 @@ describe("fold conformance", () => {
             .toThrow(/XSTATE_FOLD_FAILED|release.*BOOM.*seq 9/);
     });
 
+    test("a throwing guard fails the fold with a typed error naming machine and event", () => {
+        const machine = createMachine({
+            context: {},
+            initial: "a",
+            states: {
+                a: {
+                    on: {
+                        CHECK: {
+                            guard: () => { throw new Error("guard kaput"); },
+                            target: "b",
+                        },
+                    },
+                },
+                b: {},
+            },
+        });
+        expect(() => foldMachineState(machine, { id: "release", events: events([[9, "CHECK"]]) }))
+            .toThrow(/XSTATE_FOLD_FAILED|release.*CHECK.*seq 9/);
+    });
+
+    test("a throwing context initializer fails the initial transition with a typed error naming the machine", () => {
+        const machine = createMachine({
+            context: () => { throw new Error("context kaput"); },
+            initial: "a",
+            states: { a: {} },
+        });
+        expect(() => foldMachineState(machine, { id: "release", events: [] }))
+            .toThrow(/XSTATE_FOLD_FAILED|release.*initialTransition/);
+    });
+
     test("spawn inside assign is rejected at fold time (snapshot with children)", () => {
         const machine = createMachine({
             context: {},
@@ -272,6 +302,56 @@ describe("computeMachineState over ctx", () => {
             ],
         });
         expect(state.context.log).toEqual(["x", "y"]);
+    });
+
+    test("a throwing map callback fails with a typed error naming the source and row", () => {
+        const machine = createMachine({ initial: "a", states: { a: { on: { MARK: "b" } }, b: {} } });
+        const ctx = fakeCtx({
+            outputs: { rows: [{ payload: { tag: "x" }, nodeId: "n1", iteration: 0, seq: 1 }] },
+        });
+        const source = taskOutput("rows", {}, () => { throw new Error("mapper kaput"); });
+        expect(() => computeMachineState(ctx, machine, { id: "release", events: [source] }))
+            .toThrow(/XSTATE_EVENT_MAP_FAILED|mapper kaput|must be pure/);
+    });
+
+    test("eventReceived skips a signal payload that fails schema.safeParse, deterministically across refolds", async () => {
+        const { eventReceived } = await import("../src/index.js");
+        const schema = { safeParse: (value) => (typeof value?.feedback === "string" ? { success: true, data: value } : { success: false }) };
+        const machine = createMachine({
+            context: { feedback: [] },
+            initial: "a",
+            states: { a: { on: { REVISE: { actions: assign({ feedback: ({ context, event }) => [...context.feedback, event.note] }) } } } },
+        });
+        const ctx = fakeCtx({
+            signals: [
+                { payload: { feedback: "good note" }, signalName: "REVISE", seq: 1, receivedAtMs: 1 },
+                { payload: { malformed: true }, signalName: "REVISE", seq: 2, receivedAtMs: 2 },
+                { payload: { feedback: "another good note" }, signalName: "REVISE", seq: 3, receivedAtMs: 3 },
+            ],
+        });
+        const source = eventReceived("REVISE", schema, {}, (p) => ({ type: "REVISE", note: p.feedback }));
+        const first = computeMachineState(ctx, machine, { id: "m", events: [source] });
+        const second = computeMachineState(ctx, machine, { id: "m", events: [source] });
+        expect(first.context.feedback).toEqual(["good note", "another good note"]);
+        expect(second.context.feedback).toEqual(["good note", "another good note"]);
+    });
+
+    test("eventReceived correlationId scoping folds only signals delivered with a matching correlation id", async () => {
+        const { eventReceived } = await import("../src/index.js");
+        const machine = createMachine({
+            context: { picks: [] },
+            initial: "a",
+            states: { a: { on: { PICK: { actions: assign({ picks: ({ context, event }) => [...context.picks, event.who] }) } } } },
+        });
+        const ctx = fakeCtx({
+            signals: [
+                { payload: { who: "alice" }, signalName: "PICK", seq: 1, correlationId: "subflow-a", receivedAtMs: 1 },
+                { payload: { who: "bob" }, signalName: "PICK", seq: 2, correlationId: "subflow-b", receivedAtMs: 2 },
+            ],
+        });
+        const source = eventReceived("PICK", null, { correlationId: "subflow-a" }, (p) => ({ type: "PICK", who: p.who }));
+        const state = computeMachineState(ctx, machine, { id: "m", events: [source] });
+        expect(state.context.picks).toEqual(["alice"]);
     });
 
     test("two machines with distinct ids fold independently in one render ctx", async () => {

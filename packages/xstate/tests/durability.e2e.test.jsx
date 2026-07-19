@@ -422,6 +422,104 @@ describe("xstate durability through the real engine", () => {
         }
     }, E2E_TIMEOUT_MS);
 
+    test("the run finishes on a quiescent graph even though the machine never reaches a final state (documented, dangerous contract)", async () => {
+        // The most dangerous of the four final-state/liveness differences
+        // from a live actor: a machine state awaiting an external event that
+        // renders no listener makes the graph quiescent, and the RUN ends —
+        // silently, from the machine's point of view it is still mid-flight.
+        // This is a documented contract, not a bug, so it must be pinned.
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            yOut: z.object({ ok: z.boolean() }),
+        });
+        const machine = createMachine({
+            initial: "waitingY",
+            states: {
+                waitingY: { on: { Y: "done" } },
+                done: { type: "final" },
+            },
+        });
+        /** @type {Array<string>} */
+        const probe = [];
+        try {
+            const workflow = smithers(() => {
+                function Orphan() {
+                    const state = useSmithersMachine(machine, {
+                        id: "orphan",
+                        events: [eventReceived("Y", z.object({ ok: z.boolean() }), {}, () => ({ type: "Y" }))],
+                    });
+                    probe.push(state.status);
+                    // Deliberately renders nothing for "waitingY" — no
+                    // <WaitForEvent>, no <Task> — the authoring bug this
+                    // contract test documents.
+                    return <Workflow name="xstate-quiescent" />;
+                }
+                return <Orphan />;
+            });
+
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("finished");
+            expect(probe.at(-1)).toBe("active");
+        }
+        finally {
+            cleanup();
+        }
+    }, E2E_TIMEOUT_MS);
+
+    test("a failure-flavored final state does not fail the run, does not cancel other rendered tasks, and snapshot.output is not run output", async () => {
+        const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+            stageOne: z.object({ value: z.number() }),
+            stageTwo: z.object({ value: z.number() }),
+        });
+        const machine = createMachine({
+            initial: "working",
+            output: () => ({ error: "boom" }),
+            states: {
+                working: { on: { TASK1_DONE: "failed" } },
+                failed: { type: "final", tags: ["failure"] },
+            },
+        });
+        /** @type {Array<import("xstate").AnyMachineSnapshot>} */
+        const probe = [];
+        try {
+            const workflow = smithers(() => {
+                function Outcome() {
+                    const state = useSmithersMachine(machine, {
+                        id: "outcome",
+                        events: [taskOutput("stageOne", { nodeId: "task1" }, () => ({ type: "TASK1_DONE" }))],
+                    });
+                    probe.push(state);
+                    return (
+                        <Workflow name="xstate-final-semantics">
+                            <Task id="task1" output={outputs.stageOne}>
+                                {() => ({ value: 1 })}
+                            </Task>
+                            {/* Unconditional — proves the engine does not
+                                cancel/skip rendering other tasks just because
+                                the derived machine reached a final state. */}
+                            <Task id="always" output={outputs.stageTwo}>
+                                {() => ({ value: 2 })}
+                            </Task>
+                        </Workflow>
+                    );
+                }
+                return <Outcome />;
+            });
+
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("finished");
+            expect(result.output).toBeUndefined();
+            const finalState = probe.at(-1);
+            expect(finalState.status).toBe("done");
+            expect(finalState.hasTag("failure")).toBe(true);
+            expect(finalState.output).toEqual({ error: "boom" });
+            expect(await db.select().from(tables.stageOne)).toHaveLength(1);
+            expect(await db.select().from(tables.stageTwo)).toHaveLength(1);
+        }
+        finally {
+            cleanup();
+        }
+    }, E2E_TIMEOUT_MS);
+
     test("timedOut() pointed at a non-tagged WaitForEvent(onTimeout='continue') hard-errors instead of silently never firing", async () => {
         const { smithers, outputs, db, cleanup } = createTestSmithers({
             waitOut: z.object({ kind: z.string() }).passthrough(),
