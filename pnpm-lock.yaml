@@ -255,6 +255,9 @@ importers:
       '@smithers-orchestrator/components':
         specifier: workspace:*
         version: link:../packages/components
+      '@smithers-orchestrator/gateway-client':
+        specifier: workspace:*
+        version: link:../packages/gateway-client
       '@smithers-orchestrator/review':
         specifier: workspace:*
         version: link:../apps/review
@@ -298,9 +301,6 @@ importers:
       '@smithers-orchestrator/driver':
         specifier: workspace:*
         version: link:../packages/driver
-      '@smithers-orchestrator/gateway-client':
-        specifier: workspace:*
-        version: link:../packages/gateway-client
       '@smithers-orchestrator/graph':
         specifier: workspace:*
         version: link:../packages/graph
