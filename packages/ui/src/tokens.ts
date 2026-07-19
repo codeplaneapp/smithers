@@ -27,58 +27,69 @@
  */
 export const tokens = {
   /** Page background. */
-  background: "var(--bg, #ffffff)",
+  background: "var(--bg, #fafafa)",
   /** Default text color. */
-  foreground: "var(--text, #0a0a0a)",
+  foreground: "var(--text, #18181b)",
   /** Card / panel / popover surface. */
   card: "var(--surface, #ffffff)",
-  cardForeground: "var(--text, #0a0a0a)",
+  cardForeground: "var(--text, #18181b)",
+  /** Raised surface one step below card (insets, secondary fills). */
+  surface2: "var(--surface-2, #f4f4f5)",
+  /** Overlay surface (popovers, dialogs). */
+  surface3: "var(--surface-3, #ffffff)",
   /** Frosted surfaces used by the floating Multi-style chat composer. */
   glass: "var(--surface-glass, rgba(255,255,255,0.72))",
   glassStrong: "var(--surface-glass-strong, rgba(255,255,255,0.85))",
-  popover: "var(--surface, #ffffff)",
-  popoverForeground: "var(--text, #0a0a0a)",
+  popover: "var(--surface-3, #ffffff)",
+  popoverForeground: "var(--text, #18181b)",
   /** Brand color. The house "primary" button is TINTED (10% brand surface + brand text), not solid. */
   primary: "var(--brand, #6d56d8)",
+  /** Tinted brand surface/border for soft emphasis (chips, active rows). */
+  primarySoft: "var(--brand-soft, color-mix(in srgb, var(--brand, #6d56d8) 10%, var(--surface, #ffffff)))",
+  primarySoftStrong: "var(--brand-soft-strong, color-mix(in srgb, var(--brand, #6d56d8) 16%, var(--surface, #ffffff)))",
+  primaryBorder: "var(--brand-border, color-mix(in srgb, var(--brand, #6d56d8) 40%, transparent))",
   /**
    * Text on solid brand fills. --inverse-text is white in light mode and near
    * black in dark mode, which tracks the brand value getting lighter in dark.
    */
-  primaryForeground: "var(--inverse-text, #ffffff)",
+  primaryForeground: "var(--inverse-text, #fafafa)",
   /** Subtle raised surface (hover states, secondary buttons, muted fills). */
-  secondary: "var(--hover, #f4f4f4)",
-  secondaryForeground: "var(--text, #0a0a0a)",
-  muted: "var(--hover, #f4f4f4)",
-  mutedForeground: "var(--text-muted, #525252)",
-  accent: "var(--hover, #f4f4f4)",
-  accentForeground: "var(--text, #0a0a0a)",
+  secondary: "var(--hover, #f4f4f5)",
+  secondaryForeground: "var(--text, #18181b)",
+  muted: "var(--hover, #f4f4f5)",
+  mutedForeground: "var(--text-muted, #52525b)",
+  accent: "var(--hover, #f4f4f5)",
+  accentForeground: "var(--text, #18181b)",
   destructive: "var(--danger, #e5484d)",
   success: "var(--success, #0f8f78)",
   warning: "var(--warning, #bf7100)",
+  info: "var(--info, #2f6fde)",
   /** Hairline borders. */
-  border: "var(--border, rgba(10,10,10,0.08))",
-  borderStrong: "var(--border-strong, rgba(10,10,10,0.14))",
+  border: "var(--border, rgba(24,24,27,0.08))",
+  borderStrong: "var(--border-strong, rgba(24,24,27,0.14))",
   /** Form control borders (slightly stronger). */
-  input: "var(--border-solid, #ededed)",
+  input: "var(--border-solid, #e4e4e7)",
   /** Focus ring fill; pair with a 50% brand border-color (the house focus rule). */
   ring: "color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent)",
   ringBorder: "color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent)",
   /** Extra-subtle fill for chips and hover washes. */
-  hoverSubtle: "var(--hover-subtle, rgba(10,10,10,0.03))",
+  hoverSubtle: "var(--hover-subtle, rgba(24,24,27,0.04))",
   /** Faint text (placeholders use --text-placeholder). */
-  textFaint: "var(--text-faint, #6f6f6f)",
-  placeholder: "var(--text-placeholder, #767676)",
+  textFaint: "var(--text-faint, #71717a)",
+  placeholder: "var(--text-placeholder, #9f9fa8)",
   /** Inverse surface/text (tooltips, "ink" chips). */
-  inverseBg: "var(--inverse-bg, #0a0a0a)",
-  inverseText: "var(--inverse-text, #ffffff)",
+  inverseBg: "var(--inverse-bg, #18181b)",
+  inverseText: "var(--inverse-text, #fafafa)",
   /** Code block colors. */
-  codeBg: "var(--code-bg, #0a0a0a)",
-  codeText: "var(--code-text, #f4f4f4)",
+  codeBg: "var(--code-bg, #18181b)",
+  codeText: "var(--code-text, #f4f4f5)",
   /** Shadow base as space-separated RGB channels, for `rgb(${tokens.shadowRgb} / a)`. */
-  shadowRgb: "var(--shadow-rgb, 10 10 10)",
-  /** Card corner radius (px). Controls use `radiusControl`. */
-  radius: "8px",
-  radiusControl: "6px",
+  shadowRgb: "var(--shadow-rgb, 24 24 27)",
+  /** Card corner radius. Controls use `radiusControl`. */
+  radius: "var(--r-2, 10px)",
+  radiusControl: "var(--r-1, 6px)",
+  /** Shared control height (buttons, inputs, selects, triggers). */
+  controlHeight: "var(--ctl-h, 32px)",
   fontSans:
     'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   fontMono:

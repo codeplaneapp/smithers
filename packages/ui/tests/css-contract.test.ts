@@ -65,7 +65,7 @@ describe("css contract", () => {
     for (const m of rootBlock.matchAll(/(--[\w-]+):([^;]+);/g)) {
       lightValues.set(m[1]!, m[2]!.trim());
     }
-    expect(lightValues.get("--bg")).toBe("#ffffff");
+    expect(lightValues.get("--bg")).toBe("#fafafa");
 
     const sources = [smithersUiCss, Object.values(tokens).filter((v) => typeof v === "string").join("\n")];
     let checked = 0;

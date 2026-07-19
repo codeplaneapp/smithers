@@ -99,7 +99,7 @@ describe("Badge + StatusPill", () => {
 
   test("StatusPill maps status buckets onto badge variants with data-status", () => {
     const running = renderToStaticMarkup(<StatusPill status="running" />);
-    expect(running).toContain("sui-badge-warning");
+    expect(running).toContain("sui-badge-default");
     expect(running).toContain('data-status="running"');
     expect(running).toContain("Running");
     expect(running).toContain("sui-status-dot");
@@ -379,7 +379,7 @@ describe("CollapsiblePanel", () => {
 
   test("status prop maps buckets onto the StatusPill tint", () => {
     expect(renderToStaticMarkup(<CollapsiblePanel title="Run" status="running">x</CollapsiblePanel>)).toContain(
-      "sui-badge-warning",
+      "sui-badge-default",
     );
     expect(renderToStaticMarkup(<CollapsiblePanel title="Run" status="failed">x</CollapsiblePanel>)).toContain(
       "sui-badge-destructive",

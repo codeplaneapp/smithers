@@ -10,15 +10,16 @@ export function normalizeStatus(status: string | undefined): string {
   return (status ?? "").trim().toLowerCase().replaceAll("_", "-");
 }
 
-export type StatusClass = "ok" | "warn" | "bad" | "muted";
+export type StatusClass = "ok" | "warn" | "bad" | "muted" | "run";
 
-/** Bucket a status string into the four badge tints. */
+/** Bucket a status string into the badge tints. */
 export function statusClass(status: string | undefined): StatusClass {
   const normalized = normalizeStatus(status);
   if (["fixed", "ready", "done", "finished", "continued", "succeeded", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
   if (["broken", "blocked", "failed", "failure", "error", "cancelled", "canceled", "stale", "orphaned"].includes(normalized)) return "bad";
+  if (normalized === "running") return "run";
   if (
-    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "paused", "recovering", "todo", "open"].includes(normalized) ||
+    ["partial", "missing-tests", "missing", "waiting", "paused", "recovering"].includes(normalized) ||
     normalized.startsWith("waiting-")
   ) return "warn";
   return "muted";

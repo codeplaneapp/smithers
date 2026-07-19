@@ -70,6 +70,7 @@ export const badgeCss = `
 .sui-badge-success { border-color:color-mix(in srgb, ${t.success} 33%, transparent); background:color-mix(in srgb, ${t.success} 12%, transparent); color:${t.success}; }
 .sui-badge-warning { border-color:color-mix(in srgb, ${t.warning} 33%, transparent); background:color-mix(in srgb, ${t.warning} 12%, transparent); color:${t.warning}; }
 .sui-badge-destructive { border-color:color-mix(in srgb, ${t.destructive} 33%, transparent); background:color-mix(in srgb, ${t.destructive} 12%, transparent); color:${t.destructive}; }
+.sui-badge-info { border-color:color-mix(in srgb, ${t.info} 33%, transparent); background:color-mix(in srgb, ${t.info} 12%, transparent); color:${t.info}; }
 .sui-badge-muted { border-color:${t.border}; background:color-mix(in srgb, ${t.mutedForeground} 12%, transparent); color:${t.mutedForeground}; }
 .sui-status-dot { width:6px; height:6px; flex:none; border-radius:999px; background:currentColor; }
 `;

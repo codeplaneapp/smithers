@@ -14,7 +14,7 @@ describe("statusClass", () => {
     expect(statusClass("completed")).toBe("ok");
     expect(statusClass("failed")).toBe("bad");
     expect(statusClass("blocked")).toBe("bad");
-    expect(statusClass("running")).toBe("warn");
+    expect(statusClass("running")).toBe("run");
     expect(statusClass("waiting-approval")).toBe("warn");
     expect(statusClass("waiting-quota")).toBe("warn");
     expect(statusClass("continued")).toBe("ok");

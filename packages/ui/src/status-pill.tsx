@@ -8,6 +8,7 @@ const STATUS_VARIANT: Record<StatusClass, NonNullable<BadgeProps["variant"]>> = 
   warn: "warning",
   bad: "destructive",
   muted: "muted",
+  run: "default",
 };
 
 export type StatusPillProps = Omit<ComponentProps<"span">, "children"> & {
