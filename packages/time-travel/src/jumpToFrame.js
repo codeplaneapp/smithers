@@ -574,6 +574,24 @@ async function planSandboxReverts(
     );
     const targetAttempt = beforeAttempts[beforeAttempts.length - 1];
     if (!targetAttempt || typeof targetAttempt.jjPointer !== "string") {
+      // Every attempt records its jjCwd unconditionally at insert time, but
+      // jjPointer only fills in once a jj snapshot succeeds for that cwd
+      // (packages/engine/src/engine.js). In a plain-git checkout (linked
+      // worktrees, CI runners without jj colocation) no attempt for this cwd
+      // ever gets a jjPointer, so nothing was ever snapshotted here and there
+      // is nothing to revert — skip the cwd instead of hard-failing the whole
+      // rewind. Only treat it as truly unsupported when this run DID manage
+      // to snapshot the cwd at some point (just not before the target frame),
+      // since that case really can't be resolved to a safe revert target.
+      const everSnapshotted = attemptsForRun.some(
+        (attempt) =>
+          attempt?.jjCwd === cwd &&
+          typeof attempt?.jjPointer === "string" &&
+          attempt.jjPointer.length > 0,
+      );
+      if (!everSnapshotted) {
+        continue;
+      }
       throw new JumpToFrameError(
         "UnsupportedSandbox",
         `Could not resolve a rewind pointer for sandbox cwd ${cwd}.`,
