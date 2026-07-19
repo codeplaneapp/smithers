@@ -146,7 +146,7 @@ function btnStyle(bg: string, disabled: boolean): CSSProperties {
     // Inverse text keeps contrast on the solid semantic button in both themes
     // (white on the deep light-mode fills, near-black on the lighter dark-mode
     // fills); falls back to white when the style guide CSS is absent.
-    color: "var(--inverse-text, #ffffff)",
+    color: "var(--inverse-text, #fafafa)",
     fontWeight: 600,
     fontSize: 13,
     cursor: disabled ? "default" : "pointer",

@@ -187,7 +187,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 .pill.ok { color: var(--success); border-color: var(--success-border); background: var(--success-soft); }
 .pill.warn { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); }
-.pill.wait { color: var(--brand); border-color: var(--brand-border); background: var(--brand-soft); }
+.pill.wait { color: var(--warning); border-color: var(--warning-border); background: var(--warning-soft); }
+.pill.run { color: var(--brand); border-color: var(--brand-border); background: var(--brand-soft); }
 .pill.live { color: var(--info); border-color: var(--info-border); background: var(--info-soft); }
 .launch {
   border-top: 1px solid var(--border);
@@ -634,9 +635,9 @@ async function rpcSocket(method, params = {}) {
 
 function statusClass(status) {
   if (status === "finished" || status === "succeeded" || status === "completed") return "ok";
-  if (status === "failed" || status === "cancelled") return "warn";
-  if (String(status ?? "").startsWith("waiting")) return "wait";
-  if (status === "running" || status === "recovering") return "live";
+  if (status === "failed") return "warn";
+  if (String(status ?? "").startsWith("waiting") || status === "paused") return "wait";
+  if (status === "running" || status === "recovering") return "run";
   return "";
 }
 

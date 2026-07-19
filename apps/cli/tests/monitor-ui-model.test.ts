@@ -139,7 +139,8 @@ describe("status tones", () => {
     expect(toneForStatus("recovering")).toBe("running");
     expect(toneForStatus("waiting-approval")).toBe("waiting");
     expect(toneForStatus("waiting_event")).toBe("waiting");
-    expect(toneForStatus("pending")).toBe("waiting");
+    expect(toneForStatus("pending")).toBe("idle");
+    expect(toneForStatus("queued")).toBe("idle");
     expect(toneForStatus("finished")).toBe("ok");
     expect(toneForStatus("succeeded")).toBe("ok");
     expect(toneForStatus("failed")).toBe("failed");

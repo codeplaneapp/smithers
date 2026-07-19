@@ -405,10 +405,10 @@ export function normalizeStatus(status: string | undefined): string {
 export function toneForStatus(status: string | undefined): Tone {
   const s = normalizeStatus(status);
   if (s === "running" || s === "in-progress" || s === "continued" || s === "recovering") return "running";
-  if (s.startsWith("waiting") || s === "paused" || s === "pending" || s === "queued") return "waiting";
+  if (s.startsWith("waiting") || s === "paused") return "waiting";
   if (s === "finished" || s === "succeeded" || s === "ok" || s === "success") return "ok";
   if (s === "failed" || s === "error" || s === "stale" || s === "orphaned") return "failed";
-  if (s === "cancelled" || s === "canceled" || s === "skipped") return "idle";
+  if (s === "pending" || s === "queued" || s === "cancelled" || s === "canceled" || s === "skipped") return "idle";
   // Unknown statuses read as live so in-flight runs surface instead of vanishing.
   return "running";
 }
@@ -1157,14 +1157,14 @@ export function buildTimeline(rows: readonly NodeStateRow[], nowMs: number): Tim
   const sortKeys = new Map<string, number | undefined>();
   const entries = rows.map((row) => {
     const tone = toneForStatus(row.state);
-    const settled = tone === "ok" || tone === "failed" || tone === "idle";
+    const neverRan = NEVER_RAN_STATES.has(normalizeStatus(row.state)) && row.startedAtMs === undefined;
+    const settled = !neverRan && (tone === "ok" || tone === "failed" || tone === "idle");
     const endMs = row.finishedAtMs ?? (settled ? row.updatedAtMs : undefined);
     const durationMs =
       row.startedAtMs !== undefined
         ? Math.max(0, (endMs ?? nowMs) - row.startedAtMs)
         : undefined;
     const key = `${row.nodeId}#${row.iteration}`;
-    const neverRan = NEVER_RAN_STATES.has(normalizeStatus(row.state)) && row.startedAtMs === undefined;
     sortKeys.set(key, row.startedAtMs ?? (neverRan ? undefined : row.updatedAtMs));
     return {
       ...row,
