@@ -359,6 +359,17 @@ describe("iteration scope helpers", () => {
 });
 
 describe("SmithersCtx output access", () => {
+  test("reads each aliased output row once in durable sequence order", () => {
+    const rows = [
+      { runId: "r", nodeId: "b", iteration: 0, value: 2, seq: 900, __smithersProvenanceSeq: 2 },
+      { runId: "r", nodeId: "a", iteration: 0, value: 1, seq: 901, __smithersProvenanceSeq: 1 },
+    ];
+    const ctx = makeCtx({ outputs: { rows, outputTable: rows } });
+    expect(ctx.outputRows("rows")).toEqual([
+      { payload: { value: 1, seq: 901 }, nodeId: "a", iteration: 0, seq: 1 },
+      { payload: { value: 2, seq: 900 }, nodeId: "b", iteration: 0, seq: 2 },
+    ]);
+  });
   test("normalizes input payload rows in constructor", () => {
     const ctx = makeCtx({ input: { runId: "r1", payload: '{"ok":true}' } });
     expect(ctx.input).toEqual({ ok: true });

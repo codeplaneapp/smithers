@@ -178,10 +178,17 @@ function mergeOutputSnapshots(base, live) {
         merged[key] = [...rows];
     }
     for (const [key, rows] of Object.entries(live)) {
-        merged[key] = [...(merged[key] ?? []), ...rows];
+        const current = merged[key] ?? [];
+        const byIdentity = new Map(current.map((row) => [`${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`, row]));
+        for (const row of rows) {
+            byIdentity.set(`${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`, row);
+        }
+        merged[key] = [...byIdentity.values()];
     }
     return merged;
 }
+
+const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
 /**
  * @returns {Promise<CreateWorkflowSession | null>}
  */
@@ -366,9 +373,18 @@ export class WorkflowDriver {
         const tableName = this.outputTablesByNodeId.get(task.nodeId);
         if (!tableName)
             return;
-        const row = output && typeof output === "object" && !Array.isArray(output)
+        const candidate = output && typeof output === "object" && !Array.isArray(output)
             ? { ...output, nodeId: task.nodeId, iteration: task.iteration }
             : { nodeId: task.nodeId, iteration: task.iteration, payload: output };
+        const existing = (this.persistedOutputs[tableName] ?? []).find((item) => item.nodeId === task.nodeId && Number(item.iteration ?? 0) === Number(task.iteration ?? 0));
+        const existingSeq = existing?.[OUTPUT_PROVENANCE_SEQ];
+        const candidateSeq = candidate[OUTPUT_PROVENANCE_SEQ];
+        let seq = Number(existingSeq);
+        if (!Number.isFinite(seq)) seq = Number(candidateSeq);
+        if (!Number.isFinite(seq)) {
+            seq = Object.values(this.persistedOutputs).flat().reduce((max, item) => Math.max(max, Number(item[OUTPUT_PROVENANCE_SEQ] ?? -1)), -1) + 1;
+        }
+        const row = { ...candidate, [OUTPUT_PROVENANCE_SEQ]: seq };
         this.persistedOutputs = mergeOutputSnapshots(this.persistedOutputs, { [tableName]: [row] });
         await this.runtimeAdapter.storage.saveOutputs(this.activeRunId, this.persistedOutputs);
     }

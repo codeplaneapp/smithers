@@ -5,6 +5,7 @@ import { normalizeInputRow } from "./normalizeInputRow.js";
 import { withLogicalIterationShortcuts } from "./withLogicalIterationShortcuts.js";
 import { RuntimeCapabilityError } from "./RuntimeCapabilityError.js";
 import { digestProofRow } from "./provenance.js";
+const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./SafeParser.ts").SafeParser} SafeParser */
 /** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
@@ -22,6 +23,7 @@ import { digestProofRow } from "./provenance.js";
  * @template Schema
  * @typedef {import("./OutputAccessor.ts").OutputAccessor<Schema>} OutputAccessor
  */
+/** @typedef {import("./OutputRows.ts").OutputRowsReader} OutputRowsReader */
 
 /**
  * Strip harness metadata columns (runId/nodeId/iteration) from an output row
@@ -47,15 +49,18 @@ function stripAutoColumns(row) {
 function resolveDrizzleName(table) {
     if (!table || typeof table !== "object")
         return undefined;
-    const tableObj = /** @type {Record<string, unknown>} */ (table);
+    const tableObj = /** @type {Record<string | symbol, unknown>} */ (table);
+    const symbolName = tableObj[Symbol.for("drizzle:Name")];
+    if (typeof symbolName === "string") return symbolName;
     const tableMeta = tableObj._;
     if (tableMeta &&
         typeof tableMeta === "object" &&
         typeof (/** @type {Record<string, unknown>} */ (tableMeta)).name === "string") {
         return /** @type {string} */ ((/** @type {Record<string, unknown>} */ (tableMeta)).name);
     }
-    if (typeof tableObj.name === "string")
-        return /** @type {string} */ (tableObj.name);
+    // Keep the old plain-object test/adapter shape working; real Drizzle
+    // tables are resolved by the symbol above.
+    if (typeof tableObj.name === "string") return tableObj.name;
     return undefined;
 }
 
@@ -79,6 +84,8 @@ export class SmithersCtx {
     _worktreePaths;
     /** @type {OutputAccessor<Schema>} */
     outputs;
+    /** @type {OutputRowsReader<Schema>} */
+    outputRows;
     /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
     _outputs;
     /** @type {Map<unknown, string> | undefined} */
@@ -123,6 +130,34 @@ export class SmithersCtx {
             outputsFn[name] = rows;
         }
         this.outputs = /** @type {OutputAccessor<Schema>} */ (/** @type {unknown} */ (outputsFn));
+        this.outputRows = /** @type {OutputRowsReader<Schema>} */ ((output, options = {}) => {
+            const tableName = typeof output === "string" ? output : resolveDrizzleName(output) ?? this._zodToKeyName?.get(output);
+            if (!tableName) return [];
+            const seen = new Set();
+            const result = [];
+            for (const [key, candidates] of Object.entries(opts.outputs)) {
+                if (key !== tableName && key !== resolveDrizzleName(output)) continue;
+                for (const row of candidates) {
+                    const nodeId = String(row.nodeId ?? "");
+                    const iteration = Number(row.iteration ?? 0);
+                    if (options.nodeId && nodeId !== options.nodeId && nodeId !== `${options.nodeId}${options.scope ?? ""}`) continue;
+                    if (options.scope && !nodeId.endsWith(options.scope)) continue;
+                    const identity = `${nodeId}::${iteration}`;
+                    if (seen.has(identity)) continue;
+                    seen.add(identity);
+                    const durableSeq = row[OUTPUT_PROVENANCE_SEQ];
+                    const seq = Number(durableSeq);
+                    if (!Number.isFinite(seq)) {
+                        throw new SmithersError("OUTPUT_PROVENANCE_MISSING", `Output row ${nodeId}::${iteration} has no durable completion sequence.`);
+                    }
+                    const { runId: _runId, nodeId: _nodeId, iteration: _iteration, ...withUserFields } = row;
+                    const { __smithersProvenanceSeq: _provenanceSeq, ...payloadFields } = withUserFields;
+                    const payload = payloadFields;
+                    result.push({ payload: Object.keys(payload).length === 1 && "payload" in payload ? payload.payload : payload, nodeId, iteration, seq });
+                }
+            }
+            return result.sort((a, b) => a.seq - b.seq);
+        });
     }
     /**
      * Return the resolved absolute path for a rendered worktree or task id.

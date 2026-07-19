@@ -359,6 +359,25 @@ type OutputAccessor$2<Schema, TRow = unknown> = {
     [K in keyof Schema & string]: Array<InferOutputEntry$1<Schema[K]>>;
 };
 
+type OutputRow$1<Payload = unknown> = {
+    payload: Payload;
+    nodeId: string;
+    iteration: number;
+    seq: number;
+};
+type OutputRowsOptions = {
+    nodeId?: string;
+    scope?: string;
+};
+type OutputRowsReader$2<Schema = unknown> = {
+    <K extends keyof Schema & string>(output: K, options?: OutputRowsOptions): Array<OutputRow$1<InferOutputEntry$1<Schema[K]>>>;
+    <T extends z.ZodTypeAny>(output: T, options?: OutputRowsOptions): Array<OutputRow$1<z.infer<T>>>;
+    <T extends {
+        $inferSelect: unknown;
+    }>(output: T, options?: OutputRowsOptions): Array<OutputRow$1<InferRow<T>>>;
+    (output: unknown, options?: OutputRowsOptions): Array<OutputRow$1<unknown>>;
+};
+
 /**
  * Resolve the row type a `ctx.output`/`ctx.outputMaybe`/`ctx.latest` call returns
  * from the `table` argument it was given:
@@ -456,6 +475,8 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     _worktreePaths: Record<string, string>;
     /** @type {OutputAccessor<Schema>} */
     outputs: OutputAccessor$1<Schema>;
+    /** @type {OutputRowsReader<Schema>} */
+    outputRows: OutputRowsReader$1<Schema>;
     /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
     _outputs: OutputSnapshot$2;
     /** @type {Map<unknown, string> | undefined} */
@@ -627,6 +648,7 @@ type TableRef = unknown;
 type OutputRow = Record<string, unknown>;
 type ResolveOutputRow<Schema, T> = ResolveOutputRow$1<Schema, T>;
 type OutputAccessor$1<Schema> = OutputAccessor$2<Schema>;
+type OutputRowsReader$1<Schema = unknown> = OutputRowsReader$2<Schema>;
 
 type WorkflowElement = {
     type: unknown;
@@ -944,6 +966,7 @@ type OutputAccessor<Schema = any> = OutputAccessor$2<Schema>;
 type InferOutputEntry<T> = InferOutputEntry$1<T>;
 type OutputKey = OutputKey$2;
 type OutputSnapshot = OutputSnapshot$2;
+type OutputRowsReader<Schema> = OutputRowsReader$2<Schema>;
 type ProofBinding = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
 type RunAuthContext = RunAuthContext$2;
 type EffectPlatformRuntime = EffectPlatformRuntime$1;
@@ -975,4 +998,4 @@ type RuntimeCapability = RuntimeCapability$1;
 type RuntimeCapabilityErrorDetails = RuntimeCapabilityErrorDetails$1;
 type BrowserRuntimeOptions = BrowserRuntimeOptions$1;
 
-export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };
+export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };

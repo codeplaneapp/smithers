@@ -162,10 +162,10 @@ describe("WorkflowDriver runtimeAdapter threading", () => {
     const persisted = await runtimeAdapter.storage.loadOutputs("run-resume");
     expect(persisted.seed_output).toEqual([{ nodeId: "seed", iteration: 0, value: 1 }]);
     expect(persisted.agent_output).toEqual([
-      { summary: "agent-done", nodeId: "agentTask", iteration: 0 },
+      { summary: "agent-done", nodeId: "agentTask", iteration: 0, __smithersProvenanceSeq: 0 },
     ]);
     expect(persisted.dependent_output).toEqual([
-      { derived: "compute-done", nodeId: "computeTask", iteration: 0 },
+      { derived: "compute-done", nodeId: "computeTask", iteration: 0, __smithersProvenanceSeq: 1 },
     ]);
 
     const storedRun = await runtimeAdapter.storage.loadRun("run-resume");

@@ -23,7 +23,12 @@ describe("RunOptions public type", () => {
     writeFileSync(
       join(dir, "run-options.ts"),
       `
-        import type { RunOptions, SmithersErrorReport } from "@smithers-orchestrator/driver";
+        import type { OutputRowsReader, RunOptions, SmithersErrorReport } from "@smithers-orchestrator/driver";
+
+        type Outputs = { rows: { value: number } };
+        declare const rowsReader: OutputRowsReader<Outputs>;
+        const value: number = (rowsReader("rows")[0].payload as { value: number }).value;
+        void value;
 
         const reports: SmithersErrorReport[] = [];
 
