@@ -212,6 +212,18 @@ test("events --watch appends new events without clearing the screen", async () =
     let processRef;
     try {
         await insertRun(adapter, "watch-events-run", "running");
+        const historicalTimestamp = Date.now() - 1_000;
+        await adapter.insertEventWithNextSeq({
+            runId: "watch-events-run",
+            timestampMs: historicalTimestamp,
+            type: "RunHeartbeat",
+            payloadJson: JSON.stringify({
+                type: "RunHeartbeat",
+                runId: "watch-events-run",
+                timestampMs: historicalTimestamp,
+                phase: "historical",
+            }),
+        });
         processRef = spawnSmithersLive(["events", "watch-events-run", "--watch", "--interval", "0.2", "--json", "--raw"], { cwd: repo.dir });
         await waitForMatch(processRef.readStderr, "--interval clamped to 500ms", WATCH_STARTUP_TIMEOUT_MS);
         await sleep(600);
@@ -224,6 +236,7 @@ test("events --watch appends new events without clearing the screen", async () =
                 type: "RunHeartbeat",
                 runId: "watch-events-run",
                 timestampMs: now,
+                phase: "live",
             }),
         });
         await adapter.insertEventWithNextSeq({
@@ -244,8 +257,40 @@ test("events --watch appends new events without clearing the screen", async () =
         expect(exit.exitCode).toBe(0);
         const stdout = processRef.readStdout();
         expect(stdout).toContain("\"type\":\"RunHeartbeat\"");
+        expect(stdout).toContain("\"phase\":\"live\"");
+        expect(stdout).not.toContain("\"phase\":\"historical\"");
         expect(stdout).toContain("\"type\":\"RunFinished\"");
         expect(stdout).not.toContain(CLEAR_SCREEN_SEQUENCE);
+    }
+    finally {
+        if (processRef) {
+            await ensureProcessStopped(processRef);
+        }
+        sqlite.close();
+    }
+}, 30_000);
+test("events --watch --replay-history emits existing events before tailing", async () => {
+    const repo = createTempRepo();
+    const { sqlite, adapter } = openRepoDb(repo);
+    let processRef;
+    try {
+        await insertRun(adapter, "watch-events-replay-run", "running");
+        const now = Date.now();
+        await adapter.insertEventWithNextSeq({
+            runId: "watch-events-replay-run",
+            timestampMs: now,
+            type: "RunHeartbeat",
+            payloadJson: JSON.stringify({
+                type: "RunHeartbeat",
+                runId: "watch-events-replay-run",
+                timestampMs: now,
+                phase: "historical",
+            }),
+        });
+        processRef = spawnSmithersLive(["events", "watch-events-replay-run", "--watch", "--replay-history", "--interval", "0.2", "--json", "--raw"], { cwd: repo.dir });
+        await waitForMatch(processRef.readStdout, "\"phase\":\"historical\"", WATCH_STARTUP_TIMEOUT_MS);
+        const exit = await stopProcess(processRef, "SIGINT");
+        expect(exit.exitCode === 0 || exit.signal === "SIGINT").toBe(true);
     }
     finally {
         if (processRef) {

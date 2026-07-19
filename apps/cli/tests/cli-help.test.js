@@ -72,6 +72,7 @@ test("events --help says --since is a duration and distinguishes it from logs --
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("duration window");
     expect(result.stdout).toContain("milliseconds");
+    expect(result.stdout).toContain("--replay-history");
 });
 test("hijack --help documents --target as engine OR node id (#23)", () => {
     const repo = createTempRepo();

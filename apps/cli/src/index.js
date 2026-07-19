@@ -1766,6 +1766,7 @@ const eventsOptions = z.object({
     json: z.boolean().default(false).describe("Output NDJSON for piping"),
     groupBy: z.string().optional().describe("Group output by \"node\" or \"attempt\""),
     watch: z.boolean().default(false).describe("Watch mode: append new events as they arrive"),
+    replayHistory: z.boolean().default(false).describe("With --watch, replay matching history before tailing new events"),
     interval: z.number().positive().default(2).describe("Watch poll interval in seconds"),
     raw: z.boolean().default(false).describe("Include raw agent chunk/tool history instead of the default lifecycle-only view"),
 });
@@ -5970,8 +5971,11 @@ const cli = Cli.create({
                 : undefined;
             const groupedEvents = [];
             let emitted = 0;
-            let lastSeq = -1;
-            while (emitted < query.limit) {
+            const tailFromNow = c.options.watch && !c.options.replayHistory && !c.options.since;
+            let lastSeq = tailFromNow
+                ? (await adapter.getLastEventSeq(c.args.runId)) ?? -1
+                : -1;
+            while (!tailFromNow && emitted < query.limit) {
                 const pageLimit = Math.min(EVENTS_PAGE_SIZE, query.limit - emitted);
                 const page = await queryEventHistoryPage(adapter, c.args.runId, {
                     afterSeq: lastSeq,
