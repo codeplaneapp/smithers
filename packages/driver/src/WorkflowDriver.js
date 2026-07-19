@@ -317,6 +317,8 @@ export class WorkflowDriver {
     settledTasks = [];
     /** @type {import("./RuntimeAdapter.ts").RuntimeAdapter | undefined} */
     runtimeAdapter;
+    /** @type {((runId: string) => Promise<import("./RawSignalRow.ts").RawSignalRow[]>) | undefined} */
+    signalReader;
     /** @type {OutputSnapshot} Output rows persisted to runtimeAdapter.storage this run, kept in sync so each save is a full, monotonically-growing snapshot. */
     persistedOutputs = {};
     /** @type {import("./RuntimeAdapter.ts").StoredRunState | undefined} */
@@ -334,6 +336,7 @@ export class WorkflowDriver {
         this.session = options.session;
         this.createSession = options.createSession;
         this.runtimeAdapter = options.runtimeAdapter;
+        this.signalReader = options.signalReader;
         this.executeTask = options.executeTask ?? this.runtimeAdapter?.executeTask ?? defaultTaskExecutor;
         this.onSchedulerWait = options.onSchedulerWait;
         this.onWait = options.onWait;
@@ -545,6 +548,9 @@ export class WorkflowDriver {
    * @returns {Promise<import("./RawSignalRow.ts").RawSignalRow[]>}
    */
     async loadSignalRows(runId) {
+        if (this.signalReader) {
+            return this.signalReader(runId);
+        }
         if (!this.db || typeof (/** @type {{ listSignals?: unknown }} */ (this.db)).listSignals !== "function") {
             return [];
         }

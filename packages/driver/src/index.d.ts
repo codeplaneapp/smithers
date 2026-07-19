@@ -799,6 +799,13 @@ type WorkflowDriverOptions$1<Schema = unknown> = {
      * final `executeTask` fallback).
      */
     runtimeAdapter?: RuntimeAdapter$1;
+    /**
+     * Durable signal read path for `ctx.signalRows`: returns every
+     * `_smithers_signals` row for the run with its shared-clock seq. The engine
+     * wires this to its db adapter; when absent the driver falls back to a
+     * `listSignals` method on `db`, else renders with no signal rows.
+     */
+    signalReader?: (runId: string) => Promise<RawSignalRow$1[]>;
 };
 
 /**
@@ -872,6 +879,8 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
     }>;
     /** @type {import("./RuntimeAdapter.ts").RuntimeAdapter | undefined} */
     runtimeAdapter: RuntimeAdapter$1 | undefined;
+    /** @type {((runId: string) => Promise<import("./RawSignalRow.ts").RawSignalRow[]>) | undefined} */
+    signalReader: ((runId: string) => Promise<RawSignalRow$1[]>) | undefined;
     /** @type {OutputSnapshot} Output rows persisted to runtimeAdapter.storage this run, kept in sync so each save is a full, monotonically-growing snapshot. */
     persistedOutputs: OutputSnapshot$1;
     /** @type {import("./RuntimeAdapter.ts").StoredRunState | undefined} */

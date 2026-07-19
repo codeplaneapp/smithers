@@ -8121,6 +8121,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
             // using the real, unmodified resolveWorktreePath now that
             // SmithersCtx/extractGraph no longer import it themselves.
             runtimeAdapter: createNodeRuntime(),
+            // Durable signal read path for ctx.signalRows: the driver's `db`
+            // is the raw drizzle handle, so the adapter-backed reader is
+            // injected explicitly. The high limit overrides listSignals'
+            // default 200-row cap — machine folds need full signal history.
+            signalReader: (signalRunId) => Effect.runPromise(adapter.listSignals(signalRunId, { limit: 1_000_000 })),
             executeTask: (task) => executeDriverTask(task),
             onSchedulerWait: (durationMs) => Effect.runPromise(Metric.update(schedulerWaitDuration, durationMs)),
             onWait: (reason) => handleDriverWait(reason),

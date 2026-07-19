@@ -9,6 +9,7 @@ import type {
 } from "./workflow-types.ts";
 import type { WorkflowDefinition } from "./WorkflowDefinition.ts";
 import type { WorkflowGraphRenderer } from "./WorkflowGraphRenderer.ts";
+import type { RawSignalRow } from "./RawSignalRow.ts";
 import type { RuntimeAdapter } from "./RuntimeAdapter.ts";
 
 export type WorkflowDriverOptions<Schema = unknown> = {
@@ -35,4 +36,11 @@ export type WorkflowDriverOptions<Schema = unknown> = {
    * final `executeTask` fallback).
    */
   runtimeAdapter?: RuntimeAdapter;
+  /**
+   * Durable signal read path for `ctx.signalRows`: returns every
+   * `_smithers_signals` row for the run with its shared-clock seq. The engine
+   * wires this to its db adapter; when absent the driver falls back to a
+   * `listSignals` method on `db`, else renders with no signal rows.
+   */
+  signalReader?: (runId: string) => Promise<RawSignalRow[]>;
 };
