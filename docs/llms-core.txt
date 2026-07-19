@@ -10250,6 +10250,8 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
 | `smithers-orchestrator/gateway-ui` | `./src/gateway-ui.js` | Prebuilt React components for gateway-backed UIs (`RunList`, `RunTree`, `ApprovalPanel`, and more) |
 | `smithers-orchestrator/ui` | `./src/ui.js` | Shared shadcn-anatomy component library (`Button`, `Card`, `Dialog`, `Tabs`, `StatusPill`, and more) styled through the ui-styleguide theme tokens |
+| `smithers-orchestrator/ui/adapters/markdown-editor` | `./src/ui/adapters/markdown-editor.js` | The shared `MarkdownEditor` WYSIWYG Milkdown Crepe editor, shipped behind an explicit heavy-dependency adapter subpath |
+| `smithers-orchestrator/ui/adapters/pierre-diff-view` | `./src/ui-adapters-pierre-diff-view.js` | Syntax-highlighted `PierreDiffView` diff surface (split/inline) over `@pierre/diffs`; opt-in adapter kept out of the base `ui` barrel so the heavy widget dependency is never pulled in transitively |
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
 | `smithers-orchestrator/browser` | `./src/browser.js` | Portable browser runner, `RuntimeAdapter`, browser-safe workflow primitives, Map-backed default storage, and typed fail-closed host capabilities. See [Browser runtime](/runtime/browser) |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
@@ -11144,6 +11146,42 @@ can build a `DiffFile` from a raw patch and reason about it without a runtime:
 | `tokens` | The token bridge (`var(--token, #lightFallback)` strings) for inline styles that must match the components. |
 | `cn` | clsx class composition. |
 | `buttonVariants`, `badgeVariants`, `alertVariants`, `spinnerVariants` | CVA variant builders for styling your own elements like the components. |
+
+### Adapters
+
+Heavy third-party editor widgets live behind explicit
+`@smithers-orchestrator/ui/adapters/*` subpaths, so importing the base library
+never pulls their runtime. Import them from the matching
+`smithers-orchestrator/ui/adapters/*` subpath instead of the root `ui` barrel.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `MarkdownEditor` | The shared WYSIWYG Milkdown Crepe markdown editor: the user edits rendered markdown directly, never raw source. It is the single replacement for the former per-app editors. Under server render and test DOMs (no ProseMirror layout) it degrades to a controlled `<textarea>` honoring the same contract. | `value`, `onChange`, `readOnly`, `resetKey`, plus an imperative `getMarkdown` / `setMarkdown` handle |
+
+The editor is generic and store-free: multiplayer sync, draft reconciliation,
+and persistence stay a caller concern, wired through `onChange` and the
+imperative `setMarkdown` (which is echo-suppressed, so an external update never
+loops back out as a local edit). Ship its Crepe theme CSS with
+`MarkdownEditorStyles` alongside `SmithersUiStyles`, or rely on the browser
+self-injection fallback every editor performs.
+
+```tsx
+import { useRef } from "react";
+import { Button, SmithersUiStyles } from "smithers-orchestrator/ui";
+import { MarkdownEditor, MarkdownEditorStyles } from "smithers-orchestrator/ui/adapters/markdown-editor";
+
+function DocEditor({ initial, onSave }: { initial: string; onSave: (markdown: string) => void }) {
+  const editor = useRef<{ getMarkdown: () => string } | null>(null);
+  return (
+    <div>
+      <SmithersUiStyles />
+      <MarkdownEditorStyles />
+      <MarkdownEditor ref={editor} value={initial} onChange={(markdown) => onSave(markdown)} />
+      <Button onClick={() => onSave(editor.current?.getMarkdown() ?? "")}>Save</Button>
+    </div>
+  );
+}
+```
 
 ## A complete workflow UI
 
