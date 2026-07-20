@@ -161,6 +161,19 @@ test("a fresh pack UI theme module fails", (context) => {
   assert.match(result.errors.join("\n"), /New architecture violation: pack-ui-theme-module/);
 });
 
+test("a fresh pack UI theme directory module fails", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  snapshot(root);
+  write(root, "examples/ui/theme/index.ts", "export const palette = {};\n");
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(
+    result.errors.join("\n"),
+    /New architecture violation: pack-ui-theme-module :: examples\/ui\/theme\/index\.ts is a bespoke theme or token module/,
+  );
+});
+
 test("a baselined pack offender passes until it is edited", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));

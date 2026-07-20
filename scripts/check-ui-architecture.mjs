@@ -287,17 +287,69 @@ function sourceFiles(root, kind) {
       directWorkspaceDirectories(root, parent).flatMap((directory) =>
         walk(root, directory, isSourcePath),
       ),
-    ),
+    ).concat(PACK_UI_DIRECTORIES.flatMap((directory) => walk(root, directory, isSourcePath))),
   );
 }
 
 function styleFiles(root, kind) {
-  const roots = kind === "multi" ? ["src", "packages"] : ["packages", "apps"];
+  const roots = kind === "multi" ? ["src", "packages"] : ["packages", "apps", ...PACK_UI_DIRECTORIES];
   return sorted(
     roots.flatMap((directory) =>
       walk(root, directory, (path) => STYLE_EXTENSIONS.has(extname(path))),
     ),
   );
+}
+
+function isPackUiPath(path) {
+  return PACK_UI_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`));
+}
+
+function isPackLocalImport(path, specifier) {
+  if (!specifier.startsWith(".")) return false;
+  const root = PACK_UI_DIRECTORIES.find((directory) => path.startsWith(`${directory}/`));
+  const target = posix.normalize(posix.join(posix.dirname(path), specifier));
+  return Boolean(root && (target === root || target.startsWith(`${root}/`)));
+}
+
+function isAllowedPackUiImport(path, specifier) {
+  return (
+    isPackLocalImport(path, specifier) ||
+    PACK_UI_IMPORTS.has(specifier) ||
+    specifier.startsWith("smithers-orchestrator/ui/adapters/")
+  );
+}
+
+function packUiViolations(path, source) {
+  if (!isPackUiPath(path)) return [];
+  const violations = [];
+  for (const specifier of parseModuleSpecifiers(source)) {
+    if (!isAllowedPackUiImport(path, specifier)) {
+      violations.push(formatViolation("pack-ui-imports", `${path} imports ${specifier}`));
+    }
+  }
+  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let hasStyleTag = false;
+  let hasStyleProp = false;
+  function visit(node) {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (node.tagName.getText(sourceFile).toLowerCase() === "style") hasStyleTag = true;
+      if (node.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.text === "style")) {
+        hasStyleProp = true;
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  if (hasStyleTag) violations.push(formatViolation("pack-ui-style-tag", `${path} renders <style>`));
+  if (hasStyleProp) violations.push(formatViolation("pack-ui-style-prop", `${path} renders a style prop`));
+  const modulePath = path
+    .replace(/\.[^.]+$/, "")
+    .split("/")
+    .filter((segment) => segment !== ".smithers" && segment !== "ui" && segment !== "examples");
+  if (modulePath.some((segment) => /(?:theme|tokens?)/i.test(segment))) {
+    violations.push(formatViolation("pack-ui-theme-module", `${path} is a bespoke theme or token module`));
+  }
+  return violations;
 }
 
 function manifestFiles(root, kind) {
@@ -960,9 +1012,10 @@ function shadcnViolations(root, files) {
   for (const entryFile of SHADCN_PROVENANCE_ENTRY_FILES) {
     const laneManifestPath = `packages/ui/${entryFile}`;
     const laneManifestAbsolutePath = join(root, laneManifestPath);
-    const triggerPath = SHADCN_PROVENANCE_TRIGGERS.get(entryFile);
+    const requiredFiles = SHADCN_PROVENANCE_REQUIRED_FILES.get(entryFile) ?? [];
+    const laneIsPresent = requiredFiles.some((path) => fileSet.has(`packages/ui/${path}`));
     if (!existsSync(laneManifestAbsolutePath)) {
-      if (triggerPath && fileSet.has(triggerPath)) {
+      if (laneIsPresent) {
         violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} is missing`));
       }
       continue;
@@ -1040,8 +1093,8 @@ function shadcnViolations(root, files) {
       }
     }
 
-    if (triggerPath && fileSet.has(triggerPath)) {
-      for (const requiredFile of SHADCN_PROVENANCE_REQUIRED_FILES.get(entryFile) ?? []) {
+    if (laneIsPresent) {
+      for (const requiredFile of requiredFiles) {
         if (!laneRecordedPaths.has(requiredFile)) {
           violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} has no entry for ${requiredFile}`));
         }
@@ -1086,10 +1139,13 @@ export function collectUiArchitectureState(root, kind = "smithers") {
   const violations = [];
 
   for (const [path, specifiers] of imports) {
+    violations.push(...packUiViolations(path, sources.get(path)));
     for (const specifier of specifiers) {
-      if (isUiSpecifier(specifier)) inventories.uiImports.push(`${path} -> ${specifier}`);
-      if (isLegacyUiPackage(specifier)) inventories.legacyPackageUsage.push(`${path} -> ${specifier}`);
-      if (STYLE_EXTENSIONS.has(extname(specifier))) inventories.styleEntryPoints.push(`${path} -> ${specifier}`);
+      if (!isPackUiPath(path)) {
+        if (isUiSpecifier(specifier)) inventories.uiImports.push(`${path} -> ${specifier}`);
+        if (isLegacyUiPackage(specifier)) inventories.legacyPackageUsage.push(`${path} -> ${specifier}`);
+        if (STYLE_EXTENSIONS.has(extname(specifier))) inventories.styleEntryPoints.push(`${path} -> ${specifier}`);
+      }
       if (matchesPrefix(specifier, FORBIDDEN_REGISTRY_PREFIXES)) {
         violations.push(formatViolation("official-shadcn-only", `${path} imports ${specifier}`));
       }
@@ -1108,6 +1164,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       }
       if (
         kind === "smithers" &&
+        !isPackUiPath(path) &&
         isGatewayReact(specifier) &&
         !path.startsWith("packages/ui/src/smithers/connected/")
       ) {
@@ -1217,9 +1274,9 @@ export function collectUiArchitectureState(root, kind = "smithers") {
   }
 
   for (const path of files) {
-    if (isStyleModule(path)) inventories.styleEntryPoints.push(path);
+    if (!isPackUiPath(path) && isStyleModule(path)) inventories.styleEntryPoints.push(path);
     const canonicalUi = kind === "smithers" && path.startsWith("packages/ui/src/");
-    if (!canonicalUi && isDuplicateWrapperOrIcon(path)) inventories.localDuplicateWrappersAndIcons.push(path);
+    if (!isPackUiPath(path) && !canonicalUi && isDuplicateWrapperOrIcon(path)) inventories.localDuplicateWrappersAndIcons.push(path);
   }
   inventories.styleEntryPoints.push(...styles);
 
