@@ -192,9 +192,6 @@ const SHADCN_PROVENANCE_ENTRY_KEYS = [
   "registryItem",
 ];
 const SHADCN_PROVENANCE_VERIFICATION = "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.";
-const UI_LAYER_DIRECTION_EXCEPTIONS = new Set([
-  "packages/ui/src/primitives/markdown.tsx -> ../agentic/CodeBlock",
-]);
 const PACK_UI_DIRECTORIES = [".smithers/ui", "examples/ui"];
 const PACK_UI_IMPORTS = new Set([
   "react",
@@ -1204,11 +1201,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       if (layer) {
         for (const specifier of specifiers) {
           const target = importedUiLayer(path, specifier);
-          if (
-            target &&
-            !allowedLayers[layer].has(target) &&
-            !UI_LAYER_DIRECTION_EXCEPTIONS.has(`${path} -> ${specifier}`)
-          ) {
+          if (target && !allowedLayers[layer].has(target)) {
             violations.push(formatViolation("ui-layer-direction", `${path} (${layer}) imports ${specifier} (${target})`));
           }
         }

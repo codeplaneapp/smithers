@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { type ComponentProps, Fragment, memo, type MouseEvent, type ReactNode } from "react";
-import { CodeBlock } from "../agentic/CodeBlock";
+import { CodeBlock } from "./CodeBlock";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
 

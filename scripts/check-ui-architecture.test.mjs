@@ -850,18 +850,23 @@ test("the frozen version 2 provenance umbrella passes", (context) => {
   assert.equal(check(root).ok, true);
 });
 
-test("valid agentic lane provenance and the exact Markdown CodeBlock seam pass", (context) => {
+test("CodeBlock can live in primitives with an agentic compatibility re-export", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   write(
     root,
-    "packages/ui/src/agentic/CodeBlock.tsx",
+    "packages/ui/src/primitives/CodeBlock.tsx",
     "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
   );
   write(
     root,
+    "packages/ui/src/agentic/CodeBlock.tsx",
+    'export { CodeBlock } from "../primitives/CodeBlock";\n',
+  );
+  write(
+    root,
     "packages/ui/src/primitives/markdown.tsx",
-    'import { CodeBlock } from "../agentic/CodeBlock"; export function Markdown(props: { code: string }) { return <CodeBlock code={props.code} />; }\n',
+    'import { CodeBlock } from "./CodeBlock"; export function Markdown(props: { code: string }) { return <CodeBlock code={props.code} />; }\n',
   );
   json(root, "packages/ui/provenance/agentic-response-code.json", [
     {
@@ -878,7 +883,7 @@ test("valid agentic lane provenance and the exact Markdown CodeBlock seam pass",
   assert.equal(check(root).ok, true);
 });
 
-test("other primitives cannot import the agentic layer", (context) => {
+test("primitives cannot import the agentic layer", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   write(
@@ -900,8 +905,8 @@ test("other primitives cannot import the agentic layer", (context) => {
   snapshot(root);
   write(
     root,
-    "packages/ui/src/primitives/other.tsx",
-    'import { CodeBlock } from "../agentic/CodeBlock"; export function Other(props: { code: string }) { return <CodeBlock code={props.code} />; }\n',
+    "packages/ui/src/primitives/markdown.tsx",
+    'import { CodeBlock } from "../agentic/CodeBlock"; export function Markdown(props: { code: string }) { return <CodeBlock code={props.code} />; }\n',
   );
   const result = check(root);
   assert.equal(result.ok, false);
