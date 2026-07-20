@@ -95,6 +95,21 @@ describe("css contract", () => {
     expect(defaultRule).toContain("color:var(--brand, #6d56d8)");
   });
 
+  test("badge variants consume the shared semantic soft and border tokens", () => {
+    const variants = [
+      ["default", "brand"],
+      ["success", "success"],
+      ["warning", "warning"],
+      ["destructive", "danger"],
+      ["info", "info"],
+    ] as const;
+    for (const [variant, semantic] of variants) {
+      const rule = smithersUiCss.match(new RegExp(`\\.sui-badge-${variant} \\{[^}]+\\}`))?.[0] ?? "";
+      expect(rule).toContain(`var(--${semantic}-border,`);
+      expect(rule).toContain(`var(--${semantic}-soft,`);
+    }
+  });
+
   test("composes the agent output block into the shipped stylesheet", () => {
     expect(agentOutputCss).toContain(".sui-agent-output {");
     expect(agentOutputCss).toContain(".sui-agent-output-tools {");

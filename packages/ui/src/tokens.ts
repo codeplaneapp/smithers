@@ -20,10 +20,9 @@
  *   different semantics than shadcn's; redefining shadcn's canonical tokens at
  *   the root would silently recolor every legacy `.pill`/`.badge`/`.button` in
  *   the same document. The bridge lives only in these var() expressions.
- * - Never string-concatenate an alpha suffix onto a token. Derive tints with
- *   `color-mix(in srgb, ${token} N%, transparent)` -- `in srgb` specifically,
- *   matching the house recipes byte-for-byte (Tailwind-style oklab mixing
- *   drifts visibly on brand tints).
+ * - Never string-concatenate an alpha suffix onto a token. Use the shared
+ *   semantic `*Soft`/`*Border` tokens where they apply; custom tints must use
+ *   `color-mix(in srgb, ...)`, matching the house recipes byte-for-byte.
  */
 export const tokens = {
   /** Page background. */
@@ -60,10 +59,18 @@ export const tokens = {
   mutedForeground: "var(--text-muted, #52525b)",
   accent: "var(--hover, #f4f4f5)",
   accentForeground: "var(--text, #18181b)",
-  destructive: "var(--danger, #e5484d)",
-  success: "var(--success, #0f8f78)",
-  warning: "var(--warning, #bf7100)",
+  destructive: "var(--danger, #c5343f)",
+  destructiveSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #c5343f) 10%, var(--surface, #ffffff)))",
+  destructiveBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #c5343f) 40%, transparent))",
+  success: "var(--success, #087461)",
+  successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #087461) 12%, var(--surface, #ffffff)))",
+  successBorder: "var(--success-border, color-mix(in srgb, var(--success, #087461) 40%, transparent))",
+  warning: "var(--warning, #955600)",
+  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #955600) 12%, var(--surface, #ffffff)))",
+  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #955600) 40%, transparent))",
   info: "var(--info, #2f6fde)",
+  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #2f6fde) 10%, var(--surface, #ffffff)))",
+  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #2f6fde) 40%, transparent))",
   /** Hairline borders. */
   border: "var(--border, rgba(24,24,27,0.08))",
   borderStrong: "var(--border-strong, rgba(24,24,27,0.14))",

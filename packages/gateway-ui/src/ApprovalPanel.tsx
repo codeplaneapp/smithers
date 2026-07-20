@@ -114,7 +114,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
                 type="button"
                 disabled={isBusy}
                 onClick={() => decide(row, true)}
-                style={btnStyle(theme.success, isBusy)}
+                style={approvalButtonStyle(theme.success, theme.successSoft, theme.successBorder, isBusy)}
               >
                 Approve
               </button>
@@ -122,7 +122,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
                 type="button"
                 disabled={isBusy}
                 onClick={() => decide(row, false)}
-                style={btnStyle(theme.danger, isBusy)}
+                style={approvalButtonStyle(theme.danger, theme.dangerSoft, theme.dangerBorder, isBusy)}
               >
                 Deny
               </button>
@@ -137,16 +137,18 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
   );
 }
 
-function btnStyle(bg: string, disabled: boolean): CSSProperties {
+export function approvalButtonStyle(
+  color: string,
+  background: string,
+  borderColor: string,
+  disabled: boolean,
+): CSSProperties {
   return {
     padding: "6px 14px",
     borderRadius: 6,
-    border: "none",
-    background: bg,
-    // Inverse text keeps contrast on the solid semantic button in both themes
-    // (white on the deep light-mode fills, near-black on the lighter dark-mode
-    // fills); falls back to white when the style guide CSS is absent.
-    color: "var(--inverse-text, #fafafa)",
+    border: `1px solid ${borderColor}`,
+    background,
+    color,
     fontWeight: 600,
     fontSize: 13,
     cursor: disabled ? "default" : "pointer",

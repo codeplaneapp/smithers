@@ -32,9 +32,9 @@ const lightTokens = [
   // Semantic colors. brand = action/active, info = neutral-highlight,
   // success = done, warning = needs-attention/waiting, danger = failed.
   "--brand:#6d56d8",
-  "--success:#0f8f78",
-  "--danger:#e5484d",
-  "--warning:#bf7100",
+  "--success:#087461",
+  "--danger:#c5343f",
+  "--warning:#955600",
   "--info:#2f6fde",
   "--shadow-rgb:24 24 27",
   // Elevation shadows, weakest to strongest (card, raised, overlay).
@@ -48,7 +48,7 @@ const darkTokens = [
   "--bg:#09090b",
   "--text:#f4f4f5",
   "--text-muted:#a1a1aa",
-  "--text-faint:#71717a",
+  "--text-faint:#8c8c95",
   "--text-placeholder:#63636b",
   "--surface:#141417",
   "--surface-2:#1b1b20",
@@ -98,7 +98,7 @@ const sharedTokens = [
   "--major:var(--warning)",
   "--minor:var(--warning)",
   "--nit:var(--muted)",
-  "--me:color-mix(in srgb,var(--brand) 12%,var(--surface))",
+  "--me:var(--brand-soft)",
   "--ink:var(--inverse-bg)",
   // Soft tints + tint borders for the semantic colors. Use these instead of
   // hand-rolling color-mix percentages so every tinted surface matches.
@@ -178,7 +178,7 @@ export const workflowUiThemeCss = [
   ".textarea,textarea.prompt,textarea.input,textarea { padding:10px 12px; min-height:88px; resize:vertical; line-height:1.45; }",
   ".input::placeholder,.textarea::placeholder,.prompt::placeholder,textarea::placeholder,input::placeholder { color:var(--text-placeholder); }",
   ".pill,.badge,.chip { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:1px 10px; border:1px solid var(--border); border-radius:999px; color:var(--text-muted); font-family:var(--font-mono); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }",
-  ".pill { border-color:color-mix(in srgb,var(--brand) 22%,transparent); background:color-mix(in srgb,var(--brand) 14%,transparent); color:var(--brand); }",
+  ".pill { border-color:var(--brand-border); background:var(--brand-soft); color:var(--brand); }",
   ".pill.muted,.badge.muted,.chip { border-color:var(--border); background:var(--hover-subtle); color:var(--text-muted); }",
   ".badge { font-family:inherit; font-weight:650; text-transform:uppercase; }",
   ".badge.ok,.badge.finished,.badge.success { color:var(--success); border-color:var(--success-border); background:var(--success-soft); }",

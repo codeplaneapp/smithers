@@ -10,8 +10,8 @@ How the pieces fit, infrastructure first:
 - `cn.ts` — clsx class composition (no tailwind-merge needed; all classes are
   namespaced `sui-*` so there is nothing to merge).
 - `tokens.ts` — the `var(--house-token, #lightFallback)` bridge onto the
-  styleguide theme. Never emits `:root`; tints only via
-  `color-mix(in srgb, ...)`.
+  styleguide theme. Never emits `:root`; shared semantic tints resolve through
+  the styleguide's `*-soft`/`*-border` tokens, with byte-equal light fallbacks.
 - `status.ts` — shared status vocabulary: `normalizeStatus`, `statusClass`,
   `formatStatus`, `isTerminalRunStatus`.
 - `uiCss.ts` — the whole stylesheet as one JS string; per-component blocks

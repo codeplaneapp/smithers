@@ -64,13 +64,13 @@ export const buttonCss = `
 
 export const badgeCss = `
 .sui-badge { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:1px 10px; border:1px solid ${t.border}; border-radius:999px; background:transparent; color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.sui-badge-default { border-color:color-mix(in srgb, ${t.primary} 33%, transparent); background:color-mix(in srgb, ${t.primary} 12%, transparent); color:${t.primary}; }
+.sui-badge-default { border-color:${t.primaryBorder}; background:${t.primarySoft}; color:${t.primary}; }
 .sui-badge-secondary { border-color:${t.border}; background:${t.hoverSubtle}; color:${t.mutedForeground}; }
 .sui-badge-outline { border-color:${t.input}; color:${t.foreground}; }
-.sui-badge-success { border-color:color-mix(in srgb, ${t.success} 33%, transparent); background:color-mix(in srgb, ${t.success} 12%, transparent); color:${t.success}; }
-.sui-badge-warning { border-color:color-mix(in srgb, ${t.warning} 33%, transparent); background:color-mix(in srgb, ${t.warning} 12%, transparent); color:${t.warning}; }
-.sui-badge-destructive { border-color:color-mix(in srgb, ${t.destructive} 33%, transparent); background:color-mix(in srgb, ${t.destructive} 12%, transparent); color:${t.destructive}; }
-.sui-badge-info { border-color:color-mix(in srgb, ${t.info} 33%, transparent); background:color-mix(in srgb, ${t.info} 12%, transparent); color:${t.info}; }
+.sui-badge-success { border-color:${t.successBorder}; background:${t.successSoft}; color:${t.success}; }
+.sui-badge-warning { border-color:${t.warningBorder}; background:${t.warningSoft}; color:${t.warning}; }
+.sui-badge-destructive { border-color:${t.destructiveBorder}; background:${t.destructiveSoft}; color:${t.destructive}; }
+.sui-badge-info { border-color:${t.infoBorder}; background:${t.infoSoft}; color:${t.info}; }
 .sui-badge-muted { border-color:${t.border}; background:color-mix(in srgb, ${t.mutedForeground} 12%, transparent); color:${t.mutedForeground}; }
 .sui-status-dot { width:6px; height:6px; flex:none; border-radius:999px; background:currentColor; }
 `;
