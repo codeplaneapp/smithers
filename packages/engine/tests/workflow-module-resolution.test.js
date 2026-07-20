@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,8 +17,29 @@ afterAll(() => {
 
 function copyPackage(specifier, destination) {
     const packageJson = require.resolve(`${specifier}/package.json`);
-    cpSync(dirname(packageJson), destination, { recursive: true });
+    copyPackageDirectory(dirname(packageJson), destination);
 }
+
+function copyPackageDirectory(source, destination) {
+    const runtimeState = join(source, ".smithers");
+    cpSync(source, destination, {
+        recursive: true,
+        filter: (entry) => entry !== runtimeState,
+    });
+}
+
+test("package fixture copies exclude workspace-local Smithers runtime state", () => {
+    const source = join(fixtureRoot, "fixture-package");
+    const destination = join(fixtureRoot, "fixture-package-copy");
+    mkdirSync(join(source, ".smithers"), { recursive: true });
+    writeFileSync(join(source, "package.json"), '{"name":"fixture-package"}\n');
+    writeFileSync(join(source, ".smithers", "control-plane.db"), "workspace state");
+
+    copyPackageDirectory(source, destination);
+
+    expect(existsSync(join(destination, "package.json"))).toBe(true);
+    expect(existsSync(join(destination, ".smithers"))).toBe(false);
+});
 
 test("workflow imports use the engine React and Smithers modules over pack-local copies", async () => {
     installWorkflowModuleResolution();
