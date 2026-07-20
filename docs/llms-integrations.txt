@@ -2171,7 +2171,7 @@ error naming the Smithers-native alternative. There is no escape hatch.
 | `stopChild` / `stop` | Stop rendering the task (unmounting is the durable equivalent) |
 | `cancel` | `<WaitForEvent timeoutMs>` + `timedOut()` |
 | Custom / `log` actions | Only `assign` runs in the fold; run side effects in tasks |
-| A bare-constant `meta.smithersTaskId` on a state the machine can re-enter | Derive the id from context: `meta: { smithersTaskId: (context) => ... } }` minted from an `assign` counter |
+| A bare-constant `meta.smithersTaskId` on a state the machine can re-enter | Derive the id from context: `meta: { smithersTaskId: (context) => ... }` minted from an `assign` counter |
 
 Every callback in the fold (event mappers, context initializers, guards,
 assigners, machine `output` functions) must be pure, side-effect-free, free
