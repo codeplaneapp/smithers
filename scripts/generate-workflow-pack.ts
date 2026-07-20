@@ -22,6 +22,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkUiArchitecture } from "./check-ui-architecture.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SMITHERS_DIR = resolve(REPO_ROOT, ".smithers");
@@ -295,6 +296,16 @@ function emit(files: TemplateFile[]): string {
 }
 
 function main() {
+  const architecture = checkUiArchitecture({
+    root: REPO_ROOT,
+    baselinePath: "scripts/ui-architecture-baseline.json",
+  });
+  if (!architecture.ok) {
+    throw new Error(
+      "Workflow-pack UI architecture check failed. Resolve the violation or ratchet only an existing legacy violation in scripts/ui-architecture-baseline.json:\n" +
+        architecture.errors.map((error) => `- ${error}`).join("\n"),
+    );
+  }
   const files = build();
   const output = emit(files);
   writeFileSync(OUTPUT_FILE, output, "utf8");

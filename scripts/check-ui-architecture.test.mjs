@@ -111,6 +111,43 @@ test("an exact legacy allowlist passes", (context) => {
   });
 });
 
+test("a compliant pack UI passes", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  write(
+    root,
+    ".smithers/ui/compliant.tsx",
+    'import { useState } from "react"; import { Button } from "smithers-orchestrator/ui"; import { helper } from "./helper"; export function Compliant() { const [open] = useState(false); return <Button>{helper(open)}</Button>; }\n',
+  );
+  write(root, ".smithers/ui/helper.ts", "export function helper(open: boolean) { return open ? \"Open\" : \"Closed\"; }\n");
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
+test("a fresh pack UI style block fails", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  snapshot(root);
+  write(root, ".smithers/ui/fresh.tsx", "export function Fresh() { return <style>{\".x{}\"}</style>; }\n");
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /New architecture violation: pack-ui-style-tag/);
+});
+
+test("a baselined pack offender passes until it is edited", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = ".smithers/ui/legacy.tsx";
+  write(root, path, "export function Legacy() { return <style>{\".x{}\"}</style>; }\n");
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+  write(root, path, "export function Legacy() { return <div style={{ color: \"red\" }} />; }\n");
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /New architecture violation: pack-ui-style-prop/);
+  assert.match(result.errors.join("\n"), /Stale legacy allowlist entry/);
+});
+
 test("workflow-render hooks are distinct from public gateway data hooks", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));

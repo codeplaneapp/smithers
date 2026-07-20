@@ -195,6 +195,13 @@ const SHADCN_PROVENANCE_VERIFICATION = "Each source file in an approved collecti
 const UI_LAYER_DIRECTION_EXCEPTIONS = new Set([
   "packages/ui/src/primitives/markdown.tsx -> ../agentic/CodeBlock",
 ]);
+const PACK_UI_DIRECTORIES = [".smithers/ui", "examples/ui"];
+const PACK_UI_IMPORTS = new Set([
+  "react",
+  "smithers-orchestrator/gateway-react",
+  "smithers-orchestrator/gateway-ui",
+  "smithers-orchestrator/ui",
+]);
 const INTRINSIC_VISUAL_TAGS = new Set([
   "a", "article", "aside", "button", "canvas", "code", "div", "footer", "form",
   "h1", "h2", "h3", "header", "iframe", "img", "input", "label", "li", "main",
