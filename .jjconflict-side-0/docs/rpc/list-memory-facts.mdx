@@ -1,0 +1,14 @@
+---
+title: listMemoryFacts
+description: Gateway RPC for listing cross-run memory facts.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listMemoryFacts`
+- Scope: `memory:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ namespace? }`
+- Response: `MemoryFact[]`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.

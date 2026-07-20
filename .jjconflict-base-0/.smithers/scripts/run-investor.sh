@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Keyboard-driven Smithers INVESTOR slide deck.
+#
+#   ▸ / Space / Enter / Down  — next slide
+#   ◂ / Up                    — previous slide
+#   r                         — replay current slide's narration
+#   m                         — mute / unmute audio for the rest of the deck
+#   q / Esc / Ctrl-C          — quit
+#
+# Investor-facing companion to run-demo.sh (the technical deck).
+#
+# Usage (from repo root):
+#   ./.smithers/scripts/run-investor.sh                # full deck, audio on
+#   ./.smithers/scripts/run-investor.sh --silent       # no audio
+#   ./.smithers/scripts/run-investor.sh --start-at 9   # jump straight to slide 10
+#   ./.smithers/scripts/run-investor.sh --voice Daniel
+#   ./.smithers/scripts/run-investor.sh --auto --silent --auto-ms 5000   # auto rehearsal
+#
+# Any other flags get forwarded to `smithers up`.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+
+silent=false
+auto=false
+auto_ms=9000
+start_at=0
+voice="Ava (Premium)"
+rate=190
+forward=()
+
+while (("$#")); do
+  case "$1" in
+    --silent|--no-audio|--no-sound|--mute)
+                 silent=true; shift ;;
+    --auto)      auto=true; shift ;;
+    --auto-ms)   auto_ms=$2; shift 2 ;;
+    --start-at)  start_at=$2; shift 2 ;;
+    --voice)     voice=$2; shift 2 ;;
+    --rate)      rate=$2; shift 2 ;;
+    *)           forward+=("$1"); shift ;;
+  esac
+done
+
+input=$(printf '{"silent":%s,"auto":%s,"autoMs":%s,"startAt":%s,"voice":"%s","rate":%s}' \
+  "$silent" "$auto" "$auto_ms" "$start_at" "$voice" "$rate")
+
+exec bun run smithers up .smithers/workflows/investor.tsx \
+  --input "$input" "${forward[@]+"${forward[@]}"}"

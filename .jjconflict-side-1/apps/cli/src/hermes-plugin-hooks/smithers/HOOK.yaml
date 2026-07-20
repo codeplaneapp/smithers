@@ -1,0 +1,8 @@
+name: smithers
+description: >-
+  Post Smithers run summaries back into the originating gateway session so a
+  long, detached run reports its result into the chat it was launched from.
+events:
+  - agent:end
+  - session:start
+handler: handler.py

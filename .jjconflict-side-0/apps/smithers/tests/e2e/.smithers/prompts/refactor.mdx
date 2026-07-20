@@ -1,0 +1,15 @@
+---
+name: Refactor
+inputs:
+  - name: target
+    type: string
+    default: src/index.ts
+  - name: constraint
+    type: string
+    default: preserve behavior
+---
+import Guidelines from "./guidelines.mdx";
+
+<Guidelines />
+
+Refactor {props.target} while honoring {props.constraint}.

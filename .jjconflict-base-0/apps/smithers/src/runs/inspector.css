@@ -1,0 +1,152 @@
+/* Node-inspector enrichment + live-run affordances (ancestry breadcrumb, Tools
+   side-effect badges, the props table, prompt links, the waiting-run approval
+   banner, the resume button). Imported at the top of NodeInspector.tsx so it
+   loads globally without touching the shared featureCards.css. Reuses the
+   --tone / --brand / --border / --danger tokens; color stays state, not
+   decoration. */
+
+/* ---- Approval banner above the tree (waiting run) ---- */
+.runs-approval {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 14px 0;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--st-waiting) 40%, var(--border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--st-waiting) 9%, var(--surface));
+  font-size: 13.5px;
+}
+.runs-approval::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-waiting);
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+.runs-approval b { font-weight: 650; }
+.runs-approval-actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* ---- Resume button in the surface-head cluster (failed/cancelled) ---- */
+.run-resume { margin-left: 4px; }
+
+/* ---- Ancestry breadcrumb above the inspect tabs ---- */
+.inspect-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 12px 0;
+  font: 500 12px/1.4 ui-monospace, Menlo, monospace;
+}
+.inspect-crumb {
+  border: 0;
+  background: transparent;
+  padding: 1px 4px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.inspect-crumb:hover { background: var(--hover); color: var(--text); }
+.inspect-crumb:last-child { color: var(--brand); font-weight: 650; }
+.inspect-crumb-sep { color: var(--text-faint); user-select: none; }
+
+/* ---- Tool-call side-effect badge (Tools tab) ---- */
+.sidefx-badge {
+  margin-left: auto;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font: 600 10.5px/1.5 Inter, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 12%, var(--surface));
+}
+.sidefx-badge.is-read { --tone: var(--st-idle); }
+.sidefx-badge.is-write { --tone: var(--st-waiting); }
+.sidefx-badge.is-other { --tone: var(--st-info); }
+
+/* ---- Props table (replaces the flat kv list) ---- */
+.prop-row {
+  display: grid;
+  grid-template-columns: 132px 1fr auto;
+  align-items: start;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  font-size: 13px;
+}
+.prop-row:last-child { border-bottom: 0; }
+.prop-key {
+  font: 600 12.5px/1.5 ui-monospace, Menlo, monospace;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+.prop-key.is-prompt { color: var(--brand); }
+.prop-value {
+  min-width: 0;
+  font: 500 12.5px/1.5 ui-monospace, Menlo, monospace;
+  color: var(--text);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.prop-value.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.prop-string { color: var(--st-ok); }
+.prop-num { color: var(--st-info); }
+.prop-bool { color: var(--st-running); }
+.prop-null { color: var(--text-faint); font-style: italic; }
+.prop-collapsible { color: var(--text-muted); }
+.prop-expand {
+  display: inline-block;
+  margin-left: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--brand);
+  font: 600 11.5px/1 Inter, sans-serif;
+  cursor: pointer;
+}
+.prop-actions { display: flex; align-items: center; gap: 6px; }
+.prop-copy,
+.prop-open-prompt {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.prop-copy:hover { background: var(--hover); color: var(--text); }
+.prop-open-prompt { color: var(--brand); }
+.prop-open-prompt:hover { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); }
+.prop-copy svg,
+.prop-open-prompt svg { width: 13px; height: 13px; }
+
+/* ---- Container-node role description footer ---- */
+.node-role-desc {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.node-role-desc::before {
+  content: "↳ ";
+  color: var(--text-faint);
+}

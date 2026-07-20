@@ -1,0 +1,111 @@
+---
+title: Workflow optimization
+description: Optimize Smithers workflow prompts against eval suites with GEPA-style prompt artifacts.
+---
+
+Run `bunx smithers-orchestrator optimize` to generate improved prompts for agent tasks via GEPA, verify the improvement against your eval suite, and save the result as a reusable artifact.
+
+```bash
+OPENAI_API_KEY=... \
+bunx smithers-orchestrator optimize workflow.tsx \
+  --cases evals/smoke.jsonl \
+  --suite smoke-gepa \
+  --artifact .smithers/optimizations/smoke-gepa.json
+```
+
+The implicit optimizer is OpenAI-compatible `gpt-5.6-luna` with reasoning
+effort `medium`. Pass `--provider` to select Cerebras, Claude, Kimi, or another
+supported backend explicitly.
+
+`bunx smithers-orchestrator optimize` runs the eval suite twice:
+
+1. baseline run with the workflow's current prompts
+2. optimized run with GEPA-generated prompt patches applied
+
+The command writes the artifact only when the optimized score improves by at least `--min-improvement`. Reports for both runs are written under `.smithers/optimizations/reports` unless `--report-dir` is set.
+
+## Reuse an artifact
+
+Apply the optimized prompts to future evals with `--optimization`:
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx \
+  --cases evals/smoke.jsonl \
+  --suite smoke-optimized \
+  --optimization .smithers/optimizations/smoke-gepa.json
+```
+
+The artifact patches only agent-backed `<Task>` prompts by `nodeId`. Workflow structure, output schemas, retries, approvals, and persistence behavior stay unchanged.
+
+## Cerebras improvement demo
+
+Example: the following run demonstrates a baseline failure corrected by a GEPA-generated patch. The baseline prompt did not include the required optimization token, so the eval failed. Cerebras GEPA generated a prompt patch that included the missing requirement, and the optimized eval passed.
+
+```bash
+CEREBRAS_API_KEY=... bunx smithers-orchestrator optimize workflow.tsx \
+  --cases evals/opt.jsonl \
+  --suite cerebras-proof \
+  --provider cerebras \
+  --model zai-glm-4.7 \
+  --artifact artifacts/optimized.json \
+  --report-dir artifacts/reports \
+  --format json
+```
+
+Observed result:
+
+```json
+{
+  "optimization": {
+    "schemaVersion": 1,
+    "id": "opt-...",
+    "strategy": "gepa",
+    "optimizer": { "name": "smithers-gepa", "provider": "cerebras", "model": "zai-glm-4.7" },
+    "workflowPath": "workflow.tsx",
+    "createdAtMs": 0,
+    "baseline": { "score": 0.1, "passed": 0, "total": 1 },
+    "optimized": { "score": 1, "passed": 1, "total": 1 },
+    "improvement": { "absolute": 0.9, "relative": 9 },
+    "promptTasks": [],
+    "promptPatches": {},
+    "reports": { "baseline": "...", "optimized": "..." },
+    "artifactPath": "artifacts/optimized.json"
+  }
+}
+```
+
+## Providers
+
+`bunx smithers-orchestrator optimize` accepts the same provider vocabulary Smithers uses for agents and accounts:
+
+| Provider | Optimizer API | Required env | Default model |
+| --- | --- | --- | --- |
+| `openai-api` (default), `openai`, `openai-sdk`, `codex` | OpenAI-compatible | `OPENAI_API_KEY` | `gpt-5.6-luna` (`medium` reasoning) |
+| `cerebras` | OpenAI-compatible | `CEREBRAS_API_KEY` | `zai-glm-4.7` |
+| `anthropic-api`, `anthropic`, `anthropic-sdk`, `claude-code`, `claude` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `claude-fable-5` |
+| `gemini-api`, `gemini`, `antigravity` | Gemini generateContent API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.5-flash` |
+| `kimi`, `moonshot` | OpenAI-compatible Moonshot API | `MOONSHOT_API_KEY` | `kimi-k2.7-code` |
+| `opencode` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `anthropic/claude-fable-5` |
+| `pi` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `gpt-5.6-luna` |
+| `amp`, `forge`, `openai-compatible` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | pass `--model` when needed |
+
+The default models track the [SOTA model registry](/reference/sota-models), which lists the current defaults and badges and is refreshed by a daily research job. The CLI provider names (`codex`, `claude-code`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
+
+Smithers defaults research and prompt-optimization work to Luna. Automatic
+workflow routing keeps non-Codex providers behind Codex; this standalone command
+does not silently change paid API backends. If OpenAI is unavailable, select a
+Cerebras, Claude, Kimi, or other fallback explicitly with `--provider`.
+
+`--provider heuristic` is deterministic and intended for local tests and fixtures. Use `heuristic` when you want deterministic optimization without an API call: place `optimizationHints` in each case's `metadata` to control the patch. It uses eval-case metadata such as:
+
+```json
+{
+  "metadata": {
+    "optimizationHints": {
+      "answer": "Include the exact rubric requirement in the task prompt."
+    }
+  }
+}
+```
+
+Artifacts are Smithers JSON records with baseline score, optimized score, improvement, prompt patches, and linked eval reports.

@@ -1,0 +1,24 @@
+# Engineering doc & architecture
+
+You are the orchestrator. Design the high-level ARCHITECTURE yourself — this is the one
+artifact that is never delegated. Write the engineering doc to docs/planning/03-eng.md.
+
+Read: docs/planning/01-prd.md, docs/planning/02-design.md,
+artifacts/smithering/research/eng-deps.md, artifacts/smithering/research/eng-oss.md.
+
+{props.feedback ? `Apply the adversarial reviewer's feedback:
+${props.feedback}
+Issues: ${props.issues}` : ""}
+
+Must include:
+
+- The architecture (components, data flow, key interfaces) and why.
+- Every infra/3rd-party dependency DECLARED (dependencies[] with purpose + risk).
+- Requirements traceability: every engineering requirement references the PRD requirement
+  it serves (requirementsTraceability[]). Pure implementation-detail work that serves no
+  single feature is called out explicitly as engineering-only tickets.
+- assumptionsToProbe[]: each 3rd-party/infra assumption that is expensive to unwind if
+  wrong, with a narrow probe (ONE question each) and blocking=true/false. EVERY entry in
+  dependencies[] must map to at least one probe (blocking unless you justify why not) —
+  all 3rd-party integrations get proven in isolation, not just the scary ones.
+- An engineering Verification section.

@@ -1,0 +1,14 @@
+---
+title: listScores
+description: Gateway RPC for listing scorer/eval results for a run.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listScores`
+- Scope: `score:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, nodeId? }`
+- Response: `ScoreRow[]`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, and `Internal`.

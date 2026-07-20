@@ -1,0 +1,14 @@
+---
+title: rewindRun
+description: Gateway RPC for rewinding a run to a frame.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `rewindRun`
+- Scope: `run:admin`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, frameNo, confirm: true }`
+- Response: `JumpResult`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `FrameOutOfRange`, `Busy`, `RateLimited`, `UnsupportedSandbox`, `VcsError`, and `RewindFailed`.

@@ -1,0 +1,485 @@
+---
+title: Scorers API
+description: Evaluators that grade task output, persist scores, and aggregate them across runs.
+icon: "gauge"
+---
+
+A scorer grades a task's output and returns a number between 0 and 1. Attach
+scorers to a `Task` via its `scorers` prop; they run **after** the task
+completes and never block the workflow. Each result is persisted to the
+`_smithers_scorers` table so you can aggregate scores across runs.
+
+All scorer values and types are re-exported from the `smithers-orchestrator`
+facade, which is canonical. The `smithers-orchestrator/scorers` subpath exports
+the same surface.
+
+```ts
+import {
+  createScorer,
+  llmJudge,
+  faithfulnessScorer,
+  schemaAdherenceScorer,
+  latencyScorer,
+  aggregateScores,
+  runScorersBatch,
+} from "smithers-orchestrator";
+import type { Scorer, ScoreResult, ScorersMap } from "smithers-orchestrator";
+```
+
+<Note>
+The component that hosts scorers (`Task`) can be imported directly or taken
+from `createSmithers`; the factory form binds it to the workflow context. See
+the [Components reference](/reference/components) for the `scorers` prop and
+[`ScorersMap`](/reference/types#scorersmap) for its shape.
+</Note>
+
+## Concepts
+
+A `Scorer` is a named, self-describing evaluator. Its `score` function is a
+`ScorerFn`: given a `ScorerInput`, it returns a `Promise<ScoreResult>`.
+
+<ResponseField name="Scorer" type="object">
+  A named scorer.
+
+  <Expandable title="Scorer">
+    <ResponseField name="id" type="string" required>
+      Unique identifier. Persisted as `scorerId` and used to filter aggregates.
+    </ResponseField>
+    <ResponseField name="name" type="string" required>
+      Human-readable name. Persisted as `scorerName`.
+    </ResponseField>
+    <ResponseField name="description" type="string" required>
+      Description of what the scorer evaluates.
+    </ResponseField>
+    <ResponseField name="score" type="ScorerFn" required>
+      The scoring function.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="ScorerInput" type="object">
+  The argument passed to a `ScorerFn`. Built from the task's input, output, and
+  metadata at scoring time.
+
+  <Expandable title="ScorerInput">
+    <ParamField path="input" type="unknown" required>
+      The original task input or prompt.
+    </ParamField>
+    <ParamField path="output" type="unknown" required>
+      The task's produced output.
+    </ParamField>
+    <ParamField path="groundTruth" type="unknown">
+      Expected output for comparison.
+    </ParamField>
+    <ParamField path="context" type="unknown">
+      Additional context such as retrieved documents.
+    </ParamField>
+    <ParamField path="latencyMs" type="number">
+      How long the task took, in milliseconds.
+    </ParamField>
+    <ParamField path="outputSchema" type="ZodObject">
+      The Zod schema the output should match.
+    </ParamField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="ScoreResult" type="object">
+  What a `ScorerFn` returns.
+
+  <Expandable title="ScoreResult">
+    <ResponseField name="score" type="number" required>
+      Normalized quality score between 0 and 1.
+    </ResponseField>
+    <ResponseField name="reason" type="string">
+      Human-readable explanation of the score.
+    </ResponseField>
+    <ResponseField name="meta" type="Record<string, unknown>">
+      Arbitrary metadata, persisted as `metaJson`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+A scorer is bound to a task through a `ScorerBinding`, and a `ScorersMap` is the
+keyed set of bindings you pass to the `scorers` prop. Each binding may carry a
+`SamplingConfig` controlling how often the scorer runs.
+
+```ts
+type ScorerBinding = { scorer: Scorer; sampling?: SamplingConfig };
+type ScorersMap    = Record<string, ScorerBinding>;
+type SamplingConfig =
+  | { type: "all" }                  // run every time (default)
+  | { type: "ratio"; rate: number }  // run with probability `rate`
+  | { type: "none" };                // never run
+```
+
+```tsx
+<Task
+  id="analyze"
+  output={outputs.analysis}
+  agent={analyst}
+  scorers={{
+    schema: { scorer: schemaAdherenceScorer() },
+    latency: { scorer: latencyScorer({ targetMs: 5000, maxMs: 20000 }) },
+    safety: { scorer: toxicityScorer(judge), sampling: { type: "ratio", rate: 0.1 } },
+  }}
+>
+  Analyze the report.
+</Task>
+```
+
+**Source** [`types.ts`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/types.ts) · **See also** [`ScorersMap`](/reference/types#scorersmap), [Components](/reference/components)
+
+## createScorer
+
+Build a custom `Scorer` from a plain config object. The returned scorer is just
+its config; the work lives in your `score` function.
+
+```ts
+function createScorer(config: CreateScorerConfig): Scorer;
+```
+
+<ParamField path="config" type="CreateScorerConfig" required>
+  <Expandable title="CreateScorerConfig">
+    <ParamField path="id" type="string" required>
+      Unique identifier.
+    </ParamField>
+    <ParamField path="name" type="string" required>
+      Human-readable name.
+    </ParamField>
+    <ParamField path="description" type="string" required>
+      What the scorer evaluates.
+    </ParamField>
+    <ParamField path="score" type="ScorerFn" required>
+      Async function returning a `ScoreResult`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="Scorer" type="object">
+  The named scorer, ready to bind to a task.
+</ResponseField>
+
+```ts
+const wordCount = createScorer({
+  id: "word-count",
+  name: "Word Count",
+  description: "Scores toward 1.0 as output approaches 200 words",
+  score: async ({ output }) => ({
+    score: Math.min(String(output).split(/\s+/).length / 200, 1),
+  }),
+});
+```
+
+**Source** [`createScorer.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/createScorer.js) · **Tests** [`create-scorer.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/create-scorer.test.js) · **See also** [`llmJudge`](#llmjudge)
+
+## llmJudge
+
+Build an LLM-as-judge scorer that delegates evaluation to an agent. The judge is
+prompted with your `instructions` plus the output of `promptTemplate`, and is
+expected to reply with JSON `{ "score": <0-1>, "reason": "<text>" }`. The reply
+is parsed leniently (a bare number works, and braces inside `reason` do not
+truncate the match), the score is clamped to 0–1, and an unparseable reply
+scores 0.
+
+```ts
+function llmJudge(config: LlmJudgeConfig): Scorer;
+```
+
+<ParamField path="config" type="LlmJudgeConfig" required>
+  <Expandable title="LlmJudgeConfig">
+    <ParamField path="id" type="string" required>
+      Unique identifier.
+    </ParamField>
+    <ParamField path="name" type="string" required>
+      Human-readable name.
+    </ParamField>
+    <ParamField path="description" type="string" required>
+      What the judge evaluates.
+    </ParamField>
+    <ParamField path="judge" type="AgentLike" required>
+      The agent that performs the evaluation.
+    </ParamField>
+    <ParamField path="instructions" type="string" required>
+      System-level instructions prepended to every prompt.
+    </ParamField>
+    <ParamField path="promptTemplate" type="(input: ScorerInput) => string" required>
+      Builds the judge prompt from the scorer input. Instruct the judge to
+      respond with the `{ score, reason }` JSON object.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="Scorer" type="object">
+  A scorer whose `score` calls `judge.generate(...)` and parses the reply.
+</ResponseField>
+
+```ts
+const tone = llmJudge({
+  id: "tone",
+  name: "Professional Tone",
+  description: "Evaluates professional tone",
+  judge,
+  instructions: "You evaluate text for professional tone.",
+  promptTemplate: ({ output }) =>
+    `Rate the professionalism (0-1 JSON):\n\n${String(output)}`,
+});
+```
+
+**Source** [`llmJudge.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/llmJudge.js) · **Tests** [`create-scorer.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/create-scorer.test.js) · **See also** [Built-in scorers](#built-in-scorers)
+
+## Built-in scorers
+
+Each built-in is a factory that returns a `Scorer`. Judge-based scorers take
+an `AgentLike` judge; the deterministic ones do not call an agent.
+
+| Scorer | What it measures | Factory |
+| --- | --- | --- |
+| `faithfulnessScorer` | Output is grounded in `context`, no hallucinations | `faithfulnessScorer(judge)` |
+| `relevancyScorer` | Output addresses the `input` | `relevancyScorer(judge)` |
+| `toxicityScorer` | Toxic, harmful, or inappropriate content (higher = more toxic) | `toxicityScorer(judge)` |
+| `schemaAdherenceScorer` | Output passes the task's `outputSchema` (1 valid, 0 invalid) | `schemaAdherenceScorer()` |
+| `latencyScorer` | Execution time vs. budget (1 at/below target, 0 at/above max) | `latencyScorer({ targetMs, maxMs })` |
+| `pocJudgmentScorer` | Delegation planning nodes' risk/probe judgment (plan-changing findings reward hardest, false negatives punished hardest) | `pocJudgmentScorer(options?)` |
+| `planSolidityScorer` | Delegation replan churn after execution started; plan-phase churn is free | `planSolidityScorer(options?)` |
+| `estimateAccuracyScorer` | Predicted tokens/costUsd/minutes vs. actuals per node (symmetric ratio, cost-weighted) | `estimateAccuracyScorer()` |
+| `tierFitScorer` | Whether a delegation node's intelligence tier matched its work | `tierFitScorer(judge)` |
+| `humanPollScorer` | End-of-run user poll (1-5 ratings and booleans) normalized to 0-1 | `humanPollScorer()` |
+
+The five delegation-chain scorers read their data from the scored output or
+context and no-op (score 1, `meta.skipped`) when it is absent. Their results
+combine into a run total with `delegationRunScore(results, { weights? })`
+(default weights 0.25 / 0.25 / 0.15 / 0.15 / 0.2), built on the generic
+`weightedScore(results, weights)` helper; missing or skipped components drop
+out and the remaining weights renormalize.
+
+```ts
+const grounded = faithfulnessScorer(judge);
+const onSchema = schemaAdherenceScorer();
+const fast = latencyScorer({ targetMs: 5000, maxMs: 20000 });
+```
+
+<Note>
+`schemaAdherenceScorer` and `latencyScorer` no-op (score 1) when the input lacks
+an `outputSchema` or `latencyMs`. `toxicityScorer` scores the *level* of
+toxicity, so clean text scores near 0.
+</Note>
+
+### smithersScorers
+
+`smithersScorers` is the Drizzle table backing scorer persistence (`_smithers_scorers`).
+Every scorer result is inserted here as a [`ScoreRow`](/reference/types#scorerow);
+[`aggregateScores`](#aggregatescores) reads from it. Use it for direct queries
+against your store.
+
+**Source** [`faithfulnessScorer.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/faithfulnessScorer.js) · [`schema.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/schema.js) · **Tests** [`builtins.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/builtins.test.js) · **See also** [`ScoreRow`](/reference/types#scorerow)
+
+## Eval datasets and assertions
+
+The scorer package also owns the shared eval-case domain used by `smithers
+eval`, the `eval-suite-run` workflow, and score-comparison UIs.
+
+```ts
+import {
+  EVAL_CASE_STATUSES,
+  EVAL_PASS_THRESHOLD,
+  evalAssertionScorer,
+  evalCaseRunId,
+  evaluateEvalCase,
+  evaluateEvalCaseAsync,
+  formatEvalError,
+  isPlainObject,
+  jsonContains,
+  jsonEquals,
+  normalizeEvalJudge,
+  normalizeExpected,
+  parseEvalDataset,
+  slugifyEvalToken,
+} from "smithers-orchestrator/scorers";
+```
+
+`parseEvalDataset(text)` accepts a JSON array or JSONL rows, ignores blank and
+`#` comment lines in JSONL, derives missing ids, rejects duplicate ids, and
+validates optional judge assertions. It returns an `EvalDatasetParseResult`
+instead of throwing for malformed authored data.
+
+`evaluateEvalCase(args)` performs deterministic grading. An `expected` object
+using only `status`, `output`, `outputContains`, and `errorContains` is an
+assertion spec. Other objects and arrays use recursive subset matching; scalar
+values use canonical JSON equality. The result contains every `EvalAssertion`
+and a combined `passed` flag.
+
+`evaluateEvalCaseAsync(args, runJudge?)` composes those deterministic
+assertions with an optional `EvalJudge`:
+
+```ts
+type EvalJudge = {
+  instructions: string;
+  threshold?: number; // default EVAL_PASS_THRESHOLD (0.8)
+};
+
+const grade = await evaluateEvalCaseAsync(
+  {
+    input,
+    output,
+    status: "finished",
+    expected: { outputContains: { safe: true } },
+    judge: {
+      instructions: "The answer cites the supplied evidence.",
+      threshold: 0.9,
+    },
+  },
+  async ({ judge, input, output }) => runProjectJudge({ judge, input, output }),
+);
+```
+
+Judge scores are clamped to 0 through 1. Missing runners, invalid judge
+configuration, provider errors, and malformed verdicts become failed
+assertions on that case instead of aborting the suite. `normalizeEvalJudge`
+validates the authored contract; `normalizeExpected`, `jsonContains`,
+`jsonEquals`, `formatEvalError`, `isPlainObject`, and `slugifyEvalToken` are
+the exported low-level helpers for clients that must share the same semantics.
+
+`evalCaseRunId(suiteId, caseId, evalRunId)` builds a readable, bounded,
+collision-resistant child-run id. `evalAssertionScorer()` converts the
+assertions stored on a case task output into the persisted score row read by
+`listScoresForRuns` and `getScoreDetail`. `EVAL_CASE_STATUSES` defines the
+allowed engine statuses for status assertions.
+
+**Source** [`evalCases.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/evalCases.js) · **Tests** [`eval-cases.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/eval-cases.test.js) · **See also** [Evals quickstart](/guides/evals-quickstart), [Score comparison RPC](/rpc/list-scores-for-runs)
+
+## Running scorers
+
+Bound scorers run automatically when a task completes, so you rarely call these
+directly. They are exported for custom hosts, batch evaluation, and tooling.
+
+### runScorersAsync
+
+Fire-and-forget execution for live scoring. Runs every binding concurrently via
+`Effect.runFork` and returns immediately, so scoring never blocks the workflow.
+Failures are logged, not thrown.
+
+```ts
+function runScorersAsync(
+  scorers: ScorersMap,
+  ctx: ScorerContext,
+  adapter: SmithersDb | null,
+  eventBus?: EventBus | null,
+): void;
+```
+
+<ParamField path="scorers" type="ScorersMap" required>
+  The keyed bindings to run.
+</ParamField>
+<ParamField path="ctx" type="ScorerContext" required>
+  Run/node coordinates plus the data the scorers grade. See
+  [`ScorerContext`](/reference/types).
+</ParamField>
+<ParamField path="adapter" type="SmithersDb | null" required>
+  Database adapter to persist results, or `null` to skip persistence.
+</ParamField>
+<ParamField path="eventBus" type="EventBus | null">
+  Optional bus that receives `ScorerStarted` / `ScorerFinished` /
+  `ScorerFailed` events.
+</ParamField>
+
+### runScorersBatch
+
+Blocking execution for batch and test evaluation. Runs every binding
+concurrently and resolves to a map of binding key to `ScoreResult` (or `null`
+when a scorer is sampled out or fails).
+
+```ts
+function runScorersBatch(
+  scorers: ScorersMap,
+  ctx: ScorerContext,
+  adapter: SmithersDb | null,
+  eventBus?: EventBus | null,
+): Promise<Record<string, ScoreResult | null>>;
+```
+
+<ResponseField name="Promise<Record<string, ScoreResult | null>>" type="object">
+  One entry per binding key, in the order the scorers were declared.
+</ResponseField>
+
+```ts
+const results = await runScorersBatch(
+  { quality: { scorer: tone } },
+  {
+    runId: "RUN_ID",
+    nodeId: "NODE_ID",
+    iteration: 0,
+    attempt: 1,
+    input: "Summarize the article.",
+    output: "...",
+  },
+  null,
+);
+// results.quality?.score
+```
+
+### aggregateScores
+
+Compute per-scorer statistics across persisted results: `count`, `mean`, `min`,
+`max`, `p50`, and `stddev`. Filter to a run, node, or scorer.
+
+```ts
+function aggregateScores(
+  adapter: SmithersDb,
+  opts?: AggregateOptions,
+): Promise<AggregateScore[]>;
+```
+
+<ParamField path="adapter" type="SmithersDb" required>
+  Database adapter to read scorer rows from.
+</ParamField>
+<ParamField path="opts" type="AggregateOptions">
+  <Expandable title="AggregateOptions">
+    <ParamField path="runId" type="string">
+      Filter to a specific run.
+    </ParamField>
+    <ParamField path="nodeId" type="string">
+      Filter to a specific node.
+    </ParamField>
+    <ParamField path="scorerId" type="string">
+      Filter to a specific scorer.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="Promise<AggregateScore[]>" type="object">
+  One row per scorer, ordered by scorer name.
+
+  <Expandable title="AggregateScore">
+    <ResponseField name="scorerId" type="string" />
+    <ResponseField name="scorerName" type="string" />
+    <ResponseField name="count" type="number">
+      Number of scores included.
+    </ResponseField>
+    <ResponseField name="mean" type="number" />
+    <ResponseField name="min" type="number" />
+    <ResponseField name="max" type="number" />
+    <ResponseField name="p50" type="number">
+      Median, computed in memory.
+    </ResponseField>
+    <ResponseField name="stddev" type="number" />
+  </Expandable>
+</ResponseField>
+
+```ts
+const stats = await aggregateScores(adapter, { runId: "RUN_ID" });
+```
+
+Scores for a run are also viewable from the CLI:
+
+```bash
+bunx smithers-orchestrator scores RUN_ID
+```
+
+**Source** [`run-scorers.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/run-scorers.js) · [`aggregate.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/aggregate.js) · **Tests** [`run-scorers.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/run-scorers.test.js) · [`aggregate.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/aggregate.test.js) · **See also** [`ScorerContext`, `AggregateScore`](/reference/types#scorercontext)
+
+---
+
+To wire scorers into a workflow and read them back, see the
+[Evals quickstart](/guides/evals-quickstart). For the full type surface, see the
+[Types reference](/reference/types). For the `scorers` prop on `Task`, see the
+[Components reference](/reference/components).

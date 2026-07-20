@@ -1,0 +1,14 @@
+---
+title: getNodeDiff
+description: Gateway RPC for node-level diff inspection.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `getNodeDiff`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, nodeId, iteration? }`
+- Response: `GetNodeDiffRouteResult` (`payload` is `DiffBundle | GetNodeDiffStatPayload`)
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `NodeNotFound`, `IterationNotFound`, `PayloadTooLarge`, `VcsError`, and `Internal`.

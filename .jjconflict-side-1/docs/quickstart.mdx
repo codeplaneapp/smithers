@@ -1,0 +1,57 @@
+---
+title: Quickstart
+description: Scaffold and run a Smithers workflow in two commands.
+---
+
+<Note>
+  The commands below are operated by the coding agent. If you are an agent, run
+  them yourself on the human's behalf; never hand them to the human. If you are
+  a human, ask your agent for the outcome and it runs these for you; the initial
+  `init` is the only command worth typing by hand before an agent is set up.
+</Note>
+
+<Steps>
+  <Step title="Scaffold a project">
+    `init` creates `.smithers/` (the focused authoring workflows, DDD spec/UI closure, and agent config). Add
+    `--template <id>` when you want a create-workflow-driven starter request and
+    follow-up notes; it does not install an archived workflow. Run
+    `bunx smithers-orchestrator starters` to browse template IDs.
+
+    ```bash
+    bunx smithers-orchestrator init
+    bunx smithers-orchestrator init --template idea-to-tickets
+    ```
+  </Step>
+  <Step title="Run a workflow">
+    Point a seeded workflow at a prompt and Smithers starts a durable run.
+
+    ```bash
+    bunx smithers-orchestrator workflow run create-workflow --prompt "Add a rate-limiting workflow"
+    ```
+  </Step>
+  <Step title="Inspect the run">
+    Watch run state, tail the event log, and read structured output as it executes.
+
+    ```bash
+    bunx smithers-orchestrator ps
+    bunx smithers-orchestrator inspect RUN_ID
+    bunx smithers-orchestrator logs RUN_ID --tail 20
+    ```
+  </Step>
+  <Step title="Resume after a crash">
+    Every completed step is persisted, so a crashed or stopped run resumes from its
+    last checkpoint.
+
+    ```bash
+    bunx smithers-orchestrator workflow run create-workflow --run-id RUN_ID --resume true
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  `init` installed the smithers skill for your coding agents automatically. Just ask for the
+  outcome (*"orchestrate an agent to add rate limiting and keep iterating until the tests
+  pass"*) and your agent runs Smithers for you.
+</Tip>
+
+For a full worked example, see the [Tour](/tour). For every CLI command see the [CLI catalog](/cli/overview).

@@ -1,0 +1,25 @@
+# Document the new skill
+
+The skill has been written. Produce a short, human-facing summary so the operator
+knows what was created and how to use it. No file writes — just summarize.
+
+## Skill
+
+- Name: {props.skillName}
+
+## Design
+
+{JSON.stringify(props.design, null, 2)}
+
+## Files written
+
+{JSON.stringify(props.scaffold, null, 2)}
+
+## Task
+
+Write a one-line `summary` of what the skill does and when an agent should reach
+for it, and report the `skillPath` — the primary `SKILL.md` (or `.md`) path from
+the files written above (or null if none was written).
+
+REQUIRED OUTPUT:
+{props.schema}

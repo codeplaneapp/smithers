@@ -1,0 +1,57 @@
+{
+  "version": "0.25.1",
+  "generatedFrom": "release-content workflow render-media",
+  "assets": [
+    {
+      "tweetIndex": 1,
+      "kind": "hero",
+      "suggestion": "Hero card showing Smithers 0.25.1 version",
+      "file": "marketing/0.25.1/assets/tweet-01-hero.png",
+      "svg": "marketing/0.25.1/assets/tweet-01-hero.svg",
+      "sibling": "assets/tweet-01-hero.png",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 2,
+      "kind": "terminal",
+      "suggestion": "Terminal screenshot showing DB_QUERY_FAILED output with actionable guidance text",
+      "file": "marketing/0.25.1/assets/tweet-02-terminal.png",
+      "svg": "marketing/0.25.1/assets/tweet-02-terminal.svg",
+      "sibling": "assets/tweet-02-terminal.png",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 3,
+      "kind": "terminal",
+      "suggestion": "Terminal showing accounts.json warning skip and flag parsing success",
+      "file": "marketing/0.25.1/assets/tweet-03-terminal.png",
+      "svg": "marketing/0.25.1/assets/tweet-03-terminal.svg",
+      "sibling": "assets/tweet-03-terminal.png",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 4,
+      "kind": "terminal",
+      "suggestion": "Terminal showing Pi diagnostics provider-aware output with correct env var mapping",
+      "file": "marketing/0.25.1/assets/tweet-04-terminal.png",
+      "svg": "marketing/0.25.1/assets/tweet-04-terminal.svg",
+      "sibling": "assets/tweet-04-terminal.png",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 5,
+      "kind": "terminal",
+      "suggestion": "Terminal showing successful migration completion output",
+      "file": "marketing/0.25.1/assets/tweet-05-terminal.png",
+      "svg": "marketing/0.25.1/assets/tweet-05-terminal.svg",
+      "sibling": "assets/tweet-05-terminal.png",
+      "captureRecommended": false,
+      "command": null
+    }
+  ],
+  "captures": []
+}

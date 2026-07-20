@@ -1,0 +1,12 @@
+# Synthesize probe results
+
+Synthesize the assumption-probe results (evidence in artifacts/smithering/probes/).
+
+Results:
+
+{props.results}
+
+Stop rule: a failed probe is a PLAN-CHANGING gate, not information. If any probe whose
+assumption was blocking=true failed, set blockingFailure=true and write exactly what must
+change (planChanges) — the pipeline will pause for human approval of the amended plan.
+Update docs/planning/03-eng.md with any amendments.

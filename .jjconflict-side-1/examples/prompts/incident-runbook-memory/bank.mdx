@@ -1,0 +1,10 @@
+Incident just triaged: {props.incident}
+
+Lessons the team has ALREADY banked on "{props.topic}":
+{props.existingLessons.length ? props.existingLessons.map((l, i) => `${i + 1}. ${l}`).join("\n") : "(none)"}
+
+Extract 1-2 NEW durable lessons this incident teaches — reusable statements a
+future responder can act on without knowing this incident. Skip anything the
+existing lessons already cover. Call record_lesson once per lesson with the
+topic "{props.topic}", then return the noteIds it gave you and a one-line summary.
+If this incident teaches nothing new, call no tools and say so in the summary.

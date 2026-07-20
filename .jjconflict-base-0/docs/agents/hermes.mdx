@@ -1,0 +1,69 @@
+---
+title: Hermes
+description: Run Smithers from Nous Research's Hermes agent. Register the MCP server in config.yaml and point Hermes at it with AGENTS.md.
+---
+
+[Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) is a
+self-improving, multi-channel agent with a terminal TUI, an OpenAI-compatible
+HTTP API, and **first-class MCP support in both directions**. Because Hermes is a
+native MCP client, the cleanest integration is to register Smithers as an MCP
+server. Hermes can then list, run, watch, and approve workflows as tools.
+
+## Register the MCP server
+
+The fastest path is `mcp add`, which writes its server straight into Hermes's
+`~/.hermes/config.yaml`:
+
+```bash
+bunx smithers-orchestrator mcp add --agent hermes
+```
+
+To do it by hand, Hermes reads MCP servers from `~/.hermes/config.yaml` under
+`mcp_servers`. Add Smithers as a stdio server:
+
+```yaml
+mcp_servers:
+  smithers:
+    command: bunx
+    args: ["smithers-orchestrator", "--mcp"]
+```
+
+Or use the Hermes CLI:
+
+```bash
+hermes mcp   # browse the catalog / install / configure
+```
+
+Smithers' tools surface as `mcp_smithers_<tool>`: `mcp_smithers_run_workflow`,
+`mcp_smithers_watch_run`, `mcp_smithers_resolve_approval`, and the rest. Full
+reference: [MCP Server](/integrations/mcp-server).
+
+## Optional generated skill files
+
+Hermes supports the `SKILL.md` (agentskills.io) format. `skills add` syncs the
+generated Smithers CLI skill set into `~/.agents/skills/`, which Hermes can be
+pointed at if you want command-level skill context:
+
+```bash
+bunx smithers-orchestrator skills add
+```
+
+Because Hermes is a native MCP client, the MCP server above is the primary
+integration; generated skill files are a complement, not a requirement.
+
+## Standing instructions
+
+Hermes resolves an instruction file by priority (`.hermes.md`, then `AGENTS.md`,
+then `CLAUDE.md`), and the first match wins. Add an orchestration section to whichever the
+repo already uses:
+
+```md
+## Orchestration
+Use Smithers for durable, multi-step, or human-in-the-loop agent work.
+`bunx smithers-orchestrator starters` lists ready-made workflows.
+```
+
+## See also
+
+- [MCP Server](/integrations/mcp-server): the full tool reference
+- [Agent Support](/agents/overview): the cross-agent commands

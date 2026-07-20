@@ -1,0 +1,247 @@
+{
+  "name": "smithers-monorepo",
+  "version": "0.29.0",
+  "description": "Durable control plane for long-running coding agents",
+  "author": "William Cory",
+  "license": "MIT",
+  "private": true,
+  "packageManager": "pnpm@10.6.1",
+  "module": "packages/smithers/src/index.js",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    ".smithers"
+  ],
+  "bin": {
+    "smithers": "apps/cli/src/index.js"
+  },
+  "exports": {
+    ".": "./packages/smithers/src/index.js",
+    "./gateway": "./packages/server/src/gateway.js",
+    "./gateway-client": "./packages/smithers/src/gateway-client.js",
+    "./gateway-react": "./packages/smithers/src/gateway-react.js",
+    "./tools": "./packages/smithers/src/tools.js",
+    "./testing": "./packages/testing/src/index.ts",
+    "./jsx-runtime": "./packages/smithers/src/jsx-runtime.js",
+    "./jsx-dev-runtime": "./packages/smithers/src/jsx-runtime.js",
+    "./server": "./packages/server/src/index.js",
+    "./observability": "./apps/observability/src/index.js",
+    "./mdx-plugin": "./packages/smithers/src/mdx-plugin.js",
+    "./dom/renderer": "./packages/react-reconciler/src/dom/renderer.js",
+    "./serve": "./packages/server/src/serve.js",
+    "./scorers": "./packages/scorers/src/index.js",
+    "./memory": "./packages/memory/src/index.js",
+    "./openapi": "./packages/openapi/src/index.js",
+    "./sandbox": {
+      "types": "./packages/sandbox/src/index.d.ts",
+      "import": "./packages/sandbox/src/index.js",
+      "default": "./packages/sandbox/src/index.js"
+    },
+    "./telegram": {
+      "types": "./packages/telegram/src/index.d.ts",
+      "import": "./packages/telegram/src/index.js",
+      "default": "./packages/telegram/src/index.js"
+    },
+    "./aws": {
+      "types": "./packages/smithers/src/aws.d.ts",
+      "import": "./packages/smithers/src/aws.js",
+      "default": "./packages/smithers/src/aws.js"
+    },
+    "./cloudflare": {
+      "types": "./packages/smithers/src/cloudflare.d.ts",
+      "import": "./packages/smithers/src/cloudflare.js",
+      "default": "./packages/smithers/src/cloudflare.js"
+    },
+    "./daytona": {
+      "types": "./packages/smithers/src/daytona.d.ts",
+      "import": "./packages/smithers/src/daytona.js",
+      "default": "./packages/smithers/src/daytona.js"
+    },
+    "./microsandbox": {
+      "types": "./packages/smithers/src/microsandbox.d.ts",
+      "import": "./packages/smithers/src/microsandbox.js",
+      "default": "./packages/smithers/src/microsandbox.js"
+    },
+    "./gcp": {
+      "types": "./packages/smithers/src/gcp.d.ts",
+      "import": "./packages/smithers/src/gcp.js",
+      "default": "./packages/smithers/src/gcp.js"
+    },
+    "./vercel": {
+      "types": "./packages/smithers/src/vercel.d.ts",
+      "import": "./packages/smithers/src/vercel.js",
+      "default": "./packages/smithers/src/vercel.js"
+    },
+    "./control-plane": "./packages/smithers/src/control-plane.js"
+  },
+  "engines": {
+    "node": ">=22",
+    "bun": ">=1.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smithersai/smithers.git"
+  },
+  "homepage": "https://github.com/smithersai/smithers#readme",
+  "bugs": {
+    "url": "https://github.com/smithersai/smithers/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "react",
+    "jsx",
+    "llm",
+    "claude",
+    "orchestration",
+    "workflow",
+    "bun"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
+    "typecheck:evals": "tsc -p evals/tsconfig.json --noEmit",
+    "lint": "node scripts/lint.mjs",
+    "lint:fix": "node scripts/lint.mjs --fix --fix-suggestions",
+    "cli": "bun run apps/cli/src/index.js",
+    "generate:init-pack": "bun scripts/generate-workflow-pack.ts",
+    "sota:gen": "bun scripts/generate-sota.ts",
+    "sota:research": "bun scripts/sota-research.ts",
+    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-ui-architecture.mjs && node --test scripts/check-ui-architecture.test.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs && pnpm -r --no-bail test",
+    "coverage": "node scripts/coverage.mjs",
+    "check:effect": "node scripts/check-single-effect-version.mjs",
+    "check:deps": "node scripts/check-dependency-boundaries.mjs",
+    "check:ui-architecture": "node scripts/check-ui-architecture.mjs",
+    "test:ui-architecture": "node --test scripts/check-ui-architecture.test.mjs",
+    "check:db-access": "node scripts/check-no-direct-db-access.mjs",
+    "check:docs": "node scripts/check-docs.mjs",
+    "check:llms": "node scripts/check-llms.mjs",
+    "check:sota": "node scripts/check-sota.mjs",
+    "check:dts": "node scripts/check-dts.mjs",
+    "fetch:jj": "node scripts/fetch-jj-binaries.mjs",
+    "docs:components": "node scripts/generate-component-source.mjs",
+    "docs:llms": "bun scripts/generate-llms.ts && bun scripts/optimize-llms-full.ts",
+    "docs": "cd docs && bunx mintlify dev",
+    "release:content": "bunx smithers-orchestrator up .smithers/workflows/release-content.tsx",
+    "release:content:approve": "bunx smithers-orchestrator up .smithers/workflows/release-content.tsx --input '{\"dryRun\":false,\"publish\":false}'",
+    "release:content:publish": "bunx smithers-orchestrator up .smithers/workflows/release-content.tsx --input '{\"dryRun\":false,\"publish\":true}'",
+    "release:workflow": "bunx smithers-orchestrator up .smithers/workflows/release.tsx",
+    "release:workflow:gated": "bunx smithers-orchestrator up .smithers/workflows/release.tsx --input '{\"requireMarketingContent\":true}'",
+    "marketing:thread": "bunx smithers-orchestrator up .smithers/workflows/release-content.tsx --input '{\"channels\":{\"changelog\":false,\"tweetThread\":true,\"blogPost\":false},\"skip\":{\"changelog\":true,\"blogPost\":true,\"publishX\":true,\"publishBlog\":true,\"publishChangelog\":true}}'",
+    "marketing:thread:write": "bunx smithers-orchestrator up .smithers/workflows/release-content.tsx --input '{\"dryRun\":false,\"publish\":true,\"allowUnreviewedPublish\":true,\"channels\":{\"changelog\":false,\"tweetThread\":true,\"blogPost\":false},\"skip\":{\"changelog\":true,\"blogPost\":true,\"approval\":true,\"publishX\":true,\"publishBlog\":true,\"publishChangelog\":true}}'",
+    "version": "node scripts/bump.mjs",
+    "release": "node scripts/publish.mjs",
+    "sandbox:up": "bun scripts/sandbox.ts up",
+    "sandbox:down": "bun scripts/sandbox.ts down"
+  },
+  "pnpm": {
+    "overrides": {
+      "effect": "3.21.4"
+    },
+    "onlyBuiltDependencies": [
+      "@smithers-orchestrator/jj-darwin-arm64",
+      "@smithers-orchestrator/jj-darwin-x64",
+      "@smithers-orchestrator/jj-linux-arm64",
+      "@smithers-orchestrator/jj-linux-x64",
+      "@smithers-orchestrator/jj-win32-x64"
+    ]
+  },
+  "trustedDependencies": [
+    "@smithers-orchestrator/jj-darwin-arm64",
+    "@smithers-orchestrator/jj-darwin-x64",
+    "@smithers-orchestrator/jj-linux-arm64",
+    "@smithers-orchestrator/jj-linux-x64",
+    "@smithers-orchestrator/jj-win32-x64"
+  ],
+  "overrides": {
+    "@effect/cluster": "0.59.0",
+    "@effect/platform": "0.96.2",
+    "@effect/rpc": "0.75.1",
+    "@effect/sql": "0.51.1",
+    "@effect/workflow": "0.18.2",
+    "effect": "3.21.4"
+  },
+  "devDependencies": {
+    "@effect/cluster": "^0.59.0",
+    "@effect/experimental": "^0.60.0",
+    "@effect/rpc": "^0.75.1",
+    "@effect/sql": "^0.51.1",
+    "@effect/workflow": "^0.18.2",
+    "@happy-dom/global-registrator": "^20.10.6",
+    "@mdx-js/esbuild": "^3.1.1",
+    "@smithers-orchestrator/accounts": "workspace:*",
+    "@smithers-orchestrator/agent-eliza": "workspace:*",
+    "@smithers-orchestrator/agents": "workspace:*",
+    "@smithers-orchestrator/aws": "workspace:*",
+    "@smithers-orchestrator/cli": "workspace:*",
+    "@smithers-orchestrator/cloudflare": "workspace:*",
+    "@smithers-orchestrator/components": "workspace:*",
+    "@smithers-orchestrator/control-plane": "workspace:*",
+    "@smithers-orchestrator/daytona": "workspace:*",
+    "@smithers-orchestrator/db": "workspace:*",
+    "@smithers-orchestrator/devtools": "workspace:*",
+    "@smithers-orchestrator/driver": "workspace:*",
+    "@smithers-orchestrator/electric-proxy": "workspace:*",
+    "@smithers-orchestrator/engine": "workspace:*",
+    "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/gateway": "workspace:*",
+    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@smithers-orchestrator/gateway-react": "workspace:*",
+    "@smithers-orchestrator/gateway-ui": "workspace:*",
+    "@smithers-orchestrator/gcp": "workspace:*",
+    "@smithers-orchestrator/graph": "workspace:*",
+    "@smithers-orchestrator/integrations": "workspace:*",
+    "@smithers-orchestrator/memory": "workspace:*",
+    "@smithers-orchestrator/microsandbox": "workspace:*",
+    "@smithers-orchestrator/observability": "workspace:*",
+    "@smithers-orchestrator/openapi": "workspace:*",
+    "@smithers-orchestrator/pi-plugin": "workspace:*",
+    "@smithers-orchestrator/protocol": "workspace:*",
+    "@smithers-orchestrator/react-reconciler": "workspace:*",
+    "@smithers-orchestrator/review": "workspace:*",
+    "@smithers-orchestrator/sandbox": "workspace:*",
+    "@smithers-orchestrator/scheduler": "workspace:*",
+    "@smithers-orchestrator/scorers": "workspace:*",
+    "@smithers-orchestrator/server": "workspace:*",
+    "@smithers-orchestrator/telegram": "workspace:*",
+    "@smithers-orchestrator/testing": "workspace:*",
+    "@smithers-orchestrator/time-travel": "workspace:*",
+    "@smithers-orchestrator/tool-context": "workspace:*",
+    "@smithers-orchestrator/tui": "workspace:*",
+    "@smithers-orchestrator/ui": "workspace:*",
+    "@smithers-orchestrator/ui-styleguide": "workspace:*",
+    "@smithers-orchestrator/usage": "workspace:*",
+    "@smithers-orchestrator/vcs": "workspace:*",
+    "@smithers-orchestrator/vercel": "workspace:*",
+    "@smithers-orchestrator/xstate": "workspace:*",
+    "@tanstack/react-query": "^5.101.2",
+    "@types/bun": "latest",
+    "@types/dagre": "^0.7.54",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/react-reconciler": "^0.33.0",
+    "@types/ws": "^8.18.1",
+    "bun-types": "^1.3.14",
+    "diff": "^9.0.0",
+    "drizzle-orm": "^0.45.2",
+    "effect": "3.21.4",
+    "esbuild": "^0.28.1",
+    "oxlint": "^1.72.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "smithers-orchestrator": "workspace:*",
+    "tsup": "^8.5.1",
+    "twitter-api-v2": "^1.29.0",
+    "typescript": "~6.0.3",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "7.21.2",
+    "@xyflow/react": "^12.10.2",
+    "dagre": "^0.8.5"
+  }
+}

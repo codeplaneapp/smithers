@@ -1,0 +1,3255 @@
+# Smithers Integrations
+
+> Smithers integrations: agent runtimes (Claude Code, Codex, Gemini, Pi), tool surfaces, ecosystem partners.
+
+---
+
+## Integrations
+
+> Three patterns for connecting Smithers to external services.
+
+Smithers ships first-party event sources for GitHub, Linear, and Telegram (the `@smithers-orchestrator/integrations` package) that turn provider webhooks into durable workflow signals. For services it does not cover (Notion, Slack, and similar), treat them as external integrations your app owns and pick one of three wirings: tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If a service already exposes an MCP server and you are using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
+
+## Pattern 1: Pass tools to an SDK agent
+
+Use this when the agent needs judgment but the external calls should stay explicit and reviewable.
+
+```ts
+import { ToolLoopAgent as Agent, tool, zodSchema } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { z } from "zod";
+
+const linearGetIssue = tool({
+  description: "Fetch a Linear issue",
+  inputSchema: zodSchema(z.object({ id: z.string() })),
+  execute: async ({ id }) => linearClient.getIssue(id),
+});
+
+const opsAgent = new Agent({
+  model: anthropic("claude-fable-5"),
+  tools: { linearGetIssue },
+});
+```
+
+## Pattern 2: Pass a skill / plugin / MCP config to a CLI agent
+
+Use this when your CLI agent already supports external integrations and Smithers should only orchestrate the task.
+
+```ts
+import { PiAgent } from "smithers-orchestrator";
+
+const pi = new PiAgent({
+  provider: "openai",
+  model: "gpt-5.6-sol",
+  skill: ["./skills/linear", "./skills/notion"],
+});
+```
+
+```tsx
+<Task id="ticket-review" output={outputs.review} agent={pi}>
+  {`Use the Linear skill to inspect ${ctx.input.issueId}, then summarize next actions.`}
+</Task>
+```
+
+## Pattern 3: Run an external CLI in a task
+
+Use this when the step is deterministic and you do not need the model involved.
+
+```tsx
+<Task id="load-linear" output={outputs.linearIssue}>
+  {async () => {
+    const proc = Bun.spawn(["linear", "issue", "view", ctx.input.issueId, "--json"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    if (await proc.exited !== 0) throw new Error(stderr || stdout);
+    return JSON.parse(stdout);
+  }}
+</Task>
+```
+
+## Choosing between them
+
+| If you need | Prefer |
+|---|---|
+| AI judgment over a small integration surface | Pattern 1 (SDK agent with narrow tools) |
+| Existing CLI ecosystem support (skills, plugins, MCP) | Pattern 2 (CLI agent) |
+| Deterministic sync or publish steps | Pattern 3 (compute task) |
+
+## See also
+
+For React hook patterns see [/recipes#custom-hooks-over-ctx](/recipes#custom-hooks-over-ctx); for agent-class details see [SDK agents](/integrations/sdk-agents), [MCP Toolset](/integrations/mcp-toolset), and [CLI agents](/integrations/cli-agents). To wire Smithers *into* your coding agent so it can drive workflows, see [Agent Support](/agents/overview).
+
+---
+
+## CLI Agents
+
+> Spawn external CLI tools (Codex, Claude Code, Pi, …) and pipe them through the workflow runtime.
+
+CLI-backed agent classes wrap external AI command-line tools and implement the [AI SDK](https://ai-sdk.dev) `Agent` interface. Use them anywhere Smithers accepts an agent, including [`<Task>`](/components/task). Reach for these for a vendor's full CLI surface (sessions, sandboxes, slash commands, MCP). For API-billed provider wrappers, see [SDK Agents](/integrations/sdk-agents).
+
+<Note>API reference: [Agents](/reference/agents) lists every agent class, its options, and links to source and tests.</Note>
+
+## Quick Start
+
+```tsx
+import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  analysis: z.object({ summary: z.string() }),
+});
+
+const reviewer = new CodexAgent({
+  model: "gpt-5.6-sol",
+  systemPrompt: "You are a careful code reviewer.",
+  sandbox: "read-only",
+  timeoutMs: 30 * 60 * 1000,
+});
+
+export default smithers((ctx) => (
+  <Workflow name="review">
+    <Task id="analysis" output={outputs.analysis} agent={reviewer}>
+      {`Analyze the codebase and identify potential improvements.`}
+    </Task>
+  </Workflow>
+));
+```
+
+## Available agents
+
+```toon
+agents[13]{class,cli,modelDefault,hijack,notes}:
+  CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
+  ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
+  AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
+  GeminiAgent,gemini,CLI default,legacy session id,Deprecated legacy Gemini CLI wrapper
+  PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
+  KimiAgent,kimi,CLI default,native session id,Moonshot Kimi CLI (auto-isolates KIMI_SHARE_DIR)
+  ForgeAgent,forge,CLI default,conversation id,Forge CLI (300+ models)
+  HermesCliAgent,hermes,CLI default,session id,Nous Research Hermes Agent CLI (hermes -z headless)
+  AmpAgent,amp,CLI default,thread id,Amp CLI (--execute headless mode)
+  VibeAgent,vibe,CLI default,headless session id,Mistral Vibe CLI
+  OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
+  OpenClawAgent,openclaw,CLI default,session id,OpenClaw CLI (openclaw agent --json)
+  PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
+```
+
+CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
+
+`HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
+which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
+`HermesCliAgent` to delegate a task to the Hermes coding agent itself; use
+`HermesAgent` to call a Hermes model endpoint.
+
+`OpenClawAgent` drives `openclaw agent` in JSON mode. Pass `agent` for a named
+OpenClaw agent, `sessionId` to resume a session with `--session-id`, `workspace`
+to set the workspace path, and `continueSession` when the installed CLI should
+continue its active session.
+
+## Codex-first defaults
+
+When `bunx smithers-orchestrator init` detects usable Codex authentication, its
+generated pools start with Codex workers using exact model pins:
+
+| Work | Model |
+|---|---|
+| Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
+| Mid-tier judgment, validation, or tool-heavy work that needs extra checking | `gpt-5.6-terra` |
+| **Research, implementation, ordinary tool use, UI, and routine-to-substantial execution** | `gpt-5.6-luna` |
+
+Start with Luna for most work, including substantial implementation and
+ordinary tool use; change size alone does not require Sol. Escalate to Terra
+for stronger validation or structured tool-heavy judgment, and to Sol for
+ambiguity, high-stakes decisions, novel architecture, orchestration, final
+review, or repeated failure. Other adapters stay later in automatic sequential
+fallback chains, while an explicitly constructed provider agent remains a
+deliberate choice. See [SOTA role defaults](/reference/sota-models#role-defaults).
+
+## Codex CLI Agent
+
+`CodexAgent` is the Smithers wrapper for OpenAI's `codex` CLI. It runs `codex exec` in non-interactive mode, sends the task prompt over stdin, forces `--json` so Smithers can stream structured progress, and captures the final assistant message via `--output-last-message`.
+
+```tsx
+import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  patch: z.object({ summary: z.string(), files: z.array(z.string()) }),
+});
+
+const codex = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
+  sandbox: "workspace-write",
+  skipGitRepoCheck: true,
+  yolo: true,
+});
+
+export default smithers(() => (
+  <Workflow name="codex-implementation">
+    <Task id="implement" output={outputs.patch} agent={codex}>
+      Implement the requested change and summarize the edited files.
+    </Task>
+  </Workflow>
+));
+```
+
+For ChatGPT-account Codex auth, use an exact Codex model id such as
+`gpt-5.6-luna`; do not invent a `-codex` suffix.
+
+### Authentication
+
+- Subscription login: run `codex login` once. For isolated accounts, pass `configDir`; Smithers sets `CODEX_HOME` for that invocation.
+- `apiKey`: Smithers sets `OPENAI_API_KEY` on the spawned process, but Codex CLI >= 0.144 ignores that variable for auth/billing selection when subscription login is present. The option is therefore effectively inert on current CLIs; the subscription login wins.
+- Account registry: `bunx smithers-orchestrator agents add --provider codex ...` registers a subscription config directory, while `--provider openai-api` registers API-key billing for Codex-compatible providers.
+
+### Structured output
+
+- If the Smithers task has an output schema and `outputSchema` is not set, Smithers writes a temporary OpenAI-compatible JSON Schema file and passes it as `--output-schema`.
+- Resume attempts use `codex exec resume <thread-id>` and skip `--output-schema`, matching the Codex CLI's resume command surface.
+- Hijack opens native Codex with `codex resume <thread-id> -C <cwd>`.
+
+## Claude Code CLI Agent
+
+`ClaudeCodeAgent` is the Smithers wrapper for Anthropic's `claude` CLI. It runs
+the CLI non-interactively, captures the final assistant message, and (by default)
+forces `--output-format stream-json` so Smithers can stream structured progress.
+
+### Authentication
+
+- Subscription billing (default): `ClaudeCodeAgent` clears `ANTHROPIC_API_KEY`
+  from the spawned process so the CLI bills your Claude Pro/Max subscription
+  instead of the API. No key is required. The agent logs a one-time warning when
+  it unsets an inherited `ANTHROPIC_API_KEY`.
+- Subscription login: the `claude` CLI stores credentials per config directory.
+  To set up an isolated subscription, run `CLAUDE_CONFIG_DIR=<dir> claude` once
+  and complete `/login` interactively. The credentials land at
+  `<dir>/.credentials.json`.
+- Pinning a subscription: pass `configDir` to use that directory's credentials.
+  Smithers sets `CLAUDE_CONFIG_DIR=<configDir>` for that invocation, so you can
+  run several subscriptions side by side. Omit it to use the default `~/.claude/`.
+- API billing: pass `apiKey` to bill the Anthropic API instead. When `apiKey` is
+  set, Smithers stops clearing `ANTHROPIC_API_KEY` and forwards your key as
+  `ANTHROPIC_API_KEY` to the spawned `claude` process.
+
+```ts
+import { ClaudeCodeAgent } from "smithers-orchestrator";
+
+// Subscription billing, pinned to an isolated login dir (no API key):
+const claude = new ClaudeCodeAgent({
+  model: "claude-fable-5",
+  configDir: "/home/me/.claude-work", // CLAUDE_CONFIG_DIR for this invocation
+});
+
+// API billing (switches off subscription auth):
+const apiClaude = new ClaudeCodeAgent({
+  model: "claude-fable-5",
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+```
+
+Codex also supports `codex login` / `CODEX_HOME` via `configDir`. Although its
+`apiKey` option sets `OPENAI_API_KEY`, current Codex CLIs do not use that
+variable to switch away from subscription auth.
+
+## Subscription-mode structured completion
+
+You do not need a [Workflow](/components/workflow) or [Task](/components/task)
+graph to call a model once and get a typed object back. Construct a CLI agent and
+call `agent.generate({ prompt, outputSchema, timeout, abortSignal })` directly.
+With no `apiKey`, the call bills the host subscription, returns a single
+completion, and is bounded by `timeout` and `abortSignal`.
+
+`generate()` resolves to an AI SDK `GenerateTextResult`. Read the full text from
+`.text`; when the response is valid JSON, Smithers parses it into `.output`
+using the AI SDK 7 structured-output field.
+
+### Claude Code (subscription, no API key)
+
+`ClaudeCodeAgent.generate()` does not auto-inject the schema into the prompt
+(that injection happens inside `<Task>`), so when calling it standalone, instruct
+JSON in the prompt yourself. `outputSchema` drives `.output` parsing and
+validation. Setting `outputFormat: "json"` and `tools: ""` keeps the run a single
+quiet completion with no tool use.
+
+```ts
+import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const schema = z.object({
+  sentiment: z.enum(["positive", "neutral", "negative"]),
+  summary: z.string(),
+});
+
+const claude = new ClaudeCodeAgent({
+  model: "claude-fable-5",
+  outputFormat: "json",
+  tools: "", // no tools, pure completion
+  // no apiKey → bills your Claude Pro/Max subscription
+});
+
+const controller = new AbortController();
+const result = await claude.generate({
+  prompt:
+    "Classify the sentiment of this review and summarize it in one sentence. " +
+    'Respond with ONLY a raw JSON object: {"sentiment": "...", "summary": "..."}. ' +
+    "First character `{`, last character `}`, no prose or code fences.\n\n" +
+    "Review: Shipping was slow but the product is excellent.",
+  outputSchema: schema,
+  timeout: { totalMs: 2 * 60 * 1000, idleMs: 30 * 1000 },
+  abortSignal: controller.signal,
+});
+
+const parsed = schema.parse(result.output ?? JSON.parse(result.text));
+console.log(parsed.sentiment, parsed.summary);
+```
+
+### Codex (subscription, strict JSON)
+
+`CodexAgent` with `nativeStructuredOutput: true` forwards the schema to the CLI
+as `codex exec --output-schema`, so the model is constrained to emit JSON
+matching the schema. No API key is needed; it bills your ChatGPT subscription
+via `~/.codex/auth.json` (or `CODEX_HOME` when `configDir` is set).
+
+```ts
+import { CodexAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const schema = z.object({
+  sentiment: z.enum(["positive", "neutral", "negative"]),
+  summary: z.string(),
+});
+
+const codex = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
+  nativeStructuredOutput: true, // forwards outputSchema as --output-schema
+  // no apiKey → bills your ChatGPT subscription
+});
+
+const result = await codex.generate({
+  prompt:
+    "Classify the sentiment of this review and summarize it in one sentence.\n\n" +
+    "Review: Shipping was slow but the product is excellent.",
+  outputSchema: schema,
+  timeout: { totalMs: 2 * 60 * 1000, idleMs: 30 * 1000 },
+});
+
+const parsed = schema.parse(result.output);
+console.log(parsed.sentiment, parsed.summary);
+```
+
+Notes:
+
+- No API key is required for either agent; the call bills the host subscription.
+- `outputSchema` is honored differently per agent: Codex constrains decoding via
+  `--output-schema` (strict JSON); Claude Code relies on the JSON you ask for in
+  the prompt and parses it into `.output`. Both validate against the schema.
+- A single `generate()` call returns one completion. There is no graph, no
+  durability, and no retry loop unless you add one. For schema-validation retries,
+  durability, and multi-step orchestration, wrap the agent in a [`<Task>`](/components/task).
+- `timeout: { totalMs, idleMs }` caps wall-clock and idle time; pass an
+  `AbortSignal` to cancel from the outside.
+
+## Common options
+
+All CLI agents accept the same base option surface:
+
+```ts
+type BaseCliAgentOptions = {
+  id?: string;                       // Agent instance id (default: random UUID)
+  model?: string;                    // Model name passed to --model
+  systemPrompt?: string;             // Prepended to the user prompt
+  instructions?: string;             // Alias for systemPrompt
+  cwd?: string;                      // Working directory (default: tool ctx rootDir or process.cwd())
+  env?: Record<string, string>;      // Extra env vars merged with process.env
+  yolo?: boolean;                    // Skip permission prompts (default: true)
+  timeoutMs?: number;                // Hard wall-clock cap
+  idleTimeoutMs?: number;            // Inactivity cap; resets on any stdout/stderr
+  maxOutputBytes?: number;           // Truncate captured output
+  extraArgs?: string[];              // Additional CLI flags appended to the command
+};
+```
+
+Per-call timeout override:
+
+```ts
+await agent.generate({
+  prompt: "do the thing",
+  timeout: { totalMs: 15 * 60 * 1000, idleMs: 2 * 60 * 1000 },
+});
+```
+
+## Per-agent extras
+
+`ClaudeCodeAgent` extends the base with Claude Code-specific session and permission flags. Key additions: `permissionMode`, `sessionId`, `mcpConfig`, `resume`.
+
+```ts
+import { ClaudeCodeAgent } from "smithers-orchestrator";
+new ClaudeCodeAgent({
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
+  allowedTools?: string[]; disallowedTools?: string[]; disableSlashCommands?: boolean;
+  addDir?: string[]; file?: string[]; fromPr?: string; fallbackModel?: string;
+  appendSystemPrompt?: string; agents?: Record<string, { description?: string; prompt?: string }> | string;
+  agent?: string; tools?: string[] | "default" | "";
+  betas?: string[]; pluginDir?: string[]; resume?: string; sessionId?: string;
+  mcpConfig?: string[]; mcpDebug?: boolean; maxBudgetUsd?: number; jsonSchema?: string;
+  configDir?: string; apiKey?: string;
+  dangerouslySkipPermissions?: boolean; allowDangerouslySkipPermissions?: boolean; chrome?: boolean; noChrome?: boolean;
+  continue?: boolean; forkSession?: boolean; noSessionPersistence?: boolean; replayUserMessages?: boolean;
+  debug?: boolean | string; debugFile?: string; ide?: boolean; includePartialMessages?: boolean;
+  inputFormat?: "text" | "stream-json"; settingSources?: string; settings?: string; strictMcpConfig?: boolean; verbose?: boolean;
+  outputFormat?: "text" | "json" | "stream-json"; // default stream-json
+});
+```
+
+#### Allow-list and deny-list tools
+
+`allowedTools` and `disallowedTools` are independent string arrays that map to
+the Claude Code CLI's `--allowed-tools` and `--disallowed-tools`. Use them
+together: `allowedTools` whitelists what the agent may use, and `disallowedTools`
+hard-blocks tools even if they would otherwise be allowed. To let an agent read
+and write files but never run a shell, list both:
+
+```ts
+const reviewer = new ClaudeCodeAgent({
+  model: "claude-fable-5",
+  allowedTools: ["Read", "Write"],   // may read and write files
+  disallowedTools: ["Bash"],          // but never execute shell commands
+});
+```
+
+Setting `allowedTools` alone does not block `Bash`; the deny-list is what
+forbids it. Tool names follow the Claude Code convention (`Read`, `Write`,
+`Edit`, `Bash`, `WebFetch`, `Grep`, ...) and `Bash(git:*)`-style scoping is
+allowed.
+
+#### MCP servers (`mcpConfig`)
+
+`mcpConfig` is a string array passed straight through to the CLI's `--mcp-config`
+flag. Each entry is **either a path to an MCP config JSON file or an inline JSON
+string** (the Claude Code CLI accepts both forms), so you can mix them:
+
+```ts
+const agent = new ClaudeCodeAgent({
+  model: "claude-fable-5",
+  mcpConfig: [
+    "./.mcp.json",                                                   // a file path
+    '{"mcpServers":{"fs":{"command":"npx","args":["@modelcontextprotocol/server-filesystem","."]}}}', // inline JSON
+  ],
+  strictMcpConfig: true, // ignore any other MCP sources, use only mcpConfig
+});
+```
+
+`CodexAgent` extends the base with OpenAI Codex-specific flags. Key additions: `sandbox`, `config`, `outputSchema`.
+
+```ts
+import { CodexAgent } from "smithers-orchestrator";
+new CodexAgent({
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  fullAuto?: boolean; dangerouslyBypassApprovalsAndSandbox?: boolean;
+  config?: Record<string, string | number | boolean | object | null> | string[];
+  enable?: string[]; disable?: string[];
+  oss?: boolean; localProvider?: string;
+  image?: string[]; profile?: string; cd?: string; addDir?: string[];
+  skipGitRepoCheck?: boolean; color?: "always" | "never" | "auto";
+  outputSchema?: string; outputLastMessage?: string; json?: boolean;
+  configDir?: string; apiKey?: string;
+});
+```
+
+`AntigravityAgent` wraps the Google `agy` CLI. Key additions: `allowedMcpServerNames`, `geminiDir`, `conversation`, `continue`, and `resume`.
+
+```ts
+import { AntigravityAgent } from "smithers-orchestrator";
+new AntigravityAgent({
+  model?: string; sandbox?: boolean;
+  yolo?: boolean; dangerouslySkipPermissions?: boolean;
+  allowedMcpServerNames?: string[]; allowedTools?: string[];
+  conversation?: string; continue?: boolean; resume?: string;
+  includeDirectories?: string[];
+  extensions?: string[]; listExtensions?: boolean;
+  listSessions?: boolean; deleteSession?: string;
+  screenReader?: boolean; outputFormat?: "text" | "json" | "stream-json";
+  debug?: boolean;
+  binary?: string; configDir?: string; geminiDir?: string; apiKey?: string;
+  // Deprecated and rejected at runtime: debug, screenReader, outputFormat,
+  // extensions, listExtensions, listSessions, deleteSession.
+});
+```
+
+Current `agy` builds changed several Gemini-era flags. Smithers treats that as a
+runtime contract, not a best-effort pass-through:
+
+| Smithers option | Emitted `agy` surface |
+|---|---|
+| `includeDirectories` | `--add-dir` |
+| `conversation` / `resume` | `--conversation <id>` |
+| `continue` | `--continue` |
+| `configDir` / `geminiDir` | `--gemini_dir <dir>` and `GEMINI_DIR=<dir>` |
+| prompt text | `-p <prompt>` |
+
+Smithers does not emit `--output-format`, `--include-directories`, `--resume`,
+`--screen-reader`, `--debug`, extension flags, session-list flags, or
+`--prompt` for Antigravity. Options that would require those removed flags fail
+fast with `AGENT_CONFIG_INVALID` and a replacement hint. Plugins are managed
+outside workflow launch through `agy plugin`.
+
+`GeminiAgent` is the deprecated legacy wrapper for the older `gemini` CLI. Prefer `AntigravityAgent` for new Google CLI integrations, but existing workflows can still use `GeminiAgent`.
+
+```ts
+import { GeminiAgent } from "smithers-orchestrator";
+new GeminiAgent({
+  debug?: boolean; model?: string; sandbox?: boolean; yolo?: boolean;
+  approvalMode?: "default" | "auto_edit" | "yolo" | "plan";
+  experimentalAcp?: boolean;
+  allowedMcpServerNames?: string[]; allowedTools?: string[];
+  extensions?: string[]; listExtensions?: boolean;
+  resume?: string; listSessions?: boolean; deleteSession?: string;
+  includeDirectories?: string[]; screenReader?: boolean;
+  outputFormat?: "text" | "json" | "stream-json";
+  configDir?: string; apiKey?: string;
+});
+```
+
+`PiAgent` wraps the Pi CLI and adds extension UI hook support. Key additions: `provider`, `model`, `mode`, `onExtensionUiRequest`, `extension`, `thinking`.
+
+```ts
+import { PiAgent, type PiExtensionUiRequest, type PiExtensionUiResponse } from "smithers-orchestrator";
+new PiAgent({
+  provider?: string; model?: string; apiKey?: string; appendSystemPrompt?: string; mode?: "text" | "json" | "rpc";
+  print?: boolean; continue?: boolean; resume?: boolean; session?: string;
+  sessionDir?: string; noSession?: boolean;
+  models?: string | string[]; listModels?: boolean | string;
+  extension?: string[]; skill?: string[]; promptTemplate?: string[]; theme?: string[];
+  noExtensions?: boolean; noSkills?: boolean; noPromptTemplates?: boolean; noThemes?: boolean;
+  tools?: string[]; noTools?: boolean; files?: string[];
+  thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  export?: string; verbose?: boolean;
+  onExtensionUiRequest?: (req: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null;
+});
+```
+
+`KimiAgent` wraps the Moonshot Kimi CLI with automatic session isolation. Key additions: `thinking`, `agent`, `maxRalphIterations`.
+
+```ts
+import { KimiAgent } from "smithers-orchestrator";
+new KimiAgent({
+  thinking?: boolean; outputFormat?: "text" | "stream-json";
+  finalMessageOnly?: boolean; quiet?: boolean;
+  agent?: "default" | "okabe"; agentFile?: string;
+  workDir?: string; session?: string; continue?: boolean;
+  skillsDir?: string; mcpConfigFile?: string[]; mcpConfig?: string[];
+  maxStepsPerTurn?: number; maxRetriesPerStep?: number; maxRalphIterations?: number;
+  verbose?: boolean; debug?: boolean; configDir?: string; // sets KIMI_SHARE_DIR (see below)
+});
+```
+
+Unlike the other agents, `KimiAgent`'s `configDir` sets the **`KIMI_SHARE_DIR`**
+environment variable for that invocation (Kimi has no separate config-dir flag),
+pinning credentials and session state to `<configDir>` instead of the default
+`~/.kimi/`. It is exactly equivalent to `env: { KIMI_SHARE_DIR: "<configDir>" }`;
+the `configDir` name just keeps the option uniform across agents.
+
+`ForgeAgent` wraps the Forge CLI and supports 300+ models via provider/model strings. Key additions: `conversationId`, `provider`, `workflow`.
+
+```ts
+import { ForgeAgent } from "smithers-orchestrator";
+new ForgeAgent({
+  directory?: string; provider?: string; agent?: string;
+  conversationId?: string; sandbox?: string; restricted?: boolean;
+  verbose?: boolean; workflow?: string; event?: string; conversation?: string;
+});
+```
+
+`HermesCliAgent` wraps the Nous Research Hermes Agent CLI in its headless one-shot
+mode (`hermes -z "<prompt>"`): a single prompt in, the final response text out.
+Key additions: `provider`, `continueSession`. A per-call `resumeSession` emits
+`-r <session>`; a configured `continueSession` emits `-c [name]`.
+
+```ts
+import { HermesCliAgent } from "smithers-orchestrator";
+new HermesCliAgent({
+  model?: string; provider?: string;
+  continueSession?: string | boolean;
+});
+```
+
+Smithers also installs a native Hermes plugin (slash commands, a live-run status
+injector, lifecycle hooks, a bundled skill, and approval buttons) when you run
+`bunx smithers-orchestrator hermes` (an alias for `bunx smithers-orchestrator mcp add --agent hermes`),
+so Hermes can drive Smithers as its durable control plane. See the
+[Hermes & Eliza](/integrations/hermes) page.
+
+`OpenClawAgent` wraps the OpenClaw gateway-backed agent CLI via
+`openclaw agent --message <prompt> --json`. Key additions: `agent`, `session`,
+`workspace`, `json`, and `continueSession`. A per-call `resumeSession` emits
+`--session-id <id>`, so Smithers can route retries or continuations into the right
+OpenClaw conversation when the installed CLI supports sessions.
+
+```ts
+import { OpenClawAgent } from "smithers-orchestrator";
+new OpenClawAgent({
+  agent?: string;
+  session?: string;
+  workspace?: string;
+  json?: boolean;
+  continueSession?: boolean;
+});
+```
+
+Smithers also installs a native OpenClaw plugin when you run
+`bunx smithers-orchestrator mcp add --agent openclaw`. The plugin adds Smithers
+workflow tools, a bundled orchestration skill, and eval/optimization tools that
+encourage OpenClaw to turn repeated work into reusable, measured workflows. See
+[OpenClaw](/agents/openclaw).
+
+`AmpAgent` wraps the Amp CLI in `--execute` headless mode. Key additions: `visibility`, `mcpConfig`, `dangerouslyAllowAll`.
+
+```ts
+import { AmpAgent } from "smithers-orchestrator";
+new AmpAgent({
+  visibility?: "private" | "public" | "workspace" | "group";
+  mcpConfig?: string; settingsFile?: string;
+  logLevel?: "error" | "warn" | "info" | "debug" | "audit"; logFile?: string;
+  dangerouslyAllowAll?: boolean; ide?: boolean; jetbrains?: boolean;
+});
+```
+
+`VibeAgent` wraps Mistral's `vibe` CLI with streaming JSON output. Key additions: `agent`, `maxTurns`, `maxPrice`, `maxTokens`, `enabledTools`, `sessionId`, `continueSession`.
+
+```ts
+import { VibeAgent } from "smithers-orchestrator";
+new VibeAgent({
+  agent?: string;
+  maxTurns?: number; maxPrice?: number; maxTokens?: number;
+  enabledTools?: string[];
+  sessionId?: string; continueSession?: boolean;
+});
+```
+
+`OpenCodeAgent` wraps the OpenCode CLI via `opencode run --format json`. Key additions: `agentName`, `continueSession`, `sessionId`. Note: native hijack support is not yet shipped.
+
+```ts
+import { OpenCodeAgent } from "smithers-orchestrator";
+new OpenCodeAgent({
+  model: "provider/model",
+  agentName: "readonly",
+  attachFiles: ["src/main.ts"],
+  variant: "high",
+});
+```
+
+`PoolAgent` wraps `pool exec` with ACP-compatible NDJSON streaming. It supports
+named agents, explicit sandbox mode, and manual session continuation.
+
+```ts
+import { PoolAgent } from "smithers-orchestrator";
+new PoolAgent({
+  agentName: "default",
+  sandbox: "required",
+  resumeSession: "session-id",
+});
+```
+
+## Hijack handoff
+
+Most built-in CLI agents support `bunx smithers-orchestrator hijack RUN_ID`, which relaunches the agent in its native CLI session for interactive takeover.
+
+Smithers persists the native session or conversation id on each task event. On hijack, it waits for a safe boundary between blocking tool calls, then reopens the session via the vendor's resume flag:
+
+| Agent class | Resume flag |
+|---|---|
+| `ClaudeCodeAgent` | `claude --resume` |
+| `CodexAgent` | `codex resume` |
+| `AntigravityAgent` | `agy --conversation` |
+| `PiAgent` | `pi --session` |
+| `KimiAgent` | `kimi --session` |
+| `ForgeAgent` | `forge --conversation-id` |
+| `AmpAgent` | `amp threads continue` |
+
+On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
+
+## Notes
+
+- **Yolo defaults.** `yolo: true` (default) maps to each CLI's "skip approvals" flag (`--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-allow-all`). Set `yolo: false` or use the agent-specific approval option for tighter control.
+- **Pi rpc mode** sends prompts as JSON over stdin and is required for `onExtensionUiRequest` callbacks; text/json modes pass the prompt as a positional arg with `files` emitted as `@path`.
+- **Kimi share dir.** `KimiAgent` auto-creates an isolated `KIMI_SHARE_DIR` per invocation to prevent `kimi.json` corruption under concurrent runs. Pass `configDir` (or `env.KIMI_SHARE_DIR`) to pin a specific directory instead.
+- **Antigravity config.** `AntigravityAgent` launches the `agy` binary and passes `configDir`/`geminiDir` as both `--gemini_dir` and `GEMINI_DIR`, matching Antigravity's `~/.gemini/antigravity-cli` config root. Current `agy` prompts use `-p`, extra directories use `--add-dir`, and native resume uses `--conversation`.
+- **Non-idempotent retries.** When a `<Task>` retries, Smithers prepends a warning listing previously-called side-effect tools so the agent can verify external state before re-invoking them.
+
+---
+
+## SDK Agents
+
+> Provider-backed AI SDK agent wrappers for Anthropic, OpenAI, and Hermes that work like first-class Smithers agents.
+
+`AnthropicAgent`, `OpenAIAgent`, and `HermesAgent` are provider-backed [AI SDK](https://ai-sdk.dev) agents with class-style ergonomics matching the [CLI agents](/integrations/cli-agents). `AnthropicAgent` and `OpenAIAgent` wrap `ToolLoopAgent` directly; `HermesAgent` extends the OpenAI-compatible path with Hermes defaults. `ElizaAgent` adapts an Eliza runtime/character into the same Smithers agent interface when you need an in-process ElizaOS-backed agent.
+
+<Note>API reference: [Agents](/reference/agents) lists every agent class, its options, and links to source and tests.</Note>
+
+## Import
+
+```ts
+import {
+  AnthropicAgent,
+  OpenAIAgent,
+  createHttpTool,
+  tools,
+} from "smithers-orchestrator";
+import { stepCountIs } from "ai";
+```
+
+## Quick Start
+
+```ts
+const claude = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools,
+  instructions: "You are a careful planner.",
+  stopWhen: stepCountIs(40),
+});
+
+const codex = new OpenAIAgent({
+  model: "gpt-5.6-luna",
+  tools,
+  instructions: "You are a precise implementation agent.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { AnthropicAgent, createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: z.object({ repo: z.string() }),
+  plan: z.object({
+    summary: z.string(),
+    risk: z.enum(["low", "medium", "high"]),
+  }),
+});
+
+const claude = new AnthropicAgent({
+  model: "claude-fable-5",
+  instructions: "You are a careful planner. Return structured JSON.",
+});
+
+export default smithers((ctx) => (
+  <Workflow name="sdk-agent-plan">
+    <Task id="plan" output={outputs.plan} agent={claude}>
+      {`Analyze ${ctx.input.repo} and propose a migration plan.`}
+    </Task>
+  </Workflow>
+));
+```
+
+In workflow JSX, put the schema on the Smithers task by passing
+`output={outputs.plan}`. You do not also configure the schema on the agent
+constructor. At execution time the engine infers the task's Zod schema and calls
+the SDK agent with `agent.generate({ outputSchema })`; the agent receives both
+the prompt and the schema for that task. The `ctx` variable in the example is
+the normal parameter of the `smithers((ctx) => ...)` builder, typed from the
+`input` schema above.
+
+You can also call an SDK agent once without rendering a workflow. Pass
+`outputSchema` directly to `generate()` when you want typed structured output:
+
+```ts
+import { z } from "zod";
+
+const schema = z.object({
+  summary: z.string(),
+  risk: z.enum(["low", "medium", "high"]),
+});
+
+const result = await claude.generate({
+  prompt: "Summarize this change and classify its risk.",
+  outputSchema: schema,
+  timeout: { totalMs: 60_000 },
+});
+
+const parsed = schema.parse(result.output ?? JSON.parse(result.text));
+```
+
+For `AnthropicAgent`, `outputSchema` is forwarded as AI SDK
+`Output.object({ schema })`, which uses Anthropic's native structured-output
+request path for Claude models. `OpenAIAgent` does the same unless
+`nativeStructuredOutput: false`; `HermesAgent` defaults that option to `false`
+because many local Hermes servers do not honor JSON-schema response formats.
+
+## Model Input
+
+`AnthropicAgent` and `OpenAIAgent` accept a model ID string (`"claude-fable-5"`, `"gpt-5.6-luna"`) or a prebuilt provider model instance. `HermesAgent` accepts an optional model ID string and defaults it to `"hermes"`.
+
+## Options
+
+Constructors forward standard AI SDK `ToolLoopAgent` settings: `instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`. The wrappers add provider model resolution on top.
+
+- `AnthropicAgentOptions` is `ToolLoopAgentSettings` without `model`, plus required `model: string | LanguageModel`.
+- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL`, `apiKey`, and `api`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
+- `HermesAgentOptions` makes `model` optional, allows `baseURL` and `apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
+
+For the string model form of `OpenAIAgent`, pass `baseURL` and `apiKey` directly when targeting an OpenAI-compatible endpoint instead of the default OpenAI API. This is the simplest path for local servers such as llama.cpp:
+
+```ts
+const local = new OpenAIAgent({
+  model: "llama-3.1-8b-instruct",
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "none",
+  tools,
+  instructions: "You are a local coding assistant.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+Set `apiKey: "none"` in the `OpenAIAgent` config when your local server accepts OpenAI-compatible requests but does not require a real key.
+
+String models default to OpenAI's Responses API (`/responses`), which most OpenAI-compatible servers (Gemini's OpenAI-compat layer, llama.cpp, vLLM) do not implement: every call 404s even though the endpoint serves `/chat/completions` fine. Set `api: "chat"` to route the agent through `/chat/completions` on those endpoints:
+
+```ts
+const gemini = new OpenAIAgent({
+  model: "gemini-2.5-flash",
+  baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+  apiKey: process.env.GEMINI_API_KEY,
+  api: "chat",
+});
+```
+
+Some OpenAI-compatible local servers accept chat requests but do not reliably implement JSON schema structured output. For those servers, keep the output schema on the Smithers task and disable native structured output on the agent so Smithers uses prompt-based JSON extraction instead:
+
+```ts
+const local = new OpenAIAgent({
+  model: "llama-3.1-8b-instruct",
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "none",
+  nativeStructuredOutput: false,
+  tools,
+  instructions: "You are a local coding assistant.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+For advanced provider setup, create the AI SDK OpenAI provider yourself and pass the prebuilt model into `OpenAIAgent`:
+
+```ts
+import { createOpenAI } from "@ai-sdk/openai";
+
+const localOpenAI = createOpenAI({
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "none",
+});
+
+const local = new OpenAIAgent({
+  model: localOpenAI("llama-3.1-8b-instruct"),
+  tools,
+  instructions: "You are a local coding assistant.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+Use the `createOpenAI` path when you need provider-level configuration beyond `baseURL` and `apiKey`; in that form, `baseURL` and `apiKey` belong in the `createOpenAI` config, not in the `OpenAIAgent` constructor.
+
+## Generic HTTP Tool
+
+`createHttpTool()` returns an AI SDK tool that can call any REST endpoint without an OpenAPI spec. Use it as the universal escape hatch when no curated connector or MCP server exists yet.
+
+```ts
+const http = createHttpTool({
+  defaultHeaders: { "user-agent": "smithers-workflow" },
+});
+
+const ops = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools: { http },
+  instructions: "Use the HTTP tool only for APIs the workflow explicitly names.",
+  stopWhen: stepCountIs(20),
+});
+```
+
+The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
+
+## Hermes
+
+[Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API, so `HermesAgent` is a convenience subclass of `OpenAIAgent` that points the provider at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
+
+```ts
+import { HermesAgent } from "smithers-orchestrator";
+
+const hermes = new HermesAgent({
+  baseURL: "http://127.0.0.1:5123/v1", // or set HERMES_BASE_URL
+  model: "hermes",                      // whatever model id your server advertises
+  tools,
+  instructions: "You are a careful implementation agent.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+`baseURL` falls back to the `HERMES_BASE_URL` env var and must be set in either place. `apiKey` falls back to `HERMES_API_KEY` (then `"hermes"`). Pass `nativeStructuredOutput: true` if your server does honor JSON-schema output. To use Smithers *from* Hermes instead of running Hermes as a worker, see [Agent Support → Hermes](/agents/hermes).
+
+## Eliza
+
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents on this page, it ships in a separate opt-in package that owns the `@elizaos/core` dependency, so install and import it from `@smithers-orchestrator/agent-eliza`:
+
+```ts
+import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
+
+const eliza = new ElizaAgent({
+  character: { name: "SupportBot", bio: "Answers product questions." },
+  plugins: [],
+  settings: { SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN ?? "" },
+  model: "eliza",
+});
+```
+
+The harness lazily initializes the runtime on the first `generate` (or `preflight`) call and reuses it across calls. `settings` and `env` merge onto the character's own `settings` with precedence `env` over `settings` over `character.settings`. Pass an `outputSchema` on the Smithers task (or directly to `generate`) for structured output; `ElizaAgent` extracts JSON from the model's text because it does not set `supportsNativeStructuredOutput`.
+
+## Hijack Support
+
+SDK agents do not reopen a provider-native CLI. Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
+
+Live-run behavior:
+
+- Smithers captures response history after each step via `onStepEnd`.
+- `bunx smithers-orchestrator hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
+- On clean REPL exit, Smithers writes updated message history back and resumes the workflow automatically.
+
+Limits:
+
+- Smithers reconstructs the agent from the workflow source on hijack. This means cross-engine hijack is not supported: the REPL will use the same agent class that ran originally.
+
+## CLI vs SDK
+
+| | CLI Agents | SDK Agents |
+|---|---|---|
+| Billing | Provider subscription / local CLI | API billing |
+| Tools | Provider CLI tool ecosystem | Smithers [tools](/integrations/tools) [sandbox](/components/sandbox) |
+| Flexibility | Native CLI flags | AI SDK `providerOptions` |
+| Structured output | Prompt-injection + text JSON extraction | Native (`supportsNativeStructuredOutput`) |
+
+**Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`, so when a `<Task>` has an `output` schema they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) and the result is schema-constrained. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape does not guarantee meaningful values. For tasks whose primary job is producing typed/JSON output, prefer `AnthropicAgent`/`OpenAIAgent` (or, for an OpenAI-compatible endpoint that honors JSON schema, an `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
+
+Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience, not a separate runtime.
+
+## Transcription Tool
+
+Use `createTranscriptionTool` when an SDK agent needs to transcribe audio as part of its tool loop. The tool accepts either an `audioUrl` or `audioBase64` input and normalizes Whisper or Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
+
+For Whisper, remote audio downloads are capped at 25 MiB by default. Set `maxResponseBodyBytes` to choose a different cap; the deprecated `maxResponseBytes` option remains a compatibility fallback when `maxResponseBodyBytes` is omitted. The generic `createHttpTool` has its own independent 1 MiB default.
+
+```ts
+import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
+
+const transcribeAudio = createTranscriptionTool({
+  provider: "deepgram", // or "whisper"
+  apiKey: process.env.DEEPGRAM_API_KEY!,
+});
+
+const agent = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools: { transcribeAudio },
+  instructions: "Transcribe audio clips and summarize the result.",
+});
+```
+
+## Example: Dual Setup
+
+```ts
+const useCli = process.env.USE_CLI_AGENTS === "1";
+
+export const claude = useCli
+  ? new ClaudeCodeAgent({
+      model: "claude-fable-5",
+      dangerouslySkipPermissions: true,
+    })
+  : new AnthropicAgent({
+      model: "claude-fable-5",
+      tools,
+      instructions: "You are a careful planner.",
+      stopWhen: stepCountIs(40),
+    });
+```
+
+## Next Steps
+
+- [CLI Agents](/integrations/cli-agents)
+- [Built-in Tools](/integrations/tools)
+- [Agents and Tools](/agents/overview)
+
+---
+
+## MCP Toolset
+
+> Connect a stdio MCP server to an SDK agent by projecting its tools into AI SDK tools.
+
+`createMcpToolset` connects to a Model Context Protocol server over stdio, lists its tools once, and returns an AI SDK-compatible `tools` record for an SDK agent. This is the inbound MCP integration path: use any MCP server as an agent tool provider without writing one wrapper per external service.
+
+For the opposite direction, where an MCP-aware client drives Smithers workflows, see [MCP Server](/integrations/mcp-server).
+
+## Import
+
+```ts
+import { OpenAIAgent } from "smithers-orchestrator";
+import {
+  createMcpToolset,
+  type McpServerConfig,
+  type McpToolset,
+  type McpToolsetOptions,
+} from "@smithers-orchestrator/agents/mcp/createMcpToolset";
+```
+
+`createMcpToolset` is intentionally a deep import from `@smithers-orchestrator/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smithers-orchestrator` facade.
+
+## Quick Start
+
+```ts
+const mcp = await createMcpToolset({
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-github"],
+  env: { GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN ?? "" },
+});
+
+try {
+  const agent = new OpenAIAgent({
+    model: "gpt-5.6-terra",
+    instructions: "Use the available tools when they are relevant.",
+    tools: mcp.tools,
+  });
+
+  // Pass `agent` to a <Task>.
+} finally {
+  await mcp.close();
+}
+```
+
+Call `close()` in a `finally` block when the workflow process owns the connection. The MCP client and spawned server process stay open until `close()` resolves.
+
+## API
+
+```ts
+type McpServerConfig = {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+};
+
+type McpToolsetOptions = {
+  include?: string[];
+  exclude?: string[];
+  namePrefix?: string;
+  clientName?: string;
+  clientVersion?: string;
+};
+
+type McpToolset = {
+  tools: Record<string, import("ai").Tool>;
+  toolNames: string[];
+  close: () => Promise<void>;
+};
+
+declare function createMcpToolset(
+  config: McpServerConfig,
+  options?: McpToolsetOptions,
+): Promise<McpToolset>;
+```
+
+`command`, `args`, `env`, and `cwd` are passed to the MCP SDK stdio transport. The Smithers client identity defaults to `clientName: "smithers-mcp-toolset"` and `clientVersion: "0.0.0"`.
+
+## Tool Curation
+
+```ts
+const github = await createMcpToolset(
+  {
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-github"],
+    env: { GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN ?? "" },
+  },
+  {
+    include: ["get_issue", "create_pull_request"],
+    exclude: ["create_pull_request"],
+    namePrefix: "github_",
+  },
+);
+```
+
+`include` and `exclude` match the original MCP server tool names before `namePrefix` is applied. If both match a tool, `exclude` wins. `toolNames` contains the final names after filtering and prefixing.
+
+## Runtime Behavior
+
+On connect, Smithers calls `tools/list` once and wraps every selected MCP tool with AI SDK `dynamicTool`. When an agent invokes one of those tools, the wrapper calls MCP `tools/call` with the original server tool name and the model-provided arguments.
+
+Response handling is intentionally simple:
+
+- Successful calls return `structuredContent` when the server provides it.
+- Otherwise successful calls return the joined text content blocks.
+- MCP tool errors return `{ error: true, message, status: "failed" }` so the agent can inspect and recover inside its tool loop.
+
+Schema handling follows the MCP server's advertised `inputSchema`. If a server omits it, Smithers uses an empty object JSON schema.
+
+## CLI Agents
+
+CLI agents consume MCP through their native configuration surfaces, not through `createMcpToolset`. Claude Code, Kimi, and Amp expose MCP config flags; Codex reads MCP servers from `~/.codex/config.toml` or `codex mcp add`.
+
+Use `createMcpToolset` when you are building an SDK-agent workflow with `AnthropicAgent`, `OpenAIAgent`, `HermesAgent`, or a raw AI SDK tool-loop agent.
+
+## See Also
+
+- [SDK Agents](/integrations/sdk-agents)
+- [OpenAPI Tools](/concepts/openapi-tools)
+- [MCP Server](/integrations/mcp-server)
+- [`examples/mcp-integration`](https://github.com/smithersai/smithers/tree/main/examples/mcp-integration)
+
+---
+
+## Built-in Tools
+
+> Sandboxed file and shell tools for AI agent tasks, with exact input schemas, security policies, and usage examples.
+
+```ts
+import { tools, read, write, edit, grep, bash, defineTool, getDefinedToolMetadata } from "smithers-orchestrator";
+```
+
+`tools` bundles all five tools keyed by name:
+
+```ts
+const { read, write, edit, grep, bash } = tools;
+```
+
+<Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
+
+The `smithers-orchestrator/tools` subpath also exports lower-level helpers for advanced integrations:
+
+| Export | Purpose |
+|---|---|
+| `readFileTool`, `writeFileTool`, `editFileTool`, `grepTool`, `bashTool` | Call the underlying implementation directly instead of the AI SDK tool wrapper. |
+| `getDefinedToolMetadata(tool)` | Read Smithers metadata (`name`, `sideEffect`, `idempotent`) from a `defineTool()` result. |
+| `getToolContext()`, `runWithToolContext(ctx, fn)` | Inspect or provide the task-local tool runtime context. |
+| `getToolIdempotencyKey(ctx?)`, `nextToolSeq(ctx)` | Build stable idempotency keys and task-local tool-call sequence numbers. |
+| `BASH_TOOL_MAX_*` constants | Upper bounds for bash command length, args, cwd, output bytes, and timeout. |
+
+## Sandboxing
+
+All tools are sandboxed to `rootDir` (defaults to the workflow directory). Paths are resolved relative to this root; escapes via symlinks are rejected.
+
+| Policy | Behavior |
+|---|---|
+| Path resolution | Relative paths resolve against `rootDir`. Absolute paths must fall within root. |
+| Symlinks | Rejected if target is outside sandbox. |
+| Output size | Process output is truncated to `maxOutputBytes` (default 200KB); `read`, `write`, and `edit` reject files, content, or patches that exceed it. |
+| Timeouts | `bash` and `grep` default to 60s; exceeded processes killed with `SIGKILL`. |
+| Network | `bash` blocks network commands by default. See [bash](#bash). |
+
+## Tool call state
+
+Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows. The engine durably records the start of every `defineTool()` invocation before executing it, then reads those rows on retry to detect previously invoked non-idempotent side-effect tools. This start-first record is intentional: a process crash after the external side effect cannot erase the evidence needed for replay protection.
+
+| Field | Description |
+|---|---|
+| `runId` | Workflow run ID |
+| `nodeId` | Task node that invoked the tool |
+| `iteration` | Loop iteration |
+| `attempt` | Retry attempt number |
+| `seq` | Sequential call counter within the task |
+| `toolName` | `read`, `write`, `edit`, `grep`, or `bash` |
+| `inputJson` | Serialized input arguments |
+| `outputJson` | Reserved for a serialized output; start records leave it `null` |
+| `startedAtMs` | Start timestamp |
+| `finishedAtMs` | Reserved end timestamp; start records leave it `null` |
+| `status` | `"started"` for the durable pre-execution record |
+| `errorJson` | Reserved error details; start records leave it `null` |
+
+## defineTool
+
+`defineTool()` wraps custom [AI SDK](https://ai-sdk.dev) tools with Smithers runtime context, deterministic idempotency keys, side-effect metadata, and the side-effect snapshot hook.
+
+```ts
+import { defineTool } from "smithers-orchestrator";
+import { z } from "zod";
+
+const placeOrder = defineTool({
+  name: "wholefoods.place_order",
+  description: "Place a grocery order",
+  schema: z.object({
+    sku: z.string(),
+  }),
+  sideEffect: true,
+  idempotent: false,
+  async execute(args, ctx) {
+    return await wholeFoods.placeOrder({
+      sku: args.sku,
+      idempotencyKey: ctx.idempotencyKey,
+    });
+  },
+});
+```
+
+- `ctx.idempotencyKey` is stable across retries and resumes for the same task iteration.
+- `sideEffect: true` opts the tool into Smithers side-effect tracking.
+- `idempotent: false` marks the tool for retry warnings when a previous attempt has a recorded `_smithers_tool_calls` row.
+- The engine persists the durable start row through the Smithers DB adapter before `execute` runs.
+
+### Side Effects and Idempotency
+
+Every custom tool that modifies external state **must** declare `sideEffect: true`. This is how Smithers protects your [workflow](/workflows/overview) during retries and resumes. Without it, Smithers treats the tool as a pure read and replays it freely, potentially sending duplicate emails, double-charging payments, or creating duplicate records.
+
+The two flags work together:
+
+| `sideEffect` | `idempotent` | Smithers behavior |
+|---|---|---|
+| `false` (default) | `true` (default) | Pure read. Safe to replay on retry. No warnings. |
+| `true` | `true` | Mutates external state, but calling twice with the same input produces the same result (e.g. an upsert, a PUT request). Safe to replay. No warnings. |
+| `true` | `false` | Mutates external state and is **not** safe to replay (e.g. sending an email, placing an order, charging a payment). On retry, Smithers injects a warning listing the tool as already called so the agent can verify external state before calling again. |
+
+With `sideEffect: true` and `idempotent: false`, Smithers does two things on retry:
+
+1. **Warns the agent.** The retry prompt lists which non-idempotent tools were already called.
+2. **Provides a stable idempotency key.** `ctx.idempotencyKey` is deterministic for a given task + iteration; pass it to external APIs that support idempotency (Stripe, AWS) to deduplicate.
+
+If your `execute` function has `sideEffect: true, idempotent: false` but omits the `ctx` parameter, Smithers logs a startup warning. This is almost always a bug: you need `ctx.idempotencyKey` to handle retries safely.
+
+```ts
+// ✗ Bad: non-idempotent side effect without ctx
+const sendEmail = defineTool({
+  name: "email.send",
+  schema: z.object({ to: z.string(), body: z.string() }),
+  sideEffect: true,
+  idempotent: false,
+  async execute(args) {  // ← missing ctx parameter, Smithers warns
+    await mailer.send(args);
+  },
+});
+
+// ✓ Good: uses ctx.idempotencyKey to deduplicate
+const sendEmail = defineTool({
+  name: "email.send",
+  schema: z.object({ to: z.string(), body: z.string() }),
+  sideEffect: true,
+  idempotent: false,
+  async execute(args, ctx) {
+    await mailer.send({ ...args, idempotencyKey: ctx.idempotencyKey });
+  },
+});
+```
+
+### What counts as a side effect
+
+The rule is simple: **if you cannot undo it with `git reset`, mark it as a side effect.**
+
+A side effect is any mutation the runtime should not blindly repeat on retry. If a custom tool talks to an external API, writes to a database, sends a message, or triggers a webhook, mark it.
+
+The built-in `write` and `edit` tools are registered as `sideEffect: true` and `idempotent: false` because their file mutations are not safe to blindly replay on retry; like `bash`, they are treated conservatively. All three built-in mutating tools (`write`, `edit`, `bash`) are side-effecting.
+
+| Tool | Side effect? | Why |
+|---|---|---|
+| Built-in `read`, `grep` | No | Pure reads |
+| Built-in `write`, `edit` | **Yes** | Sandboxed file writes are tracked by git, but replaying on retry could overwrite content that diverged since the first call |
+| Built-in `bash` | **Yes** | Arbitrary shell commands may not be safe to repeat |
+| Custom tool calling an external API | **Yes** | Mutates state outside the sandbox |
+| Custom tool writing to a database | **Yes** | External persistent state |
+| Custom tool sending a Slack message | **Yes** | Irreversible external communication |
+| Custom tool creating a GitHub PR | **Yes** | External state visible to others |
+
+---
+
+## read
+
+Read a file from the sandbox.
+
+```ts
+{ path: string }  // relative to rootDir or absolute
+```
+
+Returns file contents as UTF-8. Throws `"File too large"` if size exceeds `maxOutputBytes`.
+
+```ts
+import { ToolLoopAgent as Agent } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { read, grep } from "smithers-orchestrator";
+
+const codeAgent = new Agent({
+  model: openai("gpt-5.6-sol"),
+  tools: { read, grep },
+});
+```
+
+```tsx
+{/* outputs comes from createSmithers() */}
+<Task id="review" output={outputs.review} agent={codeAgent}>
+  Read the file src/auth.ts and identify any security vulnerabilities.
+</Task>
+```
+
+---
+
+## write
+
+Write content to a file. Creates parent directories as needed.
+
+```ts
+{
+  path: string      // relative to rootDir or absolute
+  content: string
+}
+```
+
+Returns `"ok"`. Throws `"Content too large"` if content exceeds `maxOutputBytes`. Logs content hash (SHA-256) and byte size; full content is not stored.
+
+```ts
+import { ToolLoopAgent as Agent } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { write, read } from "smithers-orchestrator";
+
+const writerAgent = new Agent({
+  model: openai("gpt-5.6-luna"),
+  tools: { write, read },
+});
+```
+
+---
+
+## edit
+
+Apply a unified diff patch to an existing file.
+
+```ts
+{
+  path: string    // file to patch
+  patch: string   // unified diff format
+}
+```
+
+Returns `"ok"`. The file must exist. Reads current contents, applies the patch via `applyPatch`, writes back. Throws on size limits (`"Patch too large"`, `"File too large"`) or mismatched context (`"Failed to apply patch"`). Logs patch hash and byte size.
+
+```
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -10,3 +10,4 @@
+   const token = jwt.sign(payload, secret);
++  logger.info("Token issued", { userId: payload.sub });
+   return token;
+```
+
+---
+
+## grep
+
+Search for a regex pattern using `ripgrep`.
+
+```ts
+{
+  pattern: string    // regex
+  path?: string      // directory or file (default: rootDir)
+}
+```
+
+Returns matching lines with file paths and line numbers (`rg -n` format). Exit code 1 (no matches) returns empty string. Exit code 2 throws stderr as error. Requires `ripgrep` in PATH.
+
+```
+src/auth.ts:15:  if (token.expired()) {
+src/auth.ts:42:  validateToken(token);
+tests/auth.test.ts:8:  const token = createTestToken();
+```
+
+---
+
+## bash
+
+Run an executable directly with arguments.
+
+```ts
+{
+  cmd: string                     // executable path/name; no shell parsing
+  args?: string[]                 // arguments
+  opts?: { cwd?: string }        // working directory (sandboxed)
+}
+```
+
+Use `args` for arguments. If you need shell syntax such as pipes or redirects, invoke a shell explicitly, for example `cmd: "sh", args: ["-lc", "..."]`.
+
+Returns combined stdout and stderr. Working directory defaults to `rootDir`. Timeout: 60s (killed with `SIGKILL` via process group). Non-zero exit codes throw.
+
+### Network Blocking
+
+Controlled by `allowNetwork` in `RunOptions`, `--allow-network` on CLI, or server config. Default: blocked.
+
+When blocked, Smithers tokenizes `cmd` plus `args`. Executable basenames are
+matched for known network tools, URL tokens are blocked by prefix, and `git`
+plus a remote-operation token is blocked.
+
+| Category | Match |
+|---|---|
+| HTTP clients | executable basename `curl` or `wget` |
+| URL tokens | any token starting with `http://` or `https://` |
+| Package managers | executable basename `npm`, `bun`, or `pip` |
+| Git remote ops | `git` plus a `push`, `pull`, `fetch`, `clone`, or `remote` token |
+
+Local git commands (`git status`, `git diff`, `git log`) are allowed.
+
+<Warning>
+**Enforcement vs. bypassable denylist.** True OS-level network isolation is
+enforced **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
+with a network-deny profile (when `sandbox-exec` is available). On Linux and
+every other platform, including the environments Smithers runs in for CI,
+cloud, and production, `allowNetwork:false` cannot enforce a kernel sandbox and
+degrades to the token/basename denylist in the table above. That denylist is
+best-effort defense-in-depth, **not** a security boundary: it is trivially
+bypassable by a shell, an interpreter (`python -c` assembling a URL from parts,
+bash `/dev/tcp`), or a renamed binary. When isolation is unenforced, Smithers
+logs a `TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely
+on `allowNetwork:false` to sandbox untrusted code**. Run untrusted workloads
+under a real [`<Sandbox>`](/components/sandbox) provider with egress controls
+instead.
+</Warning>
+
+```ts
+import { ToolLoopAgent as Agent } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { bash } from "smithers-orchestrator";
+
+const devAgent = new Agent({
+  model: openai("gpt-5.6-terra"),
+  tools: { bash },
+});
+```
+
+```tsx
+{/* outputs comes from createSmithers() */}
+<Task id="lint" output={outputs.lint} agent={devAgent}>
+  Run the linter on src/ and report any issues.
+</Task>
+```
+
+---
+
+## Using Tools with Agents
+
+Pass tools to an [AI SDK](https://ai-sdk.dev) agent and assign the agent to a [`<Task>`](/components/task):
+
+```tsx
+import { ToolLoopAgent as Agent } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { createSmithers, read, write, edit, grep, bash, Task } from "smithers-orchestrator";
+import { z } from "zod";
+
+const codeAgent = new Agent({
+  model: openai("gpt-5.6-luna"),
+  tools: { read, write, edit, grep, bash },
+  instructions: "You are a senior engineer. Use the available tools to complete tasks.",
+});
+
+const { Workflow, smithers, outputs } = createSmithers({
+  result: z.object({ summary: z.string() }),
+});
+
+export default smithers((ctx) => (
+  <Workflow name="refactor">
+    <Task id="refactor" output={outputs.result} agent={codeAgent}>
+      {`Refactor the function in ${ctx.input.file} to improve readability.`}
+    </Task>
+  </Workflow>
+));
+```
+
+The full bundle works too:
+
+```ts
+import { ToolLoopAgent as Agent } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { tools } from "smithers-orchestrator";
+
+const fullAgent = new Agent({
+  model: openai("gpt-5.6-terra"),
+  tools,
+});
+```
+
+## Configuration
+
+| Option | Default | Description |
+|---|---|---|
+| `rootDir` | Workflow directory | Sandbox root |
+| `allowNetwork` | `false` | Allow network commands in `bash` |
+| `maxOutputBytes` | `200000` (200KB) | Max output size per tool |
+| `toolTimeoutMs` | `60000` (60s) | Timeout for `bash` and `grep` |
+
+```ts
+import { Effect } from "effect";
+import { runWorkflow } from "smithers-orchestrator";
+
+const result = await Effect.runPromise(runWorkflow(workflow, {
+  input: { file: "src/auth.ts" },
+  rootDir: "/home/project",
+  allowNetwork: false,
+  maxOutputBytes: 500_000,
+  toolTimeoutMs: 120_000,
+}));
+```
+
+## See Also
+
+- [Agents and Tools](/agents/overview)
+- [Sandbox](/components/sandbox)
+- [Common External Tools](/integrations/common-tools)
+- [Tools Agent Example](/examples/tools-agent)
+
+---
+
+## Common External Tools
+
+> Patterns for hitting GitHub, Linear, Notion, Slack, Obsidian as tools.
+
+<Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
+
+For each external service, you have three choices:
+
+1. **OpenAPI tools**: point `createOpenApiTools()` at the service's OpenAPI spec. See [OpenAPI tools](/concepts/openapi-tools).
+2. **CLI in a task**: if the service has a CLI (`gh`, `linear`, `notion`, `slack`), run it inside a `<Task>` via the `bash` tool. See [side-effect tools with idempotency](/recipes#side-effect-tools-with-idempotency).
+3. **Custom `defineTool`**: wrap the service's REST API in a Zod-validated tool. See [`defineTool`](/integrations/tools#definetool).
+
+### Example: CLI in a task (Pattern 2)
+
+```tsx
+<Task
+  id="open-pr"
+  tools={[bash]}
+  prompt="Run: gh pr create --title 'Fix login bug' --body 'Closes #42'"
+/>
+```
+
+Run `gh auth login` once on the host before executing. The `bash` tool executes in the task's sandbox, so credentials set in the environment carry through automatically.
+
+## Quick decision
+
+| Service | Recommended approach |
+|---|---|
+| GitHub      | `gh` CLI in a task (auth via `gh auth login`) |
+| Linear      | `linear` CLI in a task, or OpenAPI tools |
+| Notion      | OpenAPI tools (Notion publishes a spec) |
+| Slack       | OpenAPI tools or `slack` CLI |
+| Obsidian    | `bash` tool with vault path; no API needed |
+
+Always mark side-effecting tools with `sideEffect: true` and use `ctx.idempotencyKey` so retries don't double-fire.
+
+---
+
+## Community Connectors
+
+> Package long-tail integrations as manifest-declared tools, triggers, and auth requirements.
+
+Community connectors are package-level integration descriptors. They let a maintainer publish one connector package that projects agent-callable tools and triggers onto Smithers' existing Tier 0 substrate instead of adding one workflow node per app.
+
+A connector package is declarative at the boundary: the manifest says what tool and trigger surfaces exist, which auth grants they require, and which runtime adapter should load them. Runtime code may still live in the package, but Smithers only discovers it through the loader contract below.
+
+## Package Layout
+
+```text
+smithers-connector-acme/
+  package.json
+  smithers.connector.json
+  openapi/acme.yaml
+  mcp/server.json
+  src/index.ts
+  README.md
+```
+
+`smithers.connector.json` is the contract. `package.json` should expose the loader module with a normal ESM export and include a `smithers.connector` field that points at the manifest:
+
+```json
+{
+  "name": "smithers-connector-acme",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "smithers": {
+    "connector": "./smithers.connector.json"
+  }
+}
+```
+
+## Manifest Format
+
+The manifest format id is `smithers.connector.v1`. Unknown top-level keys are ignored, but unknown keys inside `tools`, `triggers`, `auth`, and `surfaces` must fail validation so package authors notice typos before an agent receives the tool catalog.
+
+```json
+{
+  "schema": "smithers.connector.v1",
+  "id": "acme",
+  "name": "Acme",
+  "version": "0.1.0",
+  "description": "Curated Acme tools for Smithers agents.",
+  "loader": "./src/index.ts",
+  "auth": {
+    "oauth": {
+      "provider": "acme",
+      "grant": "authorization_code_pkce",
+      "scopes": ["tickets:read", "tickets:write"],
+      "tenantKey": "workspace_id"
+    }
+  },
+  "surfaces": {
+    "openapi": {
+      "spec": "./openapi/acme.yaml",
+      "baseUrl": "https://api.acme.example"
+    },
+    "mcp": {
+      "command": "node",
+      "args": ["./dist/mcp-server.js"]
+    },
+    "webhooks": {
+      "provider": "acme",
+      "signature": "hmac-sha256",
+      "idempotencyKey": "$.event_id"
+    }
+  },
+  "tools": [
+    {
+      "name": "acme_create_ticket",
+      "surface": "openapi",
+      "operationId": "createTicket",
+      "description": "Create one Acme ticket after checking for an existing ticket with the same external id.",
+      "auth": "oauth",
+      "scopes": ["tickets:write"],
+      "sideEffect": true,
+      "idempotency": {
+        "key": "externalId",
+        "required": true
+      }
+    },
+    {
+      "name": "acme_search_tickets",
+      "surface": "mcp",
+      "tool": "search_tickets",
+      "description": "Search Acme tickets by text, status, assignee, or customer.",
+      "auth": "oauth",
+      "scopes": ["tickets:read"],
+      "sideEffect": false
+    }
+  ],
+  "triggers": [
+    {
+      "name": "acme_ticket_updated",
+      "surface": "webhook",
+      "event": "ticket.updated",
+      "auth": "oauth",
+      "scopes": ["tickets:read"],
+      "dedupe": {
+        "key": "$.event_id"
+      },
+      "payloadSchema": {
+        "type": "object",
+        "required": ["ticketId"],
+        "properties": {
+          "ticketId": { "type": "string" }
+        }
+      }
+    }
+  ],
+  "tokenBroker": {
+    "audience": "acme",
+    "defaultTtlSeconds": 300,
+    "allowedActions": ["acme_create_ticket", "acme_search_tickets"]
+  }
+}
+```
+
+## Loader Contract
+
+A Smithers connector loader must:
+
+1. validate the manifest before loading package code.
+2. resolve auth through the OAuth plane and token broker, never by handing durable credentials to an LLM-visible tool call.
+3. project tools from `surfaces.openapi`, `surfaces.mcp`, or the package loader into AI SDK-compatible tools.
+4. register triggers from `surfaces.webhooks` with signature verification and dedupe before workflow dispatch.
+5. enforce scopes for every tool and trigger invocation against the connected user and tenant.
+6. Preserve idempotency metadata so retries and resumes can avoid duplicate write-side effects.
+
+Loader modules export one named `loadConnector` function:
+
+```ts
+export type SmithersConnectorContext = {
+  manifest: unknown;
+  connection: {
+    userId: string;
+    tenantId?: string;
+    scopes: string[];
+  };
+  tokenBroker: {
+    issue(input: {
+      audience: string;
+      scopes: string[];
+      action: string;
+      ttlSeconds?: number;
+    }): Promise<{ token: string; expiresAt: string }>;
+  };
+};
+
+export async function loadConnector(ctx: SmithersConnectorContext) {
+  return {
+    tools: {},
+    triggers: [],
+  };
+}
+```
+
+The loader may add custom tools that cannot be represented by OpenAPI or MCP, but those tools still need manifest entries. The manifest remains the auditable catalog Smithers can show to agents and humans.
+
+## Tool Declarations
+
+Each tool declaration describes one agent-callable capability, not one raw endpoint. Prefer a small curated surface with clear names and task-shaped descriptions.
+
+Required fields:
+
+| Field | Purpose |
+|---|---|
+| `name` | Stable tool name exposed to the agent. Prefix with the connector id. |
+| `surface` | `openapi`, `mcp`, or `custom`. |
+| `description` | Agent-facing behavior, limits, and recovery guidance. |
+| `auth` | Auth profile key, or `none` for public tools. |
+| `scopes` | Minimum delegated scopes required for this action. |
+| `sideEffect` | `true` for writes, sends, charges, deletes, or external state changes. |
+
+OpenAPI tools bind with `operationId`. MCP tools bind with the upstream MCP `tool` name. Custom tools bind to code returned by `loadConnector`.
+
+Side-effecting tools must declare `idempotency.required: true` unless the upstream provider supplies an equivalent idempotency key, request id, or natural unique key.
+
+## Trigger Declarations
+
+Triggers describe external events that can start or resume workflows. They are not workflow nodes and should not grow into a provider-specific palette.
+
+Required fields:
+
+| Field | Purpose |
+|---|---|
+| `name` | Stable trigger id exposed to workflow authors. |
+| `surface` | `webhook`, `poll`, or `mcp`. |
+| `event` | Provider event name or polling resource. |
+| `auth` | Auth profile key required to subscribe or poll. |
+| `dedupe.key` | JSONPath or provider event id used for idempotent dispatch. |
+
+Webhook triggers must declare the provider signature scheme and payload mapper through `surfaces.webhooks`. Poll triggers must declare interval bounds and cursor storage requirements in the manifest before registration.
+
+## Auth Requirements
+
+Connector auth declarations are requirements, not secrets. The OAuth plane owns authorization-code + PKCE flows, encrypted refresh-token storage, single-flight refresh, and per-user/per-tenant scoping.
+
+Supported auth profiles:
+
+| Profile | Use |
+|---|---|
+| `oauth` | Delegated per-user OAuth through the Smithers OAuth plane. |
+| `apiKey` | User-supplied key stored in the credential vault, exposed only through the token broker. |
+| `none` | Public or local-only tools. |
+
+Do not put tokens, client secrets, refresh tokens, service-account credentials, or shared bot tokens in a connector package. Runtime calls receive scoped action tokens from the `tokenBroker`, and the broker exchanges or unwraps provider credentials outside the agent transcript.
+
+## Tier 0 Integration Points
+
+Community connectors plug into existing universal surfaces:
+
+| Tier 0 surface | Connector field | Loader behavior |
+|---|---|---|
+| OAuth plane | `auth.oauth` | Resolve delegated user consent, tenant key, scopes, and refresh lifecycle. |
+| Scoped token broker | `tokenBroker` and per-tool `scopes` | Issue short-lived, revocable, auditable action tokens the LLM never sees. |
+| OpenAPI tools | `surfaces.openapi` + `tools[].operationId` | Build curated tools with `createOpenApiTools`; never dump every endpoint by default. |
+| MCP client | `surfaces.mcp` + `tools[].tool` | Pass selected MCP tools through with names and descriptions from the manifest. |
+| Webhook ingress | `surfaces.webhooks` + `triggers[]` | Verify signatures, map payloads, dedupe events, and dispatch workflows. |
+| Generic HTTP / sandbox | `surface: "custom"` | Run package code for cases that cannot be expressed as OpenAPI or MCP. |
+
+## Anti-Patterns
+
+- Do not add a node per app. Connectors contribute agent tools and triggers, not a giant fixed-schema workflow palette.
+- Do not publish every OpenAPI operation as a tool. Collapse noisy endpoint sets into task-shaped actions.
+- Do not bypass delegated OAuth with service-account or shared-bot tokens.
+- Do not refresh tokens independently in each tool call; refresh must go through the single-flight OAuth/token broker path.
+- Do not omit idempotency from write tools or webhook triggers.
+- Do not hide tool behavior in package code when it can be declared in the manifest.
+
+## Review Checklist
+
+Before accepting a community connector, verify:
+
+- The manifest validates as `smithers.connector.v1`.
+- Every tool has a clear description, auth profile, scope list, and side-effect marker.
+- Every write tool has idempotency metadata.
+- Every trigger has signature verification or polling cursor rules plus dedupe.
+- OAuth scopes are the minimum needed for the declared tools and triggers.
+- The package uses OpenAPI, MCP, webhook ingress, or the token broker instead of inventing a parallel integration plane.
+
+---
+
+## Ecosystem
+
+> Community projects built on Smithers.
+
+## Burns
+
+Workspace-first local control plane for Smithers. Single UI for authoring, running, and supervising workflows across repositories. Register repos, launch runs, stream events, inspect frames, handle approvals.
+
+- React web app, ElectroBun (a Bun-native Electron alternative) desktop shell, or headless CLI
+- AI-assisted workflow authoring via local agent CLIs
+- SQLite-backed workspace registry
+
+<Card title="Burns" icon="github" href="https://github.com/l3wi/burns">
+  github.com/l3wi/burns
+</Card>
+
+## Ralphinho
+
+Multi-agent development workflows. Two independent workflows:
+
+- **Ralphinho** (scheduled-work) -- decomposes RFC into work units, runs tier-based quality pipelines (implement, test, review), lands via merge queue with CI verification.
+- **Improvinho** (review-discovery) -- three parallel discovery lenses (refactoring, type safety, architecture), deduplicates findings. Optionally pushes to Linear.
+
+Requires Bun and Jujutsu (`jj`). Supports Claude and Codex agents.
+
+<Card title="Ralphinho" icon="github" href="https://github.com/enitrat/ralphinho">
+  github.com/enitrat/ralphinho
+</Card>
+
+## Cairo Coder
+
+AI-powered Cairo smart contract generator. RAG pipeline (DSPy) converting natural language to Cairo contracts for Starknet. Uses Smithers with Claude and Codex agents.
+
+<Card title="Cairo Coder" icon="github" href="https://github.com/KasarLabs/cairo-coder">
+  github.com/KasarLabs/cairo-coder
+</Card>
+
+## Agentix
+
+Opinionated RFC-to-production orchestrator. Multi-phase pipelines: research, plan, implement, test, review. Role-based agents, conflict-aware merge queues, security/performance gates. DDD + BDD + TDD by default.
+
+<Card title="Agentix" icon="github" href="https://github.com/AbdelStark/agentix">
+  github.com/AbdelStark/agentix
+</Card>
+
+## Era
+
+Generic multi-phase development workflow engine. Research, Plan, Implementation, Testing, Review, Fix, Final Review pipeline with outer Loop. Role-based agents, intelligent caching, dual-layer prompts.
+
+<Card title="Era" icon="github" href="https://github.com/ClementWalter/era">
+  github.com/ClementWalter/era
+</Card>
+
+## Local Isolated Ralph
+
+Kubernetes-native Smithers workflow runner. Runs workflows as isolated K8s Jobs and CronJobs via k3s/k3d. Sandboxed container execution.
+
+<Card title="Local Isolated Ralph" icon="github" href="https://github.com/SamuelLHuber/local-isolated-ralph">
+  github.com/SamuelLHuber/local-isolated-ralph
+</Card>
+
+## Publishing Workflow Packs
+
+Use the [Workflow Catalog](/workflows/catalog) metadata when publishing a pack or success story: workflow IDs, required agents, Gateway scopes, inputs, outputs, write behavior, sandbox runtime, and validation command. That keeps community projects installable by operators who did not author the underlying TSX.
+
+---
+
+## PI Integration
+
+> Use PI as a Smithers workflow CLI backend and understand how PI extensibility composes with Smithers declarative orchestration.
+
+Smithers provides deterministic orchestration (workflow graph, approvals, retries, durable state). PI provides adaptive agent capabilities (providers, models, extensions, skills, prompt templates). Use both when you need deterministic execution with flexible agent behavior.
+
+## Integration Modes
+
+### 1) PI as Workflow Agent
+
+```tsx
+import { PiAgent } from "smithers-orchestrator";
+
+const pi = new PiAgent({
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  mode: "text",
+});
+
+{/* outputs comes from createSmithers() */}
+<Task id="implementation" output={outputs.implementation} agent={pi}>
+  {`Implement feature X and explain tradeoffs.`}
+</Task>
+```
+
+`PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text mode uses `--print` by default; JSON/RPC modes set `--mode` and omit `--print`.
+
+PI sessions are first-class hijack targets. `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
+
+### 2) PI Server Client
+
+Drive Smithers server APIs from a PI extension or Bun process via `@smithers-orchestrator/pi-plugin`:
+
+```ts
+import { runWorkflow, approve, streamEvents } from "@smithers-orchestrator/pi-plugin";
+```
+
+`@smithers-orchestrator/pi-plugin` currently publishes TypeScript source entrypoints; run it with Bun or bundle it before using it from plain Node.
+
+The older `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extension` subpaths were removed; use the scoped package directly.
+
+### 3) Hybrid: PI Extensibility + Smithers Orchestration
+
+- Keep orchestration in Smithers (`<Sequence>`, `<Parallel>`, `<Branch>`, `<Loop>`).
+- Run adaptive logic in PI tasks (extensions/skills/provider overrides).
+
+Patterns:
+
+1. PI skill-driven coding task inside a Smithers `<Task>`.
+2. PI extension command that starts/resumes Smithers workflows via server API or `@smithers-orchestrator/pi-plugin`.
+3. Smithers workflow output persisted to SQLite and consumed by later PI-assisted tasks.
+
+## Hijacking PI Sessions
+
+PI is a native-session hijack backend.
+
+- Live run: Smithers watches PI's event stream, waits between blocking tool calls, then hands off the session.
+- Finished/cancelled run: Smithers reopens the latest persisted PI session.
+- Relaunch uses the stored session ID: `pi --session <id>`.
+- Clean exit resumes the workflow automatically.
+
+Session persistence:
+
+- `PiAgent` defaults `noSession` to `true` for one-shot calls.
+- For workflow hijack/resume/streaming, Smithers keeps session persistence enabled automatically.
+- `mode: "json"` is not required for hijack support.
+
+## Setup
+
+1. Install PI CLI and add to `PATH`.
+2. Configure PI credentials via env/config (prefer over CLI args for API keys).
+3. Instantiate `PiAgent` with explicit options in workflows.
+4. For server-driven workflows, use `@smithers-orchestrator/pi-plugin`.
+
+```bash
+# Verify PI is installed
+pi --version
+```
+
+## Design Guidance
+
+| Use `PiAgent` tasks when | Use Smithers-native tasks when |
+|---|---|
+| You need PI capabilities inside deterministic workflows | You need strict reproducibility and narrow tool contracts |
+| You want PI calls as auditable workflow steps | |
+
+## Limitations
+
+Smithers does not provide a chat interface for PI. Chat UI integration is the responsibility of the host application using `@smithers-orchestrator/pi-plugin`.
+
+---
+
+## Hermes & Eliza
+
+> First-class Smithers support for the Hermes agent (a native Hermes plugin) and the Eliza (elizaOS) agent (built in by default). Make Smithers the durable control plane for both.
+
+Smithers ships **first-class support for two agent runtimes**:
+[Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) via a
+native Hermes plugin, and [Eliza (elizaOS)](https://github.com/elizaOS/eliza),
+which has Smithers built in by default. In both, Smithers becomes the durable
+control plane: the agent launches crash-safe, multi-step workflows, clears human
+approval gates, and stays aware of every in-flight run.
+
+The relationship is bidirectional:
+
+- **Hermes / Eliza drive Smithers**: they run and operate durable workflows.
+- **Smithers drives Hermes**: `HermesCliAgent` lets a workflow `<Task>` delegate
+  to the Hermes agent itself (see [CLI agents](/integrations/cli-agents)).
+
+## Hermes: a native plugin (not just MCP)
+
+Smithers installs a **native Hermes plugin**, which is far richer than a bare MCP
+entry. MCP can only expose tools. The plugin adds:
+
+- **Slash commands** (`/smithers run|ps|inspect|output|approve|deny|watch`) usable in the
+  Hermes CLI and every gateway (Discord, Telegram, Slack).
+- **A live-run status injector** (`pre_llm_call` hook) so Hermes is aware of
+  active and paused runs, and any pending approval gates, on every turn.
+- **Tools**: `smithers_run`, `smithers_ps`, `smithers_inspect`, `smithers_approve`,
+  `smithers_deny`, `smithers_output`, `smithers_human_answer`.
+- **A bundled skill** (`smithers:orchestrate`) that teaches Hermes to prefer a
+  durable workflow over a one-off skill.
+- **Gateway push-back**: a detached run launched from a chat session reports its
+  result back into that same session.
+- **Slack approval buttons**: an approval gate becomes Approve / Deny buttons that
+  map straight to `bunx smithers-orchestrator approve` / `bunx smithers-orchestrator deny`.
+
+### Distribution is one command
+
+The plugin ships inside the Smithers CLI, so installing it is one command:
+
+```bash
+bunx smithers-orchestrator hermes
+
+# `hermes` is a convenience alias for the generic form:
+bunx smithers-orchestrator mcp add --agent hermes
+```
+
+The command writes the plugin into `~/.hermes/plugins/smithers/`, installs the
+gateway hook into `~/.hermes/hooks/smithers/`, enables it in
+`~/.hermes/config.yaml`, and also registers the MCP server as a floor (so tools
+work even if user plugins are disabled). It is idempotent: rerun it any time to
+upgrade.
+
+Verify it loaded:
+
+```bash
+hermes plugins list        # shows `smithers`
+hermes -z "/smithers ps"   # lists your runs from inside Hermes
+```
+
+## Eliza (elizaOS): built in by default
+
+[Eliza](https://github.com/elizaOS/eliza) has Smithers support **built in by
+default**: there is no plugin to install. Any Eliza agent can launch and operate
+durable Smithers workflows out of the box, and a provider injects live Smithers
+run status into the agent's context on every turn.
+
+What the agent gets:
+
+- `RUN_SMITHERS_WORKFLOW`: start a durable workflow for any multi-step or
+  background task (falls back to `create-workflow` to author one from the
+  request).
+- `SMITHERS_APPROVE` / `SMITHERS_DENY`: clear approval gates.
+- `SMITHERS_RUNS` provider: every turn, the agent automatically sees what is
+  running and what needs a human.
+
+It reaches Smithers through the `smithers` CLI (override the binary with
+`$SMITHERS_BIN`).
+
+## Why a workflow, not a skill
+
+In both runtimes the guidance is the same: a Smithers workflow is a **superset of
+a skill**. A skill is static instructions; a workflow is executable, durable,
+typed, inspectable, composable, and optimizable. Capture reusable procedures as
+workflows (even small one-task ones), and optimize them like skills with
+`bunx smithers-orchestrator eval`, scorers, and `bunx smithers-orchestrator optimize`. See the
+[smithers skill](https://github.com/smithersai/smithers/blob/main/skills/smithers/SKILL.md).
+
+## Links
+
+- Hermes agent: [github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+- Eliza (elizaOS): [github.com/elizaOS/eliza](https://github.com/elizaOS/eliza)
+- Hermes plugin source: [apps/cli/src/hermes-plugin](https://github.com/smithersai/smithers/tree/main/apps/cli/src/hermes-plugin)
+
+---
+
+## XState
+
+> Typed control state for workflows: fold an XState v5 machine over durable output and signal rows with useSmithersMachine
+
+`smithers-orchestrator/xstate` runs [XState v5](https://stately.ai/docs) state
+machines as an **optional derived-state layer** over the rows Smithers already
+persists: not a backend, not a scheduler, and not a persisted actor.
+Each frame, `useSmithersMachine` recomputes the machine's state as a pure fold
+over durable output and signal rows using XState's pure
+`initialTransition` / `transition` functions. Nothing about the machine is
+persisted; resume, fork, and rewind are correct because the fold's inputs are
+exactly the rows those features restore.
+
+Use it when a workflow's control flow outgrows plain conditionals (revision
+loops, approval ladders, multi-phase pipelines with re-entry) and you want
+`state.matches(...)` instead of hand-rolled row checks. For linear pipelines,
+`ctx.outputs` conditionals remain simpler.
+
+```tsx
+import { setup, assign } from "xstate";
+import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smithers-orchestrator/xstate";
+
+const releaseMachine = setup({}).createMachine({
+  context: { revision: 0 },
+  initial: "researching",
+  states: {
+    researching: { on: { RESEARCH_DONE: "awaitingApproval" } },
+    awaitingApproval: { on: { APPROVED: "drafting", REJECTED: "researching" } },
+    drafting: {
+      // Declares which <Task> this re-enterable state drives, so the lint
+      // can verify its id is derived from context, not a bare constant.
+      meta: { smithersTaskId: ({ revision }) => `draft-r${revision}` },
+      on: {
+        REVISE: { actions: assign({ revision: ({ context }) => context.revision + 1 }) },
+        TIMEOUT: "done",
+      },
+    },
+    done: { type: "final" },
+  },
+});
+
+function Release() {
+  const ctx = useCtx();
+  // Event sources are pure functions of ctx, never of machine state.
+  const state = useSmithersMachine(releaseMachine, {
+    id: "release",
+    input: ctx.input,
+    events: [
+      taskOutput(researchSchema, { nodeId: "research" }, () => ({ type: "RESEARCH_DONE" })),
+      approvalDecided(gateSchema, { nodeId: "gate" }, (d) => (d.approved ? { type: "APPROVED" } : { type: "REJECTED" })),
+      eventReceived("REVISE", reviseSchema, {}, (p) => ({ type: "REVISE", feedback: p.feedback })),
+      timedOut(reviseWaitSchema, { scope: "revise" }, () => ({ type: "TIMEOUT" })),
+    ],
+  });
+  const rev = state.context.revision;
+
+  return (
+    <Workflow name="release">
+      {state.matches("researching") && (
+        <Task id="research" output={researchSchema} agent={researcher}>Research {ctx.input.topic}</Task>
+      )}
+      {state.matches("awaitingApproval") && (
+        <ApprovalGate id="gate" output={gateSchema} onDeny="continue" request={{ title: "Continue to drafting?" }} />
+      )}
+      {state.matches("drafting") && (
+        <>
+          {/* Machine re-entry never re-executes a completed (nodeId, iteration):
+              version task identity from machine context instead. The lint
+              enforces this: a state the machine can re-enter must declare
+              meta.smithersTaskId as a context-derived function, not a bare
+              constant, so this pairing stays checked rather than
+              convention-only. */}
+          <Task id={`draft-r${rev}`} output={draftSchema} agent={writer}>Write the draft.</Task>
+          {/* Wake-and-park plumbing: keeps the run alive and wakes a frame on
+              delivery. The REVISE events themselves come from the durable
+              signal table, not from this node's output. */}
+          <WaitForEvent id={`revise-r${rev}`} event="REVISE" output={reviseWaitSchema} timeoutMs={86_400_000} onTimeout="continue" tagged async />
+        </>
+      )}
+    </Workflow>
+  );
+}
+```
+
+External events are ordinary signals: `bunx smithers-orchestrator signal RUN_ID REVISE --data '{...}'`.
+There is **no `send()`, no `onDone` prop, and no actor**.
+
+## The fold
+
+Each frame, `useSmithersMachine(machine, { id, input, events })`:
+
+1. Collects events by evaluating each declared source against `ctx`.
+2. Orders them by **(provenance seq, declaration index, mapped-event
+   subindex)**: causal arrival order with deterministic tiebreaks, a total
+   order that is a pure function of rows on every branch.
+3. Folds: `initialTransition(machine, input)`, then
+   `transition(machine, snapshot, event)` per event. Returned actions are
+   discarded; builtin `assign` applies inside `transition`. Events not
+   accepted in the current state are discarded, matching live-actor
+   semantics. Events after the machine reaches a final state are discarded.
+4. Returns the final `MachineSnapshot`; `state.matches()`, `state.can()`,
+   `state.context`, `state.hasTag()` work as `@xstate/react` users expect.
+
+Multiple machines per workflow are supported; give each `useSmithersMachine`
+call a distinct `id`.
+
+## Event sources
+
+| Source | Reads | Notes |
+| --- | --- | --- |
+| `taskOutput(output, { nodeId?, scope? }, map)` | Durable output rows via `ctx.outputRows` | One `map` call per row; return an event, an array, or `null` to skip. "A durable row exists", not "the task completed": failed attempts write no row, and `(nodeId, iteration)` writes are upserts. |
+| `approvalDecided(output, { nodeId?, scope? }, map)` | Approval decision rows | Denials persist a row only with `onDeny: "continue"`; a failing gate ends the branch and writes nothing. |
+| `eventReceived(signalName, schema, { correlationId? }, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table directly on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing, including a signal delivered before its listener has ever mounted. `correlationId` scopes the fold to signals delivered with a matching id, required when the same signal name is used by more than one concurrent wait. Payloads failing `schema.safeParse` are skipped deterministically (same rows ⇒ same skips), so a malformed external delivery can never brick every future render of the run. Rewinding past a delivered signal makes the machine forget it, the same as output rows. |
+| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires the wait to opt into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`); pointing `timedOut()` at a non-tagged wait is a hard render-time error (`TASK_OUTPUT_SCHEMA_INVALID`), not a silent no-op. |
+
+All sources are pure functions of `ctx`; deriving a source's `nodeId` from
+the fold's own output is circular and unsupported.
+
+## Constraints (enforced at mount)
+
+A mount-time lint runs per machine identity (hot reload re-lints) and rejects
+machine features that cannot exist inside a durable fold, each with a typed
+error naming the Smithers-native alternative. There is no escape hatch.
+
+| Rejected | Use instead |
+| --- | --- |
+| `invoke` | A `<Task>`/`<Subflow>` writing an output row + `taskOutput()` |
+| `spawn` / `spawnChild` (including inside `assign`) | `<Task>` execution + `taskOutput()` |
+| `after` | `<WaitForEvent timeoutMs tagged onTimeout="continue">` + `timedOut()`, or `<Timer>` |
+| `raise` | Model the step as machine states, or a real signal + `eventReceived()` |
+| `sendTo` | Durable channels: outputs, approvals, signals |
+| `emit` | Derive observers from the returned snapshot |
+| `enqueueActions` | Plain `assign`; side effects in tasks |
+| `stopChild` / `stop` | Stop rendering the task (unmounting is the durable equivalent) |
+| `cancel` | `<WaitForEvent timeoutMs>` + `timedOut()` |
+| Custom / `log` actions | Only `assign` runs in the fold; run side effects in tasks |
+| A bare-constant `meta.smithersTaskId` on a state the machine can re-enter | Derive the id from context: `meta: { smithersTaskId: (context) => ... }` minted from an `assign` counter |
+
+Every callback in the fold (event mappers, context initializers, guards,
+assigners, machine `output` functions) must be pure, side-effect-free, free
+of time/randomness, and must not mutate inputs. A throwing mapper, guard, or
+assigner (or a throwing context initializer) fails the render with a typed
+`SmithersError` naming the machine and event/phase, rather than an anonymous
+crash deep inside the fold.
+
+## Listeners, re-entry, and final states
+
+- **The signal table is the event source; listeners are wake-and-park
+  plumbing.** A parked `<WaitForEvent>` matters for liveness: an idle
+  machine state with nothing rendered makes the graph quiescent and ends the
+  run. States awaiting external events should render a listener to keep
+  the run parked and wake a frame on delivery. A missed wake delays the fold
+  by one frame but never loses the event.
+- **Machine re-entry never re-executes a completed Smithers task.** Any task
+  rendered inside a machine state the machine can re-enter needs
+  context-versioned identity (`draft-r${rev}` minted from an `assign`
+  counter). A bare-constant task id in a state on a machine cycle deadlocks
+  the machine: no new row, no new event, and the quiescent graph ends the run.
+  The lint catches this for any state that declares `meta.smithersTaskId`: a
+  re-enterable state (reachable back to itself through the machine's
+  transition graph, whether a direct self-transition or a longer cycle) may only
+  declare it as a function of context, never a bare string.
+- **Final states are derived-only.** Smithers can finish while the machine is
+  non-final (graph quiescent); a machine final state does not cancel
+  in-flight tasks (stop rendering them instead); `snapshot.output` is not the
+  run output; a failure-flavored final state does not fail the run.
+
+## Durability and time travel
+
+The fold's inputs are exactly the rows Smithers restores, so crash/resume
+recomputes an identical machine state; rewinding to an earlier frame yields
+the machine state those earlier rows imply; forked runs fold their copied
+row history and diverge cleanly with their own signals.
+
+One carve-out: an in-place payload replacement at the same
+`(nodeId, iteration)` (manual `retry-task` of a completed node, HumanTask
+reopen) keeps its seq but changes its payload, so folded history from that
+position **reinterprets**. The in-process cache validates by content hash and
+refolds automatically; workflows feeding machines from replaceable tasks
+should prefer fork-and-migrate.
+
+The prefix cache key is `(runId, machine id, reducer hash)`, where the
+reducer hash is a content hash
+of the machine (config + `setup()` implementations) plus every declared
+event source (kind, target, options, `map`/`schema` source), so one process
+hosting many runs (or a fork, which inherits its parent's row history and
+machine `id` verbatim) never serves one run's snapshot to another, and a
+mid-run machine or event-source edit can't reuse a fold computed under the
+old reducer. The cache is bounded (LRU-evicted) so a long-running process
+does not retain every historical snapshot. Mid-run machine edits ride the
+`acceptWorkflowChange` gate: the reducer hash changing for an already-folded
+`(runId, id)` logs a machine-history reinterpretation warning instead of
+silently reinterpreting.
+
+## Performance
+
+Recomputing per frame is cheap in practice: an in-process prefix cache
+validates folded history by content hash and folds only the new suffix each
+frame. The CI benchmark (`packages/xstate/tests/fold-benchmark.test.js`)
+folds 10,000 events on a parallel + nested-compound machine in well under a
+second full-refold (~20µs/event), and proves an incremental frame folds only
+the new suffix by counting actual transitions executed (immune to machine
+load), not by timing it; a wall-clock threshold is logged but kept
+deliberately generous and non-strict, since it isn't the real gate. Practical
+limit: tens of thousands of events per machine per run; beyond that, prefer
+summarizing history into machine context via coarser events.
+
+## Visualization
+
+Machines are plain XState, so Stately Studio import and `xstate/graph` static
+visualization work unmodified on the machine definition.
+
+---
+
+## Microsandbox Provider
+
+> Run a Smithers <Sandbox> child workflow in a local Microsandbox microVM with createMicrosandboxSandboxProvider.
+
+# Microsandbox Provider
+
+`@smithers-orchestrator/microsandbox` is a first-class Smithers
+`SandboxProvider` backed by the open source
+[Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
+boots a local microVM with its own Linux kernel, writes the Smithers request
+through the host-to-guest filesystem channel, executes the entry command, and
+reads the result back through the same channel. No daemon or hosted sandbox
+service is required.
+
+The provider id is `microsandbox` (exported as
+`MICROSANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createMicrosandboxSandboxProvider,
+  registerMicrosandboxSandboxProvider,
+  MICROSANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/microsandbox";
+```
+
+Microsandbox currently labels the runtime beta. Pin and test the SDK version you
+deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
+Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
+Windows. Run `msb doctor` on every host before accepting work.
+
+Microsandbox `0.6.6` snapshots contain disk state, require a stopped sandbox,
+and cold-boot when restored. They do not preserve memory, running processes,
+sockets, or device state. A fleet integration must not advertise a sticky
+workspace as memory-preserving suspend, instant resume, or a live fork.
+
+## Install
+
+The provider package declares `microsandbox` as an optional dependency and
+imports it only when a session starts. Install it directly if your package
+manager omits optional dependencies:
+
+```sh
+npm install microsandbox@0.6.6
+```
+
+The SDK downloads or resolves its platform runtime and pulls the selected OCI
+image on first use. Later sandboxes reuse the local image cache.
+
+## Usage
+
+Pass the provider object directly to `<Sandbox>`:
+
+```tsx
+import { createSmithers, Sandbox } from "smithers-orchestrator";
+import { createMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+
+const provider = createMicrosandboxSandboxProvider({
+  image: "oven/bun:1",
+  cpus: 2,
+  memoryMib: 4096,
+  security: "restricted",
+  setupFiles: {
+    "/workspace/run-smithers-sandbox.js": runnerSource,
+  },
+});
+
+export default parent.smithers((ctx) => (
+  <parent.Workflow name="microsandbox-run">
+    <Sandbox
+      id="isolated-edit"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      allowNetwork
+      output={parent.outputs.result}
+    />
+  </parent.Workflow>
+));
+```
+
+Or register it once and select it by id:
+
+```ts
+import { registerMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+
+const unregister = registerMicrosandboxSandboxProvider({
+  image: "oven/bun:1",
+});
+
+// <Sandbox provider="microsandbox" workflow={child} output={outputs.result} />
+```
+
+The default image is `oven/bun:1`. The default entry command is
+`bun /workspace/run-smithers-sandbox.js`. Put that runner in the image or
+provide it with `setupFiles`. A factory-level `command` wins over the
+`<Sandbox command>` prop. Without either, the default is used.
+
+The provider creates its workdir through `sandbox.fs()` after boot and passes
+that path to each command. It does not call `builder.workdir()`, which would
+require the directory to exist in the image before the provider can create it.
+
+## Smithers prop mapping
+
+The adapter maps the provider-neutral `<Sandbox>` controls onto the
+Microsandbox builder and execution APIs.
+
+| Smithers control | Microsandbox behavior |
+|---|---|
+| `image` | OCI image, local rootfs directory, or disk image passed to `builder.image()` |
+| `env` | Per-command environment, merged below provider `env` and egress variables |
+| `allowNetwork={false}` | `builder.disableNetwork()`, so no guest network interface is created |
+| `allowNetwork` | Microsandbox's default public-only policy, which blocks private and metadata destinations |
+| `ports` | TCP host-to-guest mappings through `builder.port()`; requires `allowNetwork` |
+| `volumes` | Host bind mounts through `builder.volume(...bind...)`; read-only unless `readonly: false` |
+| `cpuLimit` | Rounded up to a whole vCPU and passed to `builder.cpus()` |
+| `memoryLimit` | Converted from Docker-style `b`, `k`, `m`, or `g` units to MiB |
+| `workspace.snapshotId` | Boots from a Microsandbox snapshot instead of an image |
+| `workspace.idleTimeoutSecs` | Host-enforced idle drain timeout |
+| `workspace.persistence` | `ephemeral` removes state on stop; `sticky` reopens the named sandbox and preserves its writable layer |
+| `command` | Shell command executed with `/bin/sh -lc` unless the factory sets `command` |
+
+Provider options can also set `cpus`, `maxCpus`, `memoryMib`, `maxMemoryMib`,
+`maxDurationSecs`, `idleTimeoutSecs`, `security`, `labels`, `scripts`,
+`setupFiles`, `pullPolicy`, and `sandboxName`. `configureBuilder(builder,
+request)` is the escape hatch for Microsandbox features that Smithers does not
+model directly, including custom network policies, secret substitution,
+registry authentication, rootfs patches, and named or tmpfs volumes.
+
+## Request and result contract
+
+The shared provider kit writes the request JSON below the workdir and gives the
+entry command two env vars:
+
+- `SMITHERS_SANDBOX_REQUEST_PATH`: request JSON to read.
+- `SMITHERS_SANDBOX_RESULT_PATH`: result JSON to write.
+
+The entry command may print the result JSON to stdout or write it to the result
+path. The result is `{ bundlePath }` or a structured `{ status,
+output|outputs, patches?, diffBundle?, runId? }`. The provider fills
+`remoteRunId`, `workspaceId`, and `containerId` with the Microsandbox name when
+the entry omits them.
+
+Parent directories are created through `sandbox.fs()` before files are
+written. Command execution uses `execStreamWith()` so an abort signal or
+timeout can kill the guest process instead of leaving it running after the
+Smithers task ends.
+
+## Network and secrets
+
+Microsandbox runs locally, but its network policy is host-controlled. With
+`allowNetwork` unset or false, Smithers disables the interface. With
+`allowNetwork` true, Microsandbox allows public destinations and DNS while
+blocking private, link-local, host, and cloud metadata destinations by
+default.
+
+The Smithers provider kit still projects `egress` proxy variables and uploads
+an inline CA certificate into the guest. Use `configureBuilder` with
+Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
+allowlists or host-side secret substitution.
+
+There is an important `0.6.6` limitation for production secret handling. The
+raw Go SDK `Secret.Env` value is persisted in runtime state, while the declared
+store-backed secret source is not implemented by the runtime. Do not assume
+that selecting a secret API alone keeps plaintext out of provider state. Use a
+nonpersisting, operation-scoped delivery path, and test guest disk, snapshots,
+logs, errors, command arguments, and runtime metadata with a sentinel value.
+When a credential needs method/path policy, signing, audit, approval, MCP
+policy, rate limiting, or response filtering, give the guest a short-lived
+credential-proxy capability instead of the upstream secret.
+
+Bind mounts deliberately expose host paths to the guest. Keep them read-only
+unless the workflow must write, and never mount a credential directory or the
+Microsandbox state directory into an untrusted workload.
+
+## Cleanup and persistence
+
+`cleanup: "destroy"` is the default.
+
+- An ephemeral sandbox is stopped and its state is removed.
+- A sticky workspace is stopped but kept on disk, then reopened by
+  `workspace.name` on the next run.
+- `cleanup: "keep"` creates or starts the sandbox detached and leaves it
+  running after the provider returns. Set `idleTimeoutSecs` or
+  `maxDurationSecs` so a crashed orchestrator cannot leave compute running
+  forever.
+
+Microsandbox is local infrastructure. Capacity, image cache, persisted
+workspaces, logs, and the `~/.microsandbox` database live on the host. Running
+it as a fleet provider therefore requires host scheduling, admission control,
+state placement, generation fencing, snapshot export, authenticated streaming,
+and observability outside this adapter. Plue implements that remote fleet
+boundary separately; this package remains a local Smithers provider and does
+not make an arbitrary API pod a safe KVM host.
+
+## SDK subset used
+
+The adapter uses the published TypeScript SDK surface:
+
+- `Sandbox.builder(name)` with image or snapshot, resource, network, mount,
+  lifecycle, label, and script setters;
+- `Sandbox.get(name)` plus handle `connect()`, `start()`, and `startDetached()`
+  for sticky workspaces;
+- `sandbox.fs().write()`, `readToString()`, `exists()`, and `mkdir()` for file
+  transport;
+- `sandbox.execStreamWith()` plus `collect()` and `kill()` for commands;
+- `sandbox.stop()` and `Sandbox.remove(name)` for teardown.
+
+The repository-only fixture at
+`packages/microsandbox/tests/fixtures/createMockMicrosandboxEnvironment.js`
+supplies an in-memory SDK double for package tests. It is not part of the
+package's public exports and requires no hypervisor, image pull, or credentials.
+
+---
+
+## Daytona Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow inside a Daytona sandbox with createDaytonaSandboxProvider.
+
+# Daytona Sandbox Provider
+
+`@smithers-orchestrator/daytona` is a first-class Smithers `SandboxProvider`
+backed by the [Daytona](https://www.daytona.io/) SDK. It runs a `<Sandbox>`
+child workflow's request inside a Daytona sandbox: it uploads the request JSON,
+runs the entry command, and reads the result JSON back. The shared provider-kit
+owns the request/result protocol, egress, secret scrubbing, and cleanup, so this
+package only maps the small `SandboxSession` seam onto Daytona.
+
+The provider id is `daytona-sandbox` (exported as `DAYTONA_SANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createDaytonaSandboxProvider,
+  registerDaytonaSandboxProvider,
+  DAYTONA_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/daytona";
+```
+
+## Credentials
+
+`@daytonaio/sdk` is an optional dependency, imported lazily inside the session.
+Install it to use the real provider:
+
+```
+npm install @daytonaio/sdk
+```
+
+Credentials come from factory options first, then the Daytona env chain. They
+are used only to build the local SDK client. They are never written into the
+request JSON and never forwarded into the remote sandbox env.
+
+- `DAYTONA_API_KEY`: API key (required for a real client).
+- `DAYTONA_API_URL`: API base url (optional).
+- `DAYTONA_TARGET`: target region (optional).
+
+The same values may be passed as `apiKey`, `apiUrl`, and `target` factory
+options, or through `clientOptions`.
+
+## Usage
+
+Pass the provider straight to `<Sandbox>`:
+
+```tsx
+import { createSmithers, Sandbox } from "smithers-orchestrator";
+import { createDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+
+const provider = createDaytonaSandboxProvider({
+  image: "ubuntu:22.04",
+  autoStopInterval: 15, // minutes idle before Daytona auto-stops
+  ephemeral: true,      // delete the sandbox on disconnect
+});
+
+export default parent.smithers((ctx) => (
+  <parent.Workflow name="daytona-sandbox-run">
+    <Sandbox
+      id="remote-edit"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      output={parent.outputs.result}
+    />
+  </parent.Workflow>
+));
+```
+
+Or register it once and reference it by id:
+
+```ts
+import { registerDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+
+const unregister = registerDaytonaSandboxProvider({ image: "ubuntu:22.04" });
+
+// <Sandbox provider="daytona-sandbox" workflow={child} output={outputs.result} />
+```
+
+## Request/result contract
+
+The kit writes the request JSON to `.smithers/sandbox-request.json` in the
+workdir and hands the entry command two env vars:
+
+- `SMITHERS_SANDBOX_REQUEST_PATH`: where to read the request JSON.
+- `SMITHERS_SANDBOX_RESULT_PATH`: where to write the result JSON.
+
+The entry command either prints the result JSON to stdout or writes it to
+`SMITHERS_SANDBOX_RESULT_PATH`. The result is `{ bundlePath }` or a structured
+`{ status, output|outputs, patches?, diffBundle?, runId? }`. The kit fills
+`remoteRunId`/`workspaceId` from the Daytona sandbox id when the entry omits
+them.
+
+## Factory options
+
+- `image` or `snapshot`: the base for `daytona.create` (pass one, not both).
+- `autoStopInterval`: minutes idle before Daytona auto-stops (default `15`).
+- `ephemeral`: delete the sandbox on disconnect (default `true`).
+- `resources`, `labels`, `env`: forwarded to `daytona.create`.
+- `command`: entry command (default `node /workspace/run-smithers-sandbox.js`).
+- `workdir`: default `/workspace`.
+- `cleanup`: `"destroy"` (default) or `"keep"`.
+- `client` / `clientOptions`: inject an SDK client or its constructor options.
+
+Per-run `request.config` may carry `image`, `snapshot`, `resources`, `labels`,
+or a `workspace` block (`snapshotId`, `idleTimeoutSecs`,
+`persistence: "ephemeral"`) which maps onto the create options.
+
+## SDK subset used
+
+`daytona.create({ image?|snapshot?, envVars, labels, ephemeral, autoStopInterval,
+resources })`, `sandbox.fs.uploadFile(Buffer, path)`,
+`sandbox.fs.downloadFile(path)`, `sandbox.process.executeCommand(command, cwd,
+env, timeoutSecs)` (Daytona merges stderr into `result`), and
+`daytona.delete(sandbox)`.
+
+## Cleanup and cost
+
+`cleanup: "destroy"` (default) deletes the sandbox after the run. `cleanup:
+"keep"` leaves it running. `ephemeral` plus `autoStopInterval` bound idle cost
+even when cleanup is skipped, so a crashed orchestrator does not leave a sandbox
+billing forever. You pay for Daytona sandbox time from create to teardown.
+
+`createMockDaytonaSandboxEnvironment(handler, faults?)` is an in-memory SDK
+double for tests. It needs zero credentials, so unit tests run in CI without
+touching Daytona.
+
+---
+
+## Vercel Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow on Vercel Sandbox compute with createVercelSandboxProvider.
+
+# Vercel Sandbox Provider
+
+`@smithers-orchestrator/vercel` is a first-class Smithers `SandboxProvider`
+backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK. It
+runs a `<Sandbox>` child workflow's request on Vercel Sandbox compute: it ships
+the request JSON into the sandbox workdir, runs the entry command, and reads the
+result JSON back. The shared provider-kit owns request shipping, egress, result
+parsing, secret scrubbing, and cleanup, so this package only supplies the Vercel
+`createSession` seam.
+
+The provider id is `vercel-sandbox` (exported as `VERCEL_SANDBOX_PROVIDER_ID`).
+The default workdir is `/vercel/sandbox`.
+
+```ts
+import {
+  createVercelSandboxProvider,
+  registerVercelSandboxProvider,
+  VERCEL_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/vercel";
+```
+
+## Credentials
+
+`@vercel/sandbox` is an optional dependency, imported lazily inside the session.
+Install it to use the real provider:
+
+```bash
+npm install @vercel/sandbox
+```
+
+OIDC is preferred; the access-token trio is the fallback. Auth is resolved and
+validated before the SDK is touched, so a misconfigured provider fails fast with
+`INVALID_INPUT`. These values are used only to create the sandbox. They are
+never written into the request JSON and never forwarded into the remote command
+env.
+
+- `VERCEL_OIDC_TOKEN` (preferred), or
+- `VERCEL_TOKEN` + `VERCEL_TEAM_ID` + `VERCEL_PROJECT_ID`.
+
+Each can also be passed as a factory option (`oidcToken`, `token`, `teamId`,
+`projectId`).
+
+## Usage
+
+```tsx
+import { createSmithers, Sandbox } from "smithers-orchestrator";
+import { createVercelSandboxProvider } from "smithers-orchestrator/vercel";
+
+const provider = createVercelSandboxProvider({
+  runtime: "node24",
+  vcpus: 2,
+  ports: [3000],
+  maxDurationMs: 45 * 60_000,
+});
+
+export default parent.smithers((ctx) => (
+  <parent.Workflow name="vercel-sandbox-run">
+    <Sandbox
+      id="remote-build"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      output={parent.outputs.result}
+    />
+  </parent.Workflow>
+));
+```
+
+Or register it once and reference it by id:
+
+```ts
+import { registerVercelSandboxProvider } from "smithers-orchestrator/vercel";
+
+const unregister = registerVercelSandboxProvider({ runtime: "node24" });
+
+// <Sandbox provider="vercel-sandbox" workflow={child} output={outputs.result} />
+```
+
+## Request/result contract
+
+The kit writes the request JSON to `.smithers/sandbox-request.json` in the
+workdir and hands the entry command two env vars:
+
+- `SMITHERS_SANDBOX_REQUEST_PATH`: where to read the request JSON.
+- `SMITHERS_SANDBOX_RESULT_PATH`: where to write the result JSON.
+
+The entry command either prints the result JSON to stdout or writes it to
+`SMITHERS_SANDBOX_RESULT_PATH`. The result is `{ bundlePath }` or a structured
+`{ status, output|outputs, patches?, diffBundle?, runId? }`. When ports are
+declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
+
+## Factory options
+
+- `runtime`: Vercel Sandbox runtime (default `node24`).
+- `vcpus`: vCPU count passed to `resources`.
+- `ports`: ports whose domains are surfaced.
+- `timeoutMs` / `maxDurationMs`: see duration cap below.
+- `persist`: `stop()` (pause) instead of `delete()` on teardown.
+- `command`: entry command.
+- `workdir`: default `/vercel/sandbox`.
+- `cleanup`: `"destroy"` (default) or `"keep"`.
+- `env`: merged into the command env.
+- `client` / `createOptions`: inject the SDK class or extra `Sandbox.create`
+  options.
+
+## Duration and plan cap
+
+The default session timeout is 5 minutes. `options.timeoutMs` (or
+`request.toolTimeoutMs`) maps to the create `timeout`. Durations above the
+5-minute default warn through a heartbeat and call `sandbox.extendTimeout()`, up
+to `options.maxDurationMs` (default 45 minutes). A request above that cap throws
+`INVALID_INPUT` rather than provisioning a sandbox that would overrun the plan.
+Raise `maxDurationMs` for Pro (up to 5 hours).
+
+## Cleanup and cost
+
+Ephemeral sandboxes are deleted permanently on teardown (`cleanup: "destroy"`,
+the default). Set `persist: true` to `stop()` (pause) the sandbox instead so it
+can be resumed. `cleanup: "keep"` skips teardown entirely. You pay for Vercel
+Sandbox wall-clock from create to teardown.
+
+`createMockVercelSandboxEnvironment(handler, config?)` is an in-memory SDK
+double for tests. Pass it as `options.client`; it needs zero credentials, so
+unit tests run in CI without touching Vercel.
+
+---
+
+## AWS Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow on AWS Fargate or CodeBuild with createAwsSandboxProvider, transporting the bundle through S3.
+
+# AWS Sandbox Provider
+
+`@smithers-orchestrator/aws` is a first-class Smithers `SandboxProvider` that
+runs a `<Sandbox>` child workflow's request on AWS. It has two modes: Fargate
+(ECS `RunTask`, the default) and CodeBuild. AWS gives the orchestrator no shared
+filesystem with the remote task, so the request/result bundle is transported
+through an S3 bucket you already own. The shared provider-kit owns the
+request/result protocol, egress, secret scrubbing, and cleanup; this package
+supplies the S3 transport plus the ECS/CodeBuild runners.
+
+The provider id is `aws-sandbox` (exported as `AWS_SANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createAwsSandboxProvider,
+  registerAwsSandboxProvider,
+  AWS_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/aws";
+```
+
+## Credentials
+
+Authentication uses the standard AWS SDK v3 credential chain: env vars, shared
+config, SSO, or an instance/task role. No explicit credentials are passed to the
+factory and none are ever forwarded into the remote task env. The remote task
+authenticates with its own task or build IAM role.
+
+The `@aws-sdk/*` clients are optional dependencies, imported lazily. Install the
+ones your mode needs:
+
+- `@aws-sdk/client-s3` (always).
+- `@aws-sdk/client-ecs` (Fargate).
+- `@aws-sdk/client-codebuild` (CodeBuild).
+- `@aws-sdk/client-cloudwatch-logs` (only with `captureLogs`).
+
+## Prerequisites
+
+The provider does not provision infrastructure. Set these up first:
+
+- An S3 `bucket` that already exists. The provider only manages the key prefix
+  `smithers/sandbox/<runId>/<sandboxId>/` under it.
+- For Fargate: an ECS `cluster`, a registered `taskDefinition`, at least one VPC
+  `subnet`, optional `securityGroups`, and the `containerName` inside the task
+  definition. The task role needs S3 read/write on the prefix.
+- For CodeBuild: a CodeBuild `projectName`. The build role needs S3 read/write
+  on the prefix.
+
+## Usage
+
+```tsx
+import { createAwsSandboxProvider } from "smithers-orchestrator/aws";
+
+// Fargate (default)
+const provider = createAwsSandboxProvider({
+  region: "us-east-1",
+  bucket: "my-smithers-sandbox-bucket", // must already exist
+  cluster: "smithers",
+  taskDefinition: "smithers-sandbox:7",
+  subnets: ["subnet-abc123"],
+  securityGroups: ["sg-def456"],
+  assignPublicIp: "ENABLED",
+  containerName: "runner",
+});
+
+// <Sandbox provider={provider} workflow={child} output={outputs.result} />
+```
+
+```ts
+// CodeBuild
+const codebuild = createAwsSandboxProvider({
+  mode: "codebuild",
+  region: "us-east-1",
+  bucket: "my-smithers-sandbox-bucket",
+  projectName: "smithers-sandbox",
+});
+```
+
+Or register either provider once and reference it by id with
+`registerAwsSandboxProvider(...)` then `<Sandbox provider="aws-sandbox" />`.
+
+## Request/result contract
+
+The kit hands the entry command `SMITHERS_SANDBOX_REQUEST_PATH` and
+`SMITHERS_SANDBOX_RESULT_PATH`. Because there is no shared filesystem, the
+container round-trips those files through S3. The provider injects four more
+vars so the entry can find them:
+
+- `SMITHERS_SANDBOX_S3_BUCKET`: the transport bucket.
+- `SMITHERS_SANDBOX_S3_PREFIX`: `smithers/sandbox/<runId>/<sandboxId>`.
+- `SMITHERS_SANDBOX_REQUEST_S3_KEY`: S3 key of the request JSON.
+- `SMITHERS_SANDBOX_RESULT_S3_KEY`: S3 key the entry must write the result to.
+
+Every workdir path maps to `s3://<bucket>/<prefix>/<runId>/<sandboxId>/<encodeURIComponent(workdir-relative path)>` so two files that share a basename never collide. The entry
+either prints the result JSON to stdout or writes it to the result key. An infra
+failure (task or build fails with no result written) throws. A result file with
+`status: "failed"` is a normal failed bundle. Fargate reports a real numeric
+container exit code; CodeBuild reports a status (`SUCCEEDED` maps to 0, else 1).
+
+## Factory options
+
+- `mode`: `"fargate"` (default) or `"codebuild"`.
+- `region`, `bucket`: required in both modes.
+- Fargate: `cluster`, `taskDefinition`, `subnets`, `containerName` (required),
+  `securityGroups`, `assignPublicIp`, `logGroupName`.
+- CodeBuild: `projectName` (required).
+- `captureLogs`: pull CloudWatch logs, truncated to `maxOutputBytes`.
+- `command`, `workdir` (default `/workspace`), `env`.
+- `cleanup`: `"destroy"` (default) or `"keep"`.
+- `clients` / `client` / `clientOptions`: inject SDK doubles or client options.
+
+## Cleanup and cost
+
+`cleanup: "destroy"` (default) stops the task or build if it is still running
+and deletes the transient S3 objects. `cleanup: "keep"` leaves them. You pay for
+Fargate task time or CodeBuild build minutes, plus S3 storage of the small
+transient bundle objects. Set a short lifecycle TTL on the `smithers/sandbox/`
+prefix to reap anything a crash leaves behind. EC2 mode is documented future
+work.
+
+`createMockAwsSandboxEnvironment(handler, mockOptions?)` provides in-memory S3,
+ECS, CodeBuild, and CloudWatch Logs doubles for tests. It needs zero AWS
+credentials, so unit tests run in CI without touching AWS.
+
+---
+
+## GCP Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow on Cloud Run Jobs with createGcpSandboxProvider, transporting the bundle through Cloud Storage.
+
+# GCP Sandbox Provider
+
+`@smithers-orchestrator/gcp` is a first-class Smithers `SandboxProvider` for
+Google Cloud. It executes a `<Sandbox>` child workflow's request on Cloud Run
+Jobs and ships the request/result bundle through a Cloud Storage bucket, because
+Cloud Run Jobs give no shared filesystem back to the caller. The shared
+provider-kit owns the request/result protocol, egress, secret scrubbing, and
+cleanup; this package supplies the GCS transport plus the Cloud Run runner.
+
+The provider id is `gcp-sandbox` (exported as `GCP_SANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createGcpSandboxProvider,
+  registerGcpSandboxProvider,
+  GCP_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/gcp";
+```
+
+## Credentials
+
+Authentication is Application Default Credentials:
+`GOOGLE_APPLICATION_CREDENTIALS` (a service-account key file) or workload
+identity, plus `GOOGLE_CLOUD_PROJECT`. Local credentials are never forwarded
+into the container. The container env is `options.env` plus the Smithers, egress,
+and GCS-transport variables.
+
+`@google-cloud/run` and `@google-cloud/storage` are optional dependencies,
+imported lazily inside the session, so the package loads without them. Install
+both to use the real provider:
+
+```
+npm install @google-cloud/run @google-cloud/storage
+```
+
+## Prerequisites
+
+The provider does not create the bucket. Set these up first:
+
+- A Cloud Storage `bucket` that already exists (the transport). Set a short
+  lifecycle TTL on the `smithers/sandbox/` prefix to reap crash leftovers.
+- A Cloud Run `jobName` to run, or set `createJob` to have a per-run Job created
+  and torn down. When `createJob` is set you must also pass a container `image`
+  (Cloud Run requires one to create the Job). The job's service account needs
+  read/write on the bucket prefix.
+
+## Required options
+
+`createGcpSandboxProvider({ projectId, location, bucket, jobName })`: all four
+are required and missing ones throw `INVALID_INPUT`. `projectId` falls back to
+`GOOGLE_CLOUD_PROJECT`.
+
+| option      | meaning                                                     |
+| ----------- | ---------------------------------------------------------- |
+| `projectId` | GCP project id                                             |
+| `location`  | Cloud Run region, e.g. `us-central1`                       |
+| `bucket`    | a pre-existing Cloud Storage bucket (transport)            |
+| `jobName`   | Cloud Run Job to run (or created per-run when `createJob`) |
+
+Other knobs: `prefix` (default `smithers/sandbox`), `command`, `workdir`
+(default `/workspace`), `env`, `cleanup` (`"destroy"` or `"keep"`),
+`timeoutSec`, `createJob`, `sandboxId(request)`, and
+`client`/`clients`/`clientOptions` for SDK injection.
+
+## Usage
+
+```tsx
+import { Sandbox } from "smithers-orchestrator";
+import { createGcpSandboxProvider } from "smithers-orchestrator/gcp";
+
+const provider = createGcpSandboxProvider({
+  projectId: "my-project",
+  location: "us-central1",
+  bucket: "my-smithers-sandbox",
+  jobName: "smithers-sandbox-runner",
+});
+
+// <Sandbox provider={provider} workflow={child} output={outputs.result} />
+```
+
+Or register it once and reference it by id with
+`registerGcpSandboxProvider(...)` then `<Sandbox provider="gcp-sandbox" />`.
+
+## Request/result contract
+
+The kit writes `.smithers/sandbox-request.json` and expects
+`.smithers/sandbox-result.json` back, handing the container
+`SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH`. Because there
+is no shared filesystem, the container round-trips those files through GCS. The
+runner injects four extra vars:
+
+- `SMITHERS_SANDBOX_GCS_BUCKET`: the transport bucket.
+- `SMITHERS_SANDBOX_GCS_PREFIX`: object-name prefix.
+- `SMITHERS_SANDBOX_REQUEST_GCS_OBJECT`: object holding the request JSON.
+- `SMITHERS_SANDBOX_RESULT_GCS_OBJECT`: object the entry must write result JSON to.
+
+Every workdir-relative path maps to
+`<prefix>/<runId>/<sandboxId>/<percent-encoded workdir-relative path>` (the full path, not just the basename, so same-named files never collide). Cloud Run reports task counts
+and conditions, not a numeric exit code: a succeeded task is exit 0 and a failed
+task is exit 1. An infra failure (execution failed, no result written) throws. A
+run that writes `status: "failed"` result JSON is a normal failed bundle the kit
+materializes.
+
+## Cleanup and cost
+
+`cleanup: "destroy"` (default) deletes the transient GCS objects and, when
+`createJob` made a per-run job, deletes that job. `cleanup: "keep"` leaves
+everything. The bucket itself is never created or deleted. You pay for Cloud Run
+Job execution time plus GCS storage of the small transient objects. Compute
+Engine execution is documented future work.
+
+`createMockGcpSandboxEnvironment(handler, config?)` provides in-memory Cloud
+Storage and Cloud Run doubles for tests. It needs zero real GCP credentials or
+bucket, so unit tests run in CI without touching GCP.
+
+---
+
+## Serverless deployment
+
+> How to run the Smithers control plane serverlessly across platforms -- pick a host, a storage descriptor, and (for full-OS agents) a sandbox provider. Includes the per-platform matrix and cost drivers.
+
+# Serverless deployment
+
+Deploying Smithers serverlessly is three independent choices. This page maps
+each choice onto the platforms Smithers supports today, states honestly what
+runs where, and points at the exact exports. For the conceptual model behind it
+(in-process vs full-OS agents, what's billed), read
+[Where agents run, sandboxes & cost](/concepts/execution-model) first.
+
+1. **A control-plane host** -- where the engine drives the run.
+2. **A storage descriptor** -- where durable run state lives.
+3. **A sandbox provider** -- *only* if your workflow uses CLI / full-OS agents
+   via [`<Sandbox>`](/components/sandbox); in-process SDK agents need none.
+
+## 1. Control-plane host
+
+The engine renders the workflow, schedules tasks, and persists frames. Where it
+can run depends on the runtime's system access:
+
+| Host | Runtime | Runs the engine today? |
+|---|---|---|
+| A container running **Bun** (ECS, App Runner, Cloud Run service, GKE, a VM) | Bun | ✅ Yes |
+| The **Node** runtime (Vercel Node function, AWS Lambda Node, a Node server) | Node (has `fs` + `child_process`) | ⚠️ In progress |
+| Cloudflare **Worker** / Vercel **Edge** | V8 isolate (no `fs`/`child_process`) | ⚠️ In progress |
+
+<Warning>
+  **The engine currently requires the Bun runtime.** Run it on any container
+  platform (ECS, App Runner, Cloud Run, GKE, a VM) under Bun and the full engine
+  works today. Two portability efforts are in flight:
+
+  - **Node runtime** (Vercel Node functions, Lambda Node): closest, since Node
+    has `fs` + `child_process`. The engine module now **imports cleanly under
+    plain Node** (all `bun:sqlite`-reaching value imports are lazy-loaded, guarded
+    by a node-subprocess regression test), and it no longer hard-binds the Bun
+    platform layer (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`,
+    supplied by your entrypoint from `@effect/platform-node`). The engine now
+    **drives a run to completion under plain Node**, proven end-to-end by a
+    node-subprocess regression test that runs a compute-task workflow against
+    PGlite and asserts the run reaches `finished`; the worker-task dispatch path
+    no longer requires bun-sqlite (under Node the `@effect/cluster` single-runner
+    uses the in-memory MessageStorage driver, matching the non-durable `:memory:`
+    sqlite the Bun path already used). Still to land before calling Node fully
+    supported: validating agent (CLI/SDK) tasks and the gateway under Node.
+  - **Isolates** (Workers, Edge): further out -- the engine and gateway also use
+    `node:fs` / `node:child_process` (git/jj worktrees on a real filesystem),
+    which an `@effect/platform` `FileSystem`/`Command` seam must abstract. Today
+    an isolate can host **storage + in-process SDK agents** (via
+    `createSmithersCloudflare`), but not the run driver.
+</Warning>
+
+## 2. Storage descriptor
+
+Durable run state is dialect-abstracted (`sqlite | postgres`), so the same
+control plane runs on any of these:
+
+| Descriptor | Use for |
+|---|---|
+| `bun:sqlite` (default) | Local dev on Bun. |
+| PGlite | Embedded Postgres, zero external DB. |
+| Postgres | Production: RDS, Cloud SQL, Neon, Supabase, any Postgres. Use the pooled/serverless endpoint on functions. |
+| `createCloudflareDurableObjectSqliteDescriptor` | Cloudflare Workers durable run-of-record (real interactive transactions). |
+| `createCloudflareD1SqliteDescriptor` | Cloudflare D1 -- **read-mostly only** (no interactive transactions; unsafe for durable run state). |
+
+On Node hosts, point Smithers at Postgres and you are done. On Cloudflare, build
+the API with `createSmithersCloudflare` over the Durable Object SQLite
+descriptor (see [Cloudflare](/integrations/cloudflare)).
+
+## 3. Sandbox provider (only for full-OS / CLI agents)
+
+In-process SDK agents (`AnthropicAgent`, `OpenAIAgent`, `HermesAgent`,
+`ElizaAgent`) need **no** provider -- they are HTTPS calls in your process. CLI
+agents (`ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, …) spawn a vendor
+binary and must run inside a container, which a `SandboxProvider` supplies at
+each `<Sandbox>` boundary. Each provider ships a `create…SandboxProvider` and a
+`createMock…SandboxEnvironment` test double;
+Microsandbox/AWS/GCP/Vercel/Daytona also ship a `register…SandboxProvider`
+helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
+
+| Platform | Package | Create fn · provider id | Execution · transport |
+|---|---|---|---|
+| Microsandbox | `@smithers-orchestrator/microsandbox` | `createMicrosandboxSandboxProvider` · `microsandbox` | Local hardware-isolated microVM · guest filesystem |
+| Cloudflare | `@smithers-orchestrator/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
+| AWS | `@smithers-orchestrator/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
+| GCP | `@smithers-orchestrator/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
+| Vercel | `@smithers-orchestrator/vercel` | `createVercelSandboxProvider` · `vercel-sandbox` | Vercel Sandbox compute |
+| Daytona | `@smithers-orchestrator/daytona` | `createDaytonaSandboxProvider` · `daytona-sandbox` | Daytona sandboxes |
+| Any host (Docker) | `@smithers-orchestrator/sandbox` | Docker `http-runner` | Local/remote Docker |
+
+<Note>
+  There is no dedicated Kubernetes provider yet. On a cluster, run the
+  control plane as a normal Node deployment and use the Docker `http-runner`
+  (or register a custom `SandboxProvider` that submits a K8s Job) for the
+  full-OS agent path.
+</Note>
+
+## Per-platform recipes
+
+The control plane runs under **Bun** on any of these container platforms today;
+the Node-runtime and isolate paths are in progress (see the host section above).
+
+| Platform | Control plane (Bun container) | Storage | Sandbox provider (CLI agents) | Status |
+|---|---|---|---|---|
+| **Local / any VM** | Bun | `bun:sqlite` / PGlite / Postgres | `createMicrosandboxSandboxProvider` or Docker `http-runner` | ✅ Full |
+| **AWS** | Bun on ECS / App Runner | Postgres (RDS) | `createAwsSandboxProvider` (Fargate/CodeBuild) | ✅ Full |
+| **GCP** | Bun on Cloud Run / GKE | Postgres (Cloud SQL) | `createGcpSandboxProvider` (Cloud Run Jobs) | ✅ Full |
+| **Kubernetes** | Bun deployment | Postgres | Docker `http-runner` / custom | ✅ Full (no first-class provider yet) |
+| **Vercel** | Node function | Postgres (Neon pooled) | `createVercelSandboxProvider` | ⚠️ Node-runtime engine load in progress |
+| **Cloudflare** | Worker + Durable Object | DO-SQLite | `createCloudflareSandboxProvider` | ⚠️ Storage + SDK agents; run driver in progress |
+
+## What it costs
+
+Three independent axes (detailed in
+[the execution model](/concepts/execution-model#what-you-pay-for----three-billing-axes)):
+
+- **Model tokens / subscription** -- billed by the model provider.
+- **Control-plane host compute** -- your Node function/server wall-clock (or
+  Worker/DO requests + duration on Cloudflare).
+- **Sandbox provider compute** -- only when a `<Sandbox>` runs: the container/VM
+  wall-clock from create → run → teardown, plus the bundle-transport storage
+  (S3/GCS/DO). A workflow of only in-process SDK agents pays this axis nothing.
+
+## Read next
+
+- [Where agents run, sandboxes & cost](/concepts/execution-model) -- the model.
+- [Cloudflare](/integrations/cloudflare) -- Workers, DO-SQLite, and the provider.
+- [Microsandbox](/integrations/microsandbox-sandbox-provider) · [AWS](/integrations/aws-sandbox-provider) · [GCP](/integrations/gcp-sandbox-provider) · [Vercel](/integrations/vercel-sandbox-provider) · [Daytona](/integrations/daytona-sandbox-provider) sandbox providers.
+- [Control plane](/deployment/control-plane) · [Production hardening](/deployment/production-hardening).
+
+---
+
+## Run on Plue
+
+> Execute a Smithers workflow on Plue workspaces through the Plue sandbox provider.
+
+# Run on Plue
+
+`run-on-plue` executes a Smithers workflow script on Plue infrastructure
+instead of the local machine. It uses the
+[`<Sandbox>`](/components/sandbox) provider seam with
+`createPlueSandboxProvider`, and the provider shells through the `plue` CLI so
+Plue owns workspace lifecycle, authentication, quotas, placement, and sandbox
+execution through its self-hosted Microsandbox plane.
+
+Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
+
+## What it does
+
+The workflow lives at `.smithers/workflows/run-on-plue.tsx`. It accepts a path to any Smithers `.tsx` workflow, reads that file, and sends it to a Plue-backed sandbox provider.
+
+The provider:
+
+1. Creates a Plue workspace with `plue workspace create --repo <owner>/<repo>`.
+2. Polls `plue workspace view --format json` until the workspace is running and has an SSH command.
+3. Connects over SSH in batch mode.
+4. Installs Bun if missing, then installs `@anthropic-ai/claude-code` and `@openai/codex` when those CLIs are absent.
+5. Seeds Claude and Codex auth via `plue workspace exec --seed-agent-auth claude,codex`.
+6. Ships a small remote project containing the child workflow source, `agents.ts`, `package.json`, and `input.json`.
+7. Runs `smithers-orchestrator up` in the workspace and reads the remote run result back over SSH.
+8. Deletes the workspace unless `keepWorkspace` is true.
+
+The parent workflow receives:
+
+```ts
+{
+  status: "finished" | "failed" | "cancelled";
+  output?: unknown;
+  remoteRunId?: string;
+  workspaceId?: string;
+}
+```
+
+## Requirements
+
+- `plue` CLI installed and authenticated on the host running Smithers. Verify with `plue auth status`.
+- The target Plue server must have workspaces enabled. Local Plue uses `SMITHERS_FEATURE_FLAGS_WORKSPACES=true`.
+- The Plue server must be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` and an authenticated Microsandbox controller.
+- The repo passed as `repo` must exist in Plue and be accessible to the authenticated user.
+- Claude auth must be available locally. The preferred path is Claude Code subscription OAuth in the OS credential store; `ANTHROPIC_API_KEY` only works when that key has usable API billing.
+- Codex auth must be available locally. The preferred path is `~/.codex/auth.json`; `OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth.
+- If `plue` is not on `PATH`, set `PLUE_BIN` or pass `plueBin` in the workflow input.
+
+Secrets are seeded at run time through Plue's operation-scoped secret or
+credential-proxy path. They must not be written into guest disks, snapshots,
+images, command arguments, logs, errors, or durable request state. Do not bake
+Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials
+into workspace snapshots or committed files.
+
+## Run a workflow remotely
+
+Run the included demo child workflow:
+
+```bash
+bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+  "script": ".smithers/workflows/plue-demo-child.tsx",
+  "repo": "alice/smoke-test"
+}'
+```
+
+Pass input through to the remote child:
+
+```bash
+bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+  "script": "workflows/review-child.tsx",
+  "repo": "acme/app",
+  "input": {
+    "ticketId": "APP-123"
+  }
+}'
+```
+
+Use a local or custom CLI binary and keep the workspace for inspection:
+
+```bash
+bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+  "script": ".smithers/workflows/plue-demo-child.tsx",
+  "repo": "alice/smoke-test",
+  "plueBin": "/path/to/plue",
+  "keepWorkspace": true
+}'
+```
+
+## Use the provider directly
+
+`run-on-plue` is the default wrapper, but workflows can pass the provider object to `<Sandbox>` directly:
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers } from "smithers-orchestrator";
+import { Sandbox } from "@smithers-orchestrator/components";
+import { createPlueSandboxProvider } from "../lib/plue-provider";
+import { childWorkflow } from "./child";
+import { z } from "zod/v4";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  result: z.object({ summary: z.string() }),
+});
+
+const provider = createPlueSandboxProvider({
+  repo: "acme/app",
+  keepWorkspace: false,
+});
+
+export default smithers((ctx) => (
+  <Workflow name="remote-child">
+    <Sandbox
+      id="plue-run"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      output={outputs.result}
+      reviewDiffs={false}
+      timeoutMs={30 * 60_000}
+    />
+  </Workflow>
+));
+```
+
+## Non-interactive caveat
+
+Keep `reviewDiffs={false}` for Plue runs. `<Sandbox>` defaults to fail-closed diff review, which expects a local review/approval interaction before applying file changes. The v1 Plue provider is non-interactive: it runs the remote child, maps the remote result into the parent run, and does not open a human approval loop inside the VM.
+
+Design child workflows so they return structured output or artifacts. If you need to inspect the remote VM after a failure, run with `keepWorkspace: true`, then use `plue workspace view` or `plue workspace ssh` to connect.
+
+## Claude and Codex bootstrap
+
+Remote workspaces may not have all agent CLIs preinstalled. The provider's bootstrap is idempotent:
+
+- `bun` is installed from the official installer when missing.
+- `claude` is installed with `bun i -g @anthropic-ai/claude-code` when missing.
+- `codex` is installed with `bun i -g @openai/codex` when missing.
+- `~/.bun/bin` is prepended to `PATH` for remote commands.
+- `plue workspace exec --seed-agent-auth claude,codex` stages Claude Code and Codex credentials before the child workflow runs.
+
+The remote mini-project includes an `agents.ts` that exports both `ClaudeCodeAgent` and `CodexAgent`, so child workflows can import or define tasks that use either CLI once bootstrap completes.

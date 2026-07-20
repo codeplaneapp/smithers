@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#4C8DFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#4C8DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#0C0E16"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+<text font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF" letter-spacing="5"><tspan x="96" y="156">SMITHERS · V0.24.0</tspan></text>
+
+  <rect x="96" y="220" width="1408" height="440" rx="16" fill="#141826" stroke="#232A3A"/>
+  <rect x="96" y="220" width="1408" height="64" rx="16" fill="#0A0D14"/>
+  <rect x="96" y="260" width="1408" height="24" fill="#141826"/>
+  <circle cx="130" cy="252" r="9" fill="#F87171"/>
+  <circle cx="160" cy="252" r="9" fill="#FBBF24"/>
+  <circle cx="190" cy="252" r="9" fill="#34D399"/>
+  <text x="800" y="260" font-size="24" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="middle">smithers</text>
+<text font-size="32" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#E7E9EE"><tspan x="136" y="360"><tspan fill="#4C8DFF">$ </tspan>bunx smithers-orchestrator init</tspan></text>
+<text font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280"><tspan x="136" y="438">▸ run this command to capture real output</tspan></text>
+<text font-size="28" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="96" y="720">The default smart and smartTool pools now lead with a working Claude</tspan><tspan x="96" y="760">subscription provider. If no usable provider is found, init fails with…</tspan></text>
+
+  <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
+  <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>
+  <text x="1504" y="826" font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="end">0.24.0</text>
+</svg>

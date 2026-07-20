@@ -1,0 +1,11 @@
+# Per-run agent scratch + isolated working copies (one dir per run id).
+runs/
+# ASAN build artifacts.
+targets/*/build/
+# Local Smithers run database + execution logs.
+smithers.db
+smithers.db-shm
+smithers.db-wal
+.smithers/
+# Never auto-install here; the example runs in-place from the monorepo.
+node_modules/

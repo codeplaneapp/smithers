@@ -1,0 +1,10 @@
+# Polish scan
+
+Confirm and localize these specific review findings in {props.targetRepo} (plus any
+regressions they imply — do not go hunting for new scope):
+
+{props.mustFix}
+
+Each issue: exact file/location and what "fixed" means. Fixers must show red-before-green
+for behavior fixes; the verifier re-runs the relevant backpressure gates from
+docs/planning/04-backpressure.md.

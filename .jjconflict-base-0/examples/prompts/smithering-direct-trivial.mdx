@@ -1,0 +1,19 @@
+# Direct execution (trivial tier)
+
+This request was routed as trivial — just do it, end to end, right now.
+
+## Request
+
+{props.prompt}
+
+Target repo: {props.repo ?? "(current repo)"}
+
+Requirements:
+
+- Follow the repo's existing conventions (read neighboring code first).
+- VERIFY your work: run the relevant tests/build/lint; for behavior changes add or update
+  a test that fails before your fix and passes after. Record what you ran and the results
+  in verificationEvidence.
+- Commit on a branch with a clear message. Do NOT merge to the default branch and do not
+  push unless a remote workflow obviously expects it.
+- List every file you changed in filesChanged.

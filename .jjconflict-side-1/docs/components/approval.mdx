@@ -1,0 +1,78 @@
+---
+title: <Approval>
+description: Durable human approval; persists ApprovalDecision, selection, or ranking.
+---
+
+```ts
+import { Approval, approvalDecisionSchema } from "smithers-orchestrator";
+
+type ApprovalProps = {
+  id: string;
+  mode?: "approve" | "select" | "rank"; // default "approve"
+  options?: ApprovalOption[]; // required for select/rank
+  output: z.ZodObject | Table | string;
+  outputSchema?: z.ZodObject; // default: mode-appropriate schema (approve→approvalDecisionSchema, select→approvalSelectionSchema, rank→approvalRankingSchema); or the output schema itself when output is a ZodObject
+  request: { title: string; summary?: string; metadata?: Record<string, unknown> };
+  onDeny?: "fail" | "continue" | "skip"; // default "fail"
+  allowedScopes?: string[];
+  allowedUsers?: string[];
+  autoApprove?: {
+    after?: number; // auto-approve after N consecutive manual approvals
+    condition?: (ctx: WorkflowContext) => boolean;
+    audit?: boolean;
+    revertOn?: (ctx: WorkflowContext) => boolean;
+  };
+  async?: boolean; // unrelated downstream may continue while pending
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  skipIf?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
+  retries?: number;
+  retryPolicy?: { backoff?: "fixed" | "linear" | "exponential"; initialDelayMs?: number };
+  continueOnFail?: boolean;
+  cache?: { by?: (ctx) => unknown; version?: string };
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+  children?: React.ReactNode;
+};
+```
+
+```tsx
+import { Approval, Sequence, Task, Workflow, approvalDecisionSchema, createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  publishApproval: approvalDecisionSchema,
+  publishResult: z.object({ status: z.enum(["published", "rejected"]) }),
+});
+
+export default smithers((ctx) => {
+  const decision = ctx.outputMaybe(outputs.publishApproval, { nodeId: "approve-publish" });
+  return (
+    <Workflow name="publish-flow">
+      <Sequence>
+        <Approval
+          id="approve-publish"
+          output={outputs.publishApproval}
+          request={{ title: "Publish the draft?", summary: "Human review required." }}
+          onDeny="continue"
+        />
+        {decision ? (
+          <Task id="record" output={outputs.publishResult}>
+            {{ status: decision.approved ? "published" : "rejected" }}
+          </Task>
+        ) : null}
+      </Sequence>
+    </Workflow>
+  );
+});
+```
+
+## Notes
+
+- `mode="select"` returns `{ selected, notes }`; `mode="rank"` returns `{ ranked, notes }`.
+- Durable deferred keyed on (run, node, iteration) survives restarts; the operating agent resolves it with `bunx smithers-orchestrator approve`/`deny` after relaying the request to the human and getting their decision (never hand the command to the human).
+- For a pre-task pause without persisted decision, use `<Task needsApproval>`.

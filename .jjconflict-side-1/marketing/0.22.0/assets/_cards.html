@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --bg:#0C0E16; --surface-1:#141826; --surface-2:#1A2030;
+    --text-primary:rgba(255,255,255,.88); --text-secondary:rgba(255,255,255,.60); --text-tertiary:rgba(255,255,255,.45);
+    --border:rgba(255,255,255,.08); --fill-hover:rgba(255,255,255,.04); --fill-selected:rgba(76,141,255,.12);
+    --accent:#4C8DFF; --success:#34D399; --warning:#FBBF24; --danger:#F87171; --info:#60A5FA;
+    --accent-fill:rgba(76,141,255,.12); --accent-stroke:rgba(76,141,255,.35);
+    --font-sans:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#000;font-family:var(--font-sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .card{
+    width:1600px;height:900px;position:relative;overflow:hidden;
+    background:radial-gradient(1200px 700px at 78% -10%, rgba(76,141,255,.10), transparent 60%), var(--bg);
+    color:var(--text-primary);padding:84px 96px;display:flex;flex-direction:column;
+  }
+  .card + .card{margin-top:40px}
+  .kicker{font-family:var(--font-mono);font-size:22px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent);margin-bottom:26px}
+  h1{font-size:104px;line-height:.98;font-weight:800;letter-spacing:-.02em}
+  h2{font-size:64px;line-height:1.02;font-weight:800;letter-spacing:-.015em}
+  .sub{font-size:32px;line-height:1.4;color:var(--text-secondary);max-width:1100px;margin-top:26px}
+  .brand{position:absolute;left:96px;bottom:60px;display:flex;align-items:center;gap:16px;color:var(--text-tertiary);font-size:24px}
+  .brand .dot{width:14px;height:14px;border-radius:3px;background:var(--accent)}
+  .ver{position:absolute;right:96px;bottom:60px;font-family:var(--font-mono);font-size:24px;color:var(--text-tertiary)}
+  .spacer{flex:1}
+
+  /* hero stat row */
+  .stats{display:flex;gap:18px;margin-top:64px}
+  .stat{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:26px 30px;min-width:300px}
+  .stat .n{font-size:46px;font-weight:800}
+  .stat .l{font-size:22px;color:var(--text-secondary);margin-top:8px}
+
+  /* color=state legend */
+  .legend{display:flex;flex-direction:column;gap:22px;margin-top:54px}
+  .lrow{display:flex;align-items:center;gap:28px;background:var(--surface-1);border:1px solid var(--border);border-left-width:6px;border-radius:10px;padding:24px 32px}
+  .lrow .pill{font-family:var(--font-mono);font-size:24px;padding:8px 18px;border-radius:6px;font-weight:700}
+  .lrow .desc{font-size:30px;color:var(--text-secondary)}
+  .lrow .state{font-size:30px;font-weight:700;min-width:230px}
+
+  /* fork diagram */
+  .flow{display:flex;align-items:center;gap:0;margin-top:70px}
+  .node{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:34px 40px;min-width:330px}
+  .node .tag{font-family:var(--font-mono);font-size:22px;color:var(--accent);margin-bottom:14px}
+  .node .title{font-size:40px;font-weight:800}
+  .node .meta{font-size:24px;color:var(--text-tertiary);margin-top:12px;font-family:var(--font-mono)}
+  .arrow{flex:1;height:4px;background:linear-gradient(90deg,var(--accent-stroke),var(--accent));position:relative;margin:0 8px}
+  .arrow::after{content:"";position:absolute;right:-2px;top:-9px;border-left:20px solid var(--accent);border-top:11px solid transparent;border-bottom:11px solid transparent}
+  .alabel{position:absolute;top:-46px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:20px;color:var(--text-tertiary);white-space:nowrap}
+  .code{margin-top:64px;font-family:var(--font-mono);font-size:30px;color:var(--text-secondary);background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:30px 36px;display:inline-block}
+  .code b{color:var(--accent);font-weight:700}
+
+  /* any-agent grid */
+  .agents{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:60px}
+  .agent{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:32px;font-size:30px;font-weight:700;display:flex;align-items:center;gap:18px}
+  .agent .b{width:14px;height:14px;border-radius:50%;background:var(--success)}
+  .install{margin-top:50px;font-family:var(--font-mono);font-size:32px;background:#000;border:1px solid var(--accent-stroke);border-radius:12px;padding:30px 36px;color:var(--text-primary);display:inline-block}
+  .install .p{color:var(--accent)}
+
+  /* chat-first mock */
+  .chatwrap{display:flex;gap:24px;margin-top:54px;flex:1}
+  .chatcol{flex:1.1;display:flex;flex-direction:column;gap:18px}
+  .overcol{flex:1;background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:0;overflow:hidden;display:flex;flex-direction:column}
+  .overhead{padding:18px 24px;border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:20px;color:var(--text-tertiary);display:flex;gap:10px;align-items:center}
+  .overbody{padding:26px;display:flex;flex-direction:column;gap:14px}
+  .runrow{display:flex;align-items:center;gap:16px;font-size:24px}
+  .runrow .s{width:12px;height:12px;border-radius:50%}
+  .runrow .tag{font-family:var(--font-mono);font-size:18px;padding:4px 12px;border-radius:5px;margin-left:auto}
+  .bubble{border-radius:14px;padding:24px 28px;font-size:27px;line-height:1.45;max-width:88%}
+  .me{align-self:flex-end;background:var(--accent-fill);border:1px solid var(--accent-stroke)}
+  .ai{align-self:flex-start;background:var(--surface-1);border:1px solid var(--border);color:var(--text-secondary)}
+  .ai b{color:var(--text-primary)}
+  .slash{font-family:var(--font-mono);color:var(--accent)}
+  .inputbar{margin-top:auto;background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:22px 26px;font-size:26px;color:var(--text-tertiary);display:flex;align-items:center;gap:14px}
+  .inputbar .cur{width:3px;height:30px;background:var(--accent);display:inline-block;margin-left:2px}
+</style>
+</head>
+<body>
+
+<!-- 1. HERO -->
+<div class="card" id="hero">
+  <div class="kicker">Smithers · v0.22.0</div>
+  <h1>Smithers&nbsp;Studio&nbsp;2</h1>
+  <div class="sub">A ground-up, dark agent-operations console. Watch every run, terminal, workflow, and approval gate, live over real backends. The new default is one conversation that drives issues, runs, PRs, and workflows.</div>
+  <div class="stats">
+    <div class="stat"><div class="n" style="color:var(--accent)">4 + 6 + 3</div><div class="l">progressive-disclosure surfaces</div></div>
+    <div class="stat"><div class="n" style="color:var(--success)">0</div><div class="l">mocks in the runtime path</div></div>
+    <div class="stat"><div class="n" style="color:var(--warning)">⌘K</div><div class="l">reaches everything</div></div>
+  </div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">0.22.0</div>
+</div>
+
+<!-- 2. CHAT-FIRST -->
+<div class="card" id="chat">
+  <div class="kicker">New default · Chat-first shell</div>
+  <h2>Tell it what you want. It runs the rest.</h2>
+  <div class="chatwrap">
+    <div class="chatcol">
+      <div class="bubble me">Open a review on the current branch and show me the verdicts.</div>
+      <div class="bubble ai">Launching <span class="slash">/review</span> over your diff. Opening the live verdict board beside us. Three reviewers running. <b>I'll surface the gate when they finish.</b></div>
+      <div class="inputbar"><span class="slash">/</span> ship the fix once review passes<span class="cur"></span></div>
+    </div>
+    <div class="overcol">
+      <div class="overhead"><span style="color:var(--accent)">▣</span> overlay · Runs</div>
+      <div class="overbody">
+        <div class="runrow"><span class="s" style="background:var(--accent)"></span> review:1 <span class="tag" style="color:var(--accent);background:var(--accent-fill)">running</span></div>
+        <div class="runrow"><span class="s" style="background:var(--success)"></span> review:2 <span class="tag" style="color:var(--success);background:rgba(52,211,153,.12)">approved</span></div>
+        <div class="runrow"><span class="s" style="background:var(--warning)"></span> gate <span class="tag" style="color:var(--warning);background:rgba(251,191,36,.12)">approval</span></div>
+        <div class="runrow"><span class="s" style="background:var(--accent)"></span> implement <span class="tag" style="color:var(--accent);background:var(--accent-fill)">running</span></div>
+        <div class="runrow"><span class="s" style="background:var(--success)"></span> plan <span class="tag" style="color:var(--success);background:rgba(52,211,153,.12)">done</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">studio 2 · /studio toggles the tabbed shell</div>
+</div>
+
+<!-- 3. COLOR = STATE -->
+<div class="card" id="state">
+  <div class="kicker">Design system · Color equals run state</div>
+  <h2>Saturated color only ever means one thing.</h2>
+  <div class="legend">
+    <div class="lrow" style="border-left-color:var(--accent)"><span class="pill" style="color:var(--accent);background:var(--accent-fill)">running</span><span class="state" style="color:var(--accent)">Blue</span><span class="desc">an agent is live right now</span></div>
+    <div class="lrow" style="border-left-color:var(--success)"><span class="pill" style="color:var(--success);background:rgba(52,211,153,.12)">succeeded</span><span class="state" style="color:var(--success)">Green</span><span class="desc">completed or approved</span></div>
+    <div class="lrow" style="border-left-color:var(--warning)"><span class="pill" style="color:var(--warning);background:rgba(251,191,36,.12)">waiting</span><span class="state" style="color:var(--warning)">Amber</span><span class="desc">a human-approval gate needs you</span></div>
+    <div class="lrow" style="border-left-color:var(--danger)"><span class="pill" style="color:var(--danger);background:rgba(248,113,113,.12)">failed</span><span class="state" style="color:var(--danger)">Red</span><span class="desc">errored or denied</span></div>
+  </div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">everything else is near-monochrome</div>
+</div>
+
+<!-- 4. TASK FORK -->
+<div class="card" id="fork">
+  <div class="kicker">New primitive · &lt;Task fork="…"&gt;</div>
+  <h2>Fork the agent's whole mind, context included.</h2>
+  <div class="flow">
+    <div class="node"><div class="tag">source</div><div class="title">plan</div><div class="meta">full session context</div></div>
+    <div class="arrow"><span class="alabel">copies the session</span></div>
+    <div class="node"><div class="tag">fork=&quot;plan&quot;</div><div class="title">implement</div><div class="meta">fresh, independent</div></div>
+    <div class="arrow"><span class="alabel">fork again</span></div>
+    <div class="node"><div class="tag">fork=&quot;implement&quot;</div><div class="title">verify</div><div class="meta">source never mutated</div></div>
+  </div>
+  <div class="code">&lt;Task id="implement" <b>fork="plan"</b>&gt;…&lt;/Task&gt;</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">parallel branches share one base context</div>
+</div>
+
+<!-- 5. ANY AGENT -->
+<div class="card" id="agent">
+  <div class="kicker">No lock-in · Drive Smithers from the agent you already run</div>
+  <h2>One install. Every agent.</h2>
+  <div class="agents">
+    <div class="agent"><span class="b"></span>Claude Code</div>
+    <div class="agent"><span class="b"></span>Codex</div>
+    <div class="agent"><span class="b"></span>Cursor</div>
+    <div class="agent"><span class="b"></span>Copilot</div>
+    <div class="agent"><span class="b"></span>Pi</div>
+    <div class="agent"><span class="b"></span>Hermes</div>
+    <div class="agent"><span class="b"></span>OpenClaw</div>
+    <div class="agent" style="color:var(--text-tertiary)">+14 more</div>
+  </div>
+  <div class="install"><span class="p">$</span> smithers skills add &nbsp;&amp;&amp;&nbsp; smithers mcp add</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh/agents/overview</div>
+  <div class="ver">a drop-in skill + MCP server, fanned out to every detected agent</div>
+</div>
+
+</body>
+</html>

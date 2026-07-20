@@ -1,0 +1,1543 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Release-day Kimi K3 RoadmapBench result on the Valibot 1.2.0 roadmap, compared with the exact Claude Opus baseline and published benchmark context."
+    />
+    <title>Kimi K3 × RoadmapBench — Smithers benchmark report</title>
+    <link rel="canonical" href="https://kimibenchmarks.smithers.sh/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kimibenchmarks.smithers.sh/" />
+    <meta property="og:title" content="Kimi K3 × RoadmapBench" />
+    <meta
+      property="og:description"
+      content="A controlled Smithers rerun: Kimi K3 scores 1.000 on the Valibot 1.2.0 RoadmapBench task, versus the exact Opus-led baseline at 0.714."
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #111a21;
+        --muted: #63717a;
+        --paper: #f3f1e9;
+        --panel: #fffdf8;
+        --line: #d8d8cf;
+        --cyan: #52f0d2;
+        --cyan-dark: #087a6c;
+        --blue: #5478ff;
+        --gold: #f4bd52;
+        --red: #e8685b;
+        --navy: #101c28;
+        --navy-2: #172c3d;
+        --shadow: 0 18px 48px rgba(16, 28, 40, 0.09);
+        --radius: 22px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(
+            circle at 18% 10%,
+            rgba(82, 240, 210, 0.09),
+            transparent 24rem
+          ),
+          var(--paper);
+        font-family:
+          Inter,
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: inherit;
+      }
+      a:hover {
+        color: var(--cyan-dark);
+      }
+
+      .wrap {
+        width: min(1180px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      .hero {
+        position: relative;
+        overflow: hidden;
+        min-height: 650px;
+        padding: 30px 0 70px;
+        color: #f6fbfa;
+        background:
+          linear-gradient(135deg, rgba(82, 240, 210, 0.11), transparent 35%),
+          linear-gradient(160deg, var(--navy), #0d1821 56%, #122638);
+        isolation: isolate;
+      }
+
+      .hero::before,
+      .hero::after {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        border: 1px solid rgba(82, 240, 210, 0.22);
+        border-radius: 50%;
+      }
+
+      .hero::before {
+        width: 720px;
+        height: 720px;
+        right: -260px;
+        top: -300px;
+        box-shadow:
+          0 0 0 110px rgba(82, 240, 210, 0.025),
+          0 0 0 240px rgba(82, 240, 210, 0.02);
+      }
+
+      .hero::after {
+        width: 300px;
+        height: 300px;
+        left: -180px;
+        bottom: -160px;
+      }
+
+      .topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 72px;
+        font-size: 12px;
+        font-weight: 760;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand-mark {
+        width: 31px;
+        height: 31px;
+        border: 7px solid var(--cyan);
+        border-radius: 50% 50% 50% 8px;
+        transform: rotate(-18deg);
+      }
+
+      .run-date {
+        color: #a9b7bf;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+        gap: clamp(40px, 7vw, 100px);
+        align-items: end;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 20px;
+        color: var(--cyan);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 28px;
+        height: 2px;
+        background: currentColor;
+      }
+
+      h1 {
+        max-width: 780px;
+        margin: 0;
+        font-size: clamp(56px, 8.5vw, 106px);
+        line-height: 0.92;
+        letter-spacing: -0.065em;
+        font-weight: 820;
+      }
+
+      h1 span {
+        color: var(--cyan);
+      }
+
+      .dek {
+        max-width: 700px;
+        margin: 30px 0 0;
+        color: #c7d2d7;
+        font-size: clamp(18px, 2.1vw, 24px);
+        line-height: 1.4;
+      }
+
+      .score-card {
+        padding: 28px;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 26px;
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: 0 24px 90px rgba(0, 0, 0, 0.22);
+        backdrop-filter: blur(12px);
+      }
+
+      .score-label {
+        color: #a8b8bf;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .score {
+        margin: 8px 0 4px;
+        color: var(--cyan);
+        font-size: clamp(70px, 9vw, 112px);
+        font-weight: 830;
+        line-height: 1;
+        letter-spacing: -0.075em;
+      }
+
+      .score-sub {
+        color: #d6e0e4;
+        font-size: 17px;
+      }
+
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 24px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 8px 11px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 999px;
+        color: #d9e5e7;
+        background: rgba(0, 0, 0, 0.12);
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .badge::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--cyan);
+        box-shadow: 0 0 12px rgba(82, 240, 210, 0.75);
+      }
+
+      main {
+        padding: 74px 0 88px;
+      }
+
+      .callout {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 1px;
+        margin-top: -112px;
+        position: relative;
+        z-index: 3;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: var(--radius);
+        background: var(--line);
+        box-shadow: var(--shadow);
+      }
+
+      .callout > div {
+        min-height: 160px;
+        padding: 28px;
+        background: var(--panel);
+      }
+
+      .metric-kicker {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .metric-value {
+        margin: 5px 0 2px;
+        font-size: clamp(32px, 4vw, 50px);
+        line-height: 1.1;
+        font-weight: 820;
+        letter-spacing: -0.045em;
+      }
+
+      .metric-note {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      section {
+        padding-top: 92px;
+      }
+
+      .section-head {
+        display: grid;
+        grid-template-columns: minmax(0, 0.7fr) minmax(280px, 0.3fr);
+        gap: 50px;
+        align-items: end;
+        margin-bottom: 34px;
+      }
+
+      .section-no {
+        margin-bottom: 10px;
+        color: var(--cyan-dark);
+        font-size: 11px;
+        font-weight: 850;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: clamp(38px, 5vw, 64px);
+        line-height: 1;
+        letter-spacing: -0.05em;
+      }
+
+      h3 {
+        margin: 0 0 12px;
+        font-size: 22px;
+        line-height: 1.2;
+        letter-spacing: -0.025em;
+      }
+
+      .section-intro {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        box-shadow: 0 10px 35px rgba(16, 28, 40, 0.04);
+      }
+
+      .matchup {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        overflow: hidden;
+      }
+
+      .matchup-chart {
+        padding: clamp(26px, 5vw, 52px);
+      }
+      .matchup-aside {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: clamp(26px, 5vw, 52px);
+        color: #edf6f4;
+        background: var(--navy-2);
+      }
+
+      .versus-row {
+        margin-top: 32px;
+      }
+      .versus-row + .versus-row {
+        margin-top: 30px;
+      }
+      .versus-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 9px;
+      }
+
+      .versus-name {
+        font-weight: 760;
+      }
+      .versus-role {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .versus-value {
+        font-variant-numeric: tabular-nums;
+        font-size: 25px;
+        font-weight: 820;
+      }
+      .track {
+        height: 17px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e2e4de;
+      }
+      .bar {
+        height: 100%;
+        border-radius: inherit;
+      }
+      .bar.kimi {
+        width: 100%;
+        background: linear-gradient(90deg, var(--cyan-dark), var(--cyan));
+      }
+      .bar.opus {
+        width: 71.4%;
+        background: linear-gradient(90deg, #3d589f, var(--blue));
+      }
+
+      .delta {
+        margin: 26px 0 18px;
+        color: var(--cyan);
+        font-size: clamp(56px, 7vw, 88px);
+        line-height: 0.9;
+        font-weight: 830;
+        letter-spacing: -0.06em;
+      }
+
+      .aside-label {
+        color: #9fb0b9;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .aside-copy {
+        color: #bdcbd0;
+        font-size: 14px;
+      }
+      .aside-copy strong {
+        color: #fff;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+
+      caption {
+        padding: 22px 24px 10px;
+        text-align: left;
+        font-size: 20px;
+        font-weight: 780;
+      }
+
+      th,
+      td {
+        padding: 17px 20px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      th {
+        color: var(--muted);
+        background: #f8f7f1;
+        font-size: 11px;
+        font-weight: 820;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      tbody tr:hover td {
+        background: rgba(82, 240, 210, 0.04);
+      }
+      .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .target {
+        min-width: 280px;
+      }
+      .weight {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        font-weight: 790;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .status::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--cyan-dark);
+      }
+
+      .status.unknown::before {
+        background: var(--gold);
+      }
+      .subtle {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .timeline {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+      }
+
+      .phase {
+        position: relative;
+        min-height: 208px;
+        padding: 25px 22px;
+        overflow: hidden;
+      }
+
+      .phase::after {
+        content: attr(data-step);
+        position: absolute;
+        right: -5px;
+        bottom: -36px;
+        color: rgba(16, 28, 40, 0.05);
+        font-size: 128px;
+        font-weight: 850;
+        line-height: 1;
+      }
+
+      .phase-model {
+        color: var(--cyan-dark);
+        font-size: 11px;
+        font-weight: 820;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .phase-time {
+        margin: 18px 0 4px;
+        font-size: 35px;
+        font-weight: 820;
+        letter-spacing: -0.045em;
+      }
+      .phase-copy {
+        position: relative;
+        z-index: 1;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+      .evidence-card {
+        padding: 30px;
+      }
+      .evidence-card .big {
+        margin: 14px 0 3px;
+        font-size: 46px;
+        font-weight: 830;
+        letter-spacing: -0.05em;
+      }
+      .evidence-card p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .check-list {
+        list-style: none;
+        margin: 20px 0 0;
+        padding: 0;
+      }
+      .check-list li {
+        position: relative;
+        padding: 11px 0 11px 28px;
+        border-top: 1px solid var(--line);
+        font-size: 14px;
+      }
+      .check-list li::before {
+        content: "✓";
+        position: absolute;
+        left: 1px;
+        color: var(--cyan-dark);
+        font-weight: 900;
+      }
+
+      .scope-note {
+        display: flex;
+        gap: 17px;
+        align-items: flex-start;
+        margin-bottom: 22px;
+        padding: 19px 21px;
+        border: 1px solid #e3c176;
+        border-radius: 15px;
+        background: #fff8e6;
+        color: #5e4a1e;
+        font-size: 14px;
+      }
+
+      .scope-note strong {
+        white-space: nowrap;
+      }
+
+      .benchmark-stack {
+        display: grid;
+        gap: 22px;
+      }
+      .benchmark-panel {
+        padding: 0 0 8px;
+        overflow: hidden;
+      }
+      .benchmark-panel header {
+        padding: 27px 27px 8px;
+      }
+      .benchmark-panel header p {
+        margin: 7px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .benchmark-panel table {
+        min-width: 720px;
+      }
+      .highlight td {
+        background: rgba(82, 240, 210, 0.09);
+        font-weight: 680;
+      }
+      .legacy-kimi td:first-child {
+        color: var(--cyan-dark);
+        font-weight: 760;
+      }
+
+      .fineprint {
+        margin: 14px 26px 16px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .caveats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1px;
+        overflow: hidden;
+        background: var(--line);
+      }
+
+      .caveat {
+        padding: 28px;
+        background: var(--panel);
+      }
+      .caveat-no {
+        color: var(--cyan-dark);
+        font-size: 12px;
+        font-weight: 850;
+      }
+      .caveat h3 {
+        margin-top: 10px;
+      }
+      .caveat p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .artifacts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .artifact {
+        display: block;
+        min-height: 132px;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--panel);
+        text-decoration: none;
+        transition:
+          transform 0.15s ease,
+          border-color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+
+      .artifact:hover {
+        color: inherit;
+        transform: translateY(-3px);
+        border-color: var(--cyan-dark);
+        box-shadow: 0 14px 28px rgba(16, 28, 40, 0.08);
+      }
+
+      .artifact-type {
+        color: var(--cyan-dark);
+        font-size: 10px;
+        font-weight: 850;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .artifact-name {
+        margin: 7px 0 3px;
+        font-weight: 780;
+      }
+      .artifact-desc {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      footer {
+        margin-top: 90px;
+        padding: 32px 0 45px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .footer-grid {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+      }
+      code {
+        padding: 0.13em 0.38em;
+        border-radius: 5px;
+        background: rgba(16, 28, 40, 0.07);
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.9em;
+      }
+
+      @media (max-width: 900px) {
+        .hero {
+          min-height: auto;
+        }
+        .topline {
+          padding-bottom: 48px;
+        }
+        .hero-grid,
+        .section-head,
+        .matchup {
+          grid-template-columns: 1fr;
+        }
+        .score-card {
+          max-width: 520px;
+        }
+        .callout {
+          grid-template-columns: 1fr;
+          margin-top: -70px;
+        }
+        .timeline {
+          grid-template-columns: 1fr 1fr;
+        }
+        .artifacts {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .wrap {
+          width: min(100% - 24px, 1180px);
+        }
+        .hero {
+          padding-top: 20px;
+        }
+        .topline {
+          align-items: flex-start;
+        }
+        .run-date {
+          text-align: right;
+        }
+        h1 {
+          font-size: 55px;
+        }
+        main {
+          padding-top: 60px;
+        }
+        section {
+          padding-top: 72px;
+        }
+        .grid-2,
+        .timeline,
+        .caveats,
+        .artifacts {
+          grid-template-columns: 1fr;
+        }
+        .callout > div {
+          min-height: auto;
+        }
+        .scope-note {
+          display: block;
+        }
+        .scope-note strong {
+          display: block;
+          margin-bottom: 5px;
+        }
+        th,
+        td {
+          padding: 14px 13px;
+        }
+        .footer-grid {
+          flex-direction: column;
+        }
+      }
+
+      @media print {
+        body {
+          background: #fff;
+        }
+        .hero {
+          min-height: 0;
+          padding-bottom: 45px;
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+        .callout {
+          margin-top: 28px;
+        }
+        main {
+          padding-top: 0;
+        }
+        section {
+          break-inside: avoid;
+          padding-top: 48px;
+        }
+        .panel,
+        .callout {
+          box-shadow: none;
+        }
+        .artifact {
+          min-height: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="wrap">
+        <div class="topline">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span> Smithers
+            benchmark lab
+          </div>
+          <div class="run-date">Release-day run · July 16, 2026</div>
+        </div>
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow">RoadmapBench · Valibot 1.2.0</div>
+            <h1>Kimi K3 <span>closes</span> the roadmap.</h1>
+            <p class="dek">
+              A controlled OpenCode rerun of the exact third-party task
+              previously attempted with Claude Opus 4.8. Kimi’s candidate passed
+              every hidden target.
+            </p>
+          </div>
+          <aside class="score-card" aria-label="Kimi benchmark score">
+            <div class="score-label">Official weighted reward</div>
+            <div class="score">1.000</div>
+            <div class="score-sub">3 of 3 targets · fully resolved</div>
+            <div class="badges">
+              <span class="badge">94 hidden tests pass</span>
+              <span class="badge">audit clean</span>
+              <span class="badge">first attempts</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap">
+        <div class="callout" aria-label="Top-line benchmark findings">
+          <div>
+            <div class="metric-kicker">Exact-task gain</div>
+            <div class="metric-value">+0.286</div>
+            <div class="metric-note">versus the Opus-led 0.714 baseline</div>
+          </div>
+          <div>
+            <div class="metric-kicker">Hidden test evidence</div>
+            <div class="metric-value">67 + 12 + 15</div>
+            <div class="metric-note">coercion · examples · ISBN</div>
+          </div>
+          <div>
+            <div class="metric-kicker">Run integrity</div>
+            <div class="metric-value">0 signals</div>
+            <div class="metric-note">across 62 recorded commands</div>
+          </div>
+        </div>
+
+        <section id="verdict">
+          <div class="section-head">
+            <div>
+              <div class="section-no">01 · Controlled comparison</div>
+              <h2>Same task. Same reviewer. Better finish.</h2>
+            </div>
+            <p class="section-intro">
+              The controlled change was the candidate model: Kimi K3 replaced
+              Claude Opus 4.8 for planning, implementation, and finalization.
+              Codex GPT‑5.5 remained the independent reviewer.
+            </p>
+          </div>
+
+          <div class="panel matchup">
+            <div class="matchup-chart">
+              <h3>Valibot 1.1 → 1.2 weighted completion</h3>
+              <p class="section-intro">
+                Task <code>vbt-1.2.0-roadmap</code> · weights [3, 2, 2]
+              </p>
+
+              <div class="versus-row">
+                <div class="versus-top">
+                  <div class="versus-name">
+                    Kimi K3
+                    <span class="versus-role"
+                      >OpenCode candidate roles + Codex 5.5 review</span
+                    >
+                  </div>
+                  <div class="versus-value">1.000</div>
+                </div>
+                <div class="track" aria-label="Kimi score 100 percent">
+                  <div class="bar kimi"></div>
+                </div>
+              </div>
+
+              <div class="versus-row">
+                <div class="versus-top">
+                  <div class="versus-name">
+                    Claude Opus 4.8
+                    <span class="versus-role"
+                      >Opus candidate roles + Codex 5.5 review</span
+                    >
+                  </div>
+                  <div class="versus-value">0.714</div>
+                </div>
+                <div class="track" aria-label="Opus score 71.4 percent">
+                  <div class="bar opus"></div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="matchup-aside">
+              <div>
+                <div class="aside-label">Completion delta</div>
+                <div class="delta">
+                  +28.6<span style="font-size: 0.42em; letter-spacing: -0.02em">
+                    pp</span
+                  >
+                </div>
+                <p class="aside-copy">
+                  Kimi converted the prior partial result into a full
+                  resolution: <strong>3/3 targets versus 2/3</strong>.
+                </p>
+              </div>
+              <p class="aside-copy">
+                This is a Kimi-led stack result, not a pure single-model result.
+                The reviewer found no roadmap defects and applied
+                <strong>zero fixes</strong>, so the passing implementation
+                remained Kimi’s work.
+              </p>
+            </aside>
+          </div>
+        </section>
+
+        <section id="targets">
+          <div class="section-head">
+            <div>
+              <div class="section-no">02 · Target-level evidence</div>
+              <h2>Every roadmap branch passed.</h2>
+            </div>
+            <p class="section-intro">
+              The benchmark’s unmodified hidden grader assigns binary credit per
+              target, then weights the three target outcomes. Kimi earned all
+              seven available weight points.
+            </p>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <caption>
+                Authoritative hidden-test outcome
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Roadmap target</th>
+                  <th scope="col">Weight</th>
+                  <th scope="col">Kimi K3 run</th>
+                  <th scope="col">Exact Opus baseline</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="target">
+                    <strong>Type coercion actions</strong
+                    ><span class="subtle"
+                      >toBigint, toBoolean, toDate, toNumber, toString</span
+                    >
+                  </td>
+                  <td><span class="weight">3 / 7</span></td>
+                  <td>
+                    <span class="status">Pass</span
+                    ><span class="subtle">67 hidden tests</span>
+                  </td>
+                  <td>
+                    <span class="status">Pass</span
+                    ><span class="subtle"
+                      >weight‑3 target retained in baseline summary</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td class="target">
+                    <strong>Schema examples + extraction</strong
+                    ><span class="subtle"
+                      >examples metadata and depth-first getExamples</span
+                    >
+                  </td>
+                  <td><span class="weight">2 / 7</span></td>
+                  <td>
+                    <span class="status">Pass</span
+                    ><span class="subtle">12 hidden tests</span>
+                  </td>
+                  <td rowspan="2">
+                    <span class="status unknown">1 of these 2</span
+                    ><span class="subtle"
+                      >The old report preserved the aggregate 2/3 result, not
+                      which weight‑2 target failed.</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td class="target">
+                    <strong>ISBN validation</strong
+                    ><span class="subtle"
+                      >ISBN‑10/13 format, separators, prefix, checksum</span
+                    >
+                  </td>
+                  <td><span class="weight">2 / 7</span></td>
+                  <td>
+                    <span class="status">Pass</span
+                    ><span class="subtle">15 hidden tests</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Total</strong></td>
+                  <td><strong>7 / 7</strong></td>
+                  <td><strong>1.000 · 3/3</strong></td>
+                  <td><strong>0.714 · 2/3</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="run">
+          <div class="section-head">
+            <div>
+              <div class="section-no">03 · Run anatomy</div>
+              <h2>53 minutes, four clean stages.</h2>
+            </div>
+            <p class="section-intro">
+              All workflow nodes completed on attempt one. There were no
+              retries, model fallbacks, or reviewer code changes.
+            </p>
+          </div>
+
+          <div class="timeline">
+            <article class="panel phase" data-step="1">
+              <div class="phase-model">Kimi K3 · OpenCode</div>
+              <div class="phase-time">2m 07s</div>
+              <h3>Plan</h3>
+              <div class="phase-copy">
+                Mapped all three targets, public exports, implementation
+                patterns, and test strategy.
+              </div>
+            </article>
+            <article class="panel phase" data-step="2">
+              <div class="phase-model">Kimi K3 · OpenCode</div>
+              <div class="phase-time">36m 05s</div>
+              <h3>Implement</h3>
+              <div class="phase-copy">
+                Added 5 coercion actions, examples metadata/extraction, ISBN
+                validation, exports, runtime tests, and type tests.
+              </div>
+            </article>
+            <article class="panel phase" data-step="3">
+              <div class="phase-model">GPT‑5.5 xhigh · Codex</div>
+              <div class="phase-time">10m 23s</div>
+              <h3>Review</h3>
+              <div class="phase-copy">
+                Audited signatures, behavior, builds, public imports, and
+                regressions. Found zero roadmap defects; fixed nothing.
+              </div>
+            </article>
+            <article class="panel phase" data-step="4">
+              <div class="phase-model">Kimi K3 · OpenCode</div>
+              <div class="phase-time">4m 57s</div>
+              <h3>Finalize</h3>
+              <div class="phase-copy">
+                Reran focused runtime/type suites and end-to-end API smoke
+                checks before declaring readiness.
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="integrity">
+          <div class="section-head">
+            <div>
+              <div class="section-no">04 · Fairness & integrity</div>
+              <h2>The score survived the controls.</h2>
+            </div>
+            <p class="section-intro">
+              Agent self-assessment is excluded from the outcome. The reported
+              number comes only from RoadmapBench’s hidden target tests in the
+              validated scoring path.
+            </p>
+          </div>
+
+          <div class="grid-2">
+            <article class="panel evidence-card">
+              <div class="metric-kicker">Grader soundness</div>
+              <div class="big">0 → 1</div>
+              <p>
+                Untouched source scores 0.0; the oracle patch scores 1.0 through
+                the same scorer.
+              </p>
+              <ul class="check-list">
+                <li>Pinned official task image</li>
+                <li>Fresh scorer container with network disabled</li>
+                <li>Unmodified upstream <code>tests/test.sh</code></li>
+              </ul>
+            </article>
+            <article class="panel evidence-card">
+              <div class="metric-kicker">Post-hoc audit</div>
+              <div class="big">Clean</div>
+              <p>
+                62 recorded commands inspected, with zero
+                access/leakage/subversion signals.
+              </p>
+              <ul class="check-list">
+                <li>
+                  Hidden tests and oracle stayed outside the repo until scoring
+                </li>
+                <li>OpenCode web search/fetch/codesearch denied</li>
+                <li>Offline project toolchain container</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="scope-note" style="margin-top: 18px; margin-bottom: 0">
+            <strong>Collection note</strong>
+            <span
+              >The workflow-level scorer did not materialize
+              <code>score.json</code>, so the collector used its documented
+              fallback and invoked the same authoritative
+              <code>score.sh</code> directly against the finished candidate. The
+              resulting <code>reward.json</code> and test log are linked
+              below.</span
+            >
+          </div>
+        </section>
+
+        <section id="context">
+          <div class="section-head">
+            <div>
+              <div class="section-no">05 · Known benchmark context</div>
+              <h2>Promising signal, not a leaderboard claim.</h2>
+            </div>
+            <p class="section-intro">
+              Two external tables help frame the result: RoadmapBench’s
+              full-suite study and Moonshot’s K3 launch benchmarks. Neither is
+              directly comparable to this one-task Smithers run.
+            </p>
+          </div>
+
+          <div class="scope-note">
+            <strong>Do not rank these together.</strong>
+            <span
+              >Our 1.000 is one selected task under a Smithers four-stage
+              scaffold with a retained Codex reviewer. The published
+              RoadmapBench figures cover all 115 tasks under OpenHands, one
+              trial per model. Kimi’s launch table spans other benchmarks and
+              varying harnesses.</span
+            >
+          </div>
+
+          <div class="benchmark-stack">
+            <article class="panel benchmark-panel">
+              <header>
+                <h3>Published RoadmapBench full-suite results</h3>
+                <p>
+                  115 tasks · OpenHands scaffold · single trial per model · K3
+                  was not included in the paper.
+                </p>
+              </header>
+              <div
+                class="table-wrap"
+                style="border: 0; border-radius: 0; box-shadow: none"
+              >
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Model</th>
+                      <th scope="col" class="num">Resolved rate</th>
+                      <th scope="col" class="num">Completion score</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="highlight">
+                      <td>Claude Opus 4.7</td>
+                      <td class="num">39.1%</td>
+                      <td class="num">0.692</td>
+                    </tr>
+                    <tr>
+                      <td>Claude Opus 4.6</td>
+                      <td class="num">32.2%</td>
+                      <td class="num">0.627</td>
+                    </tr>
+                    <tr>
+                      <td>GPT‑5.4</td>
+                      <td class="num">29.6%</td>
+                      <td class="num">0.497</td>
+                    </tr>
+                    <tr>
+                      <td>Gemini 3.1 Pro</td>
+                      <td class="num">20.9%</td>
+                      <td class="num">0.439</td>
+                    </tr>
+                    <tr>
+                      <td>DeepSeek V4 Pro</td>
+                      <td class="num">18.3%</td>
+                      <td class="num">0.486</td>
+                    </tr>
+                    <tr>
+                      <td>GLM‑5.1</td>
+                      <td class="num">18.3%</td>
+                      <td class="num">0.453</td>
+                    </tr>
+                    <tr class="legacy-kimi">
+                      <td>Kimi K2.6</td>
+                      <td class="num">14.8%</td>
+                      <td class="num">0.432</td>
+                    </tr>
+                    <tr>
+                      <td>Mimo V2.5 Pro</td>
+                      <td class="num">13.9%</td>
+                      <td class="num">0.440</td>
+                    </tr>
+                    <tr>
+                      <td>Qwen 3.6 Plus</td>
+                      <td class="num">12.2%</td>
+                      <td class="num">0.424</td>
+                    </tr>
+                    <tr class="legacy-kimi">
+                      <td>Kimi K2.5</td>
+                      <td class="num">11.3%</td>
+                      <td class="num">0.378</td>
+                    </tr>
+                    <tr>
+                      <td>MiniMax M2.7</td>
+                      <td class="num">10.4%</td>
+                      <td class="num">0.332</td>
+                    </tr>
+                    <tr>
+                      <td>Qwen 3.5 397B</td>
+                      <td class="num">9.6%</td>
+                      <td class="num">0.383</td>
+                    </tr>
+                    <tr>
+                      <td>Seed 2.0 Pro</td>
+                      <td class="num">5.2%</td>
+                      <td class="num">0.177</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="fineprint">
+                Source:
+                <a
+                  href="https://arxiv.org/html/2605.15846"
+                  target="_blank"
+                  rel="noreferrer"
+                  >RoadmapBench paper, Table 2</a
+                >. RR counts only fully resolved tasks; Completion Score
+                averages weighted per-task rewards. The exact local Opus 4.8
+                comparison above is a separate Smithers run and is not part of
+                this table.
+              </p>
+            </article>
+
+            <article class="panel benchmark-panel">
+              <header>
+                <h3>Moonshot’s release-day Kimi K3 coding table</h3>
+                <p>
+                  Vendor-published K3 (max) results, shown beside the same
+                  table’s Opus 4.8 and GPT‑5.5 values.
+                </p>
+              </header>
+              <div
+                class="table-wrap"
+                style="border: 0; border-radius: 0; box-shadow: none"
+              >
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Benchmark</th>
+                      <th scope="col" class="num">Kimi K3</th>
+                      <th scope="col" class="num">Opus 4.8</th>
+                      <th scope="col" class="num">GPT‑5.5</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="highlight">
+                      <td>DeepSWE</td>
+                      <td class="num">67.5</td>
+                      <td class="num">59.0</td>
+                      <td class="num">67.0</td>
+                    </tr>
+                    <tr>
+                      <td>Program Bench</td>
+                      <td class="num"><strong>77.8</strong></td>
+                      <td class="num">71.9</td>
+                      <td class="num">70.8</td>
+                    </tr>
+                    <tr>
+                      <td>Terminal Bench 2.1</td>
+                      <td class="num"><strong>88.3</strong></td>
+                      <td class="num">84.6</td>
+                      <td class="num">83.4</td>
+                    </tr>
+                    <tr>
+                      <td>FrontierSWE</td>
+                      <td class="num"><strong>81.2</strong></td>
+                      <td class="num">66.7</td>
+                      <td class="num">64.9</td>
+                    </tr>
+                    <tr>
+                      <td>SWE Marathon</td>
+                      <td class="num"><strong>42.0</strong></td>
+                      <td class="num">40.0</td>
+                      <td class="num">14.0</td>
+                    </tr>
+                    <tr>
+                      <td>PostTrain Bench</td>
+                      <td class="num"><strong>36.6</strong></td>
+                      <td class="num">34.1</td>
+                      <td class="num">28.4</td>
+                    </tr>
+                    <tr>
+                      <td>MLS Bench</td>
+                      <td class="num"><strong>48.3</strong></td>
+                      <td class="num">42.8</td>
+                      <td class="num">35.5</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="fineprint">
+                Source:
+                <a
+                  href="https://www.kimi.com/fr-fr/blog/kimi-k3"
+                  target="_blank"
+                  rel="noreferrer"
+                  >Kimi K3 launch technical blog</a
+                >. These are Moonshot-reported results, not reproduced in this
+                run. The blog’s footnotes use different agent harnesses by
+                benchmark/model; K3 results use max reasoning.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section id="limits">
+          <div class="section-head">
+            <div>
+              <div class="section-no">06 · Interpretation</div>
+              <h2>What this run does—and does not—say.</h2>
+            </div>
+            <p class="section-intro">
+              The strongest conclusion is narrow: on this exact audited Valibot
+              task, the Kimi-led rerun outperformed the recorded Opus-led
+              baseline.
+            </p>
+          </div>
+
+          <div class="panel caveats">
+            <article class="caveat">
+              <div class="caveat-no">01</div>
+              <h3>One task, one attempt</h3>
+              <p>
+                A 1.000 single-task result is not an estimate of K3’s 115-task
+                resolved rate. More tasks and repeats are required for a stable
+                model-level conclusion.
+              </p>
+            </article>
+            <article class="caveat">
+              <div class="caveat-no">02</div>
+              <h3>Scaffold attribution</h3>
+              <p>
+                Kimi handled three candidate roles; Codex GPT‑5.5 independently
+                reviewed. The reviewer made no fixes, but the workflow itself
+                may improve performance versus a single-agent scaffold.
+              </p>
+            </article>
+            <article class="caveat">
+              <div class="caveat-no">03</div>
+              <h3>Host-run threat model</h3>
+              <p>
+                The build container was offline and network tools were denied,
+                but the agent was not under a complete OS-level host sandbox.
+                Integrity therefore also relies on the clean command audit.
+              </p>
+            </article>
+            <article class="caveat">
+              <div class="caveat-no">04</div>
+              <h3>Patch capture caveat</h3>
+              <p>
+                The collector’s <code>agent.diff</code> includes only the two
+                tracked barrel edits; Git omitted the 37 newly created untracked
+                candidate files. The audit inventories those files, and the
+                scorer compiled/tested the finished tree. Three additional
+                <code>__bench__</code> files in that inventory were injected
+                only after the run by scoring.
+              </p>
+            </article>
+            <article class="caveat">
+              <div class="caveat-no">05</div>
+              <h3>Runtime is hardware-bound</h3>
+              <p>
+                The official linux/amd64 task image ran under emulation on an
+                arm64 Mac. Treat 53m32s as this setup’s wall time, not a
+                portable latency benchmark.
+              </p>
+            </article>
+            <article class="caveat">
+              <div class="caveat-no">06</div>
+              <h3>Baseline target identity</h3>
+              <p>
+                The old Opus report records the weight‑3 target plus one
+                weight‑2 target passing, but not whether examples or ISBN was
+                the miss. This report does not infer it.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section id="artifacts">
+          <div class="section-head">
+            <div>
+              <div class="section-no">07 · Reproducibility bundle</div>
+              <h2>Follow the evidence.</h2>
+            </div>
+            <p class="section-intro">
+              The local links below open the scorer output, audit, provenance,
+              run log, workflow definition, and historical baseline used in this
+              report.
+            </p>
+          </div>
+
+          <div class="artifacts">
+            <a class="artifact" href="evidence/reward.json">
+              <div class="artifact-type">JSON · authoritative</div>
+              <div class="artifact-name">Hidden-test reward</div>
+              <div class="artifact-desc">Reward 1.0 · 3/3 phases</div>
+            </a>
+            <a class="artifact" href="evidence/test-output.txt">
+              <div class="artifact-type">Log · scorer</div>
+              <div class="artifact-name">Hidden-test output</div>
+              <div class="artifact-desc">67 + 12 + 15 tests passing</div>
+            </a>
+            <a class="artifact" href="evidence/audit.json">
+              <div class="artifact-type">JSON · integrity</div>
+              <div class="artifact-name">Audit verdict</div>
+              <div class="artifact-desc">Clean · 62 commands · 0 signals</div>
+            </a>
+            <a class="artifact" href="evidence/report.json">
+              <div class="artifact-type">JSON · aggregate</div>
+              <div class="artifact-name">Regression report</div>
+              <div class="artifact-desc">RR 1.0 · CS 1.0 · n=1</div>
+            </a>
+            <a class="artifact" href="evidence/provenance.json">
+              <div class="artifact-type">JSON · provenance</div>
+              <div class="artifact-name">Model & baseline record</div>
+              <div class="artifact-desc">Kimi K3/OpenCode + GPT‑5.5 review</div>
+            </a>
+            <a class="artifact" href="evidence/run-summary.json">
+              <div class="artifact-type">JSON · workflow</div>
+              <div class="artifact-name">Run summary</div>
+              <div class="artifact-desc">
+                Stages, durations, outputs, model pool
+              </div>
+            </a>
+            <a class="artifact" href="evidence/agent.diff">
+              <div class="artifact-type">Diff · partial</div>
+              <div class="artifact-name">Tracked patch preview</div>
+              <div class="artifact-desc">
+                Two public barrel edits; see capture caveat
+              </div>
+            </a>
+            <a class="artifact" href="evidence/methodology.md">
+              <div class="artifact-type">Markdown · methodology</div>
+              <div class="artifact-name">Controlled methodology</div>
+              <div class="artifact-desc">
+                Roles, controls, scorer, interpretation
+              </div>
+            </a>
+            <a class="artifact" href="evidence/opus-baseline.md">
+              <div class="artifact-type">Markdown · baseline</div>
+              <div class="artifact-name">Recorded Opus results</div>
+              <div class="artifact-desc">
+                Exact-task 0.714 baseline and methodology
+              </div>
+            </a>
+          </div>
+        </section>
+
+        <footer>
+          <div class="footer-grid">
+            <div>
+              <a href="https://kimibenchmarks.smithers.sh/"
+                >kimibenchmarks.smithers.sh</a
+              >
+              · July 16, 2026
+            </div>
+            <div>Run ID: <code>rmb-kimi-k3-opencode-vbt-1.2.0</code></div>
+          </div>
+        </footer>
+      </div>
+    </main>
+  </body>
+</html>

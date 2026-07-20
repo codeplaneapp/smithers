@@ -1,0 +1,33 @@
+---
+title: backpressure-plan
+description: Turn acceptance criteria into a gate matrix so a workflow cannot just try-its-best and move on.
+---
+
+`backpressure-plan` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
+`backpressure-plan` turns a goal and its acceptance criteria into a **gate matrix**:
+each criterion is mapped to a verification method (schema, unit/integration test,
+eval, review, approval, or trace) and an enforcement policy. Use it before building
+or running an automation so every "done" claim has to be proven by evidence instead
+of an agent declaring victory and moving on.
+
+```bash
+bunx smithers-orchestrator workflow run backpressure-plan \
+  --prompt "The /login endpoint returns valid JSON, rejects bad credentials with 401, and stays under 200ms p95"
+```
+
+## Stages
+
+1. **extract-criteria**: pull the prompt apart into a flat list of atomic, verifiable acceptance criteria. A goal with no verifiable criteria fails the run loudly instead of producing an empty gate matrix.
+2. **plan-gates**: map each criterion to a `verificationMethod`, `gateType` (blocking / warning / informational), who checks it, the failure action, the evidence required, and whether a human approval is needed. Every blocking criterion must map to a real verification method.
+3. **verify**: deterministic (no agent) parity check of the matrix against the extracted criteria (one gate per criterion, same order, verbatim text), returning `{ match, criteriaCount, gateCount, missing, unverifiedBlocking, summary }`.
+
+## Inputs
+
+| Input | Type | Default |
+| --- | --- | --- |
+| `prompt` | string | `"Describe the goal and its acceptance criteria in plain English."` |
+
+Use this when you want a run that can apply real backpressure: every criterion has
+a check and an evidence requirement, so the workflow cannot silently skip the parts
+it could not finish.

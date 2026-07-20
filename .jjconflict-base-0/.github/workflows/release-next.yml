@@ -1,0 +1,97 @@
+name: Release next channel
+
+# Every fully green commit on main ships to the npm `next` dist-tag (and the
+# moving `next` git tag) via scripts/publish-next.mjs. The `latest` dist-tag
+# and the vX.Y.Z release tags are owned exclusively by the manual
+# `pnpm release` flow (scripts/publish.mjs) and are never touched here.
+#
+# "Fully green" means every push-triggered workflow — CI and Faults — succeeded
+# for the exact commit. Each of the two completion events triggers this
+# workflow; the gate step re-checks BOTH workflows' conclusions for the commit,
+# so only the event that completes the green pair actually publishes, and a
+# commit with any red lane never ships.
+
+on:
+  workflow_run:
+    workflows: ["CI", "Faults (per-PR)"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: read
+
+# Serialize publishes so two green commits cannot interleave registry writes.
+# publish-next.mjs additionally orders the `next` pointers by commit time, so
+# an out-of-order run (older commit's CI finishing last) cannot move `next`
+# backwards even if runs land out of queue order.
+concurrency:
+  group: release-next
+  cancel-in-progress: false
+
+jobs:
+  publish-next:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.repository == 'smithersai/smithers'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # Checkout must precede the gate: the gate step runs
+      # scripts/release-next-gate.mjs from this checkout, and without it the
+      # module-not-found exit was read as "not ready", silently skipping every
+      # publish.
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Require the latest push workflow runs green for this commit
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          test -f scripts/release-next-gate.mjs
+          runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+            --jq '.workflow_runs')
+          if gate=$(printf '%s' "$runs" | node scripts/release-next-gate.mjs); then
+            ready=true
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then exit "$status"; fi
+            ready=false
+          fi
+          echo "$gate"
+          if [ "$ready" != "true" ]; then
+            echo "Latest required push workflows are not yet green for $HEAD_SHA; their completion events will re-trigger this workflow"
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v6.0.8
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v6.4.0
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          bun-version: 1.3.13
+
+      - name: Install dependencies
+        if: steps.gate.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Publish next snapshot
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/publish-next.mjs

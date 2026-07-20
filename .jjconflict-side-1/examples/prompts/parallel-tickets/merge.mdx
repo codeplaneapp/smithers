@@ -1,0 +1,20 @@
+Merge ticket branch **`{props.branch}`** into **`{props.baseBranch}`**.
+
+Steps:
+1. `git fetch origin {props.baseBranch}`
+2. Check whether `{props.branch}` is already up to date on `{props.baseBranch}`.
+   If not, attempt a rebase. If the rebase has conflicts, abort and report
+   `status: "conflict"` — do not try to resolve them here.
+3. Run the project's build/test gate (whatever the repo conventionally uses).
+   If gates fail, report `status: "failed"` with the failure details in `note`.
+4. Fast-forward `{props.baseBranch}` to the rebased branch tip and push.
+5. Delete the local `{props.branch}` after a clean merge.
+
+## Output
+
+Return JSON matching `mergeSchema`:
+- `ticketId`: `"{props.ticketId}"`
+- `branch`: `"{props.branch}"`
+- `status`: `"merged"` | `"conflict"` | `"failed"`
+- `note`: 1–2 sentences explaining what happened (commit SHA on success,
+  conflict files on conflict, failing gate name on failure).

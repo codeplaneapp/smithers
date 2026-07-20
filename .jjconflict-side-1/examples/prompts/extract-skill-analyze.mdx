@@ -1,0 +1,49 @@
+# Analyze the pattern to harvest
+
+You are the analysis step of an "extract a reusable skill" pipeline. A run (or a
+described pattern) just happened, and we want to harvest whatever is durable and
+reusable from it. Do NOT write any files yet — only produce the structured
+analysis.
+
+## What to harvest
+
+{props.prompt}
+
+## Run to read
+
+Run id: {props.runId ?? "(none given — analyse the prompt/context above on its own)"}
+
+If a run id is given (the `Run id` above), you have file and shell tools — inspect
+the real run state before deciding, substituting that id for `RUN_ID` below. Read
+it, do not guess:
+
+- `bunx smithers-orchestrator inspect RUN_ID` for the full run state (steps, agents, outputs).
+- `bunx smithers-orchestrator events RUN_ID --limit 200` for the event history.
+- `bunx smithers-orchestrator node NODE_ID --run-id RUN_ID` for a specific node's tool calls and output.
+
+These are read-only. Do NOT start, cancel, fork, or graph any run — another step
+owns that. If no run id is given, work purely from the prompt and context above.
+
+## What to decide
+
+A harvest can land in three places, and they are not mutually exclusive:
+
+1. **A skill** — a short agent-facing markdown doc under `{props.skillsDir}` that
+   future worker agents read. Best when the pattern is "here is how to do X well".
+2. **A whole workflow** — a new Smithers `.tsx` graph. Best when the pattern is a
+   multi-step, repeatable process worth running end-to-end (clarify, loop, gate).
+3. **Memory** — durable, run-independent facts worth remembering across future
+   runs (a convention, a gotcha, a decision). Avoid run-specific trivia.
+
+Produce:
+
+- **repeatedPattern** — one paragraph naming the durable, repeatable pattern.
+- **reusableAsSkill** — `true` when a skill doc is the right home for it.
+- **reusableAsWorkflow** — `true` when a new workflow is the right home for it.
+- **memoryFacts** — the durable facts worth persisting (may be empty).
+
+Be decisive and conservative: only mark something reusable when you can name the
+concrete, repeatable shape. The next step turns this into proposals.
+
+REQUIRED OUTPUT:
+{props.schema}

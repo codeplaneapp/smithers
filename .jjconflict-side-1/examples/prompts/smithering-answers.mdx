@@ -1,0 +1,13 @@
+# Product questions for the human
+
+Build request: {props.request}
+
+{props.questionsBlock}
+
+Operating agent: put these to the human conversationally — never tell the human to run a
+command. The recommended answers make "just go with your recommendations" a valid reply.
+Then record the result as JSON:
+
+```json
+{ "answers": [{ "id": "...", "answer": "..." }], "additionalContext": "anything else we should know, or null" }
+```

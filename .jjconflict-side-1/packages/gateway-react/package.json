@@ -1,0 +1,48 @@
+{
+  "name": "@smithers-orchestrator/gateway-react",
+  "version": "0.29.0",
+  "description": "React hooks and root helpers for Smithers Gateway UIs",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "import": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "build": "node ../../node_modules/tsup/dist/cli-default.js --dts-only",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "test": "bun test tests"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@tanstack/react-db": "0.1.91",
+    "@tanstack/react-query": "5.101.2",
+    "effect": "3.21.4"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.10.6",
+    "@smithers-orchestrator/db": "workspace:*",
+    "@smithers-orchestrator/server": "workspace:*",
+    "@types/bun": "latest",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "~6.0.3"
+  }
+}

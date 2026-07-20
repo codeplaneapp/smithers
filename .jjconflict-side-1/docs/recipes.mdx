@@ -1,0 +1,387 @@
+---
+title: Recipes
+description: Tight, reusable patterns. Copy, paste, adapt.
+---
+
+Each recipe is a working snippet plus one line of context. They compose freely.
+
+<Note>API reference: [Reference overview](/reference/overview) maps every package to its exhaustive API page, each with links to source and tests.</Note>
+
+If you want a ready-to-run outcome before writing workflow code, start with [Starters](/starters) or run `bunx smithers-orchestrator starters`.
+
+## Default model routing
+
+Smithers-generated workflows are Codex-first when usable Codex authentication
+is available. GPT-5.6 Luna is now the broad default: start with
+it for research, implementation, ordinary tool use, UI work, and routine-to-
+substantial execution, then escalate only when the task earns the extra cost or
+judgment. Pin the tier to the role:
+
+| Work | Model |
+|---|---|
+| Research, implementation, ordinary tool use, UI, and routine-to-substantial execution | `gpt-5.6-luna` |
+| Explicitly tool-heavy validation or higher-judgment escalation | `gpt-5.6-terra` |
+| Planning, orchestration, final review, and the hardest reasoning | `gpt-5.6-sol` |
+
+Luna remains the first implementation, research, and ordinary tool-use model
+even for large or substantial changes; size alone does not promote it to Sol.
+Escalate to Terra only for explicitly tool-heavy validation or higher-judgment
+checking, and to Sol for
+ambiguous architecture, final review, high-stakes decisions, or repeated Luna
+failure. Non-Codex adapters are later sequential fallbacks when earlier Codex
+agents are unavailable or fail; they are not parallel peers or a second opinion
+on every run. `claude-fable-5` is the configured smart-role fallback or an
+intentional Claude-native specialist. Explicit provider-specific workflows
+continue to run as written. See the
+[SOTA model registry](/reference/sota-models#role-defaults) for the decision
+rules and primary release links.
+
+## Implement → review loop
+
+Iterate until a reviewer signs off, with a hard cap.
+
+```tsx
+<Loop
+  until={ctx.latest(outputs.review, "review")?.approved === true}
+  maxIterations={5}
+  onMaxReached="return-last"
+>
+  <Sequence>
+    <Task id="implement" output={outputs.impl} agent={implementer}>
+      {`${ctx.input.task}\nPrior review: ${ctx.latest(outputs.review, "review")?.feedback ?? "none"}`}
+    </Task>
+    <Task id="review" output={outputs.review} agent={reviewer}>
+      {`Review the latest implementation. Return { approved, feedback }.`}
+    </Task>
+  </Sequence>
+</Loop>
+```
+
+Stop conditions must be measurable (boolean, count, array length). Avoid "looks good" prompts; agents are literal.
+
+In a `<Loop>` `until`, read the most recent iteration with `ctx.latest`. `ctx.outputMaybe(.., { nodeId })` without an explicit `iteration` resolves the *current render iteration* (which equals the loop iteration only for a single, non-nested loop, and is `0` when several loops coexist), so an `outputMaybe`-based `until` can silently never advance.
+
+## Parallel Codex review
+
+Two Codex tiers provide independent signals without routing to another provider.
+Cost = the slower model's latency.
+
+```tsx
+<Parallel>
+  <Task id={`${ticket.id}:review-sol`} output={outputs.review} agent={codexSol} continueOnFail>
+    <ReviewPrompt reviewer="sol" />
+  </Task>
+  <Task id={`${ticket.id}:validate-terra`} output={outputs.review} agent={codexTerra} continueOnFail>
+    <ReviewPrompt reviewer="terra" />
+  </Task>
+</Parallel>
+```
+
+`continueOnFail` keeps one tier's timeout from blocking the other.
+
+## Approval gate with branching
+
+Decision data drives the next branch.
+
+```tsx
+<Approval
+  id="ship-decision"
+  output={outputs.shipDecision}
+  request={{ title: `Ship v${ctx.input.version}?`, summary: testReport }}
+  onDeny="continue"
+/>
+
+{ctx.outputMaybe(outputs.shipDecision, { nodeId: "ship-decision" })?.approved
+  ? <Task id="release" .../>
+  : <Task id="rollback" .../>}
+```
+
+`onDeny`: `"fail"` aborts, `"continue"` proceeds without the gated branch, `"skip"` skips the gated tasks.
+
+## Retry policy & timeouts
+
+```tsx
+<Task
+  id="api-call"
+  agent={agent}
+  retries={3}
+  retryPolicy={{ backoff: "exponential", initialDelayMs: 1000 }}
+  timeoutMs={30_000}
+>
+  Call external API.
+</Task>
+```
+
+Defaults to fit the work: simple tasks 30–60s + 1–2 retries, tool-heavy 2–5m + 1–2, large generations 5–10m + 0–1. Exponential backoff for rate-limited APIs.
+
+## Optional, non-blocking step
+
+```tsx
+<Task id="lint" output={outputs.lint} agent={linter} continueOnFail>
+  Run lint checks. Pipeline continues if this fails.
+</Task>
+```
+
+Use for nice-to-have telemetry, lint, optional analysis.
+
+## Conditional branch on output
+
+```tsx
+const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
+
+{analysis?.risk === "high" ? (
+  <Task id="escalate" output={outputs.escalation} agent={escalator}>
+    {`Critical: ${analysis.summary}`}
+  </Task>
+) : null}
+```
+
+`ctx.outputMaybe` for control flow.
+
+## Dynamic ticket discovery
+
+Discover work, run each ticket, re-render to catch the next batch. Scales to large projects.
+
+```tsx
+export default smithers((ctx) => {
+  const discover = ctx.latest(outputs.discover, "discover");
+  const unfinished = (discover?.tickets ?? []).filter(
+    (t) => !ctx.latest(outputs.report, `${t.id}:report`)
+  );
+
+  return (
+    <Workflow name="big-project">
+      <Sequence>
+        <Branch if={unfinished.length === 0} then={<Discover />} />
+        {unfinished.map((t) => (
+          <TicketPipeline key={t.id} ticket={t} />
+        ))}
+      </Sequence>
+    </Workflow>
+  );
+});
+```
+
+Use stable IDs (`t.id`, not array index) so resume matches.
+
+## Coherent task with tools
+
+One context boundary per logical operation, not per step. Splitting too finely loses cross-step reasoning.
+
+```tsx
+<Task id="fix-config-bugs" output={outputs.result} agent={agentWithTools}>
+  {`Analyze config files in ${ctx.input.dir}, find bugs, fix them, write results.
+   Use read, edit, bash. Return { summary, filesChanged }.`}
+</Task>
+```
+
+## Per-agent least-privilege tools
+
+```tsx
+import { OpenAIAgent } from "smithers-orchestrator";
+
+const researcher  = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" });
+const validator   = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } });
+const reviewer    = new OpenAIAgent({ model: "gpt-5.6-sol", instructions: "...", tools: { read, grep } });
+const implementer = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "...", tools: { read, write, edit, bash } });
+```
+
+Match the tool surface to the role.
+
+## Side-effect tools with idempotency
+
+External mutations must mark themselves and use the runtime idempotency key.
+
+```tsx
+import { defineTool } from "smithers-orchestrator/tools";
+
+const createTicket = defineTool({
+  name: "jira.create",
+  schema: z.object({ title: z.string() }),
+  sideEffect: true,
+  idempotent: false,
+  async execute(args, ctx) {
+    return jira.createIssue({ ...args, idempotencyKey: ctx.idempotencyKey });
+  },
+});
+```
+
+Retries reuse the same idempotency key, so a successful side effect from attempt 1 isn't doubled by attempt 2.
+
+## Caching for iterative authoring
+
+```tsx
+<Workflow name="report" cache>
+  <Task
+    id="analyze"
+    output={outputs.analysis}
+    agent={analyst}
+    cache={{ by: (ctx) => ({ repo: ctx.input.repo }), version: "v2" }}
+  >
+    {`Analyze ${ctx.input.repo}`}
+  </Task>
+  <Task id="report" output={outputs.report} agent={reporter} deps={{ analyze: outputs.analysis }}>
+    {(deps) => `Report on ${deps.analyze.summary}`}
+  </Task>
+</Workflow>
+```
+
+Tweak the downstream Task without re-running the expensive upstream one. Don't cache side effects.
+
+## Schemas in their own file
+
+```ts
+// schemas.ts
+export const schemas = {
+  analysis: z.object({ summary: z.string(), issues: z.array(z.string()) }),
+  review:   z.object({ approved: z.boolean(), feedback: z.string() }),
+  report:   z.object({ title: z.string(), body: z.string() }),
+};
+
+// workflow.tsx
+import { schemas } from "./schemas";
+const { Workflow, smithers, outputs } = createSmithers(schemas);
+```
+
+All data shapes in one place; new contributors read schemas.ts first.
+
+## MDX prompt with auto-injected schema
+
+```mdx
+{/* Review.mdx */}
+Review this code:
+
+**Files**: {props.files.join(", ")}
+**Tests**: {props.testsPassed}/{props.testsRun} passing
+
+Return JSON matching schema:
+{props.schema}
+```
+
+`props.schema` is the JSON-schema description of the Task's `outputSchema`, auto-injected. Keeps the prompt and the validator in sync.
+
+In `.mdx` prompt files, prose that looks like JSX or HTML is parsed as JSX. Wrap examples such as `<Parallel maxConcurrency={N}>` in inline backticks or a fenced code block so the prompt module still compiles and exports its default prompt component.
+
+## Custom hooks over `ctx`
+
+```tsx
+function useReviewState(ticketId: string) {
+  const ctx = useCtx();
+  const sol = ctx.latest("review", `${ticketId}:review-sol`);
+  const terra = ctx.latest("review", `${ticketId}:validate-terra`);
+  return { sol, terra, allApproved: !!(sol?.approved && terra?.approved) };
+}
+```
+
+Workflow logic factors out into hooks the same way React UI logic does.
+
+## VCS revert & per-attempt snapshots
+
+Smithers records the current JJ change ID in `_smithers_attempts.jj_pointer` per attempt. Revert any attempt with a recorded JJ pointer to its exact workspace state:
+
+```bash
+bunx smithers-orchestrator revert workflow.tsx --run-id RUN_ID --node-id implement --attempt 1
+```
+
+Useful when an experiment leaves the worktree in a bad state.
+
+## Time travel: fork, replay, diff
+
+```bash
+bunx smithers-orchestrator timeline RUN_ID --tree
+bunx smithers-orchestrator diff RUN_ID NODE_ID
+bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze --label exp1
+bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
+```
+
+Fork makes a child run without starting it (add `--run` to start immediately); replay also makes a child run but immediately resumes it. `--restore-vcs` checks out the original revision so re-execution sees the same source.
+
+## Scoring tasks
+
+```tsx
+import { schemaAdherenceScorer, latencyScorer, llmJudge } from "smithers-orchestrator/scorers";
+
+<Task
+  id="analyze"
+  output={outputs.analysis}
+  agent={analyst}
+  scorers={{
+    schema:  { scorer: schemaAdherenceScorer() },
+    latency: { scorer: latencyScorer({ targetMs: 5000 }) },
+    quality: {
+      scorer: llmJudge({
+        id: "analysis-quality",
+        name: "Analysis Quality",
+        description: "Rates whether the analysis is useful and well supported.",
+        judge: analyst,
+        instructions: "Return JSON with score from 0 to 1 and a short reason.",
+        promptTemplate: ({ input, output }) =>
+          `Rate the analysis quality.\nInput: ${JSON.stringify(input)}\nOutput: ${JSON.stringify(output)}`,
+      }),
+      sampling: { type: "ratio", rate: 0.1 },
+    },
+  }}
+>
+  Analyze...
+</Task>
+```
+
+Scorers run after the task and never block. Sample expensive scorers with `ratio`.
+
+## Eval suites for regressions
+
+```jsonl
+{"id":"happy-path","input":{"prompt":"Draft release notes"},"expected":{"status":"finished"}}
+{"id":"quality-gate","input":{"prompt":"Find risky changes"},"expected":{"status":"finished","outputContains":{"analysis":[{"riskLevel":"low"}]}}}
+```
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+```
+
+Use eval suites when you need repeatable workflow-level checks. Assertions support `status`, `output` (exact match), and `outputContains` (partial match). Reports land in `.smithers/evals/<suite>.json`; the command exits non-zero on failures.
+
+## Continue-as-new for very long runs
+
+A run with too much accumulated state hands off to a fresh run with carried state.
+
+```tsx
+<ContinueAsNew when={iterationCount > 100} carry={{ summary: rolledUpState }} />
+```
+
+Avoids unbounded SQLite growth in long-lived loops.
+
+## Hot reload while authoring
+
+```bash
+bunx smithers-orchestrator up workflow.tsx --hot
+```
+
+Edits to the workflow source apply on the next render frame without losing in-flight task state. Schema changes still require a fresh run.
+
+## Fork agent session context
+
+Every agent task produces a reusable session snapshot. `fork` starts a new task from a copy of another task's final context, without mutating the source.
+
+```tsx
+<Task id="investigate" agent={codexLuna} output={outputs.investigation}>
+  Understand the bug and identify possible fixes.
+</Task>
+
+<Parallel>
+  <Task id="minimal-fix" agent={codexLuna} fork="investigate" output={outputs.patch}>
+    Try the minimal fix.
+  </Task>
+  <Task id="refactor-fix" agent={codexLuna} fork="investigate" output={outputs.patch}>
+    Try the refactor fix.
+  </Task>
+</Parallel>
+```
+
+`fork` adds the source as a dependency (the forked task waits for it), copies its conversation into a fresh session, then submits the new prompt. Both branches above start from the same investigation and never affect each other. Chain it for follow-ups (`plan → implement → verify`); inside a `<Loop>` it forks the latest completed snapshot for that id. See [`<Task>` fork](/components/task#fork).
+
+## Read next
+
+- [How It Works](/how-it-works): the model these recipes plug into.
+- [Components](/components/workflow): full prop surface.
+- [CLI](/cli/overview): every command.

@@ -1,0 +1,115 @@
+---
+title: HTTP Server
+description: "Run Smithers as an HTTP server: REST routes for runs, approvals, tools."
+---
+
+`startServer` boots a multi-workflow HTTP server with REST endpoints for run lifecycle, SSE event streams, and [human-in-the-loop approvals](/components/approval). For a single-workflow variant alongside `bunx smithers-orchestrator up`, see [Serve Mode](/integrations/serve).
+
+<Note>API reference: [Server & Gateway](/reference/server-gateway) lists every server and gateway export, its options, and links to source and tests.</Note>
+
+## Quick start
+
+```ts
+import { startServer } from "smithers-orchestrator";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+
+const server = startServer({
+  port: 7331,
+  db: drizzle("./smithers.db"),
+  authToken: process.env.SMITHERS_API_KEY,
+  rootDir: process.cwd(),
+});
+```
+
+```bash
+curl -X POST http://localhost:7331/v1/runs \
+  -H "Authorization: Bearer $SMITHERS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"workflowPath": "./bugfix.tsx", "input": {"description": "fix auth"}}'
+```
+
+## ServerOptions
+
+```ts
+type ServerOptions = {
+  port?: number;              // default 7331
+  host?: string;              // default 127.0.0.1; a non-loopback bind requires authToken
+  db?: unknown;               // enables GET /v1/runs and approvals listing
+  authToken?: string;         // falls back to process.env.SMITHERS_API_KEY
+  insecure?: boolean;         // default false; allow a non-loopback bind with no authToken (dangerous)
+  maxBodyBytes?: number;      // default 1_048_576
+  rootDir?: string;           // sandbox root for workflow paths and tools
+  allowNetwork?: boolean;     // default false; allows network in `bash`
+  integrations?: IntegrationsConfig; // external HMAC-verified integrations served by this process (requires db)
+  headersTimeout?: number;    // default 30_000
+  requestTimeout?: number;    // default 60_000
+};
+```
+
+`startServer` returns a listening `http.Server`. `headersTimeout` and `requestTimeout` are applied to that server to bound slow header/body uploads.
+
+## API Routes (TOON)
+
+```toon
+routes[15]{method,path,purpose,auth}:
+  GET,/metrics,Prometheus exposition,bearer
+  POST,/v1/runs,Start or resume a run,bearer
+  GET,/v1/runs,List runs (requires db),bearer
+  GET,/v1/runs/:runId,Run status and node summary,bearer
+  POST,/v1/runs/:runId/resume,Resume paused or failed run,bearer
+  POST,/v1/runs/:runId/cancel,Abort an active run,bearer
+  GET,/v1/runs/:runId/events,SSE event stream (?afterSeq=N),bearer
+  GET,/v1/runs/:runId/frames,List render frames,bearer
+  POST,/v1/runs/:runId/nodes/:nodeId/approve,Approve a paused node,bearer
+  POST,/v1/runs/:runId/nodes/:nodeId/deny,Deny a paused node,bearer
+  POST,/v1/runs/:runId/signals/:signalName,Deliver a named signal,bearer
+  GET,/v1/approvals,List pending approvals (requires db),bearer
+  GET,/v1/approval/list,Legacy alias for /v1/approvals,bearer
+  GET,/approval/list and /approvals,Legacy aliases for /v1/approvals,bearer
+  POST,/signal/:runId/:signalName,Legacy alias for signals,bearer
+```
+
+JSON requests/responses use `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. SSE events are named `smithers` and carry [`SmithersEvent`](/runtime/events) JSON; the stream sends a keep-alive comment every 10 s and closes on terminal state.
+
+Errors use the envelope `{ "error": { "code", "message", "details" } }`. Common codes: `INVALID_REQUEST`, `INVALID_JSON`, `PAYLOAD_TOO_LARGE`, `RUN_ID_REQUIRED`, `RUN_NOT_FOUND`, `RUN_ALREADY_EXISTS`, `RUN_NOT_ACTIVE`, `NOT_FOUND`, `UNAUTHORIZED`, `WORKFLOW_PATH_OUTSIDE_ROOT`, `DB_NOT_CONFIGURED`, `SERVER_ERROR`.
+
+## Tool surface
+
+Tools resolve relative to `rootDir`. The example below exposes a workflow that uses the built-in `bash` tool through the server; clients call it via `POST /v1/runs`.
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { bashTool } from "smithers-orchestrator/tools";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  result: z.object({ stdout: z.string() }),
+});
+
+export default smithers((ctx) => (
+  <Workflow name="echo">
+    <Task id="run" output={outputs.result}>
+      {async () => ({ stdout: await bashTool("echo", [ctx.input.msg]) })}
+    </Task>
+  </Workflow>
+));
+```
+
+`allowNetwork: false` (the default) keeps `bash` offline. Set `rootDir` to constrain the filesystem the workflow can touch.
+
+## Authentication
+
+When `authToken` is configured (directly or via `SMITHERS_API_KEY`), every request must include either:
+
+- `Authorization: Bearer <token>`, or
+- `x-smithers-key: <token>`.
+
+Missing or invalid tokens return `401`. No scopes; for finer access control use the [Gateway](/integrations/gateway).
+
+## Notes
+
+- Each `POST /v1/runs` and `/resume` reloads the workflow source via a content-addressed shadow file with the same extension as the source, so edits take effect on the next call without a restart.
+- Active runs heartbeat to `_smithers_runs.heartbeat_at_ms` every 1 s; stale rows (no heartbeat in 30 s) are treated as crashed and may be resumed.
+- When a server-level `db` differs from a workflow's database, runs and events are mirrored asynchronously to the server db so they show up in `GET /v1/runs`.
+- Metrics are exported via `/metrics`; set `SMITHERS_OTEL_ENABLED=1` plus `OTEL_EXPORTER_OTLP_ENDPOINT` for OTLP. See [Observability](/guides/monitoring-logs).

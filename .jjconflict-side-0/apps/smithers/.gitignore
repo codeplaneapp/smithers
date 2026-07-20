@@ -1,0 +1,11 @@
+dist
+node_modules
+*.tsbuildinfo
+
+# Playwright e2e runtime artifacts
+playwright-report
+test-results
+tests/e2e/.gateway.pid
+tests/e2e/smithers.db
+tests/e2e/smithers.db-shm
+tests/e2e/smithers.db-wal

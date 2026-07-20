@@ -1,0 +1,378 @@
+---
+title: Smithers
+description: Multi-agent workflows with full observability and time travel. Watch every step live; rewind, fork, or replay any run. Any model, any harness.
+mode: "custom"
+---
+
+<div className="landing-root">
+
+<div className="landing-grain" aria-hidden="true" />
+
+{/* ─────────────────────────── Hero ─────────────────────────── */}
+<section className="max-w-6xl mx-auto px-6 pt-16 pb-12 md:pt-24">
+  <div className="grid lg:grid-cols-2 gap-14 items-center">
+
+    <div>
+      <span className="landing-eyebrow">
+        <span className="landing-dot" aria-hidden="true" />
+        Open source · durable runtime for AI agents
+      </span>
+
+      <h1 className="landing-display mt-6" style={{ fontSize: "clamp(2.4rem, 5vw, 3.9rem)" }}>
+        Agent workflows with <span className="landing-brass">time travel.</span>
+      </h1>
+
+      <p className="mt-6 text-lg leading-relaxed" style={{ maxWidth: "34rem" }}>
+        Zero config: describe the workflow in plain English and your coding
+        agent builds it &mdash; no files written by hand. Then watch every step
+        stream live, and rewind, fork, or replay any run from any point. Durable
+        by default: kill the process, pick up where it left off. Any model, any harness.
+      </p>
+
+      <div className="flex flex-wrap gap-3 mt-9">
+        <a href="/guide/get-started" className="landing-btn">Read the docs</a>
+        <a href="/introduction" className="landing-btn-ghost">Docs for agents →</a>
+        <a href="https://ui-preview.smithers.sh" target="_blank" rel="noopener noreferrer" className="landing-btn-preview">
+          <span>Sign up for UI preview <span className="landing-brass">→</span></span>
+        </a>
+      </div>
+
+      {/* Install command - the primary CTA */}
+      <div className="mt-12">
+        <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>
+          <span style={{ width: "0.25rem", height: "0.25rem", borderRadius: "999px", background: "var(--l-brass)" }} aria-hidden="true" />
+          Run this in your project
+        </div>
+        <div
+          className="landing-cmd flex items-center justify-between gap-4"
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            navigator.clipboard.writeText("bunx smithers-orchestrator init");
+            const c = document.getElementById("cmd-check");
+            if (c) { c.style.opacity = "1"; setTimeout(() => { c.style.opacity = "0"; }, 1800); }
+          }}
+          style={{ cursor: "pointer" }}
+        >
+          <span>
+            <span className="landing-brass" style={{ fontWeight: 700 }}>$ </span>
+            bunx smithers-orchestrator init
+          </span>
+          <span id="cmd-check" className="landing-brass" style={{ opacity: 0, transition: "opacity 0.2s", fontSize: "0.8rem" }}>copied ✓</span>
+        </div>
+        <p className="mt-3" style={{ fontSize: "0.85rem" }}>
+          Creates an editable <code>hello.mdx</code> workflow you can run
+          immediately, then installs the <code>smithers</code> skill into your agents.
+          From there, just describe any new workflow and your agent builds it &mdash;
+          zero config.
+        </p>
+      </div>
+    </div>
+
+    {/* Demo terminal - a live durable run across multiple harnesses */}
+    <div className="landing-card overflow-hidden" style={{ borderRadius: "6px" }}>
+      <div
+        className="flex items-center justify-between px-4 py-3"
+        style={{ borderBottom: "1px solid var(--l-line)", background: "color-mix(in oklch, var(--l-surface) 60%, transparent)" }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="landing-chrome-dot" aria-hidden="true" />
+          <span className="landing-chrome-dot" aria-hidden="true" />
+          <span className="landing-chrome-dot" aria-hidden="true" />
+        </div>
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.75rem", color: "var(--l-ink-muted)" }}>
+          ship-it · a7b93f2
+        </span>
+        <span className="flex items-center gap-1.5" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--l-brass)" }}>
+          <span className="landing-running" aria-hidden="true" /> running
+        </span>
+      </div>
+
+      <div className="p-5" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.8rem", lineHeight: 1.7 }}>
+        <div style={{ color: "var(--l-ink-muted)", marginBottom: "1rem" }}>
+          <span className="landing-brass">you</span> &gt; Research, plan, then implement. Pause for my approval before you ship.
+        </div>
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">✓</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>research</span>
+            <span className="landing-agent-tag">claude</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>persisted</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">✓</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>plan</span>
+            <span className="landing-agent-tag">codex</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>persisted</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">↻</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>implement <span style={{ color: "var(--l-ink-muted)" }}>(resumed)</span></span>
+            <span className="landing-agent-tag">codex</span>
+            <span className="landing-brass" style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>running</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">✓</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>review</span>
+            <span className="landing-agent-tag">pi</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>persisted</span>
+          </div>
+          <div className="flex items-center gap-3" style={{ opacity: 0.7 }}>
+            <span style={{ color: "var(--l-ink-muted)" }}>⏸</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>approval to ship</span>
+            <span className="landing-agent-tag">you</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>waiting</span>
+          </div>
+        </div>
+        <div className="mt-5 pt-4" style={{ borderTop: "1px solid var(--l-line)", fontSize: "0.7rem", color: "var(--l-ink-muted)" }}>
+          crash-safe · resumes from the last persisted step · rewind to any step
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{/* ──────────────────── Every harness (incl. subscriptions) ──────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-10 text-center">
+  <span className="landing-eyebrow">Model and harness agnostic</span>
+  <div className="flex flex-wrap items-center justify-center gap-2.5 mt-5">
+    <span className="landing-pill">Claude Code</span>
+    <span className="landing-pill">Codex</span>
+    <span className="landing-pill">Cursor</span>
+    <span className="landing-pill">Gemini</span>
+    <span className="landing-pill">Pi</span>
+    <span className="landing-pill">+ any AI SDK model</span>
+  </div>
+  <p className="mt-5" style={{ maxWidth: "36rem", marginInline: "auto" }}>
+    Works with the harnesses you already pay for: <strong style={{ color: "var(--l-ink)" }}>your
+    Codex and Claude subscriptions, not just API keys</strong>. Point each task at
+    whichever agent and model is best for the job, and swap the harness without
+    rewriting the workflow.
+  </p>
+</section>
+
+{/* ─────────────────────────── Proof ─────────────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-8 text-center">
+  <div className="flex flex-wrap items-start justify-center gap-x-12 gap-y-5">
+    <div>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>100+</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>runnable example workflows</span>
+    </div>
+    <div>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>6+</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>ecosystem projects on the runtime</span>
+    </div>
+    <div>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>MIT</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>open source, no cloud required</span>
+    </div>
+  </div>
+  <p className="mt-6" style={{ fontSize: "0.82rem", color: "var(--l-ink-muted)" }}>
+    Burns · Ralphinho · Cairo Coder · Agentix · Era · Local Isolated Ralph
+    <a href="/integrations/ecosystem" className="landing-brass" style={{ marginLeft: "0.6rem", fontWeight: 600 }}>community projects on the runtime →</a>
+  </p>
+</section>
+
+{/* ─────────────────────────── Why ─────────────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-16">
+  <div className="text-center mb-12">
+    <span className="landing-eyebrow">Why Smithers</span>
+    <h2 className="landing-display mt-5" style={{ fontSize: "clamp(1.9rem, 4vw, 2.8rem)" }}>
+      The right way to build an agent<br className="hidden sm:block" /> changes every six months.
+    </h2>
+    <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+      Chains. ReAct. Crews. Swarms. Background agents. Subagent fan-out. Couple
+      your infrastructure to any one of them and you've already rebuilt twice.
+      One layer underneath never changes: durable orchestration. Smithers is that layer.
+    </p>
+  </div>
+
+  {/* Layer stack */}
+  <div className="flex flex-col gap-2.5" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+    <div className="landing-card flex items-center justify-between gap-4 px-5 py-4">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>Model</strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>Claude, GPT, Gemini, Kimi</span>
+      </div>
+      <span style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--l-volatile)" }}>Volatile · weekly</span>
+    </div>
+    <div className="landing-card flex items-center justify-between gap-4 px-5 py-4">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>Topology</strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>ReAct, crew, swarm, background agents</span>
+      </div>
+      <span style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--l-fluid)" }}>Fluid · monthly</span>
+    </div>
+    <div className="landing-card flex items-center justify-between gap-4 px-5 py-4">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>How you build</strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>Prompting → loops → skills → recipes</span>
+      </div>
+      <span style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--l-fluid)" }}>Shifts · every 6 months</span>
+    </div>
+    <div className="landing-card landing-card-accent flex items-center justify-between gap-4 px-5 py-5">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>Orchestration <span className="landing-brass">· this is Smithers</span></strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>Durable steps, retries, state, approvals, observability</span>
+      </div>
+      <span className="landing-brass" style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>Stable · doesn't change</span>
+    </div>
+  </div>
+
+  {/* Killer feature: time travel + observability */}
+  <div className="landing-killer p-6 mt-8" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+    <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>Time travel · the killer feature</div>
+    <p style={{ color: "var(--l-ink)", margin: 0 }}>
+      Every transition, attempt, and approval is a SQLite row, so you can watch a
+      run live, rewind to any step, fork an alternate branch, and replay from a
+      checkpoint. Full observability with Prometheus metrics and traces, no setup.
+    </p>
+  </div>
+
+  {/* Three guarantees */}
+  <div className="grid sm:grid-cols-3 gap-4 mt-8">
+    <div className="landing-card p-5">
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Durable</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Every step is checkpointed the moment it finishes. A crash, a closed laptop, a flaky tool: all resume points.</span>
+    </div>
+    <div className="landing-card p-5">
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Composable</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Review loops, panels, debates, sagas. Named patterns are small TSX components on the substrate. Read them, fork them.</span>
+    </div>
+    <div className="landing-card p-5">
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Self-improving</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Score every run, then let Smithers optimize its own prompts (GEPA) against your eval suite. The system gets better, not just the answer.</span>
+    </div>
+  </div>
+</section>
+
+{/* ─────────────── vs. built-in orchestration ─────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-16">
+  <div className="text-center mb-10">
+    <span className="landing-eyebrow">Already fanning out subagents?</span>
+    <h2 className="landing-display mt-5" style={{ fontSize: "clamp(1.8rem, 4vw, 2.6rem)" }}>
+      Your agent's built-in orchestration is ephemeral.
+    </h2>
+    <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+      Subagent fan-out inside Claude Code or Codex is the right tool for work that
+      fits in one sitting. It also lives inside one session, one vendor, and one
+      terminal. Smithers is where the fan-out goes when the work has to survive.
+    </p>
+  </div>
+
+  <div className="grid md:grid-cols-2 gap-5" style={{ maxWidth: "44rem", marginInline: "auto" }}>
+    <div className="landing-card p-6">
+      <div className="landing-eyebrow" style={{ marginBottom: "0.9rem" }}>Built-in subagents</div>
+      <div className="flex flex-col gap-2.5" style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>
+        <span>Work dies when the session ends or crashes</span>
+        <span>One vendor per session</span>
+        <span>An approval blocks the terminal</span>
+        <span>A bad decision means starting over</span>
+        <span>Orchestration is a prompt you retype</span>
+      </div>
+    </div>
+    <div className="landing-card landing-card-accent p-6">
+      <div className="landing-eyebrow" style={{ marginBottom: "0.9rem" }}>A Smithers run</div>
+      <div className="flex flex-col gap-2.5" style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink)" }}>
+        <span>Resumes from the last finished step</span>
+        <span>Claude, Codex, Gemini, and Pi in one workflow</span>
+        <span>Approvals wait overnight, durably</span>
+        <span>Rewind, fork, or replay any step</span>
+        <span>A workflow file you version, review, and rerun</span>
+      </div>
+    </div>
+  </div>
+
+  <p className="text-center mt-8 flex flex-wrap justify-center gap-x-6 gap-y-2">
+    <a href="/why/vs-claude-code-workflows" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      vs. Claude Code Workflows →
+    </a>
+    <a href="/why/vs-temporal" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      vs. Temporal →
+    </a>
+    <a href="/why/vs-langgraph" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      vs. LangGraph →
+    </a>
+  </p>
+</section>
+
+{/* ─────────────────────── Just say this ─────────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-16">
+  <div className="text-center mb-10">
+    <span className="landing-eyebrow">Just say this</span>
+    <h2 className="landing-display mt-5" style={{ fontSize: "clamp(1.8rem, 4vw, 2.6rem)" }}>
+      Built-in recipes for everyday agent work.
+    </h2>
+    <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+      Smithers ships a focused authoring pack plus a large archive of copyable
+      examples. Describe the outcome and your coding agent can build the right
+      workflow with create-workflow.
+    </p>
+  </div>
+
+  {/* Curated authoring workflows; archived examples live under examples/init-pack. */}
+  <div className="flex flex-wrap justify-center gap-2 mb-8" style={{ maxWidth: "42rem", marginInline: "auto" }}>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/create-workflow.tsx" target="_blank" rel="noopener noreferrer">create-workflow</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/create-skill.tsx" target="_blank" rel="noopener noreferrer">create-skill</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/docs-driven-development.tsx" target="_blank" rel="noopener noreferrer">docs-driven-development</a>
+  </div>
+
+  <div className="flex flex-col gap-3" style={{ maxWidth: "40rem", marginInline: "auto" }}>
+    <div className="landing-card p-5">
+      <p style={{ color: "var(--l-ink)", margin: 0 }}>
+        “Migrate the dashboard to the new gateway APIs. Show me the plan before you start.”
+      </p>
+      <span style={{ fontSize: "0.72rem", fontFamily: "ui-monospace, monospace", color: "var(--l-ink-muted)" }}>
+        → runs <span className="landing-brass">mission</span>: milestone plan · your approval · focused workers
+      </span>
+    </div>
+    <div className="landing-card p-5">
+      <p style={{ color: "var(--l-ink)", margin: 0 }}>
+        “Add rate limiting. Don't stop until tests pass and a reviewer signs off.”
+      </p>
+      <span style={{ fontSize: "0.72rem", fontFamily: "ui-monospace, monospace", color: "var(--l-ink-muted)" }}>
+        → runs <span className="landing-brass">implement</span>: write · validate · review loop until approved
+      </span>
+    </div>
+  </div>
+
+  <p className="text-center mt-8">
+    <a href="/guide/what-you-can-do" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      See what you can do →
+    </a>
+  </p>
+</section>
+
+{/* ─────────────────────── Two doors ─────────────────────── */}
+<section className="max-w-5xl mx-auto px-6 py-16" style={{ borderTop: "1px solid var(--l-line)" }}>
+  <div className="text-center mb-10">
+    <h2 className="landing-display" style={{ fontSize: "clamp(1.7rem, 3.5vw, 2.4rem)" }}>Two ways in.</h2>
+  </div>
+  <div className="grid md:grid-cols-2 gap-5">
+    <a href="/guide/get-started" className="landing-card p-7 block" style={{ transition: "border-color 0.15s" }}>
+      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>For humans</div>
+      <strong className="landing-display" style={{ fontSize: "1.5rem", display: "block", marginBottom: "0.6rem" }}>Get started</strong>
+      <p style={{ marginBottom: "1rem" }}>
+        Run one command and ask the agent you already use for an outcome. Learn
+        what Smithers is, then drive it without writing a workflow by hand.
+      </p>
+      <span className="landing-brass" style={{ fontWeight: 600 }}>Read the guide →</span>
+    </a>
+    <a href="/introduction" className="landing-card p-7 block" style={{ transition: "border-color 0.15s" }}>
+      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>For agents</div>
+      <strong className="landing-display" style={{ fontSize: "1.5rem", display: "block", marginBottom: "0.6rem" }}>Docs for agents</strong>
+      <p style={{ marginBottom: "1rem" }}>
+        The full API, components, and patterns, written for the coding agent that
+        authors and runs your workflows. Or feed it <code>/llms-full.txt</code> directly.
+      </p>
+      <span className="landing-brass" style={{ fontWeight: 600 }}>Read the agent docs →</span>
+    </a>
+  </div>
+
+  <p className="text-center mt-10">
+    MIT-licensed and open source on{" "}
+    <a href="https://github.com/smithersai/smithers" className="landing-brass" style={{ fontWeight: 600 }}>GitHub</a>.
+  </p>
+</section>
+
+</div>

@@ -1,0 +1,47 @@
+# Derive an eval suite from acceptance criteria
+
+You are the intake step of an "author eval fixtures" pipeline. Turn the user's
+acceptance criteria into a structured eval suite: a suite name plus a list of
+cases. Do NOT write any files yet — only produce the structured suite.
+
+## Acceptance criteria / goal
+
+{props.criteria}
+
+Target workflow (may be empty — the cases run against this workflow later):
+{props.workflow ?? "(none given — leave the run command's workflow as a placeholder)"}
+
+Fixtures will be written under: {props.evalsDir}
+
+## What an eval suite is
+
+A Smithers eval suite is a `.jsonl` file where each line is one case. A case has:
+
+- `id` — a stable kebab-case id for the case.
+- `input` — the workflow input object the case runs with (e.g. `{ "prompt": "..." }`).
+- `expected` — an assertion object. Supported keys: `status` (e.g. `"finished"`),
+  `output` (exact match of a node's output), and `outputContains` (partial match,
+  e.g. `{ "analysis": [{ "riskLevel": "low" }] }`).
+
+`smithers eval` runs the workflow once per case and checks the `expected`
+assertions, so every case must be runnable input plus a checkable expectation.
+
+## What to decide
+
+1. **suiteName** — a stable kebab-case id derived from the goal (also the fixture
+   filename stem). Keep it short and descriptive.
+2. **cases** — one case per acceptance criterion, plus a happy-path case. For each:
+   - `id` — kebab-case, unique within the suite.
+   - `input` — a concrete input object that exercises the criterion.
+   - `expected` — the tightest assertion you can justify. Prefer a `status` check
+     plus an `outputContains` check on the field the criterion is really about;
+     fall back to `status: "finished"` only when no output field is checkable.
+   - `rubric` — one or two sentences of plain-English pass/fail criteria a human
+     or `llmJudge` could apply to this case.
+
+Be decisive and minimal: cover the stated criteria, do not invent scope you
+cannot justify from the goal. Keep `input` and `expected` objects small and
+realistic — the downstream step writes them verbatim into the fixture.
+
+REQUIRED OUTPUT:
+{props.schema}

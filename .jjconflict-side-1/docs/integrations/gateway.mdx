@@ -1,0 +1,597 @@
+---
+title: Gateway
+description: WebSocket / RPC gateway for connecting clients and custom UIs to Smithers runs, providing pushed updates, subscriptions, metrics, and resilient reconnection.
+---
+
+`Gateway` is Smithers' headless control plane. Reach for it (instead of [`startServer()`](/integrations/server)) when long-lived clients (bots, dashboards, schedulers, and custom UIs) need to authenticate once, stream events over WebSocket with resilient reconnection, decide [approvals](/components/approval), inject [signals](/runtime/events), access metrics, and manage cron schedules across many registered workflows. Custom UIs, whether using the vanilla SDK or React hooks, rely on the Gateway to provide pushed updates and a stale-data-free model. For the single-workflow Hono-based HTTP surface, see [Serve Mode](/integrations/serve) (`createServeApp()` / `bunx smithers-orchestrator up --serve`).
+
+<Warning>
+  **Gateway-first client contract:** controllers, Bun cron jobs, monitors, bots,
+  and custom clients must use this Gateway API. Do not open `smithers.db`,
+  `.smithers/pg`, or Postgres directly; do not query `_smithers_*`; do not import
+  `openSmithersStore` or CLI-internal `findAndOpenDb`; and do not pass
+  `--backend` to read/control commands to hunt for runs. Direct backend access
+  exists for runtime implementation, `smithers migrate`, backend integration
+  tests, and maintainer diagnostics only. It is not a control-plane API.
+</Warning>
+
+<Note>API reference: [Server & Gateway](/reference/server-gateway) and [Gateway Client](/reference/gateway-client) list every gateway and client export, its options, and links to source and tests.</Note>
+
+## Quick start
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { Gateway, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  result: z.object({ ok: z.boolean() }),
+});
+
+const deploy = smithers((ctx) => (
+  <Workflow name="deploy">
+    <Task id="ship" output={outputs.result}>{{ ok: true }}</Task>
+  </Workflow>
+));
+
+const gateway = new Gateway({
+  heartbeatMs: 15_000,
+  auth: {
+    mode: "token",
+    tokens: { "operator-token": { role: "operator", scopes: ["*"] } },
+  },
+});
+
+gateway.register("deploy", deploy, { schedule: "0 8 * * 1-5" });
+await gateway.listen({ port: 7331 });
+```
+
+```ts
+const ws = new WebSocket("ws://localhost:7331");
+ws.onmessage = (m) => console.log(JSON.parse(m.data));
+ws.onopen = () => ws.send(JSON.stringify({
+  type: "req",
+  id: "c1",
+  method: "connect",
+  params: {
+    minProtocol: 1,
+    maxProtocol: 1,
+    client: { id: "docs-example", version: "1.0.0", platform: "browser" },
+    auth: { token: "operator-token" },
+  },
+}));
+```
+
+## Gateway client SDK
+
+Programmatic clients (bots, schedulers, dashboards, third-party UIs) talk to the Gateway through the typed client SDK over the same RPC and WebSocket API. For the full custom-UI guide (declarative queries, pushed updates, stale guards, reconnect/resume, backpressure, optimistic mutations, auth, vanilla JS + React hooks) see [Custom UIs](/integrations/custom-ui).
+
+```ts
+import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+
+const gateway = new SmithersGatewayClient();
+const workflows = await gateway.listWorkflows();
+
+// Resilient pushed updates: backoff + jitter on reconnect, resume from the last
+// observed seq via run.gap_resync, stop on run.completed or abort.
+for await (const frame of gateway.streamRunEventsResilient({ runId: "run-1" })) {
+  if (frame.event === "run.completed") break;
+}
+```
+
+Gateway client exports:
+
+| Package | Exports |
+|---|---|
+| `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
+| `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
+
+## Bun controllers and cron jobs
+
+Run one Gateway singleton per workspace. Discover its verified URL with the
+public `gateway status` command rather than reading the runtime state file or
+assuming port 7331 (the preferred port may already be occupied):
+
+```ts
+import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+
+const statusProcess = Bun.spawnSync([
+  "bunx", "smithers-orchestrator", "gateway", "status", "--format", "json",
+], {
+  cwd: process.cwd(),
+  stdout: "pipe",
+  stderr: "pipe",
+});
+
+if (!statusProcess.success) {
+  throw new Error(new TextDecoder().decode(statusProcess.stderr));
+}
+
+const status = JSON.parse(new TextDecoder().decode(statusProcess.stdout));
+if (!status.running || typeof status.url !== "string") {
+  throw new Error("No healthy workspace Gateway is running");
+}
+
+const gateway = new SmithersGatewayClient({
+  baseUrl: status.url,
+  token: process.env.SMITHERS_API_KEY,
+  client: { id: "local-health-cron", platform: "bun" },
+});
+
+const runs = await gateway.listRuns({ filter: { limit: 50 } });
+```
+
+Start `bunx smithers-orchestrator gateway` under your service manager when
+`status.running` is false. A health cron should report the missing Gateway and
+restart that singleton; it should not fall back to opening a store. Once it has
+a run ID, use `getRun` for snapshots and `streamRunEventsResilient` for a live
+cursor. Use `launchRun`, `resumeRun`, `cancelRun`, `submitApproval`, and
+`submitSignal` for mutations so authentication, ownership, idempotency,
+invalidation, and event emission stay intact.
+
+<Note>
+  **Bundling in Next.js / webpack:** in published versions up to and including
+  0.28.0, `gateway-client` transitively imports
+  `@smithers-orchestrator/electric-proxy`, which shipped raw TypeScript
+  sources. Bun and Vite handle that natively, but webpack-based builds
+  (Next.js) fail hard unless you add it to
+  [`transpilePackages`](https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages):
+
+  ```js
+  // next.config.mjs
+  export default {
+    transpilePackages: ["@smithers-orchestrator/electric-proxy"],
+  };
+  ```
+
+  Releases after 0.28.0 ship the package as plain JavaScript with bundled type
+  declarations, so the workaround is not needed there.
+</Note>
+
+## REST domain API
+
+The Gateway also exposes a typed REST domain surface under `/v1/api/*`. These
+routes share the same auth modes, scope checks, validation, and backend code
+paths as their `/v1/rpc/<method>` twins. Responses use `{ ok: true, data }` for
+reads and `{ ok: false, error }` for failures.
+
+Mutating routes include a write acknowledgement. SQLite and embedded PGlite
+return `{ seq }`, where `seq` is the invalidation frame emitted by
+`GET /v1/api/stream`. Real Postgres returns `{ txid }`, a numeric string from
+`pg_current_xact_id()::xid::text`, for Electric transaction matching.
+
+```toon
+api[24]{route,rpc,scope}:
+  GET /v1/api/runs,listRuns,run:read
+  GET /v1/api/runs/:id,getRun,run:read
+  POST /v1/api/runs,launchRun,run:write
+  POST /v1/api/runs/:id/resume,resumeRun,run:write
+  POST /v1/api/runs/:id/cancel,cancelRun,run:write
+  POST /v1/api/runs/:id/rewind,rewindRun,run:admin
+  GET /v1/api/runs/:id/tree,getDevToolsSnapshot,observability:read
+  GET /v1/api/events,streamRunEvents tail snapshot,run:read
+  GET /v1/api/nodes/:runId/:nodeId/output,getNodeOutput,run:read
+  GET /v1/api/nodes/:runId/:nodeId/diff,getNodeDiff,run:read
+  GET /v1/api/approvals,listApprovals,run:read
+  POST /v1/api/approvals/:id,submitApproval,approval:submit
+  POST /v1/api/signals,submitSignal,signal:submit
+  GET /v1/api/workflows,listWorkflows,run:read
+  GET /v1/api/docs,listDocs,run:read
+  GET /v1/api/prompts,listPrompts,prompt:read
+  GET /v1/api/scores,listScores,score:read
+  GET /v1/api/tickets,listTickets,ticket:read
+  GET /v1/api/memory-facts,listMemoryFacts,memory:read
+  GET /v1/api/crons,cronList,cron:read
+  GET /v1/api/accounts,listAccounts,account:read
+  GET /v1/api/schema-signature,getSchemaSignature,run:read
+  GET /v1/api/stream,SSE invalidation feed,run:read
+```
+
+`GET /v1/api/stream` is a `text/event-stream` invalidation feed for local
+TanStack Query collections. Change events are `event: change` frames with
+`data: {"seq": number, "collections": string[]}`. Writes that happen inside a
+short coalescing window emit one frame with the union of collection names.
+
+Clients should send `Last-Event-ID` when reconnecting. The Gateway replays
+missed frames from its bounded ring buffer when possible. If the requested seq
+is too old, it sends `event: reset` with the current seq so the client can
+invalidate all collection query keys. Each connection also has a bounded
+outbound queue; a slow consumer is resynced through the same reset path, which
+bounds memory per stream.
+
+## RPC methods (TOON)
+
+```toon
+rpc[27]{method,params,returns,scope,transport}:
+  launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket
+  resumeRun,runId/options.force?,{runId/status},run:write,http+websocket
+  cancelRun,runId,{runId/status:cancelling},run:write,http+websocket
+  hijackRun,runId/options?,{runId/status:hijack-ready/sessionId},run:admin,http+websocket
+  rewindRun,runId/frameNo/confirm:true,JumpResult,run:admin,http+websocket
+  submitApproval,runId/nodeId/iteration?/decision,{runId/nodeId/iteration/approved},approval:submit,http+websocket
+  submitSignal,runId/correlationKey/payload?/signalName?,Delivery metadata,signal:submit,http+websocket
+  getRun,runId,Run record + optional runState,run:read,http+websocket
+  listRuns,filter.status?/filter.limit?/filter.workflow?,Run summaries,run:read,http+websocket
+  listWorkflows,filter.hasUi?,Workflow summaries,run:read,http+websocket
+  listApprovals,filter.runId?/filter.workflow?/filter.limit?,Pending approvals,run:read,http+websocket
+  streamRunEvents,runId/afterSeq?,{streamId/runId/afterSeq/currentSeq},run:read,websocket
+  streamDevTools,runId/afterSeq?/fromSeq?,{streamId/runId/fromSeq/afterSeq} + devtools.event frames,observability:read,websocket
+  getDevToolsSnapshot,runId/frameNo?,DevTools snapshot payload,observability:read,http+websocket
+  getNodeOutput,runId/nodeId/iteration?,NodeOutputResponse,run:read,http+websocket
+  getNodeDiff,runId/nodeId/iteration?,Node diff response,run:read,http+websocket
+  cronList,filter.workflow?,Cron rows,cron:read,http+websocket
+  cronCreate,workflow/pattern/cronId?/enabled?,Created cron row,cron:write,http+websocket
+  cronDelete,cronId,{cronId/removed},cron:write,http+websocket
+  cronRun,cronId? or workflow/input?,{runId/workflow},cron:write,http+websocket
+  listAccounts,,Registered agent accounts (api keys redacted),account:read,http+websocket
+  listMemoryFacts,namespace?,Memory facts,memory:read,http+websocket
+  listScores,runId/nodeId?,Scorer results,score:read,http+websocket
+  listTickets,kind?,Work docs,ticket:read,http+websocket
+  createTicket,path/content/kind?/status?,Created doc row,ticket:write,http+websocket
+  updateTicket,path/content?/status?,Updated doc row,ticket:write,http+websocket
+  deleteTicket,path,{path/deleted},ticket:write,http+websocket
+```
+
+`health` remains available as a utility RPC and `GET /health` is available without auth. The legacy method names are still accepted for compatibility (`runs.create`, `runs.get`, `runs.list`, `runs.cancel`, `runs.rerun`, `runs.diff`, `frames.list`, `frames.get`, `attempts.list`, `attempts.get`, `workflows.list`, `approvals.list`, `approvals.decide`, `signals.send`, `cron.list`, `cron.add`, `cron.remove`, `cron.trigger`, `jumpToFrame`, `devtools.jumpToFrame`, `devtools.getNodeOutput`, `devtools.getNodeDiff`), but new clients should use the v1 names above.
+
+### Scopes
+
+```toon
+scopes[14]{scope,allows}:
+  run:read,Read run state/lists/event streams/node output/node diffs
+  run:write,Launch/resume/cancel runs; implies run:read
+  run:admin,Hijack or rewind runs; implies run:write and run:read
+  approval:submit,Submit approval decisions
+  signal:submit,Submit workflow signals
+  cron:read,List cron schedules
+  cron:write,Create/delete/trigger cron schedules; implies cron:read
+  account:read,List registered agent accounts (api keys redacted)
+  memory:read,List cross-run memory facts
+  prompt:read,List workspace prompts
+  score:read,List scorer/eval results for a run
+  ticket:read,List work docs (tickets/plans/specs/proposals)
+  ticket:write,Create/update/soft-delete work docs; implies ticket:read
+  observability:read,Read DevTools and other observability streams
+```
+
+`*` grants every scope. Pass a method name string in the `scopes` array (e.g. `"launchRun"`) to grant access to exactly that RPC call. Legacy wildcard method grants such as `cron.*` continue to match legacy method names; typed scopes are the contract to use for new integrations. Legacy ranked grants (`read`, `execute`, `approve`, `admin`) are accepted so older tokens keep working.
+
+### `rewindRun` (destructive rewind)
+
+Rewinds a run to a prior frame and makes it resumable from that point.
+This is destructive: it truncates frames, attempts, output rows, and
+diff-cache entries beyond the target; reverts JJ sandboxes; marks the
+run `running` again; and emits a `TimeTravelJumped` event so
+`streamDevTools` subscribers rebaseline.
+
+Caller identity is authorized per-request: the connection must have
+`run:admin` scope and must also be the run owner (`userId` matches
+`ownerId`) or have `role: "admin"`. Scope alone never grants access.
+The legacy aliases `jumpToFrame` and `devtools.jumpToFrame` route to
+`rewindRun`.
+
+Request:
+
+```ts
+type RewindRunRequest = {
+  runId: string;     // /^[a-z0-9_-]{1,64}$/
+  frameNo: number;   // 0 <= frameNo <= latestFrameNo
+  confirm: true;     // must be literal true
+};
+```
+
+Response (`JumpResult`):
+
+```ts
+type JumpResult = {
+  ok: true;
+  newFrameNo: number;
+  revertedSandboxes: number;
+  deletedFrames: number;
+  deletedAttempts: number;
+  invalidatedDiffs: number;
+  durationMs: number;
+};
+```
+
+Also broadcast after the DB commit as `run.time_travel_jumped` with
+`{ runId, fromFrameNo, toFrameNo, timestampMs, caller }`.
+
+Quota: 10 rewinds per run per caller per hour (default window). Exceeded
+→ `RateLimited`.
+
+Failure modes and HTTP status:
+
+| Code                   | Meaning                                                                   | HTTP  |
+| ---------------------- | ------------------------------------------------------------------------- | ----- |
+| `InvalidRunId`         | `runId` fails `/^[a-z0-9_-]{1,64}$/`.                                     | `400` |
+| `InvalidFrameNo`       | `frameNo` is not a non-negative i32 integer.                              | `400` |
+| `ConfirmationRequired` | Caller omitted `confirm: true`.                                           | `400` |
+| `FrameOutOfRange`      | `frameNo` > latest frame, or run has no frames.                           | `400` |
+| `Unauthorized`         | Caller is neither the run owner nor an admin (audit row still written).   | `401` |
+| `RunNotFound`          | `runId` does not exist.                                                   | `404` |
+| `Busy`                 | Another rewind is in flight for this run.                                 | `409` |
+| `RateLimited`          | Caller exceeded rewind quota (default 10/hour).                           | `429` |
+| `UnsupportedSandbox`   | A sandbox cannot be reverted (missing / untrackable `jjPointer`).         | `501` |
+| `VcsError`             | A JJ revert call failed; DB/reconciler rolled back.                       | `500` |
+| `RewindFailed`         | Rewind failed and rollback was partial; run marked `needs_attention`.     | `500` |
+
+Every call, whether success, failure, or unauthorized, writes one row to
+`_smithers_time_travel_audit` with `result ∈ { success, failed, partial, in_progress }`.
+An in-progress row is inserted before any mutation and updated in place
+on completion; startup recovery flips any leftover `in_progress` rows to
+`partial`.
+
+### Node output
+
+`getNodeOutput` returns the DevTools Output-tab payload for a single task iteration:
+
+```ts
+type NodeOutputResponse = {
+  status: "produced" | "pending" | "failed";
+  row: Record<string, unknown> | null;
+  schema: OutputSchemaDescriptor | null;
+  partial?: Record<string, unknown> | null; // only when status === "failed"
+};
+
+type OutputSchemaDescriptor = {
+  fields: Array<{
+    name: string;
+    type: "string" | "number" | "boolean" | "object" | "array" | "null" | "unknown";
+    optional: boolean;
+    nullable: boolean;
+    description?: string;
+    enum?: readonly unknown[];
+  }>;
+};
+```
+
+### Error codes
+
+Gateway v1 RPC errors use stable code strings and HTTP status mappings:
+
+```toon
+errors[23]{code,http}:
+  InvalidRequest,400
+  InvalidInput,400
+  Unauthorized,401
+  Forbidden,403
+  RunNotFound,404
+  ScoreNotFound,404
+  RUN_NOT_ACTIVE,409
+  CronNotFound,404
+  TicketNotFound,404
+  NodeNotFound,404
+  IterationNotFound,404
+  NodeHasNoOutput,404
+  FrameOutOfRange,400
+  SeqOutOfRange,400
+  Busy,409
+  AlreadyDecided,409
+  RateLimited,429
+  PayloadTooLarge,413
+  BackpressureDisconnect,429
+  UnsupportedSandbox,501
+  VcsError,500
+  RewindFailed,500
+  Internal,500
+```
+
+The table above is the canonical v1 registry used by the SDK and OpenAPI.
+Current server responses can also surface legacy aliases from older Gateway
+paths. Treat these aliases by their meaning and HTTP status; new clients should
+prefer canonical codes where returned and tolerate aliases on older paths:
+
+```toon
+legacyErrors[12]{code,meaning,http}:
+  INVALID_REQUEST,Invalid request,400
+  INVALID_INPUT,Invalid input,400
+  INVALID_FRAME,Invalid frame,400
+  PROTOCOL_UNSUPPORTED,Unsupported protocol,400
+  UNAUTHORIZED,Unauthorized,401
+  FORBIDDEN,Forbidden,403
+  NOT_FOUND,Not found,404
+  METHOD_NOT_FOUND,Unknown method,404
+  PAYLOAD_TOO_LARGE,Payload too large,413
+  InvalidRunId,Invalid run id,400
+  InvalidFrameNo,Invalid frame number,400
+  ConfirmationRequired,Confirmation required,400
+```
+
+### Versioned wire shapes
+
+All DevTools wire types carry `version: 1`.
+
+`DevToolsSnapshot` (v1):
+
+```ts
+type DevToolsSnapshot = {
+  version: 1;
+  runId: string;
+  frameNo: number;   // latest frame reflected in this tree
+  seq: number;       // monotonic sequence id (equals frameNo today)
+  root: DevToolsNode;
+};
+
+type DevToolsNode = {
+  id: number;        // stable across frames for the same logical node
+  type: "workflow" | "task" | "sequence" | "parallel" | /* …see protocol */;
+  name: string;
+  props: Record<string, unknown>;
+  task?: { nodeId: string; kind: "agent" | "compute" | "static"; /* … */ };
+  children: DevToolsNode[];
+  depth: number;
+};
+```
+
+`DevToolsDelta` (v1):
+
+```ts
+type DevToolsDelta = {
+  version: 1;
+  baseSeq: number;   // must match the subscriber's current seq
+  seq: number;       // new seq after applying ops, in order
+  ops: Array<
+    | { op: "addNode"; parentId: number; index: number; node: DevToolsNode }
+    | { op: "removeNode"; id: number }
+    | { op: "updateProps"; id: number; props: Record<string, unknown> }
+    | { op: "updateTask"; id: number; task: DevToolsNode["task"] }
+    | { op: "replaceRoot"; node: DevToolsNode } // emitted when the root's
+                                                // identity or shape changes;
+                                                // `removeNode` of the root is
+                                                // never emitted.
+  >;
+};
+```
+
+`DevToolsEvent` (v1), frames pushed over `devtools.event`:
+
+```ts
+type DevToolsEvent =
+  | { version: 1; kind: "snapshot"; snapshot: DevToolsSnapshot }
+  | { version: 1; kind: "delta"; delta: DevToolsDelta };
+```
+
+A subscription always starts with a `snapshot` event, then emits `delta` events
+per frame. The server re-baselines (emits a full `snapshot` instead of a
+`delta`) after 50 delta events, when a delta is larger than a fresh snapshot,
+or when the gateway observes `TimeTravelJumped` for the run.
+
+## WebSocket protocol
+
+Three frame types share the same socket:
+
+- `req`: `{ type: "req", id, method, params? }` from client.
+- `res`: `{ type: "res", id, ok, payload?, error? }` from server, correlated by `id`.
+- `event`: `{ type: "event", event, payload?, seq, stateVersion }` server-pushed; `seq` is per connection, `stateVersion` is global.
+
+Handshake: on connect the server immediately pushes `connect.challenge` (`{ nonce, ts }`). The client replies with a `connect` request carrying `minProtocol`, `maxProtocol`, `client` metadata, `auth`, and an optional `subscribe: string[]` to filter events by `runId`. The server returns a `hello` payload (`protocol`, `features`, `policy.heartbeatMs`, `auth` with `sessionToken`/`role`/`scopes`/`userId`, `snapshot`).
+
+After `connect`, the gateway emits `tick` events every `heartbeatMs`. `launchRun`, `submitApproval`, `submitSignal`, and `cronRun` automatically subscribe the connection to the affected `runId`. Server-pushed event names:
+
+| Event | Category |
+|---|---|
+| `connect.challenge` | Connection |
+| `tick` | Connection |
+| `run.event` | Run lifecycle |
+| `run.heartbeat` | Run lifecycle |
+| `run.gap_resync` | Run lifecycle |
+| `run.error` | Run lifecycle |
+| `run.completed` | Run lifecycle |
+| `run.time_travel_jumped` | Run lifecycle |
+| `node.started` | Run lifecycle |
+| `node.finished` | Run lifecycle |
+| `node.failed` | Run lifecycle |
+| `task.output` | Run lifecycle |
+| `task.heartbeat` | Run lifecycle |
+| `approval.requested` | Approval |
+| `approval.decided` | Approval |
+| `approval.auto_approved` | Approval |
+| `cron.triggered` | Cron |
+| `devtools.event` | DevTools |
+
+For stateless callers, `POST /rpc` accepts the same body shape (`{ id, method, params }`) and returns the same `ResponseFrame`. Auth headers: `Authorization: Bearer <token>` or `x-smithers-key: <token>` (or trusted-proxy headers in trusted-proxy mode).
+
+## GatewayOptions
+
+```ts
+type GatewayOptions = {
+  protocol?: number;                 // default 1
+  features?: string[];               // default ["streaming", "runs"]
+  heartbeatMs?: number;              // default 15_000
+  auth?: GatewayAuthConfig;
+  workspaceRoot?: string;            // anchors disk-backed reads and the advertised identity
+  identity?: {                       // advertised on GET /health, the health RPC, and the WS hello
+    backend?: string;                // sqlite | pglite | postgres
+    version?: string;                // serving package version
+  };
+  ui?: GatewayUiConfig;              // custom gateway UI; true mounts the built-in console
+  operatorUi?: GatewayOperatorUiConfig | false; // default { path: "/console" }; false disables
+  defaults?: {
+    cliAgentTools?: "all" | "explicit-only";
+    outOfProcessEventBridge?: boolean;
+    outOfProcessEventBridgePollMs?: number;
+  };
+  maxBodyBytes?: number;             // default 1_048_576 for POST /rpc
+  maxPayload?: number;               // default 1_048_576 for WebSocket frames
+  maxConnections?: number;           // default 1_000
+  eventWindowSize?: number;          // default 10_000 per-run replay frames
+  outOfProcessEventBridge?: boolean; // default true; streams persisted events from detached runs
+  outOfProcessEventBridgePollMs?: number; // default 1_000
+  headersTimeout?: number;           // default 30_000
+  requestTimeout?: number;           // default 60_000
+};
+
+type GatewayOperatorUiConfig = {
+  path?: string;                      // default "/console"
+  title?: string;
+  props?: Record<string, unknown>;
+};
+
+type GatewayUiConfig =
+  | true
+  | {
+      entry: string;
+      path?: string;                  // gateway default "/"; workflow default "/workflows/<workflowKey>"
+      title?: string;
+      props?: Record<string, unknown>;
+    };
+
+type GatewayTokenGrant = {
+  role: string;
+  scopes: string[];
+  userId?: string;
+  tokenId?: string;
+  issuedAtMs?: number;
+  expiresAtMs?: number;
+  revokedAtMs?: number;
+};
+
+type GatewayAuthConfig =
+  | {
+      mode: "token";
+      tokens: Record<string, GatewayTokenGrant>;
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+    }
+  | {
+      mode: "jwt";
+      issuer: string;
+      audience: string | string[];
+      secret: string;                // HS256
+      scopesClaim?: string;          // default "scope"
+      roleClaim?: string;            // default "role"
+      userClaim?: string;            // default "sub"
+      defaultRole?: string;          // default "operator"
+      defaultScopes?: string[];      // default [] when scope claim is absent
+      clockSkewSeconds?: number;     // default 60; negative values clamp to 0
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+    }
+  | {
+      mode: "trusted-proxy";
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+      trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
+      defaultRole?: string;          // default "operator"
+      defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
+    };
+```
+
+JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured.
+
+`allowedOrigins` is available in every mode (token, jwt, trusted-proxy) as defense-in-depth. It defaults to `[]`, which enforces no Origin allowlist. When non-empty, the gateway rejects any HTTP RPC or WebSocket upgrade whose browser `Origin` header is not on the list; requests with no `Origin` header (server-to-server / CLI callers) are always allowed. Set it to your operator-UI origin(s) when exposing a token/jwt gateway to a browser.
+
+Runs started through the gateway expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`. `<Approval>` may further restrict decisions with `allowedScopes` and `allowedUsers`, which the gateway enforces before accepting `submitApproval`.
+
+`headersTimeout` and `requestTimeout` are applied to the underlying Node HTTP server when `gateway.listen()` starts. Keep both below the corresponding reverse-proxy idle/read timeouts so slow clients are closed by Smithers first.
+
+## Notes
+
+- Identity: `GET /health`, the `health` RPC, and the WS hello carry `identity: { workspaceRoot, backend, version, pid, startedAtMs }`. Clients (the CLI's `ui`/`gateway status` among them) verify `workspaceRoot` against the workspace they resolved locally instead of trusting whichever process owns the port.
+- Bind failures reject: `gateway.listen()` rejects on `EADDRINUSE` (and any other bind error) instead of crashing the process. The `smithers gateway` command retries on an ephemeral port and records the real port in its runtime state file.
+- Singleton per workspace: `smithers gateway` writes `{pid, host, port, url, token, workspaceRoot, backend, version, protocol, startedAtMs}` to `<tmpdir>/smithers-gateway/<workspace-hash>.json` (mode 0600) after listening, refuses to start when a healthy gateway for the same workspace is already running, and cleans the file up on shutdown. `smithers gateway status` and `smithers gateway stop` manage it; stale files (dead pid, identity mismatch) are cleaned up on the next discovery.
+- Monitor mount: the `smithers gateway` CLI singleton also serves the [Smithers Monitor](/guides/monitor), a live web UI over every run in the workspace, at `/monitor` (open it with `bunx smithers-orchestrator monitor`). The mount ships inside the CLI, so it needs no `.smithers/` pack and no registered workflow UI. Library embedders control the other UI mounts through `ui` (custom gateway UI, workflow UIs at `/workflows/<key>`) and `operatorUi` (the embeddable operator console, default `/console`).
+- `--mint-token`: mints a random bearer, requires it on every request, and records it only in the runtime state file (plus the daemon's own stderr). `bunx smithers-orchestrator ui` reads the token from the state file automatically for CLI RPC calls, but browser navigation to the printed workflow UI URL cannot send that bearer header until UI token injection ships; use `smithers gateway` without `--mint-token` when you need browser-served workflow UIs. Other clients can read `SMITHERS_TOKEN` / `SMITHERS_API_KEY`.
+- Cron: `gateway.register(name, wf, { schedule })` writes a cron row keyed `gateway:<name>`; the gateway polls between 1 s and 15 s (clamped from `heartbeatMs`). Cron-fired runs get `ctx.auth.role = "system"`, `triggeredBy = "cron:gateway"`, `scopes = ["*"]`.
+- Host defense: an unauthenticated gateway (the autostart default) rejects any request whose `Host` header is non-loopback, as a DNS-rebinding defense, so binding `--host 0.0.0.0` without a token returns 403 `Host is not allowed`. This applies only when no `auth` is configured. To deliberately expose an unauthenticated remote bind, pass `smithers gateway --insecure` (or `up --serve --insecure`), which trusts any Host; `SMITHERS_GATEWAY_TRUST_ANY_HOST=1` (gateway) and `SMITHERS_SERVE_TRUST_ANY_HOST=1` (serve) do the same via the environment.
+- JWT mode currently validates `alg=HS256`, HMAC, `iss`, `aud`, `exp`, `nbf`. Scope claims may be arrays or space/comma-separated strings.
+- Trusted-proxy mode is only safe behind something you control (Cloudflare Access, internal API gateway) that strips and rewrites identity headers.
+- DevTools streams: see Versioned wire shapes for re-baseline triggers; over-capacity subscribers receive `BackpressureDisconnect`.

@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smithers — Run Chronicle</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg-surface: #161b22;
+  --bg-surface2: #1c2128;
+  --bg-hover: #21262d;
+  --border: #30363d;
+  --border-subtle: #21262d;
+  --text: #e6edf3;
+  --text-secondary: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-dim: #6e7681;
+
+  --accent: #58a6ff;
+  --success: #3fb950;
+  --danger: #f85149;
+  --warning: #d29922;
+  --purple: #a371f7;
+  --pink: #d2a8ff;
+
+  --diff-add-bg: rgba(46,160,67,0.15);
+  --diff-add-fg: #7ee787;
+  --diff-del-bg: rgba(248,81,73,0.15);
+  --diff-del-fg: #ffa198;
+  --diff-hunk-bg: rgba(56,139,253,0.1);
+  --diff-hunk-fg: #79c0ff;
+
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius: 6px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 13px; line-height: 1.5; }
+
+.app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+
+/* ===== HEADER ===== */
+.header { background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 12px; }
+.run-status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; cursor: pointer; position: relative; }
+.run-status-pill.finished { background: rgba(63,185,80,0.15); color: var(--success); }
+.run-status-pill.running { background: rgba(88,166,255,0.15); color: var(--accent); }
+.run-status-pill .pulse { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.header-workflow { font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-color: transparent; }
+.header-workflow:hover { text-decoration-color: var(--accent); }
+.header-run-id { font-size: 11px; font-family: var(--font-mono); color: var(--text-dim); cursor: pointer; }
+.header-run-id:hover { color: var(--text-muted); }
+.header-elapsed { font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); margin-left: auto; }
+.heartbeat { width: 8px; height: 8px; border-radius: 50%; }
+.heartbeat.green { background: var(--success); box-shadow: 0 0 4px var(--success); }
+.heartbeat.amber { background: var(--warning); }
+.heartbeat.red { background: var(--danger); }
+
+/* ===== MAIN ===== */
+.main { display: grid; grid-template-columns: 320px 1fr 420px; overflow: hidden; }
+
+/* ===== TREE PANE ===== */
+.tree-pane { background: var(--bg-surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.tree-search { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-surface2); border-bottom: 1px solid var(--border); }
+.tree-search input { background: transparent; border: none; color: var(--text); font-size: 12px; outline: none; flex: 1; }
+.tree-search input::placeholder { color: var(--text-dim); }
+.tree-search-icon { color: var(--text-dim); font-size: 11px; }
+
+.tree-content { flex: 1; overflow-y: auto; padding: 4px 0; }
+.tree-content::-webkit-scrollbar { width: 5px; }
+.tree-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.tree-row { display: flex; align-items: center; gap: 4px; padding: 2px 8px; cursor: pointer; position: relative; min-height: 24px; }
+.tree-row:hover { background: var(--bg-hover); }
+.tree-row.selected { background: rgba(88,166,255,0.1); }
+.tree-row.ghost { opacity: 0.4; }
+.tree-row .running-cursor { position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); animation: pulse-bar 2s ease-in-out infinite; }
+@keyframes pulse-bar { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.tree-chevron { width: 12px; text-align: center; font-size: 9px; color: var(--text-dim); cursor: pointer; flex-shrink: 0; }
+.tree-tag { font-size: 11px; font-family: var(--font-mono); font-weight: 500; }
+.tree-tag.workflow { color: var(--accent); }
+.tree-tag.sequence { color: var(--purple); }
+.tree-tag.parallel { color: var(--pink); }
+.tree-tag.loop { color: var(--warning); }
+.tree-tag.task { color: var(--text); }
+.tree-tag.ghost-tag { color: var(--text-dim); }
+
+.tree-name { font-size: 10px; font-family: var(--font-mono); color: var(--text-dim); margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-state { font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 3px; margin-left: auto; flex-shrink: 0; text-transform: uppercase; }
+.tree-state.running { background: rgba(88,166,255,0.15); color: var(--accent); }
+.tree-state.succeeded { background: rgba(63,185,80,0.12); color: var(--success); }
+.tree-state.failed { background: rgba(248,81,73,0.12); color: var(--danger); }
+.tree-state.pending { background: rgba(110,118,129,0.12); color: var(--text-dim); }
+.tree-state.waiting { background: rgba(163,113,247,0.12); color: var(--purple); }
+
+.tree-lastlog { font-size: 10px; font-family: var(--font-mono); color: var(--text-dim); padding-left: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== CHRONICLE (center) ===== */
+.chronicle-pane { display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
+.chronicle-filter { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
+.filter-btn { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 2px 8px; border-radius: 12px; font-size: 10px; cursor: pointer; transition: all 0.15s; }
+.filter-btn:hover { border-color: var(--text-muted); color: var(--text); }
+.filter-btn.active { background: rgba(88,166,255,0.1); border-color: var(--accent); color: var(--accent); }
+
+.chronicle-scroll { flex: 1; overflow-y: auto; padding: 4px 0; }
+.chronicle-scroll::-webkit-scrollbar { width: 5px; }
+.chronicle-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.ev-row { display: grid; grid-template-columns: 42px 4px 1fr; gap: 0 8px; padding: 4px 12px; cursor: pointer; transition: background 0.1s; }
+.ev-row:hover { background: var(--bg-hover); }
+.ev-row.selected { background: var(--bg-surface2); }
+.ev-seq { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); text-align: right; padding-top: 2px; }
+.ev-rail { width: 4px; border-radius: 2px; }
+.ev-rail.running { background: var(--accent); }
+.ev-rail.success { background: var(--success); }
+.ev-rail.failed { background: var(--danger); }
+.ev-rail.retrying { background: var(--warning); }
+.ev-rail.frame { background: var(--text-dim); opacity: 0.4; }
+.ev-rail.approval { background: var(--pink); }
+.ev-main { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.ev-icon { font-size: 10px; flex-shrink: 0; }
+.ev-icon.s { color: var(--success); }
+.ev-icon.r { color: var(--accent); }
+.ev-icon.f { color: var(--danger); }
+.ev-icon.w { color: var(--warning); }
+.ev-icon.d { color: var(--text-dim); }
+.ev-type { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); min-width: 110px; }
+.ev-summary { font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-offset { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); margin-left: auto; flex-shrink: 0; }
+.ev-detail { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); padding-left: 18px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== INSPECTOR ===== */
+.inspector { background: var(--bg-surface); display: flex; flex-direction: column; overflow: hidden; }
+.insp-header { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.insp-node-row { display: flex; align-items: center; gap: 8px; }
+.insp-node-tag { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+.insp-state { font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; }
+.insp-state.succeeded { background: rgba(63,185,80,0.12); color: var(--success); }
+.insp-state.running { background: rgba(88,166,255,0.12); color: var(--accent); }
+.insp-state.failed { background: rgba(248,81,73,0.12); color: var(--danger); }
+.insp-sub { font-size: 10px; font-family: var(--font-mono); color: var(--text-dim); margin-top: 3px; display: flex; align-items: center; gap: 8px; }
+.insp-sub .copy-btn { cursor: pointer; opacity: 0.5; }
+.insp-sub .copy-btn:hover { opacity: 1; }
+
+.insp-tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 14px; }
+.insp-tab { padding: 7px 10px; font-size: 11px; cursor: pointer; color: var(--text-dim); border-bottom: 2px solid transparent; font-weight: 500; }
+.insp-tab:hover { color: var(--text); }
+.insp-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.insp-body { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.insp-body::-webkit-scrollbar { width: 5px; }
+.insp-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.insp-section { margin-bottom: 14px; }
+.insp-section-title { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 5px; }
+
+/* Props table */
+.prop-row { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; font-size: 11px; }
+.prop-key { font-family: var(--font-mono); color: var(--purple); font-weight: 500; min-width: 80px; flex-shrink: 0; }
+.prop-val { font-family: var(--font-mono); color: var(--text-muted); word-break: break-all; }
+
+/* Output renderer */
+.output-field { padding: 6px 8px; background: var(--bg); border-radius: 4px; margin-bottom: 4px; }
+.output-field-header { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.output-field-name { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text); }
+.output-field-type { font-size: 9px; padding: 0 4px; border-radius: 2px; background: var(--bg-hover); color: var(--text-dim); font-family: var(--font-mono); }
+.output-field-value { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: pre-wrap; line-height: 1.5; }
+
+/* Diff view */
+.diff-file-header { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding: 4px 8px; background: var(--bg-surface2); border-radius: 4px 4px 0 0; margin-bottom: 0; font-weight: 500; }
+.diff-hunk-header { font-family: var(--font-mono); font-size: 10px; color: var(--diff-hunk-fg); background: var(--diff-hunk-bg); padding: 2px 8px; }
+.diff-line { font-family: var(--font-mono); font-size: 11px; padding: 1px 8px; display: flex; gap: 0; }
+.diff-line .ln { width: 28px; text-align: right; color: var(--text-dim); font-size: 10px; flex-shrink: 0; padding-right: 6px; user-select: none; }
+.diff-line .prefix { width: 12px; flex-shrink: 0; font-weight: 700; }
+.diff-line.add { background: var(--diff-add-bg); color: var(--diff-add-fg); }
+.diff-line.del { background: var(--diff-del-bg); color: var(--diff-del-fg); }
+.diff-line.ctx { color: var(--text-muted); }
+
+/* Tool calls in inspector */
+.tool-row { display: grid; grid-template-columns: 14px 44px 1fr 36px; align-items: center; gap: 4px; padding: 3px 6px; background: var(--bg); border-radius: 3px; margin-bottom: 2px; font-family: var(--font-mono); font-size: 10px; }
+.tool-icon { text-align: center; }
+.tool-icon.ok { color: var(--success); }
+.tool-name { color: var(--text-muted); font-weight: 500; }
+.tool-detail { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-dur { color: var(--text-dim); text-align: right; }
+
+/* Actions */
+.insp-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.act-btn { display: flex; align-items: center; gap: 3px; padding: 4px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text-dim); font-size: 10px; cursor: pointer; }
+.act-btn:hover { border-color: var(--text-muted); color: var(--text); }
+.act-btn.danger { border-color: rgba(248,81,73,0.3); color: var(--danger); }
+.act-btn.danger:hover { background: rgba(248,81,73,0.1); }
+
+/* Empty state */
+.insp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); }
+.insp-empty-icon { font-size: 24px; opacity: 0.4; margin-bottom: 8px; }
+
+/* ===== FRAME SCRUBBER ===== */
+.scrubber { background: var(--bg-surface2); border-top: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 12px; }
+.scrubber-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+.scrubber-slider { flex: 1; -webkit-appearance: none; height: 4px; background: var(--border); border-radius: 2px; outline: none; }
+.scrubber-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+.scrubber-ticks { display: flex; justify-content: space-between; flex: 1; height: 4px; position: relative; }
+.scrubber-tick { width: 1px; height: 4px; background: var(--border); }
+.scrubber-rewind { font-size: 10px; font-weight: 600; color: var(--danger); background: rgba(248,81,73,0.12); padding: 3px 8px; border-radius: 4px; border: none; cursor: pointer; display: none; }
+.scrubber-rewind.visible { display: block; }
+.scrubber-live { font-size: 10px; font-weight: 500; color: var(--accent); cursor: pointer; display: none; }
+.scrubber-live.visible { display: block; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header (matches LiveRunHeaderView) -->
+  <div class="header">
+    <div class="run-status-pill finished"><span class="pulse"></span>FINISHED</div>
+    <span class="header-workflow">kanban</span>
+    <span class="header-run-id" title="Click to copy">smi_kanban_rl_01</span>
+    <span class="header-elapsed">4:38</span>
+    <div class="heartbeat green" title="Last event: 0s ago"></div>
+  </div>
+
+  <!-- Main: Tree | Chronicle | Inspector -->
+  <div class="main">
+    <!-- Tree pane (matches LiveRunTreeView) -->
+    <div class="tree-pane">
+      <div class="tree-search">
+        <span class="tree-search-icon">⌕</span>
+        <input type="text" placeholder="Search tree…" id="tree-search-input">
+      </div>
+      <div class="tree-content" id="tree-content"></div>
+    </div>
+
+    <!-- Chronicle pane -->
+    <div class="chronicle-pane">
+      <div class="chronicle-filter">
+        <button class="filter-btn active" data-filter="important">Important</button>
+        <button class="filter-btn" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="nodes">Nodes</button>
+        <button class="filter-btn" data-filter="tools">Tools</button>
+      </div>
+      <div class="chronicle-scroll" id="chronicle"></div>
+    </div>
+
+    <!-- Inspector pane (matches NodeInspectorView) -->
+    <div class="inspector" id="inspector">
+      <div class="insp-empty">
+        <div class="insp-empty-icon">◎</div>
+        <div style="font-size:11px;max-width:180px;text-align:center">Select a tree node or event to inspect</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Frame Scrubber (matches FrameScrubberView) -->
+  <div class="scrubber">
+    <span class="scrubber-label" id="scrubber-label">frame 6 / 6</span>
+    <input type="range" class="scrubber-slider" id="scrubber-slider" min="0" max="6" value="6" step="1">
+    <button class="scrubber-rewind" id="scrubber-rewind">Rewind</button>
+    <span class="scrubber-live" id="scrubber-live">Return to live</span>
+  </div>
+</div>
+
+<script>
+// ===== TREE DATA (DevToolsSnapshot) =====
+const TREE = {
+  id: 1, type: 'workflow', name: 'Workflow', props: { name: 'kanban' }, state: 'succeeded',
+  children: [
+    { id: 2, type: 'sequence', name: 'Sequence', state: 'succeeded', children: [
+      { id: 3, type: 'task', name: 'Task', nodeId: 'triage', state: 'succeeded', agent: 'claude-sonnet', label: 'Triage items', timing: '18.4s' },
+      { id: 4, type: 'loop', name: 'Loop', state: 'succeeded', props: { until: 'allDone', maxIterations: 3, iteration: 2 }, children: [
+        { id: 5, type: 'sequence', name: 'Sequence', state: 'succeeded', children: [
+          { id: 6, type: 'parallel', name: 'Parallel', state: 'succeeded', props: { maxConcurrency: 3 }, children: [
+            { id: 7, type: 'task', name: 'Task', nodeId: 'work-rl-middleware', state: 'succeeded', agent: 'claude-sonnet', timing: '25.4s' },
+            { id: 8, type: 'task', name: 'Task', nodeId: 'work-rl-config', state: 'succeeded', agent: 'claude-sonnet', timing: '19.3s' },
+            { id: 9, type: 'task', name: 'Task', nodeId: 'work-rl-tests', state: 'succeeded', agent: 'claude-sonnet', timing: '35.7s', iteration: 1 },
+            { id: 10, type: 'task', name: 'Task', nodeId: 'work-rl-docs', state: 'succeeded', agent: 'claude-sonnet', timing: '19.9s' },
+          ]},
+          { id: 11, type: 'parallel', name: 'Parallel', state: 'succeeded', props: { maxConcurrency: 2 }, children: [
+            { id: 12, type: 'task', name: 'Task', nodeId: 'review-rl-middleware', state: 'succeeded', agent: 'claude-sonnet', timing: '13.8s' },
+            { id: 13, type: 'task', name: 'Task', nodeId: 'review-rl-config', state: 'succeeded', agent: 'claude-sonnet', timing: '15.7s' },
+            { id: 14, type: 'task', name: 'Task', nodeId: 'review-rl-tests', state: 'succeeded', agent: 'claude-sonnet', timing: '15.8s', iteration: 1 },
+            { id: 15, type: 'task', name: 'Task', nodeId: 'review-rl-docs', state: 'succeeded', agent: 'claude-sonnet', timing: '13.9s' },
+          ]},
+        ]},
+      ]},
+      { id: 16, type: 'task', name: 'Task', nodeId: 'board', state: 'succeeded', label: 'Board summary', timing: '<1ms' },
+    ]},
+  ],
+};
+
+// Ghost node (was mounted in iter 0, unmounted in frame 4)
+const GHOST_NODES = [
+  { id: 99, type: 'task', name: 'Task', nodeId: 'work-rl-tests', state: 'succeeded', iteration: 0, ghost: true, timing: '33.2s', unmountedFrame: 4 },
+];
+
+// ===== EVENTS =====
+const EVENTS = [
+  { seq:1, ms:0, type:'RunStarted', rail:'success', icon:'▶', ic:'s', sum:'Run started', det:'input: { goal: "Add rate limiting…", directory: "src/api" }', node:null },
+  { seq:2, ms:12, type:'FrameCommitted', rail:'frame', icon:'◇', ic:'d', sum:'Frame 1 — mounted: triage', det:null, node:null },
+  { seq:3, ms:45, type:'NodeStarted', rail:'running', icon:'→', ic:'r', sum:'triage', det:'attempt 1 · claude-sonnet-4-20250514', node:'triage' },
+  { seq:4, ms:1200, type:'ToolCallFinished', rail:'success', icon:'🔧', ic:'d', sum:'triage → bash', det:'find src/api -name "*.ts" → 14 files', node:'triage' },
+  { seq:5, ms:2400, type:'ToolCallFinished', rail:'success', icon:'🔧', ic:'d', sum:'triage → grep', det:'pattern: "router\\." → 8 matches', node:'triage' },
+  { seq:6, ms:3100, type:'ToolCallFinished', rail:'success', icon:'🔧', ic:'d', sum:'triage → read', det:'src/api/routes/index.ts (67 lines)', node:'triage' },
+  { seq:7, ms:18400, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'triage finished — 4 items', det:'output: triage (validated) · 18.4s', node:'triage' },
+  { seq:8, ms:18500, type:'FrameCommitted', rail:'frame', icon:'◇', ic:'d', sum:'Frame 2 — Loop iter 0: work ×4', det:'Parallel maxConcurrency=3', node:null },
+  { seq:9, ms:18600, type:'NodeStarted', rail:'running', icon:'→', ic:'r', sum:'work-rl-middleware', det:'attempt 1 · iter 0', node:'work-rl-middleware' },
+  { seq:10, ms:18700, type:'NodeStarted', rail:'running', icon:'→', ic:'r', sum:'work-rl-config', det:'attempt 1 · iter 0', node:'work-rl-config' },
+  { seq:11, ms:18800, type:'NodeStarted', rail:'running', icon:'→', ic:'r', sum:'work-rl-tests', det:'attempt 1 · iter 0', node:'work-rl-tests' },
+  { seq:12, ms:28000, type:'ToolCallFinished', rail:'success', icon:'🔧', ic:'d', sum:'work-rl-middleware → write', det:'src/api/middleware/rateLimit.ts (new, 62 lines)', node:'work-rl-middleware' },
+  { seq:13, ms:38000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'work-rl-config finished', det:'column: "review" · 19.3s', node:'work-rl-config' },
+  { seq:14, ms:44000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'work-rl-middleware finished', det:'column: "review" · files: 2 · 25.4s', node:'work-rl-middleware' },
+  { seq:15, ms:44100, type:'NodeStarted', rail:'running', icon:'→', ic:'r', sum:'work-rl-docs', det:'attempt 1 · iter 0 (slot freed)', node:'work-rl-docs' },
+  { seq:16, ms:52000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'work-rl-tests finished', det:'column: "review" · 33.2s', node:'work-rl-tests' },
+  { seq:17, ms:64000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'work-rl-docs finished', det:'column: "review" · 19.9s', node:'work-rl-docs' },
+  { seq:18, ms:64100, type:'FrameCommitted', rail:'frame', icon:'◇', ic:'d', sum:'Frame 3 — review ×4', det:'Parallel maxConcurrency=2', node:null },
+  { seq:19, ms:78000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'review-rl-middleware — approved', det:'column: "done" · 13.8s', node:'review-rl-middleware' },
+  { seq:20, ms:80000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'review-rl-config — approved', det:'column: "done" · 15.7s', node:'review-rl-config' },
+  { seq:21, ms:96000, type:'NodeFinished', rail:'failed', icon:'✗', ic:'f', sum:'review-rl-tests — rejected → backlog', det:'feedback: "Missing edge case…" · 17.9s', node:'review-rl-tests' },
+  { seq:22, ms:94000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'review-rl-docs — approved', det:'column: "done" · 13.9s', node:'review-rl-docs' },
+  { seq:23, ms:96200, type:'FrameCommitted', rail:'frame', icon:'◇', ic:'d', sum:'Frame 4 — Loop iter 1: re-work rl-tests', det:'until=false · 1 item remaining', node:null },
+  { seq:24, ms:96300, type:'NodeStarted', rail:'retrying', icon:'↻', ic:'w', sum:'work-rl-tests (iter 1)', det:'re-work after review rejection', node:'work-rl-tests' },
+  { seq:25, ms:120000, type:'ToolCallFinished', rail:'success', icon:'🔧', ic:'d', sum:'work-rl-tests → bash', det:'bun test → 4 passed, 0 failed', node:'work-rl-tests' },
+  { seq:26, ms:132000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'work-rl-tests finished (iter 1)', det:'column: "review" · 35.7s', node:'work-rl-tests' },
+  { seq:27, ms:132100, type:'FrameCommitted', rail:'frame', icon:'◇', ic:'d', sum:'Frame 5 — review-rl-tests (iter 1)', det:null, node:null },
+  { seq:28, ms:148000, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'review-rl-tests — approved (iter 1)', det:'column: "done" · 15.8s', node:'review-rl-tests' },
+  { seq:29, ms:148200, type:'FrameCommitted', rail:'frame', icon:'◇', ic:'d', sum:'Frame 6 — Loop done. Mounted: board', det:'all 4 items in "done"', node:null },
+  { seq:30, ms:148400, type:'NodeFinished', rail:'success', icon:'✓', ic:'s', sum:'board finished', det:'"Processed 4 items: 4 done, 0 blocked"', node:'board' },
+  { seq:31, ms:148500, type:'RunFinished', rail:'success', icon:'✓', ic:'s', sum:'Run finished — 4m 38s', det:'10 nodes · 2 loop iterations · 42.1k tokens', node:null },
+];
+
+const IMPORTANT_TYPES = new Set(['RunStarted','RunFinished','FrameCommitted','NodeStarted','NodeFinished']);
+
+// ===== NODE INSPECTOR DATA =====
+const INSPECTORS = {
+  'triage': { state:'succeeded', tabs:['Output','Diff','Logs'], activeTab:'Output',
+    props: { nodeId:'triage', kind:'agent', agent:'claude-sonnet-4-20250514', outputTable:'triage', iteration:0, attempt:1, timing:'18.4s' },
+    tools: [{n:'bash',d:'find src/api -name "*.ts"',t:'1.1s',ok:true},{n:'grep',d:'"router\\." → 8 matches',t:'1.2s',ok:true},{n:'read',d:'src/api/routes/index.ts',t:'0.7s',ok:true}],
+    output: { fields: [
+      { name:'items', type:'array', value:'[{id:"rl-middleware",…}, {id:"rl-config",…}, {id:"rl-tests",…}, {id:"rl-docs",…}]' },
+      { name:'totalItems', type:'number', value:'4' },
+    ]},
+  },
+  'work-rl-middleware': { state:'succeeded', tabs:['Output','Diff','Logs'], activeTab:'Diff',
+    props: { nodeId:'work-rl-middleware', kind:'agent', agent:'claude-sonnet-4-20250514', outputTable:'work', iteration:0, attempt:1, timing:'25.4s' },
+    tools: [{n:'read',d:'src/api/middleware/index.ts',t:'0.1s',ok:true},{n:'write',d:'src/api/middleware/rateLimit.ts (new)',t:'0.2s',ok:true},{n:'edit',d:'src/api/middleware/index.ts:3-4',t:'0.1s',ok:true}],
+    output: { fields: [
+      { name:'itemId', type:'string', value:'"rl-middleware"' },
+      { name:'column', type:'enum', value:'"review"' },
+      { name:'summary', type:'string', value:'"Created rateLimit middleware using sliding window algorithm"' },
+      { name:'filesChanged', type:'array', value:'["src/api/middleware/rateLimit.ts", "src/api/middleware/index.ts"]' },
+    ]},
+    diff: { file:'src/api/middleware/rateLimit.ts', hunks:[
+      { header:'@@ -0,0 +1,12 @@', lines:[
+        {k:'add',ln:1,t:'import { Redis } from "ioredis";'},
+        {k:'add',ln:2,t:'import { RateLimitConfig } from "../config";'},
+        {k:'add',ln:3,t:''},
+        {k:'add',ln:4,t:'export function createRateLimiter(config: RateLimitConfig) {'},
+        {k:'add',ln:5,t:'  const redis = new Redis(config.redisUrl);'},
+        {k:'add',ln:6,t:'  return async (req, res, next) => {'},
+        {k:'add',ln:7,t:'    const key = `rl:${req.ip}:${req.path}`;'},
+        {k:'add',ln:8,t:'    const count = await redis.incr(key);'},
+        {k:'add',ln:9,t:'    if (count === 1) await redis.expire(key, config.windowSec);'},
+        {k:'add',ln:10,t:'    if (count > config.maxRequests) {'},
+        {k:'add',ln:11,t:'      return res.status(429).json({ error: "Rate limited" });'},
+        {k:'add',ln:12,t:'    }'},
+      ]}
+    ]},
+  },
+  'review-rl-tests-rejected': { state:'succeeded', tabs:['Output','Logs'], activeTab:'Output',
+    props: { nodeId:'review-rl-tests', kind:'agent', agent:'claude-sonnet-4-20250514', outputTable:'review', iteration:0, attempt:1, timing:'17.9s' },
+    tools: [{n:'read',d:'src/api/__tests__/rateLimit.test.ts',t:'0.1s',ok:true}],
+    output: { fields: [
+      { name:'itemId', type:'string', value:'"rl-tests"' },
+      { name:'approved', type:'boolean', value:'false' },
+      { name:'feedback', type:'string', value:'"Missing edge case for concurrent requests hitting the same endpoint."' },
+      { name:'column', type:'enum', value:'"backlog"' },
+    ]},
+  },
+  'board': { state:'succeeded', tabs:['Output'], activeTab:'Output',
+    props: { nodeId:'board', kind:'static', outputTable:'board', iteration:0, attempt:1, timing:'<1ms' },
+    tools: [],
+    output: { fields: [
+      { name:'done', type:'array', value:'["rl-middleware", "rl-config", "rl-tests", "rl-docs"]' },
+      { name:'blocked', type:'array', value:'[]' },
+      { name:'loopedBack', type:'array', value:'["rl-tests"]' },
+      { name:'summary', type:'string', value:'"Processed 4 items: 4 done, 0 blocked"' },
+    ]},
+  },
+};
+
+// ===== RENDER TREE =====
+function renderTree(node, depth=0, parentEl) {
+  const el = parentEl || document.getElementById('tree-content');
+  const isTask = node.type === 'task';
+  const hasKids = node.children && node.children.length > 0;
+  const indent = depth * 16;
+  const stateClass = node.state || 'pending';
+  const tagClass = node.ghost ? 'ghost-tag' : node.type;
+
+  const row = document.createElement('div');
+  row.className = `tree-row${node.ghost ? ' ghost' : ''}`;
+  row.dataset.nodeId = node.nodeId || '';
+  row.dataset.id = node.id;
+  row.style.paddingLeft = `${8 + indent}px`;
+
+  let label = isTask ? (node.nodeId || node.label || 'Task') : `<${node.name}>`;
+  let nameExtra = '';
+  if (node.props?.maxConcurrency) nameExtra += ` max=${node.props.maxConcurrency}`;
+  if (node.props?.iteration !== undefined) nameExtra += ` iter=${node.props.iteration}`;
+  if (node.iteration !== undefined) nameExtra += ` iter=${node.iteration}`;
+
+  row.innerHTML = `
+    ${hasKids ? '<span class="tree-chevron">▾</span>' : '<span class="tree-chevron"></span>'}
+    <span class="tree-tag ${tagClass}">${isTask ? '' : '‹'}${isTask ? label : node.name}${isTask ? '' : '›'}</span>
+    ${isTask ? '' : `<span class="tree-name">${nameExtra}</span>`}
+    ${isTask && node.timing ? `<span class="tree-name">${node.timing}</span>` : ''}
+    <span class="tree-state ${stateClass}">${stateClass}</span>
+  `;
+
+  row.addEventListener('click', () => {
+    document.querySelectorAll('.tree-row').forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+    if (node.nodeId) showInspector(node.nodeId, node);
+  });
+
+  el.appendChild(row);
+
+  if (hasKids) {
+    node.children.forEach(child => renderTree(child, depth + 1, el));
+  }
+}
+
+function buildTree() {
+  const el = document.getElementById('tree-content');
+  el.innerHTML = '';
+  renderTree(TREE);
+  // Add ghost
+  GHOST_NODES.forEach(g => renderTree(g, 3, el));
+}
+
+// ===== RENDER CHRONICLE =====
+function renderChronicle(events) {
+  const el = document.getElementById('chronicle');
+  el.innerHTML = events.map(ev => `
+    <div class="ev-row" data-node="${ev.node||''}" data-seq="${ev.seq}">
+      <span class="ev-seq">#${ev.seq}</span>
+      <div class="ev-rail ${ev.rail}"></div>
+      <div>
+        <div class="ev-main">
+          <span class="ev-icon ${ev.ic}">${ev.icon}</span>
+          <span class="ev-type">${ev.type}</span>
+          <span class="ev-summary">${ev.sum}</span>
+          <span class="ev-offset">+${ev.ms < 1000 ? ev.ms+'ms' : ev.ms < 60000 ? (ev.ms/1000).toFixed(1)+'s' : Math.floor(ev.ms/60000)+'m'+(Math.round((ev.ms%60000)/1000))+'s'}</span>
+        </div>
+        ${ev.det ? `<div class="ev-detail">${ev.det}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.ev-row').forEach(row => {
+    row.addEventListener('click', () => {
+      el.querySelectorAll('.ev-row').forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
+      const node = row.dataset.node;
+      if (node) showInspector(node);
+    });
+  });
+}
+
+// ===== RENDER INSPECTOR =====
+function showInspector(nodeId, treeNode) {
+  const el = document.getElementById('inspector');
+  // Special-case for the rejected review at iter 0
+  let data = INSPECTORS[nodeId];
+  if (nodeId === 'review-rl-tests' && treeNode?.iteration === 0) data = INSPECTORS['review-rl-tests-rejected'];
+  if (!data) {
+    el.innerHTML = `<div class="insp-empty"><div class="insp-empty-icon">◎</div><div style="font-size:11px">No detail for ${nodeId}</div></div>`;
+    return;
+  }
+
+  const tabsHtml = data.tabs.map(t => `<div class="insp-tab${t===data.activeTab?' active':''}" data-tab="${t}">${t}</div>`).join('');
+  const propsHtml = Object.entries(data.props).map(([k,v]) => `<div class="prop-row"><span class="prop-key">${k}</span><span class="prop-val">${v}</span></div>`).join('');
+  const toolsHtml = data.tools.map(t => `<div class="tool-row"><span class="tool-icon ${t.ok?'ok':''}">✓</span><span class="tool-name">${t.n}</span><span class="tool-detail">${t.d}</span><span class="tool-dur">${t.t}</span></div>`).join('');
+
+  let contentHtml = '';
+
+  if (data.activeTab === 'Output') {
+    contentHtml = data.output.fields.map(f => `
+      <div class="output-field">
+        <div class="output-field-header"><span class="output-field-name">${f.name}</span><span class="output-field-type">${f.type}</span></div>
+        <div class="output-field-value">${f.value}</div>
+      </div>
+    `).join('');
+  } else if (data.activeTab === 'Diff' && data.diff) {
+    const linesHtml = data.diff.hunks[0].lines.map(l => `<div class="diff-line ${l.k==='add'?'add':l.k==='del'?'del':'ctx'}"><span class="ln">${l.ln||''}</span><span class="prefix">${l.k==='add'?'+':l.k==='del'?'-':' '}</span><span>${l.t}</span></div>`).join('');
+    contentHtml = `
+      <div class="diff-file-header">${data.diff.file}</div>
+      <div class="diff-hunk-header">${data.diff.hunks[0].header}</div>
+      ${linesHtml}
+    `;
+  }
+
+  el.innerHTML = `
+    <div class="insp-header">
+      <div class="insp-node-row">
+        <span class="insp-node-tag">&lt;Task&gt;</span>
+        <span class="insp-state ${data.state}">${data.state}</span>
+      </div>
+      <div class="insp-sub">
+        <span>${data.props.nodeId}</span>
+        <span class="copy-btn" title="Copy node ID">⎘</span>
+        ${data.props.iteration !== undefined ? `<span>iter ${data.props.iteration}</span>` : ''}
+        ${data.props.timing ? `<span>${data.props.timing}</span>` : ''}
+      </div>
+    </div>
+    <div class="insp-tabs">${tabsHtml}</div>
+    <div class="insp-body">
+      <div class="insp-section">
+        <div class="insp-section-title">Props</div>
+        ${propsHtml}
+      </div>
+      ${data.tools.length ? `<div class="insp-section"><div class="insp-section-title">Tool Calls (${data.tools.length})</div>${toolsHtml}</div>` : ''}
+      <div class="insp-section">
+        <div class="insp-section-title">${data.activeTab}</div>
+        ${contentHtml}
+      </div>
+      <div class="insp-section">
+        <div class="insp-section-title">Actions</div>
+        <div class="insp-actions">
+          <button class="act-btn">↻ Retry</button>
+          <button class="act-btn">◁ Revert</button>
+          <button class="act-btn">⎘ Copy ID</button>
+          <button class="act-btn danger">⏪ Rewind here</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Tab switching
+  el.querySelectorAll('.insp-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      data.activeTab = tab.dataset.tab;
+      showInspector(nodeId, treeNode);
+    });
+  });
+}
+
+// ===== FRAME SCRUBBER =====
+const slider = document.getElementById('scrubber-slider');
+const label = document.getElementById('scrubber-label');
+const rewindBtn = document.getElementById('scrubber-rewind');
+const liveBtn = document.getElementById('scrubber-live');
+
+slider.addEventListener('input', () => {
+  const v = parseInt(slider.value);
+  label.textContent = `frame ${v} / 6`;
+  if (v < 6) {
+    rewindBtn.classList.add('visible');
+    liveBtn.classList.add('visible');
+  } else {
+    rewindBtn.classList.remove('visible');
+    liveBtn.classList.remove('visible');
+  }
+});
+
+liveBtn.addEventListener('click', () => {
+  slider.value = 6;
+  label.textContent = 'frame 6 / 6';
+  rewindBtn.classList.remove('visible');
+  liveBtn.classList.remove('visible');
+});
+
+// ===== FILTERS =====
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const f = btn.dataset.filter;
+    let evs = EVENTS;
+    if (f === 'important') evs = EVENTS.filter(e => IMPORTANT_TYPES.has(e.type));
+    else if (f === 'nodes') evs = EVENTS.filter(e => e.type.startsWith('Node'));
+    else if (f === 'tools') evs = EVENTS.filter(e => e.type === 'ToolCallFinished');
+    renderChronicle(evs);
+  });
+});
+
+// ===== INIT =====
+buildTree();
+renderChronicle(EVENTS.filter(e => IMPORTANT_TYPES.has(e.type)));
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# Spec Review
+
+OUTPUT_KIND: spec-review
+TARGET: {props.target.id}
+VOTER: {props.voter}
+FILE: {props.target.file}
+REPO: {props.repo}
+
+Compare the patched Rust module against the Zig spec and `docs/PORTING.md`.
+
+Reject layering workarounds, missing branches, wrong allocator behavior, incorrect lifetime ownership, or semantic divergences. Do not edit files.
+
+Patch result:
+{JSON.stringify(props.patch ?? null, null, 2)}
+
+Required output schema:
+{props.schema}

@@ -1,0 +1,16 @@
+---
+title: streamDevTools
+description: Gateway RPC for DevTools snapshot and delta streams.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `streamDevTools`
+- Scope: `observability:read`
+- Transport: WebSocket RPC (streaming only)
+- Request: `{ runId, afterSeq?, fromSeq? }`
+- Response: `{ streamId, runId, fromSeq, afterSeq }`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `SeqOutOfRange`, `BackpressureDisconnect`, and `Internal`.
+
+The legacy `fromSeq` field is accepted; `afterSeq` is the stable v1 name. If both are provided, they must match.

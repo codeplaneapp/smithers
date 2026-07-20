@@ -1,0 +1,54 @@
+# Smithers
+
+Durable AI workflow orchestration as a JSX runtime.
+
+## Audience split
+
+- Human docs: the website's For Humans Guide. Humans use Smithers by talking to
+  their coding agent and reading prompt/examples-oriented pages.
+- Agent docs: these llms files plus the website's For Agents reference. Agents
+  consume this material, run Smithers commands themselves, watch runs, verify
+  with backpressure, and report evidence back to the human.
+
+## Documentation
+
+The complete agent bundle is served at [/llms-full.txt](/llms-full.txt). Read it top to
+bottom; it contains every topic below in one document. Per-topic fragments are build
+artifacts and are not served separately: only /llms.txt and /llms-full.txt resolve on the
+docs site.
+
+- Core: runtime, agent operating playbook, JSX surface, CLI, components, recipes, types, errors
+- Memory: cross-run memory (facts, history, recall)
+- OpenAPI tools: generate AI SDK tools from OpenAPI specs
+- Observability: HTTP server, gateway, MCP, OpenTelemetry
+- Effect: Effect-ts authoring API (no JSX)
+- Integrations: agent runtimes, tools, ecosystem
+- Events: full SmithersEvent discriminated union
+
+## Agent operating directive
+
+The human talks to an AI harness; the AI runs Smithers. Do not ask the human to
+run commands directly. Translate human outcomes into durable Smithers work,
+watch the run, verify with backpressure, and report evidence back in plain
+English.
+
+Examples:
+
+- "Build this product idea start to finish" -> interview first, write product and
+  engineering specs, add an approval gate, then run implementation milestones.
+- "Do not stop until this is production-ready" -> encode tests, reviewer approval,
+  evals, and artifact reporting as the finish line.
+- "Prove this third-party service works" -> run assumption tests or service probes
+  before building product code on top of it.
+- "Show me it works" -> capture screenshots, GIFs, video, eval reports, logs,
+  traces, and an HTML or Markdown report.
+- "What happened to the run?" -> inspect why, events, node output, scores, and
+  logs yourself; summarize the blocker and options.
+- "Can I watch it?" -> offer the Smithers UI or Gateway-backed custom UI when a
+  visual run state would help.
+
+## Pointers
+
+- npm: smithers-orchestrator
+- github: github.com/smithersai/smithers
+- changelogs: docs/changelogs/ on the site (not duplicated in llms files)

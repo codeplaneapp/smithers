@@ -1,0 +1,59 @@
+{
+  "name": "smithers-workflows",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:current-head": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/codex-issue-merge-queue-current-head.test.ts",
+    "test": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/daily-ceo-intel-pipeline.test.ts ./tests/issue-blitz.test.ts ./tests/component-helpers.test.ts ./tests/component-workflow-core.test.tsx ./tests/component-workflow-advanced.test.tsx ./tests/curated-authoring-workflows.test.tsx ./tests/curated-ddd-eval-workflows.test.tsx ./tests/curated-system-workflows.test.tsx ./tests/seeded-pack-workflows.test.tsx ./tests/seeded-workflows-a-foundations.test.tsx ./tests/seeded-workflows-a-progression.test.tsx ./tests/seeded-onboarding-mission.test.tsx ./tests/seeded-core-workflows.test.tsx ./tests/seeded-ops-workflows.test.tsx ./tests/local-workflows-a-audit.test.tsx ./tests/local-workflows-a-queue.test.tsx ./tests/local-workflows-a-maintenance.test.tsx ./tests/local-workflows-a-issues.test.tsx ./tests/local-workflows-b-delivery.test.tsx ./tests/local-workflows-b-framework-issues.test.tsx ./tests/local-workflows-b-pipeline.test.tsx ./tests/local-workflows-b-real-release.test.tsx ./tests/local-workflows-b-utilities.test.tsx ./tests/local-workflows-c-control.test.tsx ./tests/local-workflows-c-progression.test.tsx ./tests/local-workflows-c-utilities.test.tsx ./tests/local-workflows-c-orchestration.test.tsx ./tests/ticket-fleet-disposition.test.ts ./tests/ticket-fleet-workflow.test.tsx ./tests/workflow-component-inventory.test.ts ./tests/kanban-workflow.test.ts ./tests/codex-accounts.test.ts ./tests/public-issue-agent-policy.test.ts ./tests/codex-issue-merge-queue.test.ts ./tests/codex-issue-merge-queue-current-head.test.ts ./tests/codex-issue-merge-watchdog.test.ts ./tests/estimate.test.ts ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts ./tests/ddd-scripts.test.ts ./tests/ddd-ui-parsers.test.ts ./tests/docs-driven-development-workflow.test.ts ./tests/implement-testing-framework-e2e-workflow.test.ts ./tests/release-content-probe.test.ts ./tests/release-content-sidebar.test.ts ./tests/phase1-issue-sweep.test.tsx ./tests/riskless-github-issue-sweep.test.ts ./tests/authoring-benchmark-workflow.test.ts ./tests/finish-campaigns.test.tsx ./tests/shared-ui-library.test.tsx ./tests/land-shared-ui.test.tsx ./tests/xstate-release-train.test.tsx ./ui/xstate-release-train.test.tsx ./tests/memory-recall-demo.test.tsx ./ui/memory-recall-demo.test.tsx ./ui/ddd-tabs.test.tsx ./ui/delegation-chain/dc-ui.test.tsx ./ui/trellis-state.test.ts ./lib/plue-provider.test.ts",
+    "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore .",
+    "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore --fix .",
+    "workflow:list": "smithers workflow list",
+    "workflow:run": "smithers workflow run",
+    "release:content": "cd .. && pnpm release:content",
+    "release:content:approve": "cd .. && pnpm release:content:approve",
+    "release:content:publish": "cd .. && pnpm release:content:publish",
+    "release:workflow": "cd .. && pnpm release:workflow",
+    "release:workflow:gated": "cd .. && pnpm release:workflow:gated",
+    "marketing:thread": "cd .. && pnpm marketing:thread",
+    "marketing:thread:write": "cd .. && pnpm marketing:thread:write",
+    "test:daily-ceo-intel": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/daily-ceo-intel-pipeline.test.ts",
+    "test:open-code-review": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts",
+    "test:ddd": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/ddd-scripts.test.ts ./tests/ddd-ui-parsers.test.ts ./tests/docs-driven-development-workflow.test.ts ./tests/docs-driven-development-run.e2e.test.ts ./tests/ultragrill.e2e.test.ts ./ui/ddd-tabs.test.tsx",
+    "test:ddd:browser": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/ship-pipeline-run.e2e.test.ts ./tests/ship-pipeline-ui.e2e.test.tsx"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "7.21.2",
+    "@smithers-orchestrator/cli": "workspace:*",
+    "@smithers-orchestrator/components": "workspace:*",
+    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@smithers-orchestrator/review": "workspace:*",
+    "@smithers-orchestrator/scorers": "workspace:*",
+    "@smithers-orchestrator/vcs": "workspace:*",
+    "@xyflow/react": "^12.10.2",
+    "dagre": "^0.8.5",
+    "effect": "3.21.4",
+    "mermaid": "^11.16.0",
+    "react": "^19.2.7",
+    "smithers-orchestrator": "workspace:*",
+    "twitter-api-v2": "^1.29.0",
+    "xstate": "^5.19.0",
+    "yaml": "^2.8.2",
+    "zod": "4.4.3"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.61.1"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.10.6",
+    "@smithers-orchestrator/driver": "workspace:*",
+    "@smithers-orchestrator/graph": "workspace:*",
+    "@statelyai/inspect": "^0.7.2",
+    "@types/mdx": "2.0.14",
+    "@types/node": "26.1.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "react-dom": "^19.2.7",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,20 @@
+# Merge
+
+OUTPUT_KIND: merge
+SUBJECT: {props.area.id}
+BRANCH: {props.branch}
+REPO: {props.repo}
+
+Cherry-pick approved commits for this test area onto the integration branch.
+
+Rules:
+1. Run inside `REPO`.
+2. Keep the version that preserves the targeted build and test command.
+3. Resolve conflicts explicitly.
+4. Return picked commit count and conflict count.
+
+Area result:
+{JSON.stringify(props.result, null, 2)}
+
+Required output schema:
+{props.schema}

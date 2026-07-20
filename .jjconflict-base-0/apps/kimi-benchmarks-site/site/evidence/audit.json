@@ -1,0 +1,18 @@
+{
+  "tainted": false,
+  "clean": true,
+  "n_commands_inspected": 62,
+  "command_sources": ["events/stream.ndjson (+62)"],
+  "signals": [],
+  "modified_tracked_files": [
+    "library/src/actions/index.ts",
+    "library/src/methods/index.ts"
+  ],
+  "candidate_created_file_count": 37,
+  "scorer_injected_after_run": [
+    "library/src/__bench__/test_01_coercion.test.ts",
+    "library/src/__bench__/test_02_examples.test.ts",
+    "library/src/__bench__/test_03_isbn.test.ts"
+  ],
+  "note": "Public path-sanitized copy. Scorer-injected files were introduced only after agent execution and were removed after collection."
+}

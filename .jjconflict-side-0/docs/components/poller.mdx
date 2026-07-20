@@ -1,0 +1,402 @@
+---
+title: <Poller>
+description: Poll an external condition with configurable backoff until satisfied or timed out.
+---
+
+```ts
+// Props
+import { Poller } from "smithers-orchestrator";
+
+type PollerProps = {
+  id?: string; // default "poll"
+  check: AgentLike | (() => Promise<unknown> | unknown);
+  checkOutput: OutputTarget; // must include `satisfied: boolean`
+  maxAttempts?: number; // default 30
+  backoff?: "fixed" | "linear" | "exponential"; // default "fixed"
+  intervalMs?: number; // delay BETWEEN attempts, default 5000
+  checkTimeoutMs?: number; // timeout for one check attempt; unbounded when unset
+  onTimeout?: "fail" | "return-last"; // default "fail"
+  skipIf?: boolean;
+  children?: ReactNode; // condition description
+};
+```
+
+```tsx
+<Workflow name="wait-for-deploy">
+  <Poller
+    check={statusChecker}
+    checkOutput={outputs.check}
+    maxAttempts={20}
+    intervalMs={10_000}
+    backoff="exponential"
+    onTimeout="fail"
+  >
+    Check whether the deployment to production has completed successfully.
+  </Poller>
+</Workflow>
+```
+
+## Notes
+
+- `satisfied` drives the loop's `until`.
+- The first attempt runs immediately; `intervalMs` is the delay *between* attempts.
+- Backoff scales that gap. For the Nth gap (1-indexed): fixed = `intervalMs`;
+  linear = `intervalMs * N`; exponential = `intervalMs * 2^(N-1)`.
+- The gap is a durable [`<Timer>`](/components/timer): the run parks as
+  `waiting-timer` between attempts and survives a crash or resume, rather than
+  sleeping in-process. A detached run is resumed by the gateway's timer sweep.
+- `intervalMs` does **not** bound how long a check may run. Use `checkTimeoutMs`
+  to cap a single attempt.
+
+{/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
+## Source
+
+The `<Poller>` implementation and the files it imports, straight from the package source. This section is generated; edit the source, not this block.
+
+<CodeGroup>
+```js Poller.js
+import React from "react";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { Task } from "./Task.js";
+import { Loop } from "./Ralph.js";
+import { Sequence } from "./Sequence.js";
+import { Timer } from "./Timer.js";
+/** @typedef {import("./PollerProps.ts").PollerProps} PollerProps */
+
+/**
+ * Compute the real wall-clock delay (ms) for one gap between poll attempts.
+ *
+ * `gap` is 0-indexed over the gaps, not the attempts: gap 0 is the pause
+ * between attempt 1 and attempt 2. Nothing precedes the first attempt, so the
+ * first poll always fires immediately. The returned delay is enforced by a
+ * durable <Timer>; it is not a task timeout.
+ * @param {number} gap
+ * @param {number} baseMs
+ * @param {"fixed" | "linear" | "exponential"} strategy
+ * @returns {number}
+ */
+function computeDelayMs(gap, baseMs, strategy) {
+    let raw;
+    switch (strategy) {
+        case "linear":
+            raw = baseMs * (gap + 1);
+            break;
+        case "exponential":
+            raw = baseMs * Math.pow(2, gap);
+            break;
+        case "fixed":
+        default:
+            raw = baseMs;
+            break;
+    }
+    // A non-finite delay would be formatted as "Infinity ms"/"NaNms" (and any
+    // value >= 1e21 as "1e+21ms"), none of which the engine's duration parser
+    // accepts. Fail here, where the offending prop is still in scope.
+    if (!Number.isFinite(raw)) {
+        throw new SmithersError("INVALID_INPUT", `<Poller> computed a non-finite poll delay from intervalMs=${baseMs}, backoff="${strategy}".`);
+    }
+    return Math.max(0, Math.round(raw));
+}
+/**
+ * @param {PollerProps} props
+ */
+export function Poller(props) {
+    if (props.skipIf)
+        return null;
+    const ctx = React.useContext(SmithersContext);
+    const prefix = props.id ?? "poll";
+    const maxAttempts = props.maxAttempts ?? 30;
+    const backoff = props.backoff ?? "fixed";
+    const baseInterval = props.intervalMs ?? 5000;
+    const onTimeout = props.onTimeout ?? "fail";
+    const iteration = ctx?.iterations?.[`${prefix}-loop`] ?? ctx?.iteration ?? 0;
+    const checkRow = ctx?.outputMaybe(props.checkOutput, {
+        nodeId: `${prefix}-check`,
+        iteration,
+    });
+    const until = checkRow?.satisfied === true;
+    // Determine if check is an agent or a compute function
+    const isAgent = typeof props.check === "object" &&
+        props.check !== null &&
+        "generate" in props.check;
+    // Build the check task
+    const prompt = props.children ??
+        "Check whether the condition is satisfied. Return an object with a satisfied boolean.";
+    const checkTask = isAgent
+        ? React.createElement(Task, {
+            id: `${prefix}-check`,
+            output: props.checkOutput,
+            timeoutMs: props.checkTimeoutMs,
+            agent: props.check,
+            children: prompt,
+        })
+        : React.createElement(Task, {
+            id: `${prefix}-check`,
+            output: props.checkOutput,
+            timeoutMs: props.checkTimeoutMs,
+            children: props.check,
+        });
+    // Pace the loop with a durable <Timer> ahead of the check, inside a
+    // <Sequence> so the scheduler holds the check back until the timer fires.
+    // The timer is skipped on the first iteration (poll immediately), so the
+    // delay before attempt N is the (N-1)th gap.
+    const delayMs = iteration === 0 ? 0 : computeDelayMs(iteration - 1, baseInterval, backoff);
+    return React.createElement(Loop, {
+        id: `${prefix}-loop`,
+        until,
+        maxIterations: maxAttempts,
+        onMaxReached: onTimeout === "fail" ? "fail" : "return-last",
+    }, React.createElement(Sequence, null, React.createElement(Timer, {
+        id: `${prefix}-delay`,
+        duration: `${delayMs}ms`,
+        skipIf: iteration === 0,
+    }), checkTask));
+}
+```
+
+```js SmithersError.js
+import { getSmithersErrorDocsUrl } from "./getSmithersErrorDocsUrl.js";
+/** @typedef {import("./SmithersErrorCode.ts").SmithersErrorCode} SmithersErrorCode */
+/** @typedef {import("./SmithersErrorOptions.ts").SmithersErrorOptions} SmithersErrorOptions */
+
+export class SmithersError extends Error {
+    /** @type {SmithersErrorCode} */
+    code;
+    /** @type {string} */
+    summary;
+    /** @type {string} */
+    docsUrl;
+    /** @type {Record<string, unknown> | undefined} */
+    details;
+    /** @type {unknown} */
+    cause;
+    /** @type {string} */
+    name;
+    /**
+   * @param {SmithersErrorCode} code
+   * @param {string} summary
+   * @param {Record<string, unknown>} [details]
+   * @param {unknown | SmithersErrorOptions} [causeOrOptions]
+   */
+    constructor(code, summary, details, causeOrOptions) {
+        const docsUrl = getSmithersErrorDocsUrl(code);
+        // The 4th arg historically took a bare `cause`. An object counts as an
+        // options bag only when all of its own keys are known options. Any extra
+        // data means the whole object is a legacy cause and must round-trip.
+        const ownKeys = causeOrOptions && typeof causeOrOptions === "object"
+            ? Reflect.ownKeys(causeOrOptions)
+            : [];
+        const isOptionsObject = ownKeys.length > 0 &&
+            !(causeOrOptions instanceof Error) &&
+            ownKeys.every((key) => key === "cause" || key === "includeDocsUrl" || key === "name");
+        const options = /** @type {SmithersErrorOptions} */ (isOptionsObject
+            ? causeOrOptions
+            : { cause: causeOrOptions });
+        // Append the docs pointer unless suppressed or the summary already contains it.
+        const message = options.includeDocsUrl === false || summary.includes(docsUrl)
+            ? summary
+            : `${summary} See ${docsUrl}`;
+        super(message, { cause: options.cause });
+        Object.setPrototypeOf(this, new.target.prototype);
+        this.name = options.name ?? "SmithersError";
+        this.code = code;
+        this.summary = summary;
+        this.docsUrl = docsUrl;
+        this.details = details;
+        this.cause = options.cause;
+    }
+}
+```
+
+```js context.js
+// @smithers-type-exports-begin
+/** @typedef {import("./OutputSnapshot.ts").OutputSnapshot} OutputSnapshot */
+/** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
+// @smithers-type-exports-end
+
+import React from "react";
+import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+/** @type {React.Context<SmithersCtx<any> | null>} */
+export const SmithersContext = React.createContext(null);
+SmithersContext.displayName = "SmithersContext";
+/**
+ * @template Schema
+ * @returns {{ SmithersContext: React.Context<SmithersCtx<Schema> | null>, useCtx: () => SmithersCtx<Schema> }}
+ */
+export function createSmithersContext() {
+    /** @type {React.Context<SmithersCtx<Schema> | null>} */
+    const Context = React.createContext(null);
+    Context.displayName = "SmithersContext";
+    /**
+   * @returns {SmithersCtx<Schema>}
+   */
+    function useCtx() {
+        const ctx = React.useContext(Context);
+        if (!ctx) {
+            throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
+        }
+        return ctx;
+    }
+    return { SmithersContext: Context, useCtx };
+}
+```
+
+```js Task.js
+// @smithers-type-exports-begin
+/**
+ * @template D
+ * @typedef {import("./InferDeps.ts").InferDeps<D>} InferDeps
+ */
+/** @typedef {import("./OutputTarget.ts").OutputTarget} OutputTarget */
+// @smithers-type-exports-end
+
+import { applyCliToolAllowlist } from "./cliToolAllowlist.js";
+import { createTaskComponent } from "./taskCore.js";
+
+export { renderPromptToText } from "./taskCore.js";
+
+/**
+ * The Node/CLI-agent-aware `Task`. Every render-path behavior (deps
+ * resolution, agent-chain assembly, MDX prompt rendering, static/compute/agent
+ * branching) lives in `taskCore.js`; this file only supplies the CLI-agent
+ * tool-allowlist enforcement step (`applyCliToolAllowlist`, which statically
+ * imports `ClaudeCodeAgent`/`PiAgent`/`GeminiAgent`/`AntigravityAgent` — see
+ * `cliToolAllowlist.js`). `Task.browser.js` builds the same component with a
+ * no-op allowlist step instead, so it never pulls those Node-only
+ * (`node:child_process`-backed) classes into a browser bundle.
+ */
+export const Task = createTaskComponent({ applyCliToolAllowlist });
+```
+
+```js Ralph.js
+// @smithers-type-exports-begin
+/** @typedef {import("./RalphProps.ts").RalphProps} RalphProps */
+// @smithers-type-exports-end
+
+import React from "react";
+/** @typedef {import("./LoopProps.ts").LoopProps} LoopProps */
+
+/**
+ * @param {LoopProps} props
+ */
+export function Loop(props) {
+    if (props.skipIf)
+        return null;
+    // Sanitize to the loop's host props (align with other structural components);
+    // key/skipIf are React/control props and children are passed separately.
+    const next = {
+        id: props.id,
+        until: props.until,
+        maxIterations: props.maxIterations,
+        onMaxReached: props.onMaxReached,
+        continueAsNewEvery: props.continueAsNewEvery,
+    };
+    return React.createElement("smithers:ralph", next, props.children);
+}
+/** @deprecated Use `Loop` instead. */
+export const Ralph = Loop;
+```
+
+```js Sequence.js
+import React from "react";
+/** @typedef {import("./SequenceProps.ts").SequenceProps} SequenceProps */
+
+/**
+ * @param {SequenceProps} props
+ */
+export function Sequence(props) {
+    if (props.skipIf)
+        return null;
+    // Sequence carries only a display label; pass a sanitized bag (align with
+    // the sanitizing structural components) so control props don't leak through.
+    // `label` names the phase group in run views (graph, the Claude /workflows
+    // mirror) and is preserved in the persisted frame XML.
+    const next = {
+        ...(props.label === undefined ? {} : { label: props.label }),
+        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+    };
+    return React.createElement("smithers:sequence", next, props.children);
+}
+```
+
+```js Timer.js
+import React from "react";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+/** @typedef {import("./TimerProps.ts").TimerProps} TimerProps */
+
+/**
+ * @param {TimerProps} props
+ */
+export function Timer(props) {
+    if (props.skipIf)
+        return null;
+    const hasDuration = typeof props.duration === "string" && props.duration.trim().length > 0;
+    const hasUntil = props.until !== undefined && props.until !== null && String(props.until).trim().length > 0;
+    if ((hasDuration ? 1 : 0) + (hasUntil ? 1 : 0) !== 1) {
+        throw new SmithersError("INVALID_INPUT", `<Timer id="${props.id}"> requires exactly one of "duration" or "until".`);
+    }
+    if (props.every !== undefined) {
+        throw new SmithersError("INVALID_INPUT", `<Timer id="${props.id}"> does not support "every" yet. Recurring timers ship in phase 2.`);
+    }
+    const untilIso = props.until instanceof Date
+        ? props.until.toISOString()
+        : typeof props.until === "string"
+            ? props.until
+            : undefined;
+    const timerMeta = {
+        timer: true,
+        ...(hasDuration ? { duration: props.duration } : {}),
+        ...(hasUntil ? { until: untilIso } : {}),
+        ...props.meta,
+    };
+    return React.createElement("smithers:timer", {
+        id: props.id,
+        key: props.key,
+        duration: props.duration,
+        until: untilIso,
+        dependsOn: props.dependsOn,
+        needs: props.needs,
+        label: props.label ?? `timer:${props.id}`,
+        meta: Object.keys(timerMeta).length > 0 ? timerMeta : undefined,
+        __smithersTimerDuration: props.duration,
+        __smithersTimerUntil: untilIso,
+    });
+}
+```
+
+```ts PollerProps.ts
+import type React from "react";
+import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { OutputTarget } from "./OutputTarget.ts";
+
+export type PollerProps = {
+	/** ID prefix for generated task/component ids. */
+	id?: string;
+	/** Agent or compute function that checks the condition. */
+	check: AgentLike | (() => unknown | Promise<unknown>);
+	/** Output schema for the check result. Must include `satisfied: boolean`. */
+	checkOutput: OutputTarget;
+	/** Maximum poll attempts. Default 30. */
+	maxAttempts?: number;
+	/** Strategy used to scale the inter-attempt delay. Default "fixed". */
+	backoff?: "fixed" | "linear" | "exponential";
+	/**
+	 * Base delay in milliseconds BETWEEN poll attempts; the first attempt runs
+	 * immediately. Enforced by a durable `<Timer>`. Default 5000.
+	 */
+	intervalMs?: number;
+	/** Timeout in ms for a single check attempt. Unbounded when unset. */
+	checkTimeoutMs?: number;
+	/** Behavior when maxAttempts is reached. Default "fail". */
+	onTimeout?: "fail" | "return-last";
+	/** Skip the entire component. */
+	skipIf?: boolean;
+	/** Prompt/condition description for the check agent. */
+	children?: React.ReactNode;
+};
+```
+</CodeGroup>
+{/* GENERATED:COMPONENT-SOURCE END */}

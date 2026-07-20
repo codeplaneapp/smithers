@@ -1,0 +1,85 @@
+# Record real Monitor recordings for the release
+
+You record real, verified screen captures of the Smithers Monitor for the
+{props.version} release. These gifs anchor the changelog and the launch
+thread, so they are recorded BEFORE any prose is drafted. Never fabricate,
+mock, or reuse stale screenshots when a recording is requested; every asset
+you return must come from a real running gateway you drove yourself.
+
+Repository root: {props.repoRoot}
+
+## Deliverables
+
+1. `docs/images/{props.version}/monitor-live.gif`: the Monitor following a
+   live run from `running` to `Completed` (health verdict flips, execution
+   tree progresses, events stream).
+2. `docs/images/{props.version}/monitor-tour.gif`: opening a finished run and
+   touring it (execution tree, XML/Frames toggles, event tabs).
+3. Copy any gif you recommend as tweet media into
+   `marketing/{props.version}/assets/`.
+
+## The recipe (follow it; every step encodes a real failure)
+
+1. **Build a scratch workspace.** Never record against the repo's own
+   workspace. Create a temp dir with:
+   - `node_modules` symlinked to the repo's node_modules (import resolution),
+   - `.smithers/workflows/` containing one or two small COMPUTE-ONLY demo
+     workflows (no agents, no credentials, deterministic). Give them realistic
+     names and node ids (`release-canary`: preflight/build/tests/report;
+     `docs-sync`: fetch/diff/regenerate/report) and pace each compute task
+     with a 3-10s sleep so a live recording has visible progression. Compute
+     task = a `<Task>` whose child is an async function returning the output
+     row. Wrap steps in `<Sequence>`.
+2. **Start a fresh gateway from the scratch cwd, AFTER the workflow files
+   exist.** The gateway registers workflows at boot; runs launched before it
+   boots (or not routed through it) display the generic workflow name
+   `workspace` instead of the real name. Start it with
+   `bun {props.repoRoot}/packages/smithers/src/bin/smithers.js gateway --port <free port>`,
+   confirm `gateway status` reports running:true from that cwd, and only then
+   launch runs with `up <workflow-id> -d` from the same cwd.
+3. **Never touch the repo workspace's gateway.** `smithers down` and
+   `smithers gateway stop` kill sibling runs owned by other sessions. Also do
+   not trust the repo's long-running gateway to serve current Monitor code: a
+   daemon that booted before recent commits serves stale bundles (a past
+   session hit a 500 on `/monitor/__smithers_ui/client.js` for exactly this
+   reason).
+4. **Smoke-test before recording.** `curl` the monitor page AND
+   `<gateway>/monitor/__smithers_ui/client.js`; both must be 200. Then load
+   the page in headless Chromium once and screenshot it. A blank page means
+   the app never booted; check the browser console and the bundle status
+   before wasting a recording pass.
+5. **Record with Playwright** resolved from the repo's node_modules by
+   absolute path. If the browser binary is missing, install it with
+   `node <repo>/node_modules/.pnpm/playwright@<ver>/node_modules/playwright/cli.js install chromium`.
+   Do NOT use `npx playwright` (it fails with npm EOVERRIDE in this
+   workspace). Use a 1600x1000 viewport with `recordVideo`, and inject a fake
+   cursor overlay via `addInitScript` (Playwright videos have no cursor);
+   glide with `mouse.move(..., { steps: 30 })` before each click.
+6. **Live scenario:** open `/monitor`, then spawn `up <workflow> -d` while
+   recording. Wait for the EXACT text `running` status pill (engine boot
+   takes ~8-10s), click it, then wait for the EXACT text `Completed`
+   (`exact: true` matters: substring matching hits the overview's
+   "completed today" metric instantly and ends the recording on the wrong
+   screen; a loose click also grabs an OLD finished run from the sidebar).
+   Let it settle ~2.5s after the banner flips.
+7. **Convert with two-pass palette ffmpeg:**
+   `-vf "fps=9,scale=1200:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=160[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4"`,
+   trimming idle intro with `-ss`. Target under ~4MB per gif.
+8. **Verify every gif by looking at it.** Extract frames
+   (`ffmpeg -ss <t> -i out.gif -frames:v 1 frame.png`) at the start, middle,
+   and end, and read them. Confirm the caption you return describes what the
+   frames actually show. A recording where every selector was "skipped" in
+   your logs is a blank video; re-record, never ship it.
+9. **Clean up:** stop the scratch gateway you started (only yours) and leave
+   the repo workspace untouched.
+
+## Additional instructions
+
+Global:
+{props.globalAdditional || "(none)"}
+
+Stage:
+{props.additional || "(none)"}
+
+REQUIRED OUTPUT:
+{props.schema}

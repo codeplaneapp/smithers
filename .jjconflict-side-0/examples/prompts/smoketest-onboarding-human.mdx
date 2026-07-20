@@ -1,0 +1,97 @@
+# Smoke Test — Human onboarding walkthrough
+
+You are running the **human onboarding** slice of a release smoke test. Pretend
+you are a brand-new developer who just found Smithers and is following the "For
+Humans" docs for the first time. Walk the documented steps **exactly as
+written**, run every command yourself with your shell, and verify each one does
+what the docs promise.
+
+The point: catch the friction a real first-time user hits — a command that
+errors, a doc that tells them to run something that fails, a missing
+prerequisite the page never mentions.
+
+## Our standard: zero defects, fixed by a patch release
+
+Smithers holds itself to a high bar. **We do not accept failures.** Any issue you
+find is a `fail` with exact evidence, even a minor one, a doc inconsistency, an
+edge case, an ugly error, or something unrelated to this release. We ship a patch
+release to fix it right away. Never downgrade a finding to "pre-existing",
+"acceptable", "cosmetic", "expected", or "out of scope". The ONLY legitimate
+`skipped` is a real limitation of this test machine (no agent installed, no model
+credentials); a product, CLI, doc, or behavior problem is always a `fail`.
+
+## Version under test
+
+The exact version is: {props.version}
+
+Pin it on EVERY invocation: run commands as `bunx smithers-orchestrator@VERSION SUBCOMMAND`, substituting VERSION with the version above.
+
+## Setup — a fresh folder, like a new user
+
+1. Clear the bunx cache: `bun pm cache rm`, then remove any
+   `bunx-*smithers-orchestrator*` dir from `$TMPDIR`.
+2. `SMOKE_DIR=$(mktemp -d)/smoke-human && mkdir -p "$SMOKE_DIR" && cd "$SMOKE_DIR"`.
+
+## The documented first-run flow — verify each step
+
+Follow the canonical getting-started path and record `pass | fail | skipped`
+with evidence (exact command + key output) for each:
+
+1. **`human.init`** — `init` scaffolds `.smithers/` and prints what it created,
+   which agents it detected, and suggested next commands. Confirm
+   `.smithers/prompts/hello.mdx` and `.smithers/workflows/hello.tsx` exist.
+2. **`human.version`** — `--version` prints the version. (The `cli/quickstart`
+   doc example text still says "e.g. 0.23.0" — flag it if the doc is stale, but
+   the command itself passing is what matters.)
+3. **`human.doctor`** — `workflow doctor` reports `vcs.ok` and a non-empty
+   `workflows[...]` count, pointing `workflowRoot` at the `.smithers` dir.
+4. **`human.list`** — `workflow list` prints the seeded workflows.
+5. **`human.run-hello`** — the "first workflow runs in 30 seconds" moment. Run
+   the **plain** form `workflow run hello` (NOT `--interactive`; see the trap
+   below). A durable run should start, the agent produce a greeting, and you see
+   the run id + finished output. If no agent/credentials are configured, the run
+   fails for that reason — mark `skipped` with the reason, not `fail`.
+6. **`human.observe`** — using the run id from step 5: `ps` lists the run;
+   `inspect RUNID` shows steps/outputs; `logs RUNID --tail 20` shows lifecycle
+   events.
+7. **`human.resume`** — `workflow run hello --run-id RUNID --resume true` resumes
+   from the checkpoint (the finished greet task is skipped). Near no-op on the
+   single-task hello, but it must not error.
+8. **`human.starters`** — `starters` lists plain-English starter templates with
+   copy-paste run commands.
+
+## Known documentation traps to confirm (these ARE the test)
+
+- **The `--interactive` non-TTY trap.** `docs/guide/get-started.mdx` tells the
+  user to run `workflow run hello --interactive`, but with no terminal that exits
+  code 4 with `INTERACTIVE_REQUIRES_TTY`. Verify: pipe empty stdin into
+  `workflow run hello --interactive` and confirm it exits 4. This is a real
+  doc/UX inconsistency (quickstart.mdx uses the plain form) — record it
+  (`human.interactive-trap`), status `fail` if the docs still hand a non-TTY user
+  the `--interactive` form as the primary command.
+- **Hidden agent/key prerequisite.** get-started.mdx and quickstart.mdx promise a
+  run in 30 seconds but never say you need a coding agent + credentials; only
+  installation.mdx / tour.mdx do. Note whether the failure mode is understandable
+  to a new user (`human.agent-prereq`).
+- **Wrong-package trap.** On npm, bare `smithers` is an UNRELATED package; the
+  docs always use `smithers-orchestrator`. Do not actually install bare
+  `smithers`; just confirm the docs you follow never tell you to.
+
+## Embedded docs — the steps you must follow verbatim
+
+The full text of the human getting-started docs (get-started, quickstart,
+cli/quickstart) follows:
+
+{props.humanGuide}
+
+## Output
+
+Return JSON matching the schema below. `passed` is `true` only if the documented
+first-run flow works for a new user AND every doc-trap behaves as the docs imply
+it should. A documented command that errors when followed literally is a `fail`.
+`findings`: one entry per step (`area` like `human.run-hello`), `status`, and
+`evidence`. `reproSteps`: shell commands to reproduce any failure.
+
+Required output shape (an example of the JSON to return):
+
+{props.schema}

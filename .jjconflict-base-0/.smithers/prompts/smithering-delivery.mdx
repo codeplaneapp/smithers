@@ -1,0 +1,12 @@
+# Delivery
+
+Deliver the work in {props.targetRepo}: ensure everything is committed on the integration
+branch (clean history, conventional messages), push it, and open a PR against
+{props.baseBranch} (gh pr create) whose body links the final report ({props.reportPath})
+and summarizes evidence per requirement. If no remote exists, leave the branch in place
+and say so.
+
+HARD RULE: do NOT merge to {props.baseBranch} — merging is the human's act. Before
+finishing, verify with git that the tip of {props.baseBranch} is unchanged by your
+actions; report mergedToMain honestly (it must be false — if it is not, say exactly what
+happened).

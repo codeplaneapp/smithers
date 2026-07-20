@@ -1,0 +1,42 @@
+{
+  "rss": [
+    { "id": "openai-blog", "url": "https://openai.com/news/rss.xml", "critical": true },
+    { "id": "cloudflare-blog", "url": "https://blog.cloudflare.com/rss/", "critical": true },
+    { "id": "github-blog", "url": "https://github.blog/feed/", "critical": false },
+    { "id": "vercel-changelog", "url": "https://vercel.com/atom", "critical": false },
+    { "id": "huggingface-blog", "url": "https://huggingface.co/blog/feed.xml", "critical": false },
+    { "id": "langchain-blog", "url": "https://www.langchain.com/blog/rss", "critical": false },
+    { "id": "simonwillison", "url": "https://simonwillison.net/atom/everything/", "critical": false },
+    { "id": "latent-space", "url": "https://www.latent.space/feed", "critical": false },
+    { "id": "interconnects", "url": "https://www.interconnects.ai/feed", "critical": false },
+    { "id": "together-ai-blog", "url": "https://www.together.ai/blog/rss.xml", "critical": false }
+  ],
+  "githubReleases": [
+    { "id": "gh-claude-code", "owner": "anthropics", "repo": "claude-code", "critical": false },
+    { "id": "gh-codex", "owner": "openai", "repo": "codex", "critical": false },
+    { "id": "gh-vercel-ai", "owner": "vercel", "repo": "ai", "critical": false },
+    { "id": "gh-cloudflare-workerd", "owner": "cloudflare", "repo": "workerd", "critical": false },
+    { "id": "gh-mcp-servers", "owner": "modelcontextprotocol", "repo": "servers", "critical": false },
+    { "id": "gh-langchain", "owner": "langchain-ai", "repo": "langchain", "critical": false },
+    { "id": "gh-crewai", "owner": "crewAIInc", "repo": "crewAI", "critical": false }
+  ],
+  "hn": [
+    { "id": "hn-ai-agents", "query": "AI agent orchestration", "critical": false },
+    { "id": "hn-claude", "query": "Claude", "critical": false },
+    { "id": "hn-openai", "query": "OpenAI", "critical": false },
+    { "id": "hn-mcp", "query": "Model Context Protocol", "critical": false }
+  ],
+  "lobsters": [
+    { "id": "lobsters-ai", "tag": "ai", "critical": false },
+    { "id": "lobsters-programming", "tag": "programming", "critical": false }
+  ],
+  "reddit": [
+    { "id": "reddit-localllama", "subreddit": "LocalLLaMA", "critical": false },
+    { "id": "reddit-singularity", "subreddit": "singularity", "critical": false },
+    { "id": "reddit-claudeai", "subreddit": "ClaudeAI", "critical": false }
+  ],
+  "bluesky": [
+    { "id": "bsky-ai-agents", "query": "AI agent orchestration", "critical": false },
+    { "id": "bsky-claude-code", "query": "Claude Code", "critical": false }
+  ]
+}

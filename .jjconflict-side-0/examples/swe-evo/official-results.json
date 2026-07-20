@@ -1,0 +1,38 @@
+{
+  "_source": "SWE-EVO paper (Fsoft-AIC), arXiv:2512.18470, Table 2 — 'release note + PR/issue context' setting, internet blocked.",
+  "_url": "https://arxiv.org/abs/2512.18470",
+  "instances": 48,
+  "pp_per_instance": 2.08,
+  "metrics": {
+    "resolved_rate": "Strict binary: 1 iff ALL FAIL_TO_PASS and PASS_TO_PASS tests pass after the patch; else 0. Overall = mean over 48.",
+    "apply_rate": "Patch Apply Rate: fraction of generated patches that apply cleanly.",
+    "fix_rate": "Soft metric: fraction of FAIL_TO_PASS fixed, but 0 if any PASS_TO_PASS regresses. Per-model values are in the paper's Table 6 (appendix), not Table 2."
+  },
+  "ci_note": "Wilson 95% CIs over 48 instances are wide: 25.00% -> [14.9, 38.8], 18.75% -> [10.2, 31.9], 10.42% -> [4.5, 22.2], 2.08% -> [0.4, 10.9]. Treat small gaps as noise.",
+  "subset_caveat": "These are full-48 numbers. The dvc subset run here is the gold-verified, deterministic, filesystem-test slice (the easier instances that reproduce on x86-emulated Docker). Subset Resolved Rate is NOT directly comparable to full-48 official RR.",
+  "leaderboard": [
+    { "provider": "OpenAI",    "model": "gpt-5.4",               "resolved_openhands": 25.00, "resolved_sweagent": 25.00, "swebench_verified": null  },
+    { "provider": "Moonshot",  "model": "kimi-k2p5",             "resolved_openhands": 22.92, "resolved_sweagent": 25.00, "swebench_verified": 70.80 },
+    { "provider": "DeepSeek",  "model": "deepseek-v3p2",         "resolved_openhands": 20.83, "resolved_sweagent": 23.40, "swebench_verified": 70.00 },
+    { "provider": "OpenAI",    "model": "gpt-5.2",               "resolved_openhands": 18.75, "resolved_sweagent": 22.92, "swebench_verified": 72.80 },
+    { "provider": "OpenAI",    "model": "gpt-5-08-07",           "resolved_openhands": 18.75, "resolved_sweagent": 20.83, "swebench_verified": 65.00 },
+    { "provider": "Moonshot",  "model": "kimi-k2-instruct",      "resolved_openhands": 16.67, "resolved_sweagent": 18.75, "swebench_verified": 43.80 },
+    { "provider": "DeepSeek",  "model": "deepseek-v3p1",         "resolved_openhands": 16.67, "resolved_sweagent": 10.42, "swebench_verified": null  },
+    { "provider": "Zhipu",     "model": "glm-4p5",               "resolved_openhands": 16.67, "resolved_sweagent": 16.67, "swebench_verified": 54.20 },
+    { "provider": "Qwen",      "model": "qwen3-coder-480b-a35b", "resolved_openhands": 14.58, "resolved_sweagent": 14.58, "swebench_verified": 55.40 },
+    { "provider": "OpenAI",    "model": "gpt-5-mini-08-07",      "resolved_openhands": 10.42, "resolved_sweagent": 10.42, "swebench_verified": 59.80 },
+    { "provider": "DeepSeek",  "model": "deepseek-r1-0528",      "resolved_openhands": 10.42, "resolved_sweagent": 8.33,  "swebench_verified": 57.60 },
+    { "provider": "Zhipu",     "model": "glm-5",                 "resolved_openhands": 8.33,  "resolved_sweagent": 37.50, "swebench_verified": 72.80 },
+    { "provider": "Zhipu",     "model": "glm-4p7",               "resolved_openhands": 4.17,  "resolved_sweagent": 39.58, "swebench_verified": null  },
+    { "provider": "OpenAI",    "model": "gpt-4o-2024-11-20",     "resolved_openhands": 6.25,  "resolved_sweagent": 6.25,  "swebench_verified": 21.62 },
+    { "provider": "OpenAI",    "model": "o3-2025-04-16",         "resolved_openhands": 4.17,  "resolved_sweagent": 6.25,  "swebench_verified": 58.40 },
+    { "provider": "OpenAI",    "model": "gpt-5-nano-08-07",      "resolved_openhands": 4.17,  "resolved_sweagent": 4.17,  "swebench_verified": 34.80 },
+    { "provider": "OpenAI",    "model": "gpt-4.1-2025-04-14",    "resolved_openhands": 2.08,  "resolved_sweagent": 10.42, "swebench_verified": 39.58 },
+    { "provider": "OpenAI",    "model": "gpt-oss-120b",          "resolved_openhands": 2.08,  "resolved_sweagent": 6.25,  "swebench_verified": 26.00 }
+  ],
+  "headline": {
+    "best_resolved_full48": 25.0,
+    "best_model": "gpt-5.4 (OpenHands and SWE-agent)",
+    "note": "No Claude or gpt-5.5 model appears in the official paper; this repo's smithers workflows use newer models (Opus 4.8 + Codex gpt-5.5) and a different scaffold (Panel + ReviewLoop), so any comparison is directional, not matched."
+  }
+}

@@ -1,0 +1,41 @@
+# Design the skill
+
+You are the design step of the "build me an agent skill" pipeline. Using the
+clarified spec, produce a concrete, buildable design for the `SKILL.md`. Still no
+files — this is the blueprint the scaffolder will implement, and what a human may
+approve first.
+
+## Spec
+
+{JSON.stringify(props.spec, null, 2)}
+
+Skills go in: {props.skillsDir}
+
+## Design rules
+
+- **One skill, one job.** A good skill teaches an agent to do exactly one thing
+  well. If the spec is sprawling, narrow it; note the cut scope in `rationale`.
+- **Frontmatter is the trigger.** The `description` must say both what the skill
+  does and when an agent should reach for it — it is matched against requests, so
+  lead with the situations and verbs an agent would see.
+- **Sections are an outline.** Propose the ordered body sections (heading +
+  purpose). Typical shape: a short overview, a "When to use" section, the
+  concrete steps or commands, and any gotchas. Keep it tight and practical.
+- **Supporting files only when they earn it.** Most skills are a single
+  `SKILL.md`. Add a supporting file (a script, a reference doc) only if a section
+  genuinely needs it; list each in `supportingFiles` with its path and purpose.
+  Single-file skills can live at `{props.skillsDir}/NAME.md`; skills with
+  supporting files live in `{props.skillsDir}/NAME/SKILL.md`.
+
+## Produce
+
+- `skillName` — the final kebab-case id.
+- `frontmatter` — the `name` and `description` for the YAML block.
+- `sections` — ordered body sections, each a `heading` plus its `purpose`.
+- `supportingFiles` — any extra files to ship alongside `SKILL.md` (may be empty).
+- `rationale` — why this shape, and any scope you trimmed or deferred.
+
+Make it concrete enough that the scaffolder can write the file without guessing.
+
+REQUIRED OUTPUT:
+{props.schema}

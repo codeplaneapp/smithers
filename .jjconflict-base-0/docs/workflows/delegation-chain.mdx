@@ -1,0 +1,193 @@
+---
+title: delegation-chain
+description: Hand an ambiguous ask to a recursive, tiered delegation tree with risk probes, per-node backpressure, live-editable outputs, cost forecasts, and full scoring.
+---
+
+`delegation-chain` is an archived example and is not installed by `init`. Copy
+`examples/init-pack/delegation-chain.tsx` and its dependency closure into your
+project, or ask `create-workflow` to build an equivalent. Once installed, it
+runs the whole arc from an ambiguous ask to gated, scored
+delivery. Strong models refine the goal and decompose it into tiered chunks,
+cheap models render previews and research probes, and every node declares its
+own backpressure (reviews, checks, developer previews, optional approvals)
+before anything executes. While it runs, every output stays editable in the
+workflow UI, every plan carries a cost forecast, and the run ends with
+automatic scorers plus a short user poll.
+
+```bash
+bunx smithers-orchestrator workflow run delegation-chain --prompt "Migrate the billing service to the new gateway APIs"
+```
+
+Watch and steer it in the custom workflow UI (the delegation tree, question
+forms, editable outputs, and the cost bar all live there):
+
+```bash
+bunx smithers-orchestrator ui --workflow delegation-chain
+```
+
+## Inputs
+
+| Input | Type | Default |
+| --- | --- | --- |
+| `prompt` | string | required |
+| `approvalPolicy` | string | unset (no approval gates anywhere) |
+| `maxDepth` | number | `3` |
+| `maxConcurrency` | number | `4` |
+| `maxDeriskRounds` | number | `3` |
+| `maxQuestions` | number | `10` |
+| `maxAttempts` | number | `3` |
+| `poll` | boolean | `true` |
+| `budgetUsd` | number | unset |
+| `budgetMinutes` | number | unset |
+
+Only `prompt` is required; everything else defaults to fully automatic
+operation. Example with a policy and a budget:
+
+```bash
+bunx smithers-orchestrator workflow run delegation-chain \
+  --input '{"prompt":"Ship CSV import","approvalPolicy":"Anything that deletes data needs my approval","budgetUsd":20}'
+```
+
+## Tiers
+
+Work flows down a ladder of intelligence tiers. The tiers are labels
+(`fable`, `opus`, `sonnet`, `haiku` by default), not model ids: the copied
+workflow maps each label to an agent (or failover chain) from
+`.smithers/agents.ts`, so you can swap any tier without touching the workflow
+body. By default the strongest tier plans the root and reviews, the second
+tier plans chunks, the third executes leaves, and the cheapest renders
+previews and research probes at near-zero cost.
+
+## How It Runs
+
+1. **Goal refinement.** The strongest tier forecasts every genuine
+   user-preference question upfront and answers all implementation questions
+   itself. The cheapest tier renders question forms ahead of you (10 by
+   default), so answering never waits on rendering; you answer one durable
+   form at a time in the UI. The goal agent then writes the refined prompt and
+   you approve it (editing it first if you like). The approved text becomes
+   the root planning brief.
+2. **Tiered decomposition.** The root plan streams in children; every child
+   declared as a chunk fans out into its own plan task at its own tier, level
+   by level, until the frontier is all leaves or `maxDepth` forces leaves.
+   Every plan carries per-child `{ tokens, costUsd, minutes }` estimates plus
+   a subtree rollup, and a list of risks with a probe verdict for each
+   (`poc`, `research`, or `null` for "judged routine"; that judgment is
+   scored later).
+3. **Zero-backpressure previews.** Once planning completes, the cheapest tier
+   renders every leaf's expected output. These are calibration only and are
+   always displayed with a "never executed" warning; read them to catch
+   misunderstood briefs before any execution cost is spent. The UI's skip
+   button delivers a durable `dc-skip-preview` signal that suppresses the
+   phase.
+4. **Backpressure planning.** Every node declares its gates and dependencies
+   before execution: `review` gates at a declared tier, `check` gates as
+   shell commands, `preview` gates (developer previews, below), and
+   `approval` gates, which are only permitted when you passed an
+   `approvalPolicy`. No policy, no approval gates anywhere; with a policy,
+   delegating agents add gates only where it applies and may hand children a
+   clarified version of it. The root node is required to declare a
+   `slideshow` developer preview, so every run ends with something showable.
+5. **Derisk loop.** Every flagged risk spawns a probe: `research` probes read
+   docs and report with sources, `poc` probes prove the risky thing works.
+   Findings are delivered to the nearest parent only; no node ever sees the
+   whole tree. A finding that changes the plan triggers a replan round: the
+   flagged node's owner plus every dependent (child and dependency edges
+   both) each decide `invalidated` (version bump, fresh plan, old version
+   archived) or `reaffirmed` ("my plan survives the change"). Rounds stop at
+   `maxDeriskRounds` per node.
+6. **Execution.** Leaves run in dependency order with `maxConcurrency`
+   parallelism: a leaf's pipeline only mounts once every leaf under each of
+   its declared dependencies is complete. Each leaf loops exec plus gates up
+   to `maxAttempts` times, folding failed-gate feedback into the next
+   attempt's brief. Reviews judge evidence, not summaries: each review
+   receives the node's structured output and the measured range of jj (or
+   git) commits the attempt produced, with instructions to inspect the
+   commits itself (`jj log`, `jj diff`, `jj show`). Chunk-level reviews get
+   the union of their subtree's ranges.
+7. **Scoring and poll.** A run-level digest task carries the five delegation
+   scorers, and (unless `poll: false`) a final 3-question satisfaction poll
+   renders in the UI as the run's last attention badge.
+
+## Live control while it runs
+
+The whole run is steerable from the `delegation-chain` workflow UI:
+
+- **Editable outputs.** Every rendered output is editable in place. Saving an
+  edit delivers a durable `dc-edit` signal, which rides the exact same replan
+  cascade as a probe finding: the affected owner replans or reaffirms, and
+  dependents cascade. Edits are ordinary events, not restarts.
+- **Version history.** Invalidation bumps a node's version and archives the
+  old one. Clicking a node shows its version list; every prior version stays
+  inspectable, along with the replan decision that killed it.
+- **Attention routing.** Nodes carry a pending-human rollup (self plus
+  descendants). Clicking a pulsing attention badge jumps to the nearest
+  descendant that actually needs you: a question, the refined-prompt
+  approval, an approval gate, or the poll.
+- **Cost bar.** The header shows a progress bar of actual spend against the
+  latest predicted total. Replans re-forecast, so the prediction is always
+  the newest rollup, not the first guess.
+- **Developer previews.** Nodes with a `preview` gate build a showable
+  artifact after execution, in one of five kinds: `app` (the built thing
+  itself), `terminal` (rendered terminal plus driving instructions), `api`
+  (an explorer over a built API), `throwaway-ui` (a disposable UI over the
+  work), or `slideshow` (an HTML slideshow, the fallback when there is no
+  runnable code). The build is backpressure: a failed build fails the node
+  like a failed review. The preview panel carries Invalidate and
+  Request-changes buttons, which submit the same `dc-edit` round as any other
+  edit.
+
+## Budgets
+
+Pass `budgetUsd` and/or `budgetMinutes` to enforce the forecast. Rolled-up
+actuals are checked after each leaf's execution: crossing 80% of a limit
+writes a warning row, and crossing the limit raises an error into the run.
+`budgetMinutes` is additionally enforced as a wall-clock latency SLO on the
+whole chain.
+
+## Scoring
+
+Five scorers grade the run (see the [scorer reference](/reference/scorers)):
+
+| Scorer | What it measures |
+| --- | --- |
+| `pocJudgment` | Each planning node's risk judgment. A probe finding that changed the plan rewards hardest; a risk the node never flagged that later broke it (false negative) is punished hardest, with a zero value and triple weight by default. |
+| `planSolidity` | Replan churn after execution started. Plan-phase churn is free (that is the process working); each post-exec invalidation, redelegation, gate failure, or replan subtracts a penalty. |
+| `estimateAccuracy` | Predicted vs actual `{ tokens, costUsd, minutes }` per node, as a symmetric ratio (predicting double costs the same as predicting half), weighted by predicted cost so misforecasting big nodes matters more. |
+| `tierFit` | An LLM judge on whether each node's tier matched its work: over-tiered wastes cost, under-tiered risks quality. The judge itself runs on the cheap tier. |
+| `humanPoll` | The end-of-run poll, normalized to 0 to 1. Skipped (and dropped from the total) if you never answer it. |
+
+The run total combines them with `delegationRunScore`, weighted
+0.25 / 0.25 / 0.15 / 0.15 / 0.2 by default; skipped components drop out and
+the remaining weights renormalize. All weights (and the per-classification
+values and penalties inside `pocJudgment` and `planSolidity`) are
+configurable through the scorer factory options.
+
+## Roadmap
+
+One follow-up is deliberately deferred: higher-order orchestration (a
+planning node authoring its own smithers workflow as its execution strategy)
+is reserved via the optional `dcPlan.orchestration: "tasks" | "workflow"`
+field, which is accepted and ignored today. The UI-side fold store behind
+`useDelegationChain` already runs on Effect.ts behind the frozen hook
+signature.
+
+## Use it when
+
+- The ask is ambiguous or large enough to deserve refinement, decomposition,
+  and risk probes before anyone writes code.
+- You want per-node backpressure with evidence (commit-range reviews, checks,
+  showable previews) instead of one final review.
+- You want to steer mid-flight by editing outputs rather than restarting.
+
+## Use something else when
+
+- The change is a single focused unit: use [`implement`](/workflows/implement).
+- You want milestone-by-milestone delivery with one approval gate: use
+  [`mission`](/workflows/mission).
+- You only need the gate matrix, not the delegation: use
+  [`backpressure-plan`](/workflows/backpressure-plan).
+
+The workflow is a thin wrapper around the
+[`<DelegationChain>`](/components/delegation-chain) composite; use that page
+to embed the same machinery in your own workflows.

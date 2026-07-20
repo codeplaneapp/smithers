@@ -1,0 +1,39 @@
+---
+title: improve-test-coverage
+description: Add missing tests and validate the result.
+---
+
+`improve-test-coverage` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
+`improve-test-coverage` runs the shared `ValidationLoop` with a prompt focused on finding and filling high-impact test gaps.
+
+```bash
+bunx smithers-orchestrator workflow run improve-test-coverage --prompt "Add regression coverage for webhook signature failures"
+```
+
+<Frame caption="The improve-test-coverage UI shows the high-impact gaps it fills and validates that the new tests pass.">
+  <img src="/images/workflow-ui/improve-test-coverage.png" alt="improve-test-coverage workflow UI showing added and validated tests" />
+</Frame>
+
+## Inputs
+
+| Input | Type | Default |
+| --- | --- | --- |
+| `prompt` | string | `"Improve the test coverage for the current repository."` |
+
+## Use it when
+
+- A feature landed without enough tests.
+- A bug fix needs regression coverage.
+- Review or audit found weak boundary coverage.
+
+## Use something else when
+
+- You are still fixing the bug: use [`debug`](/workflows/debug) first, then this workflow for regression coverage.
+- You want a broad gap report rather than new tests: use [`audit`](/workflows/audit) with `focus: "test coverage"`.
+
+## Resume & retry
+
+Runs the shared validation loop (up to 3 iterations) and commits to the working tree. Runs are durable and resume with `up --resume`.
+
+Transient session/infra errors such as `SESSION_ERROR`, stream disconnects, rate limits, OOMs, and timeouts must never fail a whole run; retry the affected node and let unrelated verified work continue.

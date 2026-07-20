@@ -1,0 +1,13 @@
+Incident: {props.incident}
+
+Current on-call: {props.onCall}
+
+The team's ratified runbook rules:
+{props.rules.length ? props.rules.map((r, i) => `${i + 1}. ${r}`).join("\n") : "(none yet)"}
+
+Lessons from past incidents on this topic:
+{props.lessons.length ? props.lessons.map((l, i) => `${i + 1}. ${l}`).join("\n") : "(none yet — this is a cold start)"}
+
+Diagnose the incident and list concrete next actions. Ground your diagnosis in
+the rules and lessons above where they apply, and set groundedInPriorKnowledge
+accordingly — be honest when prior knowledge didn't help.

@@ -1,0 +1,16 @@
+---
+title: listApprovals
+description: Gateway RPC for listing pending approvals.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listApprovals`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ filter?: { runId?: string; workflow?: string; limit?: number } }`
+- Response: `GatewayApprovalSummary[]`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
+
+Each summary includes the run, workflow, node, iteration, request title and summary (requestTitle, requestSummary), approval mode, options, and any approval-specific allowed scopes, users, or auto-approve configuration.

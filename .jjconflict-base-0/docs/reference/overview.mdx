@@ -1,0 +1,108 @@
+---
+title: API reference
+description: The exhaustive, dry index of every public Smithers export, its signature, params, returns, source, and tests.
+icon: "book-open"
+---
+
+This is the API reference: the complete, dry catalog of everything Smithers
+exports. Every public function, component, type, and RPC has a page here with its
+signature, parameters, return shape, the source and tests that back it, and a
+runnable example. Where the **For Humans** and **For Agents** tabs explain why
+and walk you through tasks, this tab is the lookup you reach for when you already
+know what you want and need the exact shape of it.
+
+## Import map
+
+Almost everything lives behind one facade. Import components, agents, tools,
+scorers, memory, openapi, observability, the server/gateway, db, time-travel, and
+errors from `smithers-orchestrator`.
+
+```ts
+import { createSmithers, Task } from "smithers-orchestrator";
+```
+
+The browser/React Gateway SDK is the exception: it is published as subpaths so it
+can ship independently of the engine and stay client-safe.
+
+- `smithers-orchestrator/gateway-client` · the framework-free RPC/WS client.
+- `smithers-orchestrator/gateway-react` · the React hooks and provider built on it.
+
+## How to read a page
+
+Every export follows the same layout, so once you can read one you can read all
+of them:
+
+- A one-line summary of what the export does.
+- A `ts` signature block - the exact type you call against.
+- `ParamField` rows for each parameter and `ResponseField` rows for the return
+  shape, with nested `Expandable` blocks for object members.
+- A **Throws** note linking the relevant error in [Errors](/reference/errors)
+  when the export can fail loud.
+- A short, runnable example.
+- A footer line: `**Source** · **Tests** · **See also**`, linking the GitHub
+  source file, the test file that pins its behavior, and related guides.
+
+## Reference pages
+
+<CardGroup cols={2}>
+  <Card title="Authoring" icon="pen-nib" href="/reference/authoring">
+    The factory functions that turn Zod schemas into a typed, durable workflow API.
+  </Card>
+  <Card title="Components" icon="puzzle-piece" href="/reference/components">
+    The full JSX component set: Workflow, Task, control flow, and composites.
+  </Card>
+  <Card title="Agents" icon="robot" href="/reference/agents">
+    Adapters that wrap CLI and SDK coding agents into a uniform interface.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/reference/tools">
+    Built-in tools and helpers for giving agents typed capabilities.
+  </Card>
+  <Card title="Scorers" icon="ruler" href="/reference/scorers">
+    Scoring functions that grade node output for loops and evals.
+  </Card>
+  <Card title="Memory" icon="brain" href="/reference/memory">
+    Cross-run fact storage and retrieval.
+  </Card>
+  <Card title="OpenAPI" icon="file-code" href="/reference/openapi">
+    Generate typed agent tools from an OpenAPI spec.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/reference/observability">
+    Metrics, logging, tracing, and OTLP integrations.
+  </Card>
+  <Card title="Server and gateway" icon="server" href="/reference/server-gateway">
+    The multi-run control plane: serve runs over RPC and WebSocket.
+  </Card>
+  <Card title="Gateway client" icon="plug" href="/reference/gateway-client">
+    The framework-free browser RPC/WS client (subpath export).
+  </Card>
+  <Card title="Gateway React" icon="react" href="/reference/gateway-react">
+    React hooks and provider for the Gateway (subpath export).
+  </Card>
+  <Card title="DB" icon="database" href="/reference/db">
+    The Drizzle schema and helpers for the durable store.
+  </Card>
+  <Card title="Time travel" icon="clock-rotate-left" href="/reference/time-travel">
+    Fork, replay, and rewind runs from checkpoints.
+  </Card>
+  <Card title="Run a workflow" icon="play" href="/runtime/run-workflow">
+    The runtime entry point that executes a SmithersWorkflow.
+  </Card>
+  <Card title="Types" icon="brackets-curly" href="/reference/types">
+    The shared type surface: contexts, nodes, and workflow shapes.
+  </Card>
+  <Card title="Errors" icon="triangle-exclamation" href="/reference/errors">
+    The error classes Smithers throws and how to catch them.
+  </Card>
+  <Card title="Event types" icon="list-timeline" href="/reference/event-types">
+    The run event schema emitted to logs, streams, and the UI.
+  </Card>
+  <Card title="VCS helpers" icon="code-branch" href="/reference/vcs-helpers">
+    Helpers for worktrees, diffs, and version-control operations.
+  </Card>
+  <Card title="Package configuration" icon="gear" href="/reference/package-configuration">
+    The smithers.config fields and how the backend is resolved.
+  </Card>
+  <Card title="Launch a run (RPC)" icon="rocket" href="/rpc/launch-run">
+    The Gateway RPC method that starts a new run.
+  </Card>
+</CardGroup>

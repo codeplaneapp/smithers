@@ -1,0 +1,98 @@
+---
+title: OpenClaw
+description: Run Smithers from OpenClaw with the native plugin, MCP server, and Smithers workflow agent adapter.
+---
+
+[OpenClaw](https://github.com/openclaw/openclaw) is a local-first personal agent
+and gateway that connects messaging channels, browser, files, and shell to LLMs.
+It extends through **plugins**, **skills** (distributed via ClawHub), and **MCP
+servers**, and acts as both an MCP client and an MCP server.
+
+Smithers supports both directions:
+
+- **OpenClaw drives Smithers** through the native Smithers plugin and MCP tools.
+- **Smithers drives OpenClaw** through `OpenClawAgent` inside workflow tasks.
+
+## Install the native plugin
+
+The fastest path is `mcp add --agent openclaw`. It installs the native Smithers
+OpenClaw plugin into `~/.openclaw/extensions/smithers/`, enables it in
+`~/.openclaw/openclaw.json`, and registers the Smithers MCP server as a baseline
+tool surface:
+
+```bash
+bunx smithers-orchestrator mcp add --agent openclaw
+```
+
+The plugin gives OpenClaw tools to run, inspect, approve, and read Smithers
+workflow outputs. It also adds `smithers_create_workflow`, `smithers_eval`, and
+`smithers_optimize`, plus a bundled `smithers-orchestrate` skill that nudges
+OpenClaw toward reusable, eval-backed workflows instead of repeated one-off
+turns.
+
+## Register MCP by hand
+
+If you do not want the native plugin, OpenClaw stores MCP servers in
+`~/.openclaw/openclaw.json` under `mcp.servers`. Add Smithers as a stdio server:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "smithers": {
+        "command": "bunx",
+        "args": ["smithers-orchestrator", "--mcp"]
+      }
+    }
+  }
+}
+```
+
+Or manage it from the CLI:
+
+```bash
+openclaw mcp set smithers '{"command":"bunx","args":["smithers-orchestrator","--mcp"]}'
+openclaw mcp list
+```
+
+The semantic tools (`list_workflows`, `run_workflow`, `watch_run`,
+`resolve_approval`, and the rest) become available to OpenClaw's agent. Full
+reference: [MCP Server](/integrations/mcp-server).
+
+## Optional generated skill files
+
+OpenClaw discovers skills from `~/.agents/skills/` (among other locations), which
+is exactly where the cross-agent command installs them:
+
+```bash
+bunx smithers-orchestrator skills add
+```
+
+OpenClaw's own skill registry is **ClawHub** (`openclaw skills install <slug>`);
+the generated Smithers CLI skill files install directly into the skills
+directory rather than through the hub.
+
+## Smithers runs OpenClaw too
+
+In the other direction, Smithers can spawn OpenClaw as the worker for a workflow
+task through `OpenClawAgent`:
+
+```tsx
+import { OpenClawAgent } from "smithers-orchestrator";
+
+const openclaw = new OpenClawAgent({
+  agent: "main",
+  workspace: process.cwd(),
+});
+```
+
+`bunx smithers-orchestrator init` detects an authenticated OpenClaw runtime and can scaffold it in
+`.smithers/agents.ts` even when Claude Code or Codex are not available. The
+adapter shells out to `openclaw agent --message <prompt> --json`; pass `session`
+or a per-call `resumeSession` to route work into a known OpenClaw conversation.
+
+## See also
+
+- [MCP Server](/integrations/mcp-server): the full tool reference
+- [CLI Agents](/integrations/cli-agents): using OpenClaw inside workflows
+- [Agent Support](/agents/overview): the cross-agent commands

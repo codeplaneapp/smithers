@@ -1,0 +1,17 @@
+# Assumption probe: {props.id}
+
+Assumption: {props.assumption}
+
+Probe plan: {props.probe}
+
+Write a SMALL, real, runnable proof under artifacts/smithering/probes/{props.id}/ that
+answers exactly ONE question: does this assumption hold? Actually run it and capture
+output as evidence files. This doubles as reference code for the implementation, so keep
+it clean.
+
+- If the probed service has side effects (payments, deploys, messages), use sandbox/test
+  modes and idempotency keys; never mutate anything you cannot undo.
+- ALWAYS return a result (passed=false with evidence beats an error). If it fails, state
+  planImpact: what must change in the plan.
+
+Set assumptionId="{props.id}" and artifactPath to the probe directory.

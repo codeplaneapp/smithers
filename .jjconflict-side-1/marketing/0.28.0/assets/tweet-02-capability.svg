@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#4C8DFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#4C8DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#0C0E16"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+<text font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF" letter-spacing="5"><tspan x="96" y="156">SMITHERS · V0.28.0</tspan></text>
+<text font-size="60" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#E7E9EE" font-weight="800"><tspan x="96" y="282">Operate the whole run</tspan><tspan x="96" y="350">from one live console.</tspan></text>
+
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+    <rect x="96" y="430" width="680" height="142" rx="14" fill="#141826" stroke="#232A3A"/>
+    <text x="128" y="474" font-size="19" font-weight="700" letter-spacing="3" fill="#4C8DFF">DIAGNOSE</text>
+    <text x="128" y="526" font-size="28" fill="#C6CAD4">stalled · stale · orphaned · quota</text>
+
+    <rect x="824" y="430" width="680" height="142" rx="14" fill="#141826" stroke="#232A3A"/>
+    <text x="856" y="474" font-size="19" font-weight="700" letter-spacing="3" fill="#4C8DFF">RECOVER</text>
+    <text x="856" y="526" font-size="28" fill="#C6CAD4">resume · retry · cancel · pause</text>
+
+    <rect x="96" y="600" width="680" height="142" rx="14" fill="#141826" stroke="#232A3A"/>
+    <text x="128" y="644" font-size="19" font-weight="700" letter-spacing="3" fill="#4C8DFF">INSPECT</text>
+    <text x="128" y="696" font-size="28" fill="#C6CAD4">transcripts · output · diffs · frames</text>
+
+    <rect x="824" y="600" width="680" height="142" rx="14" fill="#141826" stroke="#232A3A"/>
+    <text x="856" y="644" font-size="19" font-weight="700" letter-spacing="3" fill="#4C8DFF">CONTROL</text>
+    <text x="856" y="696" font-size="28" fill="#C6CAD4">hijack · approvals · scores · crons</text>
+  </g>
+
+  <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
+  <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>
+  <text x="1504" y="826" font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="end">0.28.0</text>
+</svg>

@@ -1,0 +1,16 @@
+---
+title: updateTicket
+description: Gateway RPC for patching a work doc's content and/or status.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `updateTicket`
+- Scope: `ticket:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ path, content?, status? }`
+- Response: `TicketRow`
+
+Patches a LIVE work doc's `content` and/or `status` by `path`. When `content` changes, `content_hash` and `updated_at_ms` are re-stamped; a status-only patch keeps the existing content and hash. An unknown or already-soft-deleted `path` returns `TicketNotFound`.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `TicketNotFound`, and `Internal`.

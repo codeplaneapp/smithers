@@ -1,0 +1,551 @@
+# Audit-epic triage — still-open findings (2026-06-17)
+
+Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 still open. #305 fully resolved (closed).
+
+| Epic | Total | Resolved | Still open |
+|---|---|---|---|
+| #299 | 4 | 0 | **4** |
+| #300 | 34 | 0 | **34** |
+| #301 | 66 | 2 | **64** |
+| #302 | 17 | 1 | **16** |
+| #303 | 50 | 10 | **41** |
+| #304 | 47 | 35 | **11** |
+| #305 | 67 | 67 | **0** |
+| #306 | 90 | 31 | **59** |
+| #307 | 48 | 23 | **25** |
+
+
+## #299 — 4 still open
+
+- [ ] **P0** P0 Flagship package smithers-orchestrator has no `test` script — its unit tests never run in CI — packages/smithers/package.json — `packages/smithers/package.json:60`
+  - fix: Add `"test": "bun test tests"` to packages/smithers/package.json scripts so `pnpm -r test` runs the 4 existing unit-test files.
+- [ ] **P0** P0 22 of 30 fault cases fabricate their own SQL schema and reimplement the feature in-test — they validate a mock of the contract, not the product — e2e/faults/ — `e2e/faults/case12-rewind-reverts-vcs.test.ts:40-221`
+  - fix: Replace per-case fabricated `buildDb()` with ensureSmithersTables(SmithersDb) and drive real engine/time-travel/gateway code (pattern already proven by case25).
+- [ ] **P0** P0 case14 'gateway RPC roundtrip' and case17 'webhook bad signature' skip the real path on an obsolete/false rationale that case25 disproves — e2e/faults/case14 — `e2e/faults/case14-gateway-rpc-roundtrip.test.ts:853-861`
+  - fix: Delete the test.skip stubs in case14/case17 and rewrite them to import and boot the real Gateway like case25 (assert real RPC roundtrip / real handleWebhook 401).
+- [ ] **P0** P0 captureWorkspaceSnapshot + withSnapshotTimeout have ZERO coverage in CI (only tested in jj-real-repo.test.js, which is skipped when jj is absent) — packages/ — `packages/vcs/src/jj.js:111-176`
+  - fix: Add a fake-bin test (SMITHERS_JJ_PATH like jj-workspace.test.js) exercising captureWorkspaceSnapshot success/failure/null paths and withSnapshotTimeout's code:124 timeout sentinel — no real jj require
+
+## #300 — 34 still open
+
+- [ ] **P2** index.js is a 6,439-line monolith mixing parsing, ~60 command bodies, MCP wiring, and helpers — apps/cli/src/index.js — `apps/cli/src/index.js:1`
+  - fix: Split into per-command modules (cli/commands/*.js), a parsing module, and an mcp/ wiring module; index.js becomes a thin dispatcher.
+- [ ] **P1** dependency-boundary check scans ZERO files for the e2e workspace (directWorkspaceDirs entry is effectively dead) — `scripts/check-dependency-boundaries.mjs:101`
+  - fix: For e2e, collect from its actual test roots (or whole dir minus ignored) rather than only `src`.
+- [ ] **P2** Circular dependency between @smithers-orchestrator/agents and @smithers-orchestrator/observability ships to npm — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:5`
+  - fix: Extract the shared trace/metrics helpers into a leaf package both depend on, breaking the cycle.
+- [ ] **P2** observability is a foundational library but lives in apps/ (package masquerading as an app) — `apps/observability/package.json:1`
+  - fix: Move to packages/observability and update the workspace, exports map, and dependents.
+- [ ] **P2** .smithers workflow pack (a shipping target) is excluded from the dependency-boundary check and imports undeclared react/effect — `scripts/check-dependency-boundaries.mjs:20`
+  - fix: Add .smithers to directWorkspaceDirs (remove from ignoredDirs) and collect its ui/components roots, then declare react/effect in .smithers/package.json.
+- [ ] **P2** Subpath exports point their types condition at the barrel index.d.ts, which does not contain the subpath's symbols — `packages/agents/package.json`
+  - fix: Generate per-subpath .d.ts (tsup multi-entry) and point each export's types at its own declaration file.
+- [ ] **P2** Three workspace packages (accounts, usage, tool-context) are missing from the root tsconfig paths map — `tsconfig.json`
+  - fix: Add the three missing path mappings to compilerOptions.paths in root tsconfig.json.
+- [ ] **P2** smithers <-> cli package cycle exists (bin delegates dynamically; cli imports smithers statically) — `packages/smithers/src/bin/smithers.js:138`
+  - fix: Move findSmithersAnchorDir (and any shared leaf) into a package both depend on, so cli no longer statically imports smithers-orchestrator.
+- [ ] **P2** Root package.json exports map is a dev-only alias that diverges structurally from the actually-published exports — `package.json:18`
+  - fix: Generate the root dev alias from the published smithers exports, or add a check that the key sets/conditions stay in sync.
+- [ ] **P2** Published smithers-orchestrator ./* wildcard publicly exposes internal helper files — `packages/smithers/package.json`
+  - fix: Drop the './*' wildcard and enumerate only intended public subpaths.
+- [ ] **P2** No automated guard that every documented public subpath export resolves — `e2e/exports/programmatic-api.test.ts:1`
+  - fix: Add an e2e test that reads each published package.json exports map and dynamically imports every subpath, asserting resolution.
+- [ ] **P1** No lint (oxlint) gate in any CI workflow — `.github/workflows/ci.yml:28`
+  - fix: Add a `pnpm lint` step to the ci.yml typecheck job (and .smithers lint).
+- [ ] **P1** No coverage measurement or gate anywhere in CI — the ~100% bar is unenforced — `.github/workflows/ci.yml:59`
+  - fix: Run bun test --coverage with a per-package threshold and a CI gate, or wire a coverage tool with a minimum bar.
+- [ ] **P1** typecheck:examples never runs in CI — 22 user-facing example workflows can ship broken — `package.json:67`
+  - fix: Add a `pnpm typecheck:examples` step to ci.yml.
+- [ ] **P2** Gateway OpenAPI drift check is gated only via faults.yml's pnpm -r build, not in the primary CI job — `.github/workflows/ci.yml:9`
+  - fix: Add `pnpm --filter @smithers-orchestrator/gateway check:openapi` (or `pnpm -r build`) to the primary ci.yml job.
+- [ ] **P2** jj platform packages' prepublishOnly binary-presence validation never runs on PRs — `packages/jj-darwin-arm64/package.json:1`
+  - fix: Add a CI step running `pnpm fetch:jj` + a presence assertion (or invoke the prepublishOnly check) on PRs.
+- [ ] **P2** Full e2e suite runs in the test job without the build step that faults.yml deems necessary — `e2e/package.json:1`
+  - fix: Add `pnpm -r build` before the test step in ci.yml, or scope the test job's e2e run to match faults.yml's prerequisites.
+- [ ] **P2** examples/ bun test (porting-rules.test.ts) never runs in CI — same untested-directory root cause as the smithers gap — `examples/bun-port-smithers/components/porting-rules.test.ts:14`
+  - fix: Add examples/* to the workspace (or add an explicit CI step running the examples test dir).
+- [ ] **P2** accounts package.json ./* subpath export is unused and would serve whole-bundle types for any subpath — `packages/accounts/package.json:13`
+  - fix: Remove the './*' wildcard or give subpaths their own generated declaration files.
+- [ ] **P2** Committed generated index.d.ts has no CI sync guard (drift risk) — `packages/accounts/src/index.d.ts:1`
+  - fix: Add a CI step: `pnpm -r build` then fail if `git status --porcelain` is non-empty.
+- [ ] **P2** getDevToolsSnapshot is used by the nodes collection but is missing from the client's typed RPC surface — `packages/gateway-client/src/GatewayRpcTypeMap.ts:31`
+  - fix: Add getDevToolsSnapshot request/response entries to GatewayRpcRequestMap/GatewayRpcResponseMap.
+- [ ] **P2** TaskMemoryConfig defined three times with a diverging shape — `packages/memory/src/TaskMemoryConfig.ts:3`
+  - fix: Have graph re-export TaskMemoryConfig from @smithers-orchestrator/memory instead of redefining it.
+- [ ] **P2** Generated openapi index.d.ts is committed and can drift; ./* and ./metrics subpaths point types at the full bundle — `packages/openapi/package.json:7`
+  - fix: Emit per-entry declarations and point subpath types at them; add a CI build+drift check.
+- [ ] **P1** Quadruple-defined error contract with no drift guard between the runtime (.js) and type (.ts) copies — `packages/protocol/src/errors.ts:1`
+  - fix: Make one runtime array the single source, derive types from it, delete the duplicate copies, and add a unit test asserting the union matches the array.
+- [ ] **P2** index.d.ts is a committed generated artifact serving as the type entry for ALL subpath exports (scheduler) — `packages/scheduler/package.json`
+  - fix: Generate per-subpath declarations and point each export's types at its own file; add a CI drift check.
+- [ ] **P2** package.json declares ./metrics and ./schema subpath exports that no consumer uses; types map all subpaths to index.d.ts (scorers) — `packages/scorers/package.json:8`
+  - fix: Drop the unused subpaths or give them their own declarations; remove the './*' wildcard.
+- [ ] **P2** Inconsistent timeout policy: isJjRepo (on the durability-startup hot path) has no timeout while getJjPointer/captureWorkspaceSnapshot do — `packages/vcs/src/jj.js:184`
+  - fix: Wrap isJjRepo's runJj in withSnapshotTimeout (or Effect.timeoutTo) returning false on timeout.
+- [ ] **P2** Default operator console re-implements the whole wire protocol instead of using the published SDK — `packages/server/src/gatewayUi/defaultOperatorUi.js:509`
+  - fix: Rebuild the default operator UI on top of the published SmithersGatewayClient SDK.
+- [ ] **P1** checkJs is off in all 27 packages: 831 .js source files (503 with JSDoc types) ship unverified types — `tsconfig.json`
+  - fix: Set checkJs:true in the root tsconfig (or each package tsconfig) and fix the resulting JSDoc-type errors package by package.
+- [ ] **P1** 28 packages commit a generated bundled src/index.d.ts that ships as exports types and can drift; drift guard exists only at publish, not in CI — `.github/workflows/ci.yml`
+  - fix: Add a CI job: `pnpm -r build` then fail if `git status --porcelain` reports any changed src/*.d.ts.
+- [ ] **P1** Published @smithers-orchestrator/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages) — `apps/observability/package.json:1`
+  - fix: Relocate observability to packages/ and break the cycle by extracting the shared trace/metric helpers into a leaf package.
+- [ ] **P2** isRecord / isObject / asRecord predicate family re-implemented across 7+ packages with divergent bodies; 99 inline error-message extractions — `packages/agents/src/BaseCliAgent/parseHelpers.js:7`
+  - fix: Add a shared @smithers-orchestrator/errors (or a small predicates package) exporting isRecord/asRecord and an errorMessage() helper, then replace the local copies.
+- [ ] **P2** apps/cli is also published from apps/ (non-private @smithers-orchestrator/cli) — apps/ contains 2 shipping packages, not the conventional zero — `apps/cli/package.json:1`
+  - fix: Move cli (and observability) to packages/ so apps/ holds only private apps.
+- [ ] **P2** Workflow-to-UI binding is implicit filename convention with no missing-UI signal — `apps/cli/src/index.js:1993`
+  - fix: Emit a warning (or a `smithers workflow doctor` check) when a registered workflow has no matching ui/<id>.tsx.
+
+## #301 — 64 still open
+
+- [ ] **P2** Capability-registry factory exports inconsistent: 4 of 10 re-exported from index and consumed nowhere via the barrel — `packages/agents/src/index.js:64,65,72,74`
+  - fix: Drop the 4 factory re-exports from index.js (or re-export all 10 consistently).
+- [ ] **P2** Orphaned type files: AskOptions.ts, InitWorkflowPackOptions.ts, InitWorkflowPackResult.ts, shebang-only index.d.ts — `apps/cli/src/AskOptions.ts, apps/cli/src/InitWorkflowPackOptions.ts, apps/cli/src/InitWorkflowPackResult.ts, apps/cli/src/index.d.ts`
+  - fix: Delete the four orphaned files.
+- [ ] **P2** Dead MCP export serveSemanticMcpServer — `apps/cli/src/mcp/semantic-server.js:85`
+  - fix: Delete serveSemanticMcpServer (and consider whether registerSemanticTools needs to stay exported).
+- [ ] **P1** Entire in-memory MetricsService in _coreMetrics.js is dead code (only the Tag is used) — `apps/observability/src/_coreMetrics.js:247-509`
+  - fix: Move the MetricsService Tag to its own file and delete the dead in-memory implementation + duplicated catalog in _coreMetrics.js.
+- [ ] **P2** Dead in-memory recordEvent handles event types that don't exist in the SmithersEvent union — `apps/observability/src/_coreMetrics.js:359-479`
+  - fix: Delete with the rest of the in-memory MetricsService body.
+- [ ] **P2** _coreMetrics.js catalog reachable as a published deep import via './*' subpath export — `apps/observability/package.json:18-22`
+  - fix: After deleting the dead _coreMetrics body, optionally tighten the exports map to only the intended subpaths.
+- [ ] **P2** bearerToken.ts is dead code — exported helper imported nowhere — `apps/review/src/server/bearerToken.ts`
+  - fix: Delete bearerToken.ts.
+- [ ] **P2** Orphan jsx stub pages not in any navigation (jsx/installation.mdx, jsx/quickstart.mdx) — `docs/jsx/installation.mdx, docs/jsx/quickstart.mdx`
+  - fix: Delete the two stub mdx files (redirects already cover the paths).
+- [ ] **P1** Public export accountToProviderEnv is dead production code with false JSDoc; logic duplicated in 3 places — `packages/accounts/src/accountToProviderEnv.js:1-48`
+  - fix: Wire agent buildCommand/agent-test to call accountToProviderEnv (dedupe), or delete it and fix the JSDoc.
+- [ ] **P2** BaseCliAgent.stream() path is unused by the product and has no tests (buildStreamResult/emptyUsage/asyncIterableToStream) — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:361,382,405,1084`
+  - fix: Delete the stream() path and its helpers, or add a test that exercises agent.stream().
+- [ ] **P2** Aspects accumulator + tracking config are render-time plumbing the engine discards (dead data path) — `packages/components/src/aspects/AspectContext.js:22, packages/components/src/components/Aspects.js:31-37, packages/components/src/components/Task.js:300-309`
+  - fix: Stop emitting accumulator/tracking from buildAspectMeta and drop createAccumulator/tracking render-time plumbing.
+- [ ] **P2** aspects/index.js barrel is exported but imported by nothing — `packages/components/src/aspects/index.js:9`
+  - fix: Delete the unused barrel.
+- [ ] **P1** Entire in-memory storage module (storage/) is dead code — `packages/db/src/storage/InMemoryStorage.js, packages/db/src/storage/StorageService.js`
+  - fix: Delete packages/db/src/storage/.
+- [ ] **P1** Parallel duplicate implementations: output/, frame-codec/, loadInputEffect.js, loadOutputsEffect.js (and internal-schema duplication) — `packages/db/src/output/, packages/db/src/frame-codec/, packages/db/src/loadInputEffect.js, packages/db/src/loadOutputsEffect.js`
+  - fix: Pick one implementation per area (single-file or modular dir) and delete the unused parallel copy + standalone loadInput/Outputs files.
+- [ ] **P2** dialect.js exports isDialect and tableColumnsSql are never used — `packages/db/src/dialect.js:31,188`
+  - fix: Delete isDialect and tableColumnsSql.
+- [ ] **P2** SmithersDb.buildEventHistoryWhere duplicates SqlMessageStorage logic but is SQLite-hardcoded and unused — `packages/db/src/adapter.js:2140`
+  - fix: Delete SmithersDb.buildEventHistoryWhere.
+- [ ] **P2** react-output.js stripAutoColumns is a third copy of the same function — `packages/db/src/react-output.js:4`
+  - fix: Re-export stripAutoColumns from the canonical output module instead of redefining in react-output.js.
+- [ ] **P2** Five package exports have no consumers anywhere in the repo (effectively dead public API) — `packages/devtools/src/index.js:18,19,20,22,23`
+  - fix: Stop exporting the 5 unused symbols from the package barrel (keep them internal/test-only).
+- [ ] **P2** Server snapshotFromFrameRow constructs a SmithersDevToolsCore + captureSnapshot whose result is discarded — `packages/server/src/gatewayRoutes/getDevToolsSnapshot.js:334-335`
+  - fix: Remove the dead core/captureSnapshot lines.
+- [ ] **P2** loadCreateSession has an unreachable createSession branch and a dead relative-path fallback — `packages/driver/src/WorkflowDriver.js:166-167,158`
+  - fix: Drop the createSession branch and the relative-path fallback specifier.
+- [ ] **P1** Obsolete ~1759-line legacy engine body (runWorkflowBodyLegacy) is unreachable in production — `packages/engine/src/engine.js:5829-7587`
+  - fix: Delete runWorkflowBodyLegacy and the legacy gate; always use runWorkflowBodyDriver.
+- [ ] **P2** deferred-bridge.js is entirely dead code (non-durable bridge superseded by durable variant) — `packages/engine/src/effect/deferred-bridge.js:1-64`
+  - fix: Delete deferred-bridge.js.
+- [ ] **P2** Dead exports in durable-deferred-bridge.js (Workflow + success schemas never consumed externally) — `packages/engine/src/effect/durable-deferred-bridge.js:19,44,51`
+  - fix: Stop exporting DurableDeferredBridgeWorkflow and the two success schemas (keep them module-local).
+- [ ] **P2** rpc-schema.js (SmithersRpcGroup + payload/result schemas) is published but has no implementation or consumer — `packages/engine/src/effect/rpc-schema.js:1-102`
+  - fix: Delete rpc-schema.js and its re-export, or wire it into an actual RPC handler.
+- [ ] **P2** subscribeTaskWorkerDispatches is a published observability hook with no production consumer — `packages/engine/src/effect/single-runner.js:191`
+  - fix: Drop the public export (keep test-internal) or wire a real observability consumer.
+- [ ] **P2** tagged.js is an orphan barrel — never imported anywhere — `packages/errors/src/tagged.js`
+  - fix: Delete tagged.js.
+- [ ] **P2** approve special-case in getRequiredScopeForGatewayMethod maps a method the runtime never dispatches (vestigial) — `packages/gateway/src/rpc/index.ts:744-746`
+  - fix: Remove the `approve` method special-case (the `approve` legacy scope token in scopes.ts is separate and can stay).
+- [ ] **P2** JsonSchema type declares anyOf/format/default/maximum fields no schema sets — `packages/gateway/src/rpc/index.ts:14,16,17,24`
+  - fix: Trim the unused JsonSchema fields.
+- [ ] **P2** Stale empty src/index.d.ts is checked in and shipped — `packages/gateway-client/src/index.d.ts:1`
+  - fix: Delete the empty index.d.ts.
+- [ ] **P2** Exported GatewayRequestFrame type is never imported or used anywhere — `packages/gateway-client/src/GatewayRequestFrame.ts:1`
+  - fix: Delete GatewayRequestFrame.ts and its re-export.
+- [ ] **P2** Three exported gatewayKeys factories (cronList, nodeOutput, nodeDiff) are unused — `packages/gateway-client/src/sync/gatewayKeys.ts:16-24`
+  - fix: Remove the three unused key factories.
+- [ ] **P1** Legacy src/dom/extract.js is dead in product but still tested (colliding extractor name) — `packages/graph/src/dom/extract.js`
+  - fix: Migrate the test onto the canonical extractGraph and delete src/dom/extract.js.
+- [ ] **P2** src/utils/tree-ids.js is dead in production (only the legacy dom/extract.js uses it) — `packages/graph/src/utils/tree-ids.js`
+  - fix: Delete tree-ids.js together with dom/extract.js.
+- [ ] **P2** Dead duplicate type exports: Scorer/ScorerBinding/SamplingConfig/ScorerFn/ScorerInput/ScoreResult/AgentLike/RetryPolicy/MemoryNamespaceKind/ExtractResult — `packages/graph/src/types.ts:32-99 (+ Scorer.ts, ScorerBinding.ts, etc.)`
+  - fix: Delete the unused type re-export files and their graph/index.js entries.
+- [ ] **P2** MemoryService/createMemoryLayer Effect layer and <Task memory> recall/remember are never wired into any runtime — `packages/memory/src/createMemoryLayer.js, packages/memory/src/MemoryService.js`
+  - fix: Wire MemoryService into task dispatch (recall/remember) or delete the unwired layer.
+- [ ] **P2** react-types.ts is dead code (zero references anywhere) — `packages/memory/src/react-types.ts:1`
+  - fix: Delete react-types.ts.
+- [ ] **P2** Four exported config types have no consumers (speculative public API) — `packages/memory/src/WorkingMemoryConfig.ts, MessageHistoryConfig.ts, MemoryProcessorConfig.ts, SemanticRecallConfig.ts`
+  - fix: Drop the speculative config types until the memory feature is wired.
+- [ ] **P2** deprecated is parsed but never used; OpenApiToolCalled event is typed/formatted but never emitted — `packages/openapi/src/extractOperations.js:45`
+  - fix: Either honor deprecated (skip/warn) and emit OpenApiToolCalled on tool execution, or drop the field and the event type/formatter.
+- [ ] **P2** Committed generated src/index.d.ts is unreferenced by the exports map (dead generated artifact in source) — `packages/pi-plugin/src/index.d.ts`
+  - fix: Delete the committed index.d.ts (and gitignore generated .d.ts).
+- [ ] **P2** DevToolsStore.retryNode and runSupportsRetry are effectively dead (no-op feature) — `packages/pi-plugin/src/runtime/DevToolsStore.ts:204,520-524`
+  - fix: Implement the retry feature or remove retryNode/runSupportsRetry.
+- [ ] **P2** DevToolsClient.signal/resume/getNodeOutput/getNodeDiff are unused within the package — `packages/pi-plugin/src/runtime/DevToolsClient.ts:411-425,449-466`
+  - fix: Remove the unused client methods or wire them into DevToolsStore.
+- [ ] **P2** outputs.ts is entirely dead — exported types have zero consumers; server and db reimplement them — `packages/protocol/src/outputs.ts`
+  - fix: Delete outputs.ts and its re-exports.
+- [ ] **P2** ProtocolError type is exported but never consumed anywhere — `packages/protocol/src/errors.ts:51 (and errors/ProtocolError.ts:6)`
+  - fix: Delete the unused ProtocolError type (and its duplicate).
+- [ ] **P2** DEVTOOLS_PROTOCOL_VERSION is exported but never read; producer/consumers hardcode version: 1 — `packages/protocol/src/devtools.js:10`
+  - fix: Either reference DEVTOOLS_PROTOCOL_VERSION where version:1 is hardcoded, or remove the constant.
+- [ ] **P2** errors/*.ts type files are dead — duplicate of errors.ts — `packages/protocol/src/errors/DevToolsErrorCode.ts, NodeOutputErrorCode.ts, NodeDiffErrorCode.ts, JumpToFrameErrorCode.ts, ProtocolError.ts`
+  - fix: Consolidate on one source (errors.ts or errors/ dir) and delete the duplicate.
+- [ ] **P2** Duplicate ProtocolError definition: errors.ts and errors/ProtocolError.ts both define the identical shape — `packages/protocol/src/errors.ts:51-55 and packages/protocol/src/errors/ProtocolError.ts:6-10`
+  - fix: Keep one definition and re-export it from the other (or delete the duplicate).
+- [ ] **P2** Dead host-config method: prepareUpdate is never called by react-reconciler 0.33 — `packages/react-reconciler/src/reconciler.js:181-185`
+  - fix: Remove prepareUpdate from the host config.
+- [ ] **P2** core-types.js is an orphaned re-export imported by nothing — `packages/react-reconciler/src/core-types.js:1`
+  - fix: Delete core-types.js.
+- [ ] **P2** SandboxHttpRunner / SandboxSocketRunner are dead pass-through re-exports — `packages/sandbox/src/effect/http-runner.js:108, packages/sandbox/src/effect/socket-runner.js:93`
+  - fix: Delete the alias exports and the workflow-bridge re-exports.
+- [ ] **P2** process-runner.js normalizeSandboxEnv/Ports/Volumes used only internally; negative paths untested — `packages/sandbox/src/effect/process-runner.js:67,109,143`
+  - fix: Make them module-local and/or add tests for the validation failure paths.
+- [ ] **P2** sandboxEgressEnv NO_PROXY array branch is unreachable dead code — `packages/sandbox/src/egress.js:148`
+  - fix: Replace line 148 with `env.NO_PROXY = egress.noProxy;` (the value is already a normalized string).
+- [ ] **P2** assertPathWithinRootEffect exported but only used internally — `packages/sandbox/src/sandboxPath.js:28`
+  - fix: Drop the export (keep module-local).
+- [ ] **P2** Scheduler/WorkflowSession Effect Tags and SchedulerLive are dead provisioning (never consumed) — `packages/scheduler/src/Scheduler.js, packages/scheduler/src/WorkflowSession.js`
+  - fix: Remove the unused Tags + Live layers from SmithersCoreLayer (or actually consume the service).
+- [ ] **P2** ~10 WorkflowSession service methods are dead in production — `packages/scheduler/src/makeWorkflowSession.js (WorkflowSessionService.ts)`
+  - fix: Trim the unused session API surface to what the driver/engine actually call.
+- [ ] **P2** scorers src/react-types.ts is never imported anywhere — `packages/scorers/src/react-types.ts:1`
+  - fix: Delete react-types.ts.
+- [ ] **P2** Public scorers API (aggregateScores, runScorersBatch, relevancy/toxicity/faithfulness scorers) has no in-repo product consumer — `packages/scorers/src/index.js:18-28; packages/smithers/src/index.js:231`
+  - fix: Use them in a built-in eval/workflow or mark as experimental; not blocking.
+- [ ] **P2** getNodeDiffRoute documents and destructures parameters it never uses (getCurrentPointerImpl, restorePointerImpl) — `packages/server/src/gatewayRoutes/getNodeDiff.js:260-262,276-278`
+  - fix: Remove the two unused params and their JSDoc.
+- [ ] **P2** ConnectRequest declares a { password: string } auth variant that is never implemented — `packages/server/src/ConnectRequest.ts:11-15`
+  - fix: Drop the password auth variant from ConnectRequest (token-only).
+- [ ] **P1** Entire src/ide/ subtree is orphaned dead code (zero importers, zero tests, no docs) — `packages/smithers/src/ide/SmithersIdeService.js`
+  - fix: Delete packages/smithers/src/ide/.
+- [ ] **P1** VCS-tag write path (tagSnapshotVcs) is orphaned — the whole vcs-version read feature no-ops in production — `packages/time-travel/src/vcs-version/tagSnapshotVcsEffect.js:18`
+  - fix: Wire tagSnapshotVcs into the snapshot path or delete the vcs-version subtree.
+- [ ] **P2** resolveWorkflowAtRevision has no production or internal consumer — `packages/time-travel/src/vcs-version/resolveWorkflowAtRevisionEffect.js:17`
+  - fix: Delete resolveWorkflowAtRevision (with the orphaned vcs-version feature).
+- [ ] **P2** formatDiffAsJson is an identity-spread export with no production caller — `packages/time-travel/src/diff.js:206-208`
+  - fix: Delete formatDiffAsJson (callers can use the diff object directly).
+- [ ] **P2** Declared dependency @smithers-orchestrator/errors is unused — `packages/usage/package.json:29`
+  - fix: Remove the unused dependency.
+- [ ] **P2** WorkspaceSnapshot.ts is orphaned dead code whose docs diverge from the authoritative inline typedef — `packages/vcs/src/WorkspaceSnapshot.ts:1-16`
+  - fix: Delete WorkspaceSnapshot.ts (or make jj.js import it as the single source).
+
+## #302 — 16 still open
+
+- [ ] **P1** P1 AmpAgent cannot resume a session — only CLI adapter that never wires resumeSession into buildCommand — `packages/agents/src/AmpAgent.js:196-240 (and AmpAgentOptions.ts)`
+  - fix: Read params.options?.resumeSession in buildCommand and, when set, emit `amp threads continue <id>` (per the manifest) instead of starting a fresh --execute thread; add a session/resume field to AmpAge
+- [ ] **P1** P1 Memory processors TokenLimiter and Summarizer ship as no-op placeholders (missing-features) — `packages/memory/src/TokenLimiter.js:15-22, packages/memory/src/Summarizer.js:13-19`
+  - fix: Implement thread-level trimming (TokenLimiter) and LLM compaction (Summarizer) against the store, or remove them from the public export and docs until implemented.
+- [ ] **P1** P1 TokenLimiter and Summarizer are no-op placeholders shipped as working public API and documented as functional (packages/memory) — `packages/memory/src/TokenLimiter.js:15-23, packages/memory/src/Summarizer.js:8-26`
+  - fix: Same as above — implement real token-budget trimming and LLM summarization, or de-stub the exported/documented surface.
+- [ ] **P1** P1 `smithers gui` launches a native app (com.smithers.SmithersGUI) that is not built or shipped from this repo — `apps/cli/src/index.js:5771-5821 (docs/cli/overview.mdx:319-324)`
+  - fix: Either ship/point at a real GUI app, or reframe the command (and docs) as 'open in an external Smithers GUI you install separately' and stop defaulting to an unshipped bundle id.
+- [ ] **P1** P1 Default semantic MCP surface omits the flagship time-travel / durability controls, forcing agents to the CLI — `apps/cli/src/mcp/semantic-tools.js (toolSurface default 'semantic' at apps/cli/src/index.js:5331)`
+  - fix: Add semantic MCP tools for fork/replay/rewind/timeline/snapshots/restore (mirroring the existing CLI handlers) so the flagship time-travel controls are usable without switching to the raw surface.
+- [ ] **P1** P1 `smithers .` / `smithers <dir>` shortcut routes to the unbuilt `gui` command — `apps/cli/src/index.js:5996-6011 (rewriteGuiShortcutArgv)`
+  - fix: Tie this finding to the gui fix: once gui targets a real/installable app (or is reframed), the shortcut is fine; otherwise route the dir shortcut to a working surface (e.g. `smithers ui`) instead of t
+- [ ] **P2** P2 Documented remote sandbox targets (gVisor, Daytona, Cloudflare) have no shipped or example provider — `packages/sandbox/src/ (README.md:164-166, docs/index.mdx)`
+  - fix: Either ship example providers (or links to real ones) for gVisor/Daytona/Cloudflare under docs/examples, or trim the README/docs table to only the targets that actually have a provider (Local, Kuberne
+- [ ] **P2** P2 `smithers openapi` advertises 'Generate AI SDK tools' but only has a `list` (preview) subcommand — `apps/cli/src/index.js:2487-2513`
+  - fix: Add a `smithers openapi generate <spec> --out <file>` subcommand that writes the generated AI SDK tool module, or rename the group/docs to 'inspect/preview' to match the only verb that exists.
+- [ ] **P2** P2 `smithers memory` and `smithers cron` CLI groups are partial vs their underlying store/adapter capabilities — `apps/cli/src/index.js:2231-2330`
+  - fix: Add `memory get`, `memory set`, and `memory rm` subcommands wrapping store.getFact/setFact/deleteFact to bring the CLI to parity with the store.
+- [ ] **P2** P2 ./BaseCliAgent subpath export declares a types target missing its runtime exports — `packages/agents/package.json (exports['./BaseCliAgent'].types) -> packages/agents/src/index.d.ts`
+  - fix: Emit/point a dedicated ./src/BaseCliAgent/index.d.ts (re-exporting the module's symbols) and set that as the subpath's `types` instead of the package-root d.ts.
+- [ ] **P2** P2 SuperSmithers 'apply' task is a no-op stub that returns a literal and writes nothing — `packages/components/src/components/SuperSmithers.js:74-91`
+  - fix: Implement the compute fn to read the prior propose-task output and actually apply the edits to disk (or gate behind dryRun), or remove the apply task and document SuperSmithers as report-only.
+- [ ] **P1** P1 AlertRuntime is a no-op stub; alertPolicy.rules are never evaluated and no alert is ever inserted — `packages/engine/src/alert-runtime.js:7-22 (wired at packages/engine/src/engine.js:5488-5514, 6059-6088)`
+  - fix: Implement start()/stop() to subscribe to the eventBus, evaluate policy.rules against run/node events, and call services.adapter.insertAlert (and createHumanRequest for alert-linked approvals) when a r
+- [ ] **P2** P2 alertPolicy.reactions are never consumed anywhere (entire alert reaction pipeline unimplemented) — `packages/engine/src/alert-runtime.js (and engine.js alert wiring)`
+  - fix: When AlertRuntime fires a rule, look up the matching policy.reactions entry and execute it (e.g. requestCancel/pauseScheduler/createHumanRequest), wired through the services already passed into the co
+- [ ] **P1** P1 10 live runtime RPC methods are absent from the canonical GATEWAY_RPC_DEFINITIONS contract (real drift) — `packages/gateway/src/rpc/index.ts:397-707 (vs dispatch in packages/server/src/gateway.js)`
+  - fix: Add these live methods to GATEWAY_RPC_DEFINITIONS (or an explicit 'internal/legacy' contract section) with request/response schemas, so the canonical contract and the rpc-contract test cover every dis
+- [ ] **P1** P1 OpenAPI non-JSON request bodies (multipart/form-data, x-www-form-urlencoded) are silently dropped — `packages/openapi/src/buildOperationSchema.js:44-58, packages/openapi/src/tool-factory/_helpers.js:120-125`
+  - fix: Extend buildOperationSchema to fall back to multipart/form-data and application/x-www-form-urlencoded content schemas, and in executeRequest encode the body (FormData / URLSearchParams) with the match
+- [ ] **P2** P2 Scorer execution never persists context/groundTruth even when received, and inputJson is the only correlation column — `packages/scorers/src/run-scorers.js:110-131 (and types.ts:108-117, 72-89)`
+  - fix: Add context/groundTruth to ScorerContext and forward them into scorer.score(); add contextJson/groundTruthJson columns to the scorer-results schema + ScoreRow and persist them in the inserted row.
+
+## #303 — 41 still open
+
+- [ ] **P1** `snapshots --json` emits unparseable stdout (human text + framework CTA injection) — `apps/cli/src/index.js:5018-5042 (snapshots command); DEVTOOLS_COMMANDS set at apps/cli/src/index.js:2638`
+  - fix: Add 'snapshots' to DEVTOOLS_COMMANDS (and argvRequestsJsonMode) so --json maps to the command option and suppresses framework CTA.
+- [ ] **P1** `timeline --json` emits unparseable stdout (human TUI text + framework CTA injection) — `apps/cli/src/index.js:5722-5767`
+  - fix: Route timeline --json through the devtools json-flag rewrite (or a raw-json handler) so it emits only the timeline JSON and no CTA.
+- [ ] **P1** smithers cron scheduler spawns `bun run src/index.js` which does not exist in user projects — `apps/cli/src/scheduler.js:30-31`
+  - fix: Spawn the resolved smithers CLI bin (e.g. process.execPath + the CLI entry, or `smithers up`) instead of a hardcoded `bun run src/index.js`.
+- [ ] **P1** apps/review CLI --publish defaults to the non-functional review.smithers.sh domain — `apps/review/src/cli/publishWalkthrough.ts:5`
+  - fix: Verify the domain is live; if not, require an explicit --publish-url / config and fail clearly rather than defaulting to a dead host.
+- [ ] **P2** SSE metering silently under-bills responses larger than 1MB — `apps/review/src/server/proxy/handleAnthropic.ts:43-51`
+  - fix: Parse usage incrementally as SSE frames arrive (or specifically retain message_delta usage) instead of truncating the accumulated buffer at 1MB.
+- [ ] **P2** Session spend-cap enforcement races under concurrent requests — `apps/review/src/server/proxy/handleAnthropic.ts:84-92,131-146`
+  - fix: Make the cap check and spend increment atomic (single conditional UPDATE / transaction) before forwarding, not a read-then-act with deferred recordUsage.
+- [ ] **P1** parseAccountsFile does not enforce the documented configDir XOR apiKey invariant (secrets can leak into subscription records) — `packages/accounts/src/parseAccountsFile.js:85-92`
+  - fix: Throw ACCOUNTS_FILE_INVALID when a subscription account carries apiKey or an api-key account carries configDir; only copy the field appropriate to the provider class.
+- [ ] **P1** agents codegen also fails the configDir-XOR-apiKey invariant, propagating a stray API key into spawned agents — `apps/cli/src/agent-detection.js:666-667 (renderAccountProviderLine)`
+  - fix: Emit configDir XOR apiKey based on provider class, mirroring the parser fix; never emit both.
+- [ ] **P2** SuperSmithers collides all 4 task outputs onto one key when reportOutput is provided — `packages/components/src/components/SuperSmithers.js:39,56,69,86`
+  - fix: Only the final report task should use reportOutput; keep distinct per-task defaults (or derive `${prefix}-read/-propose/-apply` keys) for the intermediate tasks.
+- [ ] **P2** answerHumanRequest argument order differs between SmithersDb and InMemoryStorage — `packages/db/src/adapter.js:1674 vs packages/db/src/storage/InMemoryStorage.js:348 and StorageServiceShape.ts:86`
+  - fix: Align the InMemoryStorage signature and StorageServiceShape to the SmithersDb (answeredAtMs then answeredBy) ordering, or delete InMemoryStorage if truly dead.
+- [ ] **P2** applyDelta validation is asymmetric: addNode/updateProps/updateTask accept malformed payloads — `packages/devtools/src/applyDelta.js:82-110`
+  - fix: Validate op.node (addNode) and op.props (updateProps) are objects, throwing InvalidDeltaError on malformed input, mirroring replaceRoot.
+- [ ] **P2** applyDelta updateProps with no props key sets node.props = undefined — `packages/devtools/src/applyDelta.js:96`
+  - fix: Reject updateProps ops whose props is not an object (throw InvalidDeltaError).
+- [ ] **P2** snapshotSerializer maxEntries does not bound flat arrays/objects of scalars — `packages/devtools/src/snapshotSerializer.js:56-80`
+  - fix: Increment/check traversed per emitted entry including scalar array/object members, or cap array length and object key count explicitly.
+- [ ] **P2** builder fragment(_inputSchema) silently discards its input schema argument — `packages/engine/src/effect/builder.js:1201-1203`
+  - fix: Thread the fragment's input schema into the factory/compiled fragment so it validates input on mount, or remove the parameter if intentionally unsupported.
+- [ ] **P1** Committed generated index.d.ts is stale — public error-code types missing 6 real codes — `packages/errors/src/index.d.ts (declare namespace smithersErrorDefinitions)`
+  - fix: Regenerate packages/errors/src/index.d.ts from the current runtime catalog (fix the dts generation) so all 96 codes are present.
+- [ ] **P1** tsup bundled-declaration generation drops error codes; published types diverge from runtime with no CI guard — `packages/errors/tsup.config.ts (dts) + scripts/check-docs.mjs`
+  - fix: Add a check that the generated packages/errors/src/index.d.ts error-code set matches smithersErrorDefinitions.js (extend check-docs/check-llms), and fix the generator.
+- [ ] **P2** isSmithersError returns true for EngineError, so toSmithersError(engineError) returns a non-SmithersError (violates @returns {SmithersError}) — `packages/errors/src/isSmithersError.js:8-18 and packages/errors/src/toSmithersError.js:36-45`
+  - fix: Make isSmithersError exclude EngineError (require SmithersError-brand or instanceof), and/or have toSmithersError always wrap EngineError into a real SmithersError.
+- [ ] **P2** errorToJson loses code/context for EngineError (fromTaggedError can't map it) — `packages/errors/src/errorToJson.js:7-23 and packages/errors/src/fromTaggedError.js:60-62`
+  - fix: Add an EngineError branch to errorToJson (emit code + context) and/or a fromTaggedError case mapping _tag 'EngineError' to a SmithersError.
+- [ ] **P1** streamRunEventsResilient replay detection reads frame.payload.event, but real gap_resync frames have no payload.event — `packages/gateway-client/src/SmithersGatewayClient.ts:384`
+  - fix: Use frame.event === 'run.gap_resync' (and frame.event === 'run.completed') as in streamRunEvents line 324; fix the test fixture to match the real server frame shape.
+- [ ] **P2** useGatewayExtensionStream never clears `error` after a successful reconnect — `packages/gateway-react/src/useGatewayExtensionStream.ts:66-101`
+  - fix: Call setError(undefined) on the first successful frame after a reconnect (in the for-await loop body).
+- [ ] **P2** buildRunTree recursion is unguarded against cyclic childIds — `packages/gateway-react/src/sync/useGatewayRunTree.ts:26-38`
+  - fix: Track a visited Set of node ids and skip already-visited children during the build recursion.
+- [ ] **P2** flattenGatewayRunNode visit() is unguarded against cycles — `packages/gateway-client/src/sync/flattenGatewayRunNode.ts:6-19`
+  - fix: Add a visited Set keyed by node.id and skip nodes already visited.
+- [ ] **P2** deleteThread is non-transactional across two writes (partial-delete risk) — `packages/memory/src/store/MemoryStoreLive.js:200-211`
+  - fix: Wrap both deletes in a single DB transaction (adapter.transaction / db.transaction).
+- [ ] **P1** additionalProperties as a SchemaObject/RefObject is silently dropped (typed extra props not validated) — `packages/openapi/src/jsonSchemaToZod.js:147-153 (buildObject)`
+  - fix: When additionalProperties is a SchemaObject/RefObject, set obj.catchall(jsonSchemaToZod(additionalProperties, spec, visited)).
+- [ ] **P2** Pre-loaded object specs without an `openapi` key (e.g. Swagger 2.0) throw a misleading parse error — `packages/openapi/src/loadSpecSync.js:16-27, packages/openapi/src/loadSpecEffect.js:18-21`
+  - fix: Accept any non-null object spec (or detect `swagger`/`openapi`) and surface a clear 'unsupported spec version' error for Swagger 2.0.
+- [ ] **P2** Repeated path parameters only substitute the first occurrence — `packages/openapi/src/tool-factory/_helpers.js:57-59`
+  - fix: Use url.replaceAll(`{${key}}`, ...) (or a global regex) so all occurrences are substituted.
+- [ ] **P2** A parameter literally named `body` is silently overwritten by the request body — `packages/openapi/src/buildOperationSchema.js:24-58`
+  - fix: Detect a 'body' name collision and namespace one side (e.g. requestBody under a non-colliding key, or rename the conflicting parameter).
+- [ ] **P1** pi-plugin approval detection ignores state-string normalization, so /smithers-approve and the active-run prompt miss waiting nodes — `packages/pi-plugin/src/extension.ts:502 and packages/pi-plugin/src/buildSmithersPiSystemPrompt.ts:107`
+  - fix: Use the existing normalizeState() in both approval filters (extension.ts:502 and buildSmithersPiSystemPrompt.ts:107).
+- [ ] **P1** RunInspector subscribes to the store but never unsubscribes; dispose() is dead code — `packages/pi-plugin/src/views/RunInspector.ts:64,164-166`
+  - fix: Capture the unsubscribe returned by store.subscribe and call it in dispose().
+- [ ] **P2** reconciler.js has top-level side effects but package.json declares sideEffects:false — `packages/react-reconciler/src/reconciler.js:402-413`
+  - fix: Move the side-effectful devtools injection behind an explicit init function, or mark the file in package.json sideEffects.
+- [ ] **P2** Container stores a single root; top-level Fragment/array silently truncated to last child — `packages/react-reconciler/src/reconciler.js:129-131`
+  - fix: Support multiple container children (array root) or throw on >1 top-level child instead of silently truncating.
+- [ ] **P2** insertInContainerBefore ignores its _beforeChild argument, silently dropping ordering semantics — `packages/react-reconciler/src/reconciler.js:171-173`
+  - fix: Implement ordered insertion against a multi-child container root that honors _beforeChild.
+- [ ] **P1** Deep subpath imports resolve types to index.d.ts and break strict TS consumers (TS2305/TS2459) — `packages/sandbox/package.json:12-16 (exports './*' types -> ./src/index.d.ts)`
+  - fix: Emit per-subpath declaration files (tsup dts per entry) and map './*' types to ./src/*.d.ts.
+- [ ] **P2** Type-only subpath @smithers-orchestrator/sandbox/SandboxHandle also breaks external strict TS consumers — `packages/sandbox/package.json:12-16; e2e/harness/stallSandbox.ts:2`
+  - fix: Same fix as the deep-subpath finding — per-subpath .d.ts so SandboxHandle resolves from its own subpath.
+- [ ] **P2** WorkflowSessionLive builds a single shared session (latent correctness bug if consumed) — `packages/scheduler/src/WorkflowSessionLive.js:6`
+  - fix: Use Layer.effect/scoped that builds a fresh makeWorkflowSession per scope, or don't expose a shared-instance layer.
+- [ ] **P1** context and groundTruth never reach scorers in real execution — faithfulnessScorer silently broken on live/batch runs — `packages/scorers/src/run-scorers.js:65-71`
+  - fix: Add context/groundTruth to ScorerContext + the engine's runScorersAsync call and pass them into scorer.score in run-scorers.js.
+- [ ] **P2** aggregateScores builds SQL via string interpolation with a one-character escaper — `packages/scorers/src/aggregate.js:19-52,106-108`
+  - fix: Use parameterized queries (adapter.rawQuery with bound params) instead of interpolated WHERE clauses.
+- [ ] **P2** diffSnapshots ignores outputTable changes in node-change detection — `packages/time-travel/src/diff.js:39-42`
+  - fix: Add aNode.outputTable !== bNode.outputTable to the node-change condition.
+- [ ] **P2** readUsageCache does not validate cache version and accepts array `entries` — `packages/usage/src/usageCache.js:29-37`
+  - fix: Reject when parsed.version !== 1 and require !Array.isArray(parsed.entries) (plain object) before accepting entries.
+- [ ] **P2** Anthropic/OpenAI count windows can report a negative `used` when remaining > limit — `packages/usage/src/parseAnthropicRateLimitHeaders.js:26, packages/usage/src/parseOpenAiRateLimitHeaders.js:28`
+  - fix: Clamp used = Math.max(0, limit - remaining) in both parsers.
+- [ ] **P2** Extension-stream reconnect backoff timer ignores the abort signal — `packages/gateway-react/src/useGatewayExtensionStream.ts:94`
+  - fix: Make the backoff sleep abortable — clearTimeout and resolve early on signal 'abort' (addEventListener('abort', ..., {once:true})).
+
+## #304 — 11 still open
+
+- [ ] **P2** P2 0.22.0 changelog claims 'Ten canonical starters' but only nine are defined — `docs/changelogs/0.22.0.mdx:128`
+  - fix: Change 'Ten canonical starters' to 'Nine canonical starters' and replace `idea-to-prd` with `idea-to-tickets` (or leave a historical note).
+- [ ] **P2** P2 e2e flake-log.md is empty so the documented 0-flakes/100-runs promotion gate cannot have been applied, yet cases were 'promoted' to per-PR — `e2e/flake-log.md:9-11`
+  - fix: Either implement the per-PR vs nightly subset split the docs describe, or rewrite README/flake-log to match reality (all fault cases run per-PR).
+- [ ] **P2** P2 0.17.0 changelog documents the accounts public API incorrectly (async + wrong provider id + wrong getAccount signature) — `docs/changelogs/0.17.0.mdx:327-336`
+  - fix: Remove await; use provider:'claude-code'; change getAccount call to getAccount('work').
+- [ ] **P2** P2 SuperSmithers JSDoc contradicts its own apply implementation about what writes files — `packages/components/src/components/SuperSmithers.js:18 vs 77-80`
+  - fix: Reword the JSDoc to say the agent applies edits via its file tools and the compute step only marks completion / triggers hot reload.
+- [ ] **P2** P2 Stale 'Phase 0 Seam Adapter' doc comment claims the bridge will be replaced by Activity.make() — `packages/engine/src/effect/workflow-bridge.js:29-38`
+  - fix: Update the comment to describe the current Effect bridge state instead of the planned Phase 1 migration.
+- [ ] **P3** P2 TaskAspects missing from index.js @smithers-type-exports block (export-marker inconsistency) — `packages/graph/src/index.js:2-30`
+  - fix: Add `/** @typedef {import("./TaskAspects.ts").TaskAspects} TaskAspects */` to the marker block in index.js.
+- [ ] **P2** P2 inspect()/decide() JSDoc signatures omit the options/depth parameters — `packages/scheduler/src/scheduleTasks.js:124-128 and packages/scheduler/src/makeWorkflowSession.js:492-495`
+  - fix: Add @param entries for `options` on inspect() and `depth` on decide().
+- [ ] **P2** P2 ConnectionState typedef field subscribe?: Set<string> is stale (runtime uses subscribedRuns) — `packages/server/src/gateway.js:82`
+  - fix: Rename the typedef field to `subscribedRuns?: Set<string> | null`.
+- [ ] **P3** P2 Doc/JSDoc claims a 'generation counter' stale-fence for useGatewayExtensionStream that does not exist in that hook — `packages/gateway-react/src/useGatewayExtensionStream.ts:25-26`
+  - fix: Reword the JSDoc to say a changed (namespace,key,params) aborts the prior subscription via AbortController, discarding late frames.
+- [ ] **P2** P2 workflow-ui-all.e2e.test.js docstring says 'ALL 15 UIs' but the harness covers 16 descriptors — `apps/cli/tests/workflow-ui-all.e2e.test.js:24`
+  - fix: Change '15' to '16' in the docstring (or derive the count from DESCRIPTORS.length).
+- [ ] **P3** P2 Doc inconsistency: shared/models.md lists Sonnet 4 retirement as 'TBD' while model-migration.md says 'June 15, 2026' (external claude-api skill, not the smit — `(external skill) claude-api/shared/models.md`
+  - fix: Out of scope for this repo; verify/fix in the external claude-api skill, or drop the finding from this epic.
+
+## #305 — 0 still open
+
+
+## #306 — 59 still open
+
+- [ ] **P2** Real-CLI e2e exists for only 2 of 10 CLI engines (OpenCode, Vibe); the other 8 are proven only via fake-binary subprocess tests — `packages/agents/tests/opencode-e2e.test.js, vibe-agent-e2e.test.js`
+  - fix: Add `which`-gated real-CLI e2e files for the remaining 8 engines mirroring the OpenCode/Vibe pattern.
+- [ ] **P2** MCP revert_attempt tool handler is untested — `apps/cli/src/mcp/semantic-tools.js:1185-1209`
+  - fix: Add a semantic-mcp test that seeds a run with attempts and calls the revert_attempt tool, asserting the worktree/db revert.
+- [ ] **P2** Contract test does not cover rewind despite it advertising JSON output — `apps/cli/tests/json-stdout-contract.test.js:151-160`
+  - fix: Add a rewind case to the json-stdout-contract cases array with a seeded run/frame.
+- [ ] **P2** OTLP integration entry points (createSmithersOtelLayer/ObservabilityLayer/RuntimeLayer) have no tests — `apps/observability/src/createSmithersObservabilityLayer.js:46-49`
+  - fix: Add a test that builds the layer and asserts it provides the metrics/tracing/logging services (or fails cleanly without an OTLP endpoint).
+- [ ] **P2** _traceEventNormalizers shared/generic normalizer and provider-correlation paths largely untested — `apps/observability/src/_traceEventNormalizers.js:306-397`
+  - fix: Add tests calling normalizeStructuredEventForFamily for a shared-map family and extractProviderSessionCorrelation for codex thread_id / session_id.
+- [ ] **P2** OTLP severity edge cases untested: truncated-json-stream WARN and session error/warning inference — `apps/observability/src/_otelLogBuilders.js:60-92`
+  - fix: Add inferCanonicalSeverity test with payload.reason='truncated-json-stream' and inferSessionSeverity tests for error/warning rows.
+- [ ] **P2** renderPrometheusMetrics Frequency and Summary metric-state branches untested — `apps/observability/src/renderPrometheusMetrics.js:172-188`
+  - fix: Snapshot a registry containing a Frequency (occurrences) and Summary (quantiles) metric and assert the rendered key/quantile lines.
+- [ ] **P2** Non-streaming JSON metering and srk_ api-key proxy branches untested (srk_ now covered; JSON metering still open) — `apps/review/src/server/proxy/handleAnthropic.ts:131-146`
+  - fix: Add a handleAnthropic test serving an application/json upstream body with usage and assert a kind='messages' usage_events row.
+- [ ] **P2** CLI entrypoint and GitHub Action orchestrating drivers have no tests — `apps/review/action/src/runAction.ts, runGate.ts, runReview.ts, fetchOidcToken.ts, apps/review/src/cli/main.ts, parseReviewArgs.ts`
+  - fix: Add unit tests for parseReviewArgs and a stubbed-deps test for runGate/runAction wiring and fetchOidcToken request shaping.
+- [ ] **P2** Several pure walkthrough helpers lack direct unit tests — `apps/review/src/walkthrough/classifyChangeRole.ts (+ buildNarratePrompt, describeChange, escapeHtml, renderFallbackDiffHtml, normalizeReviewInput, writeOpenAiSchemaFile)`
+  - fix: Add focused unit tests per pure helper (golden inputs/outputs).
+- [ ] **P2** /api/admin/usage endpoint untested — `apps/review/src/server/admin/handleAdminUsage.ts`
+  - fix: Add a handleAdmin test seeding usage_events and asserting the /api/admin/usage aggregation response.
+- [ ] **P1** Nightly soak CI gate runs effectively one fabricated-transport test; cases 29 and 30 permanently skipped — `e2e/faults/case28-soak-live-stream-rss.test.ts:86,212; case29:7; case30:7`
+  - fix: Promote case28 onto the real Gateway live stream and unblock 29/30 via the now-available schedulerTickEffect and a workspace runtime.
+- [ ] **P1** Six fault cases are empty skip-only stubs — `e2e/faults/case19,20,21,22 (line 5-7); case02-kill-sandbox-engine-alive.test.ts:189`
+  - fix: Implement the workspace runtime + dual-heartbeat schema and replace the skip stubs with real fault tests.
+- [ ] **P2** workflow-ui-all e2e depends on a retired POC (apps/smithers-studio-2) for its Chromium binary — `apps/cli/tests/workflow-ui-all.e2e.test.js:43,59`
+  - fix: Add a first-party playwright/chromium dependency to the CLI test workspace and drop the studio-2 fallback path.
+- [ ] **P2** case08 inspector and case24 replay-safety are hybrids: real predicate against fabricated storage — `e2e/faults/case08-inspector-never-idle.test.ts:60; case24-replay-unsafe-approval.test.ts:1-7`
+  - fix: Drive these predicates through a real seeded run/Gateway instead of a hand-built in-memory schema.
+- [ ] **P2** Reconnect-afterSeq / ws-drop / webhook behaviors are fabricated in e2e/faults but exist as real tests elsewhere — `e2e/faults/case09-reconnect-afterseq.test.ts; case15-ws-drop-reconnect.test.ts; case17-webhook-bad-signature.test.ts`
+  - fix: Promote the fault cases onto the real Gateway/server rather than fabricated ws servers.
+- [ ] **P2** e2e package.json omits the smithers-orchestrator dependency that case25 imports — `e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7`
+  - fix: Add `"smithers-orchestrator": "workspace:*"` to e2e/package.json dependencies.
+- [ ] **P2** OpenAPI 'e2e' test mocks globalThis.fetch, so it is not a strict no-mock e2e — `packages/openapi/tests/e2e.test.js:9-18,30-42`
+  - fix: Boot a tiny real HTTP server fixture and point the generated tools at it instead of mocking fetch.
+- [ ] **P1** Neither 'examples smoke test' actually exercises the examples/ tree — `apps/cli/tests/docs-examples-smoke.test.js:155`
+  - fix: Add a smoke test that compiles/loads each examples/*.tsx (or runs `tsc -p examples/tsconfig.json`) in CI.
+- [ ] **P2** examples/ tree is in NO CI gate — typecheck:examples script exists but is never invoked — `.github/workflows/ci.yml:34`
+  - fix: Add `- run: pnpm typecheck:examples` to ci.yml.
+- [ ] **P2** examples/tsconfig.json points smithers-orchestrator at src/*.js source, not the published package — `examples/tsconfig.json`
+  - fix: Point the smithers-orchestrator path at the built dist/types (or run typecheck against the published package) so examples validate shipped types.
+- [ ] **P2** AntigravityAgent stream-json interpreter is untested and effectively dead in practice — `packages/agents/src/AntigravityAgent.js:100-160`
+  - fix: Either delete the dead stream-json interpreter or add a direct interpreter test and wire stream-json output.
+- [ ] **P2** Observability metric emission path in agents has no test assertions — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:666-690`
+  - fix: Run a fake-binary agent and assert agent.* metric deltas via the metrics adapter snapshot.
+- [ ] **P2** extractTextFromJsonValue (widely-used recursive util) has a single test case — `packages/agents/tests/extract-text-from-json-value.test.js`
+  - fix: Add cases for nested arrays, message.content arrays, and non-text leaf values.
+- [ ] **P2** createMcpToolset include filter and callMcpTool error/structured-content branches untested — `packages/agents/src/mcp/createMcpToolset.js:41,79-82`
+  - fix: Add toolset tests for include-only curation and for a tool returning isError / structuredContent.
+- [ ] **P2** DevToolsRunStore verbose logging, orphan ToolCallFinished, and getTaskState-miss branches untested — `packages/devtools/src/DevToolsRunStore.js:68-77,119-142,183-189`
+  - fix: Add tests with {verbose:true}, an orphan ToolCallFinished, and getTaskState on an unknown run/node.
+- [ ] **P3** snapshotSerializer top-level non-plain values and anonymous-class instances are untested boundary cases — `packages/devtools/src/snapshotSerializer.js:88-106`
+  - fix: Add tests serializing `new Map()` at top level and an instance of an anonymous class.
+- [ ] **P2** diffSnapshots p95 timing assertion is a CI-flaky unit test — `packages/devtools/tests/diffSnapshots.test.ts:242-253`
+  - fix: Replace with an algorithmic-complexity/op-count assertion or move behind a non-gating benchmark.
+- [ ] **P2** rpc-contract example validation is schema self-validation, not a round-trip — `packages/gateway/tests/rpc-contract.test.ts:191-198`
+  - fix: Add a test that runs examples through the real RPC handlers and validates the actual responses.
+- [ ] **P2** generate-openapi.ts has zero test coverage despite emitting the published contract artifact — `packages/gateway/scripts/generate-openapi.ts:1-265`
+  - fix: Add a test invoking the generator and validating/snapshotting the emitted OpenAPI document.
+- [ ] **P2** TS *Request/*Response types and JsonSchema definitions maintained in parallel with no agreement test — `packages/gateway/src/rpc/index.ts:93-267`
+  - fix: Add a type-level test (expectType/satisfies) asserting each JsonSchema matches its TS type.
+- [ ] **P3** objectSchema(additionalProperties) sub-schema path is unused and the generator/validator paths for it are untested — `packages/gateway/src/rpc/index.ts:276-287`
+  - fix: Either drop the sub-schema option or add a definition + test that uses an additionalProperties sub-schema.
+- [ ] **P2** Untested error/auth/reconnect branches in createGatewayCollection (onError non-auth path) — `packages/gateway-client/src/sync/createGatewayCollection.ts:281-309`
+  - fix: Add a test where the stream throws a non-auth error and assert config.onError fires while reconnect proceeds.
+- [ ] **P3** snapshotToGatewayRunNode nodeKind/nodeName/nodeStatus branches partially untested — `packages/gateway-client/src/sync/snapshotToGatewayRunNode.ts:49-87`
+  - fix: Extend the fixture tree with Signal/Human/Loop nodes and running/failed run states.
+- [ ] **P2** streamExtension lacks reconnect/error-frame and abort coverage — `packages/gateway-client/src/SmithersGatewayClient.ts:562-602`
+  - fix: Add streamExtension tests pushing an error frame and aborting mid-stream.
+- [ ] **P2** useSyncMutation success-path branches (invalidate, onSuccess, reset, success status) untested for useSyncMutation directly — `packages/gateway-react/src/sync/useSyncMutation.ts:85-122`
+  - fix: Add a useSyncMutation test asserting onSuccess fires, invalidate keys re-pull, status becomes 'success', and reset() clears.
+- [ ] **P2** Connection observer offline/connecting transitions and reconnectingSince never asserted — `packages/gateway-react/src/sync/createGatewayCollections.ts:78-101`
+  - fix: Add a test forcing a connecting->offline transition and assert status + reconnectingSince.
+- [ ] **P2** invalidate() re-pull of pollable list collections via the pulser is untested — `packages/gateway-react/src/sync/createGatewayCollections.ts:109-147,387-391`
+  - fix: Add a test calling registry.invalidate(key) and asserting the list collection refetches via the pulser stream.
+- [ ] **P2** isAuthError 401/403 status and code-based branches untested — `packages/gateway-react/src/sync/createGatewayCollections.ts:53-62`
+  - fix: Add tests rejecting with {status:401}, {status:403}, and {code:'Forbidden'} and assert auth handling.
+- [ ] **P2** useGatewayExtensionAction error path and double-call generation fence untested — `packages/gateway-react/src/useGatewayExtensionAction.ts:33-39`
+  - fix: Add tests where extensionRpc rejects (error path) and where a stale call resolves after a newer one (fence).
+- [ ] **P2** useGatewayRunEvents afterSeq filter and error state untested — `packages/gateway-react/src/useGatewayRunEvents.ts:45,58-59`
+  - fix: Add a useGatewayRunEvents test passing afterSeq and asserting only later-seq events surface, plus an error-state case.
+- [ ] **P2** createGatewayReactRoot success path (mount + dual-provider wiring) untested — `packages/gateway-react/src/createGatewayReactRoot.ts:12-34`
+  - fix: Add a happy-dom test mounting into an existing root element and asserting both providers are wired.
+- [ ] **P3** useSyncClient missing-provider throw and SyncContext default untested — `packages/gateway-react/src/sync/useSyncClient.ts:10-16`
+  - fix: Render a component calling useSyncClient outside a SyncProvider and assert it throws the expected message.
+- [ ] **P2** OpenAPI metric increments never asserted; duration not recorded on error — `packages/openapi/src/tool-factory/_helpers.js:143-159`
+  - fix: Snapshot metrics around a tool call (success and error) and assert counters/duration; also record duration in the error path.
+- [ ] **P2** No real-backend e2e for openapi: e2e.test.js mocks globalThis.fetch — `packages/openapi/tests/e2e.test.js:4-22`
+  - fix: Add a real HTTP fixture server and exercise the generated tools against it.
+- [ ] **P2** buildSmithersPiSystemPrompt activeRun branch untested (jsonSchemaToTypebox default now covered) — `packages/pi-plugin/src/buildSmithersPiSystemPrompt.ts:101-117`
+  - fix: Add a buildSmithersPiSystemPrompt test passing an activeRun with waiting nodes + errors and assert the appended section.
+- [ ] **P2** Connection-limit (503) WS upgrade rejection path is untested — `packages/server/src/gateway.js:2302-2323`
+  - fix: Boot a Gateway with maxConnections:1, open one WS, and assert the second upgrade gets HTTP 503.
+- [ ] **P2** Built-in operator UI has zero behavioral coverage (string-grep only) — `packages/server/src/gatewayUi/defaultOperatorUi.js:3-1430`
+  - fix: Mount the operator console bundle in happy-dom/a browser against a real Gateway and assert it renders runs/approvals.
+- [ ] **P2** mapEvent's ~30-case SmithersEvent->wire mapping has minimal direct coverage — `packages/server/src/gateway.js:3558-3793`
+  - fix: Export mapEvent (or a thin wrapper) and add a table-driven test mapping each SmithersEvent kind to its expected wire frame.
+- [ ] **P2** case14 gateway-rpc-roundtrip e2e is not real e2e: it reimplements the RPC handlers — `e2e/faults/case14-gateway-rpc-roundtrip.test.ts:382-485`
+  - fix: Replace the hand-rolled ws server with a real Gateway instance and route requests through it.
+- [ ] **P2** createSmithersPostgres and findFreePgPort have no test coverage inside packages/smithers — `packages/smithers/src/create.js:481-580`
+  - fix: Add a packages/smithers test booting PGlite (or finding a free port) and asserting the Postgres-backed API surface.
+- [ ] **P2** bin/smithers.js local-CLI delegation logic is untested in this package — `packages/smithers/src/bin/smithers.js:1-160`
+  - fix: Add a test invoking the bin shim and asserting it delegates to the local vs bundled CLI as expected.
+- [ ] **P2** Several create.js branches uncovered: anchor-based default dbPath, journalMode option, input ALTER catch — `packages/smithers/src/create.js:338,358,400-402`
+  - fix: Add tests for createSmithers without dbPath (anchor resolution), an explicit journalMode option, and an ALTER failure path.
+- [ ] **P3** findSmithersAnchorDir fsRoot guard and HOME-unset branch only covered indirectly — `packages/smithers/src/findSmithersAnchorDir.js:18-31`
+  - fix: Add unit tests with HOME unset and a path at fs root asserting undefined is returned.
+- [ ] **P3** Public mdxPlugin lacks package-level coverage (createExternalSmithers now covered) — `packages/smithers/src/mdx-plugin.js:1-6`
+  - fix: Add a smoke test importing mdxPlugin (or assert it registers the bun mdx plugin).
+- [ ] **P1** Declarative TanStack-DB sync hooks have no real-browser e2e; no shipped UI exercises the raw declarative hooks — `packages/gateway-react/src/sync/useSyncQuery.ts (+ useSyncMutation, useSyncSubscription, useGatewayQuery, useGatewayMutation, useGatewayRunStream, useGatewayRunTree, useGatewayConnectionStatus)`
+  - fix: Add a Chromium-gated e2e (or a shipped UI) that drives useSyncQuery/useGatewayMutation/useGatewayRunStream against a real Gateway.
+- [ ] **P2** Default operator console has no behavioral/browser test — only string-grep assertions — `packages/server/tests/gateway-ui.test.jsx:94-180`
+  - fix: Render the operator console in a DOM/browser against a real Gateway and assert behavior.
+- [ ] **P2** kanban UI ships and is mounted but is not functionally covered by the all-UI e2e — `apps/cli/tests/workflow-ui-descriptors.json; apps/cli/tests/workflow-ui-all.e2e.test.js`
+  - fix: Add a kanban descriptor to workflow-ui-descriptors.json so the all-UI e2e renders it.
+- [ ] **P2** No test guards UI_WORKFLOWS / gateway-mounts / ui-files / e2e-descriptors against drift — `apps/cli/src/workflow-pack.js:1652 (UI_WORKFLOWS); apps/cli/tests/init.e2e.test.js`
+  - fix: Add a test asserting set-equality across UI_WORKFLOWS, renderGatewayFile mounts, renderUiFiles outputs, and workflow-ui-descriptors.json.
+
+## #307 — 25 still open
+
+- [ ] **P2** P2 OpenCodeAgent is the only adapter with a hand-maintained .ts declaration file instead of the standard XAgentOptions.ts pattern — `packages/agents/src/OpenCodeAgent.ts:1-40`
+  - fix: Split into OpenCodeAgentOptions.ts (type only) + rely on JSDoc-emitted .d.ts from OpenCodeAgent.js like every other adapter; delete the hand-written declare file.
+- [ ] **P2** P2 Detached spawn path resolution is inconsistent (.pathname vs fileURLToPath) — `apps/cli/src/index.js:1651 and 2951`
+  - fix: Replace both `new URL(import.meta.url).pathname` with `fileURLToPath(new URL('./index.js', import.meta.url))` to match resume-detached.js.
+- [ ] **P2** P2 runDevtoolsCommandWithTelemetry is called for snapshots/restore despite its cmd type being tree|diff|output|rewind — `apps/cli/src/index.js:2657 (JSDoc), 5027 (snapshots), 5055 (restore), 2638 (DEVTOOLS_COMMANDS)`
+  - fix: Widen the JSDoc @param to include 'snapshots'|'restore' (and add them to a telemetry-cmd set distinct from DEVTOOLS_COMMANDS) so the type matches the callers.
+- [ ] **P2** P2 Redaction 'secret-ish' rule carries a misleading dead replace:'' field — `apps/observability/src/_traceRedaction.js:28-31`
+  - fix: Drop the replace field for the secret-ish rule (or compute it from the special-case path) so the rule object doesn't carry a value the code ignores.
+- [ ] **P2** P2 Public makeSmithersSpanAttributes and the internal _coreTracing.js copy can silently diverge — only the standalone file uses the shared alias table — `apps/observability/src/_coreTracing.js:33-51`
+  - fix: Import smithersSpanAttributeAliases from ./_smithersSpanAttributeAliases.js in _coreTracing.js and delete the inline copy.
+- [ ] **P2** P2 Inconsistent host-prop sanitization across structural components — `packages/components/src/components/Branch.js:11, Sequence.js:10, Ralph.js:14, Workflow.js:9`
+  - fix: Either sanitize host props uniformly (build an explicit allowlisted props object in every structural component) or pass raw props uniformly; pick one convention.
+- [ ] **P2** P2 tsconfig outDir/declaration cruft conflicts with tsup build target — `packages/components/tsconfig.json:17-20 vs tsup.config.ts:4-6`
+  - fix: Set noEmit:true and remove declaration/emitDeclarationOnly/outDir from tsconfig.json; let tsup own the dts emit into src.
+- [ ] **P2** P2 SMITHERS_NODE_ICONS uses the same '⚡' glyph for both 'task' and 'parallel' — `packages/devtools/src/SMITHERS_NODE_ICONS.js:6,8`
+  - fix: Give 'parallel' a distinct glyph (e.g. '⫴' or '🔀'-adjacent) so task vs parallel render differently.
+- [ ] **P2** P2 printTree prints props.name/props.id without type-narrowing (Record<string,unknown> values) — `packages/devtools/src/printTree.js:24-29`
+  - fix: Narrow with `typeof node.props.name === 'string'` before interpolation (and same for id), falling back gracefully otherwise.
+- [ ] **P2** P2 Confusing snapshot-handle defaults: public snapshot() hardcodes source 'watch'/tier 2 while its comment says Tier 1/wrap — `packages/engine/src/startDurability.js:123-127`
+  - fix: Default the public snapshot() to source:'wrap', tier:1 (matching the comment/intent) or fix the comment; document withSocket/createSocketServer in the options JSDoc.
+- [ ] **P2** P2 Duplicated helper functions copy-pasted across files (isObject x3, isGatewayResponseFrame x2 identical, withoutVirtualFields x3, asRecord x2) — `packages/gateway-client/src/SmithersGatewayConnection.ts:37,50`
+  - fix: Extract isObject/isGatewayResponseFrame/withoutVirtualFields/asRecord into a shared internal module and import them.
+- [ ] **P2** P2 useGatewayRunTree casts node status to NodeStatus despite the source type being plain string — `packages/gateway-react/src/sync/useGatewayRunTree.ts:57`
+  - fix: Add a runtime narrowing helper toNodeStatus(string): NodeStatus (default 'queued' on unknown) instead of an unchecked `as` cast.
+- [ ] **P2** P2 src/extract.js re-declares shared constants instead of importing constants.js (drift risk) — `packages/graph/src/extract.js:11-12`
+  - fix: Import both from ./constants.js and delete the local re-declarations in extract.js.
+- [ ] **P2** P2 DevToolsClient.toWsUrl has a no-op pathname assignment — `packages/pi-plugin/src/runtime/DevToolsClient.ts:90`
+  - fix: Delete the line; it does nothing.
+- [ ] **P2** P2 Inconsistent subpath module layout between /devtools and /errors — `packages/protocol/src/devtools.js + devtools/*.ts vs src/errors.ts + errors/index.js + errors/*.ts`
+  - fix: Pick one layout (e.g. <name>/index.js runtime + <name>/*.ts types) and apply it to both devtools and errors.
+- [ ] **P2** P2 DevToolsNodeType union is duplicated inline in index.d.ts instead of being a single declared type — `packages/protocol/src/index.d.ts:1`
+  - fix: Have index.d.ts import/re-export DevToolsNodeType from ./devtools/DevToolsNodeType instead of inlining the literal union.
+- [ ] **P2** P2 directorySize misnamed and dangling WalkResult typedef — `packages/sandbox/src/execute.js:106 ; packages/sandbox/src/bundle.js:19`
+  - fix: Rename directorySize -> fileSize (or implement recursion); define/import a WalkResult typedef in bundle.js or change the @returns to the inline { files, totalBytes } shape.
+- [ ] **P2** P2 Request README writes confusing/empty runtime field on provider path — `packages/sandbox/src/execute.js:421`
+  - fix: Write `runtime: selectedRuntime` unconditionally (provider id is the runtime), or omit runtime on the provider path explicitly with a clear value.
+- [ ] **P2** P2 Approval 'continue' path stores resolution as output without usage; cache/output shape inconsistency — `packages/scheduler/src/makeWorkflowSession.js:393-398`
+  - fix: Normalize the continue-path output to the standard TaskOutput shape (include usage: null and a defined output value) to match cacheResolved/markTaskFinished.
+- [ ] **P2** P2 Redundant two-layer barrel shims (create-scorer.js, builtins.js) duplicate the real implementation files — `packages/scorers/src/create-scorer.js:6-7; packages/scorers/src/builtins.js:1-5`
+  - fix: Re-export the real impl files directly from index.js and delete create-scorer.js/builtins.js (update the two test imports).
+- [ ] **P2** P2 asStringRecord is a redundant one-line alias of asObject — `packages/server/src/gateway.js:618`
+  - fix: Delete asStringRecord and call asObject at line 928.
+- [ ] **P2** P2 JUMP_RUN_ID_PATTERN / JUMP_MAX_FRAME_NO exported from subpath but absent from main barrel and index.d.ts — `packages/time-travel/src/jumpToFrame.js:21-22; src/index.js:46; src/index.d.ts`
+  - fix: Add JUMP_RUN_ID_PATTERN and JUMP_MAX_FRAME_NO to the index.js re-export and to index.d.ts (or stop exporting them from the subpath if internal).
+- [ ] **P2** P2 Public type surface is Record<string,any> — direct importers get zero type safety — `packages/tool-context/src/index.d.ts:12-26`
+  - fix: Introduce a ToolContext interface (runId, nodeId, cwd, snapshot hook, seq, idempotencyKey, etc.) and type the exports against it instead of Record<string, any>.
+- [ ] **P2** P2 package.json ./* subpath export maps every subpath's types to index.d.ts (latent mis-mapping) — `packages/tool-context/package.json:13-17`
+  - fix: Map the './*' subpath types to './src/*.d.ts' (or drop the './*' export entirely if only the root entry is public).
+- [ ] **P2** P2 findVcsRoot is wrapped in Effect.sync but every consumer immediately Effect.runSync's it — pure ceremony — `packages/vcs/src/find-root.js:12-29 ; packages/engine/src/engine.js:709,733,1697`
+  - fix: Make findVcsRoot a plain synchronous function returning the value (or null) and drop the Effect.runSync wrappers at the call sites; keep an Effect-wrapped variant only if a real Effect consumer exists

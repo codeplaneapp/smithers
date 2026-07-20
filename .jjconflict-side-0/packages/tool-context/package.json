@@ -1,0 +1,35 @@
+{
+  "name": "@smithers-orchestrator/tool-context",
+  "version": "0.29.0",
+  "description": "AsyncLocalStorage tool-execution context for Smithers (run/node/idempotency), extracted so both engine and smithers can depend on it without a cycle",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "rm -f src/index.d.ts && tsup --dts-only"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~6.0.3"
+  },
+  "dependencies": {
+    "ai": "^7.0.10",
+    "zod": "^4.4.3"
+  }
+}

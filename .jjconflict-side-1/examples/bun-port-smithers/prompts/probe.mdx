@@ -1,0 +1,14 @@
+# Probe
+
+OUTPUT_KIND: probe
+PROBE: {props.probe.id}
+COMMAND: {props.probe.cmd}
+EXPECT: {props.probe.expect ?? ""}
+REPO: {props.repo}
+
+Run `./target/debug/bun-rs {props.probe.cmd}` inside `REPO`.
+
+Capture pass/fail, panic location, assertion text, signal, duration, and relevant output. Do not fix anything in this task.
+
+Required output schema:
+{props.schema}

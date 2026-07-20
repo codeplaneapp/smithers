@@ -1,0 +1,289 @@
+/* ============================================================================
+   Smithers docs — Brass Lieutenant theme layer
+   Adapted from the Next.js landing page (apps/landing-page). Warm editorial:
+   paper or near-black canvas, brass accent, serif display (Newsreader) + DM Sans body.
+   Kept intentionally light-touch — colors/fonts/appearance come from docs.json;
+   this file adds the brand accents and the custom landing-page styling.
+   Mintlify auto-loads any .css in the content dir. Selectors use the documented
+   stable ids (#navbar/#sidebar/#footer) and data-attributes only.
+   ============================================================================ */
+
+:root {
+  --brass: #cab16a;
+  --brass-muted: #8a7a52;
+  --canvas: #0c0a09;
+  --surface: #161310;
+  --ink: #f2ede4;
+  --ink-muted: #9a9288;
+  --line: #2a2620;
+}
+
+/* Warm brass text selection across the whole site (matches landing). */
+::selection {
+  background: color-mix(in oklch, var(--brass) 32%, transparent);
+  color: inherit;
+}
+
+/* ── Landing page (index.mdx, mode: "custom") ───────────────────────────── */
+
+.landing-root {
+  --l-canvas: #faf8f4;
+  --l-surface: #eee8df;
+  --l-ink: #2b251f;
+  --l-ink-muted: #6b6258;
+  --l-brass: #735f26;
+  --l-brass-muted: #7a6a47;
+  --l-volatile: #8c4a32;
+  --l-fluid: #796027;
+  --l-line: #d8d0c4;
+  --l-action-ink: #fffdf9;
+  --l-preview-surface: #fffdf9;
+  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  color: var(--l-ink);
+  background: var(--l-canvas);
+  position: relative;
+  isolation: isolate;
+}
+
+.dark .landing-root {
+  --l-canvas: #0c0a09;
+  --l-surface: #161310;
+  --l-ink: #f2ede4;
+  --l-ink-muted: #9a9288;
+  --l-brass: #cab16a;
+  --l-brass-muted: #8a7a52;
+  --l-volatile: #c98b6b;
+  --l-fluid: #c9a86b;
+  --l-line: #2a2620;
+  --l-action-ink: #0c0a09;
+  --l-preview-surface: #0e0b09;
+}
+
+/* Full-bleed canvas behind the whole landing, matched to the active docs
+   color mode. The root background also prevents gaps in full-page captures. */
+.landing-root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--l-canvas);
+}
+
+.landing-root h1,
+.landing-root h2,
+.landing-root h3 {
+  color: var(--l-ink);
+}
+.landing-root p { color: var(--l-ink-muted); }
+.landing-root a { text-decoration: none; }
+
+/* Film-grain overlay — the landing's signature texture, subtle. */
+.landing-grain {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 140px 140px;
+}
+
+/* Eyebrow / kicker label — mono, tracked out, muted. */
+.landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--l-ink-muted);
+}
+
+.landing-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--l-brass);
+  box-shadow: 0 0 0 0 color-mix(in oklch, var(--l-brass) 60%, transparent);
+  animation: landing-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes landing-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--l-brass) 45%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in oklch, var(--l-brass) 0%, transparent); }
+}
+
+/* Serif display headline — editorial, tight. */
+.landing-display {
+  font-family: "Newsreader", Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
+  color: var(--l-ink);
+}
+
+.landing-brass { color: var(--l-brass); }
+
+/* Primary brass button — sharp corners, on-brand. */
+.landing-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1.3rem;
+  border-radius: 2px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  background: var(--l-brass);
+  color: var(--l-action-ink) !important;
+  border: 1px solid var(--l-brass);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.landing-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -12px color-mix(in oklch, var(--l-brass) 70%, transparent);
+}
+
+.landing-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1.3rem;
+  border-radius: 2px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  background: transparent;
+  color: var(--l-ink) !important;
+  border: 1px solid var(--l-line);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.landing-btn-ghost:hover {
+  border-color: color-mix(in oklch, var(--l-brass) 45%, var(--l-line));
+  background: color-mix(in oklch, var(--l-surface) 70%, transparent);
+}
+
+/* Cards / panels — sharp, hairline brass-tinted borders. */
+.landing-card {
+  border: 1px solid var(--l-line);
+  background: color-mix(in oklch, var(--l-surface) 55%, transparent);
+  border-radius: 3px;
+}
+.landing-card-accent {
+  border-color: color-mix(in oklch, var(--l-brass) 32%, var(--l-line));
+  background: color-mix(in oklch, var(--l-brass) 6%, transparent);
+}
+
+/* Install-command chip. */
+.landing-cmd {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.9rem;
+  color: var(--l-ink);
+  border: 1px solid var(--l-line);
+  background: color-mix(in oklch, var(--l-surface) 70%, transparent);
+  border-radius: 2px;
+  padding: 0.75rem 1rem;
+}
+
+/* Harness pill. */
+.landing-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--l-line);
+  background: color-mix(in oklch, var(--l-surface) 60%, transparent);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--l-ink);
+}
+
+/* Demo terminal chrome dots. */
+.landing-chrome-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--l-line) 60%, var(--l-ink-muted));
+}
+
+.landing-running {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--l-brass);
+  animation: landing-blink 1.4s ease-in-out infinite;
+}
+@keyframes landing-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* UI-preview button — the intentionally distinct "temporary" CTA (rainbow
+   border marks it as the early-access web-UI teaser). */
+.landing-btn-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 2px;
+  border-radius: 3px;
+  text-decoration: none;
+  background-image: linear-gradient(90deg, #ff5f6d, #ffc371, #47e891, #1f9bff, #a35bff, #ff5f6d);
+}
+.landing-btn-preview > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: calc(0.7rem - 2px) 1.2rem;
+  border-radius: 2px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--l-ink);
+  background: var(--l-preview-surface);
+}
+
+/* Clickable recipe chips — the nerdsnipe. Mono, sharp, brass on hover. */
+.landing-recipe-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  border-radius: 2px;
+  border: 1px solid var(--l-line);
+  background: color-mix(in oklch, var(--l-surface) 60%, transparent);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  color: var(--l-ink-muted);
+  text-decoration: none;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.landing-recipe-chip:hover {
+  color: var(--l-ink);
+  border-color: color-mix(in oklch, var(--l-brass) 45%, var(--l-line));
+  background: color-mix(in oklch, var(--l-brass) 8%, transparent);
+}
+
+/* Per-step agent tag in the demo run — makes multi-harness obvious. */
+.landing-agent-tag {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 2px;
+  border: 1px solid var(--l-line);
+  color: var(--l-ink-muted);
+}
+
+/* Killer-feature callout (time travel + observability). */
+.landing-killer {
+  border: 1px solid color-mix(in oklch, var(--l-brass) 30%, var(--l-line));
+  background: color-mix(in oklch, var(--l-brass) 7%, transparent);
+  border-radius: 4px;
+}
+
+/* Respect reduced motion inside the docs landing (the standalone marketing
+   page overrode it; docs should not — accessibility). */
+@media (prefers-reduced-motion: reduce) {
+  .landing-dot,
+  .landing-running { animation: none; }
+}

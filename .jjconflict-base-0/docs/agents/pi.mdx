@@ -1,0 +1,73 @@
+---
+title: Pi
+description: Run Smithers from Pi. Install the skill, or use the first-party pi-plugin that embeds a live run inspector right in the Pi TUI.
+---
+
+[Pi](https://github.com/badlogic/pi-mono) (`@mariozechner/pi-coding-agent`) is a
+terminal coding agent with a rich extension model: **TypeScript extensions**,
+**pi packages**, **skills**, and `AGENTS.md` instructions. Smithers has a
+**first-party Pi plugin** that goes deeper than any other agent: it embeds a live
+run inspector (run tree, frame scrubber, node inspector) directly in the Pi TUI.
+
+<Note>
+Pi has **no built-in MCP client** ("No MCP" is by design). So unlike Claude Code
+or Cursor, you integrate Smithers through a **skill** or the **pi-plugin**, not an
+MCP server.
+</Note>
+
+## The pi-plugin (recommended)
+
+`@smithers-orchestrator/pi-plugin` wraps the Smithers control plane as a Pi
+extension. It registers tools to launch, approve, deny, cancel, and stream
+workflow runs, and renders the run inspector inline. This is the tightest
+integration Smithers ships: Pi becomes a full Smithers operator console.
+
+See the dedicated guide for setup and the three integration modes (Pi as a
+workflow agent, Pi as a server client, and the hybrid): **[Pi integration](/integrations/pi-integration)**.
+
+## Install the skill
+
+If you want the lighter path, `skills add` installs the Smithers skill set into
+Pi's directory for you:
+
+```bash
+bunx smithers-orchestrator skills add
+```
+
+Pi reads skills from `~/.pi/agent/skills/` (global) or `.pi/skills/` (project),
+and loads `AGENTS.md` / `CLAUDE.md` at startup, so you can also drop the
+onboarding skill in by hand:
+
+```bash
+mkdir -p ~/.pi/agent/skills/smithers
+curl -fsSL https://raw.githubusercontent.com/smithersai/smithers/main/skills/smithers/SKILL.md \
+  -o ~/.pi/agent/skills/smithers/SKILL.md
+curl -fsSL https://smithers.sh/llms-full.txt \
+  -o ~/.pi/agent/skills/smithers/llms-full.txt
+```
+
+Invoke it with `/skill:smithers`, or let Pi pick it up by description.
+
+## Standing instructions
+
+Pi concatenates `AGENTS.md` from global, parent, and current directories. Add an
+orchestration section the same way you would for Codex or Cursor:
+
+```md
+## Orchestration
+Use Smithers for durable, multi-step, or human-in-the-loop agent work.
+`bunx smithers-orchestrator starters` lists ready-made workflows.
+```
+
+## Smithers runs Pi too
+
+In the other direction, Smithers spawns Pi as a worker via `PiAgent`, including
+its `text` / `json` / `rpc` modes and extension-UI hook callbacks:
+
+```tsx
+import { PiAgent } from "smithers-orchestrator";
+
+const pi = new PiAgent({ provider: "openai", model: "gpt-5.6-luna" });
+```
+
+See [CLI Agents](/integrations/cli-agents) and [Pi integration](/integrations/pi-integration).

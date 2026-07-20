@@ -1,0 +1,111 @@
+---
+title: "Eval Suites Quickstart"
+description: Run repeatable workflow regressions from JSON or JSONL cases.
+---
+
+Use eval suites when a workflow is important enough to protect with repeatable cases. Each case gets a persisted run record, stable case metadata, and a JSON report that can be checked in CI.
+
+<Note>API reference: [Scorers](/reference/scorers) lists every scorer and its options, and links to source and tests.</Note>
+
+You need a workflow file (e.g. `workflow.tsx`) and a working `bunx smithers-orchestrator init` scaffold. Each eval case runs that workflow with the given input and checks the result.
+
+## 1. Create cases
+
+Create `evals/smoke.jsonl`:
+
+```jsonl
+{"id":"simple-request","input":{"prompt":"Summarize the repository"},"expected":{"status":"finished"}}
+{"id":"structured-output","input":{"prompt":"Return the key risks"},"expected":{"status":"finished","outputContains":{"analysis":[{"riskLevel":"low"}]}}}
+```
+
+Case files can be JSONL, a JSON array, or an object with a `cases` array:
+
+```json
+{
+  "cases": [
+    {
+      "id": "happy-path",
+      "input": { "prompt": "Draft a release note" },
+      "annotations": { "area": "release" },
+      "expected": {
+        "status": "finished",
+        "outputContains": { "analysis": [{ "riskLevel": "low" }] }
+      }
+    }
+  ]
+}
+```
+
+Supported `expected` checks:
+
+- `status`: one of `finished`, `continued`, `failed`, `cancelled`, `waiting-approval`, `waiting-event`, or `waiting-timer`
+- `output`: exact JSON match against the workflow result output
+- `outputContains`: recursive partial JSON match (array elements are matched by containment, so at least one array element must match the partial object)
+- `errorContains`: substring match against thrown errors
+
+For standard workflows, output assertions match the persisted output snapshot, keyed by output name.
+
+## Judge assertions
+
+Use a judge assertion when correctness depends on meaning, tone, or another quality that is awkward to express as an exact JSON check:
+
+```jsonl
+{"id":"deadline-summary","input":{"prompt":"Summarize the launch plan"},"expected":{"status":"finished"},"judge":{"instructions":"Output must be a polite summary mentioning the deadline","threshold":0.7}}
+```
+
+`judge.instructions` must be a non-empty string. `judge.threshold` is optional, accepts a number from `0` to `1`, and defaults to `0.8`. A case with both `expected` and `judge` passes only when every deterministic assertion passes and the judge score meets its threshold.
+
+Smithers automatically chooses an authenticated local judge agent. Use `--judge-provider` and `--judge-model` to select one explicitly:
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx \
+  --cases evals/smoke.jsonl \
+  --judge-provider codex \
+  --judge-model gpt-5.6-luna \
+  --force
+```
+
+If no usable judge agent is configured, judge assertions fail with setup guidance in their `reason` field. The workflow cases still run and the regression report is still written.
+
+## 2. Dry-run the plan
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --dry-run
+```
+
+Dry-run mode prints the planned case IDs, run IDs, and judge requirements without touching the database. Pass `--run-label <label>` when you want the dry-run and execution to use the same generated IDs.
+
+## 3. Execute the suite
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+```
+
+By default, the report is written to `.smithers/evals/smoke.json`. Use `--report path/to/report.json` to choose a different location.
+
+The command exits `0` when all cases pass and `1` when any case fails. Invalid case files exit with `4`.
+
+> **Tip:** You can use a workflow ID (`implement`) instead of a file path when running discovered workflows from `.smithers/workflows`. This lets the same suite run on every checkout without hard-coding entry file paths.
+
+## 4. Use structured output in CI
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx \
+  --cases evals/smoke.jsonl \
+  --suite smoke \
+  --report artifacts/smoke-eval.json \
+  --force \
+  --format json
+```
+
+The JSON payload includes the suite summary, per-case assertions, run IDs, inputs, outputs, errors, and report path.
+
+## Options that matter in production
+
+- `--concurrency N`: run multiple cases at once; keep this low for stateful or expensive workflows.
+- `--run-label LABEL`: append a stable label to run IDs, useful for CI build IDs or benchmark names.
+- `--max-concurrency N`: pass a per-workflow task concurrency cap to each case.
+- `--max-cases N`: shard or sample a large suite.
+- `--no-include-output`: omit workflow outputs from the report when outputs are too large or sensitive.
+- `--allow-network`: enable network access for bash tools in cases that need it.
+- `--root PATH`: set the sandbox root for tool execution.

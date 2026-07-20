@@ -1,0 +1,18 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Example prompt: revenue scout handoff"}
+      {"\n\n"}
+      {JSON.stringify(
+        {
+          opportunities: props.opportunities,
+          totalScanned: props.totalScanned,
+          crmTarget: props.crmTarget,
+          teamMapping: props.teamMapping,
+        },
+        null,
+        2,
+      )}
+    </>
+  );
+}

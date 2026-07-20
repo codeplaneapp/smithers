@@ -1,0 +1,520 @@
+---
+title: Agents API
+description: Agent classes and tool factories that drive AI providers and CLIs from inside a workflow.
+icon: "robot"
+---
+
+An agent is anything Smithers can hand a prompt and await an answer. Every agent
+class in `packages/agents` satisfies one interface, [`AgentLike`](#agentlike), so
+they are interchangeable wherever a component takes an `agent` prop, including
+[`<Task>`](/components/task).
+
+There are two families. **SDK agents** wrap the [AI SDK](https://ai-sdk.dev) and
+bill a provider over HTTP; they take an `Options` object and a model id. **CLI
+agents** spawn a vendor's local command-line tool and share
+[`BaseCliAgentOptions`](#base-cli-options). Two helpers round out the surface:
+`createHttpTool` builds an ad-hoc REST tool, and `hashCapabilityRegistry`
+fingerprints an agent's capabilities for cache keys.
+
+```ts
+import {
+  CodexAgent,
+  OpenAIAgent,
+  createHttpTool,
+  hashCapabilityRegistry,
+} from "smithers-orchestrator";
+import type { AgentLike, OpenAIAgentOptions } from "smithers-orchestrator";
+```
+
+<Note>
+Import agent classes, the tool factories, and their option **types** from the
+`smithers-orchestrator` facade. The option type shapes are also listed in the
+[Types reference](/reference/types).
+</Note>
+
+## AgentLike
+
+The structural contract every agent satisfies. You rarely implement it by hand;
+the built-in classes already do. Type a parameter as `AgentLike` to accept any
+agent.
+
+<ResponseField name="AgentLike" type="object">
+  <Expandable title="members">
+    <ResponseField name="id" type="string">
+      Optional stable identifier. Surfaced in run metadata and used to attribute
+      events and quota errors to a specific agent.
+    </ResponseField>
+    <ResponseField name="generate" type="(args?: AgentGenerateOptions) => Promise<unknown>" required>
+      Runs one generation. `args` carries `prompt`, `outputSchema`, `abortSignal`,
+      `timeout`, and `onStdout` / `onStderr` streaming callbacks.
+    </ResponseField>
+    <ResponseField name="tools" type="Record<string, unknown>">
+      Tools the agent may call during generation.
+    </ResponseField>
+    <ResponseField name="capabilities" type="AgentCapabilityRegistry">
+      Structured capability descriptor used for cache keys and diagnostics. See
+      [`hashCapabilityRegistry`](#hashcapabilityregistry).
+    </ResponseField>
+    <ResponseField name="supportsNativeStructuredOutput" type="boolean">
+      `true` when the agent consumes an `outputSchema` through a native
+      structured-output API rather than prompt-based JSON extraction.
+    </ResponseField>
+    <ResponseField name="preflight" type="(args?: AgentGenerateOptions) => Promise<void>">
+      Deterministic startup check run once before the first generation. A
+      rejected promise fails the task without retrying.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Source** [`AgentLike.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/AgentLike.ts) · **Tests** [`agent-contract.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/agent-contract.test.js) · **See also** [Agents overview](/agents/overview), [`SmithersCtx`](/reference/types)
+
+## SDK agents
+
+Provider-backed wrappers around the AI SDK `ToolLoopAgent`. Construct with an
+`Options` object whose core fields are standard AI SDK
+[`ToolLoopAgentSettings`](https://ai-sdk.dev) (`instructions`, `tools`,
+`stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`)
+plus a `model`. Reach for these to bill a provider's API directly. For a vendor's
+full CLI surface, use a [CLI agent](#cli-agents).
+
+```ts
+import { OpenAIAgent, AnthropicAgent, tools } from "smithers-orchestrator";
+import { stepCountIs } from "ai";
+
+const implementer = new OpenAIAgent({
+  model: "gpt-5.6-luna",
+  tools,
+  instructions: "You are a precise implementation agent.",
+  stopWhen: stepCountIs(40),
+});
+
+// Provider-specific agents remain available as explicit fallbacks.
+const fallbackPlanner = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools,
+  instructions: "You are a careful planner.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+### AnthropicAgent
+
+Wraps `ToolLoopAgent` against the Anthropic provider.
+
+<ParamField path="options" type="AnthropicAgentOptions" required>
+  `ToolLoopAgentSettings` without `model`, plus a required `model`.
+
+  <Expandable title="AnthropicAgentOptions">
+    <ParamField path="model" type="string | anthropic(...)" required>
+      A provider model id (`"claude-fable-5"`) or a prebuilt
+      `@ai-sdk/anthropic` model instance. The instance form is mainly for tests
+      and advanced provider setup.
+    </ParamField>
+    <ParamField path="...settings" type="ToolLoopAgentSettings">
+      All other AI SDK agent settings: `instructions`, `tools`, `stopWhen`,
+      `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### OpenAIAgent
+
+Wraps `ToolLoopAgent` against the OpenAI provider or any OpenAI-compatible
+endpoint.
+
+<ParamField path="options" type="OpenAIAgentOptions" required>
+  The Anthropic shape plus `nativeStructuredOutput`, in one of two model forms.
+
+  <Expandable title="OpenAIAgentOptions">
+    <ParamField path="model" type="string | openai(...)" required>
+      A model id string or a prebuilt `@ai-sdk/openai` model instance.
+    </ParamField>
+    <ParamField path="baseURL" type="string">
+      Base URL for an OpenAI-compatible endpoint (e.g. a local llama.cpp server).
+      Allowed only with the string-model form.
+    </ParamField>
+    <ParamField path="apiKey" type="string">
+      API key for the endpoint. Local servers often accept `"none"`. Allowed only
+      with the string-model form.
+    </ParamField>
+    <ParamField path="nativeStructuredOutput" type="boolean" default="true">
+      Set `false` to disable AI SDK native structured output and use prompt-based
+      JSON extraction instead. Useful for local servers that do not honor JSON
+      schema response formats. Per-agent defaults: `AnthropicAgent` and
+      `OpenAIAgent` default **on**; `CodexAgent` and `HermesAgent` default **off**
+      (native schema makes Codex emit only final JSON and lose tool access).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+```ts
+const local = new OpenAIAgent({
+  model: "llama-3.1-8b-instruct",
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "none",
+  nativeStructuredOutput: false,
+});
+```
+
+### HermesAgent
+
+OpenAI-compatible wrapper preconfigured for a Nous Research Hermes server.
+
+<ParamField path="options" type="HermesAgentOptions">
+  Mirrors the string-model form of `OpenAIAgentOptions`, with Hermes defaults.
+
+  <Expandable title="HermesAgentOptions">
+    <ParamField path="model" type="string" default='"hermes"'>
+      Model id advertised by your Hermes server.
+    </ParamField>
+    <ParamField path="baseURL" type="string">
+      Hermes OpenAI-compatible API URL (e.g. `http://127.0.0.1:5123/v1`). Falls
+      back to the `HERMES_BASE_URL` environment variable; one or the other is
+      required.
+    </ParamField>
+    <ParamField path="apiKey" type="string">
+      API key sent to the server. Falls back to `HERMES_API_KEY`, then `"hermes"`.
+    </ParamField>
+    <ParamField path="nativeStructuredOutput" type="boolean" default="false">
+      Off by default because a local Hermes server may not honor JSON-schema
+      response formats; Smithers falls back to prompt-based JSON extraction.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Source** [`OpenAIAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/OpenAIAgent.js) · [`AnthropicAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/AnthropicAgent.js) · [`HermesAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesAgent.js) · **Tests** [`sdk-agents.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/sdk-agents.test.js) · **See also** [SDK Agents](/integrations/sdk-agents), [`OpenAIAgentOptions`](/reference/types)
+
+## CLI agents
+
+CLI-backed classes spawn a vendor's command-line tool, stream its output through
+the runtime, and implement `AgentLike`. The binary must be on `PATH`. When you
+omit `model`, the underlying CLI picks its own default. Each class adds a few
+vendor-specific options on top of the shared base below.
+
+<Note>
+Smithers-generated workflows are Codex-first: start Luna (`gpt-5.6-luna`) for
+research, implementation, ordinary tool use, UI, and routine-to-substantial
+execution. Escalate to Terra (`gpt-5.6-terra`) for stronger validation,
+structured checking, or tool-heavy judgment; use Sol (`gpt-5.6-sol`) for
+ambiguity, high-stakes decisions, novel architecture, orchestration, final
+review, or repeated failure. Non-Codex CLI agents enter automatic pools only
+when Codex is unavailable or fails; explicitly constructed agents always run as
+written. See [SOTA role defaults](/reference/sota-models#role-defaults).
+</Note>
+
+```tsx
+import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  analysis: z.object({ summary: z.string() }),
+});
+
+const reviewer = new CodexAgent({
+  model: "gpt-5.6-sol",
+  systemPrompt: "You are a careful code reviewer.",
+  sandbox: "read-only",
+  timeoutMs: 30 * 60 * 1000,
+});
+
+export default smithers(() => (
+  <Workflow name="review">
+    <Task id="analysis" output={outputs.analysis} agent={reviewer}>
+      Analyze the codebase and identify potential improvements.
+    </Task>
+  </Workflow>
+));
+```
+
+<a id="base-cli-options" />
+
+<ParamField path="options" type="BaseCliAgentOptions">
+  Shared by every CLI agent class.
+
+  <Expandable title="BaseCliAgentOptions">
+    <ParamField path="id" type="string">
+      Stable agent id used in events and diagnostics.
+    </ParamField>
+    <ParamField path="model" type="string">
+      Model id passed through to the CLI. Defaults to the CLI's own default.
+    </ParamField>
+    <ParamField path="systemPrompt" type="string">
+      System prompt sent to the CLI.
+    </ParamField>
+    <ParamField path="instructions" type="string">
+      Additional instructions merged into the agent's context.
+    </ParamField>
+    <ParamField path="cwd" type="string">
+      Working directory for the spawned process.
+    </ParamField>
+    <ParamField path="env" type="Record<string, string>">
+      Extra environment variables for the spawned process.
+    </ParamField>
+    <ParamField path="yolo" type="boolean">
+      Run the CLI in its most permissive (no-confirmation) mode.
+    </ParamField>
+    <ParamField path="timeoutMs" type="number">
+      Hard wall-clock timeout for one generation.
+    </ParamField>
+    <ParamField path="idleTimeoutMs" type="number">
+      Timeout for no output between writes.
+    </ParamField>
+    <ParamField path="maxOutputBytes" type="number">
+      Cap on captured stdout/stderr before truncation.
+    </ParamField>
+    <ParamField path="extraArgs" type="string[]">
+      Raw extra arguments appended to the CLI invocation.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### ClaudeCodeAgent
+
+Wraps the Anthropic `claude` CLI. Adds session and permission flags on top of the
+base: `permissionMode`, `allowedTools` / `disallowedTools`, `mcpConfig`,
+`resume`, `sessionId`, `addDir`, `agents`, `appendSystemPrompt`, `configDir`,
+`apiKey`, `maxBudgetUsd`, `outputFormat` (default `stream-json`). See
+[`ClaudeCodeAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/ClaudeCodeAgentOptions.ts).
+
+### CodexAgent
+
+Wraps the OpenAI `codex` CLI (`codex exec`). Adds `sandbox`
+(`"read-only" | "workspace-write" | "danger-full-access"`), `config`, `profile`,
+`fullAuto`, `outputSchema`, `nativeStructuredOutput` (default `false`),
+`configDir`, and `apiKey`. See
+[`CodexAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/CodexAgentOptions.ts).
+
+<Note>
+`nativeStructuredOutput` on `CodexAgent` makes the model emit only final JSON and
+refuse tool calls, which breaks agentic tasks. Leave it off for read/edit/run
+work; enable it only for pure, tool-free extraction.
+</Note>
+
+### AntigravityAgent
+
+Wraps the Google `agy` CLI. Adds `allowedMcpServerNames`, `allowedTools`,
+`conversation`, `continue`, `resume`, `includeDirectories`, `sandbox`,
+`configDir`, `geminiDir`, and `apiKey`. Options that map to removed `agy` flags
+fail fast with `AGENT_CONFIG_INVALID`. Prefer this over `GeminiAgent` for new
+Google CLI work.
+
+### GeminiAgent
+
+Deprecated legacy wrapper for the older `gemini` CLI. Adds `approvalMode`,
+`sandbox`, `extensions`, `resume`, `includeDirectories`, `configDir`, and
+`apiKey`. Use `AntigravityAgent` instead for new workflows.
+
+### PiAgent
+
+Wraps the Pi CLI and adds extension UI hook support. Key additions: `provider`,
+`mode` (`"text" | "json" | "rpc"`), `thinking`, `extension`, `skill`, and
+`onExtensionUiRequest`. See
+[`PiAgentOptions`](/reference/types) and [Pi integration](/integrations/pi-integration).
+
+### KimiAgent
+
+Wraps the Moonshot `kimi` CLI and auto-isolates `KIMI_SHARE_DIR` per run. Adds
+`thinking`, `agent`, `maxRalphIterations`, `session`, `continue`, `configDir`,
+and MCP config flags.
+
+### ForgeAgent
+
+Wraps the Forge CLI (300+ models via provider/model strings). Adds `provider`,
+`agent`, `conversationId`, `workflow`, `sandbox`, and `restricted`.
+
+### AmpAgent
+
+Wraps the Amp CLI in `--execute` headless mode. Adds `visibility`
+(`"private" | "public" | "workspace" | "group"`), `mcpConfig`,
+`dangerouslyAllowAll`, and `logLevel`.
+
+### VibeAgent
+
+Wraps Mistral's `vibe` CLI with streaming JSON output. Adds `agent`, `maxTurns`,
+`maxPrice`, `maxTokens`, `enabledTools`, `sessionId`, and `continueSession`. See
+[`VibeAgentOptions`](/reference/types).
+
+### OpenCodeAgent
+
+Wraps the OpenCode CLI (`opencode run --format json`). Adds `agentName`,
+`attachFiles`, `continueSession`, `sessionId`, and `variant`. Native hijack is
+not yet supported. See [`OpenCodeAgentOptions`](/reference/types).
+
+### OpenClawAgent
+
+Wraps the OpenClaw gateway-backed agent CLI (`openclaw agent --message <prompt>
+--json`). Adds `agent`, `session`, `workspace`, `json`, and `continueSession`; a
+per-call `resumeSession` emits `--session-id`. See
+[`OpenClawAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/OpenClawAgentOptions.ts).
+
+### HermesCliAgent
+
+CLI-driver variant of Hermes (distinct from the SDK-based `HermesAgent` above),
+wrapping the `hermes` CLI. Adds `model`, `provider`, and `continueSession`, and
+emits `--model` / `--provider` flags. See
+[`HermesCliAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesCliAgentOptions.ts).
+
+**Source** [`CodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/CodexAgent.js) · [`ClaudeCodeAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/ClaudeCodeAgent.js) · [`BaseCliAgentOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/BaseCliAgentOptions.ts) · **Tests** [`codex-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/codex-support.test.js) · [`claude-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/claude-support.test.js) · **See also** [CLI Agents](/integrations/cli-agents), [Agents overview](/agents/overview)
+
+## createHttpTool
+
+Build an AI SDK tool that calls any REST API without an OpenAPI spec. The
+returned tool takes a method, url, headers, query, body, and optional auth at
+call time; `createHttpTool` only configures the description and any default
+headers. Pass it to an agent's `tools`.
+
+```ts
+function createHttpTool(options?: CreateHttpToolOptions): Tool;
+```
+
+<ParamField path="options" type="CreateHttpToolOptions">
+  <Expandable title="CreateHttpToolOptions">
+    <ParamField path="description" type="string">
+      Tool description shown to the model. Defaults to a generic REST-call
+      description.
+    </ParamField>
+    <ParamField path="defaultHeaders" type="Record<string, string>">
+      Headers merged into every request, overridable per call.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+The model invokes the tool with an `HttpToolInput` and receives an
+`HttpToolOutput`.
+
+<ParamField path="input" type="HttpToolInput">
+  <Expandable title="HttpToolInput">
+    <ParamField path="url" type="string" required>
+      Request URL.
+    </ParamField>
+    <ParamField path="method" type='"GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"' default='"GET"'>
+      HTTP method.
+    </ParamField>
+    <ParamField path="headers" type="Record<string, string>">
+      Per-call headers, merged over `defaultHeaders`.
+    </ParamField>
+    <ParamField path="query" type="Record<string, string | number | boolean | null | undefined>">
+      Query parameters; null and undefined values are skipped.
+    </ParamField>
+    <ParamField path="body" type="unknown">
+      Request body. Objects are JSON-serialized with a JSON content type unless
+      one is already set; strings, `Blob`, `FormData`, and `URLSearchParams` pass
+      through. Ignored for `GET` and `HEAD`.
+    </ParamField>
+    <ParamField path="auth" type="HttpToolAuth">
+      Optional auth applied as a header.
+
+      <Expandable title="HttpToolAuth">
+        <ParamField path='{ type: "bearer", token }'>
+          Sets `Authorization: Bearer <token>`.
+        </ParamField>
+        <ParamField path='{ type: "basic", username, password }'>
+          Sets `Authorization: Basic <base64>`.
+        </ParamField>
+        <ParamField path='{ type: "header", name, value }'>
+          Sets an arbitrary header.
+        </ParamField>
+      </Expandable>
+    </ParamField>
+    <ParamField path="timeoutMs" type="number">
+      Positive integer; aborts the request after this many milliseconds.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="HttpToolOutput" type="object">
+  <Expandable title="HttpToolOutput">
+    <ResponseField name="ok" type="boolean">
+      `true` for a 2xx response.
+    </ResponseField>
+    <ResponseField name="status" type="number">
+      HTTP status code.
+    </ResponseField>
+    <ResponseField name="statusText" type="string">
+      HTTP status text.
+    </ResponseField>
+    <ResponseField name="headers" type="Record<string, string>">
+      Response headers.
+    </ResponseField>
+    <ResponseField name="body" type="unknown">
+      Parsed JSON when the content type is JSON, the raw text otherwise, or
+      `null` for an empty or 204/205 response.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```ts
+const implementer = new OpenAIAgent({
+  model: "gpt-5.6-luna",
+  tools: {
+    http: createHttpTool({
+      defaultHeaders: { "user-agent": "smithers" },
+    }),
+  },
+});
+```
+
+**Source** [`createHttpTool.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/http/createHttpTool.js) · [`CreateHttpToolOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/http/CreateHttpToolOptions.ts) · **Tests** [`http-tool.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/http-tool.test.js) · **See also** [Common tools](/integrations/common-tools), [OpenAPI tools](/concepts/openapi-tools)
+
+## hashCapabilityRegistry
+
+Compute a stable SHA-256 hex digest of an [`AgentCapabilityRegistry`](#agentcapabilityregistry).
+The registry is normalized and stably stringified first, so the hash is
+order-independent and stable across runs. Use it as a cache key when an agent's
+declared capabilities are part of what makes a task result reusable.
+
+```ts
+function hashCapabilityRegistry(
+  registry: AgentCapabilityRegistry | null | undefined,
+): string;
+```
+
+<ParamField path="registry" type="AgentCapabilityRegistry | null | undefined" required>
+  The capability registry to fingerprint. `null` / `undefined` hash to the digest
+  of an empty normalized registry.
+
+  <a id="agentcapabilityregistry" />
+  <Expandable title="AgentCapabilityRegistry">
+    <ParamField path="version" type="1" required>
+      Registry schema version.
+    </ParamField>
+    <ParamField path="engine" type="string" required>
+      The CLI engine: one of `"claude-code"`, `"codex"`, `"antigravity"`,
+      `"gemini"`, `"kimi"`, `"pi"`, `"amp"`, `"forge"`, `"opencode"`,
+      `"openclaw"`, `"vibe"`.
+    </ParamField>
+    <ParamField path="runtimeTools" type="Record<string, AgentToolDescriptor>" required>
+      Tools available at runtime. Each `AgentToolDescriptor` has an optional
+      `description` and `source`
+      (`"builtin" | "mcp" | "extension" | "skill" | "runtime"`).
+    </ParamField>
+    <ParamField path="mcp" type="{ bootstrap, supportsProjectScope, supportsUserScope }" required>
+      MCP support descriptor.
+    </ParamField>
+    <ParamField path="skills" type="{ supportsSkills, installMode?, smithersSkillIds }" required>
+      Skill support descriptor.
+    </ParamField>
+    <ParamField path="humanInteraction" type="{ supportsUiRequests, methods }" required>
+      Human-interaction support descriptor.
+    </ParamField>
+    <ParamField path="builtIns" type="string[]" required>
+      Names of built-in capabilities.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="string">
+  A 64-character SHA-256 hex digest of the normalized registry.
+</ResponseField>
+
+```ts
+const key = hashCapabilityRegistry(implementer.capabilities);
+```
+
+**Source** [`hashCapabilityRegistry.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/capability-registry/hashCapabilityRegistry.js) · [`AgentCapabilityRegistry.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/capability-registry/AgentCapabilityRegistry.ts) · **Tests** [`capability-registry.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/capability-registry.test.js) · **See also** [Caching](/reference/types), [Agents overview](/agents/overview)
+
+---
+
+For end-to-end agent setup and provider auth, see [CLI Agents](/integrations/cli-agents)
+and [SDK Agents](/integrations/sdk-agents). For the full option type shapes, see
+the [Types reference](/reference/types).

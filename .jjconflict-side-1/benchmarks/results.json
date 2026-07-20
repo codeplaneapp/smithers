@@ -1,0 +1,55 @@
+{
+  "_note": "Canonical benchmark dataset for benchmarks.smithers.sh. Public SOTA rows are from the benchmarks' own papers/leaderboards; smithers rows are the Claude-only (Opus->Sonnet delegation) fleet and are PENDING until the first full cloud pass. Every row carries n + subset + caveat so a small/pending run can never imply a full-benchmark claim. Design: .smithers/specs/cloud-benchmark-fleet.md.",
+  "scaffold": "delegation-chain (Opus plans/reviews, Opus->Opus, Opus->Sonnet implement)",
+  "benchmarks": [
+    {
+      "id": "swe-bench-pro",
+      "name": "SWE-Bench Pro",
+      "dataset": "ScaleAI/SWE-bench_Pro (test, 731)",
+      "metric": "Pass@1 (%)",
+      "url": "https://github.com/scaleapi/SWE-bench_Pro-os",
+      "headline": "731 multi-file tasks across 11 professional repos (Go/Python/JS/TS), hidden tests in canonical per-instance Docker.",
+      "leaderboard": [
+        { "model": "smithers (Opus + Sonnet)", "scaffold": "delegation-chain", "value": null, "n": 0, "subset": "full-731 pending", "status": "pending", "caveat": "Claude-only fleet run pending" }
+      ]
+    },
+    {
+      "id": "roadmapbench",
+      "name": "RoadmapBench",
+      "dataset": "UniPat-AI/RoadmapBench (115)",
+      "metric": "Resolved Rate (%)",
+      "url": "https://github.com/UniPat-AI/RoadmapBench",
+      "headline": "Long-horizon multi-target version upgrades (median ~3,700 LOC / ~51 files); the best single agent on the official board resolves under 40%.",
+      "leaderboard": [
+        { "model": "public SOTA (best single agent)", "scaffold": "official", "value": 39.0, "n": 115, "subset": "full-115", "status": "reference", "caveat": "approximate published best" },
+        { "model": "smithers (Opus + Sonnet)", "scaffold": "delegation-chain", "value": null, "n": 0, "subset": "full-115 pending", "status": "pending", "caveat": "Claude-only fleet run pending" }
+      ]
+    },
+    {
+      "id": "claw-eval-live",
+      "name": "Claw-Eval-Live",
+      "dataset": "Claw-Eval-Live (105 tasks / 17 families)",
+      "metric": "Score (pass bar 75)",
+      "url": "https://arxiv.org/abs/2604.28139",
+      "headline": "Agentic enterprise workflows scored on observable execution evidence; no public model clears the 70% pass bar.",
+      "leaderboard": [
+        { "model": "Claude Opus 4.6", "scaffold": "official", "value": 83.6, "n": 105, "subset": "full-105", "status": "reference", "caveat": "public leaderboard" },
+        { "model": "GPT-5.4", "scaffold": "official", "value": 81.7, "n": 105, "subset": "full-105", "status": "reference", "caveat": "public leaderboard" },
+        { "model": "smithers (mixture)", "scaffold": "mixture-gateway", "value": null, "n": 0, "subset": "pending", "status": "pending", "caveat": "cannot run faithfully Claude-only (native OpenAI gather leg + neutral Gemini judge); asterisked variant only" }
+      ]
+    },
+    {
+      "id": "swe-evo",
+      "name": "SWE-EVO",
+      "dataset": "SWE-EVO (48 release-sized tasks / 7 repos)",
+      "metric": "Resolved Rate (%)",
+      "url": "https://arxiv.org/abs/2512.18470",
+      "headline": "Carry a Python project across a whole release transition; frontier agents resolve only ~21-25% (full-48).",
+      "leaderboard": [
+        { "model": "gpt-5.4", "scaffold": "official (OpenHands)", "value": 25.0, "n": 48, "subset": "full-48", "status": "reference", "caveat": "Wilson 95% CI [14.9, 38.8]" },
+        { "model": "gpt-5.2", "scaffold": "official (OpenHands)", "value": 18.75, "n": 48, "subset": "full-48", "status": "reference", "caveat": "Wilson 95% CI [10.2, 31.9]" },
+        { "model": "smithers (Opus + Sonnet)", "scaffold": "delegation-chain", "value": null, "n": 0, "subset": "dvc subset pending", "status": "pending", "caveat": "Claude-only fleet run pending; dvc subset is easier than full-48, not directly comparable" }
+      ]
+    }
+  ]
+}

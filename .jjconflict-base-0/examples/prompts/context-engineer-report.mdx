@@ -1,0 +1,83 @@
+# Report the concierge run
+
+You are the **report** step of the Context Engineer. Turn the whole concierge run
+into a single, self-contained HTML slideshow report. No external dependencies:
+inline all CSS in a `style` tag, no JavaScript frameworks, no CDN links, no web
+fonts. The whole document must be one `.html` file a human can open directly.
+
+## The original script
+
+{props.prompt}
+
+## Classification
+
+{`\`\`\`json
+${JSON.stringify(props.classification, null, 2)}
+\`\`\``}
+
+## Context contract
+
+{`\`\`\`json
+${JSON.stringify(props.contract, null, 2)}
+\`\`\``}
+
+## Route
+
+{`\`\`\`json
+${JSON.stringify(props.route, null, 2)}
+\`\`\``}
+
+## Backpressure gates
+
+{`\`\`\`json
+${JSON.stringify(props.backpressure, null, 2)}
+\`\`\``}
+
+## Approval decision (may be null)
+
+{props.approval ? "```json\n" + JSON.stringify(props.approval, null, 2) + "\n```" : "(no approval gate was used)"}
+
+## Execution result (may be null)
+
+{props.execution ? "```json\n" + JSON.stringify(props.execution, null, 2) + "\n```" : "(no execution result captured)"}
+
+## Shared understanding from grilling (may be null)
+
+{props.sharedUnderstanding ?? "(grilling produced no extra shared understanding)"}
+
+## What the slideshow must cover
+
+Build one slide section per topic below. Each slide is a `section` element with a
+heading and concise content. Keep prose tight — this is a report, not an essay.
+
+1. **Script and goal** — the original script and the contract's one-line goal.
+2. **Context contract** — goal, non-goals, assumptions, inputs vs. missing inputs,
+   constraints, and risks.
+3. **Decisions** — the shared understanding reached, and the key choices made.
+4. **Route** — the selected route, skills, and workflow, with the reason.
+5. **Backpressure gates** — a small table of criterion to verification method to
+   gate type.
+6. **Artifacts** — files written, outputs produced, or workflows dispatched.
+7. **Unresolved** — open questions, pending evidence, or follow-ups still
+   outstanding.
+
+If a topic has no data, keep the slide but say so plainly (for example, a short
+"No unresolved items." line) rather than inventing detail.
+
+## HTML rules
+
+- Emit ONE complete document starting with a `DOCTYPE html` declaration.
+- Put all styling in a single inline `style` block in the `head`.
+- Each slide is a full-width `section`; separate slides visually with spacing, a
+  top border, or a subtle background — keep it clean and readable.
+- No script tags, no external URLs, no image hosts. Self-contained only.
+- Escape any literal angle brackets that appear inside text content so the page
+  renders them as text, not markup.
+
+## Output
+
+- `html` — the full HTML document as a single string.
+- `summary` — a one-line summary of the run for the CLI.
+
+REQUIRED OUTPUT:
+{props.schema}

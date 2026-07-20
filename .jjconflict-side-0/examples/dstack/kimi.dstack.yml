@@ -1,0 +1,31 @@
+type: service
+name: kimi-k2
+
+python: "3.12"
+
+env:
+  - HF_TOKEN
+
+commands:
+  - uv pip install "vllm>=0.6.4"
+  - >-
+    uv run vllm serve moonshotai/Kimi-K2-Instruct
+    --tensor-parallel-size 8
+    --trust-remote-code
+    --max-model-len 32768
+    --served-model-name kimi-k2
+
+port: 8000
+model: kimi-k2
+
+resources:
+  gpu: H100:80GB:8
+  disk: 2000GB
+
+backends: [gcp]
+spot_policy: on-demand
+
+replicas: 1..2
+scaling:
+  metric: rps
+  target: 20

@@ -1,0 +1,9 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Generate Playwright tests from the approved test plan. Write only under the requested test directory and keep assertions meaningful.\n\nINPUT:\n"}
+      {JSON.stringify(props ?? {}, null, 2)}
+      {"\n\nReturn generated file paths, commands, and notes matching the task output schema."}
+    </>
+  );
+}

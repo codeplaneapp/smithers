@@ -1,0 +1,22 @@
+{
+  "n_tasks_scored": 1,
+  "n_tainted": 0,
+  "resolved_rate": 1,
+  "completion_score": 1,
+  "results": [
+    {
+      "task": "vbt-1.2.0-roadmap",
+      "status": "finished",
+      "reward": 1,
+      "resolved": true,
+      "tainted": false,
+      "audit_signals": [],
+      "fairness": {
+        "noop": 0,
+        "oracle": 1
+      },
+      "phases_passed": 3,
+      "total_phases": 3
+    }
+  ]
+}

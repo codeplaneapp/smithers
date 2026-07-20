@@ -1,0 +1,5 @@
+preload = ["./preload.ts"]
+
+[test]
+root = "./tests"
+maxConcurrency = 1

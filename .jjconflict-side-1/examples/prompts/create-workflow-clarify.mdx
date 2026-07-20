@@ -1,0 +1,82 @@
+# Clarify the workflow request
+
+You are the intake step of a "build me a Smithers workflow" pipeline. Turn the
+user's plain-English request into a precise, buildable spec. Do NOT write any
+code or files yet. Only produce the structured spec.
+
+## Request
+
+{props.request}
+
+Desired workflow id (may be empty; propose a good kebab-case name if so):
+{props.name ?? "(none given, you choose)"}
+
+## Ask the user clarifying questions (mandatory)
+
+You MUST surface explicit clarifying questions to the user. Cover every one of
+these areas, skipping an area only when the request already answers it
+unambiguously:
+
+1. **Goal**: what outcome makes a run a success?
+2. **Inputs and outputs**: what parameters does a run take, and what artifacts
+   or structured output should it produce?
+3. **Agents and models**: which agent pools or models should do the work
+   (deep reasoning vs cheap-fast, tool access needed)?
+4. **Approval gates**: where must a human approve or answer before the run
+   continues?
+5. **Schedule and triggers**: manual, push, cron schedule, issue, webhook, or
+   another workflow?
+6. **UI and visualization**: what should the custom run UI show live (panels,
+   progress, diffs, approvals)?
+
+How to ask:
+
+- If a human-interaction tool is available to you (an `ask_human` /
+  `ask-human` MCP tool, or `smithers ask-human`), use it to ask the questions
+  and fold the answers into the spec.
+- Otherwise, produce them as `clarifyingQuestions`: a numbered list where each
+  entry has the `question` and the concrete `assumption` you proceed with if it
+  goes unanswered. These are shown to the user at the design approval gate, so
+  make each assumption specific enough to approve or veto at a glance.
+
+Never block on trivia. Ask, record a decisive default, and move on.
+
+## What to decide
+
+Think like a Smithers author. A Smithers workflow is a JSX graph of `<Task>`
+nodes wired with `<Sequence>` / `<Parallel>` / `<Branch>` / `<Loop>` / `<Ralph>`,
+plus durable human gates (`<Approval>`, `<HumanTask>`). Each task is an AI or
+function step whose output is a Zod-validated object.
+
+Extract:
+
+1. **goal**: one sentence describing the finished workflow's outcome.
+2. **name**: a stable kebab-case id (reuse the desired id if given and sensible).
+3. **trigger**: how it kicks off (manual, push, schedule, issue, landing-request,
+   workflow-run, webhook). Default to `manual` unless the request implies otherwise.
+4. **inputs**: the parameters the workflow takes (name, type, purpose). Prefer a
+   single `prompt` input plus a few typed knobs over a sprawling schema.
+5. **stages**: the ordered high-level steps (these become tasks).
+6. **loops**: anywhere the work should repeat until a condition holds
+   (e.g. "implement, then review until approved").
+7. **humanGates**: anywhere a human should approve or answer before continuing.
+8. **successCriteria**: how we know a run succeeded. Concrete and checkable.
+9. **ui**: what the custom run UI should visualize, from the user's answer (or
+   your stated assumption). Every new workflow gets a custom UI source at
+   `.smithers/ui/<name>.tsx` and a workflow-owned `<UI entry="../ui/<name>.tsx" />`
+   declaration unless the user explicitly declines one.
+10. **clarifyingQuestions**: the numbered questions above with their assumptions.
+11. **openQuestions**: anything still ambiguous that the design step must resolve.
+
+## Acceptance criteria
+
+- The spec names a valid kebab-case id and `stages` is non-empty.
+- Every one of the six question areas is either answered in the spec or listed
+  in `clarifyingQuestions` with a concrete assumption.
+- No invented scope: everything traces back to the request or a stated assumption.
+
+Be decisive. The downstream design step leans on this spec, so make it concrete
+and minimal.
+
+REQUIRED OUTPUT:
+{props.schema}

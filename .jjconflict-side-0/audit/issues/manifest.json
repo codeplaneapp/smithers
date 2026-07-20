@@ -1,0 +1,102 @@
+[
+  {
+    "key": "p0",
+    "title": "🔴 [audit] P0 — critical blockers (4)",
+    "labels": [
+      "audit",
+      "bug"
+    ],
+    "count": 4,
+    "file": "audit/issues/p0.md",
+    "bytes": 1607
+  },
+  {
+    "key": "ci-arch",
+    "title": "🏛️ [audit] CI enforcement, architecture & systemic policy (34)",
+    "labels": [
+      "audit",
+      "tech-debt"
+    ],
+    "count": 34,
+    "file": "audit/issues/ci-arch.md",
+    "bytes": 6798
+  },
+  {
+    "key": "dead-code",
+    "title": "🧹 [audit] Dead code cleanup (66)",
+    "labels": [
+      "audit",
+      "dead-code",
+      "tech-debt"
+    ],
+    "count": 66,
+    "file": "audit/issues/dead-code.md",
+    "bytes": 12966
+  },
+  {
+    "key": "missing",
+    "title": "🧩 [audit] Stubbed & missing features (17)",
+    "labels": [
+      "audit",
+      "enhancement"
+    ],
+    "count": 17,
+    "file": "audit/issues/missing.md",
+    "bytes": 3888
+  },
+  {
+    "key": "bug",
+    "title": "🐛 [audit] Bug fixes (50)",
+    "labels": [
+      "audit",
+      "bug"
+    ],
+    "count": 50,
+    "file": "audit/issues/bug.md",
+    "bytes": 9900
+  },
+  {
+    "key": "docs",
+    "title": "📝 [audit] Documentation & skills accuracy (47)",
+    "labels": [
+      "audit",
+      "documentation"
+    ],
+    "count": 47,
+    "file": "audit/issues/docs.md",
+    "bytes": 8324
+  },
+  {
+    "key": "test-core",
+    "title": "✅ [audit] Test coverage gaps — core library packages (67)",
+    "labels": [
+      "audit",
+      "test-coverage"
+    ],
+    "count": 67,
+    "file": "audit/issues/test-core.md",
+    "bytes": 13044
+  },
+  {
+    "key": "test-rest",
+    "title": "✅ [audit] Test coverage gaps — apps, gateway, UI, e2e, examples (90)",
+    "labels": [
+      "audit",
+      "test-coverage"
+    ],
+    "count": 90,
+    "file": "audit/issues/test-rest.md",
+    "bytes": 17479
+  },
+  {
+    "key": "cleanup",
+    "title": "♻️ [audit] Code cleanup & refactors (48)",
+    "labels": [
+      "audit",
+      "tech-debt"
+    ],
+    "count": 48,
+    "file": "audit/issues/cleanup.md",
+    "bytes": 9354
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "name": "@smithers-orchestrator/cloudflare",
+  "version": "0.29.0",
+  "description": "Cloudflare Workers, Durable Object SQLite, D1, and Sandbox SDK integration for Smithers",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "build": "tsup --dts-only",
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/sandbox": "workspace:*"
+  },
+  "optionalDependencies": {
+    "@cloudflare/sandbox": "^0.12.3"
+  },
+  "devDependencies": {
+    "@smithers-orchestrator/db": "workspace:*",
+    "@types/bun": "latest",
+    "typescript": "~6.0.3"
+  }
+}

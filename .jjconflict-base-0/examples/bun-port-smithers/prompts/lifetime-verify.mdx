@@ -1,0 +1,17 @@
+# Lifetime Verify
+
+OUTPUT_KIND: lifetime-verify
+FIELD_KEY: {props.field.key}
+VOTER: {props.voter}
+ZIG: {props.field.file}
+REPO: {props.repo}
+
+Adversarially verify this proposed lifetime classification against the Zig source, `docs/PORTING.md`, and `docs/LIFETIMES.tsv`.
+
+Field:
+{JSON.stringify(props.field, null, 2)}
+
+Return `refuted: true` only for a concrete evidence-backed disagreement. Do not edit files.
+
+Required output schema:
+{props.schema}

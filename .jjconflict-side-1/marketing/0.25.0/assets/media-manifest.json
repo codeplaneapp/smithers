@@ -1,0 +1,64 @@
+{
+  "version": "0.25.0",
+  "generatedFrom": "release-content workflow render-media (hand-revised for launch)",
+  "assets": [
+    {
+      "tweetIndex": 1,
+      "kind": "hero",
+      "suggestion": "Smithers 0.25.0: long runs that survive rate limits, new agent tools, workflows that ship code.",
+      "file": "marketing/0.25.0/assets/tweet-01-hero.png",
+      "svg": "marketing/0.25.0/assets/tweet-01-hero.svg"
+    },
+    {
+      "tweetIndex": 2,
+      "kind": "capability",
+      "suggestion": "Quota-aware pause/resume: a run that hits a rate limit parks as waiting-quota and resumes itself.",
+      "file": "marketing/0.25.0/assets/tweet-02-capability.png",
+      "svg": "marketing/0.25.0/assets/tweet-02-capability.svg"
+    },
+    {
+      "tweetIndex": 3,
+      "kind": "list",
+      "suggestion": "Five new built-in agent tools, all harness-neutral: web search, HTTP, transcription, image, OCR.",
+      "file": "marketing/0.25.0/assets/tweet-03-agent-tools.png",
+      "svg": "marketing/0.25.0/assets/tweet-03-agent-tools.svg"
+    },
+    {
+      "tweetIndex": 4,
+      "kind": "list",
+      "suggestion": "Workflows that do real work: plan-implement-review-issues, audit-burndown.",
+      "file": "marketing/0.25.0/assets/tweet-04-workflows.png",
+      "svg": "marketing/0.25.0/assets/tweet-04-workflows.svg"
+    },
+    {
+      "tweetIndex": 5,
+      "kind": "animated",
+      "suggestion": "New <Sidecar> component: shadow-score a cheaper model against your primary.",
+      "file": "marketing/0.25.0/assets/tweet-05-sidecar.gif",
+      "still": "marketing/0.25.0/assets/tweet-05-sidecar.png",
+      "svg": "marketing/0.25.0/assets/tweet-05-sidecar.svg"
+    },
+    {
+      "tweetIndex": 6,
+      "kind": "metric",
+      "suggestion": "100% test coverage, thousands of new evals. Smithers is becoming bulletproof.",
+      "file": "marketing/0.25.0/assets/tweet-06-bulletproof.png",
+      "svg": "marketing/0.25.0/assets/tweet-06-bulletproof.svg"
+    },
+    {
+      "tweetIndex": 7,
+      "kind": "capability",
+      "suggestion": "Durability now runs on Postgres + PGlite. smithers migrate. Powers real-time multiplayer in the UI.",
+      "file": "marketing/0.25.0/assets/tweet-07-postgres-multiplayer.png",
+      "svg": "marketing/0.25.0/assets/tweet-07-postgres-multiplayer.svg"
+    },
+    {
+      "tweetIndex": 8,
+      "kind": "animated",
+      "suggestion": "10x weekly downloads since the last release. Thank you.",
+      "file": "marketing/0.25.0/assets/tweet-08-downloads.gif",
+      "still": "marketing/0.25.0/assets/tweet-08-downloads.png",
+      "svg": "marketing/0.25.0/assets/tweet-08-downloads.svg"
+    }
+  ]
+}

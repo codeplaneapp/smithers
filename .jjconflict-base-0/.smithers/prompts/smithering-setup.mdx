@@ -1,0 +1,23 @@
+# Set up the Smithering run
+
+No product request was provided when this run started, so the pipeline needs its
+configuration before any work begins. Operating agent: collect these answers from the
+human conversationally (do NOT make the human run any command), then record them with the
+smithers human-answer CLI.
+
+Inputs provided so far:
+
+{props.given}
+
+Record JSON matching the setup schema:
+
+- prompt (required): the product/feature request, in the human's own words.
+- repo: existing repo/directory to build in, or null for greenfield.
+- route: "auto" (default — a router classifies the request), or force a tier:
+  "trivial" (one cheap agent just does it), "complex" (codex drives it via /goal),
+  "full-build" (the entire planning + orchestration pipeline).
+- review: pause at human approval gates? (default true; false = fully autonomous)
+- poc: build a throwaway proof-of-concept before orchestrating? (default false)
+- smokeTest: smoke-run the generated workflow on one ticket before launch? (default true)
+- baseBranch: the branch delivery opens a PR against (default "main").
+- maxMonitorHours: how long to monitor the implementation run (default 24).

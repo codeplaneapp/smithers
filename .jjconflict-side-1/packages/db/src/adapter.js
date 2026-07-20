@@ -1,0 +1,4080 @@
+// @smithers-type-exports-begin
+/** @typedef {import("./adapter/AlertSeverity.ts").AlertSeverity} AlertSeverity */
+/** @typedef {import("./adapter/ApprovalRow.ts").ApprovalRow} ApprovalRow */
+/** @typedef {import("./adapter/CacheRow.ts").CacheRow} CacheRow */
+/** @typedef {import("./adapter/EvalCaseResultRow.ts").EvalCaseResultRow} EvalCaseResultRow */
+/** @typedef {import("./adapter/EvalSuiteRow.ts").EvalSuiteRow} EvalSuiteRow */
+/** @typedef {import("./adapter/IntegrationDeliveryClaim.ts").IntegrationDeliveryClaim} IntegrationDeliveryClaim */
+/** @typedef {import("./adapter/NodeRow.ts").NodeRow} NodeRow */
+/** @typedef {import("./adapter/PendingHumanRequestRow.ts").PendingHumanRequestRow} PendingHumanRequestRow */
+/** @typedef {import("./adapter/RunAncestryRow.ts").RunAncestryRow} RunAncestryRow */
+/** @typedef {import("./adapter/RunRow.ts").RunRow} RunRow */
+/** @typedef {import("./adapter/SignalRow.ts").SignalRow} SignalRow */
+/** @typedef {import("./adapter/StaleRunRecord.ts").StaleRunRecord} StaleRunRecord */
+// @smithers-type-exports-end
+
+import { getTableName } from "drizzle-orm";
+import { getTableColumns } from "drizzle-orm/utils";
+import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { Effect, Exit, FiberId, Metric } from "effect";
+import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { getSqlMessageStorage } from "./sql-message-storage.js";
+import { sha256Hex } from "./sha256Hex.js";
+import { POSTGRES, beginTransactionSql } from "./dialect.js";
+import { alertsAcknowledgedTotal, alertsActive, alertsFiredTotal, dbQueryDuration, dbTransactionDuration, dbTransactionRollbacks, } from "@smithers-orchestrator/observability/metrics";
+import { assertOptionalStringMaxLength, assertPositiveFiniteNumber, } from "./input-bounds.js";
+import { FRAME_KEYFRAME_INTERVAL, applyFrameDeltaJson, encodeFrameDelta, normalizeFrameEncoding, serializeFrameDelta, } from "./frame-codec.js";
+import { getKeyColumns } from "./output.js";
+import { withSqliteWriteRetryEffect } from "./write-retry.js";
+import { camelToSnake } from "./utils/camelToSnake.js";
+import { capturePostgresTransactionTxid, recordCommittedTxid, shouldCapturePostgresTxid, } from "./captureTxid.js";
+import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot, } from "./waitForEventAttempt.js";
+/** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
+/** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
+/** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
+/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("./adapter/EventHistoryQuery.ts").EventHistoryQuery} EventHistoryQuery */
+/** @typedef {import("./adapter/HumanRequestRow.ts").HumanRequestRow} HumanRequestRow */
+/** @typedef {import("./output/OutputKey.ts").OutputKey} OutputKey */
+/**
+ * @template A, E
+ * @typedef {Effect.Effect<A, E> & PromiseLike<A>} RunnableEffect
+ */
+/** @typedef {import("./adapter/SignalQuery.ts").SignalQuery} SignalQuery */
+/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/**
+ * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
+ */
+/**
+ * @typedef {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} NodeDiffCacheRow
+ */
+/**
+ * @typedef {{ count: number }} CountRow
+ */
+/**
+ * @typedef {{ ralphId: string; runId: string; done?: boolean }} RalphRow
+ */
+/**
+ * @typedef {{ cacheKey: string; createdAtMs?: number; nodeId: string; outputTable: string }} CacheRowLike
+ */
+/**
+ * @typedef {{ path: string; kind: string; content: string; contentHash: string; updatedAtMs: number; deletedAtMs?: number | null }} DocRow
+ */
+
+
+export const DB_ALERT_ID_MAX_LENGTH = 256;
+export const DB_ALERT_POLICY_NAME_MAX_LENGTH = 256;
+export const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;
+export const DB_ALERT_ALLOWED_SEVERITIES = [
+    "info",
+    "warning",
+    "critical",
+];
+export const DB_ALERT_ALLOWED_STATUSES = [
+    "firing",
+    "acknowledged",
+    "resolved",
+    "silenced",
+];
+// Caps the per-adapter LRU of reconstructed frame XML strings: frames can be
+// multi-KB, so 512 bounds memory while keeping recent rewind/inflate reads hot.
+const FRAME_XML_CACHE_MAX = 512;
+const DOC_CONFLICT_KIND = "conflict";
+export const DB_RUN_ID_MAX_LENGTH = 256;
+export const DB_RUN_WORKFLOW_NAME_MAX_LENGTH = 256;
+export const DB_RUN_ALLOWED_STATUSES = [
+    "running",
+    "waiting-approval",
+    "waiting-event",
+    "waiting-timer",
+    "waiting-quota",
+    "paused",
+    "finished",
+    "failed",
+    "cancelled",
+    "continued",
+];
+const RAW_QUERY_ALLOWED_PREFIX = /^(?:select|with|explain|values)\b/i;
+const RAW_QUERY_FORBIDDEN_KEYWORDS = /\b(?:drop|delete|insert|update|alter|create|attach|detach|pragma)\b/i;
+const ACTIVE_ALERT_STATUSES = new Set([
+    "firing",
+    "acknowledged",
+    "silenced",
+]);
+/**
+ * @param {string} path
+ * @param {number} updatedAtMs
+ * @returns {string}
+ */
+function docConflictPath(path, updatedAtMs) {
+    const key = createHash("sha1").update(path).digest("hex").slice(0, 16);
+    return `conflicts/${key}-${updatedAtMs}.json`;
+}
+/**
+ * Decide whether an incoming doc write diverges from the row already on record.
+ *
+ * The single writer (`syncDocsFromDisk`) re-reads and re-upserts a file on every
+ * watcher settle, so a plain "the content hash changed" rule would mint a marker
+ * on every ordinary sequential save and turn the conflict feature into an
+ * unbounded per-save change-log. A real conflict is a divergent write: the
+ * content differs AND the incoming write does not strictly advance past the row
+ * we already hold (its `updatedAtMs` is the same or older — a stale or
+ * out-of-order writer). A strict forward edit (`row.updatedAtMs >
+ * existing.updatedAtMs`) is the happy path and records no marker.
+ *
+ * @param {DocRow} row
+ * @param {DocRow} existing
+ * @returns {DocRow | null}
+ */
+function buildDocConflictRow(row, existing) {
+    if (row.kind === DOC_CONFLICT_KIND || existing.kind === DOC_CONFLICT_KIND) {
+        return null;
+    }
+    if (row.deletedAtMs != null || existing.deletedAtMs != null) {
+        return null;
+    }
+    if (row.contentHash === existing.contentHash) {
+        return null;
+    }
+    if (row.updatedAtMs > existing.updatedAtMs) {
+        return null;
+    }
+    const updatedAtMs = row.updatedAtMs;
+    const content = JSON.stringify({
+        path: row.path,
+        kind: row.kind,
+        previousHash: existing.contentHash,
+        incomingHash: row.contentHash,
+        previousUpdatedAtMs: existing.updatedAtMs,
+        incomingUpdatedAtMs: row.updatedAtMs,
+        resolution: "last-write-wins",
+        recordedAtMs: updatedAtMs,
+    }, null, 2);
+    return {
+        path: docConflictPath(row.path, updatedAtMs),
+        kind: DOC_CONFLICT_KIND,
+        content,
+        contentHash: sha256Hex(content),
+        updatedAtMs,
+        deletedAtMs: null,
+    };
+}
+/**
+ * @param {string} queryString
+ * @returns {string}
+ */
+function stripSqlCommentsAndLiterals(queryString) {
+    let sanitized = "";
+    let index = 0;
+    while (index < queryString.length) {
+        const char = queryString[index];
+        const nextChar = queryString[index + 1];
+        if (char === "-" && nextChar === "-") {
+            sanitized += " ";
+            index += 2;
+            while (index < queryString.length && queryString[index] !== "\n") {
+                index += 1;
+            }
+            continue;
+        }
+        if (char === "/" && nextChar === "*") {
+            sanitized += " ";
+            index += 2;
+            while (index < queryString.length) {
+                if (queryString[index] === "*" && queryString[index + 1] === "/") {
+                    index += 2;
+                    break;
+                }
+                index += 1;
+            }
+            continue;
+        }
+        if (char === "'" || char === "\"" || char === "`") {
+            const quote = char;
+            sanitized += " ";
+            index += 1;
+            while (index < queryString.length) {
+                if (queryString[index] === quote) {
+                    if (queryString[index + 1] === quote) {
+                        index += 2;
+                        continue;
+                    }
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            continue;
+        }
+        if (char === "[") {
+            sanitized += " ";
+            index += 1;
+            while (index < queryString.length) {
+                if (queryString[index] === "]") {
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            continue;
+        }
+        sanitized += char;
+        index += 1;
+    }
+    return sanitized;
+}
+/**
+ * @param {string} queryString
+ * @returns {string}
+ */
+function validateReadOnlyRawQuery(queryString) {
+    const trimmedQuery = queryString.trim();
+    if (!trimmedQuery) {
+        throw toSmithersError(new Error("Raw query must not be empty"), undefined, {
+            code: "INVALID_INPUT",
+            details: { operation: "raw query validation" },
+        });
+    }
+    const sanitizedQuery = stripSqlCommentsAndLiterals(trimmedQuery).trim();
+    if (!sanitizedQuery) {
+        throw toSmithersError(new Error("Raw query must not be empty"), undefined, {
+            code: "INVALID_INPUT",
+            details: { operation: "raw query validation" },
+        });
+    }
+    const singleStatementQuery = sanitizedQuery.replace(/;+\s*$/, "").trim();
+    if (singleStatementQuery.includes(";")) {
+        throw toSmithersError(new Error("Raw query must contain a single read-only SQL statement"), undefined, {
+            code: "INVALID_INPUT",
+            details: { operation: "raw query validation" },
+        });
+    }
+    const forbiddenKeyword = singleStatementQuery.match(RAW_QUERY_FORBIDDEN_KEYWORDS)?.[0];
+    if (forbiddenKeyword) {
+        throw toSmithersError(new Error(`Raw query cannot use ${forbiddenKeyword.toUpperCase()} statements`), undefined, {
+            code: "INVALID_INPUT",
+            details: {
+                operation: "raw query validation",
+                keyword: forbiddenKeyword.toUpperCase(),
+            },
+        });
+    }
+    if (!RAW_QUERY_ALLOWED_PREFIX.test(singleStatementQuery)) {
+        throw toSmithersError(new Error("Raw query only supports read-only SELECT, WITH, EXPLAIN, or VALUES statements"), undefined, {
+            code: "INVALID_INPUT",
+            details: { operation: "raw query validation" },
+        });
+    }
+    return trimmedQuery;
+}
+/**
+ * @param {unknown} status
+ */
+function validateRunStatus(status) {
+    if (typeof status !== "string" ||
+        !DB_RUN_ALLOWED_STATUSES.includes(status)) {
+        throw toSmithersError(new Error("Invalid run status"), `Run status must be one of: ${DB_RUN_ALLOWED_STATUSES.join(", ")}`, {
+            code: "INVALID_INPUT",
+            details: { status },
+        });
+    }
+}
+/**
+ * @param {unknown} severity
+ */
+function validateAlertSeverity(severity) {
+    if (typeof severity !== "string" ||
+        !DB_ALERT_ALLOWED_SEVERITIES.includes(severity)) {
+        throw toSmithersError(new Error("Invalid alert severity"), `Alert severity must be one of: ${DB_ALERT_ALLOWED_SEVERITIES.join(", ")}`, {
+            code: "INVALID_INPUT",
+            details: { severity },
+        });
+    }
+}
+/**
+ * @param {unknown} status
+ */
+function validateAlertStatus(status) {
+    if (typeof status !== "string" ||
+        !DB_ALERT_ALLOWED_STATUSES.includes(status)) {
+        throw toSmithersError(new Error("Invalid alert status"), `Alert status must be one of: ${DB_ALERT_ALLOWED_STATUSES.join(", ")}`, {
+            code: "INVALID_INPUT",
+            details: { status },
+        });
+    }
+}
+/**
+ * @param {Record<string, unknown>} row
+ * @param {string} field
+ */
+function validateOptionalPositiveTimestamp(row, field) {
+    const value = row[field];
+    if (value === undefined || value === null)
+        return;
+    assertPositiveFiniteNumber(field, Number(value));
+}
+/**
+ * @param {unknown} row
+ * @returns {void}
+ */
+function validateRunRow(row) {
+    if (!row || typeof row !== "object") {
+        throw toSmithersError(new Error("Invalid run row"), "Run row must be an object", {
+            code: "INVALID_INPUT",
+        });
+    }
+    const r = /** @type {Record<string, unknown>} */ (row);
+    assertOptionalStringMaxLength("runId", r.runId, DB_RUN_ID_MAX_LENGTH);
+    assertOptionalStringMaxLength("parentRunId", r.parentRunId, DB_RUN_ID_MAX_LENGTH);
+    assertOptionalStringMaxLength("workflowName", r.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
+    validateRunStatus(r.status);
+    validateOptionalPositiveTimestamp(r, "createdAtMs");
+    validateOptionalPositiveTimestamp(r, "startedAtMs");
+    validateOptionalPositiveTimestamp(r, "finishedAtMs");
+    validateOptionalPositiveTimestamp(r, "heartbeatAtMs");
+    validateOptionalPositiveTimestamp(r, "cancelRequestedAtMs");
+    validateOptionalPositiveTimestamp(r, "pauseRequestedAtMs");
+    validateOptionalPositiveTimestamp(r, "hijackRequestedAtMs");
+}
+/**
+ * @param {unknown} patch
+ * @returns {void}
+ */
+function validateRunPatch(patch) {
+    if (!patch || typeof patch !== "object")
+        return;
+    const p = /** @type {Record<string, unknown>} */ (patch);
+    if ("workflowName" in p) {
+        assertOptionalStringMaxLength("workflowName", p.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
+    }
+    if ("status" in p) {
+        validateRunStatus(p.status);
+    }
+    validateOptionalPositiveTimestamp(p, "startedAtMs");
+    validateOptionalPositiveTimestamp(p, "finishedAtMs");
+    validateOptionalPositiveTimestamp(p, "heartbeatAtMs");
+    validateOptionalPositiveTimestamp(p, "cancelRequestedAtMs");
+    validateOptionalPositiveTimestamp(p, "pauseRequestedAtMs");
+    validateOptionalPositiveTimestamp(p, "hijackRequestedAtMs");
+}
+
+/**
+ * @param {string} workflow
+ * @returns {string}
+ */
+function gatewayWorkflowKeyNeedle(workflow) {
+    return `"gatewayWorkflowKey":${JSON.stringify(workflow)}`;
+}
+
+/**
+ * @param {AlertRow} row
+ */
+function validateAlertRow(row) {
+    if (!row || typeof row !== "object") {
+        throw toSmithersError(new Error("Invalid alert row"), "Alert row must be an object", { code: "INVALID_INPUT" });
+    }
+    assertOptionalStringMaxLength("alertId", row.alertId, DB_ALERT_ID_MAX_LENGTH);
+    assertOptionalStringMaxLength("runId", row.runId, DB_RUN_ID_MAX_LENGTH);
+    assertOptionalStringMaxLength("policyName", row.policyName, DB_ALERT_POLICY_NAME_MAX_LENGTH);
+    assertOptionalStringMaxLength("message", row.message, DB_ALERT_MESSAGE_MAX_LENGTH);
+    if (typeof row.alertId !== "string" || row.alertId.length === 0) {
+        throw toSmithersError(new Error("Invalid alert ID"), "Alert ID must be a non-empty string", { code: "INVALID_INPUT", details: { alertId: row.alertId } });
+    }
+    if (row.runId !== null && row.runId !== undefined && typeof row.runId !== "string") {
+        throw toSmithersError(new Error("Invalid alert run ID"), "Alert run ID must be a string or null", { code: "INVALID_INPUT", details: { runId: row.runId } });
+    }
+    if (typeof row.policyName !== "string" || row.policyName.length === 0) {
+        throw toSmithersError(new Error("Invalid alert policy name"), "Alert policy name must be a non-empty string", { code: "INVALID_INPUT", details: { policyName: row.policyName } });
+    }
+    if (typeof row.message !== "string" || row.message.length === 0) {
+        throw toSmithersError(new Error("Invalid alert message"), "Alert message must be a non-empty string", { code: "INVALID_INPUT", details: { message: row.message } });
+    }
+    if (row.detailsJson !== null &&
+        row.detailsJson !== undefined &&
+        typeof row.detailsJson !== "string") {
+        throw toSmithersError(new Error("Invalid alert details JSON"), "Alert details JSON must be a string or null", { code: "INVALID_INPUT", details: { detailsJson: row.detailsJson } });
+    }
+    validateAlertSeverity(row.severity);
+    validateAlertStatus(row.status);
+    validateOptionalPositiveTimestamp(row, "firedAtMs");
+    validateOptionalPositiveTimestamp(row, "resolvedAtMs");
+    validateOptionalPositiveTimestamp(row, "acknowledgedAtMs");
+}
+/**
+ * @param {string | null | undefined} status
+ * @returns {status is AlertStatus}
+ */
+function isAlertActiveStatus(status) {
+    return status !== undefined && status !== null && ACTIVE_ALERT_STATUSES.has(status);
+}
+/**
+ * @template A, E
+ * @param {Effect.Effect<A, E>} effect
+ * @returns {RunnableEffect<A, E>}
+ */
+function runnableEffect(effect) {
+    const runnable = effect;
+    if (typeof runnable.then !== "function") {
+        Object.defineProperty(runnable, "then", {
+            configurable: true,
+            value: (onfulfilled, onrejected) => Effect.runPromise(effect).then(onfulfilled, onrejected),
+        });
+    }
+    return runnable;
+}
+/**
+ * @typedef {{ depth: number; ownerAdapter: SmithersDb | null; tail: Promise<unknown> }} SqliteTransactionState
+ */
+/** @type {WeakMap<object, SqliteTransactionState>} */
+// Cross-adapter coordination: one sqlite connection cannot run overlapping BEGIN IMMEDIATE statements.
+const sqliteTransactionStateByClient = (() => {
+    const key = Symbol.for("smithers.sqliteTransactionStateByClient");
+    const registry = /** @type {Record<PropertyKey, unknown>} */ (globalThis);
+    const existing = registry[key];
+    if (existing instanceof WeakMap) {
+        return /** @type {WeakMap<object, SqliteTransactionState>} */ (existing);
+    }
+    const stateByClient = new WeakMap();
+    Object.defineProperty(globalThis, key, {
+        configurable: false,
+        enumerable: false,
+        value: stateByClient,
+    });
+    return stateByClient;
+})();
+// Adapter identity alone is not enough to identify the transaction owner:
+// unrelated fibers using the same adapter must queue behind the transaction,
+// while the operation's child fiber must use the already-open connection.
+const sqliteTransactionContext = new AsyncLocalStorage();
+/**
+ * @param {unknown} client
+ * @returns {object}
+ */
+function assertSqliteClientKey(client) {
+    if ((typeof client !== "object" && typeof client !== "function") ||
+        client === null) {
+        throw new Error("SmithersDb requires an object sqlite client for transaction coordination.");
+    }
+    return /** @type {object} */ (client);
+}
+/**
+ * @param {unknown} db
+ * @returns {object}
+ */
+function resolveSqliteClientKey(db) {
+    const source = /** @type {{ session?: { client?: unknown }; $client?: unknown }} */ (db);
+    return assertSqliteClientKey(source?.session?.client ?? source?.$client ?? db);
+}
+/**
+ * @param {unknown} client
+ * @returns {SqliteTransactionState}
+ */
+function getSqliteTransactionState(client) {
+    const key = assertSqliteClientKey(client);
+    let state = sqliteTransactionStateByClient.get(key);
+    if (!state) {
+        state = {
+            depth: 0,
+            ownerAdapter: null,
+            tail: Promise.resolve(),
+        };
+        sqliteTransactionStateByClient.set(key, state);
+    }
+    return state;
+}
+/**
+ * Resolve a Drizzle output table's on-disk name. The name lives on the
+ * `Symbol(drizzle:Name)` slot, which `getTableName` reads; `table["_"].name` is
+ * `undefined` for these tables, so the raw-SQL Postgres path must not depend on
+ * it. Mirrors how the Drizzle `db.insert(table)` path resolves the name on
+ * SQLite.
+ * @param {unknown} table
+ * @returns {string}
+ */
+function resolveOutputTableName(table) {
+    try {
+        return getTableName(/** @type {Table} */ (table));
+    }
+    catch {
+        return "output";
+    }
+}
+/**
+ * Flatten an error and its `cause` chain (plus any SmithersError `summary`) into
+ * one string so read-path classification can inspect the underlying driver
+ * message regardless of how many wrappers sit on top of it.
+ * @param {unknown} error
+ * @returns {string}
+ */
+function collectErrorText(error) {
+    const parts = [];
+    let current = error;
+    for (let depth = 0; current != null && depth < 8; depth += 1) {
+        if (typeof current === "string") {
+            parts.push(current);
+            break;
+        }
+        if (current instanceof Error) {
+            parts.push(current.message);
+            const summary = /** @type {{ summary?: unknown }} */ (current).summary;
+            if (typeof summary === "string") {
+                parts.push(summary);
+            }
+            current = current.cause;
+            continue;
+        }
+        parts.push(String(current));
+        break;
+    }
+    return parts.join(" ");
+}
+/**
+ * A read whose output table has not been created yet is a legitimately-absent
+ * output, not a fault: SQLite reports "no such table", Postgres/PGlite report
+ * `relation "..." does not exist`. Anything else (I/O errors, malformed SQL,
+ * corruption) is a genuine fault that must stay observable rather than be
+ * flattened into a null that reads as "no output".
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isMissingOutputTableError(error) {
+    const text = collectErrorText(error);
+    return /no such table/i.test(text) || /does not exist/i.test(text);
+}
+/**
+ * Recover an output-row read. A missing table yields null (the not-found
+ * contract callers depend on); any other error is logged (structured) and
+ * rethrown so genuine DB faults do not masquerade as an absent output.
+ * @param {string} operation
+ * @param {SmithersError} error
+ * @returns {Effect.Effect<null, SmithersError>}
+ */
+function recoverOutputRead(operation, error) {
+    if (isMissingOutputTableError(error)) {
+        return Effect.succeed(null);
+    }
+    return Effect.logWarning("output read failed").pipe(Effect.annotateLogs({
+        dbOperation: operation,
+        errorCode: /** @type {{ code?: unknown }} */ (error)?.code ?? "UNKNOWN",
+    }), Effect.zipRight(Effect.fail(error)));
+}
+/**
+ * @param {unknown} db
+ * @param {string} tableName
+ * @returns {unknown | null}
+ */
+function findDrizzleTableByName(db, tableName) {
+    const schema = /** @type {{ _?: { fullSchema?: Record<string, unknown> } }} */ (db)?._?.fullSchema;
+    if (!schema) return null;
+    for (const table of Object.values(schema)) {
+        try {
+            if (getTableName(/** @type {Table} */ (table)) === tableName) return table;
+        }
+        catch {
+            // Ignore non-table schema entries.
+        }
+    }
+    return null;
+}
+/**
+ * @param {unknown} table
+ * @returns {string[]}
+ */
+function getPhysicalBooleanColumnNames(table) {
+    try {
+        const cols = getTableColumns(/** @type {Table} */ (table));
+        const names = [];
+        for (const col of Object.values(cols)) {
+            const c = /** @type {Record<string, unknown> & { config?: { mode?: string }; mapFromDriverValue?: unknown; name?: unknown }} */ (/** @type {unknown} */ (col));
+            const mapFn = /** @type {{ toString?: () => string } | undefined} */ (c?.mapFromDriverValue);
+            if (c?.columnType === "SQLiteBoolean" ||
+                c?.config?.mode === "boolean" ||
+                c?.mode === "boolean" ||
+                c?.dataType === "boolean" ||
+                mapFn?.toString?.().includes("Boolean")) {
+                const name = typeof c.name === "string" ? c.name : null;
+                if (name) names.push(name);
+            }
+        }
+        return names;
+    }
+    catch {
+        return [];
+    }
+}
+/**
+ * @param {Record<string, unknown> | null | undefined} row
+ * @param {readonly string[]} columnNames
+ * @returns {Record<string, unknown> | null | undefined}
+ */
+function coerceRawBooleanColumns(row, columnNames) {
+    if (!row || columnNames.length === 0) return row;
+    const next = { ...row };
+    for (const columnName of columnNames) {
+        const value = next[columnName];
+        if (columnName in next && typeof value !== "boolean") {
+            if (value === 0 || value === 0n || value === "0") next[columnName] = false;
+            else if (value === 1 || value === 1n || value === "1") next[columnName] = true;
+        }
+    }
+    return next;
+}
+/**
+ * @param {unknown} client
+ * @param {string} tableName
+ * @returns {string[]}
+ */
+function getPersistedBooleanColumnNames(client, tableName) {
+    try {
+        const rows = /** @type {{ query: (sql: string) => { all: (...args: unknown[]) => Array<Record<string, unknown>> } }} */ (client)
+            .query(`SELECT column_name FROM _smithers_output_schema_columns WHERE table_name = ? AND kind = 'boolean'`)
+            .all(tableName);
+        return rows
+            .map((row) => row.column_name)
+            .filter((name) => typeof name === "string");
+    }
+    catch {
+        return [];
+    }
+}
+/**
+ * @param {ReturnType<typeof getSqlMessageStorage>} storage
+ * @returns {boolean}
+ */
+function isBunSqliteStorage(storage) {
+    return storage.dialect !== POSTGRES && storage.driverKind === "bun-sqlite";
+}
+/**
+ * @param {ReturnType<typeof getSqlMessageStorage>} storage
+ * @param {string} tableName
+ * @returns {Promise<string[]>}
+ */
+async function getPersistedBooleanColumnNamesAsync(storage, tableName) {
+    try {
+        const rows = await storage.queryAllRaw(`SELECT column_name FROM _smithers_output_schema_columns WHERE table_name = ? AND kind = 'boolean'`, [tableName]);
+        return rows
+            .map((row) => row.column_name)
+            .filter((name) => typeof name === "string");
+    }
+    catch {
+        return [];
+    }
+}
+/**
+ * @param {unknown} db
+ * @returns {{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }}
+ */
+function resolveSqliteTransactionClient(db) {
+    const candidate = /** @type {{ run?: unknown; query?: unknown; exec?: unknown; $client?: unknown }} */ (resolveSqliteClientKey(db));
+    if (typeof candidate.run !== "function") {
+        throw new Error("SmithersDb.withTransaction requires Bun SQLite client transaction primitives.");
+    }
+    return /** @type {{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }} */ (candidate);
+}
+export class SmithersDb {
+    /** @type {BunSQLiteDatabase<Record<string, unknown>>} */
+    db;
+    /** @type {ReturnType<typeof getSqlMessageStorage>} */
+    internalStorage;
+    /** @type {Map<string, string>} */
+    reconstructedFrameXmlCache = new Map();
+    transactionDepth = 0;
+    /** @type {string | null} */
+    transactionOwnerThread = null;
+    /** @type {Promise<unknown>} */
+    transactionTail = Promise.resolve();
+    /**
+   * @param {BunSQLiteDatabase<Record<string, unknown>>} db
+   */
+    constructor(db) {
+        this.db = db;
+        this.internalStorage = getSqlMessageStorage(db);
+    }
+    /**
+   * @param {string} runId
+   * @param {number} frameNo
+   * @returns {string}
+   */
+    frameCacheKey(runId, frameNo) {
+        return `${runId}:${frameNo}`;
+    }
+    /**
+   * @param {string} runId
+   * @param {number} frameNo
+   * @returns {string | undefined}
+   */
+    getCachedFrameXml(runId, frameNo) {
+        const key = this.frameCacheKey(runId, frameNo);
+        const value = this.reconstructedFrameXmlCache.get(key);
+        if (value === undefined)
+            return undefined;
+        // Keep recently-used entries hot.
+        this.reconstructedFrameXmlCache.delete(key);
+        this.reconstructedFrameXmlCache.set(key, value);
+        return value;
+    }
+    /**
+   * @param {string} runId
+   * @param {number} frameNo
+   * @param {string} xmlJson
+   */
+    rememberFrameXml(runId, frameNo, xmlJson) {
+        const key = this.frameCacheKey(runId, frameNo);
+        if (this.reconstructedFrameXmlCache.has(key)) {
+            this.reconstructedFrameXmlCache.delete(key);
+        }
+        else if (this.reconstructedFrameXmlCache.size >= FRAME_XML_CACHE_MAX) {
+            const oldest = this.reconstructedFrameXmlCache.keys().next().value;
+            if (oldest !== undefined) {
+                this.reconstructedFrameXmlCache.delete(oldest);
+            }
+        }
+        this.reconstructedFrameXmlCache.set(key, xmlJson);
+    }
+    /**
+   * @param {string} runId
+   */
+    clearFrameCacheForRun(runId) {
+        for (const key of this.reconstructedFrameXmlCache.keys()) {
+            if (key.startsWith(`${runId}:`)) {
+                this.reconstructedFrameXmlCache.delete(key);
+            }
+        }
+    }
+    /**
+     * @param {string} queryString
+     * @param {unknown[]} [params]
+   * @returns {RunnableEffect<unknown[], SmithersError>}
+   */
+    rawQuery(queryString, params = []) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            const validatedQuery = yield* Effect.try({
+                try: () => validateReadOnlyRawQuery(queryString),
+                catch: (cause) => toSmithersError(cause, "validate raw query", {
+                    code: "INVALID_INPUT",
+                    details: { operation: "raw query validation" },
+                }),
+            });
+            return yield* self.read(`raw query ${validatedQuery.slice(0, 20)}`, () => {
+                if (!isBunSqliteStorage(self.internalStorage)) {
+                    return self.internalStorage.queryAllRaw(validatedQuery, params);
+                }
+                const client = self.db.session.client;
+                const stmt = client.query(validatedQuery);
+                return Promise.resolve(stmt.all(...params));
+            });
+        }));
+    }
+    /**
+   * @param {string} currentFiberThread
+   * @returns {boolean}
+   */
+    ownsActiveTransaction(currentFiberThread) {
+        const state = getSqliteTransactionState(resolveSqliteClientKey(this.db));
+        this.transactionDepth = state.depth;
+        this.transactionOwnerThread = state.ownerAdapter ? "*" : null;
+        this.transactionTail = state.tail;
+        return (state.depth > 0 &&
+            state.ownerAdapter === this &&
+            sqliteTransactionContext.getStore() === this);
+    }
+    /**
+   * @template A
+   * @param {string} label
+   * @param {() => PromiseLike<A>} operation
+   * @returns {RunnableEffect<A, SmithersError>}
+   */
+    read(label, operation) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            const start = performance.now();
+            const readOperation = Effect.tryPromise({
+                try: () => operation(),
+                catch: (cause) => toSmithersError(cause, label, {
+                    code: "DB_QUERY_FAILED",
+                    details: { operation: label },
+                }),
+            });
+            const currentFiberId = yield* Effect.fiberId;
+            const currentFiberThread = FiberId.threadName(currentFiberId);
+            let result;
+            if (self.ownsActiveTransaction(currentFiberThread)) {
+                result = yield* readOperation;
+            }
+            else {
+                // Acquire the turn and install its release atomically under
+                // interruption. A bare `acquire; op.pipe(ensuring(release))` leaves a
+                // window: once acquire resolves, Effect can deliver a queued interrupt
+                // before the ensuring finalizer is installed, so the turn leaks and
+                // every later DB op on this client deadlocks. acquireUseRelease runs
+                // acquire uninterruptibly and guarantees release whenever it succeeded.
+                result = yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => readOperation, (releaseTurn) => Effect.sync(() => releaseTurn()));
+            }
+            yield* Metric.update(dbQueryDuration, performance.now() - start);
+            return result;
+        }).pipe(Effect.annotateLogs({ dbOperation: label }), Effect.withLogSpan(`db:${label}`)));
+    }
+    /**
+   * @template A
+   * @param {string} label
+   * @param {() => PromiseLike<A>} operation
+   * @returns {RunnableEffect<A, SmithersError>}
+   */
+    write(label, operation) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            const start = performance.now();
+            const writeOperation = Effect.tryPromise({
+                try: () => operation(),
+                catch: (cause) => toSmithersError(cause, label, {
+                    code: "DB_WRITE_FAILED",
+                    details: { operation: label },
+                }),
+            });
+            const currentFiberId = yield* Effect.fiberId;
+            const currentFiberThread = FiberId.threadName(currentFiberId);
+            let result;
+            if (self.ownsActiveTransaction(currentFiberThread)) {
+                result = yield* writeOperation;
+            }
+            else {
+                result = yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
+                    const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
+	                return yield* withSqliteWriteRetryEffect(() => captureTxidForWrite
+	                    ? Effect.gen(function* () {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
+	                            catch: (cause) => toSmithersError(cause, `begin ${label}`, {
+                                code: "DB_WRITE_FAILED",
+	                                details: { operation: label, phase: "begin" },
+	                            }),
+	                        });
+	                        const value = yield* writeOperation;
+	                        const capturedTxid = yield* Effect.tryPromise({
+	                            try: () => capturePostgresTransactionTxid(self),
+	                            catch: (cause) => toSmithersError(cause, `capture txid ${label}`, {
+	                                code: "DB_QUERY_FAILED",
+	                                details: { operation: label, phase: "txid" },
+	                            }),
+	                        });
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute("COMMIT"),
+	                            catch: (cause) => toSmithersError(cause, `commit ${label}`, {
+	                                code: "DB_WRITE_FAILED",
+	                                details: { operation: label, phase: "commit" },
+	                            }),
+	                        });
+	                        recordCommittedTxid(self, capturedTxid);
+	                        return value;
+	                    }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
+	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
+	                        return yield* Effect.fail(error);
+	                    })))
+	                    : writeOperation, { label });
+                }), (releaseTurn) => Effect.sync(() => releaseTurn()));
+            }
+            yield* Metric.update(dbQueryDuration, performance.now() - start);
+            return result;
+        }).pipe(Effect.annotateLogs({ dbOperation: label }), Effect.withLogSpan(`db:${label}`)));
+    }
+    /**
+    * @returns {Effect.Effect<{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }, SmithersError, never>}
+    */
+    getSqliteTransactionClient() {
+        return Effect.try({
+            try: () => {
+                return resolveSqliteTransactionClient(this.db);
+            },
+            catch: (cause) => toSmithersError(cause, "resolve sqlite transaction client", {
+                code: "DB_WRITE_FAILED",
+                details: { operation: "resolve sqlite transaction client" },
+            }),
+        });
+    }
+    /**
+    * @returns {Effect.Effect<() => void, SmithersError, never>}
+    */
+    acquireTransactionTurn() {
+        return Effect.tryPromise({
+            try: async (signal) => {
+                const state = getSqliteTransactionState(resolveSqliteClientKey(this.db));
+                let release;
+                const gate = new Promise((resolve) => {
+                    release = resolve;
+                });
+                const previous = state.tail.catch(() => undefined);
+                state.tail = previous.then(() => gate);
+                this.transactionTail = state.tail;
+                // Callers acquire this turn via Effect.acquireUseRelease, which runs
+                // acquire uninterruptibly and guarantees the release once it resolves,
+                // so a turn can no longer leak in the post-resume gap. This abort guard
+                // stays as defense-in-depth: the serialization chain is advanced
+                // synchronously above, but `release` is only returned to the caller on
+                // success, so if this fiber is interrupted while still queued behind
+                // `previous`, resolve `gate` on abort to keep the turn from leaking and
+                // deadlocking every later DB op on this client.
+                if (signal.aborted) {
+                    release();
+                }
+                else {
+                    signal.addEventListener("abort", () => release(), { once: true });
+                }
+                await previous;
+                return release;
+            },
+            catch: (cause) => toSmithersError(cause, "acquire sqlite transaction turn", {
+                code: "DB_WRITE_FAILED",
+                details: { operation: "acquire sqlite transaction turn" },
+            }),
+        });
+    }
+    /**
+   * @template A
+   * @param {string} writeGroup
+   * @param {Effect.Effect<A, SmithersError>} operation
+   * @returns {RunnableEffect<A, SmithersError>}
+   */
+    withTransactionEffect(writeGroup, operation) {
+        const self = this;
+        const label = `sqlite transaction ${writeGroup}`;
+        return runnableEffect(withSqliteWriteRetryEffect(() => Effect.gen(function* () {
+            const currentFiberId = yield* Effect.fiberId;
+            const currentFiberThread = FiberId.threadName(currentFiberId);
+            if (self.ownsActiveTransaction(currentFiberThread)) {
+                return yield* Effect.fail(toSmithersError(new Error(`Nested sqlite transactions are not supported (writeGroup: ${writeGroup}).`), label, {
+                    code: "DB_WRITE_FAILED",
+                    details: { writeGroup, nestedTransaction: true },
+                }));
+            }
+            // Acquire the turn and its release atomically under interruption
+            // (acquireUseRelease runs acquire uninterruptibly and guarantees the
+            // release), closing the post-resume gap where a queued interrupt would
+            // discard the finalizer install and leak the turn — deadlocking the
+            // client. Both branches below drop their own releaseTurn() call.
+            return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
+            const transactionState = getSqliteTransactionState(resolveSqliteClientKey(self.db));
+            const start = performance.now();
+            if (typeof self.internalStorage.transaction === "function" && !isBunSqliteStorage(self.internalStorage) && self.internalStorage.dialect !== POSTGRES) {
+                return yield* Effect.tryPromise({
+                    try: async () => {
+                        transactionState.depth += 1;
+                        transactionState.ownerAdapter = self;
+                        self.transactionDepth = transactionState.depth;
+                        self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
+                        self.transactionTail = transactionState.tail;
+                        try {
+                            return await self.internalStorage.transaction(() => sqliteTransactionContext.run(self, () => Effect.runPromise(operation)));
+                        }
+                        finally {
+                            transactionState.depth = Math.max(0, transactionState.depth - 1);
+                            if (transactionState.depth === 0) {
+                                transactionState.ownerAdapter = null;
+                            }
+                            self.transactionDepth = transactionState.depth;
+                            self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
+                            self.transactionTail = transactionState.tail;
+                            await Effect.runPromise(Metric.update(dbTransactionDuration, performance.now() - start));
+                        }
+                    },
+                    catch: (cause) => toSmithersError(cause, label, {
+                        code: "DB_WRITE_FAILED",
+                        details: { writeGroup, phase: "transaction" },
+                    }),
+                });
+            }
+            return yield* Effect.gen(function* () {
+                const isPostgres = self.internalStorage.dialect === POSTGRES;
+                const client = isPostgres ? null : yield* self.getSqliteTransactionClient();
+                /**
+                 * Run a transaction-control statement on the active connection,
+                 * dialect-appropriately: synchronous bun:sqlite client.run for
+                 * SQLite, async @effect/sql execute (same connection) for Postgres.
+                 * @param {string} sql
+                 * @returns {Promise<unknown>}
+                 */
+                const runControl = (sql) => isPostgres
+                    ? self.internalStorage.execute(sql)
+                    : Promise.resolve(client.run(sql));
+                /**
+     * @param {"operation" | "commit"} phase
+     * @param {unknown} error
+     */
+                const rollback = (phase, error) => Effect.gen(function* () {
+                    yield* Metric.increment(dbTransactionRollbacks);
+                    yield* Effect.logWarning("transaction rollback").pipe(Effect.annotateLogs({
+                        writeGroup,
+                        phase,
+                        error: String(error),
+                    }));
+                    yield* Effect.promise(() => runControl("ROLLBACK").then(() => undefined, () => undefined));
+                });
+	                yield* Effect.tryPromise({
+	                    try: async () => {
+	                        await runControl(beginTransactionSql(self.internalStorage.dialect));
+	                        transactionState.depth += 1;
+                        // Operations composed through an async finalizer may
+                        // resume on a child Effect fiber. Treat the active
+                        // transaction as owned by this adapter until COMMIT;
+                        // the transaction turn still serializes entry.
+                        transactionState.ownerAdapter = self;
+                        self.transactionDepth = transactionState.depth;
+                        self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
+                        self.transactionTail = transactionState.tail;
+                    },
+                    catch: (cause) => toSmithersError(cause, "begin sqlite transaction", {
+                        code: "DB_WRITE_FAILED",
+                        details: { writeGroup, phase: "begin" },
+                    }),
+                });
+                const operationExit = yield* Effect.promise(() => sqliteTransactionContext.run(self, () => Effect.runPromise(Effect.exit(operation))));
+	                if (Exit.isFailure(operationExit)) {
+	                    yield* rollback("operation", operationExit.cause);
+	                    return yield* Effect.failCause(operationExit.cause);
+	                }
+	                let capturedTxid = null;
+	                const captureTxidForTransaction = isPostgres
+	                    ? yield* Effect.promise(() => shouldCapturePostgresTxid(self))
+	                    : false;
+	                if (captureTxidForTransaction) {
+	                    const txidExit = yield* Effect.exit(Effect.tryPromise({
+	                        try: () => capturePostgresTransactionTxid(self),
+	                        catch: (cause) => toSmithersError(cause, "capture postgres txid", {
+	                            code: "DB_QUERY_FAILED",
+	                            details: { writeGroup, phase: "txid" },
+                        }),
+                    }));
+                    if (Exit.isSuccess(txidExit)) {
+                        capturedTxid = txidExit.value;
+                    }
+                }
+                const commitExit = yield* Effect.exit(Effect.tryPromise({
+                    try: () => runControl("COMMIT"),
+                    catch: (cause) => toSmithersError(cause, "commit sqlite transaction", {
+                        code: "DB_WRITE_FAILED",
+                        details: { writeGroup, phase: "commit" },
+                    }),
+                }));
+	                if (Exit.isFailure(commitExit)) {
+	                    yield* rollback("commit", commitExit.cause);
+	                    return yield* Effect.failCause(commitExit.cause);
+	                }
+	                if (capturedTxid) {
+	                    recordCommittedTxid(self, capturedTxid);
+	                }
+	                return operationExit.value;
+            }).pipe(Effect.ensuring(Effect.gen(function* () {
+                transactionState.depth = Math.max(0, transactionState.depth - 1);
+                if (transactionState.depth === 0) {
+                    transactionState.ownerAdapter = null;
+                }
+                self.transactionDepth = transactionState.depth;
+                self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
+                self.transactionTail = transactionState.tail;
+                yield* Metric.update(dbTransactionDuration, performance.now() - start);
+            })));
+            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
+        }), { label }).pipe(Effect.annotateLogs({ writeGroup }), Effect.withLogSpan("db:transaction")));
+    }
+    /**
+   * @template A
+   * @param {string} writeGroup
+   * @param {Effect.Effect<A, SmithersError>} operation
+   * @returns {Promise<A>}
+   */
+    withTransaction(writeGroup, operation) {
+        return Effect.runPromise(this.withTransactionEffect(writeGroup, operation));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    insertRun(row) {
+        validateRunRow(row);
+        return this.write("insert run", () => this.internalStorage.insertIgnore("_smithers_runs", row));
+    }
+    /**
+   * @param {string} runId
+   * @param {Record<string, unknown>} patch
+    * @returns {RunnableEffect<void, SmithersError>}
+   */
+    updateRun(runId, patch) {
+        validateRunPatch(patch);
+        return this.write(`update run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", patch, "run_id = ?", [runId]));
+    }
+    /**
+   * @param {string} runId
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    updateRunEffect(runId, patch) {
+        return this.updateRun(runId, patch);
+    }
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    updateRunIfNotCancelled(runId, patch) {
+        validateRunPatch(patch);
+        return this.write(`guarded update run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", patch, "run_id = ? AND status NOT IN (?, ?, ?, ?, ?) AND cancel_requested_at_ms IS NULL", [runId, "finished", "failed", "cancelled", "canceled", "continued"]).then((count) => count > 0));
+    }
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    updateRunIfNotCancelledOwned(runId, runtimeOwnerId, patch) {
+        validateRunPatch(patch);
+        return this.write(`owned guarded update run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", patch, "run_id = ? AND status NOT IN (?, ?, ?, ?, ?) AND cancel_requested_at_ms IS NULL AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)", [runId, "finished", "failed", "cancelled", "canceled", "continued", runtimeOwnerId, runtimeOwnerId]).then((count) => count > 0));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} runtimeOwnerId
+   * @param {number} heartbeatAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    heartbeatRun(runId, runtimeOwnerId, heartbeatAtMs) {
+        return this.write(`heartbeat run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { heartbeatAtMs }, "run_id = ? AND runtime_owner_id = ?", [runId, runtimeOwnerId]));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} cancelRequestedAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    requestRunCancel(runId, cancelRequestedAtMs) {
+        return this.write(`cancel run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { cancelRequestedAtMs }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL", [runId, "running"]).then((count) => count > 0));
+    }
+    /**
+     * Atomically claim terminal cancellation. Observable cleanup belongs only
+     * to the caller that receives true.
+     * @param {string} runId
+     * @param {number} cancelledAtMs
+     * @param {string | null} [errorJson]
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    claimRunCancellation(runId, cancelledAtMs, errorJson = null) {
+        return this.write(`claim cancellation ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
+            status: "cancelled",
+            finishedAtMs: cancelledAtMs,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            // Keep a durable cancellation signal for an owner in another
+            // process. It is cleared only by a later lifecycle transition,
+            // never as part of the terminal claim itself.
+            cancelRequestedAtMs: cancelledAtMs,
+            errorJson,
+        }, `run_id = ? AND status NOT IN (?, ?, ?, ?, ?)`, [runId, "finished", "failed", "cancelled", "canceled", "continued"])
+            .then((count) => count > 0));
+    }
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    completeRun(runId, runtimeOwnerId, finishedAtMs) {
+        return this.write(`complete run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
+            status: "finished",
+            finishedAtMs,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+        }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL AND runtime_owner_id = ?", [runId, "running", runtimeOwnerId])
+            .then((count) => count > 0));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} pauseRequestedAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    requestRunPause(runId, pauseRequestedAtMs) {
+        return this.write(`pause run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { pauseRequestedAtMs }, "run_id = ?", [runId]));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} hijackRequestedAtMs
+   * @param {string | null} [hijackTarget]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    requestRunHijack(runId, hijackRequestedAtMs, hijackTarget) {
+        return this.write(`hijack run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
+            hijackRequestedAtMs,
+            hijackTarget: hijackTarget ?? null,
+        }, "run_id = ?", [runId]));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    clearRunHijack(runId) {
+        return this.write(`clear hijack run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+        }, "run_id = ?", [runId]));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
+   */
+    getRun(runId) {
+        return this.read(`get run ${runId}`, async () => {
+            return this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_runs
+         WHERE run_id = ?
+         LIMIT 1`, [runId]);
+        });
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
+   */
+    listRunAncestry(runId, limit = 1000) {
+        const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 1000;
+        const visitedCheck = this.internalStorage.dialect === POSTGRES
+            ? "POSITION(',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',' IN ancestry.path) = 0"
+            : "instr(ancestry.path, ',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',') = 0";
+        return this.read(`list run ancestry ${runId}`, () => this.internalStorage.queryAll(`WITH RECURSIVE ancestry(run_id, parent_run_id, depth, path) AS (
+           SELECT run_id, parent_run_id, 0
+                , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
+           FROM _smithers_runs
+           WHERE run_id = ? AND ? > 0
+           UNION ALL
+           SELECT child.run_id, child.parent_run_id, ancestry.depth + 1
+                , ancestry.path || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ','
+           FROM _smithers_runs child
+           JOIN ancestry ON child.run_id = ancestry.parent_run_id
+           WHERE ancestry.parent_run_id IS NOT NULL
+             AND ancestry.depth + 1 < ?
+             AND ${visitedCheck}
+         )
+         SELECT
+           run_id,
+           parent_run_id,
+           depth
+         FROM ancestry
+         ORDER BY depth ASC
+         LIMIT ?`, [runId, normalizedLimit, normalizedLimit, normalizedLimit]));
+    }
+    /**
+   * @param {string} parentRunId
+   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
+   */
+    getLatestChildRun(parentRunId) {
+        return this.read(`get latest child run ${parentRunId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_runs
+         WHERE parent_run_id = ?
+         ORDER BY created_at_ms DESC
+         LIMIT 1`, [parentRunId]));
+    }
+    /**
+   * Walk parent_run_id DOWN from a run: the run itself at depth 0 followed by
+   * every transitive child, breadth-first (depth ascending). Mirrors
+   * listRunAncestry (which walks up) including its cycle guard.
+   *
+   * @param {string} runId
+   * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
+   */
+    listRunDescendants(runId, limit = 1000) {
+        const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 1000;
+        const visitedCheck = this.internalStorage.dialect === POSTGRES
+            ? "POSITION(',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',' IN descendants.path) = 0"
+            : "instr(descendants.path, ',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',') = 0";
+        return this.read(`list run descendants ${runId}`, () => this.internalStorage.queryAll(`WITH RECURSIVE descendants(run_id, parent_run_id, depth, path) AS (
+           SELECT run_id, parent_run_id, 0
+                , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
+           FROM _smithers_runs
+           WHERE run_id = ? AND ? > 0
+           UNION ALL
+           SELECT child.run_id, child.parent_run_id, descendants.depth + 1
+                , descendants.path || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ','
+           FROM _smithers_runs child
+           JOIN descendants ON child.parent_run_id = descendants.run_id
+           WHERE descendants.depth + 1 < ?
+             AND ${visitedCheck}
+         )
+         SELECT
+           run_id,
+           parent_run_id,
+           depth
+         FROM descendants
+         ORDER BY depth ASC
+         LIMIT ?`, [runId, normalizedLimit, normalizedLimit, normalizedLimit]));
+    }
+    /**
+   * @param {string} [status]
+   * @param {string} [workflow]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
+   */
+    listRuns(limit = 50, status, workflow) {
+        return this.read(`list runs ${status ?? "all"}`, async () => {
+            const clauses = [];
+            const params = [];
+            if (status === "running") {
+                clauses.push("(status = ? OR status = ?)");
+                params.push("running", "continued");
+            }
+            else if (status) {
+                clauses.push("status = ?");
+                params.push(status);
+            }
+            if (workflow) {
+                const configContainsGatewayKey = this.internalStorage.dialect === POSTGRES
+                    ? "POSITION(? IN config_json) > 0"
+                    : "instr(config_json, ?) > 0";
+                clauses.push(`(workflow_name = ? OR ${configContainsGatewayKey})`);
+                params.push(workflow, gatewayWorkflowKeyNeedle(workflow));
+            }
+            const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+            const rows = await this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_runs
+         ${whereSql}
+         ORDER BY created_at_ms DESC
+         LIMIT ?`, [...params, limit]);
+            return rows;
+        });
+    }
+    /**
+   * @param {number} staleBeforeMs
+   * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
+   */
+    listStaleRunningRuns(staleBeforeMs, limit = 1000) {
+        return this.read(`list stale running runs before ${staleBeforeMs}`, () => this.internalStorage.queryAll(`SELECT
+             run_id,
+             workflow_path,
+             heartbeat_at_ms,
+             runtime_owner_id,
+             status
+           FROM _smithers_runs
+           WHERE status = 'running'
+             AND (heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+           ORDER BY COALESCE(heartbeat_at_ms, 0) ASC
+           LIMIT ?`, [staleBeforeMs, limit]));
+    }
+    /**
+   * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimRunForResume(params) {
+        return this.write(`claim stale run ${params.runId}`, () => {
+            const expectedStatus = params.expectedStatus ?? "running";
+            const requireStale = params.requireStale ?? expectedStatus === "running";
+            if (this.internalStorage.dialect === POSTGRES) {
+                // Null-safe heartbeat compare without wrapping the bigint param in a
+                // numeric COALESCE(?, -1): the int4 `-1` literal would force the
+                // ms-timestamp param to int4 and overflow. Compare against the
+                // bigint column directly so Postgres infers bigint.
+                return this.internalStorage
+                    .queryAllRaw(`UPDATE _smithers_runs
+             SET runtime_owner_id = ?, heartbeat_at_ms = ?
+             WHERE run_id = ?
+               AND status = ?
+               AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+               AND (heartbeat_at_ms IS NOT DISTINCT FROM ?)
+               AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+             RETURNING run_id`, [
+                        params.claimOwnerId,
+                        params.claimHeartbeatAtMs,
+                        params.runId,
+                        expectedStatus,
+                        params.expectedRuntimeOwnerId,
+                        params.expectedHeartbeatAtMs,
+                        requireStale ? 1 : 0,
+                        params.staleBeforeMs,
+                    ])
+                    .then((rows) => rows.length > 0);
+            }
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                return this.internalStorage
+                    .queryAllRaw(`UPDATE _smithers_runs
+           SET runtime_owner_id = ?, heartbeat_at_ms = ?
+           WHERE run_id = ?
+             AND status = ?
+             AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
+             AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+           RETURNING run_id`, [
+                        params.claimOwnerId,
+                        params.claimHeartbeatAtMs,
+                        params.runId,
+                        expectedStatus,
+                        params.expectedRuntimeOwnerId,
+                        params.expectedHeartbeatAtMs,
+                        requireStale ? 1 : 0,
+                        params.staleBeforeMs,
+                    ])
+                    .then((rows) => rows.length > 0);
+            }
+            const client = this.db.session.client;
+            client
+                .query(`UPDATE _smithers_runs
+           SET runtime_owner_id = ?, heartbeat_at_ms = ?
+           WHERE run_id = ?
+             AND status = ?
+             AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
+             AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)`)
+                .run(params.claimOwnerId, params.claimHeartbeatAtMs, params.runId, expectedStatus, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, requireStale ? 1 : 0, params.staleBeforeMs);
+            return this.internalStorage
+                .queryOne("SELECT changes() AS count")
+                .then((row) => Number(row?.count ?? 0) > 0);
+        });
+    }
+    /**
+   * @param {{ runId: string; claimOwnerId: string; restoreRuntimeOwnerId: string | null; restoreHeartbeatAtMs: number | null; }} params
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseRunResumeClaim(params) {
+        return this.write(`release stale run claim ${params.runId}`, () => {
+            return this.internalStorage.execute(`UPDATE _smithers_runs
+         SET runtime_owner_id = ?, heartbeat_at_ms = ?
+         WHERE run_id = ? AND runtime_owner_id = ?`, [
+                params.restoreRuntimeOwnerId,
+                params.restoreHeartbeatAtMs,
+                params.runId,
+                params.claimOwnerId,
+            ]);
+        });
+    }
+    /**
+   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; expectedClaimedBy?: string | null; expectedClaimedAtMs?: number | null; patch: Record<string, unknown>; }} params
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    updateClaimedRun(params) {
+        validateRunPatch(params.patch);
+        return this.write(`update claimed run ${params.runId}`, () => {
+            const patchEntries = Object.entries(params.patch);
+            if (patchEntries.length === 0) {
+                return Promise.resolve(true);
+            }
+            const assignments = patchEntries.map(([key]) => `${camelToSnake(key)} = ?`);
+            const setArgs = patchEntries.map(([, value]) => value);
+            const hasClaimGuard = Object.prototype.hasOwnProperty.call(params, "expectedClaimedBy") ||
+                Object.prototype.hasOwnProperty.call(params, "expectedClaimedAtMs");
+            if (this.internalStorage.dialect === POSTGRES) {
+                // Null-safe heartbeat compare (see claimRunForResume): IS NOT
+                // DISTINCT FROM keeps the bigint param from being coerced to int4
+                // by an int4 `-1` sentinel.
+                const claimWhere = hasClaimGuard
+                    ? `AND COALESCE(claimed_by, '') = COALESCE(?, '')
+               AND (claimed_at_ms IS NOT DISTINCT FROM ?)`
+                    : "";
+                const claimArgs = hasClaimGuard
+                    ? [params.expectedClaimedBy ?? null, params.expectedClaimedAtMs ?? null]
+                    : [];
+                return this.internalStorage
+                    .queryAllRaw(`UPDATE _smithers_runs
+             SET ${assignments.join(", ")}
+             WHERE run_id = ?
+               AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+               AND (heartbeat_at_ms IS NOT DISTINCT FROM ?)
+               ${claimWhere}
+             RETURNING run_id`, [...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, ...claimArgs])
+                    .then((rows) => rows.length > 0);
+            }
+            const claimWhere = hasClaimGuard
+                ? `AND COALESCE(claimed_by, '') = COALESCE(?, '')
+             AND COALESCE(claimed_at_ms, -1) = COALESCE(?, -1)`
+                : "";
+            const claimArgs = hasClaimGuard
+                ? [params.expectedClaimedBy ?? null, params.expectedClaimedAtMs ?? null]
+                : [];
+            const client = this.db.session.client;
+            client
+                .query(`UPDATE _smithers_runs
+           SET ${assignments.join(", ")}
+           WHERE run_id = ?
+             AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
+             ${claimWhere}`)
+                .run(...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, ...claimArgs);
+            return this.internalStorage
+                .queryOne("SELECT changes() AS count")
+                .then((row) => Number(row?.count ?? 0) > 0);
+        });
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertNode(row) {
+        return this.insertNodeEffect(row);
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertNodeEffect(row) {
+        return this.write(`insert node ${row.nodeId}`, () => this.internalStorage.upsert("_smithers_nodes", row, ["runId", "nodeId", "iteration"]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<NodeRow | undefined, SmithersError>}
+   */
+    getNode(runId, nodeId, iteration) {
+        return this.read(`get node ${nodeId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_nodes
+         WHERE run_id = ? AND node_id = ? AND iteration = ?
+         LIMIT 1`, [runId, nodeId, iteration]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
+   */
+    listNodeIterations(runId, nodeId) {
+        return this.read(`list node iterations ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_nodes
+         WHERE run_id = ? AND node_id = ?
+         ORDER BY iteration DESC`, [runId, nodeId]));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
+   */
+    listNodes(runId) {
+        return this.read(`list nodes ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_nodes
+         WHERE run_id = ?`, [runId]));
+    }
+    /**
+   * @param {Table} table
+   * @param {OutputKey} key
+   * @param {Record<string, unknown>} payload
+   * @returns {RunnableEffect<unknown, SmithersError>}
+   */
+    upsertOutputRow(table, key, payload) {
+        const cols = getKeyColumns(table);
+        const values = { ...payload };
+        values.runId = key.runId;
+        values.nodeId = key.nodeId;
+        if (cols.iteration) {
+            values.iteration = key.iteration ?? 0;
+        }
+        const target = cols.iteration
+            ? [cols.runId, cols.nodeId, cols.iteration]
+            : [cols.runId, cols.nodeId];
+        const tableName = resolveOutputTableName(table);
+        const conflictColumns = cols.iteration
+            ? ["runId", "nodeId", "iteration"]
+            : ["runId", "nodeId"];
+        const persist = async () => {
+            await this.internalStorage.execute(`CREATE TABLE IF NOT EXISTS _smithers_output_provenance (run_id TEXT NOT NULL, output_table TEXT NOT NULL, node_id TEXT NOT NULL, iteration INTEGER NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (run_id, output_table, node_id, iteration), UNIQUE (run_id, seq))`);
+            // Lock the run row before reading MAX(seq). This is the portable
+            // allocator mutex for PostgreSQL and PGlite; SQLite's transaction
+            // writer lock supplies the same serialization.
+            const runsTable = this.internalStorage.dialect === POSTGRES
+                ? await this.internalStorage.queryOneRaw(`SELECT 1 FROM information_schema.tables WHERE table_name = '_smithers_runs' LIMIT 1`)
+                : await this.internalStorage.queryOneRaw(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs' LIMIT 1`);
+            if (runsTable) await this.internalStorage.execute(`UPDATE _smithers_runs SET run_id = run_id WHERE run_id = ?`, [key.runId]);
+            if (!isBunSqliteStorage(this.internalStorage)) await this.internalStorage.upsert(tableName, values, conflictColumns);
+            else await this.db.insert(table).values(values).onConflictDoUpdate({ target, set: values });
+            const iteration = key.iteration ?? 0;
+            const found = await this.internalStorage.queryOne(`SELECT seq FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ? LIMIT 1`, [key.runId, tableName, key.nodeId, iteration]);
+            if (!found) {
+                const signalsTable = this.internalStorage.dialect === POSTGRES
+                    ? await this.internalStorage.queryOneRaw("SELECT 1 FROM information_schema.tables WHERE table_name = '_smithers_signals' LIMIT 1")
+                    : await this.internalStorage.queryOneRaw("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_smithers_signals' LIMIT 1");
+                const next = signalsTable
+                    ? await this.internalStorage.queryOne(`SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = ?)`, [key.runId, key.runId])
+                    : await this.internalStorage.queryOne(`SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_output_provenance WHERE run_id = ?`, [key.runId]);
+                await this.internalStorage.execute(`INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ?)`, [key.runId, tableName, key.nodeId, iteration, Number(next?.seq ?? 0), key.runId, tableName, key.nodeId, iteration]);
+            }
+            const confirmed = await this.internalStorage.queryOne(`SELECT seq FROM _smithers_output_provenance WHERE run_id = ? AND output_table = ? AND node_id = ? AND iteration = ? LIMIT 1`, [key.runId, tableName, key.nodeId, iteration]);
+            if (!confirmed) throw new Error("Output provenance allocation did not commit");
+        };
+        const inTransaction = sqliteTransactionContext.getStore() === this;
+        if (inTransaction) return this.write(`upsert output ${tableName}`, persist);
+        // withTransaction serializes SQLite writers and makes the output row
+        // plus its provenance one crash-atomic unit. PostgreSQL unique-seq
+        // conflicts are retried by the transaction wrapper, so MAX(seq)+1 can
+        // never report a successful output without its provenance row.
+        return this.withTransactionEffect(`upsert output ${tableName}`, Effect.promise(persist));
+    }
+    /**
+   * @param {Table} table
+   * @param {OutputKey} key
+   * @param {Record<string, unknown>} payload
+   * @returns {RunnableEffect<unknown, SmithersError>}
+   */
+    upsertOutputRowEffect(table, key, payload) {
+        return this.upsertOutputRow(table, key, payload);
+    }
+    /**
+   * @param {string} tableName
+   * @param {OutputKey} key
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteOutputRow(tableName, key) {
+        return this.write(`delete output ${tableName}`, async () => {
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                // External output tables are created from the Zod schema with
+                // snake_case run_id/node_id/iteration columns, so no PRAGMA-based
+                // column discovery is needed. Query the held storage connection
+                // directly: calling hasPhysicalTable() here would try to acquire
+                // this adapter's transaction turn a second time and deadlock.
+                let resolvedTableName = tableName;
+                // Mirror hasPhysicalTable's dialect switch: external storages
+                // can speak sqlite (Cloudflare, libsql), where
+                // information_schema does not exist and would fail every
+                // retry-task / time-travel delete.
+                const existsSql = this.internalStorage.dialect === POSTGRES
+                    ? `SELECT 1 AS one FROM information_schema.tables WHERE table_name = ? LIMIT 1`
+                    : `SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`;
+                const tableExists = async (candidate) => {
+                    const row = await this.internalStorage.queryOneRaw(existsSql, [candidate]);
+                    return row != null;
+                };
+                if (!(await tableExists(resolvedTableName))) {
+                    const snakeName = camelToSnake(tableName);
+                    if (snakeName !== tableName && await tableExists(snakeName)) {
+                        resolvedTableName = snakeName;
+                    }
+                }
+                const escapedPg = resolvedTableName.replaceAll(`"`, `""`);
+                return this.internalStorage.execute(`DELETE FROM "${escapedPg}"
+             WHERE run_id = ? AND node_id = ? AND iteration = ?`, [key.runId, key.nodeId, key.iteration ?? 0]);
+            }
+            const client = this.db.session.client;
+            let resolvedTableName = tableName;
+            let escapedTableName = resolvedTableName.replaceAll(`"`, `""`);
+            let tableInfo = client
+                .query(`PRAGMA table_info("${escapedTableName}")`)
+                .all();
+            if (tableInfo.length === 0) {
+                const schemaCandidates = [
+                    this.db?._?.fullSchema,
+                    this.db?._?.schema,
+                    this.db?.schema,
+                ];
+                for (const candidate of schemaCandidates) {
+                    if (!candidate || typeof candidate !== "object")
+                        continue;
+                    const table = candidate[tableName];
+                    if (!table)
+                        continue;
+                    try {
+                        resolvedTableName = getTableName(table);
+                        escapedTableName = resolvedTableName.replaceAll(`"`, `""`);
+                        tableInfo = client
+                            .query(`PRAGMA table_info("${escapedTableName}")`)
+                            .all();
+                        if (tableInfo.length > 0) {
+                            break;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            if (tableInfo.length === 0) {
+                // Node rows persist the schema KEY (`tfCandidate`) while the
+                // physical table is snake_case (`tf_candidate`). A CLI-opened
+                // adapter has no workflow output schema to consult, so fall
+                // back to the naming convention before giving up.
+                const snakeName = camelToSnake(tableName);
+                if (snakeName !== tableName) {
+                    const escapedSnake = snakeName.replaceAll(`"`, `""`);
+                    const snakeInfo = client
+                        .query(`PRAGMA table_info("${escapedSnake}")`)
+                        .all();
+                    if (snakeInfo.length > 0) {
+                        resolvedTableName = snakeName;
+                        escapedTableName = escapedSnake;
+                        tableInfo = snakeInfo;
+                    }
+                }
+            }
+            const columnNames = new Set(tableInfo
+                .map((column) => column.name)
+                .filter((name) => typeof name === "string"));
+            const runIdColumn = columnNames.has("run_id")
+                ? "run_id"
+                : columnNames.has("runId")
+                    ? "runId"
+                    : null;
+            const nodeIdColumn = columnNames.has("node_id")
+                ? "node_id"
+                : columnNames.has("nodeId")
+                    ? "nodeId"
+                    : null;
+            const iterationColumn = columnNames.has("iteration")
+                ? "iteration"
+                : null;
+            if (!runIdColumn || !nodeIdColumn) {
+                throw new Error(`Output table ${tableName} is missing runId/nodeId columns`);
+            }
+            if (iterationColumn) {
+                client
+                    .query(`DELETE FROM "${escapedTableName}"
+             WHERE "${runIdColumn}" = ? AND "${nodeIdColumn}" = ? AND "${iterationColumn}" = ?`)
+                    .run(key.runId, key.nodeId, key.iteration ?? 0);
+            }
+            else {
+                client
+                    .query(`DELETE FROM "${escapedTableName}"
+             WHERE "${runIdColumn}" = ? AND "${nodeIdColumn}" = ?`)
+                    .run(key.runId, key.nodeId);
+            }
+            return Promise.resolve(undefined);
+        });
+    }
+    /**
+   * @param {string} tableName
+   * @param {OutputKey} key
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteOutputRowEffect(tableName, key) {
+        return this.deleteOutputRow(tableName, key);
+    }
+    /**
+   * @param {string} tableName
+   * @param {string} runId
+   * @param {string} nodeId
+   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
+   */
+    getRawNodeOutput(tableName, runId, nodeId) {
+        return runnableEffect(this.read(`get raw node output ${tableName}`, () => {
+            const escaped = tableName.replaceAll(`"`, `""`);
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                const tableBoolColumns = this.internalStorage.dialect === POSTGRES
+                    ? getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName))
+                    : [];
+                return this.internalStorage
+                    .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`, [runId, nodeId])
+                    .then(async (row) => coerceRawBooleanColumns(row ?? null, [
+                    ...tableBoolColumns,
+                    ...(this.internalStorage.dialect === POSTGRES
+                        ? []
+                        : await getPersistedBooleanColumnNamesAsync(this.internalStorage, tableName)),
+                ]) ?? null);
+            }
+            const client = this.db.session.client;
+            const boolColumns = [
+                ...getPersistedBooleanColumnNames(client, tableName),
+                ...getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName)),
+            ];
+            const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`);
+            const row = stmt.get(runId, nodeId);
+            return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
+        }).pipe(Effect.catchAll((error) => recoverOutputRead(`get raw node output ${tableName}`, error))));
+    }
+    /**
+   * @param {string} tableName
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
+   */
+    /**
+   * Whether a physical table with this exact name exists in the database.
+   * @param {string} tableName
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    hasPhysicalTable(tableName) {
+        return runnableEffect(this.read(`has physical table ${tableName}`, () => {
+            if (this.internalStorage.dialect === POSTGRES) {
+                return this.internalStorage
+                    .queryOneRaw(`SELECT 1 AS one FROM information_schema.tables WHERE table_name = ? LIMIT 1`, [tableName])
+                    .then((row) => row != null);
+            }
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                return this.internalStorage
+                    .queryOneRaw(`SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`, [tableName])
+                    .then((row) => row != null);
+            }
+            const client = this.db.session.client;
+            const stmt = client.query(`SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`);
+            return Promise.resolve(stmt.get(tableName) != null);
+        }).pipe(Effect.catchAll(() => Effect.succeed(false))));
+    }
+    getRawNodeOutputForIteration(tableName, runId, nodeId, iteration) {
+        return runnableEffect(this.read(`get raw node output ${tableName} iteration ${iteration}`, () => {
+            const escaped = tableName.replaceAll(`"`, `""`);
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                const tableBoolColumns = this.internalStorage.dialect === POSTGRES
+                    ? getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName))
+                    : [];
+                return this.internalStorage
+                    .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`, [runId, nodeId, iteration])
+                    .then(async (row) => coerceRawBooleanColumns(row ?? null, [
+                    ...tableBoolColumns,
+                    ...(this.internalStorage.dialect === POSTGRES
+                        ? []
+                        : await getPersistedBooleanColumnNamesAsync(this.internalStorage, tableName)),
+                ]) ?? null);
+            }
+            const client = this.db.session.client;
+            const boolColumns = [
+                ...getPersistedBooleanColumnNames(client, tableName),
+                ...getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName)),
+            ];
+            const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`);
+            const row = stmt.get(runId, nodeId, iteration);
+            return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
+        }).pipe(Effect.catchAll((error) => recoverOutputRead(`get raw node output ${tableName} iteration ${iteration}`, error))));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertAttempt(row) {
+        return this.write(`insert attempt ${row.nodeId}#${row.attempt}`, () => this.internalStorage.upsert("_smithers_attempts", row, ["runId", "nodeId", "iteration", "attempt"]));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertAttemptEffect(row) {
+        return this.insertAttempt(row);
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    updateAttempt(runId, nodeId, iteration, attempt, patch) {
+        return this.write(`update attempt ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", patch, "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?", [runId, nodeId, iteration, attempt]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    updateAttemptEffect(runId, nodeId, iteration, attempt, patch) {
+        return this.updateAttempt(runId, nodeId, iteration, attempt, patch);
+    }
+    /**
+     * Compare-and-set the attempt terminal state. Output and node rows must be
+     * written in the same transaction only after this claim succeeds.
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    claimAttemptCompletion(runId, nodeId, iteration, attempt, runtimeOwnerId, finishedAtMs) {
+        return this.write(`claim attempt completion ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", {
+            state: "finished",
+            finishedAtMs,
+        }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = 'in-progress'
+            AND EXISTS (SELECT 1 FROM _smithers_runs r
+              WHERE r.run_id = _smithers_attempts.run_id
+                AND r.status = 'running'
+                AND r.cancel_requested_at_ms IS NULL
+                AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?))
+        `, [runId, nodeId, iteration, attempt, runtimeOwnerId, runtimeOwnerId]).then((count) => count > 0));
+    }
+    claimAttemptTerminal(runId, nodeId, iteration, attempt, runtimeOwnerId, state, finishedAtMs, errorJson) {
+        return this.write(`claim attempt ${state} ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", {
+            state,
+            finishedAtMs,
+            ...(errorJson === undefined ? {} : { errorJson }),
+        }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = 'in-progress'
+            AND EXISTS (SELECT 1 FROM _smithers_runs r
+              WHERE r.run_id = _smithers_attempts.run_id
+                AND r.status = 'running'
+                AND r.cancel_requested_at_ms IS NULL
+                AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?))
+        `, [runId, nodeId, iteration, attempt, runtimeOwnerId, runtimeOwnerId]).then((count) => count > 0));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @param {number} heartbeatAtMs
+     * @param {string | null} heartbeatDataJson
+     * @param {string} runtimeOwnerId
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    heartbeatAttempt(runId, nodeId, iteration, attempt, heartbeatAtMs, heartbeatDataJson, runtimeOwnerId) {
+        // Both rows are one ownership-fenced fact.  Deliberately abort the
+        // transaction when either side loses the fence; returning false after
+        // only updating the attempt would leave stale-owner evidence visible to
+        // the monitor.
+        const ownerId = runtimeOwnerId ?? null;
+        return this.withTransactionEffect(`heartbeat attempt ${nodeId}#${attempt}`, Effect.gen(this, function* () {
+            const runUpdated = yield* Effect.tryPromise(() => this.internalStorage.updateWhere("_smithers_runs", { heartbeatAtMs }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)", [runId, "running", ownerId, ownerId]).then((count) => count > 0));
+            if (!runUpdated) return yield* Effect.fail(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat run fence lost."));
+            const updated = yield* Effect.tryPromise(() => this.internalStorage.updateWhere("_smithers_attempts", {
+                heartbeatAtMs,
+                ...(heartbeatDataJson === null ? {} : { heartbeatDataJson }),
+            }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = 'in-progress'`, [runId, nodeId, iteration, attempt]).then((count) => count > 0));
+            if (!updated) return yield* Effect.fail(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat attempt fence lost."));
+            return true;
+        })).pipe(Effect.catchAll((error) => {
+            if (error instanceof SmithersError && error.code === "HEARTBEAT_FENCE_LOST") return Effect.succeed(false);
+            return Effect.fail(error);
+        }));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+   */
+    listAttempts(runId, nodeId, iteration) {
+        return this.read(`list attempts ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_attempts
+         WHERE run_id = ? AND node_id = ? AND iteration = ?
+         ORDER BY attempt DESC`, [runId, nodeId, iteration], { booleanColumns: ["cached"] }));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+   */
+    listAttemptsForRun(runId) {
+        return this.read(`list attempts for run ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_attempts
+         WHERE run_id = ?
+         ORDER BY started_at_ms ASC, node_id ASC, iteration ASC, attempt ASC`, [runId], { booleanColumns: ["cached"] }));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @returns {RunnableEffect<AttemptRow | undefined, SmithersError>}
+   */
+    getAttempt(runId, nodeId, iteration, attempt) {
+        return this.read(`get attempt ${nodeId}#${attempt}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_attempts
+         WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?
+         LIMIT 1`, [runId, nodeId, iteration, attempt], { booleanColumns: ["cached"] }));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+   */
+    listInProgressAttempts(runId) {
+        return this.read(`list in-progress attempts ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_attempts
+         WHERE run_id = ? AND state = ?`, [runId, "in-progress"], { booleanColumns: ["cached"] }));
+    }
+    /**
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+   */
+    listAllInProgressAttempts() {
+        return this.read("list all in-progress attempts", () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_attempts
+         WHERE state = ?`, ["in-progress"], { booleanColumns: ["cached"] }));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} frameNo
+   * @param {number} [limit]
+   * @returns {RunnableEffect<FrameRow[], SmithersError>}
+   */
+    listFrameChainDesc(runId, frameNo, limit) {
+        return this.read(`list frame chain ${runId}:${frameNo}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_frames
+         WHERE run_id = ? AND frame_no <= ?
+         ORDER BY frame_no DESC${typeof limit === "number" ? " LIMIT ?" : ""}`, typeof limit === "number" ? [runId, frameNo, limit] : [runId, frameNo]));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} frameNo
+   * @param {Map<number, string>} [localCache]
+   * @returns {Effect.Effect<string | undefined, SmithersError>}
+   */
+    reconstructFrameXml(runId, frameNo, localCache = new Map()) {
+        const self = this;
+        return Effect.gen(function* () {
+            const localHit = localCache.get(frameNo);
+            if (localHit !== undefined)
+                return localHit;
+            const cacheHit = self.getCachedFrameXml(runId, frameNo);
+            if (cacheHit !== undefined) {
+                localCache.set(frameNo, cacheHit);
+                return cacheHit;
+            }
+            let rows = (yield* self.listFrameChainDesc(runId, frameNo, FRAME_KEYFRAME_INTERVAL + 2));
+            if (rows.length === 0)
+                return undefined;
+            let anchorIndex = rows.findIndex((row) => normalizeFrameEncoding(row.encoding) !== "delta");
+            if (anchorIndex < 0) {
+                rows = (yield* self.listFrameChainDesc(runId, frameNo));
+                anchorIndex = rows.findIndex((row) => normalizeFrameEncoding(row.encoding) !== "delta");
+            }
+            if (anchorIndex < 0) {
+                return rows.find((row) => row.frameNo === frameNo)?.xmlJson;
+            }
+            const chain = rows.slice(0, anchorIndex + 1).reverse();
+            let currentXml = "";
+            for (const frameRow of chain) {
+                const rowEncoding = normalizeFrameEncoding(frameRow.encoding);
+                if (rowEncoding === "delta") {
+                    if (!currentXml) {
+                        currentXml = String(frameRow.xmlJson ?? "null");
+                    }
+                    else {
+                        currentXml = yield* Effect.try({
+                            try: () => applyFrameDeltaJson(currentXml, String(frameRow.xmlJson ?? "")),
+                            catch: (cause) => toSmithersError(cause, `apply frame delta ${runId}:${frameRow.frameNo}`, {
+                                code: "DB_QUERY_FAILED",
+                                details: { runId, frameNo: frameRow.frameNo },
+                            }),
+                        });
+                    }
+                }
+                else {
+                    currentXml = String(frameRow.xmlJson ?? "null");
+                }
+                localCache.set(frameRow.frameNo, currentXml);
+                self.rememberFrameXml(runId, frameRow.frameNo, currentXml);
+            }
+            return localCache.get(frameNo);
+        });
+    }
+    /**
+   * @param {FrameRow} row
+   * @param {Map<number, string>} [localCache]
+   * @returns {Effect.Effect<FrameRow, SmithersError>}
+   */
+    inflateFrameRow(row, localCache = new Map()) {
+        const self = this;
+        return Effect.gen(function* () {
+            const encoding = normalizeFrameEncoding(row?.encoding);
+            if (encoding !== "delta") {
+                const xmlJson = String(row?.xmlJson ?? "null");
+                localCache.set(row.frameNo, xmlJson);
+                self.rememberFrameXml(row.runId, row.frameNo, xmlJson);
+                return { ...row, encoding, xmlJson };
+            }
+            const xmlJson = yield* self.reconstructFrameXml(row.runId, row.frameNo, localCache);
+            return {
+                ...row,
+                encoding,
+                xmlJson: xmlJson ?? String(row?.xmlJson ?? "null"),
+            };
+        });
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertFrame(row) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            const runId = String(row.runId);
+            const frameNo = Number(row.frameNo);
+            const fullXmlJson = String(row.xmlJson ?? "null");
+            let encoding = "keyframe";
+            let persistedXmlJson = fullXmlJson;
+            if (frameNo > 0 && frameNo % FRAME_KEYFRAME_INTERVAL !== 0) {
+                const previousXmlJson = yield* self.reconstructFrameXml(runId, frameNo - 1);
+                if (typeof previousXmlJson === "string") {
+                    const delta = yield* Effect.try({
+                        try: () => encodeFrameDelta(previousXmlJson, fullXmlJson),
+                        catch: (cause) => toSmithersError(cause, `encode frame delta ${runId}:${frameNo}`, {
+                            code: "DB_WRITE_FAILED",
+                            details: { runId, frameNo },
+                        }),
+                    });
+                    const deltaJson = serializeFrameDelta(delta);
+                    if (deltaJson.length < fullXmlJson.length) {
+                        encoding = "delta";
+                        persistedXmlJson = deltaJson;
+                    }
+                }
+            }
+            const persistedRow = {
+                ...row,
+                xmlJson: persistedXmlJson,
+                encoding,
+            };
+            yield* self.write(`insert frame ${frameNo}`, () => self.internalStorage.upsert("_smithers_frames", persistedRow, ["runId", "frameNo"]));
+            self.clearFrameCacheForRun(runId);
+            self.rememberFrameXml(runId, frameNo, fullXmlJson);
+        }));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertFrameEffect(row) {
+        return this.insertFrame(row);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
+   */
+    getLastFrame(runId) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            const row = yield* self.read(`get last frame ${runId}`, () => self.internalStorage.queryOne(`SELECT *
+           FROM _smithers_frames
+           WHERE run_id = ?
+           ORDER BY frame_no DESC
+           LIMIT 1`, [runId]));
+            if (!row)
+                return undefined;
+            return yield* self.inflateFrameRow(row);
+        }));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertOrUpdateApproval(row) {
+        return this.write(`upsert approval ${row.nodeId}`, () => this.internalStorage.upsert("_smithers_approvals", row, ["runId", "nodeId", "iteration"]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<ApprovalRow | undefined, SmithersError>}
+   */
+    getApproval(runId, nodeId, iteration) {
+        return this.read(`get approval ${nodeId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_approvals
+         WHERE run_id = ? AND node_id = ? AND iteration = ?
+         LIMIT 1`, [runId, nodeId, iteration], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
+   * @param {HumanRequestRow} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertHumanRequest(row) {
+        return this.write(`insert human request ${row.requestId}`, () => this.internalStorage.insertIgnore("_smithers_human_requests", row));
+    }
+    /**
+   * @param {string} requestId
+   * @returns {RunnableEffect<HumanRequestRow | undefined, SmithersError>}
+   */
+    getHumanRequest(requestId) {
+        return this.read(`get human request ${requestId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_human_requests
+         WHERE request_id = ?
+         LIMIT 1`, [requestId]));
+    }
+    /**
+   * @param {string} requestId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    reopenHumanRequest(requestId) {
+        return this.write(`reopen human request ${requestId}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
+            status: "pending",
+            responseJson: null,
+            answeredAtMs: null,
+            answeredBy: null,
+        }, "request_id = ? AND status = ?", [requestId, "answered"]));
+    }
+    /**
+    * @param {number} [nowMs]
+   * @returns {RunnableEffect<void, SmithersError>}
+    */
+    expireStaleHumanRequests(nowMs = Date.now()) {
+        return this.write(`expire stale human requests before ${nowMs}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
+            status: "expired",
+            responseJson: null,
+            answeredAtMs: null,
+            answeredBy: null,
+        }, "status = ? AND timeout_at_ms IS NOT NULL AND timeout_at_ms <= ?", ["pending", nowMs]));
+    }
+    /**
+   * @param {number} [nowMs]
+   * @returns {RunnableEffect<PendingHumanRequestRow[], SmithersError>}
+   */
+    listPendingHumanRequests(nowMs = Date.now()) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            yield* self.expireStaleHumanRequests(nowMs);
+            return yield* self.read("list pending human requests", () => self.internalStorage.queryAll(`SELECT
+             h.request_id,
+             h.run_id,
+             h.node_id,
+             h.iteration,
+             h.kind,
+             h.status,
+             h.prompt,
+             h.schema_json,
+             h.options_json,
+             h.response_json,
+             h.requested_at_ms,
+             h.answered_at_ms,
+             h.answered_by,
+             h.timeout_at_ms,
+             r.workflow_name,
+             r.status AS run_status,
+             n.label AS node_label
+           FROM _smithers_human_requests h
+           LEFT JOIN _smithers_runs r ON h.run_id = r.run_id
+           LEFT JOIN _smithers_nodes n
+             ON h.run_id = n.run_id
+            AND h.node_id = n.node_id
+            AND h.iteration = n.iteration
+           WHERE h.status = ?
+           ORDER BY h.requested_at_ms ASC, h.run_id, h.node_id, h.iteration`, ["pending"]));
+        }));
+    }
+    /**
+   * @param {string} requestId
+   * @param {string} responseJson
+   * @param {number} answeredAtMs
+   * @param {string | null} [answeredBy]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    answerHumanRequest(requestId, responseJson, answeredAtMs, answeredBy) {
+        return this.write(`answer human request ${requestId}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
+            status: "answered",
+            responseJson,
+            answeredAtMs,
+            answeredBy: answeredBy ?? null,
+        }, "request_id = ? AND status = ?", [requestId, "pending"]));
+    }
+    /**
+   * @param {string} requestId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    cancelHumanRequest(requestId) {
+        return this.write(`cancel human request ${requestId}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
+            status: "cancelled",
+        }, "request_id = ? AND status = ?", [requestId, "pending"]));
+    }
+    /**
+   * @param {AlertRow} row
+   * @returns {Promise<AlertRow | undefined>}
+   */
+    insertAlert(row) {
+        validateAlertRow(row);
+        const self = this;
+        return this.withTransaction(`insert alert ${row.alertId}`, Effect.gen(function* () {
+            const existing = yield* self.getAlert(row.alertId);
+            if (existing) {
+                return existing;
+            }
+            yield* self.write(`insert alert ${row.alertId}`, () => self.internalStorage.insertIgnore("_smithers_alerts", row));
+            yield* Metric.increment(Metric.tagged(Metric.tagged(alertsFiredTotal, "policy", row.policyName), "severity", row.severity));
+            if (isAlertActiveStatus(row.status)) {
+                yield* Metric.update(alertsActive, 1);
+            }
+            return yield* self.getAlert(row.alertId);
+        }));
+    }
+    /**
+   * @param {string} alertId
+   * @returns {RunnableEffect<AlertRow | undefined, SmithersError>}
+   */
+    getAlert(alertId) {
+        return this.read(`get alert ${alertId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_alerts
+         WHERE alert_id = ?
+         LIMIT 1`, [alertId]));
+    }
+    /**
+   * @param {readonly AlertStatus[]} [statuses]
+   * @returns {RunnableEffect<AlertRow[], SmithersError>}
+   */
+    listAlerts(limit = 100, statuses) {
+        if (statuses) {
+            for (const status of statuses) {
+                validateAlertStatus(status);
+            }
+        }
+        const normalizedLimit = Math.max(1, Math.floor(limit));
+        return this.read("list alerts", () => {
+            const clauses = [];
+            const params = [];
+            if (statuses && statuses.length > 0) {
+                clauses.push(`status IN (${statuses.map(() => "?").join(", ")})`);
+                params.push(...statuses);
+            }
+            const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+            return this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_alerts
+         ${whereSql}
+         ORDER BY
+           CASE status
+             WHEN 'firing' THEN 0
+             WHEN 'acknowledged' THEN 1
+             WHEN 'silenced' THEN 2
+             WHEN 'resolved' THEN 3
+             ELSE 4
+           END,
+           fired_at_ms DESC,
+           alert_id ASC
+         LIMIT ?`, [...params, normalizedLimit]);
+        });
+    }
+    /**
+   * @param {string} alertId
+   * @returns {Promise<AlertRow | undefined>}
+   */
+    acknowledgeAlert(alertId, acknowledgedAtMs = Date.now()) {
+        validateOptionalPositiveTimestamp({ acknowledgedAtMs }, "acknowledgedAtMs");
+        const self = this;
+        return this.withTransaction(`acknowledge alert ${alertId}`, Effect.gen(function* () {
+            const alert = yield* self.getAlert(alertId);
+            if (!alert) {
+                return undefined;
+            }
+            if (alert.status !== "firing") {
+                return alert;
+            }
+            yield* self.write(`acknowledge alert ${alertId}`, () => self.internalStorage.updateWhere("_smithers_alerts", {
+                status: "acknowledged",
+                acknowledgedAtMs,
+            }, "alert_id = ? AND status = ?", [alertId, "firing"]));
+            yield* Metric.increment(Metric.tagged(alertsAcknowledgedTotal, "policy", alert.policyName));
+            return yield* self.getAlert(alertId);
+        }));
+    }
+    /**
+   * @param {string} alertId
+   * @returns {Promise<AlertRow | undefined>}
+   */
+    resolveAlert(alertId, resolvedAtMs = Date.now()) {
+        validateOptionalPositiveTimestamp({ resolvedAtMs }, "resolvedAtMs");
+        const self = this;
+        return this.withTransaction(`resolve alert ${alertId}`, Effect.gen(function* () {
+            const alert = yield* self.getAlert(alertId);
+            if (!alert) {
+                return undefined;
+            }
+            if (alert.status === "resolved") {
+                return alert;
+            }
+            yield* self.write(`resolve alert ${alertId}`, () => self.internalStorage.updateWhere("_smithers_alerts", {
+                status: "resolved",
+                resolvedAtMs,
+            }, "alert_id = ? AND status != ?", [alertId, "resolved"]));
+            if (isAlertActiveStatus(alert.status)) {
+                yield* Metric.update(alertsActive, -1);
+            }
+            return yield* self.getAlert(alertId);
+        }));
+    }
+    /**
+   * @param {string} alertId
+   * @returns {Promise<AlertRow | undefined>}
+   */
+    silenceAlert(alertId) {
+        const self = this;
+        return this.withTransaction(`silence alert ${alertId}`, Effect.gen(function* () {
+            const alert = yield* self.getAlert(alertId);
+            if (!alert) {
+                return undefined;
+            }
+            if (alert.status === "resolved" || alert.status === "silenced") {
+                return alert;
+            }
+            yield* self.write(`silence alert ${alertId}`, () => self.internalStorage.updateWhere("_smithers_alerts", {
+                status: "silenced",
+            }, "alert_id = ? AND status != ? AND status != ?", [alertId, "resolved", "silenced"]));
+            return yield* self.getAlert(alertId);
+        }));
+    }
+    /**
+   * @param {{ runId: string; signalName: string; correlationId: string | null; payloadJson: string; receivedAtMs: number; receivedBy?: string | null; }} row
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    insertSignalWithNextSeq(row) {
+        const label = `insert signal ${row.signalName}`;
+        const self = this;
+        return runnableEffect(withSqliteWriteRetryEffect(() => Effect.gen(function* () {
+            const dedupeWhereSql = `run_id = ?
+                 AND signal_name = ?
+                 AND ${row.correlationId === null ? "correlation_id IS NULL" : "correlation_id = ?"}
+                 AND payload_json = ?
+                 AND received_at_ms = ?
+                 AND ${row.receivedBy == null ? "received_by IS NULL" : "received_by = ?"}`;
+            const dedupeParams = [
+                row.runId,
+                row.signalName,
+                ...(row.correlationId === null ? [] : [row.correlationId]),
+                row.payloadJson,
+                row.receivedAtMs,
+                ...(row.receivedBy == null ? [] : [row.receivedBy]),
+            ];
+            const existing = yield* self.read(label, () => self.internalStorage.queryOne(`SELECT seq
+               FROM _smithers_signals
+               WHERE ${dedupeWhereSql}
+               ORDER BY seq DESC
+               LIMIT 1`, dedupeParams));
+            if (existing?.seq !== undefined) {
+                return existing.seq;
+            }
+            const client = /** @type {{ exec?: unknown; query?: unknown; run?: unknown }} */ (resolveSqliteClientKey(self.db));
+	            if (typeof client.exec !== "function" ||
+	                typeof client.query !== "function" ||
+	                typeof client.run !== "function") {
+	                if (self.internalStorage.dialect === POSTGRES) {
+	                    return yield* self.write(label, () => self.internalStorage.insertSignalWithNextSeqPostgres(row));
+	                }
+	                // External-SQLite fallback. Serialize the
+	                // dedupe/read-MAX/insert sequence under the shared transaction
+	                // turn so concurrent identical redeliveries return the first
+	                // seq instead of allocating duplicate signal rows.
+	                return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
+	                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
+	                return yield* Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
+	                            catch: (cause) => toSmithersError(cause, "begin fallback signal transaction"),
+	                        });
+	                    }
+	                    const existingInTurn = yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.queryOne(`SELECT seq
+                           FROM _smithers_signals
+                           WHERE ${dedupeWhereSql}
+                           ORDER BY seq DESC
+                           LIMIT 1`, dedupeParams),
+	                        catch: (cause) => toSmithersError(cause, "dedupe fallback signal row"),
+	                    });
+	                    if (existingInTurn?.seq !== undefined) {
+	                        if (captureTxidForWrite) {
+	                            yield* Effect.tryPromise({
+	                                try: () => self.internalStorage.execute("COMMIT"),
+	                                catch: (cause) => toSmithersError(cause, "commit fallback signal dedupe transaction"),
+	                            });
+	                        }
+	                        return Number(existingInTurn.seq);
+	                    }
+                    const lastSeq = (yield* Effect.tryPromise({
+                        try: () => self.internalStorage.getLastRunProvenanceSeq(row.runId),
+	                        catch: (cause) => toSmithersError(cause, "get fallback last signal seq"),
+                    })) ?? -1;
+                    const seq = lastSeq + 1;
+                    yield* Effect.tryPromise({
+                        try: () => self.internalStorage.insertIgnore("_smithers_signals", {
+                            ...row,
+                            receivedBy: row.receivedBy ?? null,
+                            seq,
+	                        }),
+	                        catch: (cause) => toSmithersError(cause, "insert fallback signal row"),
+	                    });
+	                    const capturedTxid = captureTxidForWrite
+	                        ? yield* Effect.tryPromise({
+	                            try: () => capturePostgresTransactionTxid(self),
+	                            catch: (cause) => toSmithersError(cause, "capture fallback signal txid"),
+	                        })
+	                        : null;
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute("COMMIT"),
+	                            catch: (cause) => toSmithersError(cause, "commit fallback signal transaction"),
+	                        });
+	                        recordCommittedTxid(self, capturedTxid);
+	                    }
+	                    return seq;
+	                }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
+	                    }
+	                    return yield* Effect.fail(error);
+	                })));
+	            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
+	            }
+            return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.try({
+                try: () => {
+                    client.run("BEGIN IMMEDIATE");
+                    try {
+                        const existingInTurn = client
+                            .query(`SELECT seq
+                               FROM _smithers_signals
+                               WHERE ${dedupeWhereSql}
+                               ORDER BY seq DESC
+                               LIMIT 1`)
+                            .get(...dedupeParams);
+                        if (existingInTurn?.seq !== undefined) {
+                            client.run("COMMIT");
+                            return Number(existingInTurn.seq);
+                        }
+                        const res = client
+                            .query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_signals WHERE run_id = ? UNION ALL SELECT seq FROM _smithers_output_provenance WHERE run_id = ?)")
+                            .get(row.runId, row.runId);
+                        const seq = Number(res?.seq ?? 0);
+                        client
+                            .query("INSERT INTO _smithers_signals (run_id, seq, signal_name, correlation_id, payload_json, received_at_ms, received_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                            .run(row.runId, seq, row.signalName, row.correlationId, row.payloadJson, row.receivedAtMs, row.receivedBy ?? null);
+                        client.run("COMMIT");
+                        return seq;
+                    }
+                    catch (error) {
+                        try {
+                            client.run("ROLLBACK");
+                        }
+                        catch {
+                            // ignore rollback failures
+                        }
+                        throw error;
+                    }
+                },
+                catch: (cause) => toSmithersError(cause, "insert signal transaction"),
+            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
+        }), { label }).pipe(Effect.annotateLogs({
+            runId: row.runId,
+            signalName: row.signalName,
+            correlationId: row.correlationId ?? null,
+        }), Effect.withLogSpan(`db:${label}`)));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<number | undefined, SmithersError>}
+   */
+    getLastSignalSeq(runId) {
+        return this.read(`get last signal seq ${runId}`, () => this.internalStorage.getLastSignalSeq(runId));
+    }
+    /**
+   * @param {string} runId
+   * @param {SignalQuery} [query]
+   * @returns {RunnableEffect<SignalRow[], SmithersError>}
+   */
+    listSignals(runId, query = {}) {
+        const limit = Math.max(1, Math.floor(query.limit ?? 200));
+        return this.read(`list signals ${runId}`, () => {
+            const clauses = ["run_id = ?"];
+            const params = [runId];
+            if (query.signalName) {
+                clauses.push("signal_name = ?");
+                params.push(query.signalName);
+            }
+            if (query.correlationId !== undefined) {
+                if (query.correlationId === null) {
+                    clauses.push("correlation_id IS NULL");
+                }
+                else {
+                    clauses.push("correlation_id = ?");
+                    params.push(query.correlationId);
+                }
+            }
+            if (typeof query.receivedAfterMs === "number") {
+                clauses.push("received_at_ms >= ?");
+                params.push(query.receivedAfterMs);
+            }
+            return this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_signals
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY seq ASC
+         LIMIT ?`, [...params, limit]);
+        });
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertToolCall(row) {
+        return this.write(`insert tool call ${row.toolName}`, () => this.internalStorage.insertIgnore("_smithers_tool_calls", row));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertSandbox(row) {
+        return this.write(`upsert sandbox ${row.sandboxId}`, () => this.internalStorage.upsert("_smithers_sandboxes", row, ["runId", "sandboxId"]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} sandboxId
+   * @param {number} heartbeatAtMs
+    * @returns {RunnableEffect<void, SmithersError>}
+   */
+    heartbeatSandbox(runId, sandboxId, heartbeatAtMs) {
+        return this.write(`heartbeat sandbox ${sandboxId}`, () =>
+            this.internalStorage.updateWhere(
+                "_smithers_sandboxes",
+                { heartbeatAtMs },
+                "run_id = ? AND sandbox_id = ? AND status NOT IN (?, ?, ?) AND (heartbeat_at_ms IS NULL OR heartbeat_at_ms <= ?)",
+                [runId, sandboxId, "finished", "failed", "cancelled", heartbeatAtMs],
+            ));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} sandboxId
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+   */
+    getSandbox(runId, sandboxId) {
+        return this.read(`get sandbox ${sandboxId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_sandboxes
+         WHERE run_id = ? AND sandbox_id = ?
+         LIMIT 1`, [runId, sandboxId]));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listSandboxes(runId) {
+        return this.read(`list sandboxes ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_sandboxes
+         WHERE run_id = ?`, [runId]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listToolCalls(runId, nodeId, iteration) {
+        return this.read(`list tool calls ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_tool_calls
+         WHERE run_id = ? AND node_id = ? AND iteration = ?
+         ORDER BY attempt ASC, seq ASC`, [runId, nodeId, iteration]));
+    }
+    /**
+   * Record a distinct working-copy state (deduped by jj commit id). Upsert so a
+   * re-snapshot of the same tree refreshes the operation handle.
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertWorkspaceState(row) {
+        return this.write(`upsert workspace state ${row.jjCommitId}`, () => this.internalStorage.upsert("_smithers_workspace_states", row, ["runId", "jjCwd", "jjCommitId"]));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listWorkspaceStates(runId) {
+        return this.read(`list workspace states ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_workspace_states
+         WHERE run_id = ?
+         ORDER BY created_at_ms ASC`, [runId]));
+    }
+    /**
+   * Record a snapshot checkpoint event. One row per tool/watch boundary; never
+   * deduped, so a Tier 1 boundary always has a seq to bind a resume to.
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertWorkspaceCheckpoint(row) {
+        return this.write(`insert workspace checkpoint ${row.nodeId}#${row.seq}`, () => this.internalStorage.insertIgnore("_smithers_workspace_checkpoints", row));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listWorkspaceCheckpoints(runId) {
+        return this.read(`list workspace checkpoints ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_workspace_checkpoints
+         WHERE run_id = ?
+         ORDER BY seq ASC`, [runId]));
+    }
+    /**
+   * Prune old workspace states for a run, keeping the most recent maxKeep by
+   * created_at_ms. The latest rows are always kept. Row-value NOT IN avoids the
+   * string-concat collision a naive key would have; portable to SQLite + Postgres.
+   * @param {string} runId
+   * @param {number} [maxKeep]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    pruneWorkspaceStates(runId, maxKeep = 50) {
+        const keep = Math.max(1, maxKeep);
+        return this.write(`prune workspace states ${runId}`, () => this.internalStorage.deleteWhere("_smithers_workspace_states", `run_id = ? AND (jj_cwd, jj_commit_id) NOT IN (
+           SELECT jj_cwd, jj_commit_id FROM _smithers_workspace_states
+           WHERE run_id = ? ORDER BY created_at_ms DESC LIMIT ?)`, [runId, runId, keep]));
+    }
+    /**
+   * Prune old workspace checkpoints, keeping the most recent maxKeepPerScope per
+   * (node_id, iteration, attempt) via a window function. The latest checkpoint per
+   * scope is always kept, so resume-restore targets survive.
+   * @param {string} runId
+   * @param {number} [maxKeepPerScope]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    pruneWorkspaceCheckpoints(runId, maxKeepPerScope = 100) {
+        const keep = Math.max(1, maxKeepPerScope);
+        return this.write(`prune workspace checkpoints ${runId}`, () => this.internalStorage.deleteWhere("_smithers_workspace_checkpoints", `run_id = ? AND (node_id, iteration, attempt, seq) NOT IN (
+           SELECT node_id, iteration, attempt, seq FROM (
+             SELECT node_id, iteration, attempt, seq,
+                    ROW_NUMBER() OVER (PARTITION BY node_id, iteration, attempt ORDER BY seq DESC) AS rn
+             FROM _smithers_workspace_checkpoints WHERE run_id = ?
+           ) sub WHERE rn <= ?)`, [runId, runId, keep]));
+    }
+    /**
+   * Upsert a DB-backed markdown artifact. When an existing live row has a
+   * different content hash, last-write-wins still applies, but a conflict marker
+   * row is inserted so the UI can surface the mismatch.
+   * @param {DocRow} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertDocRow(row) {
+        return this.write(`upsert doc ${row.path}`, async () => {
+            const existing = /** @type {DocRow | undefined} */ (await this.internalStorage.queryOne(`SELECT *
+             FROM _smithers_docs
+             WHERE path = ?`, [row.path]));
+            const conflict = existing ? buildDocConflictRow(row, existing) : null;
+            if (conflict) {
+                await this.internalStorage.upsert("_smithers_docs", conflict, ["path"], ["kind", "content", "contentHash", "updatedAtMs", "deletedAtMs"]);
+            }
+            await this.internalStorage.upsert("_smithers_docs", row, ["path"], ["kind", "content", "contentHash", "updatedAtMs", "deletedAtMs"]);
+        });
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertEvent(row) {
+        return this.write(`insert event ${row.type}`, () => this.internalStorage.insertIgnore("_smithers_events", row));
+    }
+    /**
+   * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string; }} row
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    insertEventWithNextSeq(row) {
+        const label = `insert event ${row.type}`;
+        const self = this;
+        // Finalization owns the surrounding transaction.  Do not open a
+        // second transaction (or silently queue this write after COMMIT) when
+        // an event is part of that atomic lifecycle transition.
+        if (this.transactionDepth > 0) {
+            return this.write(label, async () => {
+                if (this.internalStorage.dialect === POSTGRES) {
+                    return this.internalStorage.insertEventWithNextSeqPostgres(row);
+                }
+                const existing = await this.internalStorage.queryOne(`SELECT seq
+                   FROM _smithers_events
+                   WHERE run_id = ? AND timestamp_ms = ? AND type = ? AND payload_json = ?
+                   ORDER BY seq DESC LIMIT 1`, [row.runId, row.timestampMs, row.type, row.payloadJson]);
+                if (existing?.seq !== undefined) return Number(existing.seq);
+                const lastSeq = (await this.internalStorage.getLastEventSeq(row.runId)) ?? -1;
+                const seq = lastSeq + 1;
+                await this.internalStorage.insertIgnore("_smithers_events", { ...row, seq });
+                return seq;
+            });
+        }
+        return runnableEffect(withSqliteWriteRetryEffect(() => Effect.gen(function* () {
+            const existing = yield* self.read(label, () => self.internalStorage.queryOne(`SELECT seq
+               FROM _smithers_events
+               WHERE run_id = ?
+                 AND timestamp_ms = ?
+                 AND type = ?
+                 AND payload_json = ?
+               ORDER BY seq DESC
+               LIMIT 1`, [row.runId, row.timestampMs, row.type, row.payloadJson]));
+            if (existing?.seq !== undefined) {
+                return existing.seq;
+            }
+            const client = /** @type {{ exec?: unknown; query?: unknown; run?: unknown }} */ (resolveSqliteClientKey(self.db));
+	            if (typeof client.exec !== "function" ||
+	                typeof client.query !== "function" ||
+	                typeof client.run !== "function") {
+	                if (self.internalStorage.dialect === POSTGRES) {
+	                    return yield* self.write(label, () => self.internalStorage.insertEventWithNextSeqPostgres(row));
+	                }
+	                // External-SQLite fallback. Serialize the
+	                // read-MAX-then-insert under the shared transaction turn — the
+	                // same primitive the bun:sqlite path below relies on — so two
+	                // concurrent allocations can't both read the same lastSeq and
+	                // collide on the (run_id, seq) primary key. Without the turn,
+	                // insertIgnore would silently drop the loser, losing an event
+	                // from the durable log that replay/live-stream depend on.
+	                return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
+	                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
+	                return yield* Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
+	                            catch: (cause) => toSmithersError(cause, "begin fallback event transaction"),
+	                        });
+	                    }
+	                    const existingInTurn = yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.queryOne(`SELECT seq
+                           FROM _smithers_events
+                           WHERE run_id = ?
+                             AND timestamp_ms = ?
+                             AND type = ?
+                             AND payload_json = ?
+                           ORDER BY seq DESC
+                           LIMIT 1`, [row.runId, row.timestampMs, row.type, row.payloadJson]),
+	                        catch: (cause) => toSmithersError(cause, "dedupe fallback event row"),
+	                    });
+	                    if (existingInTurn?.seq !== undefined) {
+	                        if (captureTxidForWrite) {
+	                            yield* Effect.tryPromise({
+	                                try: () => self.internalStorage.execute("COMMIT"),
+	                                catch: (cause) => toSmithersError(cause, "commit fallback event dedupe transaction"),
+	                            });
+	                        }
+	                        return Number(existingInTurn.seq);
+	                    }
+	                    const lastSeq = (yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.getLastEventSeq(row.runId),
+	                        catch: (cause) => toSmithersError(cause, "get fallback last event seq"),
+                    })) ?? -1;
+                    const seq = lastSeq + 1;
+	                    yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.insertIgnore("_smithers_events", { ...row, seq }),
+	                        catch: (cause) => toSmithersError(cause, "insert fallback event row"),
+	                    });
+	                    const capturedTxid = captureTxidForWrite
+	                        ? yield* Effect.tryPromise({
+	                            try: () => capturePostgresTransactionTxid(self),
+	                            catch: (cause) => toSmithersError(cause, "capture fallback event txid"),
+	                        })
+	                        : null;
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute("COMMIT"),
+	                            catch: (cause) => toSmithersError(cause, "commit fallback event transaction"),
+	                        });
+	                        recordCommittedTxid(self, capturedTxid);
+	                    }
+	                    return seq;
+	                }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
+	                    }
+	                    return yield* Effect.fail(error);
+	                })));
+	            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
+	            }
+            return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.try({
+                try: () => {
+                    client.run("BEGIN IMMEDIATE");
+                    try {
+                        const existingInTurn = client
+                            .query(`SELECT seq
+                               FROM _smithers_events
+                               WHERE run_id = ?
+                                 AND timestamp_ms = ?
+                                 AND type = ?
+                                 AND payload_json = ?
+                               ORDER BY seq DESC
+                               LIMIT 1`)
+                            .get(row.runId, row.timestampMs, row.type, row.payloadJson);
+                        if (existingInTurn?.seq !== undefined) {
+                            client.run("COMMIT");
+                            return Number(existingInTurn.seq);
+                        }
+                        const res = client
+                            .query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?")
+                            .get(row.runId);
+                        const seq = Number(res?.seq ?? 0);
+                        client
+                            .query("INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES (?, ?, ?, ?, ?)")
+                            .run(row.runId, seq, row.timestampMs, row.type, row.payloadJson);
+                        client.run("COMMIT");
+                        return seq;
+                    }
+                    catch (error) {
+                        try {
+                            client.run("ROLLBACK");
+                        }
+                        catch {
+                            // ignore rollback failures
+                        }
+                        throw error;
+                    }
+                },
+                catch: (cause) => toSmithersError(cause, "insert event transaction"),
+            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
+        }), { label }).pipe(Effect.annotateLogs({ dbOperation: label }), Effect.withLogSpan(`db:${label}`)));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<number | undefined, SmithersError>}
+   */
+    getLastEventSeq(runId) {
+        return this.read(`get last event seq ${runId}`, () => this.internalStorage.getLastEventSeq(runId));
+    }
+    /**
+   * @param {string} runId
+   * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listEventHistory(runId, query = {}) {
+        return this.read(`list event history ${runId}`, () => this.internalStorage.listEventHistory(runId, query));
+    }
+    /**
+   * The newest events naming one node, ascending. One SQL pass (LIKE on the
+   * payload) instead of paging the whole history through JS: node transcripts
+   * on long runs need this to stay interactive, and unlike a bounded recency
+   * scan it finds OLD nodes' events too.
+   *
+   * @param {string} runId
+   * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
+   * @param {{ afterSeq?: number; limit?: number }} [query]
+   * @returns {RunnableEffect<EventRow[], SmithersError>}
+   */
+    listNodeEvents(runId, nodeId, query = {}) {
+        const limit = Math.max(1, Math.min(500, Math.floor(query.limit ?? 100)));
+        // Event sequences start at zero. With no cursor, include that first
+        // event; an explicit cursor remains exclusive and non-negative.
+        const afterSeq = query.afterSeq === undefined
+            ? -1
+            : Math.max(0, Math.floor(query.afterSeq));
+        const escapedNodeId = nodeId.replaceAll(`\\`, `\\\\`).replaceAll(`%`, `\\%`).replaceAll(`_`, `\\_`);
+        const needle = `%"nodeId":"${escapedNodeId}"%`;
+        return this.read(`list node events ${nodeId}`, () => this.internalStorage.queryAll(`SELECT * FROM (
+           SELECT * FROM _smithers_events
+           WHERE run_id = ? AND seq > ? AND payload_json LIKE ? ESCAPE '\\'
+           ORDER BY seq DESC
+           LIMIT ?
+         ) ORDER BY seq ASC`, [runId, afterSeq, needle, limit]));
+    }
+    /**
+   * @param {string} runId
+   * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    countEventHistory(runId, query = {}) {
+        return this.read(`count event history ${runId}`, () => this.internalStorage.countEventHistory(runId, query));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} afterSeq
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listEvents(runId, afterSeq, limit = 200) {
+        return this.listEventHistory(runId, { afterSeq, limit });
+    }
+    /**
+   * @param {string} runId
+   * @param {string} type
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listEventsByType(runId, type) {
+        return this.read(`list events by type ${type}`, () => this.internalStorage.listEventsByType(runId, type));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertOrUpdateRalph(row) {
+        return this.write(`upsert ralph ${row.ralphId}`, () => this.internalStorage.upsert("_smithers_ralph", row, ["runId", "ralphId"]));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listRalph(runId) {
+        return this.read(`list ralph ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_ralph
+         WHERE run_id = ?`, [runId], { booleanColumns: ["done"] }));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listPendingApprovals(runId) {
+        return this.read(`list pending approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM (
+           SELECT
+             a.run_id,
+             a.node_id,
+             a.iteration,
+             a.status,
+             a.requested_at_ms,
+             a.decided_at_ms,
+             a.note,
+             a.decided_by,
+             a.request_json,
+             a.decision_json,
+             a.auto_approved
+           FROM _smithers_approvals a
+           INNER JOIN _smithers_runs r
+             ON a.run_id = r.run_id
+           WHERE a.run_id = ? AND a.status = ?
+             AND r.status NOT IN ('finished', 'failed', 'cancelled', 'canceled', 'continued')
+           UNION ALL
+           SELECT
+             n.run_id,
+             n.node_id,
+             n.iteration,
+             'requested' AS status,
+             n.updated_at_ms AS requested_at_ms,
+             NULL AS decided_at_ms,
+             NULL AS note,
+             NULL AS decided_by,
+             NULL AS request_json,
+             NULL AS decision_json,
+             0 AS auto_approved
+           FROM _smithers_nodes n
+           INNER JOIN _smithers_runs r
+             ON n.run_id = r.run_id
+           LEFT JOIN _smithers_approvals a
+             ON a.run_id = n.run_id
+            AND a.node_id = n.node_id
+            AND a.iteration = n.iteration
+           WHERE n.run_id = ?
+             AND n.state = ?
+             AND r.status = ?
+             AND a.run_id IS NULL
+         ) pending
+         ORDER BY COALESCE(requested_at_ms, 0) ASC, run_id, node_id, iteration`, [runId, "requested", runId, "waiting-approval", "waiting-approval"], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listDecidedApprovals(runId) {
+        return this.read(`list decided approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT a.*
+         FROM _smithers_approvals a
+         JOIN _smithers_nodes n
+           ON a.run_id = n.run_id
+          AND a.node_id = n.node_id
+          AND a.iteration = n.iteration
+         WHERE a.run_id = ?
+           AND a.status IN ('approved', 'denied')
+           AND n.state = 'pending'`, [runId], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
+   * Returns all decided approvals for a run (approved or denied), regardless of
+   * node state. Used by why-diagnosis so denied gates (node state = 'failed')
+   * are included in the diagnosis output.
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listAllDecidedApprovals(runId) {
+        return this.read(`list all decided approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_approvals
+         WHERE run_id = ?
+           AND status IN ('approved', 'denied')`, [runId], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listAllPendingApprovals() {
+        return this.read("list all pending approvals", () => this.internalStorage.queryAll(`SELECT *
+         FROM (
+           SELECT
+             a.run_id,
+             a.node_id,
+             a.iteration,
+             a.status,
+             a.requested_at_ms,
+             a.decided_at_ms,
+             a.note,
+             a.decided_by,
+             a.request_json,
+             a.decision_json,
+             a.auto_approved,
+             r.workflow_name,
+             r.status AS run_status,
+             n.label AS node_label
+           FROM _smithers_approvals a
+           INNER JOIN _smithers_runs r ON a.run_id = r.run_id
+           LEFT JOIN _smithers_nodes n
+             ON a.run_id = n.run_id
+            AND a.node_id = n.node_id
+            AND a.iteration = n.iteration
+           WHERE a.status = ?
+             AND r.status NOT IN ('finished', 'failed', 'cancelled', 'canceled', 'continued')
+           UNION ALL
+           SELECT
+             n.run_id,
+             n.node_id,
+             n.iteration,
+             'requested' AS status,
+             n.updated_at_ms AS requested_at_ms,
+             NULL AS decided_at_ms,
+             NULL AS note,
+             NULL AS decided_by,
+             NULL AS request_json,
+             NULL AS decision_json,
+             0 AS auto_approved,
+             r.workflow_name,
+             r.status AS run_status,
+             n.label AS node_label
+           FROM _smithers_nodes n
+           INNER JOIN _smithers_runs r
+             ON n.run_id = r.run_id
+           LEFT JOIN _smithers_approvals a
+             ON a.run_id = n.run_id
+            AND a.node_id = n.node_id
+            AND a.iteration = n.iteration
+           WHERE n.state = ?
+             AND r.status = ?
+             AND a.run_id IS NULL
+         ) pending
+         ORDER BY COALESCE(requested_at_ms, 0) ASC, run_id, node_id, iteration`, ["requested", "waiting-approval", "waiting-approval"], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
+   * @param {string} workflowName
+   * @param {string} nodeId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listApprovalHistoryForNode(workflowName, nodeId, limit = 50) {
+        return this.read(`list approval history ${workflowName}:${nodeId}`, () => this.internalStorage.queryAll(`SELECT
+           a.run_id,
+           a.node_id,
+           a.iteration,
+           a.status,
+           a.requested_at_ms,
+           a.decided_at_ms,
+           a.note,
+           a.decided_by,
+           a.request_json,
+           a.decision_json,
+           a.auto_approved,
+           r.workflow_name,
+           r.created_at_ms AS run_created_at_ms
+         FROM _smithers_approvals a
+         INNER JOIN _smithers_runs r ON a.run_id = r.run_id
+         WHERE r.workflow_name = ? AND a.node_id = ?
+         ORDER BY r.created_at_ms DESC, a.decided_at_ms DESC
+         LIMIT ?`, [workflowName, nodeId, limit], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} ralphId
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+   */
+    getRalph(runId, ralphId) {
+        return this.read(`get ralph ${ralphId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_ralph
+         WHERE run_id = ? AND ralph_id = ?
+         LIMIT 1`, [runId, ralphId], { booleanColumns: ["done"] }));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertCache(row) {
+        return this.write(`insert cache ${row.cacheKey}`, () => this.internalStorage.upsert("_smithers_cache", row, ["cacheKey"]));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertCacheEffect(row) {
+        return this.insertCache(row);
+    }
+    /**
+   * @param {string} cacheKey
+   * @returns {RunnableEffect<CacheRow | undefined, SmithersError>}
+   */
+    getCache(cacheKey) {
+        return this.read(`get cache ${cacheKey}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_cache
+         WHERE cache_key = ?
+         LIMIT 1`, [cacheKey]));
+    }
+    /**
+   * @param {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertNodeDiffCache(row) {
+        return this.write(`upsert node diff ${row.nodeId}@${row.iteration}`, () => this.internalStorage.upsert("_smithers_node_diffs", row, ["runId", "nodeId", "iteration", "baseRef"]));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {string} baseRef
+   * @returns {RunnableEffect<NodeDiffCacheRow | undefined, SmithersError>}
+   */
+    getNodeDiffCache(runId, nodeId, iteration, baseRef) {
+        return this.read(`get node diff ${nodeId}@${iteration}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_node_diffs
+         WHERE run_id = ? AND node_id = ? AND iteration = ? AND base_ref = ?
+         LIMIT 1`, [runId, nodeId, iteration, baseRef]));
+    }
+    /**
+     * @param {string} runId
+     * @returns {RunnableEffect<NodeDiffCacheRow[], SmithersError>}
+     */
+    listNodeDiffCache(runId) {
+        return this.read(`list node diffs ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_node_diffs
+         WHERE run_id = ?
+         ORDER BY computed_at_ms ASC, node_id ASC, iteration ASC`, [runId]));
+    }
+    /**
+   * @param {string} [runId]
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    countNodeDiffCacheRows(runId) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            const row = yield* (runId
+                ? self.read(`count node diff cache rows ${runId}`, () => self.internalStorage.queryOne(`SELECT COUNT(*) AS count
+           FROM _smithers_node_diffs
+           WHERE run_id = ?`, [runId]))
+                : self.read("count node diff cache rows", () => self.internalStorage.queryOne(`SELECT COUNT(*) AS count
+           FROM _smithers_node_diffs`)));
+            return Number(row?.count ?? 0);
+        }));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} targetFrameNo
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    invalidateNodeDiffsAfterFrame(runId, targetFrameNo) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            // Frame-based invalidation (not timestamp-based):
+            // An attempt "belongs to" frame F where F is the lowest
+            // frame_no whose created_at_ms >= attempt.started_at_ms
+            // (i.e. the first frame that could record the attempt's
+            // effects). If no such frame exists, the attempt is
+            // conceptually beyond all captured frames and MUST be
+            // invalidated whenever we truncate.
+            //
+            // An attempt is invalidated iff its frameNo > targetFrameNo.
+            // Equivalently: there is NO frame F with
+            //   F.frame_no <= targetFrameNo AND F.created_at_ms >= a.started_at_ms.
+            const targetFrame = yield* self.read(`get target frame ${runId}:${targetFrameNo}`, () => self.internalStorage.queryOne(`SELECT created_at_ms AS createdAtMs
+           FROM _smithers_frames
+           WHERE run_id = ? AND frame_no = ?
+           LIMIT 1`, [runId, targetFrameNo]));
+            if (!targetFrame || typeof targetFrame.createdAtMs !== "number") {
+                return 0;
+            }
+            // Reference the target frame's created_at_ms to silence unused
+            // reads on SQLite engines that strip selects; the real frame
+            // membership check happens inside the NOT EXISTS below.
+            void targetFrame;
+            const attemptPredicate = `EXISTS (
+               SELECT 1
+               FROM _smithers_attempts a
+               WHERE a.run_id = d.run_id
+                 AND a.node_id = d.node_id
+                 AND a.iteration = d.iteration
+                 AND NOT EXISTS (
+                   SELECT 1
+                   FROM _smithers_frames f
+                   WHERE f.run_id = a.run_id
+                     AND f.frame_no <= ?
+                     AND f.created_at_ms >= a.started_at_ms
+                 )
+             )`;
+            const countRow = yield* self.read(`count node diff invalidation ${runId}:${targetFrameNo}`, () => self.internalStorage.queryOne(`SELECT COUNT(*) AS count
+           FROM _smithers_node_diffs d
+           WHERE d.run_id = ?
+             AND ${attemptPredicate}`, [runId, targetFrameNo]));
+            const deleted = Number(countRow?.count ?? 0);
+            if (deleted === 0) {
+                return 0;
+            }
+            yield* self.write(`invalidate node diffs ${runId}:${targetFrameNo}`, () => self.internalStorage.deleteWhere("_smithers_node_diffs", `run_id = ?
+         AND EXISTS (
+           SELECT 1
+           FROM _smithers_attempts a
+           WHERE a.run_id = _smithers_node_diffs.run_id
+             AND a.node_id = _smithers_node_diffs.node_id
+             AND a.iteration = _smithers_node_diffs.iteration
+             AND NOT EXISTS (
+               SELECT 1
+               FROM _smithers_frames f
+               WHERE f.run_id = a.run_id
+                 AND f.frame_no <= ?
+                 AND f.created_at_ms >= a.started_at_ms
+             )
+         )`, [runId, targetFrameNo]));
+            return deleted;
+        }));
+    }
+    /**
+   * @param {string} nodeId
+   * @param {string} [outputTable]
+   * @returns {RunnableEffect<CacheRow[], SmithersError>}
+   */
+    listCacheByNode(nodeId, outputTable, limit = 20) {
+        return this.read(`list cache by node ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_cache
+         WHERE node_id = ?${outputTable ? " AND output_table = ?" : ""}
+         ORDER BY created_at_ms DESC
+         LIMIT ?`, outputTable ? [nodeId, outputTable, limit] : [nodeId, limit]));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} frameNo
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteFramesAfter(runId, frameNo) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            yield* self.write(`delete frames after ${frameNo}`, () => self.internalStorage.deleteWhere("_smithers_frames", "run_id = ? AND frame_no > ?", [runId, frameNo]));
+            self.clearFrameCacheForRun(runId);
+        }));
+    }
+    /**
+   * Delete durable snapshot rows for frames after `frameNo`. Snapshots are keyed
+   * (run_id, frame_no) and are the hydration/fork source, so a rewind that
+   * truncates frames must truncate the matching snapshots too — otherwise
+   * fork/replay/loadLatestSnapshot can resurrect logically-discarded state.
+   * @param {string} runId
+   * @param {number} frameNo
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteSnapshotsAfter(runId, frameNo) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            yield* self.write(`delete snapshots after ${frameNo}`, () => self.internalStorage.deleteWhere("_smithers_snapshots", "run_id = ? AND frame_no > ?", [runId, frameNo]));
+        }));
+    }
+    /**
+   * Delete VCS tag rows for frames after `frameNo`, keyed (run_id, frame_no).
+   * A rewind truncates frames; the matching vcs-tags must go too or
+   * rerunAtRevision/loadVcsTag can restore a discarded working-copy revision.
+   * @param {string} runId
+   * @param {number} frameNo
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteVcsTagsAfter(runId, frameNo) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            yield* self.write(`delete vcs tags after ${frameNo}`, () => self.internalStorage.deleteWhere("_smithers_vcs_tags", "run_id = ? AND frame_no > ?", [runId, frameNo]));
+        }));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} limit
+   * @param {number} [afterFrameNo]
+   * @returns {RunnableEffect<FrameRow[], SmithersError>}
+   */
+    listFrames(runId, limit, afterFrameNo) {
+        const self = this;
+        return runnableEffect(Effect.gen(function* () {
+            const rows = (yield* self.read(`list frames ${runId}`, () => self.internalStorage.queryAll(`SELECT *
+           FROM _smithers_frames
+           WHERE run_id = ?${afterFrameNo !== undefined ? " AND frame_no > ?" : ""}
+           ORDER BY frame_no DESC
+           LIMIT ?`, afterFrameNo !== undefined
+                ? [runId, afterFrameNo, limit]
+                : [runId, limit])));
+            const localCache = new Map();
+            const expanded = [];
+            for (const row of rows) {
+                expanded.push(yield* self.inflateFrameRow(row, localCache));
+            }
+            return expanded;
+        }));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<{ state: string; count: number }>, SmithersError>}
+   */
+    countNodesByState(runId) {
+        return this.read(`count nodes by state ${runId}`, () => this.internalStorage.queryAll(`SELECT state, COUNT(*) AS count
+         FROM _smithers_nodes
+         WHERE run_id = ?
+         GROUP BY state`, [runId]));
+    }
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertCron(row) {
+        return this.write("upsert cron", () => this.internalStorage.upsert("_smithers_cron", row, ["cronId"], ["pattern", "workflowPath", "enabled", "nextRunAtMs"]));
+    }
+    /**
+    * @param {boolean} [enabledOnly]
+    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+    */
+    listCrons(enabledOnly = true) {
+        return this.read("list crons", () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_cron${enabledOnly ? " WHERE enabled = ?" : ""}`, enabledOnly ? [true] : [], { booleanColumns: ["enabled"] }));
+    }
+    /**
+   * @param {string} cronId
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @param {string | null} [errorJson]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    updateCronRunTime(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
+        return this.write(`update cron run time ${cronId}`, () => this.internalStorage.updateWhere("_smithers_cron", { lastRunAtMs, nextRunAtMs, errorJson: errorJson ?? null }, "cron_id = ?", [cronId]));
+    }
+    /**
+   * Atomically claim one cron fire by advancing the schedule only when the
+   * stored next fire time still matches what this scheduler read. Concurrent
+   * schedulers sharing a DB race this compare-and-set; exactly one observes
+   * `true` and may launch, the rest observe `false` and skip.
+   * @param {string} cronId
+   * @param {number | null} expectedNextRunAtMs
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimCronRun(cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs) {
+        return this.write(`claim cron run ${cronId}`, async () => {
+            const updated = await this.internalStorage.updateWhere("_smithers_cron", { lastRunAtMs, nextRunAtMs, errorJson: null }, "cron_id = ? AND (next_run_at_ms = ? OR (next_run_at_ms IS NULL AND ? IS NULL))", [cronId, expectedNextRunAtMs, expectedNextRunAtMs]);
+            return updated > 0;
+        });
+    }
+    /**
+   * @param {string} cronId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteCron(cronId) {
+        return this.write(`delete cron ${cronId}`, () => this.internalStorage.deleteWhere("_smithers_cron", "cron_id = ?", [cronId]));
+    }
+    // ---------------------------------------------------------------------------
+    // Memory facts
+    // ---------------------------------------------------------------------------
+    /**
+   * List cross-run memory facts, optionally scoped to a namespace. Reads the
+   * `_smithers_memory_facts` table written by `@smithers-orchestrator/memory`'s
+   * MemoryStore (`setFact`) — the SAME table the `smithers memory list` CLI reads
+   * — so a fact set by any run/workflow surfaces here. Columns are snake→camel
+   * cased by the storage layer (`value_json → valueJson`, etc.). A null/undefined
+   * namespace returns every namespace's facts; ordering is stable (namespace, key)
+   * so the gateway's `listMemoryFacts` RPC returns a deterministic list.
+   * @param {string | null} [namespace]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listMemoryFacts(namespace = null) {
+        const ns = namespace ?? null;
+        if (ns === null) {
+            return this.read("list memory facts", () => this.internalStorage.queryAll(`SELECT namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms
+         FROM _smithers_memory_facts
+         ORDER BY namespace, key`));
+        }
+        return this.read("list memory facts", () => this.internalStorage.queryAll(`SELECT namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms
+         FROM _smithers_memory_facts
+         WHERE namespace = ?
+         ORDER BY namespace, key`, [ns]));
+    }
+    // ---------------------------------------------------------------------------
+    // Docs (tickets / plans / specs / proposals)
+    // ---------------------------------------------------------------------------
+    /**
+   * List LIVE docs from `_smithers_docs` (tombstones — `deleted_at_ms IS NOT
+   * NULL` — are NEVER returned), optionally scoped to one `kind`. Backs the
+   * gateway's `listTickets` RPC and the file-watcher's reconcile read. Columns
+   * are snake→camel cased by the storage layer (`content_hash → contentHash`,
+   * etc.); newest-updated first so the surface shows recent edits on top.
+   * @param {string | null | { kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [arg]
+   *   Either a positional `kind` filter (string) or an options object.
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listDocs(arg = null) {
+        const options = typeof arg === "string" ? { kind: arg } : (arg ?? {});
+        const clauses = [];
+        const params = [];
+        if (!options.includeDeleted) {
+            clauses.push("deleted_at_ms IS NULL");
+        }
+        if (options.kind) {
+            clauses.push("kind = ?");
+            params.push(options.kind);
+        }
+        if (typeof options.updatedAfterMs === "number" && Number.isFinite(options.updatedAfterMs)) {
+            clauses.push("updated_at_ms > ?");
+            params.push(Math.floor(options.updatedAfterMs));
+        }
+        const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+        const limit = Math.max(1, Math.min(10_000, Math.floor(options.limit ?? 4_096)));
+        // Newest-updated first so when the doc set exceeds the cap the LIMIT keeps
+        // the most recent edits (the gateway re-sorts before serving).
+        return this.read("list docs", () => this.internalStorage.queryAll(`SELECT path, kind, content, content_hash, status, updated_at_ms, deleted_at_ms
+         FROM _smithers_docs
+         ${whereSql}
+         ORDER BY updated_at_ms DESC, path ASC
+         LIMIT ?`, [...params, limit]));
+    }
+    /**
+   * Read a single doc row by path (INCLUDING a tombstone, so the watcher's
+   * last-write-wins can compare against a soft-deleted row). Returns `undefined`
+   * when the path was never written.
+   * @param {string} path
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+   */
+    getDoc(path, options = {}) {
+        // Returns a tombstone by default (the watcher's last-write-wins compares
+        // against soft-deleted rows). Pass `includeDeleted: false` to hide them.
+        const filter = options.includeDeleted === false ? " AND deleted_at_ms IS NULL" : "";
+        return this.read(`get doc ${path}`, () => this.internalStorage.queryOne(`SELECT path, kind, content, content_hash, status, updated_at_ms, deleted_at_ms
+         FROM _smithers_docs
+         WHERE path = ?${filter}`, [path]));
+    }
+    /**
+   * Upsert a doc row (insert-or-replace by `path`). The caller supplies the
+   * already-computed `contentHash` (`sha256(content)`) and `updatedAtMs` so the
+   * RPC handler and the file-watcher hash/stamp identically. Writing a row with
+   * `deletedAtMs: null` REVIVES a previously soft-deleted path (a re-create or a
+   * fresh file write), which is the intended last-write-wins behaviour.
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertDoc(row) {
+        return this.write(`upsert doc ${row.path}`, () => this.internalStorage.upsert("_smithers_docs", row, ["path"], ["kind", "content", "contentHash", "status", "updatedAtMs", "deletedAtMs"]));
+    }
+    /**
+   * Soft-delete a doc by stamping `deleted_at_ms` (a tombstone) rather than
+   * removing the row, so `listTickets` hides it while the watcher can still see
+   * it survived. `updated_at_ms` is bumped so the change orders correctly.
+   * @param {string} path
+   * @param {number} deletedAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    softDeleteDoc(path, deletedAtMs) {
+        return this.write(`soft delete doc ${path}`, () => this.internalStorage.updateWhere("_smithers_docs", { deletedAtMs, updatedAtMs: deletedAtMs }, "path = ?", [path]));
+    }
+    // ---------------------------------------------------------------------------
+    // Integrations (external event delivery + polling cursors)
+    // ---------------------------------------------------------------------------
+    /**
+   * Insert an integration-delivery dedupe row if `(sourceId, dedupeKey)` was
+   * never recorded. Returns `true` when the row was inserted (first delivery)
+   * and `false` when it already existed (a redelivery to drop). The
+   * check-then-insert runs inside a single adapter transaction so two
+   * concurrent redeliveries cannot both claim "first".
+   * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    insertIntegrationDeliveryIfNew(row) {
+        const self = this;
+        return runnableEffect(this.withTransactionEffect(`insert integration delivery ${row.sourceId}`, Effect.gen(function* () {
+            const existing = yield* self.read(`get integration delivery ${row.sourceId}`, () => self.internalStorage.queryOne(`SELECT source_id
+             FROM _smithers_integration_deliveries
+             WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey]));
+            if (existing) {
+                return false;
+            }
+            yield* self.write(`insert integration delivery ${row.sourceId}`, () => self.internalStorage.insertIgnore("_smithers_integration_deliveries", {
+                sourceId: row.sourceId,
+                dedupeKey: row.dedupeKey,
+                eventName: row.eventName,
+                receivedAtMs: row.receivedAtMs,
+            }));
+            return true;
+        })).pipe(Effect.annotateLogs({
+            sourceId: row.sourceId,
+            eventName: row.eventName,
+        })));
+    }
+    /**
+   * Atomically claim an integration delivery. The first insert preserves the
+   * canonical `receivedAtMs`; replays return that timestamp even when the
+   * provider decoder stamped a newer one. Completed rows dedupe permanently,
+   * active leases return `busy`, and expired or released pending rows can be
+   * reclaimed.
+   * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
+   * @param {{ ownerToken: string; nowMs?: number; leaseDurationMs?: number }} options
+   * @returns {RunnableEffect<IntegrationDeliveryClaim, SmithersError>}
+   */
+    claimIntegrationDelivery(row, options) {
+        const self = this;
+        const nowMs = options.nowMs ?? Date.now();
+        const leaseDurationMs = Math.max(1, Math.floor(options.leaseDurationMs ?? 30_000));
+        const leaseExpiresAtMs = nowMs + leaseDurationMs;
+        return runnableEffect(this.withTransactionEffect(`claim integration delivery ${row.sourceId}`, Effect.gen(function* () {
+            yield* self.write(`insert pending integration delivery ${row.sourceId}`, () => self.internalStorage.insertIgnore("_smithers_integration_deliveries", {
+                sourceId: row.sourceId,
+                dedupeKey: row.dedupeKey,
+                eventName: row.eventName,
+                receivedAtMs: row.receivedAtMs,
+                status: "pending",
+                claimToken: options.ownerToken,
+                claimExpiresAtMs: leaseExpiresAtMs,
+                completedAtMs: null,
+            }));
+            const readClaim = () => self.read(`get integration delivery claim ${row.sourceId}`, () => self.internalStorage.queryOne(`SELECT status, received_at_ms, claim_token, claim_expires_at_ms
+             FROM _smithers_integration_deliveries
+             WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey]));
+            let existing = yield* readClaim();
+            if (!existing) {
+                return yield* Effect.fail(toSmithersError(new Error("Integration delivery claim disappeared after insert."), `claim integration delivery ${row.sourceId}`, {
+                    code: "DB_WRITE_FAILED",
+                    details: { sourceId: row.sourceId, dedupeKey: row.dedupeKey },
+                }));
+            }
+            const receivedAtMs = Number(existing.receivedAtMs);
+            if (existing.status === "completed") {
+                return { status: "completed", receivedAtMs };
+            }
+            const updated = yield* self.write(`take integration delivery claim ${row.sourceId}`, () => self.internalStorage.updateWhere("_smithers_integration_deliveries", {
+                claimToken: options.ownerToken,
+                claimExpiresAtMs: leaseExpiresAtMs,
+            }, `source_id = ? AND dedupe_key = ? AND status = 'pending'
+               AND (claim_token = ? OR claim_token IS NULL OR claim_expires_at_ms IS NULL OR claim_expires_at_ms <= ?)`, [row.sourceId, row.dedupeKey, options.ownerToken, nowMs]));
+            if (updated > 0) {
+                return { status: "claimed", receivedAtMs, leaseExpiresAtMs };
+            }
+            existing = yield* readClaim();
+            if (existing?.status === "completed") {
+                return { status: "completed", receivedAtMs: Number(existing.receivedAtMs) };
+            }
+            return {
+                status: "busy",
+                receivedAtMs: Number(existing?.receivedAtMs ?? receivedAtMs),
+                leaseExpiresAtMs: existing?.claimExpiresAtMs == null ? null : Number(existing.claimExpiresAtMs),
+            };
+        })).pipe(Effect.annotateLogs({
+            sourceId: row.sourceId,
+            eventName: row.eventName,
+        })));
+    }
+    /**
+   * Extend a pending delivery lease while `ownerToken` still owns it. Lease
+   * renewal is an owner-CAS so a worker that lost the claim to stale takeover
+   * cannot revive or complete it.
+   * @param {string} sourceId
+   * @param {string} dedupeKey
+   * @param {string} ownerToken
+   * @param {number} [nowMs]
+   * @param {number} [leaseDurationMs]
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    renewIntegrationDeliveryClaim(sourceId, dedupeKey, ownerToken, nowMs = Date.now(), leaseDurationMs = 30_000) {
+        const leaseExpiresAtMs = nowMs + Math.max(1, Math.floor(leaseDurationMs));
+        return runnableEffect(this.write(`renew integration delivery ${sourceId}`, () => this.internalStorage.updateWhere("_smithers_integration_deliveries", {
+            claimExpiresAtMs: leaseExpiresAtMs,
+        }, "source_id = ? AND dedupe_key = ? AND status = 'pending' AND claim_token = ?", [sourceId, dedupeKey, ownerToken]).then((count) => count > 0)));
+    }
+    /**
+   * Mark a pending integration delivery completed if `ownerToken` still owns
+   * the claim. Returns false after lease takeover or prior completion.
+   * @param {string} sourceId
+   * @param {string} dedupeKey
+   * @param {string} ownerToken
+   * @param {number} [completedAtMs]
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    completeIntegrationDelivery(sourceId, dedupeKey, ownerToken, completedAtMs = Date.now()) {
+        return runnableEffect(this.write(`complete integration delivery ${sourceId}`, () => this.internalStorage.updateWhere("_smithers_integration_deliveries", {
+            status: "completed",
+            claimToken: null,
+            claimExpiresAtMs: null,
+            completedAtMs,
+        }, "source_id = ? AND dedupe_key = ? AND status = 'pending' AND claim_token = ?", [sourceId, dedupeKey, ownerToken]).then((count) => count > 0)));
+    }
+    /**
+   * Release a live pending claim after an ordinary failure or interruption.
+   * The ledger row and canonical timestamp remain for immediate retry.
+   * @param {string} sourceId
+   * @param {string} dedupeKey
+   * @param {string} ownerToken
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    releaseIntegrationDeliveryClaim(sourceId, dedupeKey, ownerToken) {
+        return runnableEffect(this.write(`release integration delivery ${sourceId}`, () => this.internalStorage.updateWhere("_smithers_integration_deliveries", {
+            claimToken: null,
+            claimExpiresAtMs: null,
+        }, "source_id = ? AND dedupe_key = ? AND status = 'pending' AND claim_token = ?", [sourceId, dedupeKey, ownerToken]).then((count) => count > 0)));
+    }
+    /**
+   * Read a polling source's persisted cursor. Returns `undefined` when the
+   * source never persisted one; a stored NULL cursor comes back as `null`.
+   * @param {string} sourceId
+   * @returns {RunnableEffect<string | null | undefined, SmithersError>}
+   */
+    getIntegrationCursor(sourceId) {
+        return runnableEffect(this.read(`get integration cursor ${sourceId}`, () => this.internalStorage.queryOne(`SELECT cursor
+         FROM _smithers_integration_cursors
+         WHERE source_id = ?`, [sourceId])).pipe(Effect.map((row) => (row === undefined ? undefined : (row.cursor ?? null)))));
+    }
+    /**
+   * Persist a polling source's cursor (upsert by `source_id`).
+   * @param {string} sourceId
+   * @param {string | null} cursor
+   * @param {number} [updatedAtMs]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    setIntegrationCursor(sourceId, cursor, updatedAtMs = Date.now()) {
+        return this.write(`set integration cursor ${sourceId}`, () => this.internalStorage.upsert("_smithers_integration_cursors", {
+            sourceId,
+            cursor,
+            updatedAtMs,
+        }, ["source_id"], ["cursor", "updatedAtMs"]));
+    }
+    /**
+   * Find runs with a node currently parked on `WaitForEvent` for
+   * `eventName` + `correlationId`. This is the run-targeting query for
+   * external integration events: SQL narrows to non-terminal runs whose
+   * `waiting-event` nodes have a `waiting-event` attempt with wait-for-event
+   * metadata, then the shared `parseWaitForEventAttemptSnapshot` parser
+   * (also used by the engine's `bridgeSignalResolve`) confirms the exact
+   * signal-name + normalized-correlation-id match in JS. Returns distinct
+   * run ids.
+   * @param {string} eventName
+   * @param {string | null} [correlationId]
+   * @returns {RunnableEffect<string[], SmithersError>}
+   */
+    findRunsAwaitingEvent(eventName, correlationId = null) {
+        const normalizedCorrelationId = normalizeWaitForEventCorrelationId(correlationId);
+        const self = this;
+        return runnableEffect(this.read(`find runs awaiting ${eventName}`, () => self.internalStorage.queryAll(`SELECT a.run_id, a.node_id, a.iteration, a.attempt, a.state, a.meta_json
+         FROM _smithers_attempts a
+         JOIN _smithers_nodes n
+           ON n.run_id = a.run_id AND n.node_id = a.node_id AND n.iteration = a.iteration
+         JOIN _smithers_runs r
+           ON r.run_id = a.run_id
+         WHERE n.state = 'waiting-event'
+           AND r.status NOT IN ('finished', 'failed', 'cancelled', 'continued')
+           AND a.meta_json LIKE '%"signalName"%'
+         ORDER BY a.run_id, a.node_id, a.iteration, a.attempt`, [])).pipe(Effect.map((rows) => {
+            const runIds = new Set();
+            // Mirror `bridgeSignalResolve`: prefer the waiting-event attempt for a
+            // node, falling back to the node's first attempt.
+            /** @type {Map<string, Array<Record<string, unknown>>>} */
+            const byNode = new Map();
+            for (const row of rows) {
+                const key = `${row.runId}\u0000${row.nodeId}\u0000${row.iteration}`;
+                const list = byNode.get(key) ?? [];
+                list.push(row);
+                byNode.set(key, list);
+            }
+            for (const attempts of byNode.values()) {
+                const candidate = attempts.find((attempt) => attempt.state === "waiting-event") ??
+                    attempts[0];
+                const snapshot = parseWaitForEventAttemptSnapshot(typeof candidate?.metaJson === "string" ? candidate.metaJson : null);
+                if (!snapshot)
+                    continue;
+                if (snapshot.resolvedSignalSeq !== undefined)
+                    continue;
+                if (snapshot.signalName !== eventName)
+                    continue;
+                if (snapshot.correlationId !== normalizedCorrelationId)
+                    continue;
+                runIds.add(String(candidate.runId));
+            }
+            return [...runIds];
+        }), Effect.annotateLogs({
+            eventName,
+            correlationId: normalizedCorrelationId,
+        })));
+    }
+    // ---------------------------------------------------------------------------
+    // Scorer results
+    // ---------------------------------------------------------------------------
+    /**
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertScorerResult(row) {
+        return this.write(`insert scorer result ${row.scorerId}`, () => this.internalStorage.insertIgnore("_smithers_scorers", row));
+    }
+    /**
+   * @param {string} runId
+   * @param {string} [nodeId]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listScorerResults(runId, nodeId) {
+        return this.read(`list scorer results ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_scorers
+         WHERE run_id = ?${nodeId ? " AND node_id = ?" : ""}
+         ORDER BY scored_at_ms ASC`, nodeId ? [runId, nodeId] : [runId]));
+    }
+    /**
+   * Count scorer rows across a bounded set of runs. Every caller-supplied value
+   * is bound as a placeholder; only the fixed filter column names are composed
+   * into the statement.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   * }} query
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    countScorerResultsForRuns(query) {
+        if (query.runIds.length === 0) {
+            return this.read("count scorer results for no runs", () => Promise.resolve(0));
+        }
+        const params = [...query.runIds];
+        const predicates = [`run_id IN (${query.runIds.map(() => "?").join(", ")})`];
+        for (const [column, value] of [
+            ["node_id", query.nodeId],
+            ["scorer_id", query.scorerId],
+            ["scorer_name", query.scorerName],
+            ["source", query.source],
+        ]) {
+            if (value !== undefined) {
+                predicates.push(`${column} = ?`);
+                params.push(value);
+            }
+        }
+        return this.read("count scorer results for runs", async () => {
+            const row = await this.internalStorage.queryOne(`SELECT COUNT(*) AS count
+         FROM _smithers_scorers
+         WHERE ${predicates.join(" AND ")}`, params);
+            return Number(row?.count ?? 0);
+        });
+    }
+    /**
+   * Fetch one globally-sortable candidate page of scorer rows for a set of
+   * runs. The server merges candidates from distinct stores and applies the
+   * final global offset/limit.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   *   order: "scoredAtAsc" | "scoredAtDesc";
+   *   offset: number;
+   *   limit: number;
+   * }} query
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listScorerResultsForRuns(query) {
+        if (query.runIds.length === 0) {
+            return this.read("list scorer results for no runs", () => Promise.resolve([]));
+        }
+        const params = [...query.runIds];
+        const predicates = [`run_id IN (${query.runIds.map(() => "?").join(", ")})`];
+        for (const [column, value] of [
+            ["node_id", query.nodeId],
+            ["scorer_id", query.scorerId],
+            ["scorer_name", query.scorerName],
+            ["source", query.source],
+        ]) {
+            if (value !== undefined) {
+                predicates.push(`${column} = ?`);
+                params.push(value);
+            }
+        }
+        const direction = query.order === "scoredAtAsc" ? "ASC" : "DESC";
+        params.push(query.limit, query.offset);
+        return this.read("list scorer results for runs", () => this.internalStorage.queryAll(`SELECT id, run_id, node_id, iteration, attempt,
+                scorer_id, scorer_name, source, score, reason, scored_at_ms,
+                latency_ms, duration_ms
+         FROM _smithers_scorers
+         WHERE ${predicates.join(" AND ")}
+         ORDER BY scored_at_ms ${direction}, run_id ASC, node_id ASC,
+                  iteration ASC, attempt ASC, scorer_id ASC, id ASC
+         LIMIT ? OFFSET ?`, params));
+    }
+    /**
+   * Read one scorer row by its exact persisted id, scoped to its owning run.
+   * @param {string} runId
+   * @param {string} scoreId
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+   */
+    getScorerResult(runId, scoreId) {
+        return this.read(`get scorer result ${scoreId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_scorers
+         WHERE run_id = ? AND id = ?`, [runId, scoreId]));
+    }
+    // ---------------------------------------------------------------------------
+    // Eval suites
+    // ---------------------------------------------------------------------------
+    /**
+   * Insert-or-replace a saved eval suite by `suiteId`. Callers that intend an
+   * UPDATE (an existing suiteId) should read the current row first and carry
+   * its original `createdAtMs` forward — this upsert has no update-column
+   * allowlist, so every field present on `row` (including `createdAtMs`) is
+   * written verbatim.
+   * @param {EvalSuiteRow} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertEvalSuite(row) {
+        return this.write(`upsert eval suite ${row.suiteId}`, () => this.internalStorage.upsert("_smithers_eval_suites", row, ["suiteId"]));
+    }
+    /**
+   * @returns {RunnableEffect<EvalSuiteRow[], SmithersError>}
+   */
+    listEvalSuites() {
+        return this.read("list eval suites", () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_eval_suites
+         ORDER BY updated_at_ms DESC`));
+    }
+    /**
+   * @param {string} suiteId
+   * @returns {RunnableEffect<EvalSuiteRow | undefined, SmithersError>}
+   */
+    getEvalSuite(suiteId) {
+        return this.read(`get eval suite ${suiteId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_eval_suites
+         WHERE suite_id = ?`, [suiteId]));
+    }
+    /**
+   * Insert-or-replace one case's live result row, keyed by the caller-composed
+   * `${evalRunId}:${caseId}` id. Every field present on `row` is written
+   * verbatim on conflict (no update-column allowlist), matching
+   * `upsertEvalSuite`.
+   * @param {EvalCaseResultRow} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertEvalCaseResult(row) {
+        return this.write(`upsert eval case result ${row.id}`, () => this.internalStorage.upsert("_smithers_eval_cases", row, ["id"]));
+    }
+    /**
+   * @param {string} evalRunId
+   * @returns {RunnableEffect<EvalCaseResultRow[], SmithersError>}
+   */
+    listEvalCaseResults(evalRunId) {
+        return this.read(`list eval case results ${evalRunId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_eval_cases
+         WHERE eval_run_id = ?
+         ORDER BY case_index ASC`, [evalRunId]));
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
+   */
+    getRunEffect(runId) {
+        return this.getRun(runId);
+    }
+    /**
+   * @param {string} [status]
+   * @param {string} [workflow]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
+   */
+    listRunsEffect(limit = 50, status, workflow) {
+        return this.listRuns(limit, status, workflow);
+    }
+    /**
+   * @param {number} staleBeforeMs
+   * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
+   */
+    listStaleRunningRunsEffect(staleBeforeMs, limit = 1000) {
+        return this.listStaleRunningRuns(staleBeforeMs, limit);
+    }
+    /**
+   * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimRunForResumeEffect(params) {
+        return this.claimRunForResume(params);
+    }
+    /**
+   * @param {Parameters<SmithersDb["releaseRunResumeClaim"]>[0]} params
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseRunResumeClaimEffect(params) {
+        return this.releaseRunResumeClaim(params);
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
+   */
+    listNodeIterationsEffect(runId, nodeId) {
+        return this.listNodeIterations(runId, nodeId);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
+   */
+    listNodesEffect(runId) {
+        return this.listNodes(runId);
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+   */
+    listAttemptsEffect(runId, nodeId, iteration) {
+        return this.listAttempts(runId, nodeId, iteration);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+   */
+    listAttemptsForRunEffect(runId) {
+        return this.listAttemptsForRun(runId);
+    }
+    /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listToolCallsEffect(runId, nodeId, iteration) {
+        return this.listToolCalls(runId, nodeId, iteration);
+    }
+    /**
+   * @param {string} tableName
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
+   */
+    getRawNodeOutputForIterationEffect(tableName, runId, nodeId, iteration) {
+        return this.getRawNodeOutputForIteration(tableName, runId, nodeId, iteration);
+    }
+    /**
+   * @param {Parameters<SmithersDb["insertEventWithNextSeq"]>[0]} row
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    insertEventWithNextSeqEffect(row) {
+        return this.insertEventWithNextSeq(row);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<number | undefined, SmithersError>}
+   */
+    getLastEventSeqEffect(runId) {
+        return this.getLastEventSeq(runId);
+    }
+    /**
+   * @param {string} runId
+   * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listEventHistoryEffect(runId, query = {}) {
+        return this.listEventHistory(runId, query);
+    }
+    /**
+   * @param {string} runId
+   * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    countEventHistoryEffect(runId, query = {}) {
+        return this.countEventHistory(runId, query);
+    }
+    /**
+   * @param {string} runId
+   * @param {string} type
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listEventsByTypeEffect(runId, type) {
+        return this.listEventsByType(runId, type);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listPendingApprovalsEffect(runId) {
+        return this.listPendingApprovals(runId);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listDecidedApprovalsEffect(runId) {
+        return this.listDecidedApprovals(runId);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listAllDecidedApprovalsEffect(runId) {
+        return this.listAllDecidedApprovals(runId);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
+   */
+    getLastFrameEffect(runId) {
+        return this.getLastFrame(runId);
+    }
+    /**
+   * @param {string} nodeId
+   * @param {string} [outputTable]
+   * @returns {RunnableEffect<CacheRow[], SmithersError>}
+   */
+    listCacheByNodeEffect(nodeId, outputTable, limit = 20) {
+        return this.listCacheByNode(nodeId, outputTable, limit);
+    }
+    /**
+    * @param {boolean} [enabledOnly]
+    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+    */
+    listCronsEffect(enabledOnly = true) {
+        return this.listCrons(enabledOnly);
+    }
+    /**
+   * @param {string} cronId
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @param {string | null} [errorJson]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
+        return this.updateCronRunTime(cronId, lastRunAtMs, nextRunAtMs, errorJson);
+    }
+    /**
+   * @param {string} cronId
+   * @param {number | null} expectedNextRunAtMs
+   * @param {number} lastRunAtMs
+   * @param {number} nextRunAtMs
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    claimCronRunEffect(cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs) {
+        return this.claimCronRun(cronId, expectedNextRunAtMs, lastRunAtMs, nextRunAtMs);
+    }
+    /**
+   * @param {string} runId
+   * @param {string} [nodeId]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listScorerResultsEffect(runId, nodeId) {
+        return this.listScorerResults(runId, nodeId);
+    }
+}

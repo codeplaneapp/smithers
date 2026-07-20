@@ -1,0 +1,236 @@
+---
+title: <Subflow>
+description: Invoke a child workflow with its own retry, cache, resume boundary.
+---
+
+```ts
+import { Subflow } from "smithers-orchestrator";
+
+type SubflowProps = {
+  id: string;
+  workflow: SmithersWorkflow<unknown> | WorkflowFileRef;
+  output: OutputTarget;
+  input?: unknown;
+  mode?: "childRun" | "inline"; // default "childRun"
+  skipIf?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  continueOnFail?: boolean;
+  cache?: CachePolicy;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+  children?: React.ReactNode;
+};
+```
+
+`Subflow` is a top-level component export. `createSmithers(...)` returns typed
+`Workflow`, `Task`, `Approval`, `Sandbox`, `Signal`, and pure structural helpers
+such as `Branch`, `Loop`, and `Parallel`; import `Subflow` from
+`"smithers-orchestrator"` when you need a child workflow boundary.
+
+The `workflow` prop takes a `SmithersWorkflow` value, which is exactly what the
+default export of a workflow file is. `smithers((ctx) => ...)` returns a
+`SmithersWorkflow`, so a child workflow is just another `createSmithers` module:
+
+```tsx
+// child.tsx - a normal workflow file. Its default export is a SmithersWorkflow.
+import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+import { z } from "zod";
+
+const child = createSmithers({
+  input: z.object({ repo: z.string() }),     // types ctx.input inside the child
+  childResult: z.object({ summary: z.string() }),
+});
+
+const childWorkflow = child.smithers(
+  (ctx) => (
+    <child.Workflow name="scan-repo">
+      <Sequence>
+        <Task id="scan" output={child.outputs.childResult} agent={scanner}>
+          {`Scan ${ctx.input.repo} and summarize.`}
+        </Task>
+      </Sequence>
+    </child.Workflow>
+  ),
+  { output: child.outputs.childResult },
+);
+
+export default childWorkflow;
+```
+
+For a workflow module generated at runtime, pass the exported `WorkflowFileRef`
+shape instead. The module must default-export a `SmithersWorkflow`; its resolved
+path (including symlinks) must remain within `approvedRoot`, which defaults to
+the parent run's `rootDir`:
+
+```tsx
+import type { WorkflowFileRef } from "smithers-orchestrator";
+
+const generated: WorkflowFileRef = {
+  path: ".smithers/generated/child.tsx",
+  approvedRoot: process.cwd(),
+};
+
+<Subflow id="generated-child" workflow={generated} output={outputs.childResult} />;
+```
+
+The second argument to `smithers(build, { output })` declares which schema
+becomes the child's `RunResult.output`: the value a parent `<Subflow>`
+persists. Pass the `createSmithers(...).outputs.<key>` schema (a string schema
+key or a Drizzle table also work). Without it, the child result is read only
+from a schema key literally named `output`, so a child that writes to any other
+key (like `childResult` here) would yield an empty subflow result. Declare it
+whenever the child's result schema is not named `output`.
+
+Import that value into the parent and hand it to `<Subflow workflow={...}>`.
+The parent declares the schema it wants to persist the subflow result under;
+that key does not have to match the child's schema key, but the shape must match
+the child result you expect:
+
+```tsx
+import { createSmithers, Sequence, Subflow, Task } from "smithers-orchestrator";
+import childWorkflow from "./child.tsx";
+import { z } from "zod";
+
+const parent = createSmithers({
+  childSummary: z.object({ summary: z.string() }),
+  finalResult: z.object({ title: z.string(), summary: z.string() }),
+});
+
+export default parent.smithers((ctx) => {
+  const child = ctx.outputMaybe(parent.outputs.childSummary, { nodeId: "run-child" });
+
+  return (
+    <parent.Workflow name="parent-flow">
+      <Sequence>
+        <Subflow
+          id="run-child"
+          workflow={childWorkflow}
+          input={{ repo: "acme/app" }}
+          output={parent.outputs.childSummary}
+          retries={2}
+          timeoutMs={300_000}
+        />
+
+        {child ? (
+          <Task id="summarize" output={parent.outputs.finalResult} agent={summarizer}>
+            {`Summarize the child workflow result: ${child.summary}`}
+          </Task>
+        ) : null}
+      </Sequence>
+    </parent.Workflow>
+  );
+});
+```
+
+The child reads the `input` you pass via its own `ctx.input`. Type it by giving
+the child's `createSmithers` an `input` schema (above); without one, `ctx.input`
+is untyped and you must guard each field (`ctx.input?.repo ?? "."`).
+
+Read the persisted subflow result in the parent exactly like a task output:
+`ctx.outputMaybe(parent.outputs.childSummary, { nodeId: "run-child" })`. The
+`nodeId` is the `<Subflow id>`, and the output target is the parent's schema key.
+
+## What `childRun` persists
+
+With `mode="childRun"` (the default), the value stored under the parent's
+`<Subflow output>` target is the child's normalized `RunResult.output`: the
+child's last task result, not a table-keyed snapshot of the child's output
+tables. When the child run finishes, the engine reads the rows the child wrote
+to its declared result schema (`smithers(build, { output })`, defaulting to
+the schema key literally named `output`), strips the system columns (`runId`,
+`nodeId`, `iteration`) from each row, and normalizes what is left:
+
+- Exactly one row, the common case where the child's final task is the only
+  writer of the result schema, unwraps to that plain row object, like
+  `{ summary: "..." }` above.
+- Zero rows normalize to `null`.
+- Multiple rows (several tasks or loop iterations writing to the result
+  schema) persist as an array of stripped rows.
+
+There is no `{ schemaKey: rows }` wrapper: the parent receives the one result
+value, never a map of the child's output tables. The parent validates that
+value against its `<Subflow output>` schema exactly like a task payload, so
+adding or changing the child's final task changes the parent's expected
+schema: renaming that task's output columns, pointing the child's declared
+result at a different schema, or adding another writer to the result schema
+(one row becomes an array) all change the shape the parent receives. Update
+the parent's `<Subflow output>` schema in the same change, or the subflow task
+fails output validation.
+
+## Single-file parent and child
+
+For small examples and eval fixtures, define both factories in one `.tsx` file.
+Use separate `createSmithers` calls so the child has its own `ctx.input` type and
+output refs, and the parent has its own output table for the subflow result:
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Subflow } from "smithers-orchestrator";
+import { z } from "zod";
+
+const child = createSmithers({
+  input: z.object({ repo: z.string() }),
+  scanResult: z.object({ summary: z.string() }),
+});
+
+const scanWorkflow = child.smithers(
+  (ctx) => (
+    <child.Workflow name="scan-child">
+      <child.Task id="scan" output={child.outputs.scanResult}>
+        {{ summary: `Scanned ${ctx.input.repo}` }}
+      </child.Task>
+    </child.Workflow>
+  ),
+  { output: child.outputs.scanResult },
+);
+
+const parent = createSmithers({
+  input: z.object({ repo: z.string() }),
+  childSummary: z.object({ summary: z.string() }),
+  finalResult: z.object({ message: z.string() }),
+});
+
+export default parent.smithers((ctx) => {
+  const childSummary = ctx.outputMaybe(parent.outputs.childSummary, {
+    nodeId: "run-scan",
+  });
+
+  return (
+    <parent.Workflow name="parent-flow">
+      <parent.Sequence>
+        <Subflow
+          id="run-scan"
+          workflow={scanWorkflow}
+          input={{ repo: ctx.input.repo }}
+          output={parent.outputs.childSummary}
+        />
+
+        {childSummary ? (
+          <parent.Task id="finish" output={parent.outputs.finalResult}>
+            {{ message: `Child said: ${childSummary.summary}` }}
+          </parent.Task>
+        ) : null}
+      </parent.Sequence>
+    </parent.Workflow>
+  );
+});
+```
+
+The parent's `input` schema is optional but recommended whenever the parent
+reads `ctx.input.repo`; it turns `ctx.input` from `unknown` into a typed object.
+The child has its own `input` schema and its own `ctx.input`, populated from the
+value passed through the parent's `<Subflow input={...}>` prop.
+
+## Notes
+
+- `childRun` (default) gives the child its own DB row; retry/cache/resume scope it as a unit. The persisted result is the child's last task row, not a table-keyed snapshot (see [What `childRun` persists](#what-childrun-persists)).
+- `inline` renders the child tree as siblings in the parent plan, sharing its scope.
+- Subflows compose; children may contain `<Subflow>` themselves.
+- Declare the child's result via `smithers(build, { output })` unless its result schema is literally named `output`; that is the schema a parent `<Subflow>` persists.

@@ -1,0 +1,20 @@
+# 15-minute progress report
+
+Write the progress report for the implementation run "{props.implRunId}" to
+artifacts/smithering/reports/progress-(UTC timestamp, e.g. 20260612T0930Z).html — compute
+the timestamp yourself — as a single self-contained HTML file a human can skim in 30
+seconds.
+
+Gather evidence READ-ONLY with the smithers CLI against that run:
+
+- bunx smithers-orchestrator inspect {props.implRunId}
+- bunx smithers-orchestrator events {props.implRunId} --since 20m
+- bunx smithers-orchestrator scores {props.implRunId}
+
+Cover: tickets finished since the last report, in-flight work, failures/retries, pending
+approvals, and evidence written under artifacts/smithering/build/. If a section has no
+data, say so plainly rather than inventing detail. Do NOT modify the run.
+
+Also maintain artifacts/smithering/reports/dashboard.html — a single always-current
+overview a human can keep open (replace it wholesale each cycle): ticket board by state,
+recent failures, links to per-ticket evidence and the latest progress reports.

@@ -1,0 +1,143 @@
+---
+title: Control Plane
+description: Organization, project, identity, billing, usage, secret-reference, and audit primitives for hosted Smithers deployments.
+---
+
+The control-plane package adds a durable SQLite store for multi-tenant objects: orgs, projects, teams, billing records, usage, secret references, and audit events. Import it alongside the Gateway when you need these boundaries.
+
+## ControlPlaneStore API
+
+Import the store from the public facade:
+
+```ts
+import { ControlPlaneStore } from "smithers-orchestrator/control-plane";
+```
+
+Or from the scoped package:
+
+```ts
+import { ControlPlaneStore } from "@smithers-orchestrator/control-plane";
+```
+
+The store creates SQLite tables for:
+
+- organizations
+- teams and team membership
+- projects and project team grants
+- billing account records
+- identity-provider records for SAML/OIDC configuration
+- usage events, summaries, and quota checks
+- secret manager references, not secret values
+- audit events and org audit export
+
+Constructing `new ControlPlaneStore(sqlite)` calls `ensureControlPlaneTables(sqlite)`. You can call `ensureControlPlaneTables(sqlite)` directly when you only need to bootstrap the schema.
+
+## Store Methods
+
+| Method | Purpose |
+| --- | --- |
+| `createOrg()` | Create an organization. |
+| `getOrg()` | Load an organization by ID. |
+| `createTeam()` | Create a team in an organization. |
+| `addTeamMember()` | Add or update a user's team role. |
+| `createProject()` | Create a project in an organization. |
+| `addProjectTeam()` | Grant or update a team's project role. |
+| `upsertBillingAccount()` | Create or update the org billing record. |
+| `upsertIdentityProvider()` | Create or update a SAML/OIDC identity provider record. |
+| `listIdentityProviders()` | List org identity providers, optionally filtered by status. |
+| `recordUsage()` | Append a usage event. |
+| `summarizeUsage()` | Aggregate usage by metric and unit for an org. |
+| `setUsageLimit()` | Create or update an org/project usage limit. |
+| `checkUsageLimit()` | Return the matching limit plus `usedQuantity`, `remainingQuantity`, and `exceeded`, or `null` when no limit is configured. |
+| `putSecretRef()` | Store an external secret reference, not the secret value. |
+| `listSecretRefs()` | List org or project secret references. |
+| `recordAuditEvent()` | Append an audit event. |
+| `exportOrgAudit()` | Export org data, usage summaries, secret refs, and audit events. |
+
+```ts
+const store = new ControlPlaneStore(sqlite);
+
+// Required: create the org and at least one project before recording any data.
+const org = store.createOrg({
+  orgId: "org_acme",
+  slug: "acme",
+  name: "Acme",
+});
+
+const project = store.createProject({
+  orgId: org.orgId,
+  projectId: "project_app",
+  slug: "app",
+  name: "App",
+});
+
+// Optional: record a usage event and set a quota for a metric.
+store.recordUsage({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  runId: "run_123",
+  metric: "agent_runtime_ms",
+  quantity: 42_000,
+  unit: "ms",
+});
+
+store.setUsageLimit({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  metric: "agent_runtime_ms",
+  unit: "ms",
+  period: "monthly",
+  limitQuantity: 10_000_000,
+});
+// period must be "daily", "weekly", or "monthly"; checkUsageLimit uses it
+// as the default rolling window when sinceMs is omitted.
+
+// Optional: register a SAML or OIDC provider for the org.
+store.upsertIdentityProvider({
+  orgId: org.orgId,
+  providerId: "idp_okta",
+  type: "saml",
+  issuer: "https://acme.okta.com",
+  ssoUrl: "https://acme.okta.com/app/smithers/sso/saml",
+  certificateRef: "vault://identity/acme-okta-cert",
+});
+
+// Optional: store a reference to a secret in an external provider (not the value).
+store.putSecretRef({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  name: "deploy-token",
+  provider: "aws-secrets-manager",
+  ref: "arn:aws:secretsmanager:us-east-1:123:secret:deploy",
+});
+
+// Check whether recorded project usage exceeds the configured limit.
+const quota = store.checkUsageLimit({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  metric: "agent_runtime_ms",
+  unit: "ms",
+  period: "monthly",
+});
+// quota is null when no matching limit exists; otherwise it includes
+// { usedQuantity, remainingQuantity, exceeded, limitQuantity, ...limitMetadata }.
+// `period` is a label used to match a configured limit; `checkUsageLimit()` does not reset usage automatically for calendar periods.
+// Pass sinceMs/untilMs when you need the used quantity scoped to a billing or reporting window.
+
+const audit = store.exportOrgAudit({ orgId: org.orgId });
+```
+
+Deleting an org cascades to all its child rows: projects, teams, identity providers, billing account, usage rows, usage limits, secret references, and audit rows. There is no soft-delete; use a status flag in your application layer if you need recoverable deletion.
+
+## Hosted Boundary
+
+A hosted Smithers service should layer these primitives behind:
+
+- SSO/SAML or OIDC authentication
+- billing provider checkout and invoices
+- cloud object storage for large artifacts
+- managed secret provider reads at worker runtime
+- audit export delivery and retention policy
+- SLAs, support, compliance controls, and incident response
+
+The open-source package owns the durable data contract. The hosted service owns identity, payment collection, tenant isolation, compliance operations, and infrastructure support.

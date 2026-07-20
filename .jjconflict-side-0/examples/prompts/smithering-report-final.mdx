@@ -1,0 +1,23 @@
+# Final report of record
+
+Produce the final report of record as a self-contained HTML slideshow at
+artifacts/smithering/reports/final-report.html (set artifactPath). Status: "delivered" if
+review + polish ended approved, else "incomplete" with honest framing.
+
+Sources: the planning docs in docs/planning/, evidence in artifacts/smithering/build/,
+probe results in artifacts/smithering/probes/, the review synthesis below, run info from
+the implementation run "{props.implRunId}" (see the report:gather output), and the
+progress reports in artifacts/smithering/reports/.
+
+Review synthesis:
+
+{props.reviewSynth}
+
+Slides (keep each skimmable): Title & status · What was built (birds-eye) · Key decisions
+(with the why) · Requirements → evidence matrix (per blocking gate: evidence link or "NO
+EVIDENCE" in red) · Tests & verification summary · Failures, retries & how they were
+handled · Remaining risks & known gaps · Recommended next steps.
+
+Honesty rule: if a topic has no data, keep the slide and say so plainly rather than
+inventing detail. Embed run ids (parent: {props.parentRunId}, impl: {props.implRunId}) for
+traceability.

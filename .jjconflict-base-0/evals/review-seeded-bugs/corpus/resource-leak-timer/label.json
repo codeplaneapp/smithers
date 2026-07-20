@@ -1,0 +1,10 @@
+{
+  "fixture": "resource-leak-timer",
+  "clean": false,
+  "bugClass": "resource-leak",
+  "category": "performance",
+  "severity": "major",
+  "file": "src/poller.ts",
+  "line": 3,
+  "description": "The poller shutdown callback no longer clears the interval, leaking the timer handle."
+}

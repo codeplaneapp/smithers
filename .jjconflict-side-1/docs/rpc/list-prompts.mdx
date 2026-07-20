@@ -1,0 +1,16 @@
+---
+title: listPrompts
+description: Gateway RPC for listing registered prompts.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listPrompts`
+- Scope: `prompt:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{}`
+- Response: `Prompt[]`
+
+Each prompt is a `.md`/`.mdx` file walked from the project's `.smithers/prompts/` directory. A row carries `{ id, entryFile, source, createdAtMs?, updatedAtMs? }`, where `id` is the file's relative path without its extension (e.g. `refactor`), `entryFile` is the workspace-relative source path (e.g. `prompts/refactor.mdx`), and `source` is the raw file text. The optional timestamps come from `fs.stat`.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.

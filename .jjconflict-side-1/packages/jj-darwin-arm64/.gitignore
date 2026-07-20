@@ -1,0 +1,3 @@
+# The vendored binary is fetched at release time, never committed.
+/bin/*
+!/bin/.gitkeep

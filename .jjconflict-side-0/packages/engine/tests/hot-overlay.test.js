@@ -1,0 +1,210 @@
+import { describe, expect, test, afterEach } from "bun:test";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync, statSync, } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildOverlay, cleanupGenerations, resolveOverlayEntry, __overlayInternals, } from "../src/hot/overlay.js";
+function makeTempDir() {
+    return mkdtempSync(join(tmpdir(), "smithers-hot-"));
+}
+describe("resolveOverlayEntry", () => {
+    test("resolves entry path relative to overlay dir", () => {
+        const projectRoot = join(tmpdir(), "project");
+        const genDir = join(projectRoot, ".smithers", "hmr", "gen-1");
+        const result = resolveOverlayEntry(join(projectRoot, "src", "workflow.ts"), projectRoot, genDir);
+        expect(result).toBe(join(genDir, "src", "workflow.ts"));
+    });
+    test("handles entry at root", () => {
+        const projectRoot = join(tmpdir(), "project");
+        const genDir = join(tmpdir(), "overlay", "gen-1");
+        const result = resolveOverlayEntry(join(projectRoot, "workflow.ts"), projectRoot, genDir);
+        expect(result).toBe(join(genDir, "workflow.ts"));
+    });
+    test("handles nested paths", () => {
+        const projectRoot = join(tmpdir(), "project");
+        const genDir = join(tmpdir(), "out", "gen-5");
+        const result = resolveOverlayEntry(join(projectRoot, "a", "b", "c", "entry.ts"), projectRoot, genDir);
+        expect(result).toBe(join(genDir, "a", "b", "c", "entry.ts"));
+    });
+});
+describe("buildOverlay", () => {
+    const dirs = [];
+    afterEach(() => {
+        for (const d of dirs) {
+            try {
+                rmSync(d, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        dirs.length = 0;
+    });
+    test("creates generation directory with files", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "workflow.ts"), "export default {}");
+        mkdirSync(join(root, "src"));
+        writeFileSync(join(root, "src", "helper.ts"), "export const x = 1");
+        const genDir = await buildOverlay(root, outDir, 1);
+        expect(genDir).toBe(join(outDir, "gen-1"));
+        expect(existsSync(join(genDir, "workflow.ts"))).toBe(true);
+        expect(existsSync(join(genDir, "src", "helper.ts"))).toBe(true);
+        expect(readFileSync(join(genDir, "workflow.ts"), "utf8")).toBe("export default {}");
+    });
+    test("keeps generated module files isolated from later source edits", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        const sourcePath = join(root, "workflow.ts");
+        writeFileSync(sourcePath, "export default { version: 1 };");
+        const genDir = await buildOverlay(root, outDir, 1);
+        const overlayPath = join(genDir, "workflow.ts");
+        writeFileSync(sourcePath, "export default { version: 2 };");
+        expect(readFileSync(overlayPath, "utf8")).toBe("export default { version: 1 };");
+    });
+    test("excludes node_modules by default", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "index.ts"), "ok");
+        mkdirSync(join(root, "node_modules"));
+        writeFileSync(join(root, "node_modules", "pkg.js"), "module");
+        const genDir = await buildOverlay(root, outDir, 1);
+        expect(existsSync(join(genDir, "index.ts"))).toBe(true);
+        expect(existsSync(join(genDir, "node_modules"))).toBe(false);
+    });
+    test("excludes .git and .smithers by default", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "code.ts"), "ok");
+        mkdirSync(join(root, ".git"));
+        writeFileSync(join(root, ".git", "HEAD"), "ref");
+        mkdirSync(join(root, ".smithers"));
+        writeFileSync(join(root, ".smithers", "config"), "cfg");
+        const genDir = await buildOverlay(root, outDir, 1);
+        expect(existsSync(join(genDir, "code.ts"))).toBe(true);
+        expect(existsSync(join(genDir, ".git"))).toBe(false);
+        expect(existsSync(join(genDir, ".smithers"))).toBe(false);
+    });
+    test("skips dotfiles", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "visible.ts"), "ok");
+        writeFileSync(join(root, ".hidden"), "secret");
+        const genDir = await buildOverlay(root, outDir, 1);
+        expect(existsSync(join(genDir, "visible.ts"))).toBe(true);
+        expect(existsSync(join(genDir, ".hidden"))).toBe(false);
+    });
+    test("increments generation number in dir name", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "a.ts"), "ok");
+        const gen1 = await buildOverlay(root, outDir, 1);
+        const gen2 = await buildOverlay(root, outDir, 2);
+        expect(gen1).toContain("gen-1");
+        expect(gen2).toContain("gen-2");
+        expect(existsSync(gen1)).toBe(true);
+        expect(existsSync(gen2)).toBe(true);
+    });
+    test("falls back to copying when a hardlink destination already exists", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "workflow.ts"), "fresh");
+        mkdirSync(join(outDir, "gen-1"));
+        writeFileSync(join(outDir, "gen-1", "workflow.ts"), "stale");
+        const genDir = await buildOverlay(root, outDir, 1);
+        expect(readFileSync(join(genDir, "workflow.ts"), "utf8")).toBe("fresh");
+    });
+    test("non-module files are hardlinked into the overlay, module files get their own inode", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "notes.txt"), "asset");
+        writeFileSync(join(root, "workflow.ts"), "export default {}");
+        const genDir = await buildOverlay(root, outDir, 1);
+        const srcStat = statSync(join(root, "notes.txt"));
+        const overlayStat = statSync(join(genDir, "notes.txt"));
+        expect(overlayStat.ino).toBe(srcStat.ino);
+        expect(overlayStat.nlink).toBe(2);
+        // Module files must NOT share an inode or in-place edits would leak
+        // into already-built generations.
+        expect(statSync(join(genDir, "workflow.ts")).ino).not.toBe(statSync(join(root, "workflow.ts")).ino);
+    });
+    test("a failed hardlink for a non-module file falls back to an independent copy", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "notes.txt"), "fresh");
+        // Pre-existing destination makes link() fail with EEXIST.
+        mkdirSync(join(outDir, "gen-1"));
+        writeFileSync(join(outDir, "gen-1", "notes.txt"), "stale");
+        const genDir = await buildOverlay(root, outDir, 1);
+        expect(readFileSync(join(genDir, "notes.txt"), "utf8")).toBe("fresh");
+        expect(statSync(join(genDir, "notes.txt")).ino).not.toBe(statSync(join(root, "notes.txt")).ino);
+    });
+});
+describe("cleanupGenerations", () => {
+    const dirs = [];
+    afterEach(() => {
+        for (const d of dirs) {
+            try {
+                rmSync(d, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        dirs.length = 0;
+    });
+    test("removes old generations keeping last N", async () => {
+        const outDir = makeTempDir();
+        dirs.push(outDir);
+        for (let i = 1; i <= 5; i++) {
+            mkdirSync(join(outDir, `gen-${i}`));
+        }
+        await cleanupGenerations(outDir, 2);
+        expect(existsSync(join(outDir, "gen-1"))).toBe(false);
+        expect(existsSync(join(outDir, "gen-2"))).toBe(false);
+        expect(existsSync(join(outDir, "gen-3"))).toBe(false);
+        expect(existsSync(join(outDir, "gen-4"))).toBe(true);
+        expect(existsSync(join(outDir, "gen-5"))).toBe(true);
+    });
+    test("does nothing when fewer generations than keepLast", async () => {
+        const outDir = makeTempDir();
+        dirs.push(outDir);
+        mkdirSync(join(outDir, "gen-1"));
+        await cleanupGenerations(outDir, 5);
+        expect(existsSync(join(outDir, "gen-1"))).toBe(true);
+    });
+    test("handles non-existent outDir", async () => {
+        // Should not throw
+        await cleanupGenerations("/tmp/nonexistent-dir-xyz-12345", 3);
+    });
+    test("ignores non-gen directories", async () => {
+        const outDir = makeTempDir();
+        dirs.push(outDir);
+        mkdirSync(join(outDir, "gen-1"));
+        mkdirSync(join(outDir, "gen-2"));
+        mkdirSync(join(outDir, "gen-3"));
+        mkdirSync(join(outDir, "other-dir"));
+        await cleanupGenerations(outDir, 1);
+        expect(existsSync(join(outDir, "gen-3"))).toBe(true);
+        expect(existsSync(join(outDir, "other-dir"))).toBe(true);
+        expect(existsSync(join(outDir, "gen-1"))).toBe(false);
+    });
+});
+describe("overlay internals", () => {
+    test("maps overlay operation errors with stable code and details", () => {
+        const cause = new Error("disk unavailable");
+        const mapped = __overlayInternals.hotOverlayErrorMapper("copy overlay file", {
+            srcPath: "/src/workflow.ts",
+            destPath: "/dest/workflow.ts",
+        })(cause);
+        expect(mapped.code).toBe("HOT_OVERLAY_FAILED");
+        expect(mapped.summary).toContain("copy overlay file");
+        expect(mapped.details?.srcPath).toBe("/src/workflow.ts");
+        expect(mapped.details?.destPath).toBe("/dest/workflow.ts");
+        expect(mapped.cause).toBe(cause);
+    });
+});

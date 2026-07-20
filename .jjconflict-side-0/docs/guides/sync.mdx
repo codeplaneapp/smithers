@@ -1,0 +1,145 @@
+---
+title: Sync
+description: Use TanStack DB collections with the Smithers Gateway in local and multiplayer workspaces.
+---
+
+Smithers custom UIs use TanStack DB as their frontend data layer. UI code reads from named collections with `useLiveQuery`, and writes go through the Smithers domain API. The collection provider changes with the workspace mode.
+
+```ts
+import { QueryClient } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
+import { createSmithersCollections } from "smithers-orchestrator/gateway-client";
+
+const queryClient = new QueryClient();
+const collections = createSmithersCollections(
+  { kind: "local", apiBaseUrl: "http://127.0.0.1:7331" },
+  queryClient,
+);
+
+const { data: runs } = useLiveQuery((q) =>
+  q.from({ run: collections.runs({ limit: 50 }) }),
+);
+```
+
+## WorkspaceMode
+
+`WorkspaceMode` selects the provider:
+
+```ts
+type WorkspaceMode =
+  | { kind: "local"; apiBaseUrl: string; token?: string }
+  | {
+      kind: "multiplayer";
+      apiBaseUrl: string;
+      electricBaseUrl: string;
+      workspaceId: string;
+      token?: string;
+    };
+```
+
+`SmithersGatewayProvider` chooses local mode by default from the Gateway client base URL. Pass `mode` to `createGatewayReactRoot` or `SmithersGatewayProvider` when you need multiplayer reads.
+
+## Collections
+
+`createSmithersCollections(mode, queryClient)` returns the same collection names in every mode:
+
+```ts
+collections.runs()
+collections.run(runId)
+collections.runTree(runId)
+collections.nodes(runId)
+collections.runEvents(runId)
+collections.approvals()
+collections.workflows()
+collections.docs()
+collections.prompts()
+collections.scores({ runId })
+collections.tickets()
+collections.memoryFacts()
+collections.crons()
+```
+
+Large node blobs stay fetch-on-demand through `useGatewayNodeOutput` and `useGatewayRpc("getNodeDiff", ...)`; they are not collection rows.
+
+## Local Provider
+
+Local workspaces use the official QueryCollection provider over the Gateway REST domain API:
+
+```txt
+GET  /v1/api/runs
+GET  /v1/api/runs/:id
+POST /v1/api/runs
+GET  /v1/api/events?runId=...
+GET  /v1/api/approvals
+GET  /v1/api/stream
+```
+
+`GET /v1/api/stream` is an SSE invalidation feed. Change frames look like this:
+
+```txt
+event: change
+data: {"seq":42,"collections":["runs","events"]}
+```
+
+The client invalidates matching TanStack Query keys, and QueryCollection refetches from `/v1/api/*`. The stream coalesces bursts, sends heartbeats, reconnects with backoff, and uses bounded buffers. When the ring cannot replay a missed sequence, it sends a reset event and the client invalidates every collection key.
+
+SQLite and embedded PGlite mutating routes return `{ seq }`. That `seq` is the invalidation sequence that confirms the local optimistic write.
+
+## Multiplayer Provider
+
+Multiplayer workspaces use the official ElectricCollection provider through `@smithers-orchestrator/electric-proxy`:
+
+```txt
+ElectricCollection -> electricBaseUrl/v1/shape -> electric-proxy -> Postgres
+```
+
+The proxy owns shape scoping, auth, and rate limits. The client passes the catalog shape name and the same auth token it uses for the domain API. Rows from Electric are mapped from snake_case Postgres columns to the same camelCase row types returned by REST, so React components and `useLiveQuery` code do not branch by mode.
+
+Writes still go through `/v1/api/*`. Postgres mutating routes return `{ txid }`, captured inside the write transaction with `pg_current_xact_id()::xid::text`. Electric transaction matching uses that txid to confirm optimistic state once the shape stream catches up.
+
+## React Hooks
+
+The workflow UI hook surface is preserved on top of collections:
+
+```ts
+useGatewayRun(runId)
+useGatewayRunEvents(runId)
+useGatewayRunTree(runId)
+useGatewayApprovals({ filter: { runId } })
+useGatewayNodeOutput({ runId, nodeId })
+useGatewayActions()
+useGatewayConnectionStatus()
+```
+
+Use these hooks for normal workflow UIs. Use `useSmithersCollections()` when you need a custom collection query:
+
+```tsx
+import { useLiveQuery } from "@tanstack/react-db";
+import { useSmithersCollections } from "smithers-orchestrator/gateway-react";
+
+function ScoreList({ runId }: { runId: string }) {
+  const { collections } = useSmithersCollections();
+  const scores = useLiveQuery(
+    (q) => q.from({ score: collections.scores({ runId }) }),
+    [collections, runId],
+  );
+
+  return <pre>{JSON.stringify(scores.data ?? [], null, 2)}</pre>;
+}
+```
+
+## Domain Writes
+
+Collection mutation handlers call the same domain API that `useGatewayActions()` calls:
+
+```ts
+await collections.runs().insert({
+  runId: crypto.randomUUID(),
+  workflowKey: "deploy",
+  workflow: "deploy",
+  status: "queued",
+  input: { env: "prod" },
+});
+```
+
+Local mode confirms via SSE invalidation and refetch. Multiplayer mode confirms through Electric transaction matching with the returned `txid`. Shape streams are read paths only.

@@ -1,0 +1,105 @@
+{
+  "version": "0.24.0",
+  "generatedFrom": "release-content workflow render-media",
+  "assets": [
+    {
+      "tweetIndex": 1,
+      "kind": "hero",
+      "suggestion": "hero card",
+      "file": "marketing/0.24.0/assets/tweet-01-hero.svg",
+      "sibling": "assets/tweet-01-hero.svg",
+      "captureRecommended": false,
+      "command": "bunx smithers-orchestrator gateway"
+    },
+    {
+      "tweetIndex": 2,
+      "kind": "terminal",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator gateway` startup output showing workspace and DB paths",
+      "file": "marketing/0.24.0/assets/tweet-02-terminal.svg",
+      "sibling": "assets/tweet-02-terminal.svg",
+      "captureRecommended": true,
+      "command": "bunx smithers-orchestrator gateway"
+    },
+    {
+      "tweetIndex": 3,
+      "kind": "terminal",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator inspect` output showing input schema fields alongside a run summary",
+      "file": "marketing/0.24.0/assets/tweet-03-terminal.svg",
+      "sibling": "assets/tweet-03-terminal.svg",
+      "captureRecommended": true,
+      "command": "bunx smithers-orchestrator inspect"
+    },
+    {
+      "tweetIndex": 4,
+      "kind": "diagram",
+      "suggestion": "diagram card showing before/after loop scheduling",
+      "file": "marketing/0.24.0/assets/tweet-04-diagram.svg",
+      "sibling": "assets/tweet-04-diagram.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 5,
+      "kind": "terminal",
+      "suggestion": "terminal screenshot showing a detached run's events arriving in a connected Gateway client",
+      "file": "marketing/0.24.0/assets/tweet-05-terminal.svg",
+      "sibling": "assets/tweet-05-terminal.svg",
+      "captureRecommended": true,
+      "command": "bunx smithers-orchestrator up -d"
+    },
+    {
+      "tweetIndex": 6,
+      "kind": "terminal",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator init` completing without errors",
+      "file": "marketing/0.24.0/assets/tweet-06-terminal.svg",
+      "sibling": "assets/tweet-06-terminal.svg",
+      "captureRecommended": true,
+      "command": "bunx smithers-orchestrator init"
+    },
+    {
+      "tweetIndex": 7,
+      "kind": "terminal",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator observability` starting the Docker Compose stack",
+      "file": "marketing/0.24.0/assets/tweet-07-terminal.svg",
+      "sibling": "assets/tweet-07-terminal.svg",
+      "captureRecommended": true,
+      "command": "bunx smithers-orchestrator observability"
+    },
+    {
+      "tweetIndex": 8,
+      "kind": "changelog",
+      "suggestion": "changelog card",
+      "file": "marketing/0.24.0/assets/tweet-08-changelog.svg",
+      "sibling": "assets/tweet-08-changelog.svg",
+      "captureRecommended": false,
+      "command": null
+    }
+  ],
+  "captures": [
+    {
+      "tweetIndex": 2,
+      "command": "bunx smithers-orchestrator gateway",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator gateway` startup output showing workspace and DB paths"
+    },
+    {
+      "tweetIndex": 3,
+      "command": "bunx smithers-orchestrator inspect",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator inspect` output showing input schema fields alongside a run summary"
+    },
+    {
+      "tweetIndex": 5,
+      "command": "bunx smithers-orchestrator up -d",
+      "suggestion": "terminal screenshot showing a detached run's events arriving in a connected Gateway client"
+    },
+    {
+      "tweetIndex": 6,
+      "command": "bunx smithers-orchestrator init",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator init` completing without errors"
+    },
+    {
+      "tweetIndex": 7,
+      "command": "bunx smithers-orchestrator observability",
+      "suggestion": "terminal screenshot of `bunx smithers-orchestrator observability` starting the Docker Compose stack"
+    }
+  ]
+}

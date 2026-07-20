@@ -1,0 +1,38 @@
+You are implementing ticket **{props.ticket.id} — {props.ticket.title}** in your worktree.
+
+## Ticket
+
+{props.ticket.description}
+
+{props.ticket.files?.length ? `Files of interest: ${props.ticket.files.join(", ")}` : ""}
+
+{props.ticket.acceptanceCriteria ? `Acceptance criteria:\n${props.ticket.acceptanceCriteria}` : ""}
+
+## Reminders
+
+- You are on branch `ticket/{props.ticket.id}` in an isolated worktree.
+- You **may not** browse the web or read external docs. If you need outside
+  information, stop and emit a `needs_docs` status with `docRequests`.
+- You **may** read anything in this worktree, including `wiki/` — that's where
+  the researcher writes notes for you.
+- Make focused, atomic commits with conventional prefixes.
+
+{props.review && props.review.approved === false
+  ? `## Reviewer feedback to address\n\n${props.review.feedback}\n\n${(props.review.issues ?? []).map(i => `- [${i.severity}] ${i.file}: ${i.description} — ${i.suggestion}`).join("\n")}`
+  : ""}
+
+{props.previousImpl?.status === "needs_docs" && props.previousImpl?.docRequests?.length
+  ? `## Docs you previously requested\n\nThe researcher should have written notes into \`wiki/\`. Read those before continuing.\n\nYour previous requests:\n${props.previousImpl.docRequests.map(r => `- ${r.topic}: ${r.questions.join("; ")}`).join("\n")}`
+  : ""}
+
+## Output
+
+Return JSON matching `implementSchema`:
+
+- `ticketId`: `"{props.ticket.id}"`
+- `branch`: `"ticket/{props.ticket.id}"`
+- `status`: `"complete"` if you committed everything the ticket needs, or
+  `"needs_docs"` if you stopped because you need outside information.
+- `filesChanged`, `commitCount`, `summary` describe what you did.
+- `docRequests` is required only when status is `"needs_docs"`. Each entry
+  has a `topic` and an array of specific `questions`.

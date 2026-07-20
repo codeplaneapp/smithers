@@ -1,0 +1,40 @@
+# Triage build issue
+
+The `create-workflow` child run **{props.childRunId}** needs attention.
+
+Status: **{props.status}**
+
+Detail:
+```
+{props.detail}
+```
+
+## Investigate
+
+Run:
+```
+bunx smithers-orchestrator inspect {props.childRunId}
+bunx smithers-orchestrator logs {props.childRunId}
+bunx smithers-orchestrator why {props.childRunId}
+```
+
+## Act
+
+- **waiting-approval**: The design step is waiting for a human gate. Approve it:
+  ```
+  bunx smithers-orchestrator approve {props.childRunId} --node design:approval --by tutorial --approve
+  ```
+- **stalled / stale**: Resume the run:
+  ```
+  bunx smithers-orchestrator up .smithers/workflows/create-workflow.tsx \
+    --run-id {props.childRunId} --resume true --force --detach
+  ```
+- **failed on a transient error**: Retry the failed task:
+  ```
+  bunx smithers-orchestrator retry-task {props.childRunId} <task-id>
+  ```
+- **unrecoverable**: Set `escalate: true` with a clear explanation so the tutorial surfaces the issue.
+
+Report what you found and what actions you took.
+
+{props.schema}

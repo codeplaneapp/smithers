@@ -1,0 +1,100 @@
+---
+title: CLI Quickstart
+description: Short operational cheatsheet. The full catalog lives in CLI.
+---
+
+**Prerequisites:** `bun` installed, and a project directory where you want to run Smithers.
+
+<Note>
+  This cheatsheet is for the agent operating Smithers. You, the agent, run every
+  command on this page for the human; never hand them to the human. The human
+  states outcomes and answers questions; you operate the CLI.
+</Note>
+
+**Set up**
+
+```bash
+bunx smithers-orchestrator init                                       # scaffold .smithers/
+bunx smithers-orchestrator init --template idea-to-tickets            # return a create-workflow starter request
+bunx smithers-orchestrator starters                                   # browse template IDs
+```
+
+**Verify the setup**
+
+```bash
+bunx smithers-orchestrator --version          # prints the version you installed
+bunx smithers-orchestrator workflow doctor    # vcs + workflow pack health
+bunx smithers-orchestrator workflow list      # workflows discovered in this repo
+```
+
+`workflow doctor` confirms a VCS resolved and the pack scaffolded (output trimmed):
+
+```text
+vcs:
+  jj:
+    path: jj
+    source: path
+  git:
+    path: git
+    source: path
+  ok: true
+workflowRoot: /your/repo/.smithers
+packs[2]:
+  - scope: local
+    packDir: /your/repo/.smithers
+    preload:
+      path: /your/repo/.smithers/preload.ts
+      exists: true
+    bunfig:
+      path: /your/repo/.smithers/bunfig.toml
+      exists: true
+  - scope: global
+    ...
+workflows[3]:
+  - id: create-workflow
+  - id: create-skill
+  - id: docs-driven-development
+```
+
+`ok: true` under `vcs` means jj or git resolved; if it is `false`, install one (see [Installation](/installation)). A non-empty `workflows[...]` count means the pack is in place. `workflow list` prints the same workflow entries with full metadata.
+
+**Before your first run**
+
+Your workflow hands real work to a coding agent. Before you start it, make sure
+the agent you chose during `init` is installed and authenticated. For example,
+run `codex login` for Codex, or configure the model/provider credentials your
+chosen agent uses. See [Set up in your harness](/agents/setup) for agent-specific
+instructions.
+
+**Run your first workflow**
+
+```bash
+bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build a new workflow from a plain-English ask
+bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
+```
+
+**What success looks like**
+
+`workflow run` and `up` stream the lifecycle event log and exit on a terminal line:
+
+```text
+[12:00:01] ▶ Run started
+[12:00:01] ↺ Run status: running
+[12:00:38] ✓ implement (attempt 1)
+[12:00:40] ✓ Run finished
+```
+
+`✓ Run finished` means the run completed. `⏸ <node> waiting for approval` means it paused for a human decision (relay the question to the human, then clear it with `approve` and resume). `✗ Run failed: …` reports the error. The CLI prints the run id and suggested next commands (`logs`, `inspect`) after launch; pass that id to every command below.
+
+**Observe & control**
+
+```bash
+bunx smithers-orchestrator ps                                         # list runs
+bunx smithers-orchestrator inspect RUN_ID                           # structured run state
+bunx smithers-orchestrator logs RUN_ID --tail 20 --follow           # stream events
+bunx smithers-orchestrator why RUN_ID                               # why is it paused?
+bunx smithers-orchestrator approve RUN_ID --node NODE_ID --by NAME   # approve a paused node
+bunx smithers-orchestrator cancel RUN_ID                            # cancel a run
+```
+
+See [Tour](/tour) for a full worked example. See [CLI overview](/cli/overview) for the complete flag reference.

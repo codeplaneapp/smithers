@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <rect width="760" height="360" fill="#0b0f14"/>
+  <text x="380" y="40" fill="#e6edf3" font-size="20" font-weight="700" text-anchor="middle">Three layers, three velocities</text>
+
+  <!-- Model layer (volatile / red) -->
+  <rect x="80" y="70" width="600" height="74" rx="10" fill="#3a1418" stroke="#f85149" stroke-width="1.5"/>
+  <text x="104" y="103" fill="#f85149" font-size="17" font-weight="700">MODEL LAYER</text>
+  <text x="104" y="126" fill="#8b949e" font-size="13">GPT · Claude · Gemini · Kimi</text>
+  <text x="656" y="103" fill="#f85149" font-size="13" text-anchor="end" font-weight="600">volatile</text>
+  <text x="656" y="126" fill="#8b949e" font-size="12" text-anchor="end">changes weekly</text>
+
+  <!-- Topology layer (fluid / amber) -->
+  <rect x="80" y="156" width="600" height="74" rx="10" fill="#3a2c10" stroke="#d29922" stroke-width="1.5"/>
+  <text x="104" y="189" fill="#d29922" font-size="17" font-weight="700">TOPOLOGY LAYER</text>
+  <text x="104" y="212" fill="#8b949e" font-size="13">ReAct · crew · swarm · plan-execute · subagent fan-out</text>
+  <text x="656" y="189" fill="#d29922" font-size="13" text-anchor="end" font-weight="600">fluid</text>
+  <text x="656" y="212" fill="#8b949e" font-size="12" text-anchor="end">changes quarterly</text>
+
+  <!-- Orchestration layer (stable / green) -->
+  <rect x="80" y="242" width="600" height="80" rx="10" fill="#0f2e1a" stroke="#3fb950" stroke-width="2"/>
+  <text x="104" y="276" fill="#3fb950" font-size="17" font-weight="700">ORCHESTRATION LAYER</text>
+  <text x="104" y="299" fill="#adbac7" font-size="13">durable steps · retries · state · events · observability</text>
+  <text x="656" y="276" fill="#3fb950" font-size="13" text-anchor="end" font-weight="700">stable</text>
+  <text x="656" y="299" fill="#adbac7" font-size="12" text-anchor="end" font-weight="600">this is Smithers</text>
+</svg>

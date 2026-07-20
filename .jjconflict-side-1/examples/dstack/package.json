@@ -1,0 +1,19 @@
+{
+  "name": "smithers-dstack-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "env": "./scripts/print-env.sh",
+    "plan": "echo 'n' | dstack apply -f kimi.dstack.yml",
+    "deploy": "dstack apply -f kimi.dstack.yml -y -d",
+    "status": "dstack ps -v",
+    "teardown": "dstack stop kimi-k2 -y",
+    "workflow": "smithers up workflow.jsx"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^1.0.0",
+    "ai": "^4.0.0",
+    "smithers-orchestrator": "file:../../packages/smithers",
+    "zod": "^3.23.0"
+  }
+}

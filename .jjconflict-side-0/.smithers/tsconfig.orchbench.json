@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["workflows/orchbench.tsx", "lib/roadmapScorer.ts", "ui/orchbench.tsx"]
+}

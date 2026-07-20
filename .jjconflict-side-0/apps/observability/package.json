@@ -1,0 +1,48 @@
+{
+  "name": "@smithers-orchestrator/observability",
+  "version": "0.29.0",
+  "description": "Concrete Smithers metrics, logging, tracing, and observability integrations",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./metrics": {
+      "types": "./src/metrics/index.d.ts",
+      "import": "./src/metrics/index.js",
+      "default": "./src/metrics/index.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/",
+    "docker-compose.otel.yml",
+    "otel-collector-config.yml",
+    "prometheus/",
+    "tempo/",
+    "loki/",
+    "grafana/"
+  ],
+  "scripts": {
+    "build": "rm -f src/index.d.ts src/metrics/index.d.ts src/*-*.d.ts && tsup --dts-only",
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@effect/opentelemetry": "^0.63.0",
+    "@effect/platform": "^0.96.2",
+    "@effect/platform-bun": "^0.90.0",
+    "effect": "3.21.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~6.0.3"
+  }
+}

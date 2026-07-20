@@ -1,0 +1,18 @@
+/**
+ * A workflow file usually lives inside the workspace's own `.smithers/`
+ * (e.g. `<repo>/.smithers/workflows/x.tsx`). Using its `dirname` as the run
+ * root would make relative worktree paths resolve inside
+ * `.smithers/workflows/`, spawning a NESTED `.smithers/workflows/.smithers`
+ * workspace there (a real failure observed in the wild). Escape upward past
+ * the first `.smithers` path segment so the root lands on the real workspace.
+ *
+ * Paths that contain no `.smithers` segment (or where `.smithers` is the very
+ * first segment, i.e. no ancestor to escape to) are returned resolved and
+ * unchanged.
+ *
+ * @param {string} dir
+ * @returns {string}
+ */
+declare function escapeSmithersDir(dir: string): string;
+
+export { escapeSmithersDir };

@@ -1,0 +1,36 @@
+# Propose the skill, workflow, and memory
+
+You are the proposal step. The analysis below decided what is worth harvesting
+from the run/pattern. Turn it into concrete, ready-to-use proposals. Still no
+files written here — that happens in the next step.
+
+## What we are harvesting
+
+{props.prompt}
+
+## Analysis
+
+{JSON.stringify(props.analysis, null, 2)}
+
+## Produce
+
+- **proposedSkill** — when the analysis set `reusableAsSkill` to `true`, propose a
+  skill doc, otherwise `null`. Give it:
+  - `name` — a stable kebab-case id (this becomes the file name under `{props.skillsDir}`).
+  - `description` — one line: what it does and when to reach for it.
+  - `body` — the full markdown body, ready to write. Keep it tight and practical:
+    what the pattern is, when to use it, and the concrete steps to follow. No
+    marketing copy, no `TODO` stubs.
+- **proposedWorkflow** — when the analysis set `reusableAsWorkflow` to `true`,
+  propose a workflow, otherwise `null`. Give it an `id` (kebab-case) and a short
+  `sketch` of the graph: the stages, where it loops, and any human gate. This is
+  only a sketch — a separate `create-workflow` run can build it later.
+- **memoryToPersist** — the final, polished memory facts to keep. Start from the
+  analysis `memoryFacts`, drop run-specific trivia, and tighten the wording. May
+  be empty.
+
+If the analysis marked neither skill nor workflow reusable, return both as `null`
+and only carry through the memory facts.
+
+REQUIRED OUTPUT:
+{props.schema}

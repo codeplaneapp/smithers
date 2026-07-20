@@ -1,0 +1,10 @@
+---
+title: MDX Prompts
+description: Folded into Recipes.
+---
+
+This material is now in [Recipes](/recipes#mdx-prompt-with-auto-injected-schema).
+
+When a `<Task>` child is a JSX/MDX element and an output schema is set, Smithers auto-injects `props.schema` with a JSON example derived from the Zod schema, with no manual passing required. If running tests, register `mdxPlugin()` in the `[test]` preload as well.
+
+In `.mdx` prompt files, prose that looks like JSX or HTML is parsed as JSX. Wrap examples such as `<Parallel maxConcurrency={N}>` in inline backticks or a fenced code block so the prompt module still compiles and exports its default prompt component.

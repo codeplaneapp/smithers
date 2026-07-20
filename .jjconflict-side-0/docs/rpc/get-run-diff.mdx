@@ -1,0 +1,16 @@
+---
+title: getRunDiff
+description: Gateway RPC for the final run-level diff.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `getRunDiff`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId }`
+- Response: `GetRunDiffResponse` (`DiffBundle` or an explicit `status: "oversized"` marker)
+
+The bundle is computed from the run's base VCS revision to its terminal revision. Runs with no changed files return an honest empty `patches` array. Oversized results are never truncated and include `sizeBytes` and `maxBytes`.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `VcsError`, and `Internal`.

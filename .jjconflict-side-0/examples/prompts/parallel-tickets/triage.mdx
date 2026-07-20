@@ -1,0 +1,23 @@
+You are triaging tickets for parallel execution.
+
+Repository: {props.directory}
+Base branch: {props.baseBranch}
+
+## Tickets
+
+{Array.isArray(props.tickets)
+  ? props.tickets.map((t, i) => `### ${t.id ?? `ticket-${i + 1}`} — ${t.title ?? "(untitled)"}\n${t.description ?? ""}${t.files?.length ? `\nFiles: ${t.files.join(", ")}` : ""}${t.dependsOn?.length ? `\nDeclared dependencies: ${t.dependsOn.join(", ")}` : ""}`).join("\n\n")
+  : String(props.tickets)}
+
+## Your job
+
+1. Confirm or correct each ticket's `dependsOn` list by reading the codebase.
+   Look for: shared files with conflicting edits, shared types/interfaces,
+   shared schema/migrations, ordering implied by API contracts.
+2. Partition every ticket into the lowest-numbered wave it can land in:
+   a ticket goes into wave N iff every dependency is in waves `0..N-1`.
+3. Maximize the width of each wave — prefer many wide waves over few narrow ones.
+4. Each ticket appears in exactly one wave.
+
+Return JSON matching the schema: `tickets[]`, `waves[]` (each with `index`,
+`ticketIds`, and a one-sentence `rationale`), and a top-level `summary`.

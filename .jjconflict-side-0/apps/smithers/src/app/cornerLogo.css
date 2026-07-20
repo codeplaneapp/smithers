@@ -1,0 +1,73 @@
+/*
+ * The persistent corner logo. Its own file (not styles.css) to stay clear of
+ * the shared-stylesheet edit race. The fixed slot here is also the landing spot
+ * the first-run splash mark flies toward, so the two read as one continuous
+ * motion (see onboarding.css `ob-fly`).
+ */
+
+.corner-logo {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 45;
+  width: 30px;
+  height: 30px;
+  /* Hidden by default — the splash owns the logo until it hands off. */
+  opacity: 0;
+  transform: scale(0.6);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.corner-logo.is-shown {
+  opacity: 1;
+  /* A small overshoot so it reads as "popping" into place. */
+  animation: corner-logo-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.corner-logo svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  filter: drop-shadow(0 4px 10px rgb(var(--shadow-rgb) / 0.25));
+}
+
+.corner-logo-bg {
+  fill: var(--logo-bg);
+}
+
+.corner-logo-ring {
+  stroke: var(--logo-ring);
+}
+
+.corner-logo-stem {
+  stroke: var(--logo-stem);
+}
+
+@keyframes corner-logo-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* In the sidebar layout the rail already carries the wordmark; keep the corner
+ * mark a touch inboard so it never collides with a canvas surface's own header. */
+.app-shell[data-mode="sidebar"] .corner-logo {
+  top: 12px;
+  right: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .corner-logo.is-shown {
+    animation: none;
+    transform: none;
+  }
+}

@@ -1,0 +1,46 @@
+services:
+  gateway:
+    image: oven/bun:1.3
+    working_dir: /workspace
+    command: ["bun", "run", "/workspace/deploy/reference/reference-gateway.mjs"]
+    environment:
+      PORT: "7331"
+      SMITHERS_DB_PATH: /data/smithers.db
+      SMITHERS_TOKEN_STORE: /data/tokens.json
+      SMITHERS_GATEWAY_EVENT_WINDOW: "10000"
+      SMITHERS_GATEWAY_HEADERS_TIMEOUT_MS: "30000"
+      SMITHERS_GATEWAY_REQUEST_TIMEOUT_MS: "60000"
+      SMITHERS_GATEWAY_MODULE: /workspace/gateway.mjs
+      HINDSIGHT_URL: ${HINDSIGHT_URL:-}
+      HINDSIGHT_API_KEY: ${HINDSIGHT_API_KEY:-}
+      HINDSIGHT_BANK_PREFIX: ${HINDSIGHT_BANK_PREFIX:-}
+    volumes:
+      - ../..:/workspace:ro
+      - smithers-sqlite:/data
+    expose:
+      - "7331"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:7331/health'); process.exit(r.ok?0:1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  reverse-proxy:
+    image: caddy:2
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SMITHERS_GATEWAY_UPSTREAM: gateway:7331
+    volumes:
+      - ./caddy.example.Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  smithers-sqlite:
+  caddy-data:
+  caddy-config:

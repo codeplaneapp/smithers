@@ -1,0 +1,218 @@
+---
+title: <Sidecar>
+description: Run a cheap shadow agent beside a primary task and compare their scorer results.
+---
+
+```ts
+// Props
+import { Sidecar, computeSidecarDelta } from "smithers-orchestrator";
+
+type SidecarProps = {
+  id?: string;                         // default: "sidecar"
+  agent: AgentLike;                    // primary agent
+  sidecar: AgentLike;                  // cheap shadow agent
+  output: OutputTarget;                // primary output target
+  sidecarOutput?: OutputTarget;        // default: output
+  scorers?: ScorersMap;                // attached to both tasks
+  prompt?: string | ReactNode;
+  input?: string | ReactNode;
+  maxConcurrency?: number;
+  groundTruth?: unknown;
+  context?: unknown;
+  primaryLabel?: string;
+  sidecarLabel?: string;
+  skipIf?: boolean;
+  children?: string | ReactNode;
+};
+
+type SidecarDelta = {
+  primaryScore: number | null;
+  sidecarScore: number | null;
+  delta: number | null;
+  cheaperWins: boolean;
+};
+```
+
+```tsx
+<Workflow name="cheap-model-shadow">
+  <Sidecar
+    id="answer"
+    agent={primaryAgent}
+    sidecar={cheapAgent}
+    output={outputs.answer}
+    scorers={scorers}
+  >
+    Answer the customer question with the most accurate response.
+  </Sidecar>
+</Workflow>
+```
+
+## Behavior
+
+`<Sidecar>` renders a `<Parallel>` with two `<Task>` children. The primary task uses the component `id`, writes to `output`, and is the node downstream workflow code should consume. The sidecar task uses `${id}-sidecar`, receives the same prompt, gets `continueOnFail: true`, and writes to `sidecarOutput` when supplied or to `output` by default.
+
+Both tasks receive the same `scorers` prop. Smithers records live scorer results in `_smithers_scorers` once per task node id, so `bunx smithers-orchestrator scores RUN_ID` can show the primary row and the sidecar row separately.
+
+Use `computeSidecarDelta(rows, { primaryNodeId, sidecarNodeId, scorerId })` after reading persisted scorer rows. It derives `primaryScore`, `sidecarScore`, `delta`, and `cheaperWins` from those rows only.
+
+## Notes
+
+- The sidecar can fail without failing the workflow.
+- The sidecar result does not replace the primary result.
+- `delta` is `primaryScore - sidecarScore`.
+- `cheaperWins` is true when the sidecar score is greater than or equal to the primary score.
+
+{/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
+## Source
+
+The `<Sidecar>` implementation and the files it imports, straight from the package source. This section is generated; edit the source, not this block.
+
+<CodeGroup>
+```js Sidecar.js
+// @smithers-type-exports-begin
+/** @typedef {import("./SidecarProps.ts").SidecarProps} SidecarProps */
+// @smithers-type-exports-end
+
+import React from "react";
+import { Parallel } from "./Parallel.js";
+import { Task } from "./Task.js";
+
+/**
+ * Runs a primary task and a cheap shadow task over the same prompt.
+ *
+ * The primary task keeps the component id so downstream `needs` can consume it.
+ * The sidecar task is continue-on-fail and writes its own scorer rows.
+ *
+ * @param {SidecarProps} props
+ */
+export function Sidecar(props) {
+	if (props.skipIf) return null;
+	const {
+		id = "sidecar",
+		agent,
+		sidecar,
+		output,
+		sidecarOutput,
+		scorers,
+		prompt,
+		input,
+		maxConcurrency,
+		groundTruth,
+		context,
+		primaryLabel,
+		sidecarLabel,
+		children,
+	} = props;
+	const promptNode = prompt ?? input ?? children;
+	const shadowId = `${id}-sidecar`;
+	return React.createElement(
+		Parallel,
+		{ id: `${id}-parallel`, maxConcurrency },
+		React.createElement(
+			Task,
+			{
+				id,
+				output,
+				agent,
+				scorers,
+				groundTruth,
+				context,
+				label: primaryLabel,
+			},
+			promptNode,
+		),
+		React.createElement(
+			Task,
+			{
+				id: shadowId,
+				output: sidecarOutput ?? output,
+				agent: sidecar,
+				continueOnFail: true,
+				scorers,
+				groundTruth,
+				context,
+				label: sidecarLabel,
+			},
+			promptNode,
+		),
+	);
+}
+```
+
+```js Parallel.js
+import React from "react";
+/** @typedef {import("./ParallelProps.ts").ParallelProps} ParallelProps */
+
+/**
+ * @param {ParallelProps} props
+ */
+export function Parallel(props) {
+    if (props.skipIf)
+        return null;
+    // Align prop sanitization with other structural components. `label` names
+    // the phase group in run views (graph, the Claude /workflows mirror).
+    const next = {
+        maxConcurrency: props.maxConcurrency,
+        subtreeConcurrency: props.subtreeConcurrency,
+        id: props.id,
+        ...(props.label === undefined ? {} : { label: props.label }),
+        ...(props.priority === undefined ? {} : { priority: props.priority }),
+        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+    };
+    return React.createElement("smithers:parallel", next, props.children);
+}
+```
+
+```js Task.js
+// @smithers-type-exports-begin
+/**
+ * @template D
+ * @typedef {import("./InferDeps.ts").InferDeps<D>} InferDeps
+ */
+/** @typedef {import("./OutputTarget.ts").OutputTarget} OutputTarget */
+// @smithers-type-exports-end
+
+import { applyCliToolAllowlist } from "./cliToolAllowlist.js";
+import { createTaskComponent } from "./taskCore.js";
+
+export { renderPromptToText } from "./taskCore.js";
+
+/**
+ * The Node/CLI-agent-aware `Task`. Every render-path behavior (deps
+ * resolution, agent-chain assembly, MDX prompt rendering, static/compute/agent
+ * branching) lives in `taskCore.js`; this file only supplies the CLI-agent
+ * tool-allowlist enforcement step (`applyCliToolAllowlist`, which statically
+ * imports `ClaudeCodeAgent`/`PiAgent`/`GeminiAgent`/`AntigravityAgent` — see
+ * `cliToolAllowlist.js`). `Task.browser.js` builds the same component with a
+ * no-op allowlist step instead, so it never pulls those Node-only
+ * (`node:child_process`-backed) classes into a browser bundle.
+ */
+export const Task = createTaskComponent({ applyCliToolAllowlist });
+```
+
+```ts SidecarProps.ts
+import type React from "react";
+import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { ScorersMap } from "@smithers-orchestrator/graph/types";
+import type { OutputTarget } from "./OutputTarget.ts";
+
+export type SidecarProps = {
+	id?: string;
+	agent: AgentLike;
+	sidecar: AgentLike;
+	output: OutputTarget;
+	sidecarOutput?: OutputTarget;
+	scorers?: ScorersMap;
+	prompt?: string | React.ReactNode;
+	input?: string | React.ReactNode;
+	maxConcurrency?: number;
+	groundTruth?: unknown;
+	context?: unknown;
+	primaryLabel?: string;
+	sidecarLabel?: string;
+	skipIf?: boolean;
+	children?: string | React.ReactNode;
+};
+```
+</CodeGroup>
+{/* GENERATED:COMPONENT-SOURCE END */}

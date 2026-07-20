@@ -1,0 +1,5 @@
+preload = ["./preload.js"]
+
+[test]
+root = "."
+preload = ["./preload.js"]

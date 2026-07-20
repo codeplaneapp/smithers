@@ -1,0 +1,16 @@
+---
+title: cancelRun
+description: Gateway RPC for cancelling an active run.
+maturity: stable
+apiVersion: v1
+---
+
+`cancelRun` requests cancellation of an active run.
+
+- Method: `cancelRun`
+- Scope: `run:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId }`
+- Response: `{ runId, status: "cancelling" }`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`. `RUN_NOT_ACTIVE` means the run is not currently active, including already-finished runs. Returns `Forbidden` if the caller lacks `run:write` scope.

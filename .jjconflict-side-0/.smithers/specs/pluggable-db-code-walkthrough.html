@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pluggable DB · Code Walkthrough</title>
+<style>
+  :root{
+    --bg0:#0a0e1a; --ink:#e8edf9; --muted:#93a0c0; --line:#24304e; --card:#0f1729;
+    --sqlite:#38bdf8; --pglite:#fbbf24; --postgres:#818cf8; --gateway:#2dd4bf;
+    --ok:#34d399; --danger:#f87171; --kw:#c084fc; --str:#7ee787; --com:#5b6b8c; --fn:#6cb6ff; --num:#f0a45d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;background:radial-gradient(1100px 760px at 80% -10%,#16223f,#0a0e1a 58%);color:var(--ink);overflow:hidden}
+  .deck{height:100vh;width:100vw;position:relative}
+  .slide{position:absolute;inset:0;display:none;flex-direction:column;padding:3.4vh 4.6vw 8vh;animation:fade .4s ease}
+  .slide.active{display:flex}
+  @keyframes fade{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .kicker{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--gateway);font-weight:700;margin-bottom:.35rem}
+  h1{font-size:clamp(1.6rem,3.3vw,2.7rem);margin:.1rem 0 .3rem;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+  h2{font-size:clamp(1.2rem,2.3vw,1.8rem);margin:.05rem 0 .5rem;font-weight:800;letter-spacing:-.01em}
+  .lead{color:var(--muted);font-size:clamp(.92rem,1.35vw,1.08rem);max-width:74ch;line-height:1.5;margin:.1rem 0 .7rem}
+  .row{display:flex;gap:2vw;flex:1;min-height:0;align-items:stretch}
+  .col{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+  .col.narrow{flex:.85}
+  pre{margin:0;background:#0b1322;border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem;overflow:auto;box-shadow:0 14px 40px rgba(0,0,0,.4);flex:0 1 auto}
+  code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:clamp(.66rem,1.02vw,.86rem);line-height:1.5}
+  .fname{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--muted);margin:0 0 .35rem;display:flex;align-items:center;gap:.5rem}
+  .fname b{color:#cdd8f0}
+  .dot{width:.55rem;height:.55rem;border-radius:50%;display:inline-block}
+  .kw{color:var(--kw)} .str{color:var(--str)} .com{color:var(--com)} .fn{color:var(--fn)} .num{color:var(--num)} .hl{background:rgba(45,212,191,.13);display:block;margin:0 -1rem;padding:0 1rem;border-left:2px solid var(--gateway)}
+  .bad{background:rgba(248,113,113,.12);display:block;margin:0 -1rem;padding:0 1rem;border-left:2px solid var(--danger)}
+  ul{margin:.3rem 0;padding-left:0;list-style:none}
+  li{position:relative;padding:.3rem 0 .3rem 1.4rem;color:#cfd8ee;font-size:clamp(.86rem,1.2vw,1.02rem);line-height:1.4}
+  li::before{content:"";position:absolute;left:0;top:.72em;width:.46rem;height:.46rem;border-radius:2px;background:var(--gateway)}
+  li b{color:#fff}
+  .tag{display:inline-block;font-size:.68rem;font-weight:700;padding:.16rem .5rem;border-radius:999px;border:1px solid var(--line);margin-right:.4rem}
+  .t-sq{color:var(--sqlite);border-color:#1e4a63}.t-pg{color:var(--pglite);border-color:#5a4a16}.t-po{color:var(--postgres);border-color:#3a3f73}.t-ok{color:var(--ok);border-color:#2f6b4f}
+  svg{width:100%;height:auto;max-height:62vh}
+  .note{color:var(--muted);font-size:.82rem;margin-top:.5rem;line-height:1.45}
+  .note b{color:#cdd8f0}
+  .counter{position:absolute;top:3vh;right:4.6vw;color:var(--muted);font-size:.82rem;font-variant-numeric:tabular-nums}
+  .nav{position:absolute;bottom:2.2vh;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:1rem;z-index:5}
+  .dots{display:flex;gap:.4rem}.nd{width:.5rem;height:.5rem;border-radius:50%;background:#2a3656;cursor:pointer}.nd.on{background:var(--gateway);transform:scale(1.25)}
+  .arrow{background:#16213c;border:1px solid var(--line);color:var(--ink);width:2.2rem;height:2.2rem;border-radius:50%;font-size:1.05rem;cursor:pointer;display:grid;place-items:center}
+  .arrow:hover{background:#1d2c4d}
+  .foot{position:absolute;bottom:2.3vh;left:4.6vw;color:#566184;font-size:.74rem;letter-spacing:.04em}
+  text{font-family:"Inter",system-ui,sans-serif}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.7rem .9rem}
+  .stat .n{font-size:1.5rem;font-weight:800}.stat .l{color:var(--muted);font-size:.8rem}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+  <!-- 1 -->
+  <section class="slide active">
+    <div class="col" style="justify-content:center">
+      <div class="kicker">Code Walkthrough · branch feat/pluggable-db-backends</div>
+      <h1>Pluggable DB backends, line by line</h1>
+      <p class="lead">The actual code that fixes the off-the-shelf onboarding bug and makes <span class="tag t-sq">sqlite</span><span class="tag t-pg">pglite</span><span class="tag t-po">postgres</span> first-class on every path. We'll go: the bug → the resolver → the one shared opener → backend-aware reads → migration safety → the test that proves it.</p>
+      <div class="grid2" style="max-width:680px;margin-top:.6rem">
+        <div class="stat"><div class="n" style="color:var(--ok)">99</div><div class="l">smithers unit tests pass</div></div>
+        <div class="stat"><div class="n" style="color:var(--sqlite)">26</div><div class="l">resolver matrix cases</div></div>
+        <div class="stat"><div class="n" style="color:var(--gateway)">2</div><div class="l">real round-trip e2e (sqlite + pglite)</div></div>
+        <div class="stat"><div class="n" style="color:var(--postgres)">7</div><div class="l">review bugs found &amp; fixed</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 THE BUG -->
+  <section class="slide">
+    <div class="kicker">1 · The bug</div>
+    <h2>Write and read disagreed about the backend</h2>
+    <div class="row">
+      <div class="col narrow">
+        <ul>
+          <li><b>Run</b> wrote a SQLite store (seeded workflows use the sync, sqlite-only <code>createSmithers</code>).</li>
+          <li><b>Read</b> defaulted to <code>pglite</code> and the read path <i>physically</i> only opened bun:sqlite.</li>
+          <li>So a fresh <code>init → run → ps</code> threw <code>SMITHERS_MIGRATION_REQUIRED</code>, and a pglite run was invisible (<code>ps → []</code>).</li>
+        </ul>
+        <p class="note"><b>The two smells, in one file each:</b></p>
+      </div>
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--danger)"></span><b>apps/cli/src/find-db.js</b> — read path, before</p>
+        <pre><code><span class="com">// every read command opened bun:sqlite, no matter what</span>
+<span class="kw">export async function</span> <span class="fn">openSmithersDb</span>(dbPath) {
+  <span class="kw">const</span> { Database } = <span class="kw">await import</span>(<span class="str">"bun:sqlite"</span>);
+<span class="bad">  <span class="kw">const</span> sqlite = <span class="kw">new</span> <span class="fn">Database</span>(dbPath); <span class="com">// ← always sqlite</span></span>
+  <span class="kw">const</span> db = <span class="fn">drizzle</span>(sqlite);
+  ...
+}</code></pre>
+        <p class="fname" style="margin-top:.7rem"><span class="dot" style="background:var(--danger)"></span><b>resolveSmithersBackendChoice.js</b> — default, before</p>
+        <pre><code><span class="kw">const</span> backend = explicitBackend ?? envBackend ?? configBackend ?? <span class="bad"><span class="str">"pglite"</span></span>;
+<span class="com">// default pglite, but reads can't open pglite → migration tripwire fires</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 ARCHITECTURE -->
+  <section class="slide">
+    <div class="kicker">2 · The shape of the fix</div>
+    <h2>One resolved backend, opened once, used by every path</h2>
+    <div class="row">
+      <div class="col">
+        <svg viewBox="0 0 540 360" aria-label="hub">
+          <defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#2dd4bf"/></marker></defs>
+          <g font-size="11.5" font-weight="700" text-anchor="middle" fill="#e8edf9">
+            <rect x="14" y="32" width="118" height="34" rx="9" fill="#0f1729" stroke="#24304e"/><text x="73" y="54">run / up</text>
+            <rect x="14" y="88" width="118" height="34" rx="9" fill="#0f1729" stroke="#24304e"/><text x="73" y="110">ps · inspect</text>
+            <rect x="14" y="144" width="118" height="34" rx="9" fill="#0f1729" stroke="#24304e"/><text x="73" y="166">output · chat</text>
+            <rect x="14" y="200" width="118" height="34" rx="9" fill="#0f1729" stroke="#24304e"/><text x="73" y="222">gateway</text>
+            <rect x="14" y="256" width="118" height="34" rx="9" fill="#0f1729" stroke="#24304e"/><text x="73" y="278">migrate</text>
+          </g>
+          <g stroke="#2dd4bf" stroke-width="1.7" marker-end="url(#a)" opacity=".85">
+            <line x1="132" y1="49" x2="206" y2="165"/><line x1="132" y1="105" x2="206" y2="172"/><line x1="132" y1="161" x2="206" y2="179"/><line x1="132" y1="217" x2="206" y2="186"/><line x1="132" y1="273" x2="206" y2="193"/>
+          </g>
+          <rect x="208" y="150" width="150" height="78" rx="15" fill="#10241f" stroke="#2dd4bf"/>
+          <text x="283" y="182" fill="#2dd4bf" font-size="12.5" text-anchor="middle" font-weight="800">openSmithersStore()</text>
+          <text x="283" y="200" fill="#9fe7da" font-size="10" text-anchor="middle">resolve once →</text>
+          <text x="283" y="214" fill="#9fe7da" font-size="10" text-anchor="middle">open that backend</text>
+          <g stroke="#7f8db0" stroke-width="1.5" marker-end="url(#a)">
+            <line x1="358" y1="168" x2="430" y2="96"/><line x1="358" y1="189" x2="430" y2="189"/><line x1="358" y1="210" x2="430" y2="282"/>
+          </g>
+          <rect x="430" y="72" width="100" height="44" rx="10" fill="#0c1322" stroke="#1e4a63"/><text x="480" y="92" fill="#38bdf8" font-size="12" text-anchor="middle" font-weight="800">SQLite</text><text x="480" y="108" fill="#7fb6d8" font-size="9.5" text-anchor="middle">default</text>
+          <rect x="430" y="167" width="100" height="44" rx="10" fill="#0c1322" stroke="#5a4a16"/><text x="480" y="187" fill="#fbbf24" font-size="12" text-anchor="middle" font-weight="800">PGlite</text><text x="480" y="203" fill="#cbb16a" font-size="9.5" text-anchor="middle">explicit</text>
+          <rect x="430" y="260" width="100" height="44" rx="10" fill="#0c1322" stroke="#3a3f73"/><text x="480" y="280" fill="#818cf8" font-size="12" text-anchor="middle" font-weight="800">Postgres</text><text x="480" y="296" fill="#a3a9e0" font-size="9.5" text-anchor="middle">cloud</text>
+        </svg>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li>One function, <code>openSmithersStore()</code>, in <code>packages/smithers</code>.</li>
+          <li>It calls the resolver <b>once</b>, then opens <b>exactly</b> that backend and returns a <code>SmithersDb</code> adapter + a <code>cleanup</code>.</li>
+          <li>Reads, runs, gateway, migrate all go through it — the write/read split is gone.</li>
+          <li>SQLite is the local default; pglite/postgres are explicit. No more disagreement.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 RESOLVER DEFAULT -->
+  <section class="slide">
+    <div class="kicker">3 · The resolver — precedence</div>
+    <h2>Default flips to SQLite; explicit choices still win</h2>
+    <div class="row">
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--ok)"></span><b>resolveSmithersBackendChoice.js</b> :330</p>
+        <pre><code><span class="kw">const</span> backend = explicitBackend ?? envBackend ?? configBackend
+              ?? markerBackend ?? <span class="hl"><span class="str">"sqlite"</span></span>;
+<span class="kw">const</span> source  = explicitBackend ? <span class="str">"options"</span>
+              : envBackend     ? <span class="str">"env"</span>
+              : configBackend  ? <span class="str">"config"</span>
+              : markerBackend  ? <span class="str">"marker"</span>
+              :                  <span class="str">"default"</span>;</code></pre>
+        <p class="note"><b>Precedence:</b> a flag (<code>--backend</code>), then <code>SMITHERS_BACKEND</code>, then <code>smithers.config.ts</code>, then a workspace <code>.smithers/backend.json</code> marker, then the new default — <b>sqlite</b>. The lightest local store: no socket, no pg client, no port, no migration on a clean install.</p>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li><b>Why sqlite, not pglite?</b> Electric (the only thing that needs Postgres) can't source from pglite — so pglite buys nothing locally and costs a socket. Research-confirmed.</li>
+          <li>Seeded workflows already write sqlite via <code>createSmithers</code> → now read &amp; write agree with <b>zero</b> churn.</li>
+          <li><code>--backend pglite|postgres</code> / env / config still select those, fully.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 RESOLVER PROBE -->
+  <section class="slide">
+    <div class="kicker">3 · The resolver — don't touch Postgres you weren't asked to</div>
+    <h2>A review fix: ambient DATABASE_URL must not phone home</h2>
+    <div class="row">
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--ok)"></span><b>resolveSmithersBackendChoice.js</b> :336</p>
+        <pre><code><span class="hl"><span class="kw">const</span> shouldInspectPostgres =
+  backend === <span class="str">"postgres"</span> ||
+  <span class="fn">Boolean</span>(opts.connection || explicitPostgresConnectionString);</span>
+
+<span class="kw">const</span> postgresStore = shouldInspectPostgres
+  ? <span class="kw">await</span> <span class="fn">inspectPostgresStore</span>({
+      connectionString: explicitPostgresConnectionString
+        ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL, ... })
+  : emptyProbe;</code></pre>
+        <p class="note"><b>The bug the reviewer caught:</b> the first cut probed Postgres whenever an ambient <code>DATABASE_URL</code> was set — a near-universal dev env var. That meant every <code>smithers ps</code> on a default-sqlite repo would open a pg connection, and a firewalled host could hang it. Now we only probe Postgres when the resolved backend <i>is</i> postgres, or you passed an explicit connection.</p>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li>Probes are cheap + local for sqlite/pglite (file + <code>.smithers/pg/PG_VERSION</code>).</li>
+          <li>Postgres is the only network probe — so it's strictly opt-in.</li>
+          <li>Caught by the adversarial review, now has a regression test.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 RESOLVER CONFLICT -->
+  <section class="slide">
+    <div class="kicker">3 · The resolver — never silently hide runs</div>
+    <h2>The store with run history is authoritative</h2>
+    <div class="row">
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--ok)"></span><b>resolveSmithersBackendChoice.js</b> :345 + :362 + :373</p>
+        <pre><code><span class="com">// 1) collect every store that actually has runs</span>
+<span class="kw">const</span> populated = [
+  ...(sqliteStore.runCount  &gt; 0 ? [{ backend:<span class="str">"sqlite"</span>, ... }] : []),
+  ...(pgliteStore.runCount  &gt; 0 ? [{ backend:<span class="str">"pglite"</span>, ... }] : []),
+  ...(postgresStore.runCount&gt; 0 ? [{ backend:<span class="str">"postgres"</span>,...}] : []),
+];
+<span class="com">// 2) legacy sqlite + non-sqlite default, no marker → migrate</span>
+<span class="kw">if</span> ((backend===<span class="str">"pglite"</span>||backend===<span class="str">"postgres"</span>) &amp;&amp; sqliteStore.runCount&gt;0 &amp;&amp; !marker)
+  <span class="kw">throw</span> <span class="fn">migrationRequiredError</span>(...);
+<span class="com">// 3) resolved backend differs from where the runs are → fail loud</span>
+<span class="kw">const</span> authoritative = populated[0];
+<span class="kw">if</span> (authoritative &amp;&amp; authoritative.backend !== backend)
+  <span class="kw">throw</span> <span class="fn">divergenceError</span>({ sourceBackend: authoritative.backend, ... });</code></pre>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li>Two stores both populated → <code>SMITHERS_BACKEND_CONFLICT</code>, never a silent pick.</li>
+          <li>Symmetric: it's not "sqlite is legacy" — it's "wherever the runs are wins."</li>
+          <li>Clean install (no runs anywhere) → sqlite default, <b>no prompt</b>.</li>
+          <li>Resolution is pure — a read never writes a marker.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 OPENSTORE -->
+  <section class="slide">
+    <div class="kicker">4 · The shared opener</div>
+    <h2>Resolve once, open exactly that store</h2>
+    <div class="row">
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--ok)"></span><b>packages/smithers/src/openSmithersStore.js</b> :90</p>
+        <pre><code><span class="kw">export async function</span> <span class="fn">openSmithersStore</span>(opts = {}) {
+  <span class="kw">const</span> mode = opts.mode ?? <span class="str">"write"</span>;
+  <span class="kw">return</span> <span class="fn">retryNotFound</span>(<span class="kw">async</span> () =&gt; {
+<span class="hl">    <span class="kw">const</span> choice = <span class="kw">await</span> <span class="fn">resolveSmithersBackendChoice</span>(opts);</span>
+    <span class="kw">if</span> (mode === <span class="str">"read"</span>) <span class="fn">assertReadStoreExists</span>(choice, opts);
+<span class="hl">    <span class="kw">if</span> (choice.backend === <span class="str">"sqlite"</span>) {           <span class="com">// sync, zero-socket</span></span>
+      <span class="kw">const</span> opened = <span class="kw">await</span> <span class="fn">openSqliteStore</span>(choice.dbPath);
+      <span class="kw">return</span> { choice, adapter: opened.adapter, db: opened.db, ... };
+    }
+<span class="hl">    <span class="kw">const</span> api = <span class="kw">await</span> <span class="fn">openSmithersBackend</span>({}, opts); <span class="com">// pglite/postgres</span></span>
+    <span class="kw">if</span> (mode === <span class="str">"read"</span>) <span class="kw">await</span> <span class="fn">assertRunsTableExists</span>(api.db);
+    <span class="kw">return</span> { choice, adapter: <span class="kw">new</span> <span class="fn">SmithersDb</span>(api.db), db: api.db,
+             cleanup: <span class="kw">async</span> () =&gt; { <span class="kw">await</span> api.close?.(); } };
+  }, opts.wait);
+}</code></pre>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li><b>sqlite</b> → fast synchronous open (bun:sqlite).</li>
+          <li><b>pglite/postgres</b> → the async factory, with a real <code>cleanup</code> that <code>close()</code>s the socket/connection (no leaks).</li>
+          <li><code>mode:"read"</code> asserts the store actually exists + has the run table, so reads fail clearly instead of silently empty.</li>
+          <li><code>retryNotFound</code> lets a reader wait for a run that's just starting.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 FIND-DB -->
+  <section class="slide">
+    <div class="kicker">5 · Backend-aware reads</div>
+    <h2>The read path now reads what was written</h2>
+    <div class="row">
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--ok)"></span><b>apps/cli/src/find-db.js</b> — findAndOpenDb, after</p>
+        <pre><code><span class="kw">export async function</span> <span class="fn">findAndOpenDb</span>(from, opts) {
+<span class="hl">  <span class="kw">const</span> opened = <span class="kw">await</span> <span class="fn">openSmithersStore</span>({
+    cwd: from ?? process.<span class="fn">cwd</span>(),
+    mode: <span class="str">"read"</span>,
+    wait: opts,
+  });</span>
+  <span class="kw">return</span> { adapter: opened.adapter, dbPath: opened.dbPath, cleanup: opened.cleanup };
+}</code></pre>
+        <p class="note">Every read command — <code>ps</code>, <code>inspect</code>, <code>output</code>, <code>chat</code>, the scheduler, the TUI — flows through this. Point it at a pglite or postgres workspace and it opens <i>that</i> store. The old "always bun:sqlite" line is gone, and so is the silent-empty failure mode.</p>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li>The migration gate stays — but only as a genuine "you have old data elsewhere, migrate" signal, never on a clean install.</li>
+          <li><code>--backend sqlite</code> / a marker / <code>migrated.json</code> all suppress it correctly (existing tests stay green).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 MIGRATION -->
+  <section class="slide">
+    <div class="kicker">6 · Migration safety — the bug the green tests missed</div>
+    <h2>Reverse migration was silently corrupting the store</h2>
+    <div class="row">
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--danger)"></span>Before — pglite/postgres → sqlite rebuilt tables column-only</p>
+        <pre><code><span class="bad"><span class="com">// CREATE TABLE from information_schema columns</span></span>
+<span class="bad"><span class="com">// → no PRIMARY KEY, no indexes; row-count test still passed ✅😱</span></span></code></pre>
+        <p class="fname" style="margin-top:.6rem"><span class="dot" style="background:var(--ok)"></span><b>migrateSmithersStore.js</b> :778 — after</p>
+        <pre><code>sqlite = <span class="kw">new</span> <span class="fn">Database</span>(dbPath);
+<span class="hl"><span class="fn">ensureSmithersTables</span>(<span class="fn">drizzle</span>(sqlite)); <span class="com">// canonical schema FIRST (PK + indexes)</span></span>
+<span class="kw">await</span> <span class="fn">prepareSqliteTarget</span>(sqlite, pgConn, tables); <span class="com">// extras IF NOT EXISTS</span>
+<span class="kw">for</span> (<span class="kw">const</span> table <span class="kw">of</span> tables)
+  tableResults.<span class="fn">push</span>(<span class="kw">await</span> <span class="fn">copyPgTableToSqlite</span>(pgConn, sqlite, table, ...));
+<span class="com">// then verify row counts match, per table, or throw</span></code></pre>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li>The old reverse path produced a SQLite store with <b>no primary key</b> on <code>_smithers_runs</code> — duplicate run rows were accepted, and the engine's upserts would corrupt state.</li>
+          <li>It's the spec's named <b>launch-gate</b> direction (pglite→sqlite), and the test only checked row counts.</li>
+          <li>Fix: build the canonical schema first, then copy rows in.</li>
+          <li>New regression test asserts the PK exists, indexes exist, and a duplicate <code>run_id</code> is <b>rejected</b>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 PROOF -->
+  <section class="slide">
+    <div class="kicker">7 · The proof</div>
+    <h2>A real round-trip e2e — the test that should always have existed</h2>
+    <div class="row">
+      <div class="col">
+        <p class="fname"><span class="dot" style="background:var(--ok)"></span><b>apps/cli/tests/sqlite-default-roundtrip.e2e.test.js</b></p>
+        <pre><code><span class="fn">test</span>(<span class="str">"default sqlite init/run/read round-trip needs no migration prompt"</span>, () =&gt; {
+  <span class="kw">const</span> repo = <span class="fn">createTempRepo</span>();
+  <span class="fn">writeTestWorkflow</span>(repo, <span class="str">".smithers/workflows/default-roundtrip.tsx"</span>);
+
+  <span class="kw">const</span> run = <span class="fn">runSmithers</span>([<span class="str">"workflow"</span>,<span class="str">"run"</span>,<span class="str">"default-roundtrip"</span>, ...]);
+  <span class="fn">expect</span>(run.exitCode).<span class="fn">toBe</span>(<span class="num">0</span>);
+<span class="hl">  <span class="fn">expect</span>(run.stderr).<span class="fn">not</span>.<span class="fn">toContain</span>(<span class="str">"SMITHERS_MIGRATION_REQUIRED"</span>);</span>
+
+  <span class="kw">const</span> ps = <span class="fn">runSmithers</span>([<span class="str">"ps"</span>], ...);
+<span class="hl">  <span class="fn">expect</span>(<span class="fn">JSON</span>.<span class="fn">stringify</span>(ps.json)).<span class="fn">toContain</span>(<span class="str">"sqlite-default-roundtrip"</span>);</span>
+
+  <span class="kw">const</span> inspect = <span class="fn">runSmithers</span>([<span class="str">"inspect"</span>,<span class="str">"sqlite-default-roundtrip"</span>], ...);
+  <span class="fn">expect</span>(inspect.json.run.id).<span class="fn">toBe</span>(<span class="str">"sqlite-default-roundtrip"</span>);
+
+  <span class="kw">const</span> output = <span class="fn">runSmithers</span>([<span class="str">"output"</span>,<span class="str">"sqlite-default-roundtrip"</span>,<span class="str">"write-result"</span>]);
+<span class="hl">  <span class="fn">expect</span>(output.stdout).<span class="fn">toContain</span>(<span class="str">"fixture workflow ran"</span>);</span>
+});</code></pre>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li>Spawns the <b>real</b> CLI (no mocks), a compute-only workflow (no agent → CI-safe).</li>
+          <li>Asserts the run is actually <b>visible</b> through ps / inspect / output.</li>
+          <li>A sibling <code>pglite-roundtrip.e2e.test.js</code> does the same on pglite and asserts <code>smithers.db</code> is absent + <code>.smithers/pg/PG_VERSION</code> present.</li>
+          <li>This is the coverage gap that let the original bug ship.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SYNC A -->
+  <section class="slide">
+    <div class="kicker">7.5 · How the UI stays live</div>
+    <h2>A SQLite running in the browser, synced from the backend</h2>
+    <div class="row">
+      <div class="col">
+        <svg viewBox="0 0 560 360" aria-label="ui sync">
+          <defs><marker id="s" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#7f8db0"/></marker></defs>
+          <rect x="180" y="18" width="200" height="56" rx="12" fill="#0f1729" stroke="#24304e"/>
+          <text x="280" y="40" fill="#e8edf9" font-size="13" text-anchor="middle" font-weight="800">UI · TanStack DB</text>
+          <text x="280" y="58" fill="#8aa0c8" font-size="10.5" text-anchor="middle">browser SQLite (OPFS / wa-sqlite)</text>
+          <line x1="280" y1="74" x2="280" y2="104" stroke="#7f8db0" stroke-width="2" marker-end="url(#s)"/>
+          <rect x="150" y="104" width="260" height="52" rx="12" fill="#10241f" stroke="#2dd4bf"/>
+          <text x="280" y="126" fill="#2dd4bf" font-size="12.5" text-anchor="middle" font-weight="800">gateway-client · SyncTransport</text>
+          <text x="280" y="143" fill="#9fe7da" font-size="10" text-anchor="middle">ONE client protocol (WS / RPC) · writes via actions/RPC</text>
+          <line x1="220" y1="156" x2="150" y2="212" stroke="#7f8db0" stroke-width="2" marker-end="url(#s)"/>
+          <line x1="340" y1="156" x2="410" y2="212" stroke="#7f8db0" stroke-width="2" marker-end="url(#s)"/>
+          <rect x="30" y="212" width="220" height="78" rx="13" fill="#0c1426" stroke="#1e4a63"/>
+          <text x="140" y="236" fill="#38bdf8" font-size="12.5" text-anchor="middle" font-weight="800">LOCAL · gateway WS backing</text>
+          <text x="140" y="255" fill="#7fb6d8" font-size="10.5" text-anchor="middle">reads through SmithersDb →</text>
+          <text x="140" y="270" fill="#7fb6d8" font-size="10.5" text-anchor="middle">SQLite or PGlite · NO Electric</text>
+          <rect x="310" y="212" width="220" height="78" rx="13" fill="#120c26" stroke="#4d3a66"/>
+          <text x="420" y="236" fill="#c084fc" font-size="12.5" text-anchor="middle" font-weight="800">CLOUD · Electric backing</text>
+          <text x="420" y="255" fill="#d9bdf5" font-size="10.5" text-anchor="middle">gateway tails Electric shapes</text>
+          <text x="420" y="270" fill="#d9bdf5" font-size="10.5" text-anchor="middle">← real Postgres · same frames out</text>
+          <text x="280" y="320" fill="#566184" font-size="11.5" text-anchor="middle">The browser never chooses gateway-vs-Electric, and never talks to Electric directly.</text>
+        </svg>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li>The UI's live data lives in a <b>browser SQLite</b> exposed as <b>TanStack DB</b> collections.</li>
+          <li>It's fed by <b>one client protocol</b> — the gateway's <code>SyncTransport</code> (WS/RPC). The UI code is identical local vs cloud.</li>
+          <li>What differs is a <b>server-side backing</b>: local reads the engine store directly; cloud tails Electric and re-emits the <i>same</i> frames.</li>
+          <li>Writes always go through gateway actions/RPC — Electric is read-only.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SYNC B -->
+  <section class="slide">
+    <div class="kicker">7.6 · The constraint that shaped it</div>
+    <h2>Electric needs Postgres — so it lives server-side</h2>
+    <div class="row">
+      <div class="col narrow">
+        <ul>
+          <li><b>Electric's source must be a real Postgres</b> (logical replication). Primary-source confirmed.</li>
+          <li><b>PGlite cannot be an Electric source</b> today (the enabling work is an unmerged PR) — so "Electric everywhere" is impossible.</li>
+          <li>But the <b>gateway WS path reads through <code>SmithersDb</code></b>, so it syncs the browser DB from <b>any</b> backend — sqlite, pglite, or postgres.</li>
+          <li>So Electric becomes a <b>server-side optimization for cloud Postgres</b>, not a client choice. One UI path, every scenario.</li>
+        </ul>
+      </div>
+      <div class="col">
+        <p class="fname">Compatibility matrix — what feeds the browser SQLite</p>
+        <pre><code><span class="com">deployment   engine backend   sync backing      Electric?</span>
+<span class="hl">local        SQLite           gateway WS        no</span>
+<span class="hl">local        PGlite           gateway WS        no</span>
+local        Postgres         gateway WS        no
+<span class="hl">cloud        Postgres         Electric (svr)    yes</span>
+cloud        PGlite           gateway WS        no  <span class="com">(no Electric src)</span>
+<span class="bad">any          —  browser never connects to Electric directly</span></code></pre>
+        <p class="note"><b>Status:</b> the storage layer (this changeset) is done. This sync layer is <b>Track B</b> — the client already has the <code>SyncTransport</code> seam and both gateway + Electric collection sources; the remaining work is to collapse the client to one path, move Electric behind the gateway, and <b>test every cell of this matrix end-to-end (local + cloud)</b>. That work + its test plan is being designed next.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 COVERAGE -->
+  <section class="slide">
+    <div class="kicker">8 · Coverage &amp; what's next</div>
+    <h2>Where it stands</h2>
+    <div class="row">
+      <div class="col">
+        <div class="grid2">
+          <div class="stat"><div class="n" style="color:var(--ok)">✓</div><div class="l">resolver matrix: source × backend × store-state × markers × conflict (26 cases)</div></div>
+          <div class="stat"><div class="n" style="color:var(--ok)">✓</div><div class="l">boundary cases: corrupt/locked/stray/multiple db, uninitialized .smithers/pg</div></div>
+          <div class="stat"><div class="n" style="color:var(--ok)">✓</div><div class="l">migration: every direction + structural validity + mid-copy failure surfaces real error</div></div>
+          <div class="stat"><div class="n" style="color:var(--ok)">✓</div><div class="l">real init→run→read e2e on sqlite &amp; pglite</div></div>
+        </div>
+      </div>
+      <div class="col narrow">
+        <ul>
+          <li><b>Reviewed adversarially</b> by opus + an independent codex pass — they caught 2 HIGH + 4 MEDIUM bugs the green tests missed; all fixed + regression-tested.</li>
+          <li><b>Next:</b> Postgres CI via docker-compose (real PG round-trip + migration), full-gate green incl. unrelated pre-existing failures, then a codex deep review for release sign-off.</li>
+          <li><b>Deferred (Track B):</b> the gateway <code>SyncBacking</code> refactor — one client sync path, Electric quarantined server-side.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="counter"><span id="cur">1</span> / <span id="tot">11</span></div>
+<div class="nav">
+  <button class="arrow" id="prev">‹</button><div class="dots" id="dots"></div><button class="arrow" id="next">›</button>
+</div>
+<div class="foot">PLUGGABLE DB · CODE WALKTHROUGH · ← → / space</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  const dots=document.getElementById('dots');const cur=document.getElementById('cur');
+  document.getElementById('tot').textContent=slides.length;let i=0;
+  slides.forEach((_,n)=>{const d=document.createElement('div');d.className='nd'+(n===0?' on':'');d.onclick=()=>go(n);dots.appendChild(d);});
+  const de=[...dots.children];
+  function go(n){i=Math.max(0,Math.min(slides.length-1,n));slides.forEach((s,k)=>s.classList.toggle('active',k===i));de.forEach((d,k)=>d.classList.toggle('on',k===i));cur.textContent=i+1;}
+  document.getElementById('next').onclick=()=>go(i+1);document.getElementById('prev').onclick=()=>go(i-1);
+  addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();go(i+1);}else if(e.key==='ArrowLeft')go(i-1);else if(e.key==='Home')go(0);else if(e.key==='End')go(slides.length-1);});
+</script>
+</body>
+</html>

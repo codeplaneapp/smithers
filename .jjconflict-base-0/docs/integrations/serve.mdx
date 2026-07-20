@@ -1,0 +1,219 @@
+---
+title: Serve Mode
+description: Run a single workflow as an HTTP server with Hono. Interact with it over REST, stream events via SSE, and manage approvals remotely.
+---
+
+Serve mode starts a Hono-based HTTP server alongside a running workflow. Every route operates on the single active run, with no workflow path or run ID in requests.
+
+<Note>API reference: [Server & Gateway](/reference/server-gateway) lists every server and gateway export, its options, and links to source and tests.</Note>
+
+## CLI
+
+```bash
+bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
+```
+
+A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure` to opt out, which is dangerous). Binding to the default `127.0.0.1` needs neither.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--serve` | `false` | Enable HTTP server mode |
+| `--port` | `7331` | TCP port |
+| `--host` | `127.0.0.1` | Bind address |
+| `--auth-token` | `SMITHERS_API_KEY` env | Bearer token for auth; required for a non-loopback `--host` |
+| `--insecure` | `false` | Allow a non-loopback `--host` with no auth (exposes unauthenticated approve/deny/cancel; dangerous) |
+| `--metrics` | `true` | Expose `/metrics` Prometheus endpoint |
+| `--supervise` | `false` | Run the stale-run supervisor loop alongside `--serve` |
+
+The process stays alive after the workflow completes so final state remains queryable. Ctrl+C stops both the server and the workflow.
+
+Detached mode:
+
+```bash
+bunx smithers-orchestrator up workflow.tsx --serve --port 8080 -d
+```
+
+## Programmatic
+
+```ts
+import { SmithersDb, createServeApp } from "smithers-orchestrator";
+
+const adapter = new SmithersDb(workflow.db);
+const abort = new AbortController();
+
+const app = createServeApp({
+  workflow,
+  adapter,
+  runId,
+  abort,
+  authToken: "sk-secret",
+});
+
+Bun.serve({ port: 3000, fetch: app.fetch });
+```
+
+`createServeApp` returns a standard Hono app. Mount it with `Bun.serve`, pass it to another Hono app via `app.route()`, or use `app.fetch` in tests.
+
+## ServeOptions
+
+```ts
+type ServeOptions = {
+  workflow: SmithersWorkflow<unknown>;   // loaded workflow instance
+  adapter: SmithersDb;               // Smithers DB adapter; e.g. new SmithersDb(workflow.db)
+  runId: string;                     // active run ID
+  abort: AbortController;            // shared cancellation controller
+  authToken?: string;                // bearer token; falls back to SMITHERS_API_KEY; disabled if unset
+  metrics?: boolean;                 // expose /metrics; default true
+};
+```
+
+---
+
+## Authentication
+
+When `authToken` is configured, every route except `/health` requires:
+
+- `Authorization: Bearer <token>`, or
+- `x-smithers-key: <token>`
+
+Missing or invalid tokens receive `401`.
+
+---
+
+## Routes
+
+### GET /health
+
+Returns `200` regardless of auth.
+
+```json
+{ "ok": true }
+```
+
+### GET /
+
+Run status and node summary.
+
+```json
+{
+  "runId": "run-1234",
+  "workflowName": "bugfix",
+  "status": "running",
+  "startedAtMs": 1707500000000,
+  "finishedAtMs": null,
+  "summary": { "finished": 3, "in-progress": 1, "pending": 2 }
+}
+```
+
+### GET /events
+
+SSE stream of lifecycle events. Same format as the [multi-workflow server](/integrations/server#api-routes-toon).
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `afterSeq` | `number` | `-1` | Only events after this sequence |
+
+```
+event: smithers
+data: {"type":"NodeStarted","runId":"run-1234","nodeId":"analyze","iteration":0,"attempt":1}
+id: 1
+
+event: smithers
+data: {"type":"NodeFinished","runId":"run-1234","nodeId":"analyze","iteration":0,"attempt":1}
+id: 2
+```
+
+- Polls every 500ms.
+- Auto-closes when the run reaches a terminal state.
+- Reconnect with `?afterSeq=N` to resume from a known position.
+
+### GET /frames
+
+Rendered workflow frames.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | `number` | `50` | Max frames |
+| `afterFrameNo` | `number` | - | Frames after this number |
+
+### POST /approve/:nodeId
+
+Approve a pending approval gate. All fields optional. Returns `{ "runId": "run-1234" }`.
+
+```json
+{
+  "iteration": 0,
+  "note": "Looks good",
+  "decidedBy": "alice"
+}
+```
+
+### POST /deny/:nodeId
+
+Deny a pending approval gate. Same body as `/approve/:nodeId`.
+
+### POST /cancel
+
+Cancel the running workflow.
+
+| Status | Code | Condition |
+|---|---|---|
+| 200 | - | Cancelled successfully |
+| 409 | `RUN_NOT_ACTIVE` | Run is not actively running (e.g. already finished, failed, cancelled, continued, or its heartbeat has gone stale) |
+
+> **Note:** Runs in `waiting-approval` or `waiting-timer` state are cancelled immediately and return `200`.
+
+### GET /metrics
+
+Prometheus text exposition. Same metrics as the [multi-workflow server](/integrations/server#api-routes-toon).
+
+---
+
+## Error Format
+
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable description"
+  }
+}
+```
+
+Unknown routes return `404` with code `NOT_FOUND`.
+
+---
+
+## Serve Mode vs Multi-Workflow Server
+
+| | Serve mode | [Multi-workflow server](/integrations/server) |
+|---|---|---|
+| Scope | Single workflow, single run | Any workflow, multiple concurrent runs |
+| Start | `bunx smithers-orchestrator up --serve` or `createServeApp()` | `startServer()` |
+| Routes | `/`, `/events`, `/approve/:nodeId`, ... | `/v1/runs`, `/v1/runs/:runId`, ... |
+| Framework | Hono | Node.js `http` |
+| Use case | Development, single-purpose services | Production API gateway |
+
+---
+
+## Example
+
+```bash
+# Start a workflow with serve mode
+bunx smithers-orchestrator up workflow.tsx --serve --port 8080 --auth-token sk-secret
+
+# Status
+curl http://localhost:8080/ -H "Authorization: Bearer sk-secret"
+
+# Stream events
+curl -N http://localhost:8080/events -H "Authorization: Bearer sk-secret"
+
+# Approve
+curl -X POST http://localhost:8080/approve/deploy \
+  -H "Authorization: Bearer sk-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Ship it", "decidedBy": "alice"}'
+
+# Health (no auth)
+curl http://localhost:8080/health
+```

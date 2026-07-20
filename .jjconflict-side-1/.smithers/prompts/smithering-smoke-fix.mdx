@@ -1,0 +1,12 @@
+# Fix the smoke failure
+
+The smoke run of .smithers/workflows/smithering-impl.tsx failed. Diagnose it for real:
+inspect the child run {props.childRunId} with the smithers CLI (why / inspect / events)
+and read its errors:
+
+{props.errors}
+
+Fix the actual problem in the generated workflow (or its prompts). Do not weaken the smoke
+contract or stub anything out to "pass". Re-render the graph
+("bunx smithers-orchestrator graph .smithers/workflows/smithering-impl.tsx") before
+finishing.

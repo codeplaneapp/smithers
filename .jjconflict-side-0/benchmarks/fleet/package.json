@@ -1,0 +1,15 @@
+{
+  "name": "@smithers-orchestrator/benchmark-fleet",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Run the Smithers benchmark suite in parallel across many Claude subscriptions in the cloud (1 container : 1 subscription).",
+  "bin": {
+    "fleet": "./cli.ts"
+  },
+  "scripts": {
+    "plan": "bun cli.ts plan",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

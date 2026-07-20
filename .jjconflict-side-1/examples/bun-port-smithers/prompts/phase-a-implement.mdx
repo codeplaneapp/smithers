@@ -1,0 +1,27 @@
+# Phase A Implement
+
+OUTPUT_KIND: phase-a-implement
+ZIG: {props.file.zig}
+RS: {props.file.rs}
+CRATE: {props.file.crate}
+REPO: {props.repo}
+
+Translate exactly one Bun Zig file to Rust.
+
+Rules:
+1. Work only inside `REPO`.
+2. Read all of `docs/PORTING.md`.
+3. Grep `docs/LIFETIMES.tsv` for rows matching `ZIG`.
+4. Read the full Zig source at `ZIG`.
+5. Write the Rust draft to exactly `RS`.
+6. Preserve structure, names, field order, and control flow for side-by-side review.
+7. Avoid new crate layouts, Tokio, Rayon, Hyper, Futures, and `async fn`.
+8. Annotate unsafe blocks with `// SAFETY:`.
+9. Use `TODO(port)` instead of guessing.
+10. Do not run broad builds and do not do git operations.
+
+Prior reviewer feedback:
+{props.feedback ?? "none"}
+
+Required output schema:
+{props.schema}

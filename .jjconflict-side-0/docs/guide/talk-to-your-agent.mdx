@@ -1,0 +1,91 @@
+---
+title: "How to Talk to Your Agent"
+icon: "comments"
+description: "Phrase requests so your coding agent drives Smithers well: set finish lines, ask for gates, steer live runs, and approve from your seat."
+---
+
+You don't run Smithers; your agent does. So the craft isn't CLI flags or `.tsx` files, it's phrasing. Say the outcome you want in plain language and your agent maps it to a Smithers workflow: render → execute → persist, durable, resumable, on any machine. Phrase it well and you get a high-quality result that runs while you're away. Phrase it vaguely and you get a one-shot answer when you wanted a campaign.
+
+<Frame caption="One plain-English request, 'write a PRD', becomes a structured, durable workflow your agent runs on your behalf.">
+  <img src="/images/workflow-ui/write-a-prd.png" alt="A natural-language request expanded into a Smithers workflow run with structured stages" />
+</Frame>
+
+## Name the outcome, not the steps
+
+Describe the finished thing; your agent owns the route. You say what "done" looks like, and it reaches for the right recipe from the built-in pack.
+
+| You say | Your agent reaches for |
+| --- | --- |
+| "Add account-level rate limiting." | `implement`, a durable build run |
+| "Figure out the right approach, then build it." | `research-plan-implement`: research, plan, then execute |
+| "Get this whole epic across the line." | `mission`, a multi-stage campaign |
+| "Find the bugs and fix them." | `debug`: investigate, fix, verify |
+
+## Set the finish line
+
+Add a stopping condition and a one-shot becomes a loop. Say "don't stop until X" and your agent iterates against persisted state until X holds (tests pass, the review signs off, a score clears a bar) or it hits an iteration cap.
+
+> **"Add account-level rate limiting, and keep iterating until the tests pass and the review approves."**
+
+Each pass: write code, run tests, send the diff to a review panel. It exits when tests are green *and* the synthesized review signs off, or burns the cap and reports back.
+
+<Note>
+The cap matters. "Keep iterating until X" always carries a ceiling so a stubborn condition can't loop forever. If the loop hits the cap without satisfying X, the run stops and surfaces what's still failing, durable and inspectable, never silently spinning.
+</Note>
+
+## Ask for a gate
+
+Say "check with me first" and you get a durable pause. The run suspends as a row in SQLite and costs nothing while it waits: no process burning, no tokens ticking, until you say the word.
+
+| You say | What Smithers does |
+| --- | --- |
+| "Show me the plan before you start." | Pauses after planning, waits for your go-ahead |
+| "Don't publish until I approve." | Pauses before the publish step |
+| "Stop and ask if the migration looks risky." | Pauses on a condition, escalates to you |
+
+> **"Draft the release blog post, but don't publish until I approve it."**
+
+Your agent writes the draft, then holds at a gate before publishing. Nothing ships, for a minute or a week, same cost either way.
+
+## Steer a live run
+
+You redirect by talking to your agent, not by killing a process. Change your mind mid-run, say so, and your agent reaches for the right control verb: `signal` to nudge, `cancel` to stop a run, `down` to halt everything.
+
+| You say | What happens under the hood |
+| --- | --- |
+| "Focus only on the billing path, skip the rest." | Agent narrows scope via a signal to the run |
+| "Actually, stop this and do Y instead." | Agent cancels, then starts the new run |
+| "Pause everything, I need to think." | Agent halts active runs |
+
+> **"Stop the kanban run and just focus on the billing ticket instead."**
+
+Your agent cancels the `kanban` run and kicks off a focused `implement` run on the billing ticket. You never touched a run ID.
+
+## Approve from your seat
+
+A pause is a question waiting for one word. Your agent shows you what's on the table (the plan, the diff, the draft) and parks the run; because a suspended run is just a row, it waits indefinitely for free.
+
+Answer in plain language: "Approve." "Ship it." "No, redo the auth section first." The run continues from exactly where it stopped, with no re-running the work already done.
+
+> **"approve"**
+
+The gate clears, the run wakes, and the next stage executes against everything persisted. Deny instead and, depending on how the gate was set, the run stops, skips that step, or loops back.
+
+<Frame caption="A mission run renders its stages and gates as discrete, inspectable steps, so when it pauses for you, you see exactly what you're approving.">
+  <img src="/images/workflow-ui/mission.png" alt="A Smithers mission workflow showing sequential stages and approval points" />
+</Frame>
+
+## When not to hand it off
+
+Don't reach for Smithers when a single prompt already gets you there. One question with one answer, or a quick edit? Ask your agent directly. A workflow earns its keep when work spans stages, needs a finish line, needs your approval mid-flight, or should keep going while you're away. On a one-liner it buys you nothing.
+
+<Frame caption="The same prompt-driven flow works across Claude Code, Codex, and more: any agent, any model, any machine.">
+  <img src="/images/why/any-agent.png" alt="Smithers driving multiple agent runtimes from the same workflow" />
+</Frame>
+
+## Read next
+
+- [Watch and steer](/guide/watch-and-steer) (how-to): follow a run once it is going, clear gates, and redirect it in flight.
+- [What you can do](/guide/what-you-can-do) (reference): the full outcome catalog and the exact words that trigger each workflow.
+- [The few concepts you need](/guide/concepts) (explanation): the vocabulary behind durable runs, gates, and loops.
+- [Agents](/agents/overview) and the [CLI](/cli/overview) (under the hood): the models your workflows can drive and the verbs your agent runs for you.

@@ -1,0 +1,9 @@
+# Adversarial engineering review
+
+Adversarially review the engineering doc at docs/planning/03-eng.md against
+docs/planning/01-prd.md and docs/planning/02-design.md. You are a different model family
+than the author — your job is to find what the author cannot see. Attack: architecture
+soundness, missing failure modes, undeclared dependencies, untestable requirements,
+missing traceability, and assumptions that should be probed but aren't. Approve ONLY when
+you would stake your reputation on this plan. Otherwise approved=false with specific
+issues[].

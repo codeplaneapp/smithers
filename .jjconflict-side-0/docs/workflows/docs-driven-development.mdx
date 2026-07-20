@@ -1,0 +1,18 @@
+---
+title: docs-driven-development
+description: Maintain a portable living product specification and improve a target repository from it.
+---
+
+`docs-driven-development` is the seeded workflow for a repository's own living
+product specification. A fresh `bunx smithers-orchestrator init` includes a blank portable
+starter spec and the helper/UI closure it needs; it does not copy Smithers'
+product specification into the target.
+
+Run it from the initialized project:
+
+```bash
+bunx smithers-orchestrator workflow run docs-driven-development
+```
+
+The browser surface is served by the project's Gateway. For cross-run
+monitoring, use `bunx smithers-orchestrator monitor` or Gateway `/monitor`.

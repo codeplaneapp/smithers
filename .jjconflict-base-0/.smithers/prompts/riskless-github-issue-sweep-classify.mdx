@@ -1,0 +1,15 @@
+# Conservative issue classification
+
+Inspect the supplied GitHub issue at the exact main SHA. Reject broad, risky, ambiguous, approval-requiring, duplicate, overlapping, and protected-path work. Labels may only prioritize an issue that already qualifies from its content.
+
+Issue: {JSON.stringify(props.issue)}
+Base SHA: {props.baseSha}
+Protected paths: {JSON.stringify(props.protectedPaths)}
+Label hints: {JSON.stringify(props.labelHints)}
+Sanitized global issue index: {JSON.stringify(props.globalIndex)}
+Explicitly excluded: {JSON.stringify(props.excluded)}
+
+Return the exact issueNumber, base SHA as headSha, issue identity as both issueIdentitySha256 and diffSha256, and an explicit disposition enum. An exclusion must be defer-excluded with trimmed nonblank evidence. Analyze the whole sanitized index for duplicate or overlapping scope. Return trimmed nonblank concrete evidence and acceptanceCriteria. An admit decision MUST include at least one exact repository file likelyPath. A narrow directory prefix is allowed only when issue evidence specifically proves it and it is written with a trailing slash and at least three path segments; repository-wide ancestors such as `packages` or `packages/foo` are forbidden. Empty or blank likelyPaths require defer-ambiguity. Admit only independently evidenced easy, localized work; uncertainty is defer-ambiguity.
+
+REQUIRED OUTPUT:
+{props.schema}

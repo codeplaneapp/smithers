@@ -1,0 +1,50 @@
+# Workflow Skill Writer
+
+Create or update Smithers workflow skill files for the selected workflow target.
+
+## Inputs
+
+- Workflow target: {props.workflowTarget}
+- Output override: {props.output ?? "(none)"}
+- Default skill directory: {props.defaultSkillDir}
+- Output rule: {props.outputRule}
+- Extra user instructions: {props.prompt || "(none)"}
+
+## Selected Workflows
+
+{JSON.stringify(props.workflows, null, 2)}
+
+## Existing Skill Files
+
+{JSON.stringify(props.existingSkills, null, 2)}
+
+## Task
+
+Write the requested skill file or files. Create parent directories as needed.
+
+For each selected workflow, create or update a concise markdown skill that tells an agent:
+
+1. What the workflow does and when to use it.
+2. Which workflow ID it runs.
+3. Which inputs matter, including `prompt`, `input`, or workflow-specific fields inferred from the source.
+4. How to start it with `smithers workflow run <workflow-id>`.
+5. How to run it detached with `-d` and capture the returned `runId`.
+6. How to monitor it with `smithers logs <runId>`, `smithers chat <runId> --follow`, `smithers inspect <runId>`, `smithers events <runId> --watch`, and `smithers ps --watch`.
+7. How to handle common blocked states: approvals with `smithers approve <runId>`, signal waits with `smithers why <runId>`, and cancellation with `smithers cancel <runId>`.
+8. How to resume when appropriate using the same workflow and `--resume <runId>`, adding `--force` only when the operator has confirmed the old owner is dead.
+
+Skill file requirements:
+
+- Use YAML frontmatter with `name`, `description`, and `workflow`.
+- Choose stable kebab-case names. Prefer the workflow ID unless the source clearly implies a better agent-facing skill name.
+- Default paths are under the default skill directory as `<chosen-name>.md`.
+- If an output override is present for one workflow, write exactly that file path.
+- If an output override is present for `all`, treat it as a directory and write one file per workflow in that directory.
+- Update an existing relevant skill instead of creating a duplicate.
+- Keep each file practical and agent-facing. Do not write marketing copy.
+- Do not modify workflow source files.
+
+Return the exact file paths you wrote.
+
+REQUIRED OUTPUT:
+{props.schema}

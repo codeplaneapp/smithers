@@ -1,0 +1,78 @@
+---
+title: "Ghost: Claude Code Plugin, Smithers Skill"
+description: "Example from ~/.claude/plugins/smithers/. A Claude Code plugin that teaches Claude how to create and monitor Smithers orchestrations."
+---
+
+# Claude Code Plugin: Smithers Skill
+
+<Note>
+**Ghost doc.** Real Claude Code plugin at `~/.claude/plugins/smithers/`. Registers the `smithers` skill so Claude Code can create and run workflows.
+</Note>
+
+## plugin.json
+
+```json
+{
+  "name": "smithers",
+  "version": "0.2.0",
+  "description": "Durable control plane for long-running coding agents",
+  "author": "Smithers",
+  "license": "MIT",
+  "repository": "https://github.com/smithersai/smithers",
+  "keywords": ["orchestration", "multi-agent", "smithers", "workflow", "ai-agents", "claude", "jsx", "reactive"],
+  "skills": ["skills/smithers"]
+}
+```
+
+## SKILL.md
+
+```markdown
+---
+name: smithers
+description: Create and monitor multi-agent AI orchestrations using Smithers framework. Use when user wants to coordinate multiple AI agents, create complex workflows, build agent pipelines, or mentions "smithers", "multi-agent", "orchestration", "workflow", "agent coordination". Strongly recommends plan mode for orchestrations with 3+ phases.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Glob
+  - Grep
+  - Task
+user-invocable: true
+recommend-plan-mode: true
+---
+
+# Smithers Orchestrator
+
+## When to Use
+- Orchestrate multiple AI agents working together
+- Create complex multi-phase workflows
+- Build agent pipelines with state management
+
+## Quick Start
+1. Initialize: `bunx smithers-orchestrator init` (installs the `.smithers/` pack: workflows, prompts, and UIs)
+2. Edit `.smithers/workflows/*.tsx` (and their `.smithers/prompts/*.mdx`) to define your workflow
+3. Run and monitor: `bunx smithers-orchestrator up <workflow>` then `bunx smithers-orchestrator monitor`
+```
+
+## EXAMPLES.md
+
+Five complete workflow examples (see `~/.claude/plugins/smithers/skills/smithers/EXAMPLES.md` for full code):
+
+1. **Simple Sequential**: Three-phase research/implement/test pipeline
+2. **Conditional Branching**: Branches based on analysis results
+3. **Parallel Execution**: Frontend/backend/database agents simultaneously
+4. **Error Handling and Retry**: Automatic retry with recovery fallback
+5. **Data Flow Between Phases**: Requirements/design/implement/test with structured data passing
+
+## REFERENCE.md
+
+| Component / Utility | Purpose |
+|---------------------|---------|
+| `<Ralph>` | Loop controller: remounts children each iteration until no agents render or `maxIterations` is reached |
+| `<Claude>` | Self-executing agent: runs a Claude agent on mount, calls `onFinished`/`onError` callbacks |
+| `<Phase>` | Semantic grouping for orchestration phases, used in monitor output |
+| `<Step>` | Fine-grained grouping within a phase |
+| Zustand Store | State management: drives phase transitions via `onFinished` callbacks |
+| `RalphContext` | Context object exposing iteration count and completion signalling |
+| `serialize()` | Serializes the orchestration tree to an XML plan string |

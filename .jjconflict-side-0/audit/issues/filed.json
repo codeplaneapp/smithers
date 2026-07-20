@@ -1,0 +1,47 @@
+[
+  {
+    "key": "p0",
+    "title": "🔴 [audit] P0 — critical blockers (4)",
+    "url": "https://github.com/smithersai/smithers/issues/299"
+  },
+  {
+    "key": "ci-arch",
+    "title": "🏛️ [audit] CI enforcement, architecture & systemic policy (34)",
+    "url": "https://github.com/smithersai/smithers/issues/300"
+  },
+  {
+    "key": "dead-code",
+    "title": "🧹 [audit] Dead code cleanup (66)",
+    "url": "https://github.com/smithersai/smithers/issues/301"
+  },
+  {
+    "key": "missing",
+    "title": "🧩 [audit] Stubbed & missing features (17)",
+    "url": "https://github.com/smithersai/smithers/issues/302"
+  },
+  {
+    "key": "bug",
+    "title": "🐛 [audit] Bug fixes (50)",
+    "url": "https://github.com/smithersai/smithers/issues/303"
+  },
+  {
+    "key": "docs",
+    "title": "📝 [audit] Documentation & skills accuracy (47)",
+    "url": "https://github.com/smithersai/smithers/issues/304"
+  },
+  {
+    "key": "test-core",
+    "title": "✅ [audit] Test coverage gaps — core library packages (67)",
+    "url": "https://github.com/smithersai/smithers/issues/305"
+  },
+  {
+    "key": "test-rest",
+    "title": "✅ [audit] Test coverage gaps — apps, gateway, UI, e2e, examples (90)",
+    "url": "https://github.com/smithersai/smithers/issues/306"
+  },
+  {
+    "key": "cleanup",
+    "title": "♻️ [audit] Code cleanup & refactors (48)",
+    "url": "https://github.com/smithersai/smithers/issues/307"
+  }
+]

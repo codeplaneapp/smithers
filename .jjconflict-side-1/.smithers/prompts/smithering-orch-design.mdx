@@ -1,0 +1,25 @@
+# Orchestration design
+
+Design the implementation orchestration. Write docs/planning/06-orchestration.md and
+record a DECISION for each field (not "considerations" — decisions):
+
+- worktreeLayout: how tickets parallelize into jj/git worktrees (target repo:
+  {props.targetRepo}, base branch: {props.baseBranch}).
+- mergePolicy: how work lands. NOTE: the Smithers MergeQueue component is ONLY a
+  concurrency limiter — optimistic merging with postsubmit eviction is custom logic
+  (CheckSuite + Saga + jj revert) and worktree runs auto-rebase on resume even if the
+  rebase fails. Decide what is actually worth building vs a serialized merge lane.
+- testTiers: which backpressure gates run pre-merge per ticket vs postsubmit (an agent may
+  choose an optimistic subset only if postsubmit runs everything).
+- modelAssignment: implementer/reviewer/verifier per ticket complexity. Hard rule: the
+  reviewing model family ≠ implementing model family.
+- concurrency: max parallel workers and why.
+- observability: evidence each ticket must persist under a run-scoped path such as
+  `artifacts/smithering/build/<runId>/<ticket>/` (per the matrix), or the workflow must clean
+  the evidence root before done-checks run, so a prior run's verify/review verdict can never
+  satisfy a fresh run. Include HTML decision logs for judgment calls.
+- contextManagement: every worker gets fresh context — what each prompt must carry
+  (ticket JSON + doc paths), what it must never assume.
+
+Read: docs/planning/03-eng.md, docs/planning/04-backpressure.md,
+docs/planning/05-tickets.md. {props.pocSummary ? `POC learnings: ${props.pocSummary}` : ""}

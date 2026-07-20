@@ -1,0 +1,26 @@
+# Write the PRD
+
+End-user requirements ONLY — no implementation details.
+
+Read first: artifacts/smithering/brainstorm.md, artifacts/smithering/research/domain.md,
+artifacts/smithering/research/prior-art.md.
+
+Human answers (binding decisions): {props.answers}
+
+Additional context: {props.additionalContext ?? "none"}
+
+## PRD requirements (write to docs/planning/01-prd.md)
+
+- Every requirement gets a stable id (REQ-1, REQ-2, …) and MEASURABLE acceptance criteria
+  ("done means these checks pass", never "done means it's good").
+- A mandatory Non-goals section — scope additions later require amending this document.
+- A Verification section at PRD altitude: user-visible acceptance criteria only.
+- High emphasis on the problem being solved.
+
+## End-user interface artifact (productType: {props.productType})
+
+- webapp/mobile-app → simple self-contained HTML mockup(s) with mock data showing how it
+  functions, in artifacts/smithering/mockups/ (list them in interfaceArtifacts).
+- library → documentation-driven README draft (the docs ARE the interface).
+- api → public API reference draft.
+- cli/service/other → the closest analogous user-facing artifact.

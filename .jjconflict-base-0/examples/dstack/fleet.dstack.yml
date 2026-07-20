@@ -1,0 +1,16 @@
+type: fleet
+name: kimi-fleet
+
+nodes: 0..2
+
+backends: [gcp]
+regions: [us-central1, us-east4, us-west1]
+
+placement: cluster
+
+resources:
+  gpu: H100:80GB:8
+  disk: 2000GB
+
+spot_policy: on-demand
+idle_duration: 10m

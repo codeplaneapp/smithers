@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Approve · Smithers</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      :root {
+        --bg: var(--tg-theme-bg-color, #ffffff);
+        --text: var(--tg-theme-text-color, #17212b);
+        --hint: var(--tg-theme-hint-color, #707579);
+        --section: var(--tg-theme-section-bg-color, #f3f6f9);
+        --sep: var(--tg-theme-section-separator-color, rgba(0, 0, 0, 0.08));
+        --accent: var(--tg-theme-button-color, #2ca5e0);
+        --accent-text: var(--tg-theme-button-text-color, #ffffff);
+        --destructive: var(--tg-theme-destructive-text-color, #e5484d);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 18px; background: var(--bg); color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.5; -webkit-font-smoothing: antialiased;
+      }
+      .eyebrow { font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; margin: 0 0 6px; }
+      h1 { font-size: 1.35rem; margin: 0 0 6px; line-height: 1.2; }
+      .summary { color: var(--hint); font-size: 0.95rem; margin: 0 0 18px; white-space: pre-wrap; }
+      .card { background: var(--section); border: 1px solid var(--sep); border-radius: 14px; padding: 16px; margin-bottom: 18px; }
+      .card .row { display: flex; justify-content: space-between; gap: 12px; font-size: 0.9rem; padding: 5px 0; }
+      .card .row + .row { border-top: 1px solid var(--sep); }
+      .card .k { color: var(--hint); } .card .v { font-family: ui-monospace, Menlo, monospace; text-align: right; word-break: break-all; }
+      button { font: inherit; border: 0; border-radius: 11px; padding: 13px 16px; width: 100%; font-weight: 600; cursor: pointer; }
+      .approve { background: var(--accent); color: var(--accent-text); }
+      .reject { background: transparent; color: var(--destructive); margin-top: 10px; }
+      .status { text-align: center; color: var(--hint); font-size: 0.88rem; margin-top: 14px; min-height: 1.2em; }
+      .status.err { color: var(--destructive); }
+    </style>
+  </head>
+  <body>
+    <p class="eyebrow">Smithers · approval</p>
+    <h1 id="title">Approval needed</h1>
+    <p class="summary" id="summary"></p>
+
+    <div class="card">
+      <div class="row"><span class="k">Request</span><span class="v" id="request-id">—</span></div>
+      <div class="row"><span class="k">Approver</span><span class="v" id="approver">—</span></div>
+    </div>
+
+    <button class="approve" id="approve">✅ Approve</button>
+    <button class="reject" id="reject">🚫 Reject</button>
+    <p class="status" id="status"></p>
+
+    <script>
+      // A Telegram Mini App approval UI. It sends the SIGNED initData to the
+      // Smithers /approve endpoint, which verifies it server-side (never trust
+      // initDataUnsafe). Opened from a `web_app` inline button on a smithers
+      // TelegramApproval prompt (miniApp: { url }).
+      var tg = window.Telegram && window.Telegram.WebApp;
+      var params = new URLSearchParams(location.search);
+      var startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || params.get("startapp") || "";
+      var requestId = startParam || params.get("request") || "demo-request";
+
+      // Reference: title/summary come from the deep link or query for the demo.
+      // In production, look them up server-side by requestId.
+      document.getElementById("title").textContent = params.get("title") || "Deploy release 0.27 to prod?";
+      document.getElementById("summary").textContent = params.get("summary") || "Tests are green. Approve to ship.";
+      document.getElementById("request-id").textContent = requestId;
+
+      var statusEl = document.getElementById("status");
+      function setStatus(text, isError) {
+        statusEl.textContent = text;
+        statusEl.className = "status" + (isError ? " err" : "");
+      }
+
+      if (tg) {
+        tg.ready();
+        tg.expand();
+        var u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+        document.getElementById("approver").textContent = u ? (u.username ? "@" + u.username : String(u.id)) : "—";
+      } else {
+        setStatus("Open this page inside Telegram to approve.", true);
+      }
+
+      function submit(decision) {
+        if (!tg || !tg.initData) {
+          setStatus("Not running inside Telegram — cannot verify.", true);
+          return;
+        }
+        setStatus("Submitting…");
+        fetch("/approve", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: "tma " + tg.initData },
+          body: JSON.stringify({ requestId: requestId, decision: decision }),
+        })
+          .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+          .then(function (result) {
+            if (!result.ok || !result.body.ok) {
+              tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("error");
+              setStatus("Rejected by server: " + (result.body.reason || result.body.error || "error"), true);
+              return;
+            }
+            tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success");
+            setStatus(decision === "approve" ? "Approved. Closing…" : "Rejected. Closing…");
+            setTimeout(function () { tg.close(); }, 700);
+          })
+          .catch(function () {
+            tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("error");
+            setStatus("Network error. Try again.", true);
+          });
+      }
+
+      document.getElementById("approve").addEventListener("click", function () {
+        if (tg && tg.showConfirm) {
+          tg.showConfirm("Approve this request?", function (ok) { if (ok) submit("approve"); });
+        } else {
+          submit("approve");
+        }
+      });
+      document.getElementById("reject").addEventListener("click", function () { submit("reject"); });
+    </script>
+  </body>
+</html>
