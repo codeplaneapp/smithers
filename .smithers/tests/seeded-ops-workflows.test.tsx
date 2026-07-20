@@ -207,7 +207,10 @@ describe.serial("seeded ops/filesystem workflows", () => {
       expect(gather).toEqual({ ok: true, state: "completed", nodes: [{ id: "n1", type: "task", status: "completed", summary: 'nested "quote"' }], summary: 'Run target-1 is "completed" with 1 node(s).', raw: expect.stringContaining('"data"') });
       const gathered = staged(frame, "gather", gather as Record<string, unknown>);
       const renderFrame = await render("report-slideshow.tsx", { targetRunId: "target-1", title: "Daily report" }, gathered);
-      expect(String(renderPrompt(task(renderFrame, "render").prompt))).toContain('"completed"');
+      const renderInstructions = String(renderPrompt(task(renderFrame, "render").prompt));
+      expect(renderInstructions).toContain('"completed"');
+      expect(renderInstructions).toContain("standaloneThemeCss()");
+      expect(renderInstructions).toContain("color-scheme: light dark");
       const rendered = { title: "Daily report", html: "<html><body>one</body></html>", slideCount: 1 };
       const outputFrame = await render("report-slideshow.tsx", { targetRunId: "target-1", title: "Daily report" }, merge(gathered, staged(renderFrame, "render", rendered)));
       expect(await runTask(task(outputFrame, "output"))).toEqual({ targetRunId: "target-1", title: "Daily report", state: "completed", nodeCount: 1, slideCount: 1, summary: 'Run target-1 is "completed" with 1 node(s).' });
