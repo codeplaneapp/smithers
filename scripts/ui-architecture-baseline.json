@@ -496,7 +496,6 @@
     "single-visual-package :: packages/tui/src/modes/TreeMode.tsx imports @opentui/react",
     "single-visual-package :: packages/tui/src/modes/TreeMode.tsx renders intrinsic <code>",
     "single-visual-package :: packages/tui/src/modes/hijackUtils.ts imports @opentui/core",
-    "ui-layer-direction :: packages/ui/src/primitives/markdown.tsx (primitives) imports ../agentic/CodeBlock (agentic)",
     "ui-layer-placement :: packages/ui/src/alert.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/badge.tsx is outside the target UI layers",
     "ui-layer-placement :: packages/ui/src/button.tsx is outside the target UI layers",
