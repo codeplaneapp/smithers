@@ -151,6 +151,16 @@ test("a fresh pack UI style block fails", (context) => {
   assert.match(result.errors.join("\n"), /New architecture violation: pack-ui-style-tag/);
 });
 
+test("a fresh pack UI theme module fails", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  snapshot(root);
+  write(root, "examples/ui/packTheme.ts", "export const packTheme = {};\n");
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /New architecture violation: pack-ui-theme-module/);
+});
+
 test("a baselined pack offender passes until it is edited", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
