@@ -98,7 +98,9 @@ export const featuresData = [
       "packages/components/tests/memory-component.test.jsx",
       "packages/components/tests/priority-props.test.jsx",
       "packages/components/tests/failure-policy-props.test.jsx",
-      "packages/engine/tests/schema-retries.test.jsx"
+      "packages/engine/tests/schema-retries.test.jsx",
+      "packages/xstate/tests/conformance.test.js",
+      "packages/xstate/tests/durability.e2e.test.jsx"
     ],
     "observability": [
       "Frame snapshots and task descriptors are persisted in _smithers_* tables and can be inspected with smithers graph, inspect, tree, and DevTools streams.",
@@ -128,7 +130,8 @@ export const featuresData = [
       "packages/smithers",
       "packages/components",
       "packages/graph",
-      "packages/react-reconciler"
+      "packages/react-reconciler",
+      "packages/xstate"
     ],
     "missing": []
   },
