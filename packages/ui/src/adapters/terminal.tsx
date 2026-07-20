@@ -2,7 +2,7 @@
 import { useEffect, useInsertionEffect, useRef, type ComponentProps } from "react";
 import type { IDisposable, ITheme, Terminal as XTerminal } from "@xterm/xterm";
 import { cn } from "../cn";
-import { observeReducedMotion, prefersReducedMotion, useInjectUiCss } from "../styles";
+import { useResolvedTheme } from "../internal/useResolvedTheme";
 import { tokens as t } from "../tokens";
 import { xtermBaseCss } from "./xtermCss";
 
@@ -96,7 +96,7 @@ export type TerminalProps = Omit<ComponentProps<"div">, "onResize"> & {
   onResize?: (size: { cols: number; rows: number }) => void;
   /** Escape hatch to the raw xterm.js instance (load addons, search, read buffer). */
   onReady?: (terminal: TerminalInstance) => void;
-  /** Built-in palette selection. Defaults to `"dark"`. */
+  /** Built-in palette selection. Defaults to the active house theme. */
   theme?: TerminalColorTheme;
   /** Per-color overrides merged onto the selected palette. */
   colors?: Partial<ITheme>;
@@ -137,7 +137,7 @@ export function Terminal({
   onData,
   onResize,
   onReady,
-  theme = "dark",
+  theme,
   colors,
   fontSize = 13,
   fontFamily = DEFAULT_FONT_FAMILY,
@@ -148,8 +148,9 @@ export function Terminal({
   style,
   ...rest
 }: TerminalProps) {
-  useInjectUiCss();
   useInsertionEffect(injectTerminalStyles, []);
+  const houseTheme = useResolvedTheme();
+  const resolvedTheme = theme ?? houseTheme;
 
   // Latest-value refs keep the mount effect stable (it only re-runs on config
   // that requires rebuilding the emulator) while still calling current props.
@@ -182,7 +183,6 @@ export function Terminal({
     let resizeObserver: ResizeObserver | null = null;
     let dataDisposable: IDisposable | null = null;
     let streamTeardown: (() => void) | void;
-    let stopObservingMotion: (() => void) | undefined;
 
     async function mount() {
       const [{ Terminal: XtermTerminal }, { FitAddon }] = await Promise.all([
@@ -195,12 +195,12 @@ export function Terminal({
       // emulator into it.
       host.replaceChildren();
 
-      const palette = { ...(theme === "light" ? LIGHT_THEME : DARK_THEME), ...colorsRef.current };
+      const palette = { ...(resolvedTheme === "light" ? LIGHT_THEME : DARK_THEME), ...colorsRef.current };
       term = new XtermTerminal({
         theme: palette,
         fontFamily,
         fontSize,
-        cursorBlink: cursorBlink && !prefersReducedMotion(),
+        cursorBlink,
         convertEol: true,
         disableStdin: readOnly,
         scrollback,
@@ -212,9 +212,6 @@ export function Terminal({
       if (ac.signal.aborted) return;
 
       const boundTerm = term;
-      stopObservingMotion = observeReducedMotion((reduced) => {
-        boundTerm.options.cursorBlink = cursorBlink && !reduced;
-      });
       const write: TerminalWriter = (data) => boundTerm.write(data);
 
       const initialLines = linesRef.current;
@@ -247,18 +244,18 @@ export function Terminal({
       // unconditionally, whatever stage setup reached.
       ac.abort();
       if (typeof streamTeardown === "function") streamTeardown();
-      stopObservingMotion?.();
       resizeObserver?.disconnect();
       dataDisposable?.dispose();
       term?.dispose();
     };
-  }, [theme, fontSize, fontFamily, cursorBlink, readOnly, scrollback]);
+  }, [resolvedTheme, fontSize, fontFamily, cursorBlink, readOnly, scrollback]);
 
-  const surfaceBackground = (theme === "light" ? LIGHT_THEME : DARK_THEME).background;
+  const surfaceBackground = (resolvedTheme === "light" ? LIGHT_THEME : DARK_THEME).background;
 
   return (
     <div
       data-slot="terminal"
+      data-theme-mode={resolvedTheme}
       className={cn("sui-terminal", className)}
       style={{ background: colors?.background ?? surfaceBackground, ...style }}
       {...rest}

@@ -1,5 +1,8 @@
 /** @jsxImportSource react */
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ReactFlowProvider, type NodeProps } from "@xyflow/react";
@@ -95,6 +98,7 @@ describe("WorkflowGraph", () => {
   test("renders the react-flow canvas and ships its base stylesheet inline", () => {
     const html = renderToStaticMarkup(<WorkflowGraph spec={SPEC} />);
     expect(html).toContain("react-flow");
+    expect(html).toContain('data-theme-mode="light"');
     // The required base CSS is shipped in a <style> tag so gateway bundling keeps it.
     expect(html).toContain("<style>");
     expect(html).toContain(".react-flow__node");
@@ -104,5 +108,15 @@ describe("WorkflowGraph", () => {
     const html = renderToStaticMarkup(<WorkflowGraph spec={[]} />);
     expect(html).toContain("react-flow");
     expect(html.length).toBeGreaterThan(0);
+  });
+
+  test("derives ReactFlow colorMode from the shared reactive theme contract", () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../src/WorkflowGraph.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("useSyncExternalStore<ResolvedTheme>(subscribeTheme, resolveTheme");
+    expect(source).toContain("colorMode={colorMode}");
+    expect(source).not.toContain('colorMode="system"');
   });
 });

@@ -138,6 +138,7 @@ describe("PierreDiffView live render (happy-dom)", () => {
     container?.remove();
     container = undefined;
     document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`).forEach((el) => el.remove());
+    document.documentElement.removeAttribute("data-theme");
   });
 
   async function mount(element: ReactElement): Promise<HTMLElement> {
@@ -164,4 +165,17 @@ describe("PierreDiffView live render (happy-dom)", () => {
       expect(stat!.textContent).toBe("+1 -1");
     });
   }
+
+  test("the default Pierre mode follows root data-theme toggles", async () => {
+    document.documentElement.setAttribute("data-theme", "light");
+    const el = await mount(<PierreDiffView patch={PATCH} />);
+    const adapter = () => el.querySelector('[data-slot="pierre-diff-view"]');
+    expect(adapter()?.getAttribute("data-theme-mode")).toBe("light");
+
+    await act(async () => {
+      document.documentElement.setAttribute("data-theme", "dark");
+      await Promise.resolve();
+    });
+    expect(adapter()?.getAttribute("data-theme-mode")).toBe("dark");
+  });
 });

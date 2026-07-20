@@ -172,6 +172,32 @@ describe("MarkdownEditor styling", () => {
     expect(markdownEditorCss).toContain(".milkdown");
     expect(markdownEditorCss).toContain(".sui-markdown-editor");
     expect(markdownEditorCss).toContain("prefers-color-scheme: dark");
+    expect(markdownEditorCss).toContain(":root:not([data-theme='light']) .milkdown");
+    expect(markdownEditorCss).toContain(":root[data-theme='dark'] .milkdown");
+    expect(markdownEditorCss).toContain("--crepe-color-primary:var(--brand,#6d56d8)");
+    expect(markdownEditorCss).toContain("--crepe-font-default:var(--font-sans");
+    expect(markdownEditorCss).toContain("--crepe-font-code:var(--font-mono");
+  });
+
+  test("explicit data-theme toggles the Crepe palette independently of the OS", async () => {
+    await render(<MarkdownEditor value="theme probe" />);
+    const milkdown = document.createElement("div");
+    milkdown.className = "milkdown";
+    document.body.appendChild(milkdown);
+
+    document.documentElement.setAttribute("data-theme", "light");
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-background")).toContain("#fafafa");
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-primary")).toContain("#6d56d8");
+
+    document.documentElement.setAttribute("data-theme", "dark");
+    // happy-dom caches computed custom properties until the node reconnects;
+    // browsers invalidate this automatically when the root attribute changes.
+    milkdown.remove();
+    document.body.appendChild(milkdown);
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-background")).toContain("#09090b");
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-primary")).toContain("#8b78e6");
+    milkdown.remove();
+    document.documentElement.removeAttribute("data-theme");
   });
 
   test("MarkdownEditorStyles renders the marker style tag with the sheet", () => {

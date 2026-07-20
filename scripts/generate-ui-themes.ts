@@ -17,6 +17,7 @@ import { build } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const uiDir = resolve(root, ".smithers/ui");
+const exampleUiDir = resolve(root, "examples/ui");
 
 /**
  * Bundle a CSS entry (resolving @import + node_modules exports) into one string.
@@ -56,32 +57,132 @@ function emit(file: string, exportName: string, css: string, note: string) {
 // lockstep with the .smithers/ui one below.
 const uiAdapterDir = resolve(root, "packages/ui/src/adapters/markdown-editor");
 
-// ---- Crepe (Milkdown) theme: structural common + light/dark frame ----
+type CrepeHousePalette = {
+  background: string;
+  text: string;
+  textMuted: string;
+  textFaint: string;
+  surface: string;
+  surface2: string;
+  hover: string;
+  inverseBg: string;
+  inverseText: string;
+  inlineCodeBg: string;
+  brand: string;
+  success: string;
+  danger: string;
+  shadow1: string;
+  shadow2: string;
+};
+
+function crepeHouseTokens(palette: CrepeHousePalette): string {
+  const value = (token: string, fallback: string) => `var(--${token},${fallback})`;
+  return [
+    `--crepe-color-background:${value("bg", palette.background)}`,
+    `--crepe-color-on-background:${value("text", palette.text)}`,
+    `--crepe-color-surface:${value("surface", palette.surface)}`,
+    `--crepe-color-surface-low:${value("surface-2", palette.surface2)}`,
+    `--crepe-color-on-surface:${value("text", palette.text)}`,
+    `--crepe-color-on-surface-variant:${value("text-muted", palette.textMuted)}`,
+    `--crepe-color-outline:${value("text-faint", palette.textFaint)}`,
+    `--crepe-color-primary:${value("brand", palette.brand)}`,
+    `--crepe-color-secondary:${value("surface-2", palette.surface2)}`,
+    `--crepe-color-on-secondary:${value("text", palette.text)}`,
+    `--crepe-color-inverse:${value("inverse-bg", palette.inverseBg)}`,
+    `--crepe-color-on-inverse:${value("inverse-text", palette.inverseText)}`,
+    `--crepe-color-inline-code:${value("danger", palette.danger)}`,
+    `--crepe-color-error:${value("danger", palette.danger)}`,
+    `--crepe-color-hover:${value("hover", palette.hover)}`,
+    `--crepe-color-selected:${value("brand-soft", `color-mix(in srgb,${palette.brand} 10%,${palette.surface})`)}`,
+    `--crepe-color-inline-area:${value("inline-code-bg", palette.inlineCodeBg)}`,
+    `--crepe-color-diff-added:${value("success", palette.success)}`,
+    `--crepe-color-diff-added-bg:${value("success-soft", `color-mix(in srgb,${palette.success} 12%,${palette.surface})`)}`,
+    `--crepe-color-diff-added-text:${value("success", palette.success)}`,
+    `--crepe-color-diff-removed:${value("danger", palette.danger)}`,
+    `--crepe-color-diff-removed-bg:${value("danger-soft", `color-mix(in srgb,${palette.danger} 10%,${palette.surface})`)}`,
+    `--crepe-color-diff-removed-text:${value("danger", palette.danger)}`,
+    `--crepe-font-title:var(--font-sans,Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif)`,
+    `--crepe-font-default:var(--font-sans,Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif)`,
+    `--crepe-font-code:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace)`,
+    `--crepe-shadow-1:${value("shadow-1", palette.shadow1)}`,
+    `--crepe-shadow-2:${value("shadow-2", palette.shadow2)}`,
+  ].join(";");
+}
+
+const crepeLightHouseTokens = crepeHouseTokens({
+  background: "#fafafa",
+  text: "#18181b",
+  textMuted: "#52525b",
+  textFaint: "#71717a",
+  surface: "#ffffff",
+  surface2: "#f4f4f5",
+  hover: "#f4f4f5",
+  inverseBg: "#18181b",
+  inverseText: "#fafafa",
+  inlineCodeBg: "rgba(24,24,27,0.06)",
+  brand: "#6d56d8",
+  success: "#0f8f78",
+  danger: "#e5484d",
+  shadow1: "0 1px 2px rgb(24 24 27 / 0.05)",
+  shadow2: "0 1px 2px rgb(24 24 27 / 0.04),0 8px 24px rgb(24 24 27 / 0.07)",
+});
+const crepeDarkHouseTokens = crepeHouseTokens({
+  background: "#09090b",
+  text: "#f4f4f5",
+  textMuted: "#a1a1aa",
+  textFaint: "#71717a",
+  surface: "#141417",
+  surface2: "#1b1b20",
+  hover: "#1f1f24",
+  inverseBg: "#f4f4f5",
+  inverseText: "#18181b",
+  inlineCodeBg: "rgba(255,255,255,0.08)",
+  brand: "#8b78e6",
+  success: "#2ec9a8",
+  danger: "#f2555a",
+  shadow1: "0 1px 2px rgb(0 0 0 / 0.35)",
+  shadow2: "0 1px 2px rgb(0 0 0 / 0.30),0 8px 24px rgb(0 0 0 / 0.40)",
+});
+
+// ---- Crepe (Milkdown): structural common + house light/dark token bridge ----
 const crepeCommon = await bundleCss(`@import "@milkdown/crepe/theme/common/style.css";`);
-const crepeLight = await bundleCss(`@import "@milkdown/crepe/theme/frame.css";`);
-const crepeDark = await bundleCss(`@import "@milkdown/crepe/theme/frame-dark.css";`);
 const crepeCss = [
   crepeCommon,
-  `@media (prefers-color-scheme: light){${crepeLight}}`,
-  `@media (prefers-color-scheme: dark){${crepeDark}}`,
+  `.milkdown{${crepeLightHouseTokens}}`,
+  `@media (prefers-color-scheme: dark){:root:not([data-theme='light']) .milkdown{${crepeDarkHouseTokens}}}`,
+  `:root[data-theme='dark'] .milkdown{${crepeDarkHouseTokens}}`,
 ].join("\n");
 emit(
   "crepeTheme.generated.ts",
   "crepeThemeCss",
   crepeCss,
-  "Milkdown Crepe theme CSS (common + light/dark frame), pre-bundled for the Smithers UI <style> injection.",
+  "Milkdown Crepe CSS (common + house light/dark token bridge), pre-bundled for the Smithers UI <style> injection.",
 );
 emitTo(
   uiAdapterDir,
   "crepeTheme.generated.ts",
   "crepeThemeCss",
   crepeCss,
-  "Milkdown Crepe theme CSS (common + light/dark frame), pre-bundled for the @smithers-orchestrator/ui markdown-editor adapter <style> injection.",
+  "Milkdown Crepe CSS (common + house light/dark token bridge), pre-bundled for the @smithers-orchestrator/ui markdown-editor adapter <style> injection.",
+);
+emitTo(
+  exampleUiDir,
+  "crepeTheme.generated.ts",
+  "crepeThemeCss",
+  crepeCss,
+  "Milkdown Crepe CSS (common + house light/dark token bridge), pre-bundled for the Smithers UI <style> injection.",
 );
 
 // ---- xyflow base stylesheet (required for canvas/edges/controls) ----
 const xyflowCss = await bundleCss(`@import "@xyflow/react/dist/style.css";`);
 emit(
+  "xyflowTheme.generated.ts",
+  "xyflowThemeCss",
+  xyflowCss,
+  "@xyflow/react base stylesheet, pre-bundled for the Smithers UI <style> injection.",
+);
+emitTo(
+  exampleUiDir,
   "xyflowTheme.generated.ts",
   "xyflowThemeCss",
   xyflowCss,

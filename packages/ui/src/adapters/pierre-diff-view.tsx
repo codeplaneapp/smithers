@@ -9,6 +9,7 @@ import {
 import { CodeView } from "@pierre/diffs/react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
+import { useResolvedTheme } from "../internal/useResolvedTheme";
 
 /**
  * PierreDiffView is the high-fidelity, syntax-highlighted diff surface: it runs
@@ -19,8 +20,8 @@ import { useInjectUiCss } from "../styles";
  * through the `@smithers-orchestrator/ui/adapters/pierre-diff-view` subpath.
  *
  * The component is fully props-driven with no app coupling. Multi's original
- * carried an app `Theme` import; here the theme is an explicit `mode` prop
- * (`"light" | "dark"`) mapped onto a `DiffsThemeNames` value, and the layout is a
+ * carried an app `Theme` import; here an optional `mode` prop overrides the
+ * active house theme and maps onto a `DiffsThemeNames` value. Layout is a
  * `layout` prop (`"split"` side-by-side vs `"inline"` unified).
  */
 
@@ -96,7 +97,7 @@ export type PierreDiffViewProps = {
   patch: string;
   /** Side-by-side (`split`, default) or unified (`inline`) rendering. */
   layout?: PierreDiffLayout;
-  /** Theme mode mapped onto a `DiffsThemeNames` value. Defaults to `"light"`. */
+  /** Theme mode mapped onto a `DiffsThemeNames` value. Defaults to the active house theme. */
   mode?: PierreDiffMode;
   /** When set, only the matching file in a multi-file patch is shown. */
   selectedPath?: string | null;
@@ -109,40 +110,44 @@ export type PierreDiffViewProps = {
 export function PierreDiffView({
   patch,
   layout = "split",
-  mode = "light",
+  mode,
   selectedPath = null,
   className,
   emptyLabel,
 }: PierreDiffViewProps) {
   useInjectUiCss();
+  const houseTheme = useResolvedTheme();
+  const resolvedMode = mode ?? houseTheme;
   const items = useMemo(() => patchToCodeViewItems(patch, selectedPath), [patch, selectedPath]);
 
   if (items.length === 0) {
     return (
-      <div className={cn("sui-pierre-diff-empty", className)}>
+      <div className={cn("sui-pierre-diff-empty", className)} data-slot="pierre-diff-view" data-theme-mode={resolvedMode}>
         {emptyLabel ?? "No diff is available for this change."}
       </div>
     );
   }
 
   return (
-    <CodeView
-      className={cn("sui-pierre-diff", className)}
-      disableWorkerPool
-      items={items}
-      options={{
-        collapsedContextThreshold: 12,
-        diffIndicators: "bars",
-        diffStyle: diffStyleForLayout(layout),
-        hunkSeparators: "metadata",
-        overflow: "wrap",
-        stickyHeaders: true,
-        theme: diffsThemeForMode(mode),
-        themeType: mode,
-      }}
-      renderHeaderMetadata={(item) =>
-        item.type === "diff" ? <span className="sui-pierre-diff-stat">{diffStats(item.fileDiff)}</span> : null
-      }
-    />
+    <div data-slot="pierre-diff-view" data-theme-mode={resolvedMode}>
+      <CodeView
+        className={cn("sui-pierre-diff", className)}
+        disableWorkerPool
+        items={items}
+        options={{
+          collapsedContextThreshold: 12,
+          diffIndicators: "bars",
+          diffStyle: diffStyleForLayout(layout),
+          hunkSeparators: "metadata",
+          overflow: "wrap",
+          stickyHeaders: true,
+          theme: diffsThemeForMode(resolvedMode),
+          themeType: resolvedMode,
+        }}
+        renderHeaderMetadata={(item) =>
+          item.type === "diff" ? <span className="sui-pierre-diff-stat">{diffStats(item.fileDiff)}</span> : null
+        }
+      />
+    </div>
   );
 }

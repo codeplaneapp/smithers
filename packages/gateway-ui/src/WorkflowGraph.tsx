@@ -6,7 +6,7 @@
 // the DAG. Styling follows the shared `theme` tokens (so it tracks light/dark),
 // and the required react-flow base stylesheet ships inline via `workflowGraphCss`
 // because the gateway bundles UI with Bun.build and drops `.css` imports.
-import { memo, useMemo, type CSSProperties } from "react";
+import { memo, useMemo, useSyncExternalStore, type CSSProperties } from "react";
 import {
   Background,
   Controls,
@@ -18,7 +18,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import dagre from "dagre";
-import { statusColor, theme } from "./theme";
+import { resolveTheme, subscribeTheme, theme, type ResolvedTheme } from "./theme";
 import { workflowGraphCss } from "./workflowGraphCss";
 
 export type NodeKind =
@@ -72,13 +72,21 @@ const KIND_ACCENT: Record<NodeKind, string> = {
   human: "#a34d9f",
 };
 
+// Status → dot color, derived from the shared theme tokens so it follows the
+// active light/dark theme (running = brand, done = green, failed = red).
+const STATUS_DOT_COLOR: Record<FlowNodeStatus, string> = {
+  running: theme.accent,
+  done: theme.success,
+  failed: theme.danger,
+  pending: theme.textDim,
+};
+
 function cardStyle(kind: NodeKind, status: FlowNodeData["status"]): CSSProperties {
-  const color = statusColor(status);
   const borderColor =
     status === "done"
-      ? `color-mix(in srgb, ${color} 45%, ${theme.border})`
+      ? `color-mix(in srgb, ${theme.success} 45%, ${theme.border})`
       : status === "failed"
-        ? `color-mix(in srgb, ${color} 55%, ${theme.border})`
+        ? `color-mix(in srgb, ${theme.danger} 55%, ${theme.border})`
         : theme.border;
   const baseShadow = `0 8px 18px color-mix(in srgb, ${theme.text} 8%, transparent)`;
   return {
@@ -96,7 +104,7 @@ function cardStyle(kind: NodeKind, status: FlowNodeData["status"]): CSSPropertie
     fontFamily: theme.fontSans,
     boxShadow:
       status === "running"
-        ? `0 0 0 2px color-mix(in srgb, ${color} 55%, transparent), ${baseShadow}`
+        ? `0 0 0 2px color-mix(in srgb, ${theme.accent} 55%, transparent), ${baseShadow}`
         : baseShadow,
   };
 }
@@ -144,7 +152,7 @@ export function SmithersTaskNode({ data }: NodeProps<SmithersFlowNode>) {
             aria-hidden
             className="node-dot"
             data-status={data.status}
-            style={{ width: 7, height: 7, borderRadius: "50%", background: statusColor(data.status) }}
+            style={{ width: 7, height: 7, borderRadius: "50%", background: STATUS_DOT_COLOR[data.status] }}
           />
         ) : null}
         {data.kind}
@@ -226,9 +234,11 @@ export type WorkflowGraphProps = {
 
 function WorkflowGraphImpl({ spec, className, style }: WorkflowGraphProps) {
   const { nodes, edges } = useMemo(() => workflowToFlow(spec), [spec]);
+  const colorMode = useSyncExternalStore<ResolvedTheme>(subscribeTheme, resolveTheme, () => "light");
   return (
     <div
       className={className ?? "smithers-graph"}
+      data-theme-mode={colorMode}
       style={{ height: "100%", minHeight: 320, ...style }}
     >
       {/* react-flow's base stylesheet, shipped inline so it survives Bun.build. */}
@@ -237,7 +247,7 @@ function WorkflowGraphImpl({ spec, className, style }: WorkflowGraphProps) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        colorMode="system"
+        colorMode={colorMode}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.3}

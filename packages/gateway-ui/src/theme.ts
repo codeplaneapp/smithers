@@ -47,11 +47,14 @@ export const theme = {
 // @smithers-orchestrator/ui. Re-export them so long-standing gateway-ui imports
 // keep working without a second alias/color map.
 export {
+  resolveTheme,
+  subscribeTheme,
   normalizeStatus,
   statusClass,
   statusColor,
   statusColors,
   formatStatus,
   isTerminalRunStatus,
+  type ResolvedTheme,
   type StatusClass,
 } from "@smithers-orchestrator/ui";

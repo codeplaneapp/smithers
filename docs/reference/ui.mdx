@@ -155,7 +155,8 @@ can build a `DiffFile` from a raw patch and reason about it without a runtime:
 | Export | What it does |
 | --- | --- |
 | `SmithersUiStyles`, `composeSmithersUiStyles`, `smithersUiCss` | Render or compose the stylesheet; `withTheme` also emits the theme token block. |
-| `normalizeStatus`, `statusClass`, `statusColor`, `statusColors`, `formatStatus`, `isTerminalRunStatus` | The shared status vocabulary and token-color map `StatusPill` is built on. |
+| `normalizeStatus`, `statusClass`, `formatStatus`, `isTerminalRunStatus` | The shared status vocabulary `StatusPill` is built on. |
+| `resolveTheme`, `subscribeTheme` | Resolve the house theme (`data-theme` wins, then OS preference) and subscribe third-party widget seams to root or OS changes. |
 | `tokens` | The token bridge (`var(--token, #lightFallback)` strings) for inline styles that must match the components. |
 | `cn` | clsx class composition. |
 | `safeMarkdownHref` | Trim and allow scheme-less, `http`, `https`, or `mailto` links; reject all other schemes. |
@@ -171,7 +172,9 @@ never pulls their runtime. Import them from the matching
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
-| `MarkdownEditor` | The shared WYSIWYG Milkdown Crepe markdown editor: the user edits rendered markdown directly, never raw source. It is the single replacement for the former per-app editors. Under server render and test DOMs (no ProseMirror layout) it degrades to a controlled `<textarea>` honoring the same contract. | `value`, `onChange`, `readOnly`, `resetKey`, plus an imperative `getMarkdown` / `setMarkdown` handle |
+| `MarkdownEditor` | The shared WYSIWYG Milkdown Crepe markdown editor: the user edits rendered markdown directly, never raw source. Its generated theme maps Crepe colors and fonts onto house tokens and honors explicit `data-theme` before OS preference. Under server render and test DOMs it degrades to a controlled `<textarea>` honoring the same contract. | `value`, `onChange`, `readOnly`, `resetKey`, plus an imperative `getMarkdown` / `setMarkdown` handle |
+| `PierreDiffView` | Syntax-highlighted split or inline diffs over `@pierre/diffs`. | `patch`, `layout`, optional `mode` override (otherwise active house theme) |
+| `Terminal` | xterm.js terminal surface with snapshot and streaming seams. | `lines`, `stream`, optional `theme` override (otherwise active house theme) |
 
 The editor is generic and store-free: multiplayer sync, draft reconciliation,
 and persistence stay a caller concern, wired through `onChange` and the

@@ -10,13 +10,15 @@ How the pieces fit, infrastructure first:
 - `cn.ts` — clsx class composition (no tailwind-merge needed; all classes are
   namespaced `sui-*` so there is nothing to merge).
 - `tokens.ts` — the `var(--house-token, #lightFallback)` bridge onto the
-  styleguide theme. Never emits `:root`; shared semantic tints resolve through
-  the styleguide's `*-soft`/`*-border` tokens, with byte-equal light fallbacks.
-- `status.ts` — shared status vocabulary and token colors: `normalizeStatus`,
-  `statusClass`, `statusColor`, `statusColors`, `formatStatus`,
-  `isTerminalRunStatus`.
+  styleguide theme. Never emits `:root`; tints only via
+  `color-mix(in srgb, ...)`.
+- `internal/resolveTheme.ts` — the exported `resolveTheme()` contract and
+  subscription seam: explicit `data-theme` on `<html>` wins, otherwise the OS
+  color-scheme preference is used. Its React hook stays private to adapters.
+- `status.ts` — shared status vocabulary: `normalizeStatus`, `statusClass`,
+  `formatStatus`, `isTerminalRunStatus`.
 - `uiCss.ts` — the whole stylesheet as one JS string; per-component blocks
-  composed into `smithersUiCss`, followed by one shared reduced-motion guard.
+  composed into `smithersUiCss`.
 - `styles.tsx` — `SmithersUiStyles` render path plus the `useInjectUiCss`
   browser fallback, deduped via `SMITHERS_UI_STYLE_ATTR`.
 - One file per component (`button`, `badge`, `card`, `dialog`, `select`, ...)
@@ -43,15 +45,18 @@ How the pieces fit, infrastructure first:
   - `PierreDiffView` (`@smithers-orchestrator/ui/adapters/pierre-diff-view`) is
     the syntax-highlighted diff surface over `@pierre/diffs` `processPatch` +
     `CodeView`. It is props-driven with no app coupling: an explicit `mode`
-    (`"light" | "dark"`) maps onto a `DiffsThemeNames` value, and a `layout`
-    prop toggles `"split"` (side-by-side) vs `"inline"` (unified). The pure
+    (`"light" | "dark"`) maps onto a `DiffsThemeNames` value, and otherwise
+    follows the active house theme. A `layout` prop toggles `"split"`
+    (side-by-side) vs `"inline"` (unified). The pure
     seams `diffsThemeForMode`, `diffStyleForLayout`, and `patchToCodeViewItems`
     are exported alongside the component.
   - `Terminal` (`@smithers-orchestrator/ui/adapters/terminal`, also
     `smithers-orchestrator/ui/adapters/terminal` off the published facade) — a
     generic xterm.js render surface. The data source is lifted entirely onto
     props (`lines` snapshot, a `stream` write seam, `onData` out), so it has
-    zero app-store coupling and drops into any workflow UI. The xterm base
+    zero app-store coupling and drops into any workflow UI. Its default palette
+    follows the active house theme, while an explicit `theme` prop still wins.
+    The xterm base
     stylesheet is vendored as a string (`adapters/xtermCss.ts`) and injected
     through the same style seam the rest of the library uses, never a bare
     `import "@xterm/xterm/css/xterm.css"` that the gateway bundler drops.
@@ -65,6 +70,3 @@ Gotchas (all enforced by `../tests/css-contract.test.ts`):
 - Every component calls `useInjectUiCss()`, so a consumer who forgets
   `<SmithersUiStyles/>` still renders styled; standalone (non-gateway) hosts
   pass `withTheme` to `SmithersUiStyles` to also get the theme token block.
-- Imperative widgets that CSS cannot stop (such as xterm cursor blinking) use
-  `prefersReducedMotion()` / `observeReducedMotion()` from the shared style
-  seam instead of declaring another media-query policy.
