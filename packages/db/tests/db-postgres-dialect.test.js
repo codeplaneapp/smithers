@@ -161,6 +161,43 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(after.map((row) => row.id)).toEqual(ids);
     });
 
+    test("0030 skips missing/incompatible output tables, resolves quoted names, and does not rescan after completion", async () => {
+        await client.query(`
+            CREATE TABLE "out_camel" (
+                run_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                iteration INTEGER NOT NULL,
+                payload TEXT
+            )
+        `);
+        await client.query(`
+            INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+            VALUES ('migration-backfill', 'wf', 'finished', 1)
+        `);
+        await client.query(`
+            INSERT INTO _smithers_nodes (run_id, node_id, iteration, state, updated_at_ms, output_table, label)
+            VALUES
+              ('migration-backfill', 'missing', 0, 'finished', 1, 'does_not_exist', 'missing'),
+              ('migration-backfill', 'camel', 0, 'finished', 1, 'outCamel', 'camel')
+        `);
+        await client.query(`INSERT INTO "out_camel" (run_id, node_id, iteration, payload) VALUES ('migration-backfill', 'camel', 0, 'legacy')`);
+        await client.query(`UPDATE _smithers_schema_migrations SET details_json = NULL WHERE id = '0030_output_provenance'`);
+
+        await storage.ensureSchema();
+
+        expect(await storage.queryAll(`SELECT output_table, node_id FROM _smithers_output_provenance WHERE run_id = ?`, ['migration-backfill'])).toEqual([
+            { outputTable: 'out_camel', nodeId: 'camel' },
+        ]);
+        const marker = await storage.queryOne(`SELECT details_json FROM _smithers_schema_migrations WHERE id = ?`, ['0030_output_provenance']);
+        expect(JSON.parse(marker.detailsJson).marker).toBe('0030_output_provenance_backfill_complete');
+
+        await client.query(`INSERT INTO "out_camel" (run_id, node_id, iteration, payload) VALUES ('migration-backfill', 'new-after-backfill', 0, 'late')`);
+        await storage.ensureSchema();
+        expect(await storage.queryAll(`SELECT node_id FROM _smithers_output_provenance WHERE run_id = ? ORDER BY node_id`, ['migration-backfill'])).toEqual([
+            { nodeId: 'camel' },
+        ]);
+    });
+
     test("upsert inserts then updates on conflict (BIGINT ms timestamp round-trips as number)", async () => {
         await storage.upsert(
             "_smithers_runs",

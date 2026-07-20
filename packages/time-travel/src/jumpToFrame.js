@@ -405,16 +405,11 @@ async function restoreOutputSet(adapter, runId, snapshotOutputs) {
   // Signals use the same run-local provenance clock. Snapshot output rows
   // carry the clock value through JSON, so the durable signal inbox is
   // rewound to the same horizon rather than leaking post-target events.
-  const outputHorizon = Object.values(snapshotOutputs)
-    .filter((rows) => Array.isArray(rows))
-    .flatMap((rows) => rows)
-    .map((row) => Number(row.__smithersProvenanceSeq))
-    .filter(Number.isFinite)
-    .reduce((max, seq) => Math.max(max, seq), -1);
-  const horizon = Number.isFinite(Number(snapshotOutputs.__smithersSignalProvenanceHorizon))
-    ? Number(snapshotOutputs.__smithersSignalProvenanceHorizon)
-    : outputHorizon;
-  await storage.execute(`DELETE FROM _smithers_signals WHERE run_id = ? AND seq > ?`, [runId, horizon]);
+  const hasSignalHorizon = Object.prototype.hasOwnProperty.call(snapshotOutputs, "__smithersSignalProvenanceHorizon");
+  const signalHorizon = Number(snapshotOutputs.__smithersSignalProvenanceHorizon);
+  if (hasSignalHorizon && Number.isFinite(signalHorizon)) {
+    await storage.execute(`DELETE FROM _smithers_signals WHERE run_id = ? AND seq > ?`, [runId, signalHorizon]);
+  }
   return deleted;
 }
 

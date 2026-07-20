@@ -266,6 +266,31 @@ describe("jumpToFrame", () => {
     }
   });
 
+  test("preserves durable signals when restoring a legacy snapshot without a signal horizon", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-legacy-signals");
+      sqlite.query(`INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, vcs_pointer, workflow_hash, content_hash, created_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        "run-legacy-signals",
+        1,
+        JSON.stringify([{ runId: "run-legacy-signals", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }]),
+        JSON.stringify({ out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] }),
+        "[]", "{}", null, null, "legacy-signals", 200,
+      );
+      await adapter.insertSignalWithNextSeq({ runId: "run-legacy-signals", signalName: "before", correlationId: null, payloadJson: JSON.stringify({ value: 1 }), receivedAtMs: 1, receivedBy: "test" });
+      await adapter.insertSignalWithNextSeq({ runId: "run-legacy-signals", signalName: "after", correlationId: null, payloadJson: JSON.stringify({ value: 2 }), receivedAtMs: 2, receivedBy: "test" });
+      const before = await adapter.listSignals("run-legacy-signals");
+      expect(sqlite.query(`SELECT frame_no FROM _smithers_snapshots WHERE run_id = ?`).all("run-legacy-signals")).toEqual([{ frame_no: 1 }]);
+
+      await jumpToFrame({ adapter, runId: "run-legacy-signals", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
+
+      expect(await adapter.listSignals("run-legacy-signals")).toEqual(before);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("input boundaries: invalid runId, invalid frameNo, missing confirm", async () => {
     const { adapter, sqlite } = setupDb();
     try {

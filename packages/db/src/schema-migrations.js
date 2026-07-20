@@ -435,6 +435,24 @@ async function tableColumnNamesPostgres(pgConn, table) {
         .filter((name) => typeof name === "string"));
 }
 
+const OUTPUT_PROVENANCE_BACKFILL_MARKER = "0030_output_provenance_backfill_complete";
+
+/** @param {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] }> }} pgConn */
+async function hasPostgresOutputProvenanceBackfillMarker(pgConn) {
+    const result = await pgConn.query({
+        text: "SELECT details_json FROM _smithers_schema_migrations WHERE id = $1 LIMIT 1",
+        values: ["0030_output_provenance"],
+    });
+    const details = result.rows?.[0]?.details_json;
+    if (typeof details !== "string") return false;
+    try {
+        return JSON.parse(details)?.marker === OUTPUT_PROVENANCE_BACKFILL_MARKER;
+    }
+    catch {
+        return false;
+    }
+}
+
 async function indexExistsPostgres(pgConn, index) {
     const result = await pgConn.query({
         text: "SELECT 1 AS ok FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1 LIMIT 1",
@@ -664,7 +682,12 @@ async function recordMigrationPostgres(pgConn, migration, details) {
         text: `INSERT INTO _smithers_schema_migrations
           (id, name, applied_at_ms, checksum, destructive, details_json)
           VALUES ($1, $2, $3, $4, $5, $6)
-          ON CONFLICT (id) DO NOTHING`,
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            applied_at_ms = EXCLUDED.applied_at_ms,
+            checksum = EXCLUDED.checksum,
+            destructive = EXCLUDED.destructive,
+            details_json = COALESCE(EXCLUDED.details_json, _smithers_schema_migrations.details_json)`,
         values: [
             migration.id,
             migration.name,
@@ -1239,7 +1262,7 @@ function buildMigrations(context) {
             // 0001/current-schema bootstrap creates this table before the
             // migration runner. Presence therefore cannot mean backfill ran.
             isApplied: () => false,
-            isAppliedPostgres: async () => false,
+            isAppliedPostgres: (pgConn) => hasPostgresOutputProvenanceBackfillMarker(pgConn),
             up: (sqlite) => {
                 sqlite.run(createTableStatementFor("_smithers_output_provenance", context.createTableStatements));
                 if (!tableExists(sqlite, "_smithers_nodes")) return { table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
@@ -1264,20 +1287,37 @@ function buildMigrations(context) {
             },
             upPostgres: async (pgConn) => {
                 await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_output_provenance", context.createTableStatements)) });
-                if (!(await tableExistsPostgres(pgConn, "_smithers_nodes"))) return { table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
+                if (!(await tableExistsPostgres(pgConn, "_smithers_nodes"))) return { marker: OUTPUT_PROVENANCE_BACKFILL_MARKER, table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
                 const nodes = await pgConn.query({ text: `SELECT DISTINCT run_id, output_table FROM _smithers_nodes ORDER BY run_id, output_table` });
+                const catalog = await pgConn.query({
+                    text: "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name",
+                });
+                const physicalTables = new Set((catalog.rows ?? []).map((row) => row.name).filter((name) => typeof name === "string"));
+                const columnsByTable = new Map();
+                for (const tableName of physicalTables) {
+                    const columns = await pgConn.query({
+                        text: "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1",
+                        values: [tableName],
+                    });
+                    columnsByTable.set(tableName, new Set((columns.rows ?? []).map((row) => row.name).filter((name) => typeof name === "string")));
+                }
+                const signalsExist = physicalTables.has("_smithers_signals");
                 let inserted = 0;
                 for (const node of nodes.rows ?? []) {
                     if (typeof node.output_table !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(node.output_table)) continue;
-                    let rows;
-                    rows = (await pgConn.query({ text: `SELECT node_id, COALESCE(iteration, 0) AS iteration FROM "${node.output_table.replaceAll('"', '""')}" WHERE run_id = $1 ORDER BY node_id, iteration`, values: [node.run_id] })).rows;
+                    const tableName = physicalTables.has(node.output_table)
+                        ? node.output_table
+                        : [...physicalTables].find((name) => name === node.output_table.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+                    if (!tableName || tableName.startsWith("_smithers_") || !["run_id", "node_id", "iteration"].every((column) => columnsByTable.get(tableName)?.has(column))) continue;
+                    const quotedTable = quoteIdentifier(tableName);
+                    const rows = (await pgConn.query({ text: `SELECT node_id, COALESCE(iteration, 0) AS iteration FROM ${quotedTable} WHERE run_id = $1 ORDER BY node_id, iteration`, values: [node.run_id] })).rows;
                     for (const row of rows) {
-                        const next = await pgConn.query({ text: `SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = $1 UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = $1)`, values: [node.run_id] });
-                        await pgConn.query({ text: `INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`, values: [node.run_id, node.output_table, row.node_id, Number(row.iteration ?? 0), Number(next.rows[0].seq)] });
+                        const next = await pgConn.query({ text: `SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM (SELECT seq FROM _smithers_output_provenance WHERE run_id = $1${signalsExist ? " UNION ALL SELECT seq FROM _smithers_signals WHERE run_id = $1" : ""})`, values: [node.run_id] });
+                        await pgConn.query({ text: `INSERT INTO _smithers_output_provenance (run_id, output_table, node_id, iteration, seq) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`, values: [node.run_id, tableName, row.node_id, Number(row.iteration ?? 0), Number(next.rows[0].seq)] });
                         inserted += 1;
                     }
                 }
-                return { table: "_smithers_output_provenance", backfilled: inserted };
+                return { marker: OUTPUT_PROVENANCE_BACKFILL_MARKER, table: "_smithers_output_provenance", backfilled: inserted };
             },
         },
     ];
