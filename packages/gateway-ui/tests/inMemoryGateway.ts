@@ -18,6 +18,8 @@ export type SeedState = {
   events?: Record<string, Array<Record<string, unknown>>>;
   trees?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
+  /** Optional response delay by `runId:nodeId`, used to exercise loading transitions. */
+  outputDelayMs?: Record<string, number>;
   /** Endpoints (by pathname) that should answer with an HTTP error envelope. */
   failPaths?: Set<string>;
   /** When set, the SSE stream endpoint answers with this HTTP status. */
@@ -56,6 +58,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     events: seed.events ?? {},
     trees: seed.trees ?? {},
     outputs: seed.outputs ?? {},
+    outputDelayMs: seed.outputDelayMs ?? {},
     failPaths: seed.failPaths ?? new Set<string>(),
     streamStatus: seed.streamStatus ?? 200,
     failApprovalSubmit: seed.failApprovalSubmit ?? false,
@@ -148,7 +151,10 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
       if (outMatch && request.method === "GET") {
         const runId = decodeURIComponent(outMatch[1]!);
         const nodeId = decodeURIComponent(outMatch[2]!);
-        return ok(state.outputs[`${runId}:${nodeId}`] ?? null);
+        const outputKey = `${runId}:${nodeId}`;
+        const delayMs = state.outputDelayMs[outputKey] ?? 0;
+        if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+        return ok(state.outputs[outputKey] ?? null);
       }
       // GET /v1/api/approvals
       if (path === "/v1/api/approvals" && request.method === "GET") {

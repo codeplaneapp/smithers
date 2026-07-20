@@ -363,6 +363,63 @@ describe("NodeOutputView", () => {
     expect(harness.container.querySelector('[data-slot="node-output-fallback"]')).toBeNull();
   });
 
+  test("renders a nested streaming agent result through the parsed model", async () => {
+    const harness = await renderOutput({
+      status: "produced",
+      row: {
+        status: "running",
+        output: {
+          message: {
+            content: [
+              { type: "reasoning", text: "Inspect first" },
+              { type: "tool-call", toolName: "read", input: { path: "README.md" } },
+              { type: "text", text: "Final **answer**" },
+            ],
+          },
+        },
+      },
+    });
+    const output = harness.container.querySelector('[data-slot="agent-output"]');
+    expect(output?.getAttribute("data-streaming")).toBe("true");
+    expect(output?.querySelector('[data-slot="reasoning"]')).not.toBeNull();
+    expect(output?.querySelector('[data-slot="tool-call"]')?.getAttribute("data-state")).toBe(
+      "closed",
+    );
+    expect(output?.querySelector('[data-slot="message-response"]')).not.toBeNull();
+  });
+
+  test("clears the selected node's agent output while its replacement loads", async () => {
+    const gw = boot({
+      outputs: {
+        "run-a:n1": { status: "produced", row: { text: "first node answer" } },
+        "run-a:n2": { status: "produced", row: { text: "second node answer" } },
+      },
+      outputDelayMs: { "run-a:n2": 150 },
+    });
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputView, { runId: "run-a", nodeId: "n1", iteration: 0 }),
+    );
+    await waitFor(
+      harness,
+      () => harness.container.textContent?.includes("first node answer") ?? false,
+      "first node output to load",
+    );
+
+    await harness.render(
+      createElement(NodeOutputView, { runId: "run-a", nodeId: "n2", iteration: 0 }),
+    );
+    expect(harness.container.textContent).toContain("Loading…");
+    expect(harness.container.textContent).not.toContain("first node answer");
+    expect(harness.container.querySelector('[data-slot="agent-output"]')).toBeNull();
+
+    await waitFor(
+      harness,
+      () => harness.container.textContent?.includes("second node answer") ?? false,
+      "replacement node output to load",
+    );
+  });
+
   test("produced envelope with an object row falls back to pretty JSON", async () => {
     const harness = await renderOutput({ status: "produced", row: { foo: 42 } });
     expect(harness.container.textContent).toContain("foo");
@@ -532,6 +589,39 @@ describe("NodeOutputCard", () => {
       "live node output to load",
     );
     expect(harness.container.querySelector('[data-status="produced"]')).not.toBeNull();
+  });
+
+  test("clears the selected card's agent output while its replacement loads", async () => {
+    const gw = boot({
+      outputs: {
+        "run-a:n1": { status: "produced", row: { text: "first card answer" } },
+        "run-a:n2": { status: "produced", row: { text: "second card answer" } },
+      },
+      outputDelayMs: { "run-a:n2": 150 },
+    });
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputCard, { runId: "run-a", nodeId: "n1", iteration: 0 }),
+    );
+    await waitFor(
+      harness,
+      () => harness.container.textContent?.includes("first card answer") ?? false,
+      "first card output to load",
+    );
+
+    await harness.render(
+      createElement(NodeOutputCard, { runId: "run-a", nodeId: "n2", iteration: 0 }),
+    );
+    expect(harness.container.querySelector('[data-status="pending"]')).not.toBeNull();
+    expect(harness.container.textContent).toContain("Loading…");
+    expect(harness.container.textContent).not.toContain("first card answer");
+    expect(harness.container.querySelector('[data-slot="agent-output"]')).toBeNull();
+
+    await waitFor(
+      harness,
+      () => harness.container.textContent?.includes("second card answer") ?? false,
+      "replacement card output to load",
+    );
   });
 });
 
@@ -728,7 +818,12 @@ describe("RunEventLog", () => {
     const gw = boot({
       events: {
         "run-a": [
-          { runId: "run-a", seq: 1, event: "task.heartbeat", payload: { nodeId: "agent" } },
+          {
+            runId: "run-a",
+            seq: 1,
+            event: "TaskHeartbeat",
+            payload: { type: "progress", nodeId: "agent" },
+          },
           { runId: "run-a", seq: 2, event: "node.status", payload: { state: "running" } },
           { runId: "run-a", seq: 3, event: "node.output", payload: { text: "plain" } },
         ],
@@ -739,6 +834,7 @@ describe("RunEventLog", () => {
     const markers = harness.container.querySelectorAll('[data-slot="marker"]');
     expect(markers.length).toBe(2);
     expect(markers[0]?.getAttribute("data-variant")).toBe("status");
+    expect(markers[0]?.getAttribute("data-event")).toBe("TaskHeartbeat");
     expect(markers[0]?.querySelector('[data-slot="shimmer"]')?.getAttribute("data-active")).toBe(
       "true",
     );

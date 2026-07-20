@@ -60,12 +60,20 @@ const RESPONSE_PART_TYPES = new Set(["text", "output_text", "message", "assistan
 const REASONING_PART_TYPES = new Set(["reasoning", "thinking", "thought"]);
 const TOOL_PART_TYPES = new Set(["tool-call", "tool_call", "tool-use", "tool_use"]);
 
+function contentParts(record: UnknownRecord): unknown {
+  const message = isRecord(record.message) ? record.message : undefined;
+  return message?.content ?? message?.parts ?? record.content ?? record.parts;
+}
+
 function responseText(record: UnknownRecord): string | undefined {
   const direct = readString(record, ["markdown", "text", "response", "message", "output"]);
   if (direct) return direct;
   const message = isRecord(record.message) ? record.message : undefined;
-  const messageContent = message ? joinParts(message.content, RESPONSE_PART_TYPES) : undefined;
-  return messageContent ?? joinParts(record.content, RESPONSE_PART_TYPES);
+  const messageText = message
+    ? readString(message, ["markdown", "text", "response", "output"])
+    : undefined;
+  if (messageText) return messageText;
+  return joinParts(contentParts(record), RESPONSE_PART_TYPES);
 }
 
 function reasoningText(record: UnknownRecord): string | undefined {
@@ -81,7 +89,7 @@ function reasoningText(record: UnknownRecord): string | undefined {
   return joinParts(record.reasoning, REASONING_PART_TYPES) ??
     joinParts(record.thinking, REASONING_PART_TYPES) ??
     joinParts(record.thought, REASONING_PART_TYPES) ??
-    joinParts(record.content, REASONING_PART_TYPES);
+    joinParts(contentParts(record), REASONING_PART_TYPES);
 }
 
 function normalizeToolState(value: unknown, call: UnknownRecord, streaming: boolean): ToolCallState {
@@ -167,10 +175,11 @@ function toolCalls(record: UnknownRecord, streaming: boolean): AgentOutputToolCa
 
   let calls = readArray(record, ["toolCalls", "tool_calls"]);
   if (!calls.length) {
+    const parts = contentParts(record);
     calls = [
       ...readArray(record, ["staticToolCalls"]),
       ...readArray(record, ["dynamicToolCalls"]),
-      ...readArray(record, ["content"]).filter((part) => {
+      ...(Array.isArray(parts) ? parts : []).filter((part) => {
         if (!isRecord(part)) return false;
         const type = readString(part, ["type", "kind"]);
         return type ? TOOL_PART_TYPES.has(type.toLowerCase()) : false;
@@ -182,24 +191,65 @@ function toolCalls(record: UnknownRecord, streaming: boolean): AgentOutputToolCa
     .filter((call): call is AgentOutputToolCall => call !== undefined);
 }
 
+function mergeToolCalls(
+  direct: readonly AgentOutputToolCall[],
+  nested: readonly AgentOutputToolCall[],
+): AgentOutputToolCall[] {
+  const calls = [...direct];
+  const ids = new Set(calls.map((call) => call.id).filter((id): id is string => id !== undefined));
+  for (const call of nested) {
+    if (call.id && ids.has(call.id)) continue;
+    calls.push(call);
+    if (call.id) ids.add(call.id);
+  }
+  return calls;
+}
+
 /** Parse common AI SDK and CLI-agent output shapes without claiming arbitrary rows. */
 export function parseAgentOutput(value: unknown): AgentOutputModel | null {
+  return parseValue(value, false, new WeakSet<object>());
+}
+
+function parseValue(
+  value: unknown,
+  inheritedStreaming: boolean,
+  seen: WeakSet<object>,
+): AgentOutputModel | null {
   if (typeof value === "string") {
-    return value.trim() ? { response: value, toolCalls: [], streaming: false } : null;
+    return value.trim() ? { response: value, toolCalls: [], streaming: inheritedStreaming } : null;
   }
   if (!isRecord(value)) return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
 
   const status = readString(value, ["status", "state"]);
   const streaming = readBoolean(value, ["streaming", "isStreaming", "is_streaming"])
-    ?? (status ? ["streaming", "running", "in-progress", "in_progress"].includes(status.toLowerCase()) : false);
+    ?? (status
+      ? ["streaming", "running", "in-progress", "in_progress"].includes(status.toLowerCase())
+      : inheritedStreaming);
   const response = responseText(value);
   const reasoning = reasoningText(value);
   const calls = toolCalls(value, streaming);
-  if (!response && !reasoning && calls.length === 0) return null;
+
+  // Agent nodes often persist the provider result under an outer output/data
+  // field. Only descend into objects so arbitrary scalar rows remain on the
+  // gateway-ui JSON fallback.
+  let nestedModel: AgentOutputModel | null = null;
+  for (const key of ["output", "result", "data", "response", "message"] as const) {
+    const nested = value[key];
+    if (!isRecord(nested)) continue;
+    nestedModel = parseValue(nested, streaming, seen);
+    if (nestedModel) break;
+  }
+
+  const combinedResponse = response ?? nestedModel?.response;
+  const combinedReasoning = reasoning ?? nestedModel?.reasoning;
+  const combinedCalls = mergeToolCalls(calls, nestedModel?.toolCalls ?? []);
+  if (!combinedResponse && !combinedReasoning && combinedCalls.length === 0) return null;
   return {
-    ...(response ? { response } : {}),
-    ...(reasoning ? { reasoning } : {}),
-    toolCalls: calls,
-    streaming,
+    ...(combinedResponse ? { response: combinedResponse } : {}),
+    ...(combinedReasoning ? { reasoning: combinedReasoning } : {}),
+    toolCalls: combinedCalls,
+    streaming: streaming || (nestedModel?.streaming ?? false),
   };
 }

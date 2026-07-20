@@ -69,6 +69,25 @@ export function formatOutput(data: unknown): string {
  * `onSelectNode` to inspect a node.
  */
 export function NodeOutputView({ runId, nodeId, iteration, className, style }: NodeOutputViewProps) {
+  return (
+    <NodeOutputViewInner
+      key={JSON.stringify([runId, nodeId, iteration ?? 0])}
+      runId={runId}
+      nodeId={nodeId}
+      iteration={iteration}
+      className={className}
+      style={style}
+    />
+  );
+}
+
+function NodeOutputViewInner({
+  runId,
+  nodeId,
+  iteration,
+  className,
+  style,
+}: NodeOutputViewProps) {
   const { data, loading, error } = useGatewayNodeOutput({ runId, nodeId, iteration });
   const { status, row } = unwrapNodeOutput(data);
   const waiting = loading && data == null;

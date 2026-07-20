@@ -39,15 +39,17 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 function markerState(event: string, payload: unknown, streaming: boolean) {
   const record = recordOf(payload);
   const payloadType = typeof record?.type === "string" ? record.type : "";
-  const eventType = payloadType || event;
-  const normalized = eventType.toLowerCase().replaceAll(/[^a-z]/g, "");
+  const eventTypes = [event, payloadType]
+    .filter(Boolean)
+    .map((value) => value.toLowerCase().replaceAll(/[^a-z]/g, ""));
   const status = typeof record?.status === "string"
     ? record.status
     : typeof record?.state === "string"
       ? record.state
       : "";
-  const heartbeat = normalized === "taskheartbeat";
-  const statusRow = normalized.includes("status") || normalized.includes("state") || status !== "";
+  const heartbeat = eventTypes.includes("taskheartbeat");
+  const statusRow = eventTypes.some((value) => value.includes("status") || value.includes("state")) ||
+    status !== "";
   if (!heartbeat && !statusRow) return null;
   const active = ["active", "in-progress", "in_progress", "pending", "queued", "running", "waiting"]
     .includes(status.toLowerCase());
@@ -113,6 +115,8 @@ export function RunEventLog({
             live
             shimmer={marker.shimmer}
             data-seq={frame.seq}
+            data-event={frame.event}
+            data-streaming={marker.shimmer ? "true" : "false"}
           >
             {[seq, frame.event, detail].filter(Boolean).join("  ")}
           </Marker>

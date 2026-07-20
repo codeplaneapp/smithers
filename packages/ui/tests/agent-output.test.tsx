@@ -65,6 +65,46 @@ describe("parseAgentOutput", () => {
       thinking: [{ type: "thinking", text: "Inspect the result" }],
     })?.reasoning).toBe("Inspect the result");
   });
+
+  test("unwraps nested agent results and reads message content parts", () => {
+    expect(parseAgentOutput({
+      status: "running",
+      output: {
+        message: {
+          content: [
+            { type: "reasoning", text: "Inspect the nested result" },
+            {
+              type: "tool-call",
+              toolCallId: "call-nested",
+              toolName: "read_file",
+              input: { path: "README.md" },
+            },
+            { type: "text", text: "Found **the answer**." },
+          ],
+        },
+      },
+    })).toEqual({
+      response: "Found **the answer**.",
+      reasoning: "Inspect the nested result",
+      streaming: true,
+      toolCalls: [
+        {
+          id: "call-nested",
+          name: "read_file",
+          state: "running",
+          args: { path: "README.md" },
+        },
+      ],
+    });
+
+    expect(parseAgentOutput({
+      reasoning: "Outer reasoning",
+      output: { text: "Nested response" },
+    })).toMatchObject({
+      response: "Nested response",
+      reasoning: "Outer reasoning",
+    });
+  });
 });
 
 describe("AgentOutput", () => {

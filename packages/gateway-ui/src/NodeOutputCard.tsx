@@ -79,12 +79,13 @@ const STATUS_GLYPH: Record<NodeOutputStatus, { glyph: string; color: string; lab
  * </NodeOutputCard>
  */
 export function NodeOutputCard({ remountKey, nodeId, ...rest }: NodeOutputCardProps) {
-  // Remount on key change (matching the `key={remountKey + ":" + nodeId}`
-  // convention) so a fresh fetch runs and any body-local state resets. A
-  // component can't set its own key, so delegate to an inner component.
+  // Always remount when the requested output identity changes. The node-output
+  // hook retains its last row while a replacement request starts, so reusing
+  // the inner component could briefly paint output from the previous node.
+  // `remountKey` remains an additional caller-controlled reset dimension.
   return (
     <NodeOutputCardInner
-      key={remountKey === undefined ? undefined : `${remountKey}:${nodeId}`}
+      key={JSON.stringify([rest.runId, nodeId, rest.iteration ?? 0, remountKey])}
       nodeId={nodeId}
       {...rest}
     />
