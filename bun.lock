@@ -104,6 +104,7 @@
         "react": "^19.2.7",
         "smithers-orchestrator": "workspace:*",
         "twitter-api-v2": "^1.29.0",
+        "xstate": "^5.19.0",
         "yaml": "^2.8.2",
         "zod": "4.4.3",
       },
