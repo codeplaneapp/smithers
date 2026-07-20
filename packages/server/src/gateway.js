@@ -57,6 +57,8 @@ import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
 import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
 import { SmithersCtx } from "@smithers-orchestrator/driver";
 import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
+import { createBrowserSessionRegistry } from "./browser.js";
+import { validateBrowserRequest } from "./gatewayRoutes/browser.js";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -1358,6 +1360,12 @@ export function statusForRpcError(code) {
         case "RUN_ACTIVE":
         case "CONFLICT":
             return 409;
+        case "REVISION_CONFLICT":
+            return 409;
+        case "SSRF_BLOCKED":
+            return 400;
+        case "QUOTA_EXCEEDED":
+            return 429;
         case "DiffTooLarge":
         case "PayloadTooLarge":
         case "PAYLOAD_TOO_LARGE":
@@ -1382,6 +1390,10 @@ function eventRunId(payload) {
     const record = asObject(payload);
     const runId = record ? asString(record.runId) : undefined;
     return runId ?? null;
+}
+function eventBrowserSessionId(event, payload) {
+    if (event !== "browser.frame") return null;
+    return asString(asObject(payload)?.sessionId) ?? null;
 }
 /**
  * @param {string} method
@@ -2284,7 +2296,8 @@ export class Gateway {
      * `null` ⇒ fall back to `process.cwd()`. Set from `options.workspaceRoot`.
      * @type {string | null}
      */
-    workspaceRoot = null;
+  workspaceRoot = null;
+  browser;
     workflows = new Map();
     /**
      * Host-owned workspace workflow rescan. It is intentionally invoked only
@@ -2473,6 +2486,9 @@ export class Gateway {
             ? options.workflowRegistryRefresh
             : null;
         this.identity = options.identity ?? null;
+        this.browser = options.browser ?? createBrowserSessionRegistry();
+        this.browser.subscribe("activity", (payload) => this.broadcastEvent("browser.activity", payload));
+        this.browser.subscribe("frame", (payload) => this.broadcastEvent("browser.frame", payload));
     }
     /**
    * Identity block advertised on `GET /health`, the `health` RPC, and the WS
@@ -3040,6 +3056,7 @@ a { color: var(--brand); }</style>
    */
     appendRunEventWindow(event, payload, stateVersion) {
         const runId = eventRunId(payload);
+        const browserSessionId = eventBrowserSessionId(event, payload);
         if (!runId) {
             return null;
         }
@@ -4973,6 +4990,7 @@ a { color: var(--brand); }</style>
             this.wsServer.close();
             this.wsServer = null;
         }
+        await this.browser.shutdown?.();
     }
     startScheduler() {
         if (this.schedulerTimer) {
@@ -5932,6 +5950,9 @@ a { color: var(--brand); }</style>
         connection.subscribedRuns = Array.isArray(request.subscribe)
             ? new Set(request.subscribe.filter((value) => typeof value === "string"))
             : null;
+        connection.subscribedBrowserSessions = new Set(Array.isArray(request.subscribe)
+            ? request.subscribe.filter((value) => typeof value === "string" && value.startsWith("browser:")).map((value) => value.slice(8))
+            : []);
         this.startHeartbeat(connection);
         this.recordAuthEvent("ws", "success", connection, {
             clientId: request.client.id,
@@ -6584,12 +6605,16 @@ a { color: var(--brand); }</style>
    */
     broadcastEvent(event, payload) {
         const runId = eventRunId(payload);
+        const browserSessionId = eventBrowserSessionId(event, payload);
         this.stateVersion += 1;
         const runFrame = this.appendRunEventWindow(event, payload, this.stateVersion);
         void this.queueApiInvalidation(apiCollectionsForGatewayEvent(event));
         let recipientCount = 0;
         for (const connection of this.connections) {
             if (!connection.authenticated || !shouldDeliverEvent(connection, runId)) {
+                continue;
+            }
+            if (browserSessionId && !connection.subscribedBrowserSessions?.has(browserSessionId)) {
                 continue;
             }
             recipientCount += 1;
@@ -7606,6 +7631,18 @@ a { color: var(--brand); }</style>
                     uptimeMs: nowMs() - this.startedAtMs,
                     identity: this.buildIdentity(),
                 });
+            case "createBrowserSession":
+                return this.browserCall(frame, () => this.browser.create(validateBrowserRequest(frame.method, params)));
+            case "browserAct":
+                return this.browserCall(frame, () => this.browser.act({ ...validateBrowserRequest(frame.method, params), actor: connection.role === "user" ? "user" : "agent" }));
+            case "browserContext":
+                return this.browserCall(frame, () => this.browser.context(validateBrowserRequest(frame.method, params)));
+            case "browserPick":
+                return this.browserCall(frame, () => this.browser.pick(validateBrowserRequest(frame.method, params)));
+            case "closeBrowserSession":
+                return this.browserCall(frame, () => this.browser.close(validateBrowserRequest(frame.method, params).sessionId));
+            case "listBrowserSessions":
+                return this.browserCall(frame, () => this.browser.list());
             case "runs.list":
             case "listRuns": {
                 const filter = asObject(params.filter) ?? {};
@@ -8824,6 +8861,15 @@ a { color: var(--brand); }</style>
             }
             default:
                 return responseError(frame.id, "METHOD_NOT_FOUND", `Unknown method: ${frame.method}`);
+        }
+    }
+    async browserCall(frame, operation) {
+        try {
+            return responseOk(frame.id, await operation());
+        }
+        catch (error) {
+            const code = error?.code ?? "Internal";
+            return responseError(frame.id, code, error?.message ?? "Browser operation failed", error?.details);
         }
     }
     /**

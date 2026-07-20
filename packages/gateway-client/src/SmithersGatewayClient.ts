@@ -499,6 +499,13 @@ export class SmithersGatewayClient {
     return this.rpc("submitSignal", params);
   }
 
+  createBrowserSession(params: GatewayRpcParams<"createBrowserSession">) { return this.rpc("createBrowserSession", params); }
+  browserAct(params: GatewayRpcParams<"browserAct">) { return this.rpc("browserAct", params); }
+  browserContext(params: GatewayRpcParams<"browserContext">) { return this.rpc("browserContext", params); }
+  browserPick(params: GatewayRpcParams<"browserPick">) { return this.rpc("browserPick", params); }
+  closeBrowserSession(params: GatewayRpcParams<"closeBrowserSession">) { return this.rpc("closeBrowserSession", params); }
+  listBrowserSessions(params: GatewayRpcParams<"listBrowserSessions"> = {}) { return this.rpc("listBrowserSessions", params); }
+
   getRun(params: GatewayRpcParams<"getRun">) {
     return this.rpc("getRun", params);
   }

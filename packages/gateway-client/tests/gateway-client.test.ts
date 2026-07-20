@@ -169,6 +169,12 @@ const typedRpcRequestMethods = {
   createTicket: "createTicket",
   updateTicket: "updateTicket",
   deleteTicket: "deleteTicket",
+  createBrowserSession: "createBrowserSession",
+  browserAct: "browserAct",
+  browserContext: "browserContext",
+  browserPick: "browserPick",
+  closeBrowserSession: "closeBrowserSession",
+  listBrowserSessions: "listBrowserSessions",
 } satisfies Record<GatewayRpcMethod, keyof GatewayRpcRequestMap>;
 
 const typedRpcResponseMethods = typedRpcRequestMethods satisfies Record<GatewayRpcMethod, keyof GatewayRpcResponseMap>;

@@ -6,8 +6,140 @@
  * do not depend on the gateway implementation.
  */
 type SmithersApiVersion$1 = "v1";
-type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "ScoreNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal";
-type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "getRunDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listScoresForRuns" | "getScoreDetail" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
+type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "ScoreNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal" | "REVISION_CONFLICT" | "SSRF_BLOCKED" | "QUOTA_EXCEEDED";
+type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "getRunDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listScoresForRuns" | "getScoreDetail" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket" | "createBrowserSession" | "browserAct" | "browserContext" | "browserPick" | "closeBrowserSession" | "listBrowserSessions";
+type BrowserSource$1 = {
+    kind: "url";
+    url: string;
+} | {
+    kind: "dev-server";
+    port: number;
+    path?: string;
+};
+type BrowserSnapshot$1 = {
+    sessionId: string;
+    source: BrowserSource$1;
+    status: "starting" | "ready" | "loading" | "suspended" | "closed" | "failed";
+    revision: number;
+    page: {
+        url: string;
+        title: string;
+        canGoBack: boolean;
+        canGoForward: boolean;
+    } | null;
+    viewport: {
+        width: number;
+        height: number;
+    };
+    control: {
+        owner: "user" | "agent" | null;
+    };
+};
+type BrowserLocator$1 = {
+    testId: string;
+} | {
+    role: string;
+    name?: string;
+} | {
+    css: string;
+};
+type BrowserAction$1 = {
+    kind: "navigate";
+    url: string;
+} | {
+    kind: "back" | "forward" | "reload" | "stop";
+} | {
+    kind: "click";
+    locator?: BrowserLocator$1;
+    point?: {
+        x: number;
+        y: number;
+    };
+    button?: "left" | "right" | "middle";
+    modifiers?: string[];
+} | {
+    kind: "type";
+    locator: BrowserLocator$1;
+    text: string;
+    replace?: boolean;
+} | {
+    kind: "press";
+    key: string;
+    modifiers?: string[];
+} | {
+    kind: "scroll";
+    deltaX: number;
+    deltaY: number;
+} | {
+    kind: "dialog";
+    decision: "accept" | "dismiss";
+    promptText?: string;
+};
+type CreateBrowserSessionRequest$1 = {
+    source: BrowserSource$1;
+    viewport?: {
+        width: number;
+        height: number;
+    };
+};
+type BrowserActRequest$1 = {
+    sessionId: string;
+    actionId: string;
+    expectedRevision?: number;
+    action: BrowserAction$1;
+};
+type BrowserContextRequest$1 = {
+    sessionId: string;
+    sinceRevision?: number;
+    include?: string[];
+};
+type BrowserPickRequest$1 = {
+    sessionId: string;
+    point: {
+        x: number;
+        y: number;
+    };
+};
+type CloseBrowserSessionRequest$1 = {
+    sessionId: string;
+};
+type CreateBrowserSessionResponse$1 = BrowserSnapshot$1;
+type BrowserActResponse$1 = {
+    revision: number;
+    page: BrowserSnapshot$1["page"];
+    outcome: unknown;
+};
+type BrowserContextResponse$1 = {
+    fresh: boolean;
+    reason?: string;
+    snapshot: BrowserSnapshot$1;
+    revision: number;
+    include: string[];
+    journal?: unknown[];
+};
+type BrowserPickResponse$1 = {
+    locator: BrowserLocator$1;
+    role: string;
+    name: string;
+    text: string;
+    fingerprint: string;
+    rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+    viewport: BrowserSnapshot$1["viewport"];
+    screenshot: {
+        ref: string;
+        mediaType: string;
+    } | null;
+};
+type CloseBrowserSessionResponse$1 = {
+    closed: boolean;
+    sessionId?: string;
+};
+type ListBrowserSessionsResponse$1 = BrowserSnapshot$1[];
 type LaunchRunRequest$1 = {
     workflow: string;
     input?: Record<string, unknown>;
@@ -476,7 +608,22 @@ type ListTicketsResponse = ListTicketsResponse$1;
 type CreateTicketRequest = CreateTicketRequest$1;
 type UpdateTicketRequest = UpdateTicketRequest$1;
 type DeleteTicketRequest = DeleteTicketRequest$1;
+type CreateBrowserSessionRequest = CreateBrowserSessionRequest$1;
+type BrowserSource = BrowserSource$1;
+type BrowserLocator = BrowserLocator$1;
+type BrowserSnapshot = BrowserSnapshot$1;
+type BrowserAction = BrowserAction$1;
+type BrowserActRequest = BrowserActRequest$1;
+type BrowserContextRequest = BrowserContextRequest$1;
+type BrowserPickRequest = BrowserPickRequest$1;
+type CloseBrowserSessionRequest = CloseBrowserSessionRequest$1;
+type CreateBrowserSessionResponse = CreateBrowserSessionResponse$1;
+type BrowserActResponse = BrowserActResponse$1;
+type BrowserContextResponse = BrowserContextResponse$1;
+type BrowserPickResponse = BrowserPickResponse$1;
+type CloseBrowserSessionResponse = CloseBrowserSessionResponse$1;
+type ListBrowserSessionsResponse = ListBrowserSessionsResponse$1;
 type GatewayEventFrame<Payload = unknown> = GatewayEventFrame$1<Payload>;
 type GatewayResponseFrame<Payload = unknown> = GatewayResponseFrame$1<Payload>;
 
-export type { CancelRunRequest, CancelRunResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, DeleteTicketRequest, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };
+export type { BrowserActRequest, BrowserActResponse, BrowserAction, BrowserContextRequest, BrowserContextResponse, BrowserLocator, BrowserPickRequest, BrowserPickResponse, BrowserSnapshot, BrowserSource, CancelRunRequest, CancelRunResponse, CloseBrowserSessionRequest, CloseBrowserSessionResponse, CreateBrowserSessionRequest, CreateBrowserSessionResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, DeleteTicketRequest, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListBrowserSessionsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };

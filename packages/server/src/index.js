@@ -39,6 +39,7 @@ export * from "./gatewayRoutes/getRunDiff.js";
 export * from "./gatewayRoutes/getNodeOutput.js";
 export * from "./gatewayRoutes/jumpToFrame.js";
 export * from "./gatewayRoutes/streamDevTools.js";
+export * from "./browser.js";
 // Type-only stubs reachable via `./*` that are NOT already transitively
 // re-exported through the JS modules above.
 export * from "./ServerOptions.js";

@@ -71,6 +71,21 @@
 /** @typedef {import("./gatewayRpcTypes.ts").CreateTicketRequest} CreateTicketRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").UpdateTicketRequest} UpdateTicketRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").DeleteTicketRequest} DeleteTicketRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").CreateBrowserSessionRequest} CreateBrowserSessionRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserSource} BrowserSource */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserLocator} BrowserLocator */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserSnapshot} BrowserSnapshot */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserAction} BrowserAction */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserActRequest} BrowserActRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserContextRequest} BrowserContextRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserPickRequest} BrowserPickRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").CloseBrowserSessionRequest} CloseBrowserSessionRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").CreateBrowserSessionResponse} CreateBrowserSessionResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserActResponse} BrowserActResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserContextResponse} BrowserContextResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserPickResponse} BrowserPickResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").CloseBrowserSessionResponse} CloseBrowserSessionResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").ListBrowserSessionsResponse} ListBrowserSessionsResponse */
 /**
  * @template [Payload=unknown]
  * @typedef {import("./gatewayRpcTypes.ts").GatewayEventFrame<Payload>} GatewayEventFrame

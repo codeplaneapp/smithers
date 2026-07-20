@@ -110,22 +110,6 @@ type ServerOptions$1 = {
     requestTimeout?: number;
 };
 
-type ResponseFrame$1 = {
-    type: "res";
-    id: string;
-    ok: boolean;
-    apiVersion?: "v1";
-    payload?: unknown;
-    error?: {
-        version?: "v1";
-        code: string;
-        message: string;
-        requiredScope?: string;
-        refresh?: string;
-        details?: unknown;
-    };
-};
-
 type RequestFrame$1 = {
     type: "req";
     id: string;
@@ -243,7 +227,147 @@ type GatewayUiConfig$1 = true | {
     props?: Record<string, unknown>;
 };
 
+/** Create the gateway-local Playwright browser session registry. */
+declare function createBrowserSessionRegistry(options?: {}): {
+    create: ({ source, viewport }: {
+        source: any;
+        viewport?: {
+            width: number;
+            height: number;
+        } | undefined;
+    }) => Promise<{
+        sessionId: any;
+        source: {
+            kind: string;
+            url: any;
+            port?: undefined;
+            path?: undefined;
+        } | {
+            kind: string;
+            port: any;
+            path: any;
+            url?: undefined;
+        };
+        status: any;
+        revision: any;
+        page: {
+            url: any;
+            title: any;
+            canGoBack: boolean;
+            canGoForward: boolean;
+        } | null;
+        viewport: any;
+        control: {
+            owner: any;
+        };
+    }>;
+    act: (params: any) => Promise<any>;
+    context: ({ sessionId, sinceRevision, include }: {
+        sessionId: any;
+        sinceRevision: any;
+        include?: never[] | undefined;
+    }) => Promise<{
+        fresh: boolean;
+        snapshot: {
+            sessionId: any;
+            source: {
+                kind: string;
+                url: any;
+                port?: undefined;
+                path?: undefined;
+            } | {
+                kind: string;
+                port: any;
+                path: any;
+                url?: undefined;
+            };
+            status: any;
+            revision: any;
+            page: {
+                url: any;
+                title: any;
+                canGoBack: boolean;
+                canGoForward: boolean;
+            } | null;
+            viewport: any;
+            control: {
+                owner: any;
+            };
+        };
+        revision: any;
+        include: any[];
+    }>;
+    pick: ({ sessionId, point }: {
+        sessionId: any;
+        point: any;
+    }) => Promise<{
+        locator: {
+            testId: any;
+            role?: undefined;
+            name?: undefined;
+        } | {
+            role: any;
+            name: any;
+            testId?: undefined;
+        };
+        role: any;
+        name: any;
+        text: string;
+        fingerprint: string;
+        rect: any;
+        viewport: any;
+        screenshot: {
+            ref: string;
+            mediaType: string;
+        } | null;
+    }>;
+    close: (sessionId: any) => Promise<{
+        closed: boolean;
+        sessionId?: undefined;
+    } | {
+        closed: boolean;
+        sessionId: any;
+    }>;
+    list: () => Promise<{
+        sessionId: any;
+        source: {
+            kind: string;
+            url: any;
+            port?: undefined;
+            path?: undefined;
+        } | {
+            kind: string;
+            port: any;
+            path: any;
+            url?: undefined;
+        };
+        status: any;
+        revision: any;
+        page: {
+            url: any;
+            title: any;
+            canGoBack: boolean;
+            canGoForward: boolean;
+        } | null;
+        viewport: any;
+        control: {
+            owner: any;
+        };
+    }[]>;
+    subscribe: (kind: any, listener: any) => () => any;
+    get: (id: any) => any;
+    getArtifact: (ref: any) => any;
+    shutdown: () => Promise<void>;
+    BrowserError: typeof BrowserError;
+};
+declare class BrowserError extends Error {
+    constructor(code: any, message: any, details: any);
+    code: any;
+    details: any;
+}
+
 type GatewayOptions$1 = {
+    browser?: ReturnType<typeof createBrowserSessionRegistry>;
     protocol?: number;
     features?: string[];
     heartbeatMs?: number;
@@ -462,6 +586,22 @@ type EventFrame$1 = {
     apiVersion?: "v1";
 };
 
+type ResponseFrame$1 = {
+    type: "res";
+    id: string;
+    ok: boolean;
+    apiVersion?: "v1";
+    payload?: unknown;
+    error?: {
+        version?: "v1";
+        code: string;
+        message: string;
+        requiredScope?: string;
+        refresh?: string;
+        details?: unknown;
+    };
+};
+
 /**
  * Build the canonical extension method name. Useful in tests and tooling.
  * @param {string} namespace
@@ -664,7 +804,7 @@ declare function assertGatewayInputDepthWithinBounds(value: unknown, maxDepth?: 
 /**
  * @param {string | undefined} code
  */
-declare function statusForRpcError(code: string | undefined): 401 | 403 | 404 | 400 | 409 | 413 | 429 | 501 | 500;
+declare function statusForRpcError(code: string | undefined): 500 | 401 | 403 | 404 | 400 | 409 | 429 | 413 | 501;
 declare const GATEWAY_RPC_MAX_PAYLOAD_BYTES: 1048576;
 declare const GATEWAY_RPC_MAX_DEPTH: 32;
 declare const GATEWAY_RPC_MAX_ARRAY_LENGTH: 256;
@@ -716,6 +856,153 @@ declare class Gateway {
      * @type {string | null}
      */
     workspaceRoot: string | null;
+    browser: {
+        create: ({ source, viewport }: {
+            source: any;
+            viewport?: {
+                width: number;
+                height: number;
+            } | undefined;
+        }) => Promise<{
+            sessionId: any;
+            source: {
+                kind: string;
+                url: any;
+                port?: undefined;
+                path?: undefined;
+            } | {
+                kind: string;
+                port: any;
+                path: any;
+                url?: undefined;
+            };
+            status: any;
+            revision: any;
+            page: {
+                url: any;
+                title: any;
+                canGoBack: boolean;
+                canGoForward: boolean;
+            } | null;
+            viewport: any;
+            control: {
+                owner: any;
+            };
+        }>;
+        act: (params: any) => Promise<any>;
+        context: ({ sessionId, sinceRevision, include }: {
+            sessionId: any;
+            sinceRevision: any;
+            include?: never[] | undefined;
+        }) => Promise<{
+            fresh: boolean;
+            snapshot: {
+                sessionId: any;
+                source: {
+                    kind: string;
+                    url: any;
+                    port?: undefined;
+                    path?: undefined;
+                } | {
+                    kind: string;
+                    port: any;
+                    path: any;
+                    url?: undefined;
+                };
+                status: any;
+                revision: any;
+                page: {
+                    url: any;
+                    title: any;
+                    canGoBack: boolean;
+                    canGoForward: boolean;
+                } | null;
+                viewport: any;
+                control: {
+                    owner: any;
+                };
+            };
+            revision: any;
+            include: any[];
+        }>;
+        pick: ({ sessionId, point }: {
+            sessionId: any;
+            point: any;
+        }) => Promise<{
+            locator: {
+                testId: any;
+                role?: undefined;
+                name?: undefined;
+            } | {
+                role: any;
+                name: any;
+                testId?: undefined;
+            };
+            role: any;
+            name: any;
+            text: string;
+            fingerprint: string;
+            rect: any;
+            viewport: any;
+            screenshot: {
+                ref: string;
+                mediaType: string;
+            } | null;
+        }>;
+        close: (sessionId: any) => Promise<{
+            closed: boolean;
+            sessionId?: undefined;
+        } | {
+            closed: boolean;
+            sessionId: any;
+        }>;
+        list: () => Promise<{
+            sessionId: any;
+            source: {
+                kind: string;
+                url: any;
+                port?: undefined;
+                path?: undefined;
+            } | {
+                kind: string;
+                port: any;
+                path: any;
+                url?: undefined;
+            };
+            status: any;
+            revision: any;
+            page: {
+                url: any;
+                title: any;
+                canGoBack: boolean;
+                canGoForward: boolean;
+            } | null;
+            viewport: any;
+            control: {
+                owner: any;
+            };
+        }[]>;
+        subscribe: (kind: any, listener: any) => () => any;
+        get: (id: any) => any;
+        getArtifact: (ref: any) => any;
+        shutdown: () => Promise<void>;
+        BrowserError: {
+            new (code: any, message: any, details: any): {
+                name: string;
+                code: any;
+                details: any;
+                message: string;
+                stack?: string;
+                cause?: unknown;
+            };
+            isError(error: unknown): error is Error;
+            isError(value: unknown): value is Error;
+            captureStackTrace(targetObject: object, constructorOpt?: Function): void;
+            captureStackTrace(targetObject: object, constructorOpt?: Function): void;
+            prepareStackTrace(err: Error, stackTraces: NodeJS.CallSite[]): any;
+            stackTraceLimit: number;
+        };
+    };
     workflows: Map<any, any>;
     /**
      * Host-owned workspace workflow rescan. It is intentionally invoked only
@@ -1902,6 +2189,7 @@ declare class Gateway {
    * @returns {Promise<ResponseFrame>}
    */
     routeRequest(connection: GatewayRequestContext, frame: RequestFrame): Promise<ResponseFrame>;
+    browserCall(frame: any, operation: any): Promise<ResponseFrame$1>;
     /**
      * Dispatch an `ext.*` RPC. Resources/actions are resolved to a handler that
      * gets the validated params plus a context bundle (scopes, ids, abort
@@ -2606,4 +2894,4 @@ declare function scheduleRunCleanup(runRegistry: Map<string, RunRecord>, runId: 
  */
 declare function clearRunCleanupTimer(record: RunRecord | undefined): void;
 
-export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, createBrowserSessionRegistry, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

@@ -243,6 +243,12 @@ describe("Gateway RPC contract", () => {
       "createTicket",
       "updateTicket",
       "deleteTicket",
+      "createBrowserSession",
+      "browserAct",
+      "browserContext",
+      "browserPick",
+      "closeBrowserSession",
+      "listBrowserSessions",
     ]);
 
     for (const definition of GATEWAY_RPC_DEFINITIONS) {
@@ -347,6 +353,12 @@ describe("Gateway RPC contract", () => {
       createTicket: "ticket:write",
       updateTicket: "ticket:write",
       deleteTicket: "ticket:write",
+      createBrowserSession: "run:write",
+      browserAct: "run:write",
+      browserContext: "run:read",
+      browserPick: "run:read",
+      closeBrowserSession: "run:write",
+      listBrowserSessions: "run:read",
     };
 
     expect(Object.keys(expectedScopes).toSorted()).toEqual([...listGatewayRpcMethods()].toSorted());
@@ -818,6 +830,12 @@ describe("Gateway RPC contract", () => {
         request: { path: "feat-1" } satisfies DeleteTicketRequest,
         response: { path: "feat-1", deleted: true },
       },
+      { method: "createBrowserSession", request: { source: { kind: "url", url: "https://example.com" } }, response: { sessionId: "s1", source: { kind: "url", url: "https://example.com" }, status: "ready", revision: 0, page: null, viewport: { width: 1280, height: 720 }, control: { owner: null } } },
+      { method: "browserAct", request: { sessionId: "s1", actionId: "a1", action: { kind: "reload" } }, response: { revision: 1, page: null, outcome: { ok: true } } },
+      { method: "browserContext", request: { sessionId: "s1" }, response: { fresh: true, snapshot: { sessionId: "s1", source: { kind: "url", url: "https://example.com" }, status: "ready", revision: 0, page: null, viewport: { width: 1280, height: 720 }, control: { owner: null } }, revision: 0, include: ["visible-text"] } },
+      { method: "browserPick", request: { sessionId: "s1", point: { x: 1, y: 1 } }, response: { locator: { role: "button", name: "Continue" }, role: "button", name: "Continue", text: "Continue", fingerprint: "button:Continue:0:0", rect: { x: 0, y: 0, width: 80, height: 30 }, viewport: { width: 1280, height: 720 }, screenshot: { ref: "artifact_1", mediaType: "image/jpeg" } } },
+      { method: "closeBrowserSession", request: { sessionId: "s1" }, response: { closed: true, sessionId: "s1" } },
+      { method: "listBrowserSessions", request: {}, response: [] },
     ];
 
     // Every method in GATEWAY_RPC_DEFINITIONS must be covered.

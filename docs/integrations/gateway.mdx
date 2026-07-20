@@ -351,7 +351,7 @@ type OutputSchemaDescriptor = {
 Gateway v1 RPC errors use stable code strings and HTTP status mappings:
 
 ```toon
-errors[23]{code,http}:
+errors[26]{code,http}:
   InvalidRequest,400
   InvalidInput,400
   Unauthorized,401
@@ -375,6 +375,9 @@ errors[23]{code,http}:
   VcsError,500
   RewindFailed,500
   Internal,500
+  REVISION_CONFLICT,409
+  SSRF_BLOCKED,400
+  QUOTA_EXCEEDED,429
 ```
 
 The table above is the canonical v1 registry used by the SDK and OpenAPI.
@@ -465,7 +468,7 @@ Three frame types share the same socket:
 - `res`: `{ type: "res", id, ok, payload?, error? }` from server, correlated by `id`.
 - `event`: `{ type: "event", event, payload?, seq, stateVersion }` server-pushed; `seq` is per connection, `stateVersion` is global.
 
-Handshake: on connect the server immediately pushes `connect.challenge` (`{ nonce, ts }`). The client replies with a `connect` request carrying `minProtocol`, `maxProtocol`, `client` metadata, `auth`, and an optional `subscribe: string[]` to filter events by `runId`. The server returns a `hello` payload (`protocol`, `features`, `policy.heartbeatMs`, `auth` with `sessionToken`/`role`/`scopes`/`userId`, `snapshot`).
+Handshake: on connect the server immediately pushes `connect.challenge` (`{ nonce, ts }`). The client replies with a `connect` request carrying `minProtocol`, `maxProtocol`, `client` metadata, `auth`, and an optional `subscribe: string[]` to filter events by `runId`; use `browser:<sessionId>` to subscribe to that session's frames. The server returns a `hello` payload (`protocol`, `features`, `policy.heartbeatMs`, `auth` with `sessionToken`/`role`/`scopes`/`userId`, `snapshot`).
 
 After `connect`, the gateway emits `tick` events every `heartbeatMs`. `launchRun`, `submitApproval`, `submitSignal`, and `cronRun` automatically subscribe the connection to the affected `runId`. Server-pushed event names:
 
@@ -489,6 +492,8 @@ After `connect`, the gateway emits `tick` events every `heartbeatMs`. `launchRun
 | `approval.auto_approved` | Approval |
 | `cron.triggered` | Cron |
 | `devtools.event` | DevTools |
+| `browser.frame` | Browser viewer frames; delivered only to subscribed browser sessions |
+| `browser.activity` | Browser settled action journal entries |
 
 For stateless callers, `POST /rpc` accepts the same body shape (`{ id, method, params }`) and returns the same `ResponseFrame`. Auth headers: `Authorization: Bearer <token>` or `x-smithers-key: <token>` (or trusted-proxy headers in trusted-proxy mode).
 

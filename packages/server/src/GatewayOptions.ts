@@ -3,8 +3,10 @@ import type { GatewayDefaults } from "./GatewayDefaults.js";
 import type { GatewayOperatorUiConfig } from "./GatewayOperatorUiConfig.js";
 import type { GatewayUiConfig } from "./GatewayUiConfig.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { createBrowserSessionRegistry } from "./browser.js";
 
 export type GatewayOptions = {
+  browser?: ReturnType<typeof createBrowserSessionRegistry>;
   protocol?: number;
   features?: string[];
   heartbeatMs?: number;

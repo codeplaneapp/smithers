@@ -10,7 +10,12 @@ description: >
   user's behalf; it is not a GUI the human clicks. You are an
   ORCHESTRATOR: run long-running, multi-step, or background work
   *through* Smithers, not through your own ad-hoc subagents; spend your
-  time observing the run and reporting.
+   time observing the run and reporting. Also governs DELIVERABLE SHAPE
+   even when no workflow is involved: a user-facing report, plan, or
+   architecture document is a self-contained HTML page, and workflow
+   UIs are composed from the shipped shared components
+   (MarkdownEditor, DiffHunks, chat surfaces, KpiStat, StatusPill,
+   EmptyState) rather than hand-rolled markup.
 ---
 
 # Smithers
@@ -197,6 +202,27 @@ before every workflow you build, and the rest of this skill assumes them.
    non-interactive forms for CI, scripts, and the commands you run yourself
    with your shell tool (never pass `--interactive` to a command you execute:
    it opens a full-screen TUI your harness cannot drive).
+
+## Reports, plans, and architecture docs are HTML pages
+
+When the user asks for a **report**, a **plan**, an **architecture document**,
+or any other written deliverable meant to be read and shared, the deliverable
+is a **self-contained HTML page** — one `.html` file with its styles embedded,
+no server, no build, no external assets. Not a Markdown file, not chat
+scrollback. Markdown is for READMEs and code-adjacent notes a developer edits;
+anything the user will *read, present, or forward* gets HTML.
+
+- **Produce the page, don't describe it.** Write the file
+  (`report.html`, `plan.html`, `architecture.html`, or under `artifacts/`) and
+  hand the user the path (or open it). A chat message *about* the report is a
+  non-answer.
+- **Make it a real page.** `<!DOCTYPE html>`, an embedded `<style>`, semantic
+  sections, tables where they help, and HTML/CSS diagrams for architecture
+  (boxes and arrows beat ASCII art). Polished enough to forward without
+  apology.
+- **Run reports too.** Summarizing what a run did? Source it from persisted
+  state (`smithers inspect`, `events`, `scores`), not memory, and render HTML —
+  the `report-maker` skill covers the run-slideshow variant.
 
 ## A workflow is a superset of a skill — author a workflow, not a skill
 
@@ -786,6 +812,17 @@ The bundle is one file. Two shipping shapes:
 
 - **React (recommended).** Compose from the shipped component libraries; hand-rolled markup and CSS is the last resort. `smithers-orchestrator/gateway-ui` ships run-shaped widgets that each connect to the Gateway by themselves: `SimpleWorkflowDashboard` (a complete launch/watch dashboard in one component), `WorkflowUiShell` (the page scaffold with house styles), `RunList`, `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel`, `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `StatusPill`. `smithers-orchestrator/ui` ships the token-native primitives for everything around them (`Button`, `Card`, `Input`, `Tabs`, `Dialog`, `Table`, `StatusPill`, `EmptyState`, `KpiStat`, chat surfaces), correct in light and dark automatically. Under both sits `smithers-orchestrator/gateway-react`: one call to `createGatewayReactRoot(<App />)` reads the boot config, mounts a provider, and gives the tree live hooks for bespoke panes: `useGatewayRun`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayActions` (for `submitApproval`, `submitSignal`, `cancelRun`, `rewindRun`, etc.). The hooks are **stale-data-free by construction**: when `runId` (or any input) changes, the prior data clears synchronously and any late response from the old inputs is dropped. A custom UI that switches between runs never blinks the wrong data. It automatically manages subscriptions, pushed updates, metrics, and resilient reconnections.
 - **Vanilla.** `smithers-orchestrator/gateway-client`. One `SmithersGatewayClient` class with `getRun`, `getNodeOutput`, `getNodeDiff`, `submitApproval`, `submitSignal`, `cancelRun`, and a `streamRunEventsResilient` async generator that reconnects with backoff + jitter and resumes from the last per-run `seq`. This generator handles live pushed updates, metrics streaming, and subscriptions. Pick this when you want zero dependencies or already own your render layer.
+
+**Match the situation to the shipped component — never hand-roll these.** Each is the single shared implementation; reaching for it is the default, not an option:
+
+| The situation | The component |
+| --- | --- |
+| The user edits a node's markdown output (spec, doc, report) | `MarkdownEditor` + `MarkdownEditorStyles` from `smithers-orchestrator/ui/adapters/markdown-editor` — the shared WYSIWYG (Milkdown Crepe); the user edits the rendered document, **never raw markdown in a `<textarea>`** |
+| Rendering a `DiffBundle` for review | `DiffHunks` from `smithers-orchestrator/ui` (`@@`-grouped hunks, dual gutters, add/remove/context coloring, pagination built in) |
+| A conversational workflow (agent questions ↔ user replies) | `ChatTranscript` + `ChatComposer` from `smithers-orchestrator/ui` |
+| Headline counts on an overview | `KpiStat` |
+| Any run/node status badge | `StatusPill` (feed it `normalizeStatus`) |
+| A zero-data state ("no runs yet") | `EmptyState` |
 
 The bundle reads `?runId=<id>` from `location.search` for the run to scope to, and optionally `__SMITHERS_GATEWAY_UI__` (a `GatewayUiBootConfig`) for the mount path, RPC path, WebSocket path, and free-form `props` you set at `gateway.register({ ui: { props } })`.
 

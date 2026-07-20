@@ -74,6 +74,21 @@
 /** @typedef {import("./gatewayRpcTypes.ts").CreateTicketRequest} CreateTicketRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").UpdateTicketRequest} UpdateTicketRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").DeleteTicketRequest} DeleteTicketRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserSource} BrowserSource */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserLocator} BrowserLocator */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserSnapshot} BrowserSnapshot */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserAction} BrowserAction */
+/** @typedef {import("./gatewayRpcTypes.ts").CreateBrowserSessionRequest} CreateBrowserSessionRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserActRequest} BrowserActRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserContextRequest} BrowserContextRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserPickRequest} BrowserPickRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").CloseBrowserSessionRequest} CloseBrowserSessionRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").CreateBrowserSessionResponse} CreateBrowserSessionResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserActResponse} BrowserActResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserContextResponse} BrowserContextResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserPickResponse} BrowserPickResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").CloseBrowserSessionResponse} CloseBrowserSessionResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").ListBrowserSessionsResponse} ListBrowserSessionsResponse */
 // @smithers-type-exports-end
 /** @typedef {import("../auth/scopes.js").GatewayScope} GatewayScope */
 
@@ -206,6 +221,21 @@ const runRecord = objectSchema(
   "Current run record, including node-state counts and optional derived runState.",
   true,
 );
+const browserErrors = ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"];
+const browserSourceSchema = { oneOf: [objectSchema({ kind: { const: "url" }, url: stringSchema("Public http or https URL.") }, ["kind", "url"]), objectSchema({ kind: { const: "dev-server" }, port: integerSchema("Declared loopback port.", 1), path: stringSchema("Absolute path on the dev server.") }, ["kind", "port"])], description: "Browser navigation source." };
+const browserViewportSchema = objectSchema({ width: { ...integerSchema("Viewport width.", 1), maximum: 3840 }, height: { ...integerSchema("Viewport height.", 1), maximum: 2160 } }, ["width", "height"]);
+const browserPageSchema = objectSchema({ url: stringSchema("Current URL."), title: stringSchema("Page title."), canGoBack: booleanSchema("Whether history can go back."), canGoForward: booleanSchema("Whether history can go forward.") }, ["url", "title", "canGoBack", "canGoForward"]);
+const browserSnapshotSchema = objectSchema({ sessionId: stringSchema("Opaque session identifier."), source: browserSourceSchema, status: { type: "string", enum: ["starting", "ready", "loading", "suspended", "closed", "failed"] }, revision: integerSchema("Settled action revision."), page: { oneOf: [browserPageSchema, { type: "null" }] }, viewport: browserViewportSchema, control: objectSchema({ owner: { type: ["string", "null"], enum: ["user", "agent", null] } }, ["owner"]) }, ["sessionId", "source", "status", "revision", "page", "viewport", "control"]);
+const browserSnapshotExample = { sessionId: "s1", source: { kind: "url", url: "https://example.com" }, status: "ready", revision: 0, page: { url: "https://example.com/", title: "Example", canGoBack: false, canGoForward: false }, viewport: { width: 1280, height: 720 }, control: { owner: null } };
+const browserLocatorSchema = { oneOf: [objectSchema({ testId: stringSchema("Stable test id.") }, ["testId"]), objectSchema({ role: stringSchema("Accessible role."), name: stringSchema("Accessible name.") }, ["role"]), objectSchema({ css: stringSchema("Safe CSS selector.") }, ["css"]) ] };
+const browserActionSchema = { oneOf: [{ type: "object", properties: { kind: { const: "navigate" }, url: stringSchema("Destination URL.") }, required: ["kind", "url"], additionalProperties: false }, ...["back", "forward", "reload", "stop"].map((kind) => ({ type: "object", properties: { kind: { const: kind } }, required: ["kind"], additionalProperties: false })), { type: "object", properties: { kind: { const: "click" }, locator: browserLocatorSchema, point: objectSchema({ x: { type: "number" }, y: { type: "number" } }, ["x", "y"]), button: { type: "string", enum: ["left", "right", "middle"] }, modifiers: arraySchema(stringSchema("Keyboard modifier."), "Modifiers.") }, required: ["kind"], additionalProperties: false }, { type: "object", properties: { kind: { const: "type" }, locator: browserLocatorSchema, text: stringSchema("Text input."), replace: booleanSchema("Replace existing value.") }, required: ["kind", "locator", "text"], additionalProperties: false }, { type: "object", properties: { kind: { const: "press" }, key: stringSchema("Keyboard key."), modifiers: arraySchema(stringSchema("Keyboard modifier."), "Modifiers.") }, required: ["kind", "key"], additionalProperties: false }, { type: "object", properties: { kind: { const: "scroll" }, deltaX: { type: "number" }, deltaY: { type: "number" } }, required: ["kind", "deltaX", "deltaY"], additionalProperties: false }, { type: "object", properties: { kind: { const: "dialog" }, decision: { type: "string", enum: ["accept", "dismiss"] }, promptText: stringSchema("Replacement prompt text.") }, required: ["kind", "decision"], additionalProperties: false }] };
+const browserCreateRequestSchema = objectSchema({ source: browserSourceSchema, viewport: browserViewportSchema }, ["source"]);
+const browserActRequestSchema = objectSchema({ sessionId: stringSchema("Opaque session identifier."), actionId: stringSchema("Caller-created dedupe identifier."), expectedRevision: integerSchema("Optimistic revision fence.", 0), action: browserActionSchema }, ["sessionId", "actionId", "action"]);
+const browserContextRequestSchema = objectSchema({ sessionId: stringSchema("Opaque session identifier."), sinceRevision: integerSchema("Freshness fence.", 0), include: arraySchema({ type: "string", enum: ["visible-text", "accessibility", "interactive-elements", "screenshot", "selections", "recent-actions", "console-summary", "network-summary"] }, "Requested context slices.") }, ["sessionId"]);
+const browserActResponseSchema = objectSchema({ revision: integerSchema("Settled revision."), page: { oneOf: [browserPageSchema, { type: "null" }] }, outcome: anyJsonSchema }, ["revision", "page", "outcome"]);
+const browserContextResponseSchema = objectSchema({ fresh: booleanSchema("Whether all requested slices were captured at the current revision."), reason: stringSchema("Freshness failure reason."), snapshot: browserSnapshotSchema, revision: integerSchema("Current revision."), include: arraySchema(stringSchema("Slice name."), "Returned slices.") }, ["fresh", "snapshot", "revision", "include"], "Bounded browser context.", true);
+const browserPickRequestSchema = objectSchema({ sessionId: stringSchema("Opaque session identifier."), point: objectSchema({ x: { type: "number" }, y: { type: "number" } }, ["x", "y"]) }, ["sessionId", "point"]);
+const browserPickResponseSchema = objectSchema({ locator: objectSchema({}, [], "Safe locator ladder.", true), role: stringSchema("Element role."), name: stringSchema("Element accessible name."), text: stringSchema("Bounded visible text."), fingerprint: stringSchema("Staleness fingerprint."), rect: objectSchema({ x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } }, ["x", "y", "width", "height"]), viewport: browserViewportSchema, screenshot: { oneOf: [objectSchema({ ref: stringSchema("Artifact reference."), mediaType: stringSchema("Artifact media type.") }, ["ref", "mediaType"]), { type: "null" }] } }, ["locator", "role", "name", "text", "fingerprint", "rect", "viewport", "screenshot"]);
 
 /** @type {Record<GatewayRpcErrorCode, GatewayRpcErrorDefinition>} */
 export const GATEWAY_RPC_ERRORS = {
@@ -232,6 +262,9 @@ export const GATEWAY_RPC_ERRORS = {
   VcsError: { version: SMITHERS_API_VERSION, code: "VcsError", httpStatus: 500, description: "A version-control operation failed." },
   RewindFailed: { version: SMITHERS_API_VERSION, code: "RewindFailed", httpStatus: 500, description: "The rewind failed and the run may need attention." },
   Internal: { version: SMITHERS_API_VERSION, code: "Internal", httpStatus: 500, description: "The Gateway encountered an internal error." },
+  REVISION_CONFLICT: { version: SMITHERS_API_VERSION, code: "REVISION_CONFLICT", httpStatus: 409, description: "The browser session revision is stale." },
+  SSRF_BLOCKED: { version: SMITHERS_API_VERSION, code: "SSRF_BLOCKED", httpStatus: 400, description: "The browser destination is not allowed." },
+  QUOTA_EXCEEDED: { version: SMITHERS_API_VERSION, code: "QUOTA_EXCEEDED", httpStatus: 429, description: "The browser session quota is exhausted." },
 };
 
 /** @type {Record<string, GatewayRpcMethod>} */
@@ -1023,6 +1056,12 @@ export const GATEWAY_RPC_DEFINITIONS = [
     exampleRequest: { path: "feat-issues-card" },
     exampleResponse: { path: "feat-issues-card", deleted: true },
   },
+  { version: SMITHERS_API_VERSION, method: "createBrowserSession", title: "createBrowserSession", description: "Create an ephemeral Chromium browser session.", maturity: "stable", transport: "http+websocket", requiredScope: "run:write", requestSchema: browserCreateRequestSchema, responseSchema: browserSnapshotSchema, errors: ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"], exampleRequest: { source: { kind: "url", url: "https://example.com" } }, exampleResponse: browserSnapshotExample },
+  { version: SMITHERS_API_VERSION, method: "browserAct", title: "browserAct", description: "Perform one ordered, deduplicated browser action.", maturity: "stable", transport: "http+websocket", requiredScope: "run:write", requestSchema: browserActRequestSchema, responseSchema: browserActResponseSchema, errors: ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"], exampleRequest: { sessionId: "s1", actionId: "a1", action: { kind: "reload" } }, exampleResponse: { revision: 1, page: null, outcome: { ok: true } } },
+  { version: SMITHERS_API_VERSION, method: "browserContext", title: "browserContext", description: "Read bounded live browser perception slices.", maturity: "stable", transport: "http+websocket", requiredScope: "run:read", requestSchema: browserContextRequestSchema, responseSchema: browserContextResponseSchema, errors: ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"], exampleRequest: { sessionId: "s1", include: ["visible-text", "screenshot"] }, exampleResponse: { fresh: true, snapshot: browserSnapshotExample, revision: 0, include: ["visible-text"] } },
+  { version: SMITHERS_API_VERSION, method: "browserPick", title: "browserPick", description: "Hit-test a live page and return a safe locator and clipped artifact.", maturity: "stable", transport: "http+websocket", requiredScope: "run:read", requestSchema: browserPickRequestSchema, responseSchema: browserPickResponseSchema, errors: ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"], exampleRequest: { sessionId: "s1", point: { x: 10, y: 10 } }, exampleResponse: { locator: { role: "button", name: "Continue" }, role: "button", name: "Continue", text: "Continue", fingerprint: "button:Continue:0:0", rect: { x: 0, y: 0, width: 80, height: 30 }, viewport: { width: 1280, height: 720 }, screenshot: { ref: "artifact_1", mediaType: "image/jpeg" } } },
+  { version: SMITHERS_API_VERSION, method: "closeBrowserSession", title: "closeBrowserSession", description: "Close and wipe a browser session.", maturity: "stable", transport: "http+websocket", requiredScope: "run:write", requestSchema: objectSchema({ sessionId: stringSchema("Opaque browser session identifier.") }, ["sessionId"]), responseSchema: objectSchema({ closed: booleanSchema("Whether the session is closed."), sessionId: stringSchema("Closed session identifier.") }, ["closed"]), errors: ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"], exampleRequest: { sessionId: "s1" }, exampleResponse: { closed: true, sessionId: "s1" } },
+  { version: SMITHERS_API_VERSION, method: "listBrowserSessions", title: "listBrowserSessions", description: "List live browser sessions in this workspace.", maturity: "stable", transport: "http+websocket", requiredScope: "run:read", requestSchema: objectSchema({}, [], "No parameters."), responseSchema: arraySchema(browserSnapshotSchema, "Browser session snapshots."), errors: ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"], exampleRequest: {}, exampleResponse: [browserSnapshotExample] },
 ];
 
 /** @type {Map<string, GatewayRpcDefinition>} */

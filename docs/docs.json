@@ -470,7 +470,13 @@
               "rpc/cron-list",
               "rpc/cron-create",
               "rpc/cron-delete",
-              "rpc/cron-run"
+              "rpc/cron-run",
+              "rpc/create-browser-session",
+              "rpc/browser-act",
+              "rpc/browser-context",
+              "rpc/browser-pick",
+              "rpc/close-browser-session",
+              "rpc/list-browser-sessions"
             ]
           }
         ]

@@ -950,8 +950,8 @@ function checkGatewayRpcReferenceDocsMatchRegistry() {
   const extraDocs = actualDocs.filter((name) => !expectedDocs.includes(name));
   const problems = [];
 
-  if (definitions.length !== 35) {
-    problems.push(`expected 35 Gateway RPC definitions, found ${definitions.length}`);
+  if (definitions.length !== 41) {
+    problems.push(`expected 41 Gateway RPC definitions, found ${definitions.length}`);
   }
   for (const name of missingDocs) problems.push(`missing docs/rpc/${name}`);
   for (const name of extraDocs) problems.push(`unexpected docs/rpc/${name}`);

@@ -56,6 +56,7 @@ import type {
   ListDocsRequest,
   ListDocsResponse,
   GatewayTicketRow,
+  CreateBrowserSessionRequest, BrowserActRequest, BrowserContextRequest, BrowserPickRequest, CloseBrowserSessionRequest, CreateBrowserSessionResponse, BrowserActResponse, BrowserContextResponse, BrowserPickResponse, CloseBrowserSessionResponse, ListBrowserSessionsResponse,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
 import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
 
@@ -95,6 +96,12 @@ export type GatewayRpcRequestMap = {
   deleteTicket: DeleteTicketRequest;
   getSchemaSignature: GetSchemaSignatureRequest;
   listDocs: ListDocsRequest;
+  createBrowserSession: CreateBrowserSessionRequest;
+  browserAct: BrowserActRequest;
+  browserContext: BrowserContextRequest;
+  browserPick: BrowserPickRequest;
+  closeBrowserSession: CloseBrowserSessionRequest;
+  listBrowserSessions: Record<string, never>;
 };
 
 export type GatewayRpcResponseMap = {
@@ -133,6 +140,12 @@ export type GatewayRpcResponseMap = {
   deleteTicket: { path: string; deleted: boolean };
   getSchemaSignature: GetSchemaSignatureResponse;
   listDocs: ListDocsResponse;
+  createBrowserSession: CreateBrowserSessionResponse;
+  browserAct: BrowserActResponse;
+  browserContext: BrowserContextResponse;
+  browserPick: BrowserPickResponse;
+  closeBrowserSession: CloseBrowserSessionResponse;
+  listBrowserSessions: ListBrowserSessionsResponse;
 };
 
 export type GatewayRpcParams<Method extends GatewayRpcMethod> = GatewayRpcRequestMap[Method];

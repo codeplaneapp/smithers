@@ -30,7 +30,10 @@ export type GatewayRpcErrorCode =
   | "UnsupportedSandbox"
   | "VcsError"
   | "RewindFailed"
-  | "Internal";
+  | "Internal"
+  | "REVISION_CONFLICT"
+  | "SSRF_BLOCKED"
+  | "QUOTA_EXCEEDED";
 
 export type GatewayRpcMethod =
   | "launchRun"
@@ -67,7 +70,29 @@ export type GatewayRpcMethod =
   | "listTickets"
   | "createTicket"
   | "updateTicket"
-  | "deleteTicket";
+  | "deleteTicket"
+  | "createBrowserSession"
+  | "browserAct"
+  | "browserContext"
+  | "browserPick"
+  | "closeBrowserSession"
+  | "listBrowserSessions";
+  
+export type BrowserSource = { kind: "url"; url: string } | { kind: "dev-server"; port: number; path?: string };
+export type BrowserSnapshot = { sessionId: string; source: BrowserSource; status: "starting" | "ready" | "loading" | "suspended" | "closed" | "failed"; revision: number; page: { url: string; title: string; canGoBack: boolean; canGoForward: boolean } | null; viewport: { width: number; height: number }; control: { owner: "user" | "agent" | null } };
+export type BrowserLocator = { testId: string } | { role: string; name?: string } | { css: string };
+export type BrowserAction = { kind: "navigate"; url: string } | { kind: "back" | "forward" | "reload" | "stop" } | { kind: "click"; locator?: BrowserLocator; point?: { x: number; y: number }; button?: "left" | "right" | "middle"; modifiers?: string[] } | { kind: "type"; locator: BrowserLocator; text: string; replace?: boolean } | { kind: "press"; key: string; modifiers?: string[] } | { kind: "scroll"; deltaX: number; deltaY: number } | { kind: "dialog"; decision: "accept" | "dismiss"; promptText?: string };
+export type CreateBrowserSessionRequest = { source: BrowserSource; viewport?: { width: number; height: number } };
+export type BrowserActRequest = { sessionId: string; actionId: string; expectedRevision?: number; action: BrowserAction };
+export type BrowserContextRequest = { sessionId: string; sinceRevision?: number; include?: string[] };
+export type BrowserPickRequest = { sessionId: string; point: { x: number; y: number } };
+export type CloseBrowserSessionRequest = { sessionId: string };
+export type CreateBrowserSessionResponse = BrowserSnapshot;
+export type BrowserActResponse = { revision: number; page: BrowserSnapshot["page"]; outcome: unknown };
+export type BrowserContextResponse = { fresh: boolean; reason?: string; snapshot: BrowserSnapshot; revision: number; include: string[]; journal?: unknown[] };
+export type BrowserPickResponse = { locator: BrowserLocator; role: string; name: string; text: string; fingerprint: string; rect: { x: number; y: number; width: number; height: number }; viewport: BrowserSnapshot["viewport"]; screenshot: { ref: string; mediaType: string } | null };
+export type CloseBrowserSessionResponse = { closed: boolean; sessionId?: string };
+export type ListBrowserSessionsResponse = BrowserSnapshot[];
 
 export type LaunchRunRequest = {
   workflow: string;
@@ -513,6 +538,8 @@ export type GatewayEventFrame<Payload = unknown> = {
   stateVersion: number;
   apiVersion?: SmithersApiVersion;
 };
+export type BrowserFrameEvent = { sessionId: string; seq: number; jpegBase64: string; viewport: { width: number; height: number } };
+export type BrowserActivityEvent = { sessionId: string; actionId: string; actor: "user" | "agent" | "page"; revision: number; action: unknown; result: unknown };
 
 export type GatewayResponseFrame<Payload = unknown> =
   | {

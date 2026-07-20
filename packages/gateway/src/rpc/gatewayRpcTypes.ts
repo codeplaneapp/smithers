@@ -88,6 +88,7 @@ export type {
   UpdateTicketRequest,
   WhatHappenedRequest,
   WhatHappenedResponse,
+  BrowserSource, BrowserLocator, BrowserSnapshot, BrowserAction, CreateBrowserSessionRequest, BrowserActRequest, BrowserContextRequest, BrowserPickRequest, CloseBrowserSessionRequest, CreateBrowserSessionResponse, BrowserActResponse, BrowserContextResponse, BrowserPickResponse, CloseBrowserSessionResponse, ListBrowserSessionsResponse,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
 
 export type JsonSchema = {
