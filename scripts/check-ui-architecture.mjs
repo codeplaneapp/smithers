@@ -1012,10 +1012,9 @@ function shadcnViolations(root, files) {
   for (const entryFile of SHADCN_PROVENANCE_ENTRY_FILES) {
     const laneManifestPath = `packages/ui/${entryFile}`;
     const laneManifestAbsolutePath = join(root, laneManifestPath);
-    const requiredFiles = SHADCN_PROVENANCE_REQUIRED_FILES.get(entryFile) ?? [];
-    const laneIsPresent = requiredFiles.some((path) => fileSet.has(`packages/ui/${path}`));
+    const triggerPath = SHADCN_PROVENANCE_TRIGGERS.get(entryFile);
     if (!existsSync(laneManifestAbsolutePath)) {
-      if (laneIsPresent) {
+      if (triggerPath && fileSet.has(triggerPath)) {
         violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} is missing`));
       }
       continue;
@@ -1093,8 +1092,8 @@ function shadcnViolations(root, files) {
       }
     }
 
-    if (laneIsPresent) {
-      for (const requiredFile of requiredFiles) {
+    if (triggerPath && fileSet.has(triggerPath)) {
+      for (const requiredFile of SHADCN_PROVENANCE_REQUIRED_FILES.get(entryFile) ?? []) {
         if (!laneRecordedPaths.has(requiredFile)) {
           violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} has no entry for ${requiredFile}`));
         }
