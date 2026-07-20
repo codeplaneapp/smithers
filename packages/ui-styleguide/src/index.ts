@@ -232,3 +232,4 @@ export const workflowUiLayoutCss = [
 ].join("\n");
 
 export const workflowUiStyles = [workflowUiThemeCss, workflowUiLayoutCss].join("\n");
+export { standaloneThemeCss } from "./standaloneThemeCss";

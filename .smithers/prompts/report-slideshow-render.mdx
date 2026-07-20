@@ -43,6 +43,12 @@ If a topic has no data in the captured state, keep the slide but say so plainly
 
 - Emit ONE complete document starting with a `DOCTYPE html` declaration.
 - Put all styling in a single inline `style` block in the `head`.
+- Start that block with the exact output of `standaloneThemeCss()` from
+  `@smithers-orchestrator/ui-styleguide` (read it from the package source if it
+  is not supplied in context). Build every slide rule using only its semantic
+  token variables, such as `var(--bg)`, `var(--surface)`, `var(--text)`,
+  `var(--brand)`, and `var(--border)`. Do not hardcode hex, rgb/rgba, or any
+  off-palette color values.
 - Each slide is a full-width `section`; separate slides visually with spacing,
   a top border, or a subtle background — keep it clean and readable.
 - No script tags, no external URLs, no image hosts. Self-contained only.

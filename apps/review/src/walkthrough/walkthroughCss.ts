@@ -1,44 +1,18 @@
+import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
+
 /**
- * The walkthrough design system: light-dark() token pairs under
- * `color-scheme: light dark` (the html[data-theme] override drives the manual
- * theme toggle), one accent, a severity palette, and layout for the sticky
+ * The walkthrough design system composes the standalone shared theme with
+ * walkthrough-specific layout for the sticky
  * TOC / progress-bar navigation. Page code/pre rules are guarded with
  * :not(.pierre-diff *) so they never reach into embedded Pierre diffs;
  * walkthroughRestoreCss below re-asserts the page defaults Pierre's global
  * resets are known to leak onto (code/pre display, margin, padding, and the
  * universal box-sizing rule) and is emitted AFTER the Pierre styles.
  */
-export const walkthroughCss = `
-:root {
-  color-scheme: light dark;
-  --bg: light-dark(#f6f6f8, #101013);
-  --surface: light-dark(#ffffff, #17171b);
-  --surface-2: light-dark(#f8f8fa, #1c1c21);
-  --surface-3: light-dark(#efeff3, #232329);
-  --text: light-dark(#191921, #e9e9ee);
-  --muted: light-dark(#5c5c68, #9c9ca9);
-  --faint: light-dark(#71717d, #7f7f8c);
-  --border: light-dark(#e5e5ea, #26262d);
-  --border-strong: light-dark(#d4d4dc, #35353f);
-  --accent: light-dark(#4c53c9, #949bff);
-  --accent-soft: light-dark(#ecedfb, #23244a);
-  --add: light-dark(#1a7f37, #2ea043);
-  --del: light-dark(#cf222e, #f85149);
-  --sev-critical: light-dark(#cf222e, #f2645c);
-  --sev-major: light-dark(#bc4c00, #e8834a);
-  --sev-minor: light-dark(#7d5806, #c99b2e);
-  --sev-info: light-dark(#57606a, #99a1ab);
-  --shadow-card: light-dark(0 1px 2px rgba(24,24,36,.04), 0 1px 2px rgba(0,0,0,.4));
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --radius: 12px;
-}
-html[data-theme="light"] { color-scheme: light; }
-html[data-theme="dark"] { color-scheme: dark; }
-
-*, *::before, *::after { box-sizing: border-box; }
+export const walkthroughCss = `${standaloneThemeCss()}
+:root { --faint:var(--text-faint); --accent-soft:var(--brand-soft); --add:var(--success); --del:var(--danger); --sev-critical:var(--danger); --sev-major:var(--warning); --sev-minor:var(--warning); --sev-info:var(--info); --shadow-card:var(--shadow-2); --sans:var(--font-sans); --mono:var(--font-mono); --radius:12px; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; font: 15px/1.65 var(--sans); color: var(--text); background: var(--bg); }
+body { font: 15px/1.65 var(--sans); }
 [id] { scroll-margin-top: 56px; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -316,12 +290,12 @@ footer kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); bac
 
 @media print {
   html { color-scheme: light; }
-  body { background: #fff; color: #000; }
+  body { background: var(--surface); color: var(--text); }
   .progress, nav.toc, .controls, .theme-toggle, .copy-btn, .anchor-link, .quiz-retake { display: none !important; }
   section#quiz { display: none !important; }
   .layout { display: block; padding: 0; max-width: none; }
   main { max-width: none; }
-  header.page, section.panel, section.chapter, article.file, aside.finding { box-shadow: none; border-color: #bbb; break-inside: avoid-page; }
+  header.page, section.panel, section.chapter, article.file, aside.finding { box-shadow: none; border-color: var(--border-strong); break-inside: avoid-page; }
   section.chapter { break-before: page; break-inside: auto; }
   article.file { break-inside: auto; }
   article.file .file-head { position: static; }

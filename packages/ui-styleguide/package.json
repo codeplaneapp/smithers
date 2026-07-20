@@ -13,5 +13,8 @@
   },
   "files": [
     "src/"
-  ]
+  ],
+  "scripts": {
+    "test": "bun test tests"
+  }
 }

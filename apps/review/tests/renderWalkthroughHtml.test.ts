@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChangedFile } from "../src/walkthrough/changedFileSchema";
 import { renderWalkthroughHtml } from "../src/walkthrough/renderWalkthroughHtml";
+import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
 
 type RenderWalkthroughInput = Parameters<typeof renderWalkthroughHtml>[0];
 
@@ -86,6 +87,11 @@ function render() {
 }
 
 describe("renderWalkthroughHtml", () => {
+  test("embeds the shared standalone theme tokens", async () => {
+    const html = await render();
+    expect(html).toContain(standaloneThemeCss());
+  });
+
   test("escapes all dynamic chrome content", async () => {
     const html = await render();
     expect(html).toContain("Replaces removed with added &lt;script&gt;");

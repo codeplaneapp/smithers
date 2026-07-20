@@ -1,4 +1,4 @@
-import { workflowUiThemeCss } from "@smithers-orchestrator/gateway-ui/styleguide-css";
+import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
 
 export const landingPage = `<!doctype html>
 <html lang="en">
@@ -7,7 +7,7 @@ export const landingPage = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>smithers review</title>
 <style>
-${workflowUiThemeCss}
+${standaloneThemeCss()}
 body { margin: 0; font-size: 16px; line-height: 1.6; color: var(--text); background: var(--bg); }
 main { max-width: 720px; margin: 0 auto; padding: 64px 24px; }
 h1 { font-size: 28px; margin: 0 0 8px; }
