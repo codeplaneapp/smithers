@@ -736,7 +736,7 @@ function uiLayer(path) {
   const relativePath = path.slice(prefix.length);
   if (relativePath.startsWith("smithers/connected/")) return "connected";
   const layer = relativePath.split("/")[0];
-  return ["adapters", "ai", "chat", "internal", "primitives", "smithers", "styles"].includes(layer)
+  return ["adapters", "agentic", "ai", "chat", "internal", "primitives", "smithers", "styles"].includes(layer)
     ? layer
     : null;
 }
@@ -769,7 +769,7 @@ function resolveRelativeSource(file, specifier, files) {
 
 function disconnectedPropViolations(path, source) {
   const layer = uiLayer(path);
-  if (!["ai", "chat", "primitives", "smithers"].includes(layer)) return [];
+  if (!["agentic", "ai", "chat", "primitives", "smithers"].includes(layer)) return [];
   if (path.includes("/smithers/connected/") || posix.basename(path).startsWith("index.")) return [];
   if (!source.includes("<") || !/[.]tsx?$/.test(path)) return [];
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -959,6 +959,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       const layer = uiLayer(path);
       const allowedLayers = {
         adapters: new Set(["adapters", "internal", "primitives", "styles"]),
+        agentic: new Set(["agentic", "chat", "internal", "primitives", "styles"]),
         ai: new Set(["ai", "chat", "internal", "primitives", "styles"]),
         chat: new Set(["chat", "internal", "primitives", "styles"]),
         connected: new Set(["connected", "gateway-react", "internal", "smithers", "styles"]),

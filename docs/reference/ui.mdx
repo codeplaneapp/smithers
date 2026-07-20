@@ -91,6 +91,9 @@ All components accept `className` and `style`, forward refs, and carry
 | Component | What it renders | Key props |
 | --- | --- | --- |
 | `StatusPill` | A run/node status string as a correctly tinted `Badge`: success for finished states, warning for in-flight, destructive for failures, muted for cancelled/skipped/unknown. Carries `data-status`. | `status`, `label`, `withDot` |
+| [`Reasoning`](/reference/ui/reasoning) | A streaming-aware disclosure for extended reasoning content. It starts open while streaming and automatically closes when streaming ends unless the user has toggled it. | `streaming`, `open`, `defaultOpen`, `onOpenChange`, `duration`, `title` |
+| [`ChainOfThought`](/reference/ui/chain-of-thought) | An ordered disclosure of reasoning steps with pending, active, and done states mapped through the shared status vocabulary. | `steps`, `streaming`, `open`, `defaultOpen`, `onOpenChange`, `title` |
+| [`ToolCall`](/reference/ui/tool-call) | Compact or expanded tool invocation anatomy with lifecycle status, safe JSON input/output, and an approval-content seam. | `name`, `state`, `args`, `result`, `layout`, `open`, `approvalSlot` |
 | `EmptyState` | Centered zero-data block replacing bare "No runs yet." paragraphs. | `icon`, `title`, `description`, `action` |
 | `SectionHeader`, `Eyebrow` | Section heading row: eyebrow plus title on the left, actions on the right. | `title`, `eyebrow`, `actions` |
 | `RowButton` | Full-width selectable list row with button semantics (the house run-row recipe). | `active` |

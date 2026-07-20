@@ -56,6 +56,22 @@ export {
 export { Button, buttonVariants, type ButtonProps } from "./button";
 export { Badge, badgeVariants, type BadgeProps } from "./badge";
 export { StatusPill, type StatusPillProps } from "./status-pill";
+export { Reasoning, type ReasoningProps } from "./agentic/Reasoning";
+export {
+  ChainOfThought,
+  chainOfThoughtStepStatus,
+  type ChainOfThoughtProps,
+  type ChainOfThoughtStep,
+  type ChainOfThoughtStepStatus,
+} from "./agentic/ChainOfThought";
+export {
+  ToolCall,
+  toolCallStatus,
+  TOOL_CALL_STATE_LABELS,
+  type ToolCallProps,
+  type ToolCallState,
+} from "./agentic/ToolCall";
+export { formatJsonSafe } from "./agentic/formatJsonSafe";
 export {
   Card,
   CardHeader,

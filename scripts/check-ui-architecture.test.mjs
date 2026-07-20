@@ -120,6 +120,28 @@ test("workflow-render hooks are distinct from public gateway data hooks", (conte
   assert.equal(check(root).ok, true);
 });
 
+test("agentic components are an approved typed props-driven UI layer", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  write(
+    root,
+    "packages/ui/src/agentic/Reasoning.tsx",
+    'import { Markdown } from "../primitives/markdown"; export function Reasoning(props: { text: string }) { return <div><Markdown content={props.text} /></div>; }\n',
+  );
+  write(
+    root,
+    "packages/ui/src/primitives/markdown.tsx",
+    "export function Markdown(props: { content: string }) { return <div>{props.content}</div>; }\n",
+  );
+  const baseline = snapshot(root);
+  assert.ok(
+    !baseline.allowedLegacyViolations.some((entry) =>
+      entry.includes("packages/ui/src/agentic/Reasoning.tsx"),
+    ),
+  );
+  assert.equal(check(root).ok, true);
+});
+
 for (const [name, mutate, expected] of [
   [
     "visual imports in packages/components",

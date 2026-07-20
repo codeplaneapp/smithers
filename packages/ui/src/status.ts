@@ -16,7 +16,7 @@ export type StatusClass = "ok" | "warn" | "bad" | "muted" | "run";
 export function statusClass(status: string | undefined): StatusClass {
   const normalized = normalizeStatus(status);
   if (["fixed", "ready", "done", "finished", "continued", "succeeded", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
-  if (["broken", "blocked", "failed", "failure", "error", "cancelled", "canceled", "stale", "orphaned"].includes(normalized)) return "bad";
+  if (["broken", "blocked", "failed", "failure", "error", "denied", "cancelled", "canceled", "stale", "orphaned"].includes(normalized)) return "bad";
   if (normalized === "running") return "run";
   if (
     ["partial", "missing-tests", "missing", "waiting", "paused", "recovering"].includes(normalized) ||
@@ -57,6 +57,7 @@ export function formatStatus(status: string | undefined): string {
     failed: "Failed",
     failure: "Failed",
     error: "Error",
+    denied: "Denied",
     cancelled: "Cancelled",
     canceled: "Cancelled",
     skipped: "Skipped",

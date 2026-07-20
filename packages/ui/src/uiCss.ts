@@ -405,6 +405,62 @@ export const stageStripCss = `
 .sui-stage-chip { flex:0 0 auto; text-transform:none; letter-spacing:0; }
 `;
 
+export const agenticReasoningCss = `
+.sui-reasoning { min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; overflow:hidden; }
+.sui-reasoning-trigger { width:100%; min-width:0; display:flex; align-items:center; gap:8px; padding:10px 14px; border:0; background:transparent; color:${t.foreground}; font:inherit; text-align:left; cursor:pointer; }
+.sui-reasoning-trigger:hover { background:${t.secondary}; }
+.sui-reasoning-trigger:focus-visible { ${focusRing} }
+.sui-reasoning-chevron { flex:none; display:inline-block; color:${t.mutedForeground}; font-size:18px; line-height:1; transform:rotate(0deg); transition:transform .12s ease; }
+.sui-reasoning-trigger[aria-expanded='true'] .sui-reasoning-chevron { transform:rotate(90deg); }
+.sui-reasoning-title { min-width:0; flex:1; font-size:13px; font-weight:650; }
+.sui-reasoning-duration { flex:none; color:${t.mutedForeground}; font-size:11px; font-variant-numeric:tabular-nums; }
+.sui-reasoning-body { min-width:0; padding:0 14px 12px; color:${t.mutedForeground}; font-size:13px; line-height:1.5; }
+.sui-reasoning-title[data-shimmer='true'], .sui-cot-title[data-shimmer='true'] { background:linear-gradient(90deg, ${t.mutedForeground} 35%, ${t.foreground} 50%, ${t.mutedForeground} 65%); background-size:200% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; animation:sui-shimmer-sweep 2s linear infinite; }
+@keyframes sui-shimmer-sweep { from { background-position:200% 0; } to { background-position:-200% 0; } }
+
+.sui-cot { min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; overflow:hidden; }
+.sui-cot-trigger { width:100%; min-width:0; display:flex; align-items:center; gap:8px; padding:10px 14px; border:0; background:transparent; color:${t.foreground}; font:inherit; text-align:left; cursor:pointer; }
+.sui-cot-trigger:hover { background:${t.secondary}; }
+.sui-cot-trigger:focus-visible { ${focusRing} }
+.sui-cot-chevron { flex:none; display:inline-block; color:${t.mutedForeground}; font-size:18px; line-height:1; transform:rotate(0deg); transition:transform .12s ease; }
+.sui-cot-trigger[aria-expanded='true'] .sui-cot-chevron { transform:rotate(90deg); }
+.sui-cot-title { min-width:0; flex:1; font-size:13px; font-weight:650; }
+.sui-cot-body { min-width:0; padding:0 14px 12px; }
+.sui-cot-steps { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.sui-cot-step { position:relative; min-width:0; display:grid; grid-template-columns:12px minmax(0, 1fr); column-gap:8px; align-items:start; color:${t.foreground}; font-size:13px; line-height:1.45; }
+.sui-cot-step::before { content:""; position:absolute; left:5px; top:13px; bottom:-9px; border-left:1px solid ${t.border}; }
+.sui-cot-step:last-child::before { display:none; }
+.sui-cot-step-dot { position:relative; z-index:1; width:10px; height:10px; margin-top:4px; border:2px solid ${t.card}; border-radius:999px; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
+.sui-cot-step[data-status='running'] .sui-cot-step-dot { background:${t.info}; }
+.sui-cot-step[data-status='complete'] .sui-cot-step-dot { background:${t.success}; }
+.sui-cot-step-label { min-width:0; overflow-wrap:anywhere; }
+.sui-cot-step-detail { grid-column:2; min-width:0; margin-top:2px; color:${t.mutedForeground}; font-size:12px; overflow-wrap:anywhere; }
+
+.sui-toolcall { min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; overflow:hidden; }
+.sui-toolcall-trigger, .sui-toolcall-header { width:100%; min-width:0; display:flex; align-items:center; gap:8px; padding:9px 12px; }
+.sui-toolcall-trigger { border:0; background:transparent; color:${t.foreground}; font:inherit; text-align:left; cursor:pointer; }
+.sui-toolcall-trigger:hover { background:${t.secondary}; }
+.sui-toolcall-trigger:focus-visible { ${focusRing} }
+.sui-toolcall-header { background:${t.secondary}; }
+.sui-toolcall-chevron { flex:none; display:inline-block; color:${t.mutedForeground}; font-size:18px; line-height:1; transform:rotate(0deg); transition:transform .12s ease; }
+.sui-toolcall-trigger[aria-expanded='true'] .sui-toolcall-chevron { transform:rotate(90deg); }
+.sui-toolcall-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:${t.fontMono}; font-size:12.5px; }
+.sui-toolcall-approval { min-width:0; padding:10px 12px; border-top:1px solid ${t.border}; }
+.sui-toolcall-body { min-width:0; display:grid; gap:10px; padding:10px 12px 12px; border-top:1px solid ${t.border}; }
+.sui-toolcall-section { min-width:0; display:grid; gap:5px; }
+.sui-toolcall-section-title { color:${t.mutedForeground}; font-size:10.5px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
+.sui-toolcall-pre { margin:0; padding:10px 12px; border-radius:${t.radiusControl}; background:${t.codeBg}; color:${t.codeText}; font-family:${t.fontMono}; font-size:12px; line-height:1.5; white-space:pre-wrap; overflow:auto; max-height:320px; }
+.sui-toolcall-error { color:${t.destructive}; }
+.sui-toolcall[data-layout='expanded'] .sui-toolcall-body { border-top:0; }
+
+.sui-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sui-reasoning-title[data-shimmer='true'], .sui-cot-title[data-shimmer='true'] { animation:none; background:none; background-clip:initial; -webkit-background-clip:initial; color:${t.mutedForeground}; }
+  .sui-reasoning-chevron, .sui-cot-chevron, .sui-toolcall-chevron { transition:none; }
+}
+`;
+
 /** All component sheets, composed in a stable order. */
 export const smithersUiCss = [
   buttonCss,
@@ -432,6 +488,7 @@ export const smithersUiCss = [
   markdownCss,
   pierreDiffCss,
   stageStripCss,
+  agenticReasoningCss,
 ]
   .map((block) => block.trim())
   .join("\n");

@@ -23,6 +23,7 @@ describe("statusClass", () => {
     expect(statusClass("canceled")).toBe("bad");
     expect(statusClass("stale")).toBe("bad");
     expect(statusClass("orphaned")).toBe("bad");
+    expect(statusClass("denied")).toBe("bad");
     expect(statusClass("recovering")).toBe("warn");
     expect(statusClass("something-new")).toBe("muted");
   });
@@ -37,6 +38,7 @@ describe("formatStatus", () => {
     expect(formatStatus("stale")).toBe("Stale");
     expect(formatStatus("orphaned")).toBe("Orphaned");
     expect(formatStatus("recovering")).toBe("Recovering");
+    expect(formatStatus("denied")).toBe("Denied");
     expect(formatStatus("ok")).toBe("Complete");
     expect(formatStatus("some-new-state")).toBe("Some New State");
     expect(formatStatus(undefined)).toBe("Unknown");
