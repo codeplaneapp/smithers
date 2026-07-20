@@ -107,4 +107,8 @@ test("top-level example workflows render as graphs", () => {
     } finally {
         cleanupStubs();
     }
-}, 240_000);
+// 100+ examples, each a separate CLI subprocess at ~2.4s on an idle machine, so
+// the old 240s budget was exactly the serial runtime: one added example or any
+// competing load tipped it into a timeout that looked like a render failure
+// (the spawn is killed, so stdout/stderr come back empty).
+}, 900_000);

@@ -17,7 +17,7 @@ import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { POSTGRES, SQLITE, quoteIdentifier } from "@smithers-orchestrator/db/dialect";
-import { createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
+import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
 import { resolve, join } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
@@ -42,6 +42,23 @@ import { prepareOutputSchemas } from "./prepareOutputSchemas.js";
 /** @typedef {import("./CreateSmithersOptions.ts").CreateSmithersOptions} CreateSmithersOptions */
 
 const hotCache = new Map();
+
+/**
+ * @param {unknown} db
+ */
+function createMemoryService(db) {
+    const contractStore = createMemoryStore(db);
+    const hindsightUrl = process.env.HINDSIGHT_URL?.trim();
+    if (hindsightUrl) {
+        return createHindsightMemoryStore({
+            baseUrl: hindsightUrl,
+            contractStore,
+            ...(process.env.HINDSIGHT_API_KEY ? { apiKey: process.env.HINDSIGHT_API_KEY } : {}),
+            ...(process.env.HINDSIGHT_BANK_PREFIX ? { bankPrefix: process.env.HINDSIGHT_BANK_PREFIX } : {}),
+        });
+    }
+    return createLocalMemoryRuntime(contractStore);
+}
 /**
  * @param {Record<string, any>} schemas
  * @param {string} dbPath
@@ -373,7 +390,7 @@ export function createSmithers(schemas, opts) {
             // around the cached database so every hot import uses its current
             // validators, defaults, transforms, metadata, and object policy.
             const { tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } = prepareSmithersTables(schemas);
-            const memoryService = createLocalMemoryRuntime(createMemoryStore(cached.api.db));
+            const memoryService = createMemoryService(cached.api.db);
             const { api } = buildSmithersApi({
                 db: cached.api.db,
                 tables,
@@ -454,8 +471,7 @@ export function createSmithers(schemas, opts) {
     // The synchronous factory owns the SQLite handle, so use it for the
     // documented local memory fallback and attach the runtime to each workflow.
     ensureSmithersTables(db);
-    const memoryStore = createMemoryStore(db);
-    const memoryService = createLocalMemoryRuntime(memoryStore);
+    const memoryService = createMemoryService(db);
     // 5. Build the public API around the prepared db + table metadata.
     const { api } = buildSmithersApi({
         db,

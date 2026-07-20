@@ -1,8 +1,8 @@
 # Smithers 0.29.0 launch thread
 
 Ready-to-post X/Twitter thread for the Smithers 0.29.0 release. Numbers are
-taken verbatim from the release stats (`git log v0.28.0..HEAD`): 222 commits,
-723 files changed, 84,573 insertions, 7,561 deletions, 50 feature commits,
+taken verbatim from the release stats (`git log v0.28.0..HEAD`): 223 commits,
+724 files changed, 84,638 insertions, 7,561 deletions, 50 feature commits,
 67 bug-fix commits, 22 test commits, 42 docs commits.
 
 Five tweets. The shared UI component library, the XState mount-time lint, and
@@ -18,7 +18,7 @@ recall/retain recording. See the [media plan](#media-plan).
 
 **Media:** [hero card → assets/tweet-01-hero.png](assets/tweet-01-hero.png)
 
-> Smithers 0.29.0 is out. 222 commits, 723 files changed, 84,573 insertions.
+> Smithers 0.29.0 is out. 223 commits, 724 files changed, 84,638 insertions.
 >
 > First-class agent memory, XState machines folded over durable rows, and Microsandbox microVMs.
 >
@@ -74,7 +74,7 @@ Characters: 253
 
 **Media:** [release inventory → assets/tweet-05-changelog.png](assets/tweet-05-changelog.png)
 
-> The honest shape of this release: 67 of 222 commits are fixes, 22 are tests.
+> The honest shape of this release: 67 of 223 commits are fixes, 22 are tests.
 >
 > An empty bind={[]} provenance binding now parks as missing instead of dispatching an unproven task. Cron fires are claimed by compare-and-set, so nothing double-fires.
 >
