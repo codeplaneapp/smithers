@@ -32,6 +32,13 @@ pre-existing breakage). Full recovery log: memory file
       CLI fork-provenance fixture, generated type docs, workflow ownership inventory, and sealed
       gate PATH. `packages/testing` passes 144/144 and `.smithers` passes 590/590; full root
       `pnpm test` has not yet been re-run.)_
+      _(2026-07-20 ~01:00Z: the full root rerun reached every workspace and ended with only three
+      package failures: CLI's XState spec inventory check raced the concurrent XState landing;
+      `.smithers` needed its derived DDD modules regenerated; and engine's module-resolution test
+      copied 443 MB of workspace-local `.smithers` runtime state into its fixture. Current focused
+      CLI/DDD reruns pass, the DDD regeneration landed as `0c3526d3f7`, and the fixture exclusion
+      plus regression test landed as `4ad19b20c8` with engine 1036/1036 passing. A fresh whole-root
+      pass is still required before checking this item.)_
 
 ## After the run finishes
 - [ ] Verify the final summarize output + jj log; confirm all rounds are committed (the workflow
