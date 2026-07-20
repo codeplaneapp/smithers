@@ -17,6 +17,11 @@ import type { ScenarioStep, ScenarioValue, StepRunner } from "../../src/index.ts
 // source (default) or the COMMITTED src/index.js package artifact, so the
 // adversarial forms are proven rejected in the shipped bundle too.
 const entry = process.argv[4] === "shipped" ? "../../src/index.js" : "../../src/index.ts";
+// Deterministic probe for the PARENT's spawn harness: die with a distinctive
+// status before any JSON is printed so the parent can prove its no-output
+// failure report carries the child's exit status/signal instead of the opaque
+// "produced no output" the old blocking helper raised.
+if (process.argv[2] === "diagnostics-exit-without-output") process.exit(43);
 // Sol's round-7 counterexample: the REFLECTION PRIMITIVE itself is a mutable
 // intrinsic. The forged toString reports the same stateless-looking source
 // for every function, so two different closures would share one anonymous
