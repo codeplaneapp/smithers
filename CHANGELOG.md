@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.29.0 (2026-07-20)
 
-219 commits since [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.0): 721 files changed, +84508 / -7561 lines. Release notes: [smithers.sh/changelogs/0.29.0](https://smithers.sh/changelogs/0.29.0).
+222 commits since [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.0): 723 files changed, +84573 / -7562 lines. Release notes: [smithers.sh/changelogs/0.29.0](https://smithers.sh/changelogs/0.29.0).
 
 ### Features (29 changes, 30 commits)
 

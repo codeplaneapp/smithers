@@ -15,7 +15,9 @@ import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
 import { zodToCreateTableSQL, zodSchemaColumns, syncZodTableSchema, syncZodTableSchemaPostgres } from "@smithers-orchestrator/db/zodToCreateTableSQL";
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { POSTGRES, SQLITE, quoteIdentifier } from "@smithers-orchestrator/db/dialect";
+import { createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
 import { resolve, join } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
@@ -197,12 +199,13 @@ function prepareSmithersTables(schemas) {
  *   outputs: Record<string, unknown>;
  *   zodToKeyName: Map<unknown, string>;
  *   ambiguousZodSchemas: Set<unknown>;
+ *   memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
  *   opts?: CreateSmithersOptions;
  *   inputSchema?: unknown;
  * }} config
  */
 function buildSmithersApi(config) {
-    const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, opts, inputSchema } = config;
+    const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, memoryService, opts, inputSchema } = config;
     const { SmithersContext: RuntimeSmithersContext, useCtx } = createSmithersContext();
     const ctxRef = { current: null };
     const moduleAlertPolicy = opts?.alertPolicy;
@@ -276,6 +279,7 @@ function buildSmithersApi(config) {
             readableName: opts?.readableName,
             description: opts?.description,
             db,
+            memoryService,
             build: (ctx) => {
                 ctxRef.current = ctx;
                 return React.createElement(RuntimeSmithersContext.Provider, { value: ctxRef.current }, React.createElement(GlobalSmithersContext.Provider, { value: ctxRef.current }, build(ctx)));
@@ -369,6 +373,7 @@ export function createSmithers(schemas, opts) {
             // around the cached database so every hot import uses its current
             // validators, defaults, transforms, metadata, and object policy.
             const { tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } = prepareSmithersTables(schemas);
+            const memoryService = createLocalMemoryRuntime(createMemoryStore(cached.api.db));
             const { api } = buildSmithersApi({
                 db: cached.api.db,
                 tables,
@@ -376,6 +381,7 @@ export function createSmithers(schemas, opts) {
                 outputs,
                 zodToKeyName,
                 ambiguousZodSchemas,
+                memoryService,
                 opts,
                 inputSchema: schemas.input,
             });
@@ -445,6 +451,11 @@ export function createSmithers(schemas, opts) {
     }
     // 4. Create Drizzle instance with all tables in the schema
     const db = drizzle(sqlite, { schema: drizzleSchema });
+    // The synchronous factory owns the SQLite handle, so use it for the
+    // documented local memory fallback and attach the runtime to each workflow.
+    ensureSmithersTables(db);
+    const memoryStore = createMemoryStore(db);
+    const memoryService = createLocalMemoryRuntime(memoryStore);
     // 5. Build the public API around the prepared db + table metadata.
     const { api } = buildSmithersApi({
         db,
@@ -453,6 +464,7 @@ export function createSmithers(schemas, opts) {
         outputs,
         zodToKeyName,
         ambiguousZodSchemas,
+        memoryService,
         opts,
         inputSchema: schemas.input,
     });
