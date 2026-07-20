@@ -47,17 +47,17 @@ const hotCache = new Map();
  * @param {unknown} db
  */
 function createMemoryService(db) {
-    const contractStore = createMemoryStore(db);
-    const hindsightUrl = process.env.HINDSIGHT_URL?.trim();
-    if (hindsightUrl) {
-        return createHindsightMemoryStore({
-            baseUrl: hindsightUrl,
-            contractStore,
-            ...(process.env.HINDSIGHT_API_KEY ? { apiKey: process.env.HINDSIGHT_API_KEY } : {}),
-            ...(process.env.HINDSIGHT_BANK_PREFIX ? { bankPrefix: process.env.HINDSIGHT_BANK_PREFIX } : {}),
-        });
-    }
-    return createLocalMemoryRuntime(contractStore);
+	const contractStore = createMemoryStore(db);
+	const hindsightUrl = process.env.HINDSIGHT_URL?.trim();
+	if (hindsightUrl) {
+		return createHindsightMemoryStore({
+			baseUrl: hindsightUrl,
+			contractStore,
+			...(process.env.HINDSIGHT_API_KEY ? { apiKey: process.env.HINDSIGHT_API_KEY } : {}),
+			...(process.env.HINDSIGHT_BANK_PREFIX ? { bankPrefix: process.env.HINDSIGHT_BANK_PREFIX } : {}),
+		});
+	}
+	return createLocalMemoryRuntime(contractStore);
 }
 /**
  * @param {Record<string, any>} schemas
@@ -222,7 +222,7 @@ function prepareSmithersTables(schemas) {
  * }} config
  */
 function buildSmithersApi(config) {
-    const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, memoryService, opts, inputSchema } = config;
+	const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, memoryService, opts, inputSchema } = config;
     const { SmithersContext: RuntimeSmithersContext, useCtx } = createSmithersContext();
     const ctxRef = { current: null };
     const moduleAlertPolicy = opts?.alertPolicy;
@@ -296,7 +296,7 @@ function buildSmithersApi(config) {
             readableName: opts?.readableName,
             description: opts?.description,
             db,
-            memoryService,
+			memoryService,
             build: (ctx) => {
                 ctxRef.current = ctx;
                 return React.createElement(RuntimeSmithersContext.Provider, { value: ctxRef.current }, React.createElement(GlobalSmithersContext.Provider, { value: ctxRef.current }, build(ctx)));
@@ -468,8 +468,6 @@ export function createSmithers(schemas, opts) {
     }
     // 4. Create Drizzle instance with all tables in the schema
     const db = drizzle(sqlite, { schema: drizzleSchema });
-    // The synchronous factory owns the SQLite handle, so use it for the
-    // documented local memory fallback and attach the runtime to each workflow.
     ensureSmithersTables(db);
     const memoryService = createMemoryService(db);
     // 5. Build the public API around the prepared db + table metadata.
