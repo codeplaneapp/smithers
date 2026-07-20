@@ -25,6 +25,7 @@ import ResearchPrompt from "../prompts/implement-testing-framework-e2e-research.
 
 const ROOT = process.cwd();
 const LONG = 1_800_000;
+const IMPL_LONG = 3_600_000;
 const HEARTBEAT = 600_000;
 const AGENT_RETRIES = 2;
 const CHECK_TIMEOUT_MS = 7_200_000;
@@ -675,7 +676,7 @@ export default smithers((ctx) => {
     .filter((command) => command.length > 0 && command.length <= 1_000 && !command.includes("\n") && !command.includes("\0"));
   const reusePlanRunId = ctx.input.reusePlanRunId?.trim() || null;
   // Run ids are not always run-prefixed: forks mint UUIDs and `smithers up --run-id` accepts arbitrary slugs.
-  if (reusePlanRunId && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(reusePlanRunId)) {
+  if (reusePlanRunId && !/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]*$/.test(reusePlanRunId)) {
     throw new Error("reusePlanRunId must be a Smithers run id.");
   }
 
@@ -692,7 +693,7 @@ export default smithers((ctx) => {
     initialReview.reviewedDiffDigest === initialEvidence.diffDigest,
   );
   const initialReviewHasBlockingIssues = Boolean(
-    initialReview?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"),
+    initialReview?.issues?.some((finding) => finding.severity === "critical" || finding.severity === "major"),
   );
   const initialNeedsFix = Boolean(
     initialEvidence &&
@@ -768,7 +769,7 @@ export default smithers((ctx) => {
           }
         />
 
-        <Task id="implement" output={outputs.implementation} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task id="implement" output={outputs.implementation} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
           <ImplementPrompt
             objective={objective}
             contract={DEFAULT_OBJECTIVE}
@@ -795,7 +796,7 @@ export default smithers((ctx) => {
           if={initialNeedsFix}
           then={
             <Sequence>
-              <Task id="initial-luna-fix" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task id="initial-luna-fix" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
                 <InitialFixPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -809,7 +810,10 @@ export default smithers((ctx) => {
           else={null}
         />
 
-        <Loop id="sol-readiness" maxIterations={maxRounds} until={solReady} onMaxReached="fail">
+        {/* 2026-07-19: +2 headroom — rounds burned on a root-gate red external to the target
+            scope (undeclared dep in .smithers/ui/finish-campaigns.tsx, since fixed); Sol's
+            round-6 review approved with zero issues. Improvement rounds stay capped at maxRounds. */}
+        <Loop id="sol-readiness" maxIterations={maxRounds + 2} until={solReady} onMaxReached="fail">
           <Sequence>
             <Task id="capture-sol-readiness" output={outputs.evidence} noRetry>
               {async () => captureEvidence({ runId: ctx.runId, phase: "sol-readiness", round: nextReadinessRound, baseline: baseline! })}
@@ -867,7 +871,7 @@ export default smithers((ctx) => {
                   currentSnapshot.actualDiffDigest === currentEvidence.diffDigest,
                 );
                 const artifactsComplete = Boolean(currentEvidence && currentSol && currentSnapshot && currentEvidence.checks.length > 0);
-                const hasBlockingIssues = Boolean(currentSol?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"));
+                const hasBlockingIssues = Boolean(currentSol?.issues?.some((finding) => finding.severity === "critical" || finding.severity === "major"));
                 if (!checksPassed) reasons.push("deterministic verification checks or scope checks failed");
                 if (!solCurrent) reasons.push("Sol review does not identify the current iteration and diff digest");
                 if (!currentSol?.lgtm) reasons.push("Sol requested changes");
@@ -896,7 +900,7 @@ export default smithers((ctx) => {
             <Branch
               if={solNeedsImprovement && nextReadinessRound <= maxRounds}
               then={
-                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
                   <ConsensusImprovementPrompt
                     objective={objective}
                     contract={DEFAULT_OBJECTIVE}
@@ -914,7 +918,7 @@ export default smithers((ctx) => {
           </Sequence>
         </Loop>
 
-        <Loop id="final-consensus" maxIterations={maxRounds} until={consensusApproved} onMaxReached="fail">
+        <Loop id="final-consensus" maxIterations={maxRounds + 2} until={consensusApproved} onMaxReached="fail">
           <Sequence>
             <Task id="capture-consensus-iteration" output={outputs.evidence} noRetry>
               {async () => captureEvidence({ runId: ctx.runId, phase: "consensus", round: nextConsensusRound, baseline: baseline! })}
@@ -989,8 +993,8 @@ export default smithers((ctx) => {
                   currentSnapshot.actualDiffDigest === currentEvidence.diffDigest,
                 );
                 const artifactsComplete = Boolean(currentEvidence && currentSol && currentFable && currentSnapshot && currentEvidence.checks.length > 0);
-                const solHasBlockingIssues = Boolean(currentSol?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"));
-                const fableHasBlockingIssues = Boolean(currentFable?.issues.some((finding) => finding.severity === "critical" || finding.severity === "major"));
+                const solHasBlockingIssues = Boolean(currentSol?.issues?.some((finding) => finding.severity === "critical" || finding.severity === "major"));
+                const fableHasBlockingIssues = Boolean(currentFable?.issues?.some((finding) => finding.severity === "critical" || finding.severity === "major"));
                 if (!checksPassed) reasons.push("deterministic verification checks or scope checks failed");
                 if (!solCurrent) reasons.push("Sol review does not identify the current iteration and diff digest");
                 if (!fableCurrent) reasons.push("Fable review does not identify the current iteration and diff digest");
@@ -1024,7 +1028,7 @@ export default smithers((ctx) => {
               if={consensusNeedsImprovement && nextConsensusRound <= maxRounds}
               then={
                 <Sequence>
-                  <Task id="consensus-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                  <Task id="consensus-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
                     <ConsensusImprovementPrompt
                       objective={objective}
                       contract={DEFAULT_OBJECTIVE}

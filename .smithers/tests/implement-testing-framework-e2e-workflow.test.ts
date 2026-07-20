@@ -374,22 +374,27 @@ describe.serial("implement-testing-framework-e2e behavior", () => {
   test("bounds both rejected review loops without an unvalidated final mutation", async () => {
     await isolated(async ({ workflow }) => {
       const readiness = simulate(workflow, { input: { maxRounds: 1, verificationProfile: "focused" }, workflowPath: WORKFLOW_PATH, mocks: simulationMocks(false, true) });
-      await expect(readiness.run()).rejects.toThrow("Ralph sol-readiness reached maxIterations 1");
+      // Loops allow two verification-only grace iterations past maxRounds (improvement stays
+      // capped at maxRounds), so a round invalidated by an out-of-scope gate failure can
+      // re-verify instead of hard-failing the run.
+      await expect(readiness.run()).rejects.toThrow("Ralph sol-readiness reached maxIterations 3");
+      const readinessIteration = ["capture-sol-readiness", "sol-readiness-review", "verify-sol-readiness-snapshot", "assess-sol-readiness"];
       expect(readiness.executed).toEqual([
         "validate-input-and-agents", "research", "plan", "implement", "capture-initial-evidence", "initial-sol-review",
-        "capture-sol-readiness", "sol-readiness-review", "verify-sol-readiness-snapshot", "assess-sol-readiness",
+        ...readinessIteration, ...readinessIteration, ...readinessIteration,
       ]);
       expect(readiness.executed).not.toContain("sol-readiness-luna-improvement");
       expect(readiness.executed).not.toContain("consensus-fable-review");
 
       const sim = simulate(workflow, { input: { maxRounds: 1, verificationProfile: "focused" }, workflowPath: WORKFLOW_PATH, mocks: simulationMocks(true) });
-      await expect(sim.run()).rejects.toThrow("Ralph final-consensus reached maxIterations 1");
+      await expect(sim.run()).rejects.toThrow("Ralph final-consensus reached maxIterations 3");
+      const consensusIteration = ["capture-consensus-iteration", "consensus-sol-review", "consensus-fable-review", "verify-review-snapshot", "assess-consensus"];
       expect(sim.executed).toEqual([
         "validate-input-and-agents", "research", "plan", "implement", "capture-initial-evidence", "initial-sol-review",
         "capture-sol-readiness", "sol-readiness-review", "verify-sol-readiness-snapshot", "assess-sol-readiness",
-        "capture-consensus-iteration", "consensus-sol-review", "consensus-fable-review", "verify-review-snapshot", "assess-consensus",
+        ...consensusIteration, ...consensusIteration, ...consensusIteration,
       ]);
-      expect(sim.task("assess-consensus").outputs).toHaveLength(1);
+      expect(sim.task("assess-consensus").outputs).toHaveLength(3);
       expect(sim.task("assess-consensus").outputs[0]).toMatchObject({ approved: false, failureReasons: ["Fable requested changes", "Fable reported critical or major issues"] });
       expect(sim.executed).not.toContain("final-verify-and-summarize");
       expect(sim.executed).not.toContain("consensus-luna-improvement");
