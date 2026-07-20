@@ -9,15 +9,14 @@ Five tweets. The shared UI component library, the XState mount-time lint, and
 the long tail of smaller improvements were cut to keep the thread on the three
 features worth a demo. They stay in the [changelog](https://smithers.sh/changelogs/0.29.0).
 
-Two tweets need **real recorded media** that does not exist yet: a live XState
-machine visualization driven by a realistic workflow (tweet 3) and a memory
-recall/retain visualization (tweet 2). See the [media plan](#media-plan).
+Media is attached for tweets 1, 3, 4, and 5. Tweet 2 still needs a memory
+recall/retain recording. See the [media plan](#media-plan).
 
 ---
 
 ### 1. Tweet 1
 
-**Media:** hero card (TODO)
+**Media:** [hero card → assets/tweet-01-hero.png](assets/tweet-01-hero.png)
 
 > Smithers 0.29.0 is out. 217 commits, 721 files changed, 84,201 insertions.
 >
@@ -60,7 +59,7 @@ Characters: 256
 
 ### 4. Tweet 4
 
-**Media:** microVM architecture diagram (TODO)
+**Media:** [microVM diagram → assets/tweet-04-diagram.png](assets/tweet-04-diagram.png)
 
 > Microsandbox is a first-class sandbox provider now, and it is fully open source.
 >
@@ -73,7 +72,7 @@ Characters: 253
 
 ### 5. Tweet 5
 
-**Media:** release inventory card (TODO)
+**Media:** [release inventory → assets/tweet-05-changelog.png](assets/tweet-05-changelog.png)
 
 > The honest shape of this release: 67 of 217 commits are fixes, 22 are tests.
 >
@@ -124,11 +123,33 @@ approve the gate, then
 `bunx smithers-orchestrator signal <runId> REVISE --data '{"feedback":"..."}'`
 and the machine advances `research → approval → draft-r0 → revise-r0 → draft-r1`.
 
-### Tweet 2 — Memory visualization (blocking, must be built)
+### Tweet 2 — Memory visualization (BLOCKED, needs a Hindsight instance)
 
-`packages/components/src/components/Memory.js` exists but nothing renders memory
-state. Needs a UI showing, per task: what was recalled before the task, the
-remember/recall tool calls during it, and the digest retained after.
+The demo and UI are built, committed, and tested
+(`.smithers/workflows/memory-recall-demo.tsx`, `.smithers/ui/memory-recall-demo.tsx`),
+and run `run-1784541678447` finished 3/3 nodes. The UI correctly renders the
+recall → task → retain lane per task and labels each policy
+(inherited / overridden / opted out).
+
+**But every lane is empty**, and truthfully so:
+
+- `HINDSIGHT_URL` is unset, so the bank-backed store is inactive. The UI shows
+  "No recalled block is exposed by the gateway" and "Retention is disabled".
+- Even with it set, the *first* run of a fresh bank has nothing to recall.
+  Memory only looks like anything on run two.
+
+So a screenshot today would show a memory feature recalling nothing — worse
+than no image. To produce it:
+
+1. Set `HINDSIGHT_URL` (+ `HINDSIGHT_API_KEY`) against a real Hindsight
+   instance.
+2. Run the demo twice with related tickets, so run two recalls run one.
+3. Capture run two, where the RECALL and RETAIN lanes carry real content.
+
+Open question to confirm while doing this: whether recalled blocks and
+remember/recall tool calls are exposed over the gateway at all, or whether the
+UI can only ever show resolved policy. If the former, that gap is a Smithers
+defect worth fixing before the tweet.
 
 ### Tweets 1, 4, 5 — designed cards (SVG authored)
 
