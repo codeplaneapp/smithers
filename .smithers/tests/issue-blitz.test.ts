@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { renderWorkflow } from "smithers-orchestrator/testing";
 
-import { buildIssueBlitzNodeState } from "../lib/buildIssueBlitzNodeState";
+import { buildIssueBlitzNodeState } from "../ui/issue-blitz";
 
 const workflowSource = readFileSync(join(import.meta.dir, "../workflows/issue-blitz.tsx"), "utf8");
 const issueTrainSource = readFileSync(join(import.meta.dir, "../workflows/issue-train.tsx"), "utf8");

@@ -60,7 +60,7 @@ function eventStatus(type: string): NodeStatus | undefined {
   if (["nodestarted", "node.started", "noderetrying", "node.retrying", "taskheartbeat", "task.heartbeat"].includes(normalized)) return "running";
   return undefined;
 }
-function buildIssueBlitzNodeState(events: readonly unknown[]): NodeState {
+export function buildIssueBlitzNodeState(events: readonly unknown[]): NodeState {
   const status = new Map<string, NodeStatus>();
   const iteration = new Map<string, number>();
   for (const raw of events) {
