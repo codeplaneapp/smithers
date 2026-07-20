@@ -111,6 +111,9 @@ packages/server/tests/.test-lifecycle-*/
 # Engine dynamic-workflow e2e scratch dirs (sqlite + generated tsx, cleaned after the run
 # but visible to mid-test jj snapshots).
 packages/engine/tests/.tmp-dynamic-wf-*/
+# CLI pack-install e2e scratch dirs (fixture pack + lockfile, cleaned after the run but
+# visible to a concurrent snapshot, which fails the release stale-artifact check).
+apps/cli/tests/.tmp-*/
 **/cov*/
 **/tmp/verification/
 .context/

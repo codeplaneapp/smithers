@@ -435,23 +435,6 @@ async function tableColumnNamesPostgres(pgConn, table) {
         .filter((name) => typeof name === "string"));
 }
 
-const OUTPUT_PROVENANCE_BACKFILL_MARKER = "0030_output_provenance_backfill_complete";
-
-/** @param {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] }> }} pgConn */
-async function hasPostgresOutputProvenanceBackfillMarker(pgConn) {
-    const result = await pgConn.query({
-        text: "SELECT details_json FROM _smithers_schema_migrations WHERE id = $1 LIMIT 1",
-        values: ["0030_output_provenance"],
-    });
-    const details = result.rows?.[0]?.details_json;
-    if (typeof details !== "string") return false;
-    try {
-        return JSON.parse(details)?.marker === OUTPUT_PROVENANCE_BACKFILL_MARKER;
-    }
-    catch {
-        return false;
-    }
-}
 
 async function indexExistsPostgres(pgConn, index) {
     const result = await pgConn.query({
@@ -682,12 +665,7 @@ async function recordMigrationPostgres(pgConn, migration, details) {
         text: `INSERT INTO _smithers_schema_migrations
           (id, name, applied_at_ms, checksum, destructive, details_json)
           VALUES ($1, $2, $3, $4, $5, $6)
-          ON CONFLICT (id) DO UPDATE SET
-            name = EXCLUDED.name,
-            applied_at_ms = EXCLUDED.applied_at_ms,
-            checksum = EXCLUDED.checksum,
-            destructive = EXCLUDED.destructive,
-            details_json = COALESCE(EXCLUDED.details_json, _smithers_schema_migrations.details_json)`,
+          ON CONFLICT (id) DO NOTHING`,
         values: [
             migration.id,
             migration.name,
@@ -1261,8 +1239,12 @@ function buildMigrations(context) {
             checksum: "packages/db/migrations/0030_output_provenance.sql",
             // 0001/current-schema bootstrap creates this table before the
             // migration runner. Presence therefore cannot mean backfill ran.
+            // Both dialects re-run the (idempotent, ON CONFLICT DO NOTHING)
+            // backfill rather than short-circuiting on a ledger marker: writing
+            // a marker into details_json makes a migrated target's ledger row
+            // diverge from its source, breaking the row-for-row copy contract.
             isApplied: () => false,
-            isAppliedPostgres: (pgConn) => hasPostgresOutputProvenanceBackfillMarker(pgConn),
+            isAppliedPostgres: async () => false,
             up: (sqlite) => {
                 sqlite.run(createTableStatementFor("_smithers_output_provenance", context.createTableStatements));
                 if (!tableExists(sqlite, "_smithers_nodes")) return { table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
@@ -1287,7 +1269,7 @@ function buildMigrations(context) {
             },
             upPostgres: async (pgConn) => {
                 await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_output_provenance", context.createTableStatements)) });
-                if (!(await tableExistsPostgres(pgConn, "_smithers_nodes"))) return { marker: OUTPUT_PROVENANCE_BACKFILL_MARKER, table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
+                if (!(await tableExistsPostgres(pgConn, "_smithers_nodes"))) return { table: "_smithers_output_provenance", backfilled: 0, skipped: "missing_nodes" };
                 const nodes = await pgConn.query({ text: `SELECT DISTINCT run_id, output_table FROM _smithers_nodes ORDER BY run_id, output_table` });
                 const catalog = await pgConn.query({
                     text: "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name",
@@ -1317,7 +1299,7 @@ function buildMigrations(context) {
                         inserted += 1;
                     }
                 }
-                return { marker: OUTPUT_PROVENANCE_BACKFILL_MARKER, table: "_smithers_output_provenance", backfilled: inserted };
+                return { table: "_smithers_output_provenance", backfilled: inserted };
             },
         },
     ];

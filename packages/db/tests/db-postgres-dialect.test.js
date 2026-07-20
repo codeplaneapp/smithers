@@ -161,7 +161,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(after.map((row) => row.id)).toEqual(ids);
     });
 
-    test("0030 skips missing/incompatible output tables, resolves quoted names, and does not rescan after completion", async () => {
+    test("0030 skips missing/incompatible output tables, resolves quoted names, and re-runs idempotently", async () => {
         await client.query(`
             CREATE TABLE "out_camel" (
                 run_id TEXT NOT NULL,
@@ -188,13 +188,16 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(await storage.queryAll(`SELECT output_table, node_id FROM _smithers_output_provenance WHERE run_id = ?`, ['migration-backfill'])).toEqual([
             { outputTable: 'out_camel', nodeId: 'camel' },
         ]);
-        const marker = await storage.queryOne(`SELECT details_json FROM _smithers_schema_migrations WHERE id = ?`, ['0030_output_provenance']);
-        expect(JSON.parse(marker.detailsJson).marker).toBe('0030_output_provenance_backfill_complete');
-
+        // The backfill deliberately re-runs on every ensureSchema instead of
+        // short-circuiting on a ledger marker: a marker in details_json makes a
+        // migrated target's ledger row diverge from its source and breaks the
+        // row-for-row store-migration copy contract. Re-running must therefore
+        // be idempotent (ON CONFLICT DO NOTHING) and must pick up later rows.
         await client.query(`INSERT INTO "out_camel" (run_id, node_id, iteration, payload) VALUES ('migration-backfill', 'new-after-backfill', 0, 'late')`);
         await storage.ensureSchema();
         expect(await storage.queryAll(`SELECT node_id FROM _smithers_output_provenance WHERE run_id = ? ORDER BY node_id`, ['migration-backfill'])).toEqual([
             { nodeId: 'camel' },
+            { nodeId: 'new-after-backfill' },
         ]);
     });
 
