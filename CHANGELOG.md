@@ -6,10 +6,14 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.29.1 (2026-07-19)
 
-152 commits since the last npm release, [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.1): 655 files changed, +76935 / -7303 lines. Release notes: [smithers.sh/changelogs/0.29.1](https://smithers.sh/changelogs/0.29.1).
+185 commits since [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.1): 696 files changed, +101290 / -7518 lines. Release notes: [smithers.sh/changelogs/0.29.1](https://smithers.sh/changelogs/0.29.1).
 
-### Features (25 changes, 26 commits)
+### Features (29 changes, 30 commits)
 
+- feat(xstate): reducer hash-versioning, sound prefix-cache key, bounded LRU ([8e767206f1](https://github.com/smithersai/smithers/commit/8e767206f1))
+- feat(xstate): eventReceived correlationId scoping, timedOut bind fix, signal coverage tests ([44a61c7159](https://github.com/smithersai/smithers/commit/44a61c7159))
+- feat(xstate): add re-entry task-identity lint ([f11a0f95e1](https://github.com/smithersai/smithers/commit/f11a0f95e1))
+- feat(xstate): add @smithers-orchestrator/xstate durable machine fold package ([6180c27b37](https://github.com/smithersai/smithers/commit/6180c27b37))
 - feat(smithers): add finish-campaigns two-lane workflow (opencode-kimi + codex-sol) with UI, tests, and todo.md restore ([ccd962c5e3](https://github.com/smithersai/smithers/commit/ccd962c5e3))
 - feat(ui): add shared Terminal xterm adapter ([1eef7ff71c](https://github.com/smithersai/smithers/commit/1eef7ff71c))
 - feat(ui): add shared StageStrip pipeline-stage chip strip ([34323ac1b8](https://github.com/smithersai/smithers/commit/34323ac1b8))
@@ -41,15 +45,16 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(provenance): park bind={[]} as missing instead of dispatching unproven ([42045da538](https://github.com/smithersai/smithers/commit/42045da538))
 - fix(testing): harden real-process admission against impostor runner scripts ([3811f25961](https://github.com/smithersai/smithers/commit/3811f25961))
 
-### Bug fixes (30)
+### Bug fixes (31)
 
+- fix(time-travel): skip cwds never jj-snapshotted in planSandboxReverts ([59a528e463](https://github.com/smithersai/smithers/commit/59a528e463))
 - fix(signal): declare alchemy and @cloudflare/containers as runtime dependencies ([eef472ab57](https://github.com/smithersai/smithers/commit/eef472ab57))
 - fix(ceo-intel): narrow assess-batch id filter so tsc accepts the regex test ([4c96d0d12e](https://github.com/smithersai/smithers/commit/4c96d0d12e))
 - fix(signal): preserve cancellation/signal diagnostics past the failure-tail truncation ([f1dd6f2bbc](https://github.com/smithersai/smithers/commit/f1dd6f2bbc))
 - fix(signal): redact secrets from surfaced errors, regression-test onStepEnd+Zod (phase 2, round 5) ([d1c3d2e620](https://github.com/smithersai/smithers/commit/d1c3d2e620))
 - fix(signal): durable manual-trigger, finite retry budget, full-model probes (phase 2, round 4) ([671bf50c2b](https://github.com/smithersai/smithers/commit/671bf50c2b))
 - fix(signal): render the real issue date, not the prompt placeholder ([432cc212af](https://github.com/smithersai/smithers/commit/432cc212af))
-- fix(signal): select a provider that can actually serve — probe/serving parity for the model fallback ([357e7f469b](https://github.com/smithersai/smithers/commit/357e7f469b))
+- fix(signal): select a provider that can actually serve; probe/serving parity for the model fallback ([357e7f469b](https://github.com/smithersai/smithers/commit/357e7f469b))
 - fix(signal): manual /trigger survives client disconnect, adds 409 in-flight guard ([54088d7f3e](https://github.com/smithersai/smithers/commit/54088d7f3e))
 - fix(agents): stop treating allowed-with-overage-rejected rate_limit_events as quota failures ([58743d6b20](https://github.com/smithersai/smithers/commit/58743d6b20))
 - fix(db): probe output tables via sqlite_master on sqlite-dialect external backends ([2c1c1c724e](https://github.com/smithersai/smithers/commit/2c1c1c724e))
@@ -89,8 +94,9 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - test(pack): pin issue-train safety gates, microsandbox-finish prep, and PATH-fallback jj resolution ([02c8fcfee0](https://github.com/smithersai/smithers/commit/02c8fcfee0))
 - test(server): cover gateway UI bundle retry when a poisoned global Bun plugin breaks in-process Bun.build ([9af2f9f193](https://github.com/smithersai/smithers/commit/9af2f9f193))
 
-### Documentation (14)
+### Documentation (15)
 
+- docs(xstate): add XState integration page and regenerate llms bundles ([87f839995e](https://github.com/smithersai/smithers/commit/87f839995e))
 - docs(how-it-works): useState is process-local across frames, not reset per frame; regen llms bundles ([99f6634b58](https://github.com/smithersai/smithers/commit/99f6634b58))
 - docs(reference): add feature-inventory and browser runtime pages, tighten component/package doc coverage gates, regen llms bundles ([cfe08a07f9](https://github.com/smithersai/smithers/commit/cfe08a07f9))
 - docs(spec): add external-integrations, runtime-portability, schedules-alerts, workflow-packs, and workflow-testing feature specs; regen ddd UI modules ([597490436a](https://github.com/smithersai/smithers/commit/597490436a))
@@ -106,8 +112,32 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: align onboarding with the curated workflow pack ([63f7e29121](https://github.com/smithersai/smithers/commit/63f7e29121))
 - docs: correct 0.28.0 release stats for the re-pointed tag (1188 commits, 424 fixes) ([06a02a892c](https://github.com/smithersai/smithers/commit/06a02a892c))
 
-### Chores and maintenance (70 changes, 71 commits)
+### Chores and maintenance (94 changes, 98 commits)
 
+- keep renderer version synchronized ([a344b5a012](https://github.com/smithersai/smithers/commit/a344b5a012))
+- record testing campaign gate progress ([a71241fc30](https://github.com/smithersai/smithers/commit/a71241fc30), [5939bb1565](https://github.com/smithersai/smithers/commit/5939bb1565))
+- seal riskless gate toolchain PATH ([f3cb53a48a](https://github.com/smithersai/smithers/commit/f3cb53a48a), [a43384cb3f](https://github.com/smithersai/smithers/commit/a43384cb3f))
+- drop stray brace in the re-entry lint table ([68326fe369](https://github.com/smithersai/smithers/commit/68326fe369))
+- refresh webhook declarations ([14d4f416c2](https://github.com/smithersai/smithers/commit/14d4f416c2))
+- distinguish workflow render hooks ([e3945356a0](https://github.com/smithersai/smithers/commit/e3945356a0))
+- regenerate llms bundles for the rebased xstate docs ([c23ae3f9a9](https://github.com/smithersai/smithers/commit/c23ae3f9a9))
+- align package version with the 0.29.1 release ([d5a165cf29](https://github.com/smithersai/smithers/commit/d5a165cf29))
+- pin shared-clock seq uniqueness across concurrent signals and outputs ([2cd3246aa0](https://github.com/smithersai/smithers/commit/2cd3246aa0))
+- mark the xstate peer optional and gate the facade's isolation ([faf4476118](https://github.com/smithersai/smithers/commit/faf4476118))
+- keep provenance seq on the live completion row ([bbc9d85481](https://github.com/smithersai/smithers/commit/bbc9d85481))
+- replace em-dashes with house-style punctuation ([d005899049](https://github.com/smithersai/smithers/commit/d005899049))
+- document re-entry lint, eventReceived options bag, cache key ([7c3bb99320](https://github.com/smithersai/smithers/commit/7c3bb99320))
+- exact xstate devDep pin + API-presence assertion ([bb1b79946f](https://github.com/smithersai/smithers/commit/bb1b79946f))
+- determinism-error and final-state/liveness conformance coverage ([0c4edd82d2](https://github.com/smithersai/smithers/commit/0c4edd82d2))
+- assign owners to shipped workflows ([fb97dd2afc](https://github.com/smithersai/smithers/commit/fb97dd2afc))
+- sync no-Kimi role expectations ([696abc8321](https://github.com/smithersai/smithers/commit/696abc8321))
+- document tagged event results ([d324a2e45e](https://github.com/smithersai/smithers/commit/d324a2e45e))
+- support fork provenance reads ([feb3e0565a](https://github.com/smithersai/smithers/commit/feb3e0565a))
+- declare workflow UI runtime dependency ([58f55edb85](https://github.com/smithersai/smithers/commit/58f55edb85))
+- refresh generated artifacts ([c346de1686](https://github.com/smithersai/smithers/commit/c346de1686))
+- 0.29.1 ([0a0d47706a](https://github.com/smithersai/smithers/commit/0a0d47706a))
+- prepare 0.29.1 changelog ([5b5c647431](https://github.com/smithersai/smithers/commit/5b5c647431))
+- track current schema migration head ([39d167e040](https://github.com/smithersai/smithers/commit/39d167e040), [efc6ecfa92](https://github.com/smithersai/smithers/commit/efc6ecfa92))
 - expose durable signal rows to workflow contexts ([893d5abeb6](https://github.com/smithersai/smithers/commit/893d5abeb6))
 - sync tokens to design system v2 and render the workspace picker mark ([88506c1f3e](https://github.com/smithersai/smithers/commit/88506c1f3e))
 - align status semantics with design system v2 (running=brand, waiting/paused=amber, queued/pending=muted) ([93fa907be6](https://github.com/smithersai/smithers/commit/93fa907be6))
@@ -126,12 +156,12 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - add shared FileTree component ([534501163f](https://github.com/smithersai/smithers/commit/534501163f))
 - port dependency-free DiffHunks + diff domain into packages/ui ([d279bcc909](https://github.com/smithersai/smithers/commit/d279bcc909))
 - add shared CollapsiblePanel component ([983966d392](https://github.com/smithersai/smithers/commit/983966d392))
-- close coverage backlog — rewind retry-survivor, fork seq allocation, provenance atomicity, untagged timeout hard-error ([58498fdd25](https://github.com/smithersai/smithers/commit/58498fdd25))
+- close coverage backlog: rewind retry-survivor, fork seq allocation, provenance atomicity, untagged timeout hard-error ([58498fdd25](https://github.com/smithersai/smithers/commit/58498fdd25))
 - restore exact rewind state and provenance ([4d416c6a34](https://github.com/smithersai/smithers/commit/4d416c6a34))
 - require explicit tagged wait results ([c9bf71e810](https://github.com/smithersai/smithers/commit/c9bf71e810))
 - expose durable typed output rows ([962728913d](https://github.com/smithersai/smithers/commit/962728913d))
 - persist shared output and signal provenance ([9f2b689efd](https://github.com/smithersai/smithers/commit/9f2b689efd))
-- xstate spec rev 3 — fold in Fable review + Phase 0 validation findings ([29cdb06605](https://github.com/smithersai/smithers/commit/29cdb06605))
+- xstate spec rev 3: fold in Fable review + Phase 0 validation findings ([29cdb06605](https://github.com/smithersai/smithers/commit/29cdb06605))
 - preserve facade component prop types (#1353) ([6eb1192d19](https://github.com/smithersai/smithers/commit/6eb1192d19))
 - add XState integration design spec (derived-fold model, rev 2 post sol review) ([63799b8184](https://github.com/smithersai/smithers/commit/63799b8184))
 - chore(workflows): mark daily-ceo-intel pack source as example ([00f8f5a85f](https://github.com/smithersai/smithers/commit/00f8f5a85f))
@@ -178,7 +208,6 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - add Hindsight-backed storage ([e5f97bb1b5](https://github.com/smithersai/smithers/commit/e5f97bb1b5))
 - add declarative Memory context ([efb533bd52](https://github.com/smithersai/smithers/commit/efb533bd52))
 - define the Memory component contract ([66a4876477](https://github.com/smithersai/smithers/commit/66a4876477))
-
 ## 0.28.0 (2026-07-15)
 
 1188 commits since [v0.27.0](https://github.com/smithersai/smithers/compare/v0.27.0...v0.28.0): 4232 files changed, +369623 / -50575 lines. Release notes: [smithers.sh/changelogs/0.28.0](https://smithers.sh/changelogs/0.28.0).

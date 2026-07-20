@@ -1,6 +1,6 @@
 ---
 title: "0.29.1"
-description: "Smithers 0.29.1 is the first npm release since 0.28.0, publishing the unpublished 0.29.0 memory system alongside a shared cross-app UI component library, a first-class Microsandbox sandbox provider, and a broad security and durability hardening pass."
+description: "Smithers 0.29.1 is the first npm release since 0.28.0, publishing the unpublished 0.29.0 memory system alongside durable XState folds, a shared cross-app UI library, Microsandbox support, and broad security and durability hardening."
 ---
 
 **Smithers 0.29.1 is the first npm release since 0.28.0.** npm's `latest` tag has pointed at 0.28.0 since it
@@ -8,9 +8,9 @@ shipped: 0.29.0 was fully prepared in git, changelog and version bump
 included, but never reached the registry. 0.29.1 corrects that. If you are
 installing from npm, upgrading to 0.29.1 picks up everything from 0.29.0,
 headlined by the `<Memory>` component, in the same step as everything below.
-Across the full `v0.28.0..HEAD` range that is 152 commits, 655 files changed,
-76,935 insertions and 7,303 deletions, including 26 emoji-prefixed feature
-commits, 32 fix commits, 3 refactors, 6 test commits, and 14 docs commits.
+Across the full `v0.28.0..HEAD` range that is 185 commits, 696 files changed,
+101,290 insertions and 7,518 deletions, including 30 emoji-prefixed feature
+commits, 31 bug-fix commits, 3 refactors, 6 test commits, and 15 docs commits.
 
 ## Upgrading
 
@@ -53,6 +53,48 @@ your own Postgres.
 
 See the [Memory component docs](/components/memory) and the
 [memory concept guide](/concepts/memory) for the full contract.
+
+## XState as durable derived state
+
+`smithers-orchestrator/xstate` adds an optional XState v5 integration for
+workflows whose control flow has outgrown a set of hand-written conditionals.
+It does not persist an actor or introduce a second scheduler. Instead,
+`useSmithersMachine` folds a machine over the output, approval, timeout, and
+signal rows Smithers already persists. Resume, fork, and rewind therefore
+reconstruct the machine from the same durable history as the rest of the run.
+
+```tsx
+const state = useSmithersMachine(releaseMachine, {
+  id: "release",
+  input: ctx.input,
+  events: [
+    taskOutput(outputs.research, { nodeId: "research" }, () => ({ type: "RESEARCH_DONE" })),
+    eventReceived("REVISE", reviseSchema, {}, (payload) => ({ type: "REVISE", payload })),
+  ],
+});
+
+return state.matches("drafting")
+  ? <Task id={`draft-r${state.context.revision}`} output={outputs.draft}>…</Task>
+  : null;
+```
+
+The integration deliberately stays inside Smithers' durability model:
+
+- Event sources read typed durable rows and order them on the shared
+  provenance sequence, with deterministic declaration-order tie-breaking.
+- Signal sources support `correlationId`, so concurrent listeners using the
+  same signal name do not consume one another's history.
+- A mount-time lint rejects actor-only and side-effecting machine features
+  such as `invoke`, `spawn`, `after`, and custom actions, and detects constant
+  task identities in re-enterable states before they can deadlock a run.
+- A reducer-content hash and run-scoped, bounded prefix cache make incremental
+  folds fast without serving a snapshot produced by another run, fork, or
+  machine definition.
+- `xstate` is an optional peer. Projects that never import the integration do
+  not need it installed, and the main facade remains isolated from it.
+
+See the [XState integration guide](/integrations/xstate) for the event-source
+contract, re-entry rules, time-travel semantics, and performance bounds.
 
 ## A shared UI component library
 
@@ -110,7 +152,7 @@ before the payload reaches you.
 ## Security and durability hardening
 
 Most of this release went where you will not see a single feature callout:
-32 emoji-prefixed fix commits and 6 test commits closing gaps that only show
+31 emoji-prefixed bug-fix commits and 6 test commits closing gaps that only show
 up under real load or a misbehaving client. Two commits are explicitly
 security-scoped:
 
