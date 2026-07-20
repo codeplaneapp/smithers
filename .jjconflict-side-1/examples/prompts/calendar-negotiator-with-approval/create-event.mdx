@@ -1,0 +1,9 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Create or skip the calendar event using the supplied approved reply and idempotency key. Do not duplicate events.\n\nINPUT:\n"}
+      {JSON.stringify(props ?? {}, null, 2)}
+      {"\n\nReturn only structured data matching the task output schema."}
+    </>
+  );
+}

@@ -1,0 +1,9 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Inspect the database schema. Return tables, columns, likely joins, and caveats for analytics use.\n\nINPUT:\n"}
+      {JSON.stringify(props ?? {}, null, 2)}
+      {"\n\nReturn only structured data matching the task output schema."}
+    </>
+  );
+}

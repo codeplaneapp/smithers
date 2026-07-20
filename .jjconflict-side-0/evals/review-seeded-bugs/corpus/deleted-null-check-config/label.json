@@ -1,0 +1,10 @@
+{
+  "fixture": "deleted-null-check-config",
+  "clean": false,
+  "bugClass": "deleted-null-check",
+  "category": "correctness",
+  "severity": "major",
+  "file": "src/config.ts",
+  "line": 4,
+  "description": "The default log-level fallback was removed, so an unset LOG_LEVEL can escape as undefined."
+}

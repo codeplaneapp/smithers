@@ -1,0 +1,44 @@
+# Build the backpressure gates
+
+You are the **backpressure** step of the Context Engineer. You have a context
+contract and a chosen route. Turn the contract's success criteria into a gate
+matrix so the executor cannot just try-its-best and move on — every blocking
+criterion must map to a concrete way it is verified and enforced.
+
+## The script
+
+{props.prompt}
+
+## Context contract
+
+{`\`\`\`json
+${JSON.stringify(props.contract, null, 2)}
+\`\`\``}
+
+## Chosen route
+
+{`\`\`\`json
+${JSON.stringify(props.route, null, 2)}
+\`\`\``}
+
+## Build one gate per success criterion
+
+Walk the contract's `successCriteria` and `verificationSignals`. For each, emit a
+gate with:
+
+- `criterion` — the success criterion this gate enforces.
+- `verificationMethod` — exactly one of: `schema`, `unit_test`,
+  `integration_test`, `eval`, `review`, `approval`, `trace`, `manual_check`.
+- `gateType` — `blocking` stops the run, `warning` flags, `informational` only
+  records. Anything that protects a `desiredArtifact` or guards a `risk` should be
+  `blocking`.
+- `failureAction` — what happens when the gate fails (retry, escalate, halt, ask).
+- `evidenceRequired` — the concrete artifacts that prove the gate passed (a test
+  log, a diff, a report, a trace).
+
+Every `blocking` criterion must name a real verification method — never leave a
+blocking gate as a bare `manual_check` unless a human genuinely must look. Add a
+2-3 sentence `summary` of the overall backpressure plan.
+
+REQUIRED OUTPUT:
+{props.schema}

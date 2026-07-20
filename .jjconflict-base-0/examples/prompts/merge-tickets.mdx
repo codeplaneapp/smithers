@@ -1,0 +1,26 @@
+# Merge Tickets
+
+Merge the completed ticket branches back into the **local** main branch.
+
+🚫 ABSOLUTE PUSH BAN: NEVER run `git push`, `git push --force`, `gh pr create`,
+or anything that writes to origin/remote. Pushing to shared `main` corrupts
+everyone's tree — a human pushes out-of-band after reviewing. Your job ends at
+the local merge.
+
+The following tickets were implemented in worktree branches:
+
+{props.ticketSummary}
+
+Only merge branches whose status is "success" AND that actually contain commits
+ahead of `main` (`git rev-list --count main..<branch>` > 0). Skip the rest.
+
+For each such branch:
+1. `git merge` the branch into the current branch (local main)
+2. If there are merge conflicts, resolve them sensibly
+3. If a branch cannot be cleanly merged, skip it and note it as conflicted
+
+Report **honestly** which branches were actually merged (do not claim a branch
+was merged if it had no commits) and which were skipped/conflicted. Do not push.
+
+REQUIRED OUTPUT:
+{props.schema}

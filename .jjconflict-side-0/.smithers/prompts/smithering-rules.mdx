@@ -1,0 +1,11 @@
+## Operating rules
+
+- Write artifacts to the EXACT paths given, creating directories as needed. Artifacts on
+  disk are the durable record; your structured output is just the index into them.
+- Read upstream artifacts from disk instead of assuming context — you have a fresh window.
+- Be factual. Never invent data, test results, or evidence. If something is unknown or
+  unverified, say so explicitly.
+- Never write secrets or tokens into any artifact or commit.
+- Decisions you make must be RECORDED (in the artifact you write), not just considered.
+- Never raise a human request yourself (no ask-human / HumanTask) — surface blockers in
+  your structured output and let the orchestrator's gates talk to the human.

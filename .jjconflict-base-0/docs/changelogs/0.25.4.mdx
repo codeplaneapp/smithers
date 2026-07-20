@@ -1,0 +1,24 @@
+---
+title: "0.25.4"
+description: "A focused patch from a post-publish smoke test of 0.25.3: backend resolution honors a reverse-migration receipt, the Get Started first-run command works everywhere, and the release smoke test holds a zero-defect bar."
+---
+
+Smithers 0.25.4 is a focused patch driven by a post-publish smoke test of 0.25.3. It fixes backend resolution after a reverse migration, makes the Get Started first-run command work in every context, and raises the release smoke test to a zero-defect bar.
+
+---
+
+## CLI and backends
+
+After a reverse migration (`bunx smithers-orchestrator migrate --to sqlite`), a default `bunx smithers-orchestrator ps` or `inspect` no longer refuses with `SMITHERS_BACKEND_CONFLICT`. The reverse migration writes a `migrated.json` receipt naming sqlite as the authoritative store, but resolution previously honored only pglite and postgres receipts, so the kept source store still on disk looked like an unresolved second store. Resolution now honors a sqlite-target receipt and tolerates exactly the recorded migration source. Any OTHER populated store still refuses, so no run history is ever hidden.
+
+## Docs
+
+The Get Started first-run step now leads with the plain `bunx smithers-orchestrator workflow run hello`, which works in every context: terminals, CI, devcontainers, cloud IDEs, and agent-driven runs. `--interactive` is documented as the optional live-status-card nicety for a real terminal, instead of being the primary command that exits with `INTERACTIVE_REQUIRES_TTY` outside a TTY.
+
+## Quality
+
+The release smoke test now holds itself to a zero-defect bar: any issue it finds, even a minor one, a documentation inconsistency, an edge case, or something unrelated to the release, is a failure to fix with a patch release rather than something to downgrade or excuse. The only result it skips is a genuine limitation of the test machine itself, such as no coding agent installed or no model credentials. Backend resolution gains reverse-migration regression tests covering the positive resolve, a non-source leftover store, a sourceless receipt, an explicit-override guard, and an empty target with a populated source.
+
+## Migration notes
+
+No breaking changes are identified in 0.25.4. All changes are additive bug fixes. If a default read command refused after a reverse migration in 0.25.3, it now resolves to the migrated sqlite store automatically.

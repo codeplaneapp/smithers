@@ -1,0 +1,232 @@
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { basename, isAbsolute, relative, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { dddRoot } from "./dddRoot.ts";
+import type { Feature } from "./featuresSchema.ts";
+import { validateFeatures } from "./validateFeatures.ts";
+
+/**
+ * The workflow UI bundle cannot read the filesystem, so the spec content, the
+ * derived gap-ticket backlog, and the workflow source are pre-bundled into TS
+ * modules the UI imports:
+ *   - .smithers/ui/ddd-features.generated.ts
+ *   - .smithers/ui/ddd-docsContent.generated.ts
+ *   - .smithers/ui/ddd-ticketsBacklog.generated.ts
+ *   - .smithers/ui/ddd-workflowSource.generated.ts
+ */
+const OPEN_STATUSES = new Set(["broken", "partial", "missing", "missing-tests"]);
+const DDD_WORKFLOW_SOURCE_KEYS = ["docs-driven-development"];
+const MAX_MARKDOWN_DEPTH = 12;
+const MAX_MARKDOWN_FILES = 500;
+const MAX_MARKDOWN_FILE_BYTES = 1024 * 1024;
+
+function titleOf(markdown: string, fallback: string): string {
+  const heading = markdown.split(/\r?\n/).find((line) => line.startsWith("# "));
+  return heading ? heading.replace(/^#\s+/, "").trim() : fallback;
+}
+
+/**
+ * Docs split into two audiences. Product docs (the overview and anything under
+ * content/product/) are what a human reads and edits. Everything else —
+ * derived per-feature docs and shared reference docs — is technical material
+ * the UI tucks behind a menu and recommends handing to an agent instead.
+ */
+export function docLevelOf(contentRelPath: string): "product" | "technical" {
+  const path = contentRelPath.replaceAll("\\", "/");
+  if (path === "overview.md" || path.startsWith("product/")) return "product";
+  return "technical";
+}
+
+function safeRealpath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return "";
+  }
+}
+
+function isInsidePath(path: string, root: string): boolean {
+  const rel = relative(root, path);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function collectMarkdown(dir: string, rootReal = safeRealpath(dir), depth = 0, state = { files: 0 }): string[] {
+  if (!rootReal || !existsSync(dir) || depth > MAX_MARKDOWN_DEPTH || state.files >= MAX_MARKDOWN_FILES) return [];
+  const out: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir).sort();
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (state.files >= MAX_MARKDOWN_FILES) break;
+    try {
+      const full = resolve(dir, entry);
+      const linkStat = lstatSync(full);
+      if (linkStat.isSymbolicLink()) continue;
+      if (linkStat.isDirectory()) {
+        out.push(...collectMarkdown(full, rootReal, depth + 1, state));
+      } else if (entry.endsWith(".md") && linkStat.isFile() && linkStat.size <= MAX_MARKDOWN_FILE_BYTES) {
+        const real = realpathSync(full);
+        const fileStat = statSync(real);
+        if (!isInsidePath(real, rootReal) || !fileStat.isFile() || fileStat.size > MAX_MARKDOWN_FILE_BYTES) continue;
+        state.files += 1;
+        out.push(real);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+function slug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "gap";
+}
+
+function shortHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 8);
+}
+
+function backlogTicketPath(feature: Feature, index: number, gap: string): string {
+  return `tickets/${feature.id}--${String(index).padStart(2, "0")}-${slug(gap)}-${shortHash(`${feature.id}\0${index}\0${gap}`)}.md`;
+}
+
+function inferKind(item: string, feature: Feature): string {
+  if (/\b(test|e2e|coverage|proof|playwright|unit)\b/i.test(item)) return "e2e";
+  if (feature.status === "broken" || /\b(bug|broken|fails?|crash|error)\b/i.test(item)) return "fix";
+  if (/\b(review|audit|security)\b/i.test(item)) return "review";
+  if (feature.status === "missing" || /\b(implement|build|add support|missing)\b/i.test(item)) return "feature";
+  return "issue";
+}
+
+function ticketContent(feature: Feature, gap: string, kind: string): string {
+  return (
+    [
+      `# ${gap}`,
+      "",
+      `Feature: ${feature.title} (${feature.id})`,
+      `Status: todo · Kind: ${kind} · Priority: ${feature.priority.toUpperCase()} · Feature status: ${feature.status}`,
+      "",
+      "## Gap",
+      "",
+      gap,
+    ].join("\n") + "\n"
+  );
+}
+
+export function generateUiModules(root: string = dddRoot()): { docs: number; tickets: number } {
+  const contentDir = resolve(root, ".smithers/spec/content");
+  const uiDir = resolve(root, ".smithers/ui");
+  mkdirSync(uiDir, { recursive: true });
+  const features = validateFeatures(root, { allowMissing: true });
+
+  // --- ddd-features.generated.ts ---
+  writeFileSync(
+    resolve(uiDir, "ddd-features.generated.ts"),
+    `// Generated by .smithers/lib/ddd/generateUiModules.ts - do not edit.\n` +
+      `export const featuresData = ${JSON.stringify(features, null, 2)};\n`,
+  );
+
+  // --- ddd-docsContent.generated.ts ---
+  const contentRootReal = safeRealpath(contentDir);
+  const docs = collectMarkdown(contentDir, contentRootReal).flatMap((full) => {
+    try {
+      const fileStat = statSync(full);
+      if (!contentRootReal || !fileStat.isFile() || fileStat.size > MAX_MARKDOWN_FILE_BYTES) return [];
+      const content = readFileSync(full, "utf8");
+      const path = relative(contentRootReal, full).replaceAll("\\", "/");
+      return [{
+        path,
+        title: titleOf(content, basename(full).replace(/\.md$/, "")),
+        level: docLevelOf(path),
+        content,
+      }];
+    } catch {
+      return [];
+    }
+  });
+  writeFileSync(
+    resolve(uiDir, "ddd-docsContent.generated.ts"),
+    `// Generated by .smithers/lib/ddd/generateUiModules.ts - do not edit.\n` +
+      `export const docsContent: { path: string; title: string; level: "product" | "technical"; content: string }[] = ${JSON.stringify(docs, null, 2)};\n` +
+      `export type DocsContentEntry = (typeof docsContent)[number];\n`,
+  );
+
+  // --- ddd-ticketsBacklog.generated.ts (one ticket per open gap) ---
+  const tickets: { path: string; kind: string; status: string; priority: string; updatedAtMs: number; featureId: string; featureTitle: string; content: string }[] = [];
+  for (const feature of features) {
+    const gaps = (feature.missing ?? []).filter(Boolean);
+    // A "fixed" feature with missing[] is an inconsistent but user-visible
+    // product gap. Surface it instead of silently hiding the backlog ticket.
+    if (!OPEN_STATUSES.has(feature.status) && gaps.length === 0) continue;
+    if (gaps.length === 0) {
+      const gap = `Close the ${feature.status} status of ${feature.title} with direct proof.`;
+      tickets.push({
+        path: backlogTicketPath(feature, 1, gap),
+        kind: inferKind(gap, feature),
+        status: "todo",
+        priority: feature.priority,
+        updatedAtMs: 0,
+        featureId: feature.id,
+        featureTitle: feature.title,
+        content: ticketContent(feature, gap, inferKind(gap, feature)),
+      });
+      continue;
+    }
+    gaps.forEach((gap, i) => {
+      const kind = inferKind(gap, feature);
+      tickets.push({
+        path: backlogTicketPath(feature, i + 1, gap),
+        kind,
+        status: "todo",
+        priority: feature.priority,
+        updatedAtMs: 0,
+        featureId: feature.id,
+        featureTitle: feature.title,
+        content: ticketContent(feature, gap, kind),
+      });
+    });
+  }
+  writeFileSync(
+    resolve(uiDir, "ddd-ticketsBacklog.generated.ts"),
+      `// Generated by .smithers/lib/ddd/generateUiModules.ts - do not edit.\n` +
+      `// One ticket per open gap (features.json broken/partial/missing* + each missing[] item).\n` +
+      `export const ticketsBacklog: { path: string; kind: string; status: string; priority: string; updatedAtMs: number; featureId: string; featureTitle: string; content: string }[] = ${JSON.stringify(tickets, null, 2)};\n`,
+  );
+
+  // --- ddd-workflowSource.generated.ts ---
+  const workflowSources = Object.fromEntries(
+    DDD_WORKFLOW_SOURCE_KEYS.map((workflowKey) => {
+      const workflowPath = resolve(root, ".smithers/workflows", `${workflowKey}.tsx`);
+      return [
+        workflowKey,
+        {
+          path: relative(root, workflowPath).replaceAll("\\", "/"),
+          source: existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "",
+        },
+      ];
+    }).filter(([, value]) => (value as { source: string }).source.length > 0),
+  );
+  const primaryWorkflow = workflowSources["docs-driven-development"] as { path: string; source: string } | undefined;
+  writeFileSync(
+    resolve(uiDir, "ddd-workflowSource.generated.ts"),
+    `// Generated by .smithers/lib/ddd/generateUiModules.ts - do not edit.\n` +
+      `export const workflowSources: Record<string, { path: string; source: string }> = ${JSON.stringify(workflowSources, null, 2)};\n` +
+      `export const workflowSourcePath = ${JSON.stringify(primaryWorkflow?.path ?? "")};\n` +
+      `export const workflowSource = ${JSON.stringify(primaryWorkflow?.source ?? "")};\n`,
+  );
+
+  return { docs: docs.length, tickets: tickets.length };
+}
+
+if (import.meta.main) {
+  try {
+    const { docs, tickets } = generateUiModules();
+    console.log(`ddd ui-modules: ${docs} docs entries, ${tickets} backlog tickets -> .smithers/ui/ddd-*.generated.ts`);
+  } catch (error) {
+    console.error(`ddd ui-modules failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}

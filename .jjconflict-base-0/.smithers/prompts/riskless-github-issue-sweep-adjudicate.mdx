@@ -1,0 +1,14 @@
+# Independent riskless adjudication
+
+Audit the provisional classification below using read-only inspection at the exact base SHA. Approve only a localized, easy, independently testable fix with no architecture, API, schema, migration, security, auth, concurrency, durability, broad-refactor, or protected-path risk.
+
+Issue: {JSON.stringify(props.issue)}
+Classification: {JSON.stringify(props.classification)}
+Base SHA: {props.baseSha}
+Sanitized global issue index: {JSON.stringify(props.globalIndex)}
+Explicitly excluded: {JSON.stringify(props.excluded)}
+
+Independently inspect the complete global index for duplicate and overlap risk. Echo the exact issueNumber, base SHA as headSha, and issue identity as issueIdentitySha256 and diffSha256. Use an explicit disposition enum with trimmed nonblank evidence and acceptanceCriteria. An admit decision MUST include at least one independently supported exact repository file likelyPath, or an evidence-derived narrow directory prefix with a trailing slash and at least three path segments. Never return repository-wide ancestors such as `packages` or `packages/foo`; empty or blank likelyPaths require defer-ambiguity. Do not approve an excluded, ambiguous, stale, broad, protected, security/auth, schema/migration, concurrency/durability, coordination, approval, or design-judgment issue.
+
+REQUIRED OUTPUT:
+{props.schema}

@@ -1,0 +1,298 @@
+{
+  "compilerOptions": {
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "jsxImportSource": "smithers-orchestrator",
+    "allowJs": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false,
+    "paths": {
+      "smithers-orchestrator": [
+        "./packages/smithers/src/index.js"
+      ],
+      "smithers-orchestrator/jsx-runtime": [
+        "./packages/smithers/src/jsx-runtime.js"
+      ],
+      "smithers-orchestrator/jsx-dev-runtime": [
+        "./packages/smithers/src/jsx-runtime.js"
+      ],
+      "smithers-orchestrator/tools": [
+        "./packages/smithers/src/tools.js"
+      ],
+      "smithers-orchestrator/testing": [
+        "./packages/smithers/src/testing.d.ts"
+      ],
+      "smithers-orchestrator/cloudflare": [
+        "./packages/smithers/src/cloudflare.js"
+      ],
+      "smithers-orchestrator/browser": [
+        "./packages/smithers/src/browser.d.ts"
+      ],
+      "smithers-orchestrator/*": [
+        "./packages/smithers/src/*.js",
+        "./packages/smithers/src/*/index.js"
+      ],
+      "smithers-orchestrator/scorers": [
+        "./packages/scorers/src/index.js"
+      ],
+      "@smithers-orchestrator/agents": [
+        "./packages/agents/src/index.js"
+      ],
+      "@smithers-orchestrator/agents/*": [
+        "./packages/agents/src/*.js",
+        "./packages/agents/src/*/index.js"
+      ],
+      "@smithers-orchestrator/cli": [
+        "./apps/cli/src/index.js"
+      ],
+      "@smithers-orchestrator/cli/*": [
+        "./apps/cli/src/*.js",
+        "./apps/cli/src/*/index.js"
+      ],
+      "@smithers-orchestrator/cloudflare": [
+        "./packages/cloudflare/src/index.js"
+      ],
+      "@smithers-orchestrator/cloudflare/*": [
+        "./packages/cloudflare/src/*.js"
+      ],
+      "@smithers-orchestrator/core-react": [
+        "./packages/react/src/index.js"
+      ],
+      "@smithers-orchestrator/core-react/*": [
+        "./packages/react/src/*.js",
+        "./packages/react/src/*/index.js"
+      ],
+      "@smithers-orchestrator/db": [
+        "./packages/db/src/index.ts",
+        "./packages/db/src/index.js"
+      ],
+      "@smithers-orchestrator/db/runState": [
+        "./packages/db/src/runState.js",
+        "./packages/db/src/runState.d.ts"
+      ],
+      "@smithers-orchestrator/db/*": [
+        "./packages/db/src/*.ts",
+        "./packages/db/src/*.js",
+        "./packages/db/src/*/index.js"
+      ],
+      "@smithers-orchestrator/devtools": [
+        "./packages/devtools/src/index.js"
+      ],
+      "@smithers-orchestrator/devtools/*": [
+        "./packages/devtools/src/*.ts",
+        "./packages/devtools/src/*.js",
+        "./packages/devtools/src/*/index.js"
+      ],
+      "@smithers-orchestrator/driver": [
+        "./packages/driver/src/index.js"
+      ],
+      "@smithers-orchestrator/driver/*": [
+        "./packages/driver/src/*.ts",
+        "./packages/driver/src/*.js",
+        "./packages/driver/src/*/index.js"
+      ],
+      "@smithers-orchestrator/electric-proxy": [
+        "./packages/electric-proxy/src/index.ts"
+      ],
+      "@smithers-orchestrator/electric-proxy/*": [
+        "./packages/electric-proxy/src/*.ts"
+      ],
+      "@smithers-orchestrator/engine": [
+        "./packages/engine/src/index.js"
+      ],
+      "@smithers-orchestrator/engine/*": [
+        "./packages/engine/src/*.js",
+        "./packages/engine/src/*/index.js"
+      ],
+      "@smithers-orchestrator/errors": [
+        "./packages/errors/src/index.js"
+      ],
+      "@smithers-orchestrator/errors/*": [
+        "./packages/errors/src/*.ts",
+        "./packages/errors/src/*.js",
+        "./packages/errors/src/*/index.js"
+      ],
+      "@smithers-orchestrator/gateway": [
+        "./packages/gateway/src/index.ts"
+      ],
+      "@smithers-orchestrator/gateway/*": [
+        "./packages/gateway/src/*.ts",
+        "./packages/gateway/src/*/index.ts"
+      ],
+      "@smithers-orchestrator/gateway-client": [
+        "./packages/gateway-client/src/index.ts"
+      ],
+      "@smithers-orchestrator/gateway-client/*": [
+        "./packages/gateway-client/src/*.ts"
+      ],
+      "@smithers-orchestrator/gateway-react": [
+        "./packages/gateway-react/src/index.ts"
+      ],
+      "@smithers-orchestrator/gateway-react/*": [
+        "./packages/gateway-react/src/*.ts"
+      ],
+      "@smithers-orchestrator/graph": [
+        "./packages/graph/src/index.js"
+      ],
+      "@smithers-orchestrator/graph/*": [
+        "./packages/graph/src/*.js",
+        "./packages/graph/src/*/index.js"
+      ],
+      "@smithers-orchestrator/memory": [
+        "./packages/memory/src/index.js"
+      ],
+      "@smithers-orchestrator/memory/*": [
+        "./packages/memory/src/*.js",
+        "./packages/memory/src/*/index.js"
+      ],
+      "@smithers-orchestrator/observability": [
+        "./apps/observability/src/index.js"
+      ],
+      "@smithers-orchestrator/observability/*": [
+        "./apps/observability/src/*.js",
+        "./apps/observability/src/*/index.js"
+      ],
+      "@smithers-orchestrator/openapi": [
+        "./packages/openapi/src/index.js"
+      ],
+      "@smithers-orchestrator/openapi/*": [
+        "./packages/openapi/src/*.js",
+        "./packages/openapi/src/*/index.js"
+      ],
+      "@smithers-orchestrator/pi-plugin": [
+        "./packages/pi-plugin/src/index.ts"
+      ],
+      "@smithers-orchestrator/pi-plugin/*": [
+        "./packages/pi-plugin/src/*.ts"
+      ],
+      "@smithers-orchestrator/protocol": [
+        "./packages/protocol/src/index.js"
+      ],
+      "@smithers-orchestrator/protocol/*": [
+        "./packages/protocol/src/*.ts",
+        "./packages/protocol/src/*.js",
+        "./packages/protocol/src/*/index.js"
+      ],
+      "@smithers-orchestrator/components": [
+        "./packages/components/src/index.js"
+      ],
+      "@smithers-orchestrator/components/*": [
+        "./packages/components/src/*.js",
+        "./packages/components/src/*/index.js"
+      ],
+      "@smithers-orchestrator/control-plane": [
+        "./packages/control-plane/src/index.js"
+      ],
+      "@smithers-orchestrator/control-plane/*": [
+        "./packages/control-plane/src/*.js",
+        "./packages/control-plane/src/*/index.js"
+      ],
+      "@smithers-orchestrator/react-reconciler": [
+        "./packages/react-reconciler/src/index.js"
+      ],
+      "@smithers-orchestrator/react-reconciler/*": [
+        "./packages/react-reconciler/src/*.js",
+        "./packages/react-reconciler/src/*/index.js"
+      ],
+      "@smithers-orchestrator/sandbox": [
+        "./packages/sandbox/src/index.js"
+      ],
+      "@smithers-orchestrator/sandbox/*": [
+        "./packages/sandbox/src/*.js",
+        "./packages/sandbox/src/*/index.js"
+      ],
+      "@smithers-orchestrator/scorers": [
+        "./packages/scorers/src/index.js"
+      ],
+      "@smithers-orchestrator/scorers/*": [
+        "./packages/scorers/src/*.js",
+        "./packages/scorers/src/*/index.js"
+      ],
+      "@smithers-orchestrator/scheduler": [
+        "./packages/scheduler/src/index.js"
+      ],
+      "@smithers-orchestrator/scheduler/*": [
+        "./packages/scheduler/src/*.ts",
+        "./packages/scheduler/src/*.js",
+        "./packages/scheduler/src/*/index.js"
+      ],
+      "@smithers-orchestrator/server": [
+        "./packages/server/src/index.js"
+      ],
+      "@smithers-orchestrator/server/*": [
+        "./packages/server/src/*.js",
+        "./packages/server/src/*/index.js"
+      ],
+      "@smithers-orchestrator/time-travel": [
+        "./packages/time-travel/src/index.js"
+      ],
+      "@smithers-orchestrator/time-travel/*": [
+        "./packages/time-travel/src/*.js",
+        "./packages/time-travel/src/*/index.js"
+      ],
+      "@smithers-orchestrator/vcs": [
+        "./packages/vcs/src/index.js"
+      ],
+      "@smithers-orchestrator/vcs/*": [
+        "./packages/vcs/src/*.js",
+        "./packages/vcs/src/*/index.js"
+      ],
+      "@smithers-orchestrator/accounts": [
+        "./packages/accounts/src/index.js"
+      ],
+      "@smithers-orchestrator/accounts/*": [
+        "./packages/accounts/src/*.js",
+        "./packages/accounts/src/*/index.js"
+      ],
+      "@smithers-orchestrator/usage": [
+        "./packages/usage/src/index.js"
+      ],
+      "@smithers-orchestrator/usage/*": [
+        "./packages/usage/src/*.js",
+        "./packages/usage/src/*/index.js"
+      ],
+      "@smithers-orchestrator/testing": [
+        "./packages/testing/src/index.ts"
+      ],
+      "@smithers-orchestrator/testing/*": [
+        "./packages/testing/src/*.ts"
+      ],
+      "@smithers-orchestrator/tool-context": [
+        "./packages/tool-context/src/index.js"
+      ],
+      "@smithers-orchestrator/tool-context/*": [
+        "./packages/tool-context/src/*.js",
+        "./packages/tool-context/src/*/index.js"
+      ]
+    },
+    "typeRoots": [
+      "./packages/smithers/src/types",
+      "./node_modules/@types"
+    ]
+  },
+  "include": [
+    "packages/smithers/src/**/*",
+    "packages/smithers/tests/**/*"
+  ],
+  "exclude": [
+    "packages/smithers/src/gateway-ui.js",
+    "packages/smithers/src/gateway-ui.d.ts",
+    "packages/smithers/src/ui.js",
+    "packages/smithers/src/ui.d.ts"
+  ]
+}

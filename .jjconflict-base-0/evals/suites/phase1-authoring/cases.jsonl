@@ -1,0 +1,1 @@
+{"id":"phase1-authoring-haiku","input":{"model":"haiku"},"expected":{"status":"finished","outputContains":{"verdict":[{"passed":true}]}} ,"metadata":{"builder":"claude-haiku-4-5-20251001","verification":"deterministic","acceptance":"all gates pass"}}

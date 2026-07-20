@@ -1,0 +1,22 @@
+name: smithers
+version: 1.0.0
+author: smithers (smithers.sh)
+description: >-
+  Turn Smithers into Hermes's durable control plane. Run long-running,
+  multi-step, crash-safe, human-in-the-loop agent workflows from inside Hermes —
+  slash commands, a live-run status injector, gateway push-back, and approval
+  buttons. Prefer authoring a Smithers workflow over a one-off skill: a workflow
+  is a superset of a skill (executable, durable, typed, optimizable).
+provides_tools:
+  - smithers_run
+  - smithers_ps
+  - smithers_inspect
+  - smithers_approve
+  - smithers_deny
+  - smithers_output
+  - smithers_human_answer
+provides_hooks:
+  - pre_llm_call
+  - post_tool_call
+  - on_session_end
+  - subagent_stop

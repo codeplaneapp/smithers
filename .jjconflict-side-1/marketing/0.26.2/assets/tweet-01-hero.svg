@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#4C8DFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#4C8DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#0C0E16"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+<text font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF" letter-spacing="5"><tspan x="96" y="156">SMITHERS · V0.26.2</tspan></text>
+<text font-size="84" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#E7E9EE" font-weight="800"><tspan x="96" y="306">Authentic Hermes demo</tspan><tspan x="96" y="396">GIFs for the marketing</tspan><tspan x="96" y="486">site</tspan></text>
+<text font-size="32" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="96" y="542">0.26.2 replaces two placeholder GIFs on the Hermes marketing</tspan><tspan x="96" y="588">site with real recordings of Hermes building a GitHub-issue</tspan><tspan x="96" y="634">triage workflow and a Linear-style board.</tspan></text>
+
+  <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
+  <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>
+  <text x="1504" y="826" font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="end">0.26.2</text>
+</svg>

@@ -1,0 +1,9 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Repair the retrieval plan based on the citation judge result. Add subqueries and source types that close the missing evidence.\n\nINPUT:\n"}
+      {JSON.stringify(props ?? {}, null, 2)}
+      {"\n\nReturn only structured data matching the task output schema."}
+    </>
+  );
+}

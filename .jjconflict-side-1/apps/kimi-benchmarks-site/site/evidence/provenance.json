@@ -1,0 +1,22 @@
+{
+  "benchmark": "RoadmapBench",
+  "task": "vbt-1.2.0-roadmap",
+  "runId": "rmb-kimi-k3-opencode-vbt-1.2.0",
+  "date": "2026-07-16",
+  "candidateRoles": ["plan", "implement", "finalize"],
+  "candidateEngine": "opencode",
+  "candidateModel": "kimi-for-coding/k3",
+  "reviewerEngine": "codex",
+  "reviewerModel": "gpt-5.5",
+  "baseline": {
+    "candidateModel": "claude-opus-4-8",
+    "reviewerModel": "gpt-5.5",
+    "reward": 0.714,
+    "targets": "2/3"
+  },
+  "fairness": {
+    "noOp": 0,
+    "oracle": 1
+  },
+  "note": "Public copy with host filesystem paths removed."
+}

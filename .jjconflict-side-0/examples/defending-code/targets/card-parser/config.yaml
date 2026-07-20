@@ -1,0 +1,35 @@
+# Target configuration for the card-parser.
+#
+# Mirrors the per-target config.yaml in the reference harness
+# (anthropics/defending-code-reference-harness): it answers the four porting
+# questions: what is the target, how is it built, how is it run, and what
+# signals a finding.
+name: card-parser
+language: c
+source: src/card_parser.c
+
+# How the target is built. The harness compiles with AddressSanitizer so that
+# memory-safety violations abort with a structured report.
+build:
+  command: clang -g -O0 -fsanitize=address -fno-omit-frame-pointer -o build/card_parser src/card_parser.c
+  binary: build/card_parser
+
+# How a proof-of-concept is delivered: a single input file passed as argv[1].
+run:
+  command: build/card_parser <input-file>
+  input: file
+
+# What signals a finding: an AddressSanitizer crash report on stderr/stdout.
+signal:
+  type: asan-crash
+  marker: "ERROR: AddressSanitizer"
+
+# Input-parsing subsystems worth fuzzing. Recon may propose its own; these are
+# hints, not an exhaustive list.
+focus:
+  - id: name
+    description: "NAME field: display name copied into the record."
+  - id: email
+    description: "EMAIL field: address stored as a heap copy."
+  - id: tags
+    description: "TAGS field: comma-separated list split into a fixed table."

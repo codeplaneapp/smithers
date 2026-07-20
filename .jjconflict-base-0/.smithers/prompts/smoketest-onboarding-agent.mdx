@@ -1,0 +1,91 @@
+# Smoke Test — Agent onboarding walkthrough
+
+You are running the **agent onboarding** slice of a release smoke test. The
+embedded `SKILL.md` below is exactly what an AI coding agent (Claude Code, Codex,
+...) is taught when it is onboarded to drive Smithers. Walk the skill's
+documented command flow **as that agent would**, run every command yourself with
+your shell, and verify the CLI surface the skill promises actually exists and
+behaves as described.
+
+The point: catch any command, flag, or claim in the agent-facing skill that is
+stale against the published CLI — those break every agent that trusts the skill.
+
+## Our standard: zero defects, fixed by a patch release
+
+Smithers holds itself to a high bar. **We do not accept failures.** Any issue you
+find is a `fail` with exact evidence, even a minor one, a doc inconsistency, an
+edge case, an ugly error, or something unrelated to this release. We ship a patch
+release to fix it right away. Never downgrade a finding to "pre-existing",
+"acceptable", "cosmetic", "expected", or "out of scope". The ONLY legitimate
+`skipped` is a real limitation of this test machine (no agent installed, no model
+credentials); a product, CLI, doc, or behavior problem is always a `fail`.
+
+## Version under test
+
+The exact version is: {props.version}
+
+Pin it on EVERY invocation: run commands as `bunx smithers-orchestrator@VERSION SUBCOMMAND`, substituting VERSION with the version above.
+
+## Setup — a fresh folder
+
+1. Clear the bunx cache (`bun pm cache rm`, then remove any
+   `bunx-*smithers-orchestrator*` dir from `$TMPDIR`).
+2. `SMOKE_DIR=$(mktemp -d)/smoke-agent && mkdir -p "$SMOKE_DIR" && cd "$SMOKE_DIR"`.
+
+## The skill's "60 seconds to the aha" flow — verify each command exists + runs
+
+Record `pass | fail | skipped` with evidence (exact command + key output):
+
+1. **`agent.init`** — `init` scaffolds `.smithers/` (workflows, prompts,
+   components, `agents.ts`, `smithers.config.ts`) and reports detected agents.
+2. **`agent.starters`** — `starters` prints the starter gallery; `starters
+   --format json` emits machine-readable output (the skill says agents can filter
+   with `--audience` / `--goal` / `--workflow`).
+3. **`agent.create`** — `workflow create my-workflow` writes
+   `.smithers/workflows/my-workflow.tsx`.
+4. **`agent.graph`** — `graph .smithers/workflows/my-workflow.tsx` renders the
+   JSX tree WITHOUT executing and exits 0. (A render error means the scaffold is
+   broken — that would be a `fail`.)
+5. **`agent.run`** — `workflow run implement --prompt "Add a /health endpoint"`
+   (or `workflow run hello`) starts a durable run and prints a run id. If no
+   agent/credentials, mark `skipped` with the reason, not `fail`.
+6. **`agent.observe`** — `ps`, then `inspect RUNID`, then `logs RUNID -f` (use a
+   short timeout or `--tail`) all work and show run state.
+7. **`agent.output`** — `output RUNID NODEID` prints a node's JSON output.
+   IMPORTANT per the skill: `output` requires BOTH args; `output RUNID` alone
+   must fail with a clear missing-arg error (verify both: the two-arg form works
+   on a finished node, the one-arg form errors cleanly).
+8. **`agent.up-by-path`** — `up .smithers/workflows/my-workflow.tsx --input '{}'`
+   runs a workflow by FILE PATH (vs `workflow run ID` by id). Confirm `up`
+   accepts `--input` / `-i`.
+9. **`agent.docs`** — `docs` prints `llms.txt`; `docs-full` prints the full
+   bundle. The skill points agents at these to learn the API.
+10. **`agent.ask`** — `ask "How do I add a human approval gate?"` runs without
+    crashing (it uses the installed agent; mark `skipped` if no agent/key).
+
+## Cross-check the skill's claims against the real CLI
+
+The skill makes specific claims (e.g. `approve` / `deny` share options, `--node`
+optional when one gate pends, `signal RUN NAME --data`, `ask-human --choices` /
+`--timeout`, `up` has no `--prompt` alias but `workflow run` does). Spot-check a
+few with `--help` (e.g. `approve --help`, `signal --help`, `ask-human --help`,
+`up --help`, `workflow run --help`) and flag any command or flag the skill
+documents that the CLI does not actually have (`agent.skill-drift`).
+
+## Embedded skill (source of truth for the agent flow)
+
+The full SKILL.md follows:
+
+{props.agentSkill}
+
+## Output
+
+Return JSON matching the schema below. `passed` is `true` only if every command
+the skill tells an agent to run exists and behaves as documented (agent-auth
+`skipped`s do not count against pass). A skill-documented command or flag that
+the CLI rejects is a `fail` (`agent.skill-drift`). `findings`: one per check,
+dotted `area`, `status`, `evidence`. `reproSteps` for any failure.
+
+Required output shape (an example of the JSON to return):
+
+{props.schema}

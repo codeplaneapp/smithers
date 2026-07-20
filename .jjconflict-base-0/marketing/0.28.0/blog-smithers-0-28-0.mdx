@@ -1,0 +1,209 @@
+---
+title: "Smithers 0.28.0: operate, prove, and share long-running agent work"
+description: "Smithers 0.28.0 turns the Monitor into an operations console, adds installable workflow packs and proof-bound tasks, ships fixed and adaptive delegation, and hardens long-running agent work across 1,188 commits (424 fixes, 244 test commits)."
+---
+
+A durable agent run is useful only if you can understand it, trust the actions
+it takes, and reuse the workflow that produced it. Smithers 0.28.0 concentrates
+on those three jobs.
+
+The Monitor is now an operations console. Workflows can be installed and shared
+as packs. Sensitive tasks can bind themselves to the exact approval or artifact
+that authorized them. Delegation can follow a fixed plan or, experimentally,
+grow a bounded plan from evidence discovered during the run.
+
+The release spans 1,188 commits (424 fixes, 244 test commits) since 0.27.0. The long tail matters:
+it includes hundreds of fixes across cancellation, time travel, database
+backends, tools, integrations, plugins, sandboxes, generated types, and the
+workflow pack.
+
+## Operate the run from one place
+
+The Monitor used to answer a simple question: what is this run doing? It can now
+help you act on the answer.
+
+Every run has an always-visible health strip that distinguishes active work from
+a stalled, stale, orphaned, quota-parked, or terminal run. Recoverable runs have
+a one-click Resume action. Each node can show a live agent transcript and
+structured output, and a hijackable agent session opens in an embedded terminal
+over a Gateway PTY channel.
+
+The same run view now includes a frame scrubber, an interactive DevTools tree,
+diffs, timeline controls, scores, crons, operations metrics, quota state, agent
+and model attribution, and filters that make large fan-outs readable. Loading
+and unreachable states are explicit, so an unavailable Gateway never looks like
+an empty workspace.
+
+The Monitor can also be embedded. `?embed=1` removes the surrounding chrome,
+`?theme=` follows the host, and selection messages are accepted only from the
+explicit host origin. Keyboard navigation, visible focus, reduced motion,
+responsive layouts, and both color schemes are covered in real browser tests.
+
+## Workflows are packages now
+
+An initialized `.smithers` directory can describe itself with a
+`smithers.toon` manifest and move through a complete pack lifecycle:
+
+```sh
+bunx smithers-orchestrator add user/repository --yes
+bunx smithers-orchestrator packs list
+bunx smithers-orchestrator packs update
+bunx smithers-orchestrator eject pack-name:workflow-name
+bunx smithers-orchestrator share --dry-run
+bunx smithers-orchestrator remove pack-name
+```
+
+Installed workflows are read-only and can be addressed as
+`pack-name:workflow-name`. A local workflow with the same unqualified name wins,
+which makes the edit path straightforward: `eject` copies the workflow and its
+UI, prompts, libraries, styles, aliases, re-exports, and asset closure into the
+local pack. Pack updates keep that local copy intact.
+
+`remove` uninstalls the selected local or global pack without deleting an
+ejected local workflow.
+
+The write path received the same attention as the command surface. Installs use
+a staged, symlink-safe, same-filesystem swap. Sharing works from a temporary copy
+instead of the live pack, strips local agent configuration, supports durable
+retries, and cleans up on every terminal path. The seeded `add` and `share-pack`
+system workflows expose the lifecycle as normal inspectable Smithers runs.
+
+See the [workflow pack reference](/reference/packs).
+
+## Authority follows the artifact
+
+Long-running workflows re-render. Rows can be replaced across retries and loop
+iterations. Before 0.28.0, an approval task could prove that *something* had
+been reviewed while a later side effect acted on a different revision occupying
+the same logical slot.
+
+Provenance binding closes that gap:
+
+```tsx
+const approval = ctx.prove("review", { nodeId: "lane:review" });
+
+<Task id="publish" bind={approval} agent={publisher}>
+  Publish the reviewed artifact.
+</Task>
+```
+
+`ctx.prove()` records a digest of the exact upstream row. The engine recomputes
+that digest when the bound task is about to run. If the evidence changed, the
+task parks as `BOUND_STALE`. The run stays resumable, `smithers why` explains the
+blocker, and the workflow can produce a new review rather than acting with old
+authority.
+
+That is a small API with a large consequence: approval becomes an executable
+invariant instead of a convention carried in prompt text.
+
+See [Provenance binding](/concepts/provenance).
+
+## Delegation, two ways
+
+`DelegationChain` is the fixed option. It gives goal refinement, planning,
+preview, execution, review, scoring, and bounded replanning a stable graph and a
+dedicated UI. Durable delegation events feed the same state to browser clients.
+
+`Trellis` is the experimental adaptive option. Sol or Fable can author a strict
+`agent | sequence | parallel` program from evidence discovered during the run.
+Smithers validates that program, compiles it into ordinary tasks, settles every
+child result against its assignment, and gives the bounded evidence back to the
+author for the next decision. Terra and Luna can do work but cannot create more
+graph structure.
+
+The adaptive graph cannot grow without limit. Trellis enforces recursive author
+fuel, depth, fan-out, prompt-size, and root-concurrency ceilings. Rejected
+programs never execute. Direct critical work by Sol or Fable is disabled unless
+the caller supplies an admission policy and an independent review requirement.
+
+Trellis ships as a public component and repository workflow with a real UI. It
+is experimental and is not installed by the default init pack in this release.
+The fixed `DelegationChain` remains the supported choice for a known graph.
+
+See [`<Trellis>`](/components/trellis) and
+[`<DelegationChain>`](/components/delegation-chain).
+
+## Memory can become knowledge
+
+The memory package now has append-only notes with explicit provenance,
+supersession, review status, and opt-in full-text search.
+
+A workflow can bank observations as notes, propose one consolidated rule that
+supersedes them, wait for a human to accept it, and serve that accepted rule to
+the next run. The older observations remain available for audit. Search indexes
+are created lazily per namespace kind, so a namespace that never uses note
+search gets no FTS write overhead.
+
+The `incident-runbook-memory` example demonstrates the whole loop with ordinary
+tasks. Note storage and search are SQLite-only in 0.28.0; unsupported backends
+fail with a named error instead of an obscure driver exception.
+
+## The runtime is less tied to one process
+
+A typed `RuntimeAdapter` now owns clock, storage, identifiers, task execution,
+and optional filesystem, subprocess, worktree, and sandbox capabilities.
+
+The new `smithers-orchestrator/browser` entry point runs the real workflow
+driver, renderer, graph extraction, and core components in a browser. A
+workflow that asks for a Node-only capability gets
+`RUNTIME_CAPABILITY_UNAVAILABLE`. The adapter is exercised in real headless
+Chromium and in a packed npm consumer, alongside Node, Bun, Cloudflare Workers,
+and Vercel conformance lanes.
+
+Child workflows also become more durable. `WorkflowFileRef` can point a
+`<Subflow>` at a module generated during the run. CLI-launched children preserve
+parent lineage, fan-out can prefer an existing matching child after resume, and
+a `childRun` reference can return several output tables.
+
+AWS, GCP, Daytona, and Vercel now have first-class sandbox-provider packages on
+top of a shared provider kit. The kit standardizes request and result files,
+timeouts, redaction, CA handling, and contract tests while leaving the actual
+provider call real.
+
+## The durability pass
+
+The most visible fixes are the ones that stop operators from chasing ghosts:
+
+- Terminal cancellation is a single-owner compare-and-set claim. Pending
+  approvals, human requests, events, and timers finalize durably, and
+  `cancel`/`down` reap a surviving owner process.
+- Quota failures try the next agent before parking, keep identity across reset
+  and resume, wake at the known reset time, and can be cancelled.
+- Rewinds use durable leases. Replay updates the workflow hash it is resuming,
+  while replay-sensitive tools require approval.
+- The scheduler derives concurrency from declared fan-out, raises the cap when
+  runnable work would starve, honors subtree limits and numeric priority, and
+  supports quarantining one failed branch.
+- Malformed SQLite WAL/SHM sidecars fail with a useful error instead of taking
+  down the Bun process. Transactions, duplicate events, migrations, and output
+  table naming are correct across their supported backends.
+- HTTP and OpenAPI tools, search, TTS, the review proxy, and integrations no
+  longer carry credentials across an origin-changing redirect. Local UI hosts,
+  approval restrictions, token writes, pack writes, protected headers, and
+  structured log fields all fail closed.
+
+The release also adds `smithers status`, `smithers what`, `smithers pause`,
+`smithers review`, `smithers upgrade`, and `smithers worktree list|prune`;
+saved eval suites that run real child workflows; cross-run score comparison;
+PoolAgent support for the Poolside CLI; a deterministic testing kernel; and a
+canonical model registry with a daily research check. The seeded
+docs-driven-development workflow now maintains a reproducible feature spec and
+triage loop, while the repository `<Estimate>` helper forecasts tokens and
+prices them from the shared model table.
+
+## Upgrade
+
+```sh
+bunx smithers-orchestrator@0.28.0 init
+```
+
+Existing projects can run the agent-assisted upgrade flow:
+
+```sh
+bunx smithers-orchestrator@0.28.0 upgrade
+```
+
+Read the full [0.28.0 changelog](/changelogs/0.28.0) before upgrading if you
+rely on worktree retention, unscoped `supervise`, nested loops, replay tools,
+input-schema default behavior, memory notes, or direct editing of installed
+pack workflows.

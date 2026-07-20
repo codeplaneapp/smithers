@@ -1,0 +1,66 @@
+# Document the new workflow
+
+The new workflow verifies cleanly. Write a short, agent-facing skill file so
+that future agents (and the human) know it exists and how to run it. You have
+file tools: write the file, then report its path.
+
+## Workflow
+
+- Name: {props.workflowName}
+- Workflow file: {props.workflowFile}
+- Custom UI file (may not exist if the user declined a UI): {props.uiFile}
+
+## Design
+
+{JSON.stringify(props.design, null, 2)}
+
+## Write the skill
+
+Create exactly `{props.skillsDir}/{props.workflowName}.md` (create the directory
+if needed). Do not create a directory named after the workflow, a `SKILL.md`, or
+any alternate skill path. Use parseable YAML frontmatter then a concise body:
+
+```
+---
+name: {props.workflowName}
+description: <one line, what it does and when to reach for it>
+workflow: {props.workflowName}
+---
+```
+
+The body must tell an agent, in this order:
+
+1. What the workflow does and when to use it (1-2 sentences).
+2. Its inputs, especially `prompt` and any typed knobs from the design.
+3. How to start it:
+   `bunx smithers-orchestrator workflow run {props.workflowName} --prompt "..."`
+   (or `--input '{...}'` for structured inputs), or `smithers up {props.workflowFile}`.
+4. How to run it detached and watch it: `-d` to detach, then
+   `smithers ps`, `smithers logs <runId> -f`, `smithers inspect <runId>`.
+5. How to visualize it: `bunx smithers-orchestrator graph {props.workflowFile}`
+   (add `--interactive` for the TUI), and, if the workflow declares a custom
+   `<UI>` and the custom UI file exists, open it for a run with
+   `smithers ui <runId>`.
+6. How to handle blocked states: `smithers approve <runId>` for approval gates,
+   `smithers why <runId>` for signal waits, `smithers cancel <runId>` to stop.
+7. A final "Suggest next" line for the operator agent to relay to the user:
+   run it, watch it in the custom UI, and iterate by re-running
+   `create-workflow` with a follow-up prompt.
+
+Keep it practical and short: no marketing copy. Match the style of any existing
+files in `{props.skillsDir}`. Only document commands that actually exist; do not
+invent flags.
+
+## Output
+
+The workflow verifies the reported path after this task. A missing file, a
+wrong path, malformed YAML/frontmatter, or a parsed `name` or `workflow` value
+that is not exactly `{props.workflowName}` is a failed build. Report only the
+exact path after that exact file exists and contains the frontmatter you wrote.
+
+Return the `skillPath` you wrote and a one-line `summary` that names the
+workflow, its file, and (if present) its custom UI file, so the run's terminal
+output tells the operator exactly what was built.
+
+REQUIRED OUTPUT:
+{props.schema}

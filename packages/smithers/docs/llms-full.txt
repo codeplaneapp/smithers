@@ -10860,8 +10860,8 @@ tokens, never hex-plus-alpha.
 | `ConnectionBadge` | A live Gateway connection indicator. | none |
 | `StatusPill` | A colored status badge for any run or node status string. | `status`, `label` |
 
-`StatusPill`, `statusColor`, and the `theme` style tokens are also exported for
-building your own rows that match the components.
+`StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
+also exported for building your own rows that match the components.
 
 For a workflow whose UI just needs launch-watch-approve, render
 `<SimpleWorkflowDashboard workflow="my-workflow" />` inside
@@ -11162,7 +11162,7 @@ can build a `DiffFile` from a raw patch and reason about it without a runtime:
 | Export | What it does |
 | --- | --- |
 | `SmithersUiStyles`, `composeSmithersUiStyles`, `smithersUiCss` | Render or compose the stylesheet; `withTheme` also emits the theme token block. |
-| `normalizeStatus`, `statusClass`, `formatStatus`, `isTerminalRunStatus` | The shared status vocabulary `StatusPill` is built on. |
+| `normalizeStatus`, `statusClass`, `statusColor`, `statusColors`, `formatStatus`, `isTerminalRunStatus` | The shared status vocabulary and token-color map `StatusPill` is built on. |
 | `tokens` | The token bridge (`var(--token, #lightFallback)` strings) for inline styles that must match the components. |
 | `cn` | clsx class composition. |
 | `safeMarkdownHref` | Trim and allow scheme-less, `http`, `https`, or `mailto` links; reject all other schemes. |

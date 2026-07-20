@@ -1,0 +1,33 @@
+# Dive deeper: what else Smithers can do
+
+You just watched Smithers build **{props.builtWorkflow}** — your first workflow. That's
+the whole pattern: you describe the outcome → your agent builds a durable workflow →
+it runs, self-monitors, and self-fixes until done.
+
+Here is the Smithers documentation index:
+```
+{props.docs}
+```
+
+---
+
+## Your task
+
+From the docs above, surface **5–8 capabilities** that would be most exciting to someone
+who just built their first workflow. Each entry is a "You say → Smithers runs" pair:
+
+- **youSay**: the exact sentence you'd say to your agent (≤20 words, starts with a verb or noun)
+  — e.g. `"Run the daily code-review workflow and show me what needs attention."`
+- **smithersRuns**: which workflow / component this triggers and what it does in ≤15 words
+  — e.g. `"review: scans changed files, cross-model review panel, flags must-fix items."`
+- **what**: the concrete value you get — one sentence, grounded in outcome not process
+  — e.g. `"You wake up to a triage list instead of a pile of unreviewed PRs."`
+
+Prioritise features that feel **magical** — things a plain agent can't do alone:
+crash-safe long runs, human-in-the-loop approval gates, parallel workers, auto-retry loops,
+time-travel, cross-model review panels, background scheduled runs, live UI.
+
+Write a brief `summary` — 2 sentences: what the user just learned + the single most
+powerful next thing to try.
+
+{props.schema}

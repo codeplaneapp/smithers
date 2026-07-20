@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#4C8DFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#4C8DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#0C0E16"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+  <text font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF" letter-spacing="5"><tspan x="96" y="156">SMITHERS · V0.25.0</tspan></text>
+  <text font-size="60" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#E7E9EE" font-weight="800"><tspan x="96" y="270">Workflows that do real work</tspan></text>
+
+  <rect x="96" y="372" width="6" height="120" rx="3" fill="#4C8DFF"/>
+  <text font-size="38" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF"><tspan x="132" y="412">plan-implement-review-issues</tspan></text>
+  <text font-size="28" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="132" y="464">one deduped PR per open GitHub issue</tspan></text>
+
+  <rect x="96" y="556" width="6" height="120" rx="3" fill="#4C8DFF"/>
+  <text font-size="38" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF"><tspan x="132" y="596">audit-burndown</tspan></text>
+  <text font-size="28" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="132" y="648">clears your ticket backlog, gated on real typecheck + tests</tspan></text>
+
+  <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
+  <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>
+  <text x="1504" y="826" font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="end">0.25.0</text>
+</svg>

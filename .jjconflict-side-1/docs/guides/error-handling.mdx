@@ -1,0 +1,8 @@
+---
+title: Error Handling
+description: Folded into Recipes.
+---
+
+This material is now in [Recipes](/recipes#retry-policy--timeouts).
+
+Default retry policy is exponential backoff (1s, 2s, 4s, ... capped at 5 min) with **infinite retries**; set an explicit `retries={N}` or `noRetry` to bound it. On retry after a non-idempotent side-effect tool call, Smithers injects a warning into the prompt and reuses the same `ctx.idempotencyKey`.

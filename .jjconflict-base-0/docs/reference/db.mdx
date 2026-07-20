@@ -1,0 +1,257 @@
+---
+title: Database API
+description: The durable storage layer beneath a workflow, and the Zod-to-SQL helpers that build it.
+icon: "database"
+---
+
+Every Smithers run persists to a relational store: runs, nodes, attempts, output
+rows, render frames, and internal message history. The factory
+([`createSmithers` and friends](/reference/authoring)) owns that store for you and
+hands back a typed `db` handle, so you almost never touch this layer directly.
+
+This page is the escape hatch. Reach for it when you build a custom backend,
+inspect a store outside a running workflow, or generate tables from Zod schemas
+yourself.
+
+```ts
+import {
+  SmithersDb,
+  loadOutputs,
+  loadOutputsEffect,
+  ensureSmithersTables,
+  zodToTable,
+  zodToCreateTableSQL,
+  syncZodTableSchema,
+  zodSchemaColumns,
+  camelToSnake,
+  unwrapZodType,
+  zodSchemaToJsonExample,
+} from "smithers-orchestrator";
+```
+
+<Note>
+`SmithersDb` is also re-exported from `@smithers-orchestrator/db/adapter` for
+callers that pin the subpath; the facade export above is the supported one.
+</Note>
+
+## SmithersDb
+
+The adapter. It wraps a Drizzle database handle (a `bun:sqlite` database, or a
+Postgres/PGlite connection descriptor) and exposes every persistence operation
+the engine needs. The factory constructs one and the scheduler drives it; you
+construct one yourself only for a custom control plane.
+
+```ts
+const adapter = new SmithersDb(db);
+```
+
+<ParamField path="db" type="BunSQLiteDatabase | PostgresDescriptor" required>
+  The underlying Drizzle handle. SQLite uses Drizzle queries directly; the
+  Postgres/PGlite descriptor routes through the internal SQL message storage.
+</ParamField>
+
+Key responsibilities:
+
+<ResponseField name="run lifecycle" type="methods">
+  `insertRun`, `updateRun`, `getRun`, `listRuns`, `heartbeatRun`,
+  `requestRunCancel`, `requestRunHijack`, `claimRunForResume`,
+  `listStaleRunningRuns`, and the ancestry helpers track a run from start to
+  terminal state and support crash recovery.
+</ResponseField>
+
+<ResponseField name="nodes & attempts" type="methods">
+  `insertNode` / `getNode` / `listNodes` and `insertAttempt` / `updateAttempt` /
+  `heartbeatAttempt` record per-node execution and each retry attempt.
+</ResponseField>
+
+<ResponseField name="output rows" type="methods">
+  `upsertOutputRow`, `deleteOutputRow`, `getRawNodeOutput`, and `hasPhysicalTable`
+  read and write the typed output tables a workflow's schemas produce. Keyed by
+  `runId` / `nodeId` / `iteration`.
+</ResponseField>
+
+<ResponseField name="render frames" type="methods">
+  `insertFrame`, `listFrameChainDesc`, and `reconstructFrameXml` persist and
+  replay the delta-encoded UI frame stream (with an in-memory LRU XML cache).
+</ResponseField>
+
+<ResponseField name="transactions" type="(writeGroup, operation) => RunnableEffect">
+  `withTransaction` / `withTransactionEffect` run a write group atomically.
+  `read(label, op)` and `write(label, op)` wrap a single operation as a runnable
+  Effect with metrics and SQLite write-retry. SQLite serializes writes per
+  client; Postgres uses real transactions.
+</ResponseField>
+
+<ResponseField name="rawQuery" type="(sql, params?) => RunnableEffect<unknown[]>">
+  Read-only escape hatch. Accepts only `SELECT` / `WITH` / `EXPLAIN` / `VALUES`;
+  any DDL or mutation keyword is rejected before execution. Use it for
+  introspection, never for writes.
+</ResponseField>
+
+<ResponseField name="internalStorage" type="SqlMessageStorage">
+  The agent-message and event-history store behind the adapter, created from the
+  same handle. See [`ensureSmithersTables`](#ensuresmitherstables).
+</ResponseField>
+
+Most methods return a `RunnableEffect`: an Effect you can `yield*` inside an
+Effect program, or `await` directly as a promise.
+
+**Source** [`adapter.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/adapter.js) · [`adapter/SmithersDb.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/adapter/SmithersDb.js) · **Tests** [`db-adapter.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/db-adapter.test.js) · **See also** [How it works](/how-it-works), [`SchemaRegistryEntry`](/reference/types)
+
+## loadOutputs / loadOutputsEffect
+
+Read every persisted output row for a run, across all of a workflow's output
+tables, in one call. Given the `tables` map the factory returns and a `RUN_ID`,
+it returns a snapshot keyed by both the schema name and the physical table name.
+Boolean columns are coerced back to JS booleans; the reserved `input` table is
+skipped.
+
+```ts
+function loadOutputs(
+  db: BunSQLiteDatabase | PostgresDescriptor,
+  schema: Record<string, Table>,
+  runId: string,
+): Promise<OutputSnapshot>;
+```
+
+<ParamField path="db" type="BunSQLiteDatabase | PostgresDescriptor" required>
+  The same handle the adapter wraps. Dialect-aware: Drizzle for SQLite, a
+  parameterized `$1` query for the Postgres descriptor.
+</ParamField>
+
+<ParamField path="schema" type="Record<string, Table>" required>
+  Map of output name to its Drizzle table (the `tables` value from the factory).
+  Entries without a `runId` column, or the `input` entry, are skipped.
+</ParamField>
+
+<ParamField path="runId" type="string" required>
+  The run to read. Placeholder: `RUN_ID`.
+</ParamField>
+
+<ResponseField name="Promise<OutputSnapshot>" type="object">
+  An object whose keys are both the schema name and the snake_case table name;
+  each value is the array of Drizzle-shaped rows (camelCase keys) for that run.
+</ResponseField>
+
+`loadOutputsEffect` is the same query returning an
+`Effect.Effect<OutputSnapshot, SmithersError>` instead of a promise. Use it
+inside an Effect pipeline; use `loadOutputs` for a one-off read.
+
+```ts
+const { tables } = createSmithers(schemas);
+const snapshot = await loadOutputs(db, tables, "RUN_ID");
+const rows = snapshot.research; // rows from the "research" output table
+```
+
+**Source** [`snapshot.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/snapshot.js) · **Tests** [`db-snapshot-load.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/db-snapshot-load.test.js) · **See also** [`db-output-roundtrip.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/db-output-roundtrip.test.js)
+
+## ensureSmithersTables
+
+Create the core Smithers tables (the internal message and event-history storage
+the adapter depends on) on a fresh handle, if they do not already exist. Safe to
+call on every boot.
+
+```ts
+function ensureSmithersTables(db: BunSQLiteDatabase): void;
+```
+
+<ParamField path="db" type="BunSQLiteDatabase" required>
+  The Drizzle handle to initialize. Runs synchronously for SQLite.
+</ParamField>
+
+<Note>
+For a Postgres connection descriptor this synchronous helper is a no-op:
+Postgres schema setup is asynchronous and the Postgres/PGlite entry points
+ensure the schema (awaited) before the engine starts. Output tables are created
+separately by [`syncZodTableSchema`](#zod-table-helpers).
+</Note>
+
+**Source** [`ensure.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/ensure.js) · **Tests** [`db-ensure.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/db-ensure.test.js)
+
+## Zod -> table helpers
+
+Turn a Zod object schema into a SQLite output table. Each table gets the fixed
+`run_id` / `node_id` / `iteration` prefix and a composite primary key; field keys
+are snake-cased and mapped to columns by Zod type (string/enum/literal -> `TEXT`,
+`z.number()` / float -> `REAL` (fractions are preserved), `z.int()` -> `INTEGER`,
+boolean -> `INTEGER` boolean mode, and arrays/objects/unions -> JSON `TEXT`). Pass
+`opts.isInput` for the single-PK input-table shape. Output field names may not
+reuse the reserved key columns `runId`/`nodeId`/`iteration` (input reserves only
+`runId`); a collision throws `INVALID_INPUT` at construction.
+
+<ResponseField name="zodToTable(name, schema, opts?)" type="Table">
+  Build a Drizzle `sqliteTable` from the schema. This is what the factory calls
+  to materialize `tables`.
+</ResponseField>
+
+<ResponseField name="zodToCreateTableSQL(name, schema, opts?)" type="string">
+  Emit `CREATE TABLE IF NOT EXISTS ...`. Pass `opts.dialect` (default `"sqlite"`)
+  to emit Postgres-compatible column types instead.
+</ResponseField>
+
+<ResponseField name="syncZodTableSchema(sqlite, name, schema, opts?)" type="void">
+  Create the table and reconcile a drifted one: it runs the `CREATE TABLE`, then
+  `ALTER TABLE ADD COLUMN` for any field missing from an older table, and records
+  column kinds in `_smithers_output_schema_columns`. Idempotent. `sqlite` must be
+  a `bun:sqlite` database (or compatible `.run` / `.query` handle).
+</ResponseField>
+
+<ResponseField name="zodSchemaColumns(schema)" type="Array<{ name, sqliteType, kind }>">
+  The user-defined columns derived from the schema, excluding the fixed prefix.
+  Each entry carries the snake_case `name`, the SQLite type, and the logical
+  `kind` (`string` / `number` / `boolean` / `json`).
+</ResponseField>
+
+```ts
+import { z } from "zod";
+
+const Research = z.object({
+  findings: z.string(),
+  score: z.number().int(),
+  done: z.boolean(),
+});
+
+zodSchemaColumns(Research);
+// [
+//   { name: "findings", sqliteType: "TEXT",    kind: "string"  },
+//   { name: "score",    sqliteType: "INTEGER", kind: "number"  },
+//   { name: "done",     sqliteType: "INTEGER", kind: "boolean" },
+// ]
+
+zodToCreateTableSQL("research", Research);
+// CREATE TABLE IF NOT EXISTS "research" (run_id TEXT NOT NULL,
+//   node_id TEXT NOT NULL, iteration INTEGER NOT NULL DEFAULT 0,
+//   "findings" TEXT, "score" INTEGER, "done" INTEGER,
+//   PRIMARY KEY (run_id, node_id, iteration))
+```
+
+**Source** [`zodToTable.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/zodToTable.js) · [`zodToCreateTableSQL.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/zodToCreateTableSQL.js) · **Tests** [`zod-to-table-unit.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/zod-to-table-unit.test.js) · [`zod-to-sql.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/zod-to-sql.test.js)
+
+## Utilities
+
+Small building blocks the helpers above are made of, exported for the same
+custom-backend cases.
+
+<ResponseField name="camelToSnake(str)" type="string">
+  Convert a `camelCase` field name to `snake_case` (the column-naming rule used
+  throughout). `"createdAtMs"` -> `"created_at_ms"`.
+</ResponseField>
+
+<ResponseField name="unwrapZodType(t)" type="ZodType">
+  Strip the `optional` / `nullable` / `default` wrappers off a Zod type to reach
+  its base type, so column mapping sees the underlying kind.
+</ResponseField>
+
+<ResponseField name="zodSchemaToJsonExample(schema)" type="string">
+  Render a Zod object schema as a pretty-printed JSON example string: field
+  descriptions become string placeholders, numbers `0`, booleans `false`, arrays
+  a one-element sample, and the first enum value is used. Handy for prompting an
+  agent with the exact output shape it must return.
+</ResponseField>
+
+```ts
+unwrapZodType(z.string().optional()); // -> ZodString
+camelToSnake("hijackRequestedAtMs"); // -> "hijack_requested_at_ms"
+```
+
+**Source** [`utils/camelToSnake.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/utils/camelToSnake.js) · [`unwrapZodType.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/unwrapZodType.js) · [`zod-to-example.js`](https://github.com/smithersai/smithers/blob/main/packages/components/src/zod-to-example.js) · **Tests** [`camel-to-snake.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/camel-to-snake.test.js) · [`unwrap-zod-type.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/unwrap-zod-type.test.js) · **See also** [Authoring API](/reference/authoring), [Types reference](/reference/types)

@@ -1,0 +1,16 @@
+---
+title: hijackRun
+description: Gateway RPC for elevated operator handoff.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `hijackRun`
+- Scope: `run:admin`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, options? }`
+- Response: `{ runId, status: "hijack-ready", sessionId }`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, and `Internal`.
+
+This RPC is intentionally scoped above normal run write access. The Gateway verifies the run exists and returns a `sessionId` token that the caller (e.g. `bunx smithers-orchestrator hijack`) uses to coordinate the operator handoff: attaching a terminal, injecting commands, or resuming the agent conversation.

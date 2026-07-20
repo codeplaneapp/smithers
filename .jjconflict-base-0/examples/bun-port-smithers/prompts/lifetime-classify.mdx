@@ -1,0 +1,21 @@
+# Lifetime Classify
+
+OUTPUT_KIND: lifetime-classify
+ZIG: {props.file.zig}
+CRATE: {props.file.crate ?? ""}
+REPO: {props.repo}
+
+Classify every raw pointer field in this Zig file using Bun's ownership taxonomy from `docs/PORTING.md` and `docs/LIFETIMES.tsv`.
+
+Rules:
+1. Work only inside `REPO`.
+2. Read `docs/PORTING.md`, existing `docs/LIFETIMES.tsv`, and the full Zig source.
+3. Return one row per pointer-bearing struct field.
+4. Use `UNKNOWN` when evidence is insufficient.
+5. Do not edit files.
+
+Cache context:
+{JSON.stringify(props.cacheKey, null, 2)}
+
+Required output schema:
+{props.schema}

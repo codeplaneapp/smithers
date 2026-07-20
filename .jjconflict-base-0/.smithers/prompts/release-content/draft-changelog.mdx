@@ -1,0 +1,98 @@
+# Draft a Smithers release changelog
+
+You write the release notes at `docs/changelogs/{props.probe.version}.mdx`.
+This page is the guided tour of the release, written like a great release
+announcement (study the prior changelogs below for the voice: think Astro's
+release blog posts). It is NOT an inventory of everything that changed; the
+complete commit-level list is generated separately into the repo-root
+`CHANGELOG.md` on GitHub, and your job is to link to it, never to duplicate
+it.
+
+## Probe
+
+{JSON.stringify(props.probe, null, 2)}
+
+## Exact release stats (computed from git, use these numbers verbatim)
+
+{JSON.stringify(props.stats, null, 2)}
+
+## Real recorded media available to embed
+
+{JSON.stringify(props.recordings, null, 2)}
+
+## Release analysis
+
+{JSON.stringify(props.analysis, null, 2)}
+
+## Template selection
+
+{JSON.stringify(props.template, null, 2)}
+
+## Content brief
+
+{JSON.stringify(props.brief, null, 2)}
+
+## Additional instructions
+
+Global:
+{props.globalAdditional || "(none)"}
+
+Stage:
+{props.additional || "(none)"}
+
+## Structure (in this order)
+
+1. Frontmatter: `title: "{props.probe.version}"` and a one-sentence
+   `description` that names the top user-facing wins.
+2. A bold opening declaration ("**Smithers X is here!**") followed by a
+   two-to-four sentence thesis. If the stats are notable, say them here with
+   the exact numbers. If most of the release is hardening, say that honestly
+   and up front; users trust a release that tells them where the work went.
+3. An `## Upgrading` section EARLY, with the copy-paste commands
+   (`bunx smithers-orchestrator update`, `upgrade`, `packs update`) and a link
+   to the upgrade notes anchor.
+4. Feature sections ordered by "would a user notice and feel this?", each:
+   - a problem-first opening line (what hurt, what you can now do),
+   - a code example or copy-paste command block when the feature has a
+     surface,
+   - a `<Frame>` with a recorded gif or screenshot when one exists in the
+     media list above (path becomes `/images/...` site-absolute),
+   - short bullets for the details that change what a reader would do.
+5. An honest hardening/reliability section when the stats support one: state
+   the fix-commit and test-commit counts, name what got more reliable, and
+   point out anything directly reusable (a testing package, a security pass).
+6. `## Other improvements`: one bullet each for real but smaller changes.
+7. `## Upgrade notes`: every behavior change an upgrading user must know,
+   trimmed to the actionable ones.
+8. `## The full changelog`: link to CHANGELOG.md on GitHub
+   (`https://github.com/<org>/<repo>/blob/main/CHANGELOG.md`), plus a closing
+   line inviting bug reports (`bunx smithers-orchestrator bug`).
+
+## Voice and hard rules
+
+- Write to "you", present tense, plain verbs. Problem first, then the
+  feature. Concrete nouns over adjectives.
+- NO em-dashes anywhere (the check-docs gate fails the build on them). Use
+  commas, colons, or periods.
+- No hype words (game-changing, revolutionary, seamless, powerful, robust,
+  10x), no "not X, it's Y" antithesis constructions.
+- Every number must come from the stats block or the claim ledger. Never
+  round, never estimate.
+- Only link docs pages that exist. If you are not certain a page exists,
+  verify before linking or leave the reference as plain text.
+- Frame young features honestly: a first release is an MVP with rough edges,
+  and saying so builds trust. Never frame an unshipped preview as launched.
+- Only embed media from the recorded list above, whose frames were verified.
+  Never reuse an old gallery screenshot you have not looked at: a stale image
+  can show the UI in an error or empty state (a past release embedded a
+  "Gateway errors" failure screen with a caption describing a healthy run).
+- Media captions must describe what the recording actually shows.
+- Use `bunx smithers-orchestrator` for CLI commands.
+- Include `claimIds` that support the changelog.
+
+## Prior changelogs (match this voice)
+
+{(props.priorChangelogs || []).map((entry) => `### ${entry.version}\n\n${entry.excerpt}`).join("\n\n---\n\n") || "(none available)"}
+
+REQUIRED OUTPUT:
+{props.schema}

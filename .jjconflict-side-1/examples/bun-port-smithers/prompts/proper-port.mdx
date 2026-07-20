@@ -1,0 +1,18 @@
+# Proper Port
+
+OUTPUT_KIND: proper-port
+TARGET: {props.target.id}
+CRATE: {props.target.crate}
+FILE: {props.target.file}
+REPO: {props.repo}
+
+Remove gates, `todo!()`, `unimplemented!()`, panic placeholders, or compile-only slop by porting real behavior from the Zig spec.
+
+Target:
+{JSON.stringify(props.target, null, 2)}
+
+Previous review decision:
+{JSON.stringify(props.previousDecision ?? null, null, 2)}
+
+Required output schema:
+{props.schema}

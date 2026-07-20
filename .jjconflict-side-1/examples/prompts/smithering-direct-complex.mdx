@@ -1,0 +1,19 @@
+# Direct execution (complex tier)
+
+/goal {props.prompt}
+
+This request was routed as complex: own it end-to-end, autonomously, with deep reasoning.
+
+Target repo: {props.repo ?? "(current repo)"}
+
+Requirements:
+
+- Plan briefly before editing; follow the repo's existing conventions.
+- VERIFY rigorously: tests must fail before the fix and pass after; run the full relevant
+  suite plus lint/typecheck. Record commands and results in verificationEvidence.
+- Work on a branch with clean, conventional commits. Do NOT merge to the default branch.
+- If you hit a genuine blocker (missing credentials, ambiguous product decision), STOP and
+  report it in your summary rather than guessing — the orchestrator will take it to the
+  human.
+- List every file you changed in filesChanged. If you produced any artifact worth showing
+  (report, screenshot), set artifactPath.

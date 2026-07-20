@@ -1,0 +1,46 @@
+{
+  "name": "@smithers-orchestrator/protocol",
+  "version": "0.29.0",
+  "description": "Shared Smithers contracts, errors, and small value types",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./errors": {
+      "types": "./src/index.d.ts",
+      "import": "./src/errors/index.js",
+      "default": "./src/errors/index.js"
+    },
+    "./errors/index.js": {
+      "types": "./src/index.d.ts",
+      "import": "./src/errors/index.js",
+      "default": "./src/errors/index.js"
+    },
+    "./gateway-rpc": {
+      "types": "./src/gateway-rpc.d.ts",
+      "import": "./src/gateway-rpc.js",
+      "default": "./src/gateway-rpc.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-dts.mjs src && tsup --dts-only",
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~6.0.3"
+  }
+}

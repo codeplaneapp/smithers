@@ -1,0 +1,51 @@
+{
+  "name": "@smithers-orchestrator/graph",
+  "version": "0.29.0",
+  "description": "Framework-neutral Smithers workflow graph model and extraction helpers",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./constants": {
+      "types": "./src/constants.d.ts",
+      "import": "./src/constants.js",
+      "default": "./src/constants.js"
+    },
+    "./utils/xml": {
+      "types": "./src/utils/xml.d.ts",
+      "import": "./src/utils/xml.js",
+      "default": "./src/utils/xml.js"
+    },
+    "./classifyClaudeWorkflowNodeKind": {
+      "types": "./src/classifyClaudeWorkflowNodeKind.d.ts",
+      "import": "./src/classifyClaudeWorkflowNodeKind.js",
+      "default": "./src/classifyClaudeWorkflowNodeKind.js"
+    },
+    "./*": {
+      "types": "./src/*.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-dts.mjs src && tsup",
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/errors": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~6.0.3"
+  }
+}

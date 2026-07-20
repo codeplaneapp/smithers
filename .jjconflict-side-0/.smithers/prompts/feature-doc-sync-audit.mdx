@@ -1,0 +1,50 @@
+# Release readiness: feature and doc sync audit
+
+You are the publish gate for the `smithers-orchestrator` package. Your job is to
+confirm that every NEW or CHANGED user-facing feature since the last release is
+recorded in BOTH places before this release ships:
+
+1. The code-backed feature inventory at `.smithers/specs/features.ts`.
+2. The documentation under `docs/` (a guide, a concept page, or the API
+   reference under `docs/reference/`).
+
+You have file and shell tools. Use them. Do not guess from memory.
+
+## Gather the change set yourself
+
+1. Find the last released version: `git describe --tags --match 'v*' --abbrev=0`
+   (or read the highest version under `docs/changelogs/`). Call it BASE.
+2. List what changed since then: `git diff --name-only BASE..HEAD` and, where you
+   need detail, `git diff BASE..HEAD -- <path>`. Read the current version from
+   `package.json`.
+3. Read `.smithers/specs/features.ts` to learn the existing feature ids and how
+   they are grouped (SCREAMING_SNAKE_CASE ids under domain groups).
+
+## Decide what counts
+
+A "user-facing feature" is a new or changed public capability: a new public
+export, JSX component, CLI command or flag, agent integration, Gateway RPC
+method, config option, or an observable behavior change. Internal refactors,
+tests, chores, dependency bumps, and pure docs edits do NOT count.
+
+For each user-facing feature in the change set:
+- Confirm it has a representative id in `.smithers/specs/features.ts`. If not,
+  record the missing item in `missingFeatures` as `GROUP: SUGGESTED_FEATURE_ID -
+  one line on what it is`.
+- Confirm it is documented somewhere under `docs/` (prefer the matching
+  `docs/reference/<module>.mdx` API page, plus a guide/concept if behavioral).
+  If not, record it in `missingDocs` as `feature - the doc file that should
+  cover it`.
+
+## Verdict rules
+
+- Set `ok` to true ONLY when both inventories are complete for every user-facing
+  change. Otherwise set `ok` to false.
+- Be precise and conservative. Do not invent gaps; if you are unsure whether a
+  change is user-facing, read the actual diff before deciding. An empty change
+  set (nothing user-facing) is `ok: true`.
+- Put a short, human-readable summary in `notes`: what BASE you compared against,
+  what you checked, and what you found.
+
+REQUIRED OUTPUT:
+{props.schema}

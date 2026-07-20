@@ -1,0 +1,15 @@
+{
+  "name": "@smithers-orchestrator/swe-bench-pro",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SWE-Bench Pro benchmark for Smithers — agent-authored patches scored in ScaleAI's canonical Docker environments.",
+  "bin": {
+    "swebp": "./scripts/cli.js"
+  },
+  "scripts": {
+    "setup": "node ./scripts/setup.js",
+    "bench": "node ./scripts/cli.js run",
+    "verify": "node ./scripts/cli.js verify"
+  }
+}

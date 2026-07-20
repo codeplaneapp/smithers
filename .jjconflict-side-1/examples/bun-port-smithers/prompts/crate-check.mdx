@@ -1,0 +1,16 @@
+# Crate Check
+
+OUTPUT_KIND: crate-check
+CRATE: {props.crate.name}
+TIER: {props.crate.tier}
+REPO: {props.repo}
+
+Run `cargo check -p bun_{props.crate.name}` inside `REPO`.
+
+Fix compile errors by preserving Phase A draft bodies where possible. Gate or stub only when necessary to establish crate boundaries. Return every gated module and blocked upstream symbol.
+
+Round context:
+{JSON.stringify(props.previous ?? null, null, 2)}
+
+Required output schema:
+{props.schema}

@@ -1,0 +1,18 @@
+# Cross-model review of the generated workflow
+
+Adversarially review the generated Smithers workflow at
+.smithers/workflows/smithering-impl.tsx (a different model family authored it). Check
+against the orchestration design (docs/planning/06-orchestration.md), the tickets
+(artifacts/smithering/tickets.json), and the Smithers footgun list:
+
+- task ids stable and data-derived (resume safety)?
+- every loop capped? schemas on every task? side effects uncached and idempotent?
+- every BLOCKING backpressure gate actually wired into pre-merge checks?
+- reviewer model family ≠ implementer family per ticket?
+- smoke input contract honored (one ticket, no gates, finishes)?
+- nothing EVER merges to {props.baseBranch} (integration branch only, no policy escape
+  hatch)?
+- HTML decision docs + per-ticket evidence under artifacts/smithering/ actually wired
+  into worker prompts?
+
+approved=true only if you would launch this with real budget. Else blockingIssues[].

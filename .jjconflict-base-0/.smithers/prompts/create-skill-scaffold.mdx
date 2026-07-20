@@ -1,0 +1,40 @@
+# Scaffold the skill files
+
+You are the scaffolder. Turn the approved skill design into a real, agent-facing
+`SKILL.md` (plus any supporting files). You have file tools — **write the files to
+disk**, then report exactly what you wrote.
+
+## Design
+
+{JSON.stringify(props.design, null, 2)}
+
+Write the skill under {props.skillsDir}.
+
+## How to write it
+
+1. **Location.** Put the skill at {props.skillsDir} as either `<skillName>/SKILL.md`
+   (preferred when it ships supporting files) or a single `<skillName>.md`, where
+   `<skillName>` is the design's `skillName`.
+2. **Frontmatter.** Begin with YAML frontmatter built from the design's
+   `frontmatter`:
+   ```
+   ---
+   name: <skillName>
+   description: <one line — what it does and when to use it>
+   ---
+   ```
+3. **Body.** Write one concise section per entry in the design's `sections`
+   (heading + content fulfilling its stated purpose). Keep it practical and
+   agent-facing — tell an agent what the skill equips it to do, when to reach for
+   it, the inputs it expects, and any commands or steps. No marketing copy.
+4. **Supporting files.** Create each file listed in the design's `supportingFiles`
+   at its path, with content matching its purpose. Skip if the list is empty.
+5. Create parent directories as needed. Do not stub or leave TODOs — write real,
+   usable content.
+
+## Output
+
+Return a `skillName` and the full list of `filesWritten` (path + kind).
+
+REQUIRED OUTPUT:
+{props.schema}

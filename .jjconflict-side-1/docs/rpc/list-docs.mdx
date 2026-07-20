@@ -1,0 +1,16 @@
+---
+title: listDocs
+description: Gateway RPC for DB-backed Smithers markdown artifacts.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listDocs`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ filter?: { kind?: "ticket" | "plan" | "spec" | "proposal" | "conflict"; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number } }`
+- Response: `GatewayDocRow[]`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
+
+Each row includes `path`, `kind`, `content`, `contentHash`, `updatedAtMs`, and optional `deletedAtMs`. Tombstone rows are returned only when `includeDeleted` is true. Conflict marker rows use `kind: "conflict"` and a `conflicts/*.json` path.

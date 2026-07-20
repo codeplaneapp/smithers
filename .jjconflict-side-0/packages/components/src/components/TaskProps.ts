@@ -1,0 +1,100 @@
+import type React from "react";
+import type { z } from "zod";
+import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { SmithersCtx } from "@smithers-orchestrator/driver";
+import type { CachePolicy } from "@smithers-orchestrator/scheduler/CachePolicy";
+import type { RetryPolicy } from "@smithers-orchestrator/scheduler/RetryPolicy";
+import type { ScorersMap } from "@smithers-orchestrator/graph/types";
+import type { ProofBinding } from "@smithers-orchestrator/graph/ProofBinding";
+import type { TaskMemoryConfig } from "@smithers-orchestrator/memory/types";
+import type { OutputTarget } from "./OutputTarget.ts";
+import type { DepsSpec } from "./DepsSpec.ts";
+import type { InferDeps } from "./InferDeps.ts";
+
+export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSpec = {}> = {
+	key?: string;
+	id: string;
+	/** Where to store the task's result. Pass a Zod schema from `outputs` (recommended), a Drizzle table, or a string key. */
+	output: Output;
+	/**
+	 * Optional Zod schema describing the expected agent output shape.
+	 * When `output` is already a ZodObject this is inferred automatically.
+	 * Used for validation and to inject schema examples into MDX prompts.
+	 */
+	outputSchema?: z.ZodObject<z.ZodRawShape>;
+	/** Maximum automatic output-format/schema correction calls after the initial agent call. Set to 0 to disable corrections. Default: 3. */
+	maxSchemaRetries?: number;
+	/** Agent or array of agents [primary, fallback1, fallback2, ...]. Tries in order on retries. */
+	agent?: AgentLike | AgentLike[];
+	/** Convenience alias for a single retry fallback without exposing array syntax in JSX. */
+	fallbackAgent?: AgentLike;
+	/** Explicit dependency on other task node IDs. The task will not run until all listed tasks complete. */
+	dependsOn?: string[];
+	/** Named dependencies on other tasks. Keys become context keys, values are task node IDs. */
+	needs?: Record<string, string>;
+	/** Render-time typed dependencies. Keys resolve from task ids of the same name, or from matching `needs` entries. */
+	deps?: D;
+	/**
+	 * When true, `deps` resolution omits keys whose upstream task has no output
+	 * (e.g. a `continueOnFail` task that failed) instead of deferring the task
+	 * until every dep resolves. Pair with `needs`/`dependsOn` so the task is
+	 * still gated on upstream tasks reaching a terminal state.
+	 *
+	 * Runtime caveat: under `depsOptional`, a resolved `deps` value is absent
+	 * (not present-but-undefined) when its upstream produced no output, even
+	 * though the `children(deps)` callback types every key as present. Null-check
+	 * each dep you read (`deps.a?.field`) — reading `deps.a.field` for a failed
+	 * upstream throws at runtime despite compiling cleanly.
+	 */
+	depsOptional?: boolean;
+	/**
+	 * Start this agent task from a copy of another task's final agent session context.
+	 * The fork source becomes an implicit dependency: this task waits for it to complete,
+	 * then copies its conversation snapshot into a fresh, independent session and submits
+	 * its own prompt. The source is never mutated. Inside a `<Loop>`, resolves to the
+	 * latest completed snapshot for that task id. Requires an agent task.
+	 */
+	fork?: string;
+	/** Schedule only while every bound authority row still has the proved content digest. */
+	bind?: ProofBinding | ProofBinding[];
+	skipIf?: boolean;
+	needsApproval?: boolean;
+	/** When paired with `needsApproval`, do not block unrelated downstream flow while the approval is pending. */
+	async?: boolean;
+	timeoutMs?: number;
+	heartbeatTimeoutMs?: number;
+	heartbeatTimeout?: number;
+	/** Disable retries entirely. Equivalent to retries={0}. */
+	noRetry?: boolean;
+	retries?: number;
+	retryPolicy?: RetryPolicy;
+	continueOnFail?: boolean;
+	cache?: CachePolicy;
+	/** Optional scorers to evaluate this task's output after completion. */
+	scorers?: ScorersMap;
+	/** Expected output supplied to scorers that compare against a reference answer. */
+	groundTruth?: unknown;
+	/** Additional source context supplied to scorers such as faithfulnessScorer. */
+	context?: unknown;
+	/** Optional cross-run memory configuration. */
+	memory?: TaskMemoryConfig;
+	/** Request an immediate hijack handoff as soon as the task starts running. */
+	hijack?: boolean;
+	/** What Smithers should do after a hijacked session exits. */
+	onHijackExit?: "complete" | "reopen";
+	allowTools?: string[];
+	/**
+	 * Scheduling priority (default 0, or the nearest `<Parallel>`/`<MergeQueue>`
+	 * ancestor's priority). When more tasks are runnable than free concurrency
+	 * slots, higher priority claims slots first; ties keep plan order. Never
+	 * overrides dependencies or group caps.
+	 */
+	priority?: number;
+	/** Override the nearest container failure policy for this task. */
+	failurePolicy?: "halt" | "quarantine";
+	label?: string;
+	meta?: Record<string, unknown>;
+	/** @internal Used by createSmithers() to bind tasks to the correct workflow context. */
+	smithersContext?: React.Context<SmithersCtx<unknown> | null>;
+	children?: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | React.ReactNode);
+};

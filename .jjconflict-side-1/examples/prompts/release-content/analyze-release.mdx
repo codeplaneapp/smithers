@@ -1,0 +1,45 @@
+# Analyze a Smithers release
+
+You are building the factual release analysis for Smithers marketing automation.
+
+Smithers positioning:
+
+Smithers is the durable runtime layer for long-running coding agents: persisted state, retries, approvals, replay, sandboxes, evals, and observability.
+
+## Probe
+
+{JSON.stringify(props.probe, null, 2)}
+
+## Collected context
+
+{JSON.stringify(props.context, null, 2)}
+
+## Manual release context
+
+{JSON.stringify(props.manualContext, null, 2)}
+
+## Additional instructions
+
+Global:
+{props.globalAdditional || "(none)"}
+
+Stage:
+{props.additional || "(none)"}
+
+## Task
+
+Produce a fact-led release analysis. This is not copywriting yet.
+
+Rules:
+
+- Do not invent facts, dates, benchmarks, quotes, customers, or claims.
+- Every claim in `claimLedger` must have at least one source from commits, files, changelogs, packages, or manual context.
+- Use stable claim ids like `claim-gateway-command`, `claim-detached-events`, `claim-init-provider-fix`.
+- Mark a claim `allowedInMarketing=false` when it is vague, internally speculative, unsupported, or too risky.
+- Choose exactly one `releaseType`.
+- Prefer Smithers-specific release types: `developer-api-contract`, `agent-workflow-primitive`, `production-hardening`, `engineering-deep-dive`, or `launch-roundup`.
+- Put user-visible behavior in `userVisibleChanges`; put implementation-only details in `internalChanges`.
+- If there are no breaking changes, return an empty `breakingChanges` array.
+
+REQUIRED OUTPUT:
+{props.schema}

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --bg:#0C0E16; --surface-1:#141826; --surface-2:#1A2030;
+    --text-primary:rgba(255,255,255,.88); --text-secondary:rgba(255,255,255,.60); --text-tertiary:rgba(255,255,255,.45);
+    --border:rgba(255,255,255,.08); --fill-hover:rgba(255,255,255,.04); --fill-selected:rgba(76,141,255,.12);
+    --accent:#4C8DFF; --success:#34D399; --warning:#FBBF24; --danger:#F87171; --info:#60A5FA;
+    --accent-fill:rgba(76,141,255,.12); --accent-stroke:rgba(76,141,255,.35);
+    --font-sans:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#000;font-family:var(--font-sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .card{
+    width:1600px;height:900px;position:relative;overflow:hidden;
+    background:radial-gradient(1200px 700px at 78% -10%, rgba(76,141,255,.10), transparent 60%), var(--bg);
+    color:var(--text-primary);padding:84px 96px;display:flex;flex-direction:column;
+  }
+  .card + .card{margin-top:40px}
+  .kicker{font-family:var(--font-mono);font-size:22px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent);margin-bottom:26px}
+  h1{font-size:96px;line-height:.98;font-weight:800;letter-spacing:-.02em}
+  h2{font-size:64px;line-height:1.02;font-weight:800;letter-spacing:-.015em}
+  .sub{font-size:32px;line-height:1.4;color:var(--text-secondary);max-width:1120px;margin-top:26px}
+  .brand{position:absolute;left:96px;bottom:60px;display:flex;align-items:center;gap:16px;color:var(--text-tertiary);font-size:24px}
+  .brand .dot{width:14px;height:14px;border-radius:3px;background:var(--accent)}
+  .ver{position:absolute;right:96px;bottom:60px;font-family:var(--font-mono);font-size:24px;color:var(--text-tertiary)}
+  .spacer{flex:1}
+
+  /* hero command chips */
+  .cmds{display:flex;flex-wrap:wrap;gap:16px;margin-top:60px}
+  .cmd{font-family:var(--font-mono);font-size:28px;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:20px 26px}
+  .cmd .p{color:var(--accent)}
+
+  /* starters list */
+  .starters{display:flex;flex-direction:column;gap:16px;margin-top:54px}
+  .srow{display:flex;align-items:center;gap:28px;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:24px 30px}
+  .srow .id{font-family:var(--font-mono);font-size:26px;color:var(--accent);min-width:300px}
+  .srow .out{font-size:28px;color:var(--text-secondary)}
+  .prompt{margin-top:50px;font-family:var(--font-mono);font-size:30px;background:#000;border:1px solid var(--accent-stroke);border-radius:12px;padding:28px 34px;display:inline-block}
+  .prompt .p{color:var(--accent)}
+
+  /* optimize bars */
+  .opt{display:flex;flex-direction:column;gap:40px;margin-top:64px;max-width:1200px}
+  .bar{display:flex;align-items:center;gap:30px}
+  .bar .lbl{font-family:var(--font-mono);font-size:28px;width:240px;color:var(--text-secondary)}
+  .bar .track{flex:1;height:54px;background:var(--surface-1);border:1px solid var(--border);border-radius:8px;overflow:hidden;position:relative}
+  .bar .fill{height:100%;border-radius:7px 0 0 7px;display:flex;align-items:center;padding-left:24px;font-family:var(--font-mono);font-size:26px;font-weight:700}
+  .note{margin-top:54px;font-size:30px;color:var(--text-secondary);max-width:1100px}
+  .note b{color:var(--text-primary)}
+
+  /* hardening two-column */
+  .cols{display:flex;gap:28px;margin-top:54px}
+  .col{flex:1;background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:38px 40px}
+  .col h3{font-family:var(--font-mono);font-size:24px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:28px}
+  .col.sec h3{color:var(--danger)}
+  .col.cor h3{color:var(--success)}
+  .item{display:flex;align-items:center;gap:18px;font-size:30px;padding:14px 0;color:var(--text-secondary)}
+  .item .tick{font-size:26px}
+  .col.sec .tick{color:var(--danger)}
+  .col.cor .tick{color:var(--success)}
+</style>
+</head>
+<body>
+
+<!-- 1. HERO (non-Studio) -->
+<div class="card" id="hero2">
+  <div class="kicker">Smithers · v0.22.0</div>
+  <h1>Author and run<br/>agent workflows.</h1>
+  <div class="sub">0.22.0 ships a batch for the people writing workflows: a session-forking primitive, one-command setup for 20+ coding agents, an outcome-first starter gallery, automatic prompt tuning, and live per-workflow UIs.</div>
+  <div class="cmds">
+    <div class="cmd"><span class="p">$</span> smithers starters</div>
+    <div class="cmd"><span class="p">$</span> smithers optimize</div>
+    <div class="cmd"><span class="p">$</span> smithers ui</div>
+    <div class="cmd"><span class="p">&lt;Task</span> fork="plan"<span class="p">&gt;</span></div>
+  </div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">0.22.0</div>
+</div>
+
+<!-- 2. STARTERS -->
+<div class="card" id="starters">
+  <div class="kicker">New · smithers starters</div>
+  <h2>Start from the outcome you want.</h2>
+  <div class="starters">
+    <div class="srow"><span class="id">idea-to-prd</span><span class="out">turn a rough idea into a written PRD</span></div>
+    <div class="srow"><span class="id">ship-a-change</span><span class="out">plan, implement, and review a code change</span></div>
+    <div class="srow"><span class="id">customer-incident</span><span class="out">triage an incident and draft the writeup</span></div>
+    <div class="srow"><span class="id">launch-checklist</span><span class="out">run the pre-launch checklist end to end</span></div>
+  </div>
+  <div class="prompt"><span class="p">$</span> smithers starters &nbsp;<span style="color:var(--text-tertiary)"># plain outcomes, copy-paste commands</span></div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">10 starters map onto the seeded workflows</div>
+</div>
+
+<!-- 3. OPTIMIZE -->
+<div class="card" id="optimize">
+  <div class="kicker">New · smithers optimize</div>
+  <h2>Tune the prompts, keep only the wins.</h2>
+  <div class="opt">
+    <div class="bar">
+      <span class="lbl">baseline</span>
+      <div class="track"><div class="fill" style="width:61%;background:var(--surface-2);color:var(--text-secondary)">0.61</div></div>
+    </div>
+    <div class="bar">
+      <span class="lbl">optimized</span>
+      <div class="track"><div class="fill" style="width:84%;background:var(--accent-fill);color:var(--accent);border-right:2px solid var(--accent-stroke)">0.84</div></div>
+    </div>
+  </div>
+  <div class="note">Runs your eval suite twice: once with current prompts, once with GEPA-generated patches. It writes the new prompt artifact <b>only when the optimized score clears <span style="font-family:var(--font-mono)">--min-improvement</span></b>. Structure, schemas, retries, and approvals stay untouched.</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">cerebras · openai · anthropic · gemini · kimi · opencode</div>
+</div>
+
+<!-- 4. HARDENING -->
+<div class="card" id="hardening">
+  <div class="kicker">Under the hood · Hardening</div>
+  <h2>A security and correctness sweep.</h2>
+  <div class="cols">
+    <div class="col sec">
+      <h3>Security closed</h3>
+      <div class="item"><span class="tick">✓</span> DOM XSS in agent markdown links</div>
+      <div class="item"><span class="tick">✓</span> local-RCE via cross-origin PTY upgrade</div>
+      <div class="item"><span class="tick">✓</span> path-traversal in account labels</div>
+      <div class="item"><span class="tick">✓</span> request-body DoS in the workspace API</div>
+      <div class="item"><span class="tick">✓</span> auth-bypass via prototype-key tokens</div>
+    </div>
+    <div class="col cor">
+      <h3>Correctness hardened</h3>
+      <div class="item"><span class="tick">✓</span> engine reconciler and graph extraction</div>
+      <div class="item"><span class="tick">✓</span> time-travel snapshot fork and replay</div>
+      <div class="item"><span class="tick">✓</span> DB migrations and node-diff cache</div>
+      <div class="item"><span class="tick">✓</span> token accounting and judge scorers</div>
+      <div class="item"><span class="tick">✓</span> observability dashboards and event types</div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">plus memory-leak fixes across the gateway</div>
+</div>
+
+</body>
+</html>

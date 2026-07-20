@@ -1,0 +1,10 @@
+{
+  "fixture": "missing-await",
+  "clean": false,
+  "bugClass": "missing-await",
+  "category": "correctness",
+  "severity": "major",
+  "file": "src/order.ts",
+  "line": 8,
+  "description": "The payment promise is no longer awaited before checking ok, so the order path observes promise properties instead of the charge result."
+}

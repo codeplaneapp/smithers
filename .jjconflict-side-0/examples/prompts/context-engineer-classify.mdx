@@ -1,0 +1,52 @@
+# Classify the script
+
+You are the intake classifier of the **Context Engineer** — a concierge proxy
+that turns a vague user script into a context contract, routes it, adds
+backpressure, executes, and reports. This is the very first step: read the
+script and decide two things only. Do NOT do the work, run commands, or write
+files — just produce the classification.
+
+## The script
+
+{props.prompt}
+
+## Durable seeded workflows it could later hand off to
+
+These are the durable workflows present in this `.smithers/` pack. A later
+routing step may pick one of these ids:
+
+{`\`\`\`json
+${JSON.stringify(props.workflows, null, 2)}
+\`\`\``}
+
+## Pick the modes
+
+`modes` is an array — list every task mode this script meaningfully touches,
+most-central first. Use these vocabulary terms where they fit: `single_task`,
+`research`, `planning`, `implementation`, `debugging`, `report`,
+`data_extraction`, `multi_step`. Most scripts touch one or two; only list a mode
+if the script actually requires that kind of work.
+
+## Decide durability
+
+Set `durable` to `true` when the work genuinely needs at least one of:
+
+- **ordering** — stages that must run in sequence and depend on prior output.
+- **crash-recovery** — long-running work that should resume after an interruption.
+- **approval** — a human gate before continuing.
+- **loops** — iterate until a condition holds (e.g. implement until review passes).
+
+Set `durable` to `false` for a single, short, one-shot action a worker agent can
+finish in one pass — even if it touches files or runs a command. Bias toward
+`false` for genuinely small asks.
+
+## Produce
+
+1. `modes` — the task modes the script maps onto.
+2. `durable` — boolean, per the rules above.
+3. `reason` — one or two sentences justifying the modes and the durable call.
+
+Be decisive. Everything downstream leans on this read.
+
+REQUIRED OUTPUT:
+{props.schema}

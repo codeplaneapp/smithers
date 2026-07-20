@@ -1,0 +1,65 @@
+[
+  {
+    "file": "src/chat/MessageScroller.tsx",
+    "exports": ["MessageScroller"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/components/base/message-scroller",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "Provider/Scroller/Viewport/Content/Item/Button compound split",
+      "Marker integration slots"
+    ],
+    "divergences": [
+      "Flattened single component",
+      "Upstream explicitly rejects default auto-scroll while we ship opt-out stickToBottom (default true) because every Smithers surface streams"
+    ]
+  },
+  {
+    "file": "src/chat/Bubble.tsx",
+    "exports": ["Bubble", "bubbleVariants"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/components/base/bubble",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "Content/Reactions/Group sub-components",
+      "4 of the 7 upstream visual variants (we ship user/assistant/system only)"
+    ],
+    "divergences": ["Clamp-collapse for long content is a Smithers addition"]
+  },
+  {
+    "file": "src/chat/Attachment.tsx",
+    "exports": ["Attachment"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/components/base/attachment",
+    "ported": "partial-anatomy",
+    "omissions": ["orientation", "trigger", "actions menu", "AttachmentGroup"],
+    "divergences": []
+  },
+  {
+    "file": "src/chat/Marker.tsx",
+    "exports": ["Marker"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/components/base/marker",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": ["status variant (streaming rows) is a Smithers addition"]
+  },
+  {
+    "file": "src/chat/Shimmer.tsx",
+    "exports": ["Shimmer"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/utils/shimmer",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": []
+  },
+  {
+    "file": "src/uiCss.ts",
+    "exports": ["chatScrollerCss"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/utils/scroll-fade",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": []
+  }
+]

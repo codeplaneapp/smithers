@@ -1,0 +1,34 @@
+{
+  "version": "0.26.2",
+  "generatedFrom": "release-content workflow render-media",
+  "assets": [
+    {
+      "tweetIndex": 1,
+      "kind": "hero",
+      "suggestion": "Hero card: Smithers 0.26.2 version badge over the Hermes site",
+      "file": "marketing/0.26.2/assets/tweet-01-hero.svg",
+      "sibling": "assets/tweet-01-hero.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 2,
+      "kind": "capability",
+      "suggestion": "Embed or side-by-side of gh-workflow.gif and gh-board.gif from marketing/hermes-site/assets/",
+      "file": "marketing/0.26.2/assets/tweet-02-capability.svg",
+      "sibling": "assets/tweet-02-capability.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 3,
+      "kind": "capability",
+      "suggestion": "",
+      "file": "marketing/0.26.2/assets/tweet-03-capability.svg",
+      "sibling": "assets/tweet-03-capability.svg",
+      "captureRecommended": false,
+      "command": null
+    }
+  ],
+  "captures": []
+}

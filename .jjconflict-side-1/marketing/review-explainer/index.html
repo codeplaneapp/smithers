@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How Smithers Review Works</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #182026;
+      --muted: #5d6875;
+      --line: #d8dee6;
+      --paper: #ffffff;
+      --wash: #f4f7fa;
+      --blue: #0b63ce;
+      --green: #138a57;
+      --red: #c23b4b;
+      --yellow: #a26700;
+      --violet: #6845c2;
+      --shadow: 0 18px 60px rgba(24, 32, 38, .12);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font: 16px/1.6 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--wash);
+    }
+
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .94em;
+      background: #eef2f6;
+      border: 1px solid #dde5ee;
+      border-radius: 5px;
+      padding: .08rem .28rem;
+    }
+
+    .hero {
+      min-height: 86vh;
+      display: grid;
+      align-items: end;
+      background:
+        linear-gradient(180deg, rgba(9, 14, 20, .12), rgba(9, 14, 20, .72)),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1800' height='1200' viewBox='0 0 1800 1200'%3E%3Crect width='1800' height='1200' fill='%23eef3f7'/%3E%3Cg opacity='.88'%3E%3Crect x='150' y='130' width='1500' height='850' rx='22' fill='%23ffffff' stroke='%23c8d2dc' stroke-width='4'/%3E%3Crect x='150' y='130' width='1500' height='78' rx='22' fill='%23182026'/%3E%3Ccircle cx='205' cy='170' r='14' fill='%23ef5961'/%3E%3Ccircle cx='250' cy='170' r='14' fill='%23f0b33f'/%3E%3Ccircle cx='295' cy='170' r='14' fill='%2335b779'/%3E%3Crect x='230' y='275' width='380' height='82' rx='14' fill='%23edf6ff' stroke='%239ec5f7' stroke-width='3'/%3E%3Crect x='230' y='410' width='380' height='82' rx='14' fill='%23eefaf3' stroke='%239bd8b7' stroke-width='3'/%3E%3Crect x='710' y='270' width='380' height='230' rx='16' fill='%23fff7e8' stroke='%23e3c17d' stroke-width='3'/%3E%3Crect x='1190' y='275' width='260' height='82' rx='14' fill='%23f4efff' stroke='%23bca8ec' stroke-width='3'/%3E%3Crect x='1190' y='410' width='260' height='82' rx='14' fill='%23fff0f2' stroke='%23e8a2ad' stroke-width='3'/%3E%3Cpath d='M610 316h95M610 452h95M1090 316h100M1090 452h100' stroke='%23626f7d' stroke-width='8' stroke-linecap='round'/%3E%3Cpath d='M690 292l34 24-34 24M1176 292l34 24-34 24M1176 428l34 24-34 24' fill='none' stroke='%23626f7d' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='230' y='600' width='1220' height='230' rx='16' fill='%23f9fbfd' stroke='%23d2dce6' stroke-width='3'/%3E%3Crect x='282' y='652' width='310' height='18' rx='9' fill='%23138a57'/%3E%3Crect x='282' y='700' width='800' height='16' rx='8' fill='%23c23b4b' opacity='.75'/%3E%3Crect x='282' y='748' width='650' height='16' rx='8' fill='%230b63ce' opacity='.75'/%3E%3Crect x='1180' y='640' width='190' height='130' rx='12' fill='%23ffffff' stroke='%23c8d2dc' stroke-width='3'/%3E%3Cpath d='M1224 725l34-52 32 34 28-44' fill='none' stroke='%236845c2' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: cover;
+      background-position: center;
+      color: white;
+    }
+
+    .hero-inner {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 48px 0 9vh;
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: #d8e9ff;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      font-size: 13px;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 780px;
+      font-size: clamp(42px, 7vw, 88px);
+      line-height: .98;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 700px;
+      margin: 22px 0 0;
+      color: #edf5ff;
+      font-size: clamp(18px, 2.2vw, 24px);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 44px;
+      padding: 10px 16px;
+      border-radius: 7px;
+      font-weight: 700;
+      color: #102235;
+      background: #ffffff;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+    }
+
+    .button.secondary {
+      color: #ffffff;
+      background: rgba(255, 255, 255, .14);
+      border: 1px solid rgba(255, 255, 255, .35);
+      box-shadow: none;
+    }
+
+    main { background: var(--wash); }
+    section {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 76px 0;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 420px);
+      gap: 32px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .section-head p, .lead {
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .band {
+      width: 100%;
+      background: #ffffff;
+      border-block: 1px solid var(--line);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .tile, .diagram, .mini-card, .callout {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 1px 0 rgba(24, 32, 38, .04);
+    }
+
+    .tile {
+      padding: 22px;
+      min-height: 210px;
+    }
+
+    .tile .num {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--blue);
+      font-weight: 800;
+      margin-bottom: 18px;
+    }
+
+    .tile:nth-child(2) .num { background: var(--green); }
+    .tile:nth-child(3) .num { background: var(--yellow); }
+    .tile h3, .mini-card h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    .tile p, .mini-card p, .callout p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .diagram {
+      padding: 24px;
+      overflow: hidden;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .node {
+      position: relative;
+      min-height: 148px;
+      padding: 18px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .node::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -18px;
+      width: 24px;
+      height: 2px;
+      background: #8b98a8;
+    }
+
+    .node::before {
+      content: "";
+      position: absolute;
+      top: calc(50% - 5px);
+      right: -20px;
+      border-left: 10px solid #8b98a8;
+      border-top: 6px solid transparent;
+      border-bottom: 6px solid transparent;
+      z-index: 1;
+    }
+
+    .node:last-child::after, .node:last-child::before { display: none; }
+    .node .icon {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      color: #ffffff;
+      background: var(--blue);
+      margin-bottom: 14px;
+      font-weight: 900;
+    }
+
+    .node:nth-child(2) .icon { background: var(--green); }
+    .node:nth-child(3) .icon { background: var(--violet); }
+    .node:nth-child(4) .icon { background: var(--yellow); }
+    .node:nth-child(5) .icon { background: var(--red); }
+    .node strong { display: block; line-height: 1.15; }
+    .node span { display: block; margin-top: 7px; color: var(--muted); font-size: 14px; line-height: 1.35; }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .mini-card {
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 46px minmax(0, 1fr);
+      gap: 15px;
+      align-items: start;
+    }
+
+    .badge {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: var(--blue);
+      font-weight: 900;
+      font-size: 20px;
+    }
+
+    .mini-card:nth-child(2) .badge { background: var(--green); }
+    .mini-card:nth-child(3) .badge { background: var(--violet); }
+    .mini-card:nth-child(4) .badge { background: var(--yellow); }
+
+    .swimlane {
+      display: grid;
+      grid-template-columns: 160px minmax(0, 1fr);
+      gap: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: white;
+    }
+
+    .lane-label {
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      font-weight: 800;
+    }
+
+    .lane-track {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      min-height: 86px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .lane-label:nth-last-child(2), .lane-track:last-child { border-bottom: 0; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: #edf4ff;
+      border: 1px solid #c7dcfb;
+      color: #174b8f;
+      font-weight: 700;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .pill.green { background: #edf9f2; border-color: #bfe4cd; color: #11643f; }
+    .pill.yellow { background: #fff7e6; border-color: #ead39b; color: #754b00; }
+    .pill.red { background: #fff0f2; border-color: #efbcc4; color: #8f2635; }
+    .pill.violet { background: #f4f0ff; border-color: #d5c8fb; color: #5133a0; }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .service-box {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .service-box h3 { margin: 0 0 12px; }
+    .service-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .service-list li {
+      padding-left: 18px;
+      position: relative;
+      color: var(--muted);
+    }
+
+    .service-list li::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      position: absolute;
+      top: .65em;
+      left: 0;
+    }
+
+    .code-block {
+      margin: 0;
+      padding: 20px;
+      overflow-x: auto;
+      background: #101820;
+      color: #eef6ff;
+      border-radius: 8px;
+      border: 1px solid #263544;
+      font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .callout {
+      padding: 22px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      border-left: 5px solid var(--green);
+    }
+
+    .callout strong { display: block; margin-bottom: 4px; }
+    .footer {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 38px 0 56px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+
+    @media (max-width: 900px) {
+      .section-head, .split, .architecture { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .node::after {
+        top: auto;
+        left: 34px;
+        right: auto;
+        bottom: -18px;
+        width: 2px;
+        height: 24px;
+      }
+      .node::before {
+        top: auto;
+        right: auto;
+        left: 29px;
+        bottom: -22px;
+        border-top: 10px solid #8b98a8;
+        border-left: 6px solid transparent;
+        border-right: 6px solid transparent;
+        border-bottom: 0;
+      }
+      .swimlane { grid-template-columns: 1fr; }
+      .lane-label { border-bottom: 0; padding-bottom: 4px; }
+      .lane-track { padding-top: 6px; }
+    }
+
+    @media (max-width: 560px) {
+      .hero-inner, section, .footer { width: min(100% - 28px, 1120px); }
+      section { padding: 54px 0; }
+      .mini-card { grid-template-columns: 1fr; }
+      .actions { flex-direction: column; align-items: stretch; }
+      .button { justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Smithers Review</p>
+      <h1>Code review that turns a pull request into a readable walkthrough.</h1>
+      <p>We built a GitHub-native review system that authenticates with OIDC, runs one agent per changed file, writes a story-form HTML review, and publishes an unlisted link for humans to inspect.</p>
+      <div class="actions">
+        <a class="button" href="https://review.jjhub.tech/w/wxkid6oa8vme">Open the sample walkthrough</a>
+        <a class="button secondary" href="#how">See how it works</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <div class="section-head">
+        <h2>What we built</h2>
+        <p>A CodeRabbit-style review bot for Smithers, but with a stronger artifact: a single HTML walkthrough that explains the change in reading order.</p>
+      </div>
+      <div class="grid">
+        <article class="tile">
+          <div class="num">1</div>
+          <h3>Pull request review</h3>
+          <p>When a PR is opened, updated, or requested by comment, the GitHub Action checks out the code and runs the review flow.</p>
+        </article>
+        <article class="tile">
+          <div class="num">2</div>
+          <h3>Parallel agents</h3>
+          <p>Smithers splits the diff by file and gives each reviewable file to an agent. Findings are collected without failing the build.</p>
+        </article>
+        <article class="tile">
+          <div class="num">3</div>
+          <h3>Published walkthrough</h3>
+          <p>A narrator turns the whole diff into chapters with embedded diffs, diagrams, summaries, and links back to the PR.</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="band">
+      <section id="how">
+        <div class="section-head">
+          <h2>The simple version</h2>
+          <p>The reviewer is a pipeline. GitHub triggers it, Smithers orchestrates it, agents inspect the change, and the service publishes the result.</p>
+        </div>
+        <div class="diagram" aria-label="End to end flow diagram">
+          <div class="flow">
+            <div class="node">
+              <div class="icon">PR</div>
+              <strong>Pull request changes</strong>
+              <span>A contributor opens, updates, or comments on a PR.</span>
+            </div>
+            <div class="node">
+              <div class="icon">GH</div>
+              <strong>GitHub Action starts</strong>
+              <span>The workflow runs with read access and PR review permission.</span>
+            </div>
+            <div class="node">
+              <div class="icon">ID</div>
+              <strong>OIDC session</strong>
+              <span>The service verifies the repo identity without a stored secret.</span>
+            </div>
+            <div class="node">
+              <div class="icon">AI</div>
+              <strong>Review agents run</strong>
+              <span>Smithers fans out file reviews and narrates the change.</span>
+            </div>
+            <div class="node">
+              <div class="icon">URL</div>
+              <strong>Review is posted</strong>
+              <span>GitHub gets inline comments and an unlisted walkthrough link.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <div class="section-head">
+        <h2>How it is wired</h2>
+        <p>The system is split into a small GitHub Action, a local CLI runner, and a Cloudflare Worker service.</p>
+      </div>
+      <div class="split">
+        <div class="stack">
+          <article class="mini-card">
+            <div class="badge">A</div>
+            <div>
+              <h3>Action package</h3>
+              <p><code>apps/review/action</code> gates events, installs dependencies, checks out the PR, and launches the review CLI.</p>
+            </div>
+          </article>
+          <article class="mini-card">
+            <div class="badge">B</div>
+            <div>
+              <h3>Review workflow</h3>
+              <p><code>apps/review/src/workflow</code> resolves the target, previews files, runs agents, and renders the HTML walkthrough.</p>
+            </div>
+          </article>
+          <article class="mini-card">
+            <div class="badge">C</div>
+            <div>
+              <h3>Hosted service</h3>
+              <p><code>apps/review/src/server</code> mints sessions, proxies metered inference, stores walkthroughs, and exposes metrics.</p>
+            </div>
+          </article>
+          <article class="mini-card">
+            <div class="badge">D</div>
+            <div>
+              <h3>GitHub posting</h3>
+              <p><code>apps/review/src/github</code> turns findings into a PR review body and inline comments with suggestions.</p>
+            </div>
+          </article>
+        </div>
+        <div class="diagram" aria-label="Architecture diagram">
+          <div class="architecture">
+            <div class="service-box">
+              <h3>Inside GitHub Actions</h3>
+              <ul class="service-list">
+                <li>Reads the event payload</li>
+                <li>Skips drafts and unauthorized comments</li>
+                <li>Fetches a GitHub OIDC token</li>
+                <li>Runs <code>bun apps/review/src/cli/main.ts</code></li>
+              </ul>
+            </div>
+            <div class="service-box">
+              <h3>Inside review.jjhub.tech</h3>
+              <ul class="service-list">
+                <li>Verifies the OIDC token against GitHub JWKS</li>
+                <li>Checks repo registration and monthly quota</li>
+                <li>Issues a short-lived session token</li>
+                <li>Stores HTML walkthroughs in R2</li>
+              </ul>
+            </div>
+            <div class="service-box">
+              <h3>Inside Smithers</h3>
+              <ul class="service-list">
+                <li>Splits work into workflow tasks</li>
+                <li>Runs review agents in parallel</li>
+                <li>Combines findings into a final result</li>
+                <li>Builds a story from the full diff</li>
+              </ul>
+            </div>
+            <div class="service-box">
+              <h3>Back in the PR</h3>
+              <ul class="service-list">
+                <li>Posts a narrative review body</li>
+                <li>Adds inline comments where possible</li>
+                <li>Includes the hosted walkthrough URL</li>
+                <li>Leaves merge decisions to humans</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="band">
+      <section>
+        <div class="section-head">
+          <h2>The request lifecycle</h2>
+          <p>Each lane owns one responsibility. This keeps credentials short-lived and keeps untrusted PR code away from long-lived secrets.</p>
+        </div>
+        <div class="swimlane" aria-label="Swimlane diagram showing lifecycle">
+          <div class="lane-label">Developer</div>
+          <div class="lane-track">
+            <span class="pill">opens PR</span>
+            <span class="pill">or comments @smithers review</span>
+            <span class="pill green">reads walkthrough</span>
+          </div>
+
+          <div class="lane-label">GitHub Action</div>
+          <div class="lane-track">
+            <span class="pill">gates event</span>
+            <span class="pill yellow">requests OIDC token</span>
+            <span class="pill">checks out PR</span>
+            <span class="pill violet">runs CLI</span>
+          </div>
+
+          <div class="lane-label">Review Service</div>
+          <div class="lane-track">
+            <span class="pill yellow">verifies identity</span>
+            <span class="pill">checks quota</span>
+            <span class="pill">proxies inference</span>
+            <span class="pill green">stores HTML</span>
+          </div>
+
+          <div class="lane-label">Smithers</div>
+          <div class="lane-track">
+            <span class="pill">loads diff</span>
+            <span class="pill violet">fans out agents</span>
+            <span class="pill">narrates change</span>
+            <span class="pill red">posts findings</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <div class="section-head">
+        <h2>Why OIDC matters</h2>
+        <p>The user does not paste a platform secret into their repo. GitHub proves which repository is running, and the service returns a short-lived session.</p>
+      </div>
+      <div class="split">
+        <div class="callout">
+          <div class="badge">!</div>
+          <p><strong>No <code>pull_request_target</code>.</strong> The workflow runs on <code>pull_request</code> because the agents inspect PR code. Running with elevated target-repo credentials would be the wrong trust boundary.</p>
+        </div>
+        <pre class="code-block">pull_request opens
+  -> GitHub Action asks GitHub for OIDC token
+  -> review service verifies token signature and claims
+  -> service checks repo registration and quota
+  -> service returns a 2-hour session token
+  -> CLI uses that token for inference and publishing</pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>What the output looks like</h2>
+        <p>The artifact is intentionally plain: one static HTML file with prose, embedded diffs, diagrams, and every reviewed file in context.</p>
+      </div>
+      <div class="diagram">
+        <div class="flow">
+          <div class="node">
+            <div class="icon">1</div>
+            <strong>Headline</strong>
+            <span>A short name for the change.</span>
+          </div>
+          <div class="node">
+            <div class="icon">2</div>
+            <strong>Synopsis</strong>
+            <span>What changed and why it matters.</span>
+          </div>
+          <div class="node">
+            <div class="icon">3</div>
+            <strong>Chapters</strong>
+            <span>Files grouped in logical reading order.</span>
+          </div>
+          <div class="node">
+            <div class="icon">4</div>
+            <strong>Diffs</strong>
+            <span>Every relevant hunk embedded inline.</span>
+          </div>
+          <div class="node">
+            <div class="icon">5</div>
+            <strong>Findings</strong>
+            <span>Inline PR comments when the agent finds something actionable.</span>
+          </div>
+        </div>
+      </div>
+      <p class="lead" style="margin-top: 18px;">Sample deployed walkthrough: <a href="https://review.jjhub.tech/w/wxkid6oa8vme">https://review.jjhub.tech/w/wxkid6oa8vme</a></p>
+    </section>
+
+    <div class="band">
+      <section>
+        <div class="section-head">
+          <h2>Add it to a repo</h2>
+          <p>Users add one workflow. The service side decides whether the repo runs automatically or waits for the magic comment.</p>
+        </div>
+        <pre class="code-block">name: smithers review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: smithersai/smithers/apps/review/action@main</pre>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    Built from the Smithers review implementation in <code>apps/review</code>. The live service stores unlisted walkthroughs at <code>review.jjhub.tech</code>.
+  </footer>
+</body>
+</html>

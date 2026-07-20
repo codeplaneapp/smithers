@@ -1,0 +1,21 @@
+# Phase A Verify
+
+OUTPUT_KIND: phase-a-verify
+SUBJECT: {props.file.rs}
+ZIG: {props.file.zig}
+RS: {props.file.rs}
+REPO: {props.repo}
+
+Adversarially verify the Phase A Rust draft against the Zig source and `docs/PORTING.md`.
+
+Check for concrete rule violations only:
+1. Logic dropped or reordered.
+2. Lifetime mapping ignored.
+3. `String` or `&str` used where bytes are required.
+4. `deinit` kept instead of Rust `Drop`.
+5. bare narrowing casts.
+6. missing `// SAFETY:` comments.
+7. forbidden dependencies, `std::fs`, `std::net`, Tokio, async Rust, or broad architecture changes.
+
+Required output schema:
+{props.schema}

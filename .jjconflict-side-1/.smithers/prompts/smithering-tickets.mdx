@@ -1,0 +1,22 @@
+# Ticket breakdown
+
+Break the implementation into measurable, verifiable tickets.
+
+Read: docs/planning/01-prd.md, docs/planning/02-design.md, docs/planning/03-eng.md,
+docs/planning/04-backpressure.md. {props.probeSummary ? `Probe learnings: ${props.probeSummary}` : ""}
+
+Every ticket must have:
+
+- a STABLE kebab-case id derived from what it does (never indexes or timestamps — these
+  become durable Smithers task ids),
+- instructions self-contained enough for a fresh-context agent (paths, conventions, the
+  probe reference code under artifacts/smithering/probes/ where relevant),
+- requirementIds tracing to the PRD (or "engineering-only"),
+- verification[] drawn from the backpressure matrix: commands/e2e where possible, plus
+  agent-review entries for what only a smart agent can judge (we want a mix),
+- dependsOn[] (ticket ids), complexity.
+
+Order so the FIRST ticket is the cheapest end-to-end slice (it becomes the smoke test).
+Write docs to docs/planning/05-tickets.md AND the machine copy to
+artifacts/smithering/tickets.json as a JSON object with a "tickets" array — the
+implementation workflow imports that file.

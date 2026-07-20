@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#4C8DFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#4C8DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#0C0E16"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+<text font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF" letter-spacing="5"><tspan x="96" y="156">SMITHERS 0.24.0 · CHANGELOG</tspan></text>
+<text font-size="60" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#E7E9EE" font-weight="800"><tspan x="96" y="282">0.24.0: two new surfaces and</tspan><tspan x="96" y="350">seven targeted fixes.</tspan></text>
+<text x="96" y="436" font-size="30" fill="#4C8DFF">▪</text>
+<text font-size="30" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="136" y="436">Headless gateway command: bunx smithers-orchestrator gateway</tspan></text>
+<text x="96" y="504" font-size="30" fill="#4C8DFF">▪</text>
+<text font-size="30" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="136" y="504">inspect returns each workflow's input JSON schema</tspan></text>
+<text x="96" y="572" font-size="30" fill="#4C8DFF">▪</text>
+<text font-size="30" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="136" y="572">Parallel &lt;Loop&gt; iterations advance incrementally</tspan></text>
+<text x="96" y="640" font-size="30" fill="#4C8DFF">▪</text>
+<text font-size="30" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="136" y="640">Detached runs stream live via the out-of-process event bridge</tspan></text>
+<text font-size="28" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF"><tspan x="96" y="722">https://smithers.sh/changelogs/0.24.0</tspan><tspan x="96" y="764">https://github.com/smithersai/smithers</tspan></text>
+
+  <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
+  <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>
+  <text x="1504" y="826" font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="end">0.24.0</text>
+</svg>

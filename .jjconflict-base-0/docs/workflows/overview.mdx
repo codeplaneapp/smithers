@@ -1,0 +1,35 @@
+---
+title: Curated Workflows
+description: The workflow pack scaffolded by bunx smithers-orchestrator init.
+---
+
+`bunx smithers-orchestrator init` creates a focused `.smithers/workflows/` directory containing `create-workflow`, `create-skill`, and `docs-driven-development`. Hidden system workflows support init, failure autopsies, and upgrades. The former starter suite is retained under `examples/init-pack/`; monitoring remains `smithers monitor` and Gateway `/monitor`.
+
+Run any curated workflow by ID:
+
+```bash
+bunx smithers-orchestrator workflow run WORKFLOW_ID --prompt "..."
+```
+
+Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prompt":"..."}'`. Workflows with structured inputs also support `--input`.
+
+Writing your own workflow? Read [Workflow Authoring Rules](/workflows/authoring-rules) first: five rules (reserved output columns, no nested loops, loop output binding, the `renderWorkflow` test contract, and `.smithers/package.json` test registration) that otherwise get learned one runtime failure at a time.
+
+## Workflows
+
+| Workflow | Use it for |
+| --- | --- |
+| [`create-workflow`](/workflows/create-workflow) | Build a new Smithers workflow from a plain-English ask. |
+| [`create-skill`](/workflows/create-skill) | Author a new agent skill from a plain-English ask. |
+| [`docs-driven-development`](/workflows/docs-driven-development) | Maintain a portable living product spec and improvement loop. |
+
+Former defaults are preserved as copyable examples in `examples/init-pack/`.
+
+## Operational Notes
+
+- Curated workflow files are user-owned after scaffold. `bunx smithers-orchestrator init` will not overwrite edited files unless you pass `--force`.
+- Agent pools are defined in `.smithers/agents.ts`; edit that file to change which models each workflow uses.
+- Run `bunx smithers-orchestrator workflow list` to see the workflows in the current repo, `bunx smithers-orchestrator workflow inspect WORKFLOW_ID` to see metadata and the workflow input schema, and `bunx smithers-orchestrator workflow skills` to generate agent-facing docs under `.smithers/skills/`.
+- Workflows can carry optional metadata comments (`smithers-display-name`, `smithers-description`, `smithers-tags`, `smithers-aliases`) that `bunx smithers-orchestrator workflow list` and `workflow-skill` use for display and discovery.
+- Workflows marked `system: true` (or `// smithers-system: true`) are internal plumbing: Smithers uses them for its own durable processes (for example the seeded `init` workflow that installs/refreshes the pack). They are hidden from `workflow list`, the interactive picker, MCP `list_workflows`, and gateway `listWorkflows` by default; pass `--system` (CLI), `includeSystem: true` (MCP), or `filter.includeSystem` (gateway RPC) to see them, and run them explicitly with `workflow run <id>`.
+- Inspect and resume runs with the normal CLI: `inspect`, `logs`, `chat`, `events`, `why`, `approve`, and `up --resume`. Or watch every run live in the browser with `bunx smithers-orchestrator monitor` (the [Smithers Monitor](/guides/monitor)).

@@ -1,0 +1,212 @@
+import { Entity, ShardingConfig } from "@effect/cluster";
+import * as Rpc from "@effect/rpc/Rpc";
+import { Context, Effect, Layer, Schema } from "effect";
+import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane", "cloudflare");
+const SandboxEnvSchema = Schema.Record({
+    key: Schema.String,
+    value: Schema.String,
+});
+const SandboxEgressSchema = Schema.Struct({
+    env: Schema.optional(SandboxEnvSchema),
+    httpProxy: Schema.optional(Schema.String),
+    httpsProxy: Schema.optional(Schema.String),
+    noProxy: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))),
+    caCertPem: Schema.optional(Schema.String),
+    caCertPath: Schema.optional(Schema.String),
+    secretBindings: Schema.optional(SandboxEnvSchema),
+});
+const SandboxPortSchema = Schema.Struct({
+    host: Schema.Number,
+    container: Schema.Number,
+});
+const SandboxVolumeSchema = Schema.Struct({
+    host: Schema.String,
+    container: Schema.String,
+    readonly: Schema.optional(Schema.Boolean),
+});
+const SandboxWorkspaceSchema = Schema.Struct({
+    name: Schema.String,
+    snapshotId: Schema.optional(Schema.String),
+    idleTimeoutSecs: Schema.optional(Schema.Number),
+    persistence: Schema.optional(Schema.Literal("ephemeral", "sticky")),
+});
+const SandboxTransportConfigSchema = Schema.Struct({
+    runId: Schema.String,
+    sandboxId: Schema.String,
+    runtime: SandboxRuntimeSchema,
+    rootDir: Schema.String,
+    image: Schema.optional(Schema.String),
+    allowNetwork: Schema.optional(Schema.Boolean),
+    env: Schema.optional(SandboxEnvSchema),
+    egress: Schema.optional(SandboxEgressSchema),
+    ports: Schema.optional(Schema.Array(SandboxPortSchema)),
+    volumes: Schema.optional(Schema.Array(SandboxVolumeSchema)),
+    memoryLimit: Schema.optional(Schema.String),
+    cpuLimit: Schema.optional(Schema.String),
+    workspace: Schema.optional(SandboxWorkspaceSchema),
+});
+const SandboxHandleSchema = Schema.Struct({
+    runtime: SandboxRuntimeSchema,
+    runId: Schema.String,
+    sandboxId: Schema.String,
+    sandboxRoot: Schema.String,
+    requestPath: Schema.String,
+    resultPath: Schema.String,
+    image: Schema.optional(Schema.String),
+    allowNetwork: Schema.optional(Schema.Boolean),
+    env: Schema.optional(SandboxEnvSchema),
+    egress: Schema.optional(SandboxEgressSchema),
+    ports: Schema.optional(Schema.Array(SandboxPortSchema)),
+    volumes: Schema.optional(Schema.Array(SandboxVolumeSchema)),
+    memoryLimit: Schema.optional(Schema.String),
+    cpuLimit: Schema.optional(Schema.String),
+    workspace: Schema.optional(SandboxWorkspaceSchema),
+    containerId: Schema.optional(Schema.String),
+    workspaceId: Schema.optional(Schema.String),
+});
+const SandboxBundleResultSchema = Schema.Struct({
+    bundlePath: Schema.String,
+});
+const SandboxExecuteResultSchema = Schema.Struct({
+    exitCode: Schema.Number,
+});
+const SandboxShipPayloadSchema = Schema.Struct({
+    bundlePath: Schema.String,
+    handle: SandboxHandleSchema,
+});
+const SandboxExecutePayloadSchema = Schema.Struct({
+    command: Schema.String,
+    handle: SandboxHandleSchema,
+});
+const SandboxHandlePayloadSchema = Schema.Struct({
+    handle: SandboxHandleSchema,
+});
+const SandboxCreateRpc = Rpc.make("create", {
+    payload: SandboxTransportConfigSchema,
+    success: SandboxHandleSchema,
+    error: Schema.Unknown,
+});
+const SandboxShipRpc = Rpc.make("ship", {
+    payload: SandboxShipPayloadSchema,
+    success: Schema.Void,
+    error: Schema.Unknown,
+});
+const SandboxExecuteRpc = Rpc.make("execute", {
+    payload: SandboxExecutePayloadSchema,
+    success: SandboxExecuteResultSchema,
+    error: Schema.Unknown,
+});
+const SandboxCollectRpc = Rpc.make("collect", {
+    payload: SandboxHandlePayloadSchema,
+    success: SandboxBundleResultSchema,
+    error: Schema.Unknown,
+});
+const SandboxCleanupRpc = Rpc.make("cleanup", {
+    payload: SandboxHandlePayloadSchema,
+    success: Schema.Void,
+    error: Schema.Unknown,
+});
+export const SandboxEntity = Entity.make("Sandbox", [
+    SandboxCreateRpc,
+    SandboxShipRpc,
+    SandboxExecuteRpc,
+    SandboxCollectRpc,
+    SandboxCleanupRpc,
+]);
+/** @typedef {import("../SandboxTransportService.ts").SandboxTransportService} SandboxTransportService */
+const SandboxEntityExecutorTag = /** @type {Context.TagClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
+    Context.Tag("SandboxEntityExecutor")()
+);
+export class SandboxEntityExecutor extends SandboxEntityExecutorTag {
+    // Explicit constructor (identical to the implicit one) so runtime
+    // construction is observable; JSC never records implicit constructors.
+    constructor(...args) {
+        super(...args);
+    }
+}
+/**
+ * @param {{ runId: string; sandboxId: string; }} input
+ * @returns {string}
+ */
+export function makeSandboxEntityId(input) {
+    return `${input.runId}:${input.sandboxId}`;
+}
+const SandboxEntityLayer = SandboxEntity.toLayer(Effect.gen(function* () {
+    const executor = yield* SandboxEntityExecutor;
+    return SandboxEntity.of({
+        create: ({ payload }) => executor.create(payload),
+        ship: ({ payload }) => executor.ship(payload.bundlePath, payload.handle),
+        execute: ({ payload }) => {
+            // AbortSignal isn't serializable over RPC, so the caller's cancellation
+            // reaches us as an interruption of this handler fiber (forwarded by
+            // @effect/rpc when the client-side call is interrupted); translate that
+            // interruption back into a real AbortSignal for the executor to kill on.
+            const controller = new AbortController();
+            return executor.execute(payload.command, payload.handle, controller.signal).pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())));
+        },
+        collect: ({ payload }) => executor.collect(payload.handle),
+        cleanup: ({ payload }) => executor.cleanup(payload.handle),
+    });
+}));
+/**
+ * @param {unknown} error
+ * @param {string} operation
+ * @param {Record<string, unknown>} details
+ * @returns {SmithersError}
+ */
+function sandboxEntityError(error, operation, details) {
+    return toSmithersError(error, `sandbox entity ${operation} failed`, {
+        code: "SANDBOX_EXECUTION_FAILED",
+        details,
+    });
+}
+/**
+ * Interrupts `effect` as soon as `signal` aborts, so the caller's cancellation
+ * propagates through the entity RPC boundary as fiber interruption instead of
+ * being silently dropped (an `AbortSignal` itself can't cross the RPC wire).
+ * @template A, E
+ * @param {Effect.Effect<A, E>} effect
+ * @param {AbortSignal | undefined} signal
+ * @returns {Effect.Effect<A, E>}
+ */
+const interruptibleBySignal = (effect, signal) => {
+    if (!signal)
+        return effect;
+    if (signal.aborted)
+        return Effect.interrupt;
+    return Effect.raceFirst(effect, Effect.async((resume) => {
+        const onAbort = () => resume(Effect.interrupt);
+        signal.addEventListener("abort", onAbort, { once: true });
+        return Effect.sync(() => signal.removeEventListener("abort", onAbort));
+    }));
+};
+/**
+ * @template R, E
+ * @param {Layer.Layer<SandboxEntityExecutor, E, R>} executorLayer
+ */
+export const makeSandboxTransportServiceEffect = (executorLayer) => Effect.gen(function* () {
+    const makeClient = yield* Entity.makeTestClient(SandboxEntity, SandboxEntityLayer.pipe(Layer.provide(executorLayer))).pipe(Effect.provide(ShardingConfig.layer()));
+    /** @typedef {Effect.Effect.Success<ReturnType<typeof makeClient>>} SandboxEntityClient */
+    /**
+     * @template A
+     * @param {{ runId: string; sandboxId: string }} input
+     * @param {string} operation
+     * @param {Record<string, unknown>} details
+     * @param {(client: SandboxEntityClient) => Effect.Effect<A, unknown>} f
+     */
+    const withClient = (input, operation, details, f) => makeClient(makeSandboxEntityId(input)).pipe(Effect.flatMap((client) => f(client)), Effect.mapError((error) => sandboxEntityError(error, operation, {
+        runId: input.runId,
+        sandboxId: input.sandboxId,
+        ...details,
+    })));
+    /** @type {SandboxTransportService} */
+    const service = {
+        create: (config) => withClient(config, "create", { runtime: config.runtime, rootDir: config.rootDir }, (client) => client.create(config)),
+        ship: (bundlePath, handle) => withClient(handle, "ship", { bundlePath }, (client) => client.ship({ bundlePath, handle })),
+        execute: (command, handle, signal) => withClient(handle, "execute", { command }, (client) => interruptibleBySignal(client.execute({ command, handle }), signal)),
+        collect: (handle) => withClient(handle, "collect", {}, (client) => client.collect({ handle })),
+        cleanup: (handle) => withClient(handle, "cleanup", {}, (client) => client.cleanup({ handle })),
+    };
+    return service;
+});

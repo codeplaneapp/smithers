@@ -1,0 +1,15 @@
+# Spec Decision
+
+OUTPUT_KIND: spec-decision
+TARGET: {props.target.id}
+REPO: {props.repo}
+
+Decide whether this ungate/proper-port target is accepted.
+
+Require at least two approvals and no blocking rejection. If reviewers disagree, set `approved: false` and explain the next patch needed.
+
+Reviews:
+{JSON.stringify(props.reviews, null, 2)}
+
+Required output schema:
+{props.schema}

@@ -1,0 +1,14 @@
+---
+title: cronDelete
+description: Gateway RPC for deleting cron schedules.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `cronDelete`
+- Scope: `cron:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ cronId }`
+- Response: `{ cronId, removed: true }`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `CronNotFound`, and `Internal`.

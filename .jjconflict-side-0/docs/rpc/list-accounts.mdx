@@ -1,0 +1,18 @@
+---
+title: listAccounts
+description: Gateway RPC for listing registered Smithers agent accounts.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listAccounts`
+- Scope: `account:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{}`
+- Response: `Account[]`
+
+Each account is a row in the user-level `~/.smithers/accounts.json` registry that the `bunx smithers-orchestrator agents` CLI manages (resolved through the `@smithers-orchestrator/accounts` package, honoring `SMITHERS_HOME`/`HOME`). A row carries `{ label, provider, configDir?, hasConfigDir, hasApiKey, model?, addedAt? }`, where `provider` is one of the fixed catalog (`claude-code`, `antigravity`, `codex`, `gemini`, `kimi`, `anthropic-api`, `openai-api`, `gemini-api`).
+
+The raw API key is **never** returned: a subscription account exposes its `configDir` (and `hasConfigDir`), an API-key account exposes only `hasApiKey` (whether a non-empty key is set), so a client can render the auth posture without ever receiving the plaintext secret. A missing registry file is a clean empty list.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.

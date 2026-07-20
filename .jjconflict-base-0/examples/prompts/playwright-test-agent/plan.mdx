@@ -1,0 +1,9 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Plan Playwright E2E coverage for the supplied app and product brief. Include user flows, steps, assertions, risk, and assumptions.\n\nINPUT:\n"}
+      {JSON.stringify(props ?? {}, null, 2)}
+      {"\n\nReturn only structured data matching the task output schema."}
+    </>
+  );
+}

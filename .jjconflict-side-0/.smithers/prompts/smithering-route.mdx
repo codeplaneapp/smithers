@@ -1,0 +1,25 @@
+# Route the request
+
+Classify this request into the cheapest tier that can deliver verified quality.
+
+## Request
+
+{props.prompt}
+
+Target repo: {props.repo ?? "(none given)"} — peek at it if that changes your judgment.
+
+## Tiers
+
+- **trivial** — a small, well-scoped change one competent agent finishes in a single
+  sitting: a bugfix, a small feature, docs, config, a focused refactor. No product
+  decisions needed.
+- **complex** — substantial single-track engineering: a multi-file feature with tests, a
+  subsystem refactor, an integration. One strong autonomous agent can own it end-to-end,
+  but it deserves deep reasoning and rigorous verification.
+- **full-build** — a product or system: ambiguous scope, product decisions to make,
+  multiple workstreams, needs a PRD/design/architecture and parallel implementation. Only
+  this tier gets the full planning-and-orchestration pipeline.
+
+When in doubt between trivial and complex, pick complex. When in doubt between complex and
+full-build, ask: would a PRD, human gates, and parallel workers genuinely change the
+outcome? If not, pick complex. Record your reasoning.

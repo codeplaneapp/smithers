@@ -1,0 +1,20 @@
+{
+	email {$SMITHERS_TLS_EMAIL}
+}
+
+{$SMITHERS_DOMAIN:localhost} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+
+	@smithers path /health /metrics /rpc /v1/rpc/* /webhooks/* /*
+
+	reverse_proxy @smithers {$SMITHERS_GATEWAY_UPSTREAM:127.0.0.1:7331} {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up X-Request-Id {http.request.uuid}
+	}
+}

@@ -1,0 +1,1 @@
+import { Context } from "effect"; export class MemoryStoreService extends /** @type {Context.TagClass<MemoryStoreService, "MemoryStoreService", import("./MemoryStore.ts").MemoryStore>} */ (/** @type {unknown} */ (Context.Tag("MemoryStoreService")())) {}

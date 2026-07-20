@@ -1,0 +1,60 @@
+---
+title: Starters
+description: Choose a plain-English outcome and the command your agent runs for it.
+---
+
+Smithers ships with starter requests for when you want to describe an outcome before your agent writes workflow code. `init --template` installs the curated pack and returns a create-workflow request; it never installs an archived starter workflow. Browse the request gallery from any repo:
+
+```bash
+bunx smithers-orchestrator starters
+```
+
+First-time setup:
+
+```bash
+bunx smithers-orchestrator init --add-agents
+```
+
+Or initialize with guided next steps for one template:
+
+```bash
+bunx smithers-orchestrator init --template idea-to-tickets
+```
+
+Template IDs:
+
+Pass any ID from this table to `init --template <id>` to receive a create-workflow request for that outcome.
+
+| Starter | Best for | Workflow | Command |
+| --- | --- | --- | --- |
+| `idea-to-tickets` | founders, product, operations, engineering | `create-workflow` | `bunx smithers-orchestrator init --template idea-to-tickets` |
+| `launch-checklist` | launch owners and operators | `create-workflow` | `bunx smithers-orchestrator init --template launch-checklist` |
+| `customer-incident` | support escalations | `create-workflow` | `bunx smithers-orchestrator init --template customer-incident` |
+| `nontechnical-research` | before-build decisions | `create-workflow` | `bunx smithers-orchestrator init --template nontechnical-research` |
+| `requirements-interview` | vague stakeholder requests | `create-workflow` | `bunx smithers-orchestrator init --template requirements-interview` |
+| `quality-audit` | release readiness | `create-workflow` | `bunx smithers-orchestrator init --template quality-audit` |
+| `test-coverage` | regression prevention | `create-workflow` | `bunx smithers-orchestrator init --template test-coverage` |
+| `ship-a-change` | focused product improvements | `create-workflow` | `bunx smithers-orchestrator init --template ship-a-change` |
+| `mission-mode` | larger approved milestones | `create-workflow` | `bunx smithers-orchestrator init --template mission-mode` |
+
+Each detailed starter prints:
+
+- What outcome to expect
+- What context to gather before running
+- The exact `bunx smithers-orchestrator workflow run ...` command
+- Useful follow-up commands
+- When not to use that starter
+
+Filter by audience or goal:
+
+```bash
+bunx smithers-orchestrator starters --audience product
+bunx smithers-orchestrator starters --goal quality
+bunx smithers-orchestrator starters --workflow create-workflow
+```
+
+Use JSON when another tool needs the catalog:
+
+```bash
+bunx smithers-orchestrator starters --format json
+```

@@ -1,0 +1,47 @@
+---
+title: <ContinueAsNew>
+description: Close the current run; start a fresh one with optional carried state.
+---
+
+```ts
+import { ContinueAsNew, continueAsNew } from "smithers-orchestrator";
+
+type ContinueAsNewProps = {
+  state?: unknown; // JSON-serializable; arrives as ctx.input.__smithersContinuation.payload
+};
+
+// continueAsNew(state?) is a helper equivalent to <ContinueAsNew state={state} />
+```
+
+```tsx
+export default smithers((ctx) => {
+  const continuation = (ctx.input as any)?.__smithersContinuation as
+    | { payload?: { cursor?: string; count?: number } }
+    | undefined;
+
+  const cursor = continuation?.payload?.cursor ?? null;
+  const count = continuation?.payload?.count ?? 0;
+
+  return (
+    <Workflow name="paginated-processor">
+      <Sequence>
+        <Task id="process-batch" output={outputs.processed} agent={processorAgent}>
+          {`Process next page. Cursor: ${cursor ?? "start"}. Total so far: ${count}.`}
+        </Task>
+        <ContinueAsNew
+          state={{
+            cursor: ctx.outputMaybe(outputs.processed, { nodeId: "process-batch" })?.lastCursor,
+            count: count + 1,
+          }}
+        />
+      </Sequence>
+    </Workflow>
+  );
+});
+```
+
+## Notes
+
+- `state` must be JSON-serializable; total continuation envelope < 10 MB.
+- Workflow id is preserved across continuations; only run id increments.
+- Nodes rendered after `<ContinueAsNew>` in the same sequence don't execute.

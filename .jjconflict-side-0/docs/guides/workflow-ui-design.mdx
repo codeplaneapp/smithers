@@ -1,0 +1,306 @@
+---
+title: Workflow UI Design Principles
+description: The shared visual language every smithers ui workflow UI should follow, so each .smithers/ui/<workflow>.tsx looks like one product instead of a different app per workflow.
+---
+
+[Custom Workflow UIs](/guides/custom-workflow-ui) covers the *plumbing*: how a `.smithers/ui/<workflow>.tsx` bundle boots, talks to the Gateway, streams events, and stays stale-data-free. This guide covers the *look*: the visual language those UIs share so they read as one coherent product, not a different app per workflow.
+
+The reference implementation is the Smithers product UI. The rules below are extracted from it. When you build or touch a workflow UI, adopt these tokens and principles verbatim rather than inventing a one-off palette. The fastest way to make every workflow UI feel native is to start from the same tokens and the same handful of decisions about shape, depth, motion, and focus.
+
+<Note>Most reference UIs in this repo (`.smithers/ui/vcs.tsx`, `grill-me.tsx`, `ultragrill.tsx`) ship a single inline `<style>` string. That is fine. The point is not *where* the CSS lives; it is that the *values* come from the shared token set below instead of ad-hoc hex codes.</Note>
+
+## Components first
+
+The fastest way to comply with everything in this guide is to not hand-write the CSS at all: `smithers-orchestrator/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) whose styling is generated from the token set below, with the exact house recipes (tinted primary button, brand focus halo, 22px status pills, 8px card radius). They are correct in light and dark by construction, and Radix supplies the accessibility behavior. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage and the [UI Component Library reference](/reference/ui) for the full catalog.
+
+Everything below remains the contract those components implement, and what you follow whenever you write custom CSS next to them.
+
+## Start from the token set
+
+Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, a tint, or a shadow alpha inline; reach for a token (or derive one with `color-mix`). This is what makes light and dark "just work" and what keeps two different workflow UIs from drifting apart.
+
+<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smithers-orchestrator/ui-styleguide`) into every `/workflows/<key>` page, and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint. So a workflow UI that just *reads* the tokens is themed automatically, including for hosts that embed the page in an iframe and force a theme via the query param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct and keeps the UI portable outside the shell; duplicate declarations are harmless.</Note>
+
+Paste this `:root` block at the top of your `<style>` (it carries the canonical light values, the dark overrides for both the explicit toggle and the OS preference, and the typographic base):
+
+```css
+:root {
+  color-scheme: light;
+
+  /* Surfaces & text */
+  --bg: #ffffff;
+  --text: #0a0a0a;
+  --text-muted: #525252;
+  --text-faint: #6f6f6f;
+  --text-placeholder: #767676;
+  --surface: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong: rgba(255, 255, 255, 0.85);
+
+  /* Lines & hovers */
+  --border: rgba(10, 10, 10, 0.08);
+  --border-strong: rgba(10, 10, 10, 0.14);
+  --border-solid: #ededed;
+  --hover: #f4f4f4;
+  --hover-subtle: rgba(10, 10, 10, 0.03);
+
+  /* Inverse: the high-contrast primary-action surface (black in light, white in dark) */
+  --inverse-bg: #0a0a0a;
+  --inverse-bg-hover: #262626;
+  --inverse-text: #ffffff;
+
+  /* Code */
+  --code-bg: #0a0a0a;
+  --code-text: #f4f4f5;
+  --inline-code-bg: rgba(10, 10, 10, 0.07);
+
+  /* Semantic accents */
+  --brand: #6d56d8;
+  --success: #0f8f78;
+  --danger: #e5484d;
+
+  /* Shadow channels: space-separated so any shadow can pick its own alpha */
+  --shadow-rgb: 10 10 10;
+
+  /* Geometry (theme-invariant): spacing scale, type scale, radii, and the one
+     control height every button/chip/input/select shares. Reach for these
+     instead of bare pixel values so spacing rhythm stays even everywhere. */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px;
+  --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 15px;
+  --fs-5: 17px; --fs-6: 20px; --fs-7: 24px;
+  --lh-tight: 1.35; --lh-body: 1.5;
+  --r-1: 6px; --r-2: 10px; --r-3: 12px; --r-4: 16px; --r-full: 999px;
+  --ctl-h: 32px; --ctl-h-sm: 26px; --ctl-h-lg: 38px;
+
+  color: var(--text);
+  background: var(--bg);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Force-dark via an in-app toggle that sets data-theme on <html>. */
+:root[data-theme="dark"],
+/* And follow the OS when the user has not forced a choice. */
+:root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --bg: #0b0b0d;
+  --text: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --text-faint: #b0b0b8;
+  --text-placeholder: #a6a6ad;
+  --surface: #18181b;
+  --surface-glass: rgba(24, 24, 27, 0.72);
+  --surface-glass-strong: rgba(24, 24, 27, 0.85);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-solid: #2a2a2e;
+  --hover: #26262b;
+  --hover-subtle: rgba(255, 255, 255, 0.05);
+  --inverse-bg: #f4f4f5;
+  --inverse-bg-hover: #d4d4d8;
+  --inverse-text: #0a0a0a;
+  --code-bg: #09090b;
+  --code-text: #e4e4e7;
+  --inline-code-bg: rgba(255, 255, 255, 0.1);
+  --brand: #8b78e6;
+  --success: #2ec9a8;
+  --danger: #f2555a;
+  --shadow-rgb: 0 0 0;
+}
+```
+
+<Note>The OS-follow selector above is written as one rule for brevity. In the product UI the OS branch is split into its own `@media (prefers-color-scheme: dark)` block so it can never override an explicit `data-theme="light"`. If you support an in-app toggle, copy that split; if your UI is dark-only or OS-only, keep just the branch you need.</Note>
+
+## The principles
+
+### Color is semantic, tints are derived
+
+There are exactly three accent roles. Do not introduce a fourth hue per workflow.
+
+- `--brand` (violet): focus, in-progress, the "this is the live thing" accent.
+- `--success` (green): completed, healthy, approved.
+- `--danger` (red): failed, destructive, blocked.
+
+For a status background, a soft border, or a hover wash, **derive** the tint with `color-mix` against a token rather than picking a new hex. This keeps the tint correct in both themes automatically:
+
+```css
+.error {
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
+```
+
+Primary actions ("Run", "Approve", "Submit") use the **inverse** surface (`--inverse-bg` / `--inverse-text`), not the brand color. Brand is for *attention and progress*; inverse is for *the one button you want pressed*. Secondary actions are `--surface` with a `--border` and a `--hover` background on hover.
+
+### Typography: Inter, set tight, weighted heavy
+
+- **Font:** Inter, falling back to the system UI stack. Always render with `-webkit-font-smoothing: antialiased` and `font-synthesis: none`.
+- **Weight does the work.** Labels and titles live at 600 to 800, not 400. Body copy is the default weight; muted metadata is `--text-faint`.
+- **Headings sit tight:** `letter-spacing: -0.01em` (down to `-0.02em` for large display text). Size headings in `rem` (roughly 1.05rem to 1.3rem); never go bigger than you need.
+- **Eyebrows and tiny labels go up, not down.** Section labels and status chips use `text-transform: uppercase` with positive tracking (`letter-spacing: 0.03em` to `0.06em`) at 11 to 12px and weight 700+. This is how you signal "label" without making text large.
+- **Monospace is for identity, not chrome.** Run ids, SHAs, and code use `ui-monospace, monospace`. Do not set whole panels in monospace.
+
+### One radius scale
+
+Pick from a small, consistent ladder. Mixing arbitrary radii is the fastest way to look unfinished.
+
+- **8px** is the workhorse: buttons, inputs, panels, banners, the auth chip.
+- **6 to 7px** for small inline things: chips, glyph tiles, inline code.
+- **14 to 20px** for primary cards and the composer surface (bigger surface, softer corner).
+- **50% / 999px** for avatars, dots, and pills.
+
+Chat-style bubbles use an **asymmetric** radius: a large radius everywhere except one tight 6px corner on the speaker's side, which reads as a tail.
+
+### Depth is glass and layered shadow, never a hard box
+
+Elevated surfaces (cards, floating chrome, toasts, modals) are translucent glass, not flat fills:
+
+```css
+.card {
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.04),
+    0 16px 40px rgb(var(--shadow-rgb) / 0.1);
+}
+```
+
+Two rules make depth read correctly:
+
+1. **Stack two shadows, not one.** A 1px near-shadow grounds the edge; a large (16 to 50px) soft far-shadow at low alpha (0.08 to 0.14) lifts it off the page. A single hard shadow looks cheap.
+2. **Tint shadows through `--shadow-rgb`.** Write `rgb(var(--shadow-rgb) / 0.1)`, never `rgba(0,0,0,0.1)`. In dark mode `--shadow-rgb` becomes pure black so shadows stay believable.
+
+Flat inline rows and list items get a `--border` hairline and a `--hover` (or `--hover-subtle`) background change instead of a shadow. Reserve elevation for things that actually float.
+
+### Focus is a brand halo, not a default outline
+
+Custom controls suppress the UA ring, so give focus back explicitly and make it feel intentional.
+
+- **Containers** (a card holding an input) lift on `:focus-within` with a brand-tinted glow plus a deepened shadow, not a hard border:
+
+  ```css
+  .composer:focus-within {
+    border-color: color-mix(in srgb, var(--brand) 32%, var(--border));
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent),
+      0 20px 48px rgb(var(--shadow-rgb) / 0.14);
+  }
+  ```
+
+- **Discrete controls** (buttons, links, pills) get a crisp `:focus-visible` ring: `outline: 2px solid var(--brand); outline-offset: 2px;`. Keyboard users must always see where they are.
+
+### Motion: short, purposeful, and named
+
+Animation is fast and earns its place; nothing bounces for decoration.
+
+- **Durations live in 120 to 260ms.** Entrances around 120 to 160ms; a deliberate morph can reach 260ms. Anything slower feels broken.
+- **Easing:** `ease-out` for entrances, `cubic-bezier(0.2, 0.8, 0.2, 1)` for a confident morph. Always set `both` as the fill mode so the start and end states stick.
+- **Entrances are subtle:** opacity from 0 with an 8px `translateY`, or a directional `translateX` of about 18px for forward/back view transitions. Small distances, fast.
+- **Use a real FLIP morph for "this became that."** When a composing card turns into a running toast, measure both rects (`getBoundingClientRect`), drive a CSS-variable transform, and let one keyframe interpolate. Do not cross-fade two elements; morph the one.
+- **Spinners and pulses are tokenized too:** a brand-bordered ring for in-progress, a `--brand` dot with a `0 0 0 4px color-mix(...)` halo for "live".
+- **Reduced motion is centralized.** `WorkflowUiStyles`, `SmithersUiStyles`,
+  and `standaloneThemeCss()` already ship the same document-wide safety net,
+  so component CSS must not add its own media-query guard. Imperative canvas
+  widgets use `prefersReducedMotion()` and `observeReducedMotion()` from
+  `smithers-orchestrator/ui`.
+
+### Layout: a readable measure and calm chrome
+
+- **Constrain content width.** Primary columns are `width: min(100%, 720px); margin: 0 auto;`. Wide raw dumps belong in a scroll container, not stretched edge to edge.
+- **Float the chrome, glass it, keep it out of the corners that matter.** Fixed status/auth widgets use `--surface-glass-strong` with backdrop blur and a soft shadow, pinned with breathing room (about 12 to 14px from the edge).
+- **Spacing is generous and even.** Card padding around 16px; gaps of 8 to 18px; list rows around 10px vertical. Empty states get real space (around 48px of padding) and `--text-faint`, not a cramped one-liner.
+
+### Status surfaces read at a glance
+
+Map run state to the semantic accents consistently across every UI so a user learns the language once:
+
+- **In progress / running** → `--brand` (spinner ring, pulsing dot, brand text).
+- **Finished / healthy** → `--success`.
+- **Failed / blocked** → `--danger`.
+
+A status chip is an uppercase, tracked, 11px, weight-600 label with a `color-mix` border and tint in its accent. A run id is a monospace pill on `--surface` with a `--border`.
+
+## Putting it together
+
+A minimal, on-system `.smithers/ui/<workflow>.tsx` looks like this (tokens above, then a thin layer of component classes that only reference tokens):
+
+```tsx
+/** @jsxImportSource react */
+import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
+
+const runId = new URLSearchParams(location.search).get("runId") ?? undefined;
+
+const styles = `
+  /* paste the :root token block here */
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  .shell { width: min(100%, 720px); margin: 0 auto; padding: 36px 24px; }
+  .card {
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-glass);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 16px 40px rgb(var(--shadow-rgb) / 0.1);
+  }
+  .eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--text-faint);
+  }
+  .badge {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+    padding: 3px 8px; border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border)); color: var(--brand);
+  }
+  .badge.finished { border-color: color-mix(in srgb, var(--success) 30%, var(--border)); color: var(--success); }
+  .badge.failed { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); color: var(--danger); }
+  .runid { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-muted); }
+  .btn-primary {
+    min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px;
+    background: var(--inverse-bg); color: var(--inverse-text); font-weight: 650; cursor: pointer;
+  }
+  .btn-primary:hover { background: var(--inverse-bg-hover); }
+  .btn-primary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+`;
+
+function App() {
+  const run = useGatewayRun(runId);
+  return (
+    <main className="shell">
+      <style>{styles}</style>
+      <p className="eyebrow">Workflow</p>
+      <div className="card">
+        <span className="runid">{runId ?? "no run"}</span>
+        <span className={`badge ${run.data?.status ?? ""}`}>{run.data?.status ?? "idle"}</span>
+      </div>
+    </main>
+  );
+}
+
+createGatewayReactRoot(<App />);
+```
+
+## Checklist before you ship a UI
+
+- [ ] Colors, tints, and shadow alphas come from tokens or `color-mix`, never raw hex inline.
+- [ ] Light and dark both look right (the token block handles both; spot-check by toggling `data-theme`).
+- [ ] Type is Inter, antialiased, with heavy weights on labels and tight tracking on headings.
+- [ ] Radii come from the 6/10/12/16/pill scale; nothing arbitrary.
+- [ ] Elevated surfaces are glass with a two-layer, `--shadow-rgb`-tinted shadow.
+- [ ] Primary action is the inverse surface; brand is reserved for focus and progress.
+- [ ] Every interactive control has a visible `:focus-visible` (or `:focus-within`) treatment.
+- [ ] Motion is 120 to 260ms with `both` fill; the shared reduced-motion safety net is present.
+- [ ] Run state maps to brand/success/danger the same way it does in every other UI.
+
+## Reference
+
+- **Guide:** [Custom Workflow UIs](/guides/custom-workflow-ui) for the Gateway wiring, hooks, boot config, and stale-data-free model.
+- **Reference bundles in this repo:** `.smithers/ui/vcs.tsx`, `.smithers/ui/grill-me.tsx`, `.smithers/ui/ultragrill.tsx`, `.smithers/ui/workflow-skill.tsx`.
+- **Examples:** [Workflow UI (React)](/examples/workflow-ui-react), [Workflow UI (Vanilla)](/examples/workflow-ui-vanilla).

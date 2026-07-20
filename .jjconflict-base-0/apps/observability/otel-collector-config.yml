@@ -1,0 +1,38 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: smithers
+  otlp_grpc/tempo:
+    endpoint: "tempo:4317"
+    tls:
+      insecure: true
+  otlp_http/loki:
+    endpoint: "http://loki:3100/otlp"
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_grpc/tempo]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/loki]

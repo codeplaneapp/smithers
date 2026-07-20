@@ -1,0 +1,11 @@
+# Synthesize the review panel
+
+Synthesize the review panel findings into one verdict.
+
+Findings:
+
+{props.findings}
+
+Dedupe, then split into mustFix (critical/major only — these block delivery) and
+niceToHave. approved = mustFix is empty. Be selective: polish effort is capped, so only
+issues that change what a user/maintainer would do next belong in mustFix.

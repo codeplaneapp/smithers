@@ -1,0 +1,17 @@
+---
+title: browserPick
+description: Gateway browser service RPC.
+maturity: stable
+apiVersion: v1
+---
+
+`browserPick` controls a gateway-local ephemeral Chromium session.
+
+- Method: `browserPick`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+
+Request: `{ sessionId, point: { x, y } }`.
+Response: a safe locator ladder, bounded element identity, fingerprint, rectangle, viewport, and clipped screenshot artifact reference.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `REVISION_CONFLICT`, `SSRF_BLOCKED`, `QUOTA_EXCEEDED`, and `Internal`.

@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smithers — Run Chronicle (v2 - Chronicle + Inspector)</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg-surface: #161b22;
+  --bg-elevated: #1c2128;
+  --bg-hover: #21262d;
+  --border: #30363d;
+  --border-subtle: #21262d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --text-dim: #6e7681;
+
+  --status-running: #58a6ff;
+  --status-success: #3fb950;
+  --status-failed: #f85149;
+  --status-waiting: #a371f7;
+  --status-approval: #d2a8ff;
+  --status-retrying: #d29922;
+  --status-cancelled: #6e7681;
+  --status-cached: #39d353;
+  --status-timetravel: #79c0ff;
+
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius: 6px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+}
+
+/* ===== HEADER ===== */
+.header {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-run-id {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.header-workflow {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.status-badge.running { background: rgba(88,166,255,0.15); color: var(--status-running); }
+.status-badge.finished { background: rgba(63,185,80,0.15); color: var(--status-success); }
+.status-badge.waiting { background: rgba(163,113,247,0.15); color: var(--status-waiting); }
+
+.status-badge .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.header-stats {
+  display: flex; gap: 14px; margin-left: 8px;
+}
+.header-stat {
+  font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
+}
+.header-stat strong { color: var(--text-muted); font-weight: 500; }
+
+.filter-bar {
+  display: flex; gap: 4px; margin-left: auto;
+}
+.filter-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); padding: 3px 9px; border-radius: 14px;
+  font-size: 11px; cursor: pointer; transition: all 0.15s;
+}
+.filter-btn:hover { border-color: var(--text-muted); color: var(--text); }
+.filter-btn.active { background: rgba(88,166,255,0.12); border-color: var(--status-running); color: var(--status-running); }
+
+/* ===== MAIN LAYOUT ===== */
+.main {
+  display: grid;
+  grid-template-columns: 1fr 440px;
+  overflow: hidden;
+}
+
+/* ===== CHRONICLE FEED ===== */
+.chronicle {
+  overflow-y: auto;
+  padding: 8px 0;
+  border-right: 1px solid var(--border);
+}
+.chronicle::-webkit-scrollbar { width: 6px; }
+.chronicle::-webkit-scrollbar-track { background: transparent; }
+.chronicle::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.feed-item {
+  display: grid;
+  grid-template-columns: 54px 4px 1fr;
+  gap: 0 10px;
+  padding: 5px 16px 5px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+  position: relative;
+}
+.feed-item:hover { background: var(--bg-hover); }
+.feed-item.selected { background: var(--bg-elevated); }
+.feed-item.selected::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--status-running);
+}
+
+.feed-seq {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim); text-align: right; padding-top: 3px;
+}
+
+.feed-rail {
+  width: 4px; border-radius: 2px; min-height: 20px;
+}
+.feed-rail.running { background: var(--status-running); }
+.feed-rail.success { background: var(--status-success); }
+.feed-rail.failed { background: var(--status-failed); }
+.feed-rail.waiting { background: var(--status-waiting); }
+.feed-rail.approval { background: var(--status-approval); }
+.feed-rail.retrying { background: var(--status-retrying); }
+.feed-rail.frame { background: var(--text-dim); opacity: 0.5; }
+
+.feed-content { min-width: 0; }
+
+.feed-main-line {
+  display: flex; align-items: baseline; gap: 6px;
+}
+
+.feed-icon {
+  font-size: 11px; flex-shrink: 0; width: 14px; text-align: center;
+}
+.feed-icon.success { color: var(--status-success); }
+.feed-icon.running { color: var(--status-running); }
+.feed-icon.failed { color: var(--status-failed); }
+.feed-icon.waiting { color: var(--status-waiting); }
+.feed-icon.approval { color: var(--status-approval); }
+.feed-icon.retrying { color: var(--status-retrying); }
+.feed-icon.dim { color: var(--text-dim); }
+
+.feed-type {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-muted); min-width: 130px;
+}
+
+.feed-summary {
+  font-size: 12px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.feed-detail {
+  font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
+  margin-top: 1px; padding-left: 20px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.feed-offset {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim); margin-left: auto; flex-shrink: 0;
+}
+
+/* Connection annotations */
+.feed-connection {
+  padding: 2px 16px 2px 80px;
+  font-size: 10px; color: var(--text-dim);
+  font-family: var(--font-mono);
+  display: flex; align-items: center; gap: 4px;
+}
+.feed-connection::before {
+  content: '↓'; color: var(--status-running); font-size: 11px;
+}
+
+/* Group headers (frames) */
+.feed-frame-header {
+  padding: 8px 16px 4px 12px;
+  font-size: 10px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  font-weight: 500; font-family: var(--font-mono);
+  display: flex; align-items: center; gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
+}
+.feed-frame-header:first-child { border-top: none; margin-top: 0; }
+.feed-frame-header .frame-no { color: var(--status-running); }
+
+/* ===== INSPECTOR ===== */
+.inspector {
+  background: var(--bg-surface);
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.inspector::-webkit-scrollbar { width: 6px; }
+.inspector::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.inspector-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg-surface); z-index: 1;
+}
+.inspector-node-title {
+  display: flex; align-items: center; gap: 8px;
+}
+.inspector-node-name {
+  font-size: 14px; font-weight: 600; font-family: var(--font-mono);
+}
+.inspector-node-status {
+  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  text-transform: uppercase; font-weight: 500;
+}
+.inspector-node-status.succeeded { background: rgba(63,185,80,0.15); color: var(--status-success); }
+.inspector-node-status.running { background: rgba(88,166,255,0.15); color: var(--status-running); }
+.inspector-node-status.failed { background: rgba(248,81,73,0.15); color: var(--status-failed); }
+.inspector-node-status.waiting { background: rgba(163,113,247,0.15); color: var(--status-waiting); }
+
+.inspector-subtitle {
+  font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
+  margin-top: 4px;
+}
+
+.inspector-tabs {
+  display: flex; gap: 0; padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.inspector-tab {
+  padding: 8px 12px; font-size: 11px; cursor: pointer;
+  color: var(--text-dim); border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.inspector-tab:hover { color: var(--text); }
+.inspector-tab.active { color: var(--text); border-bottom-color: var(--status-running); }
+
+.inspector-body { padding: 14px 16px; flex: 1; }
+
+.inspector-section { margin-bottom: 16px; }
+.inspector-section-title {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 6px;
+}
+
+.inspector-kv {
+  display: grid; grid-template-columns: 90px 1fr;
+  gap: 3px 8px; font-size: 11px; margin-bottom: 4px;
+}
+.inspector-kv-label { color: var(--text-dim); }
+.inspector-kv-value { color: var(--text); font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+
+/* Graph in inspector */
+.dep-chain {
+  display: flex; align-items: center; gap: 3px;
+  padding: 8px 10px; background: var(--bg); border-radius: var(--radius);
+  overflow-x: auto; white-space: nowrap; font-family: var(--font-mono); font-size: 10px;
+}
+.dep-node {
+  padding: 2px 7px; border-radius: 3px; font-weight: 500;
+}
+.dep-node.done { background: rgba(63,185,80,0.15); color: var(--status-success); }
+.dep-node.active { background: rgba(88,166,255,0.15); color: var(--status-running); border: 1px solid rgba(88,166,255,0.4); }
+.dep-node.pending { background: var(--bg-hover); color: var(--text-dim); }
+.dep-node.failed { background: rgba(248,81,73,0.15); color: var(--status-failed); }
+.dep-arrow { color: var(--text-dim); }
+
+/* Tool calls */
+.tool-row {
+  display: grid; grid-template-columns: 16px 50px 1fr 40px;
+  align-items: center; gap: 6px;
+  padding: 3px 8px; background: var(--bg); border-radius: 3px;
+  margin-bottom: 2px; font-family: var(--font-mono); font-size: 11px;
+}
+.tool-icon { text-align: center; }
+.tool-icon.ok { color: var(--status-success); }
+.tool-icon.err { color: var(--status-failed); }
+.tool-name { color: var(--text-muted); font-weight: 500; }
+.tool-detail { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-dur { color: var(--text-dim); text-align: right; font-size: 10px; }
+
+/* Output preview */
+.output-preview {
+  background: var(--bg); border-radius: var(--radius);
+  padding: 10px 12px; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-muted); line-height: 1.6; max-height: 200px;
+  overflow-y: auto; white-space: pre-wrap;
+}
+
+/* Token usage */
+.token-row {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+}
+.token-label { color: var(--text-dim); min-width: 50px; }
+.token-bar {
+  flex: 1; height: 4px; background: var(--bg); border-radius: 2px; overflow: hidden;
+}
+.token-bar-fill { height: 100%; border-radius: 2px; }
+.token-bar-fill.input { background: var(--status-running); }
+.token-bar-fill.output { background: var(--status-success); }
+
+/* Actions */
+.inspector-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.action-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text-muted); font-size: 11px;
+  cursor: pointer; transition: all 0.15s;
+}
+.action-btn:hover { border-color: var(--text-muted); color: var(--text); }
+
+/* Loop indicator */
+.loop-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 3px; font-size: 10px;
+  background: rgba(210,169,34,0.12); color: var(--status-retrying);
+  font-family: var(--font-mono);
+}
+
+/* Empty state */
+.inspector-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; color: var(--text-dim);
+  text-align: center; padding: 40px;
+}
+.inspector-empty-icon { font-size: 28px; margin-bottom: 10px; opacity: 0.4; }
+.inspector-empty-text { font-size: 12px; max-width: 200px; }
+
+/* ===== TIMELINE ===== */
+.timeline {
+  background: var(--bg-surface); border-top: 1px solid var(--border);
+  padding: 8px 20px 10px; height: 90px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.timeline-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 2px;
+}
+.timeline-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.timeline-elapsed { font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); }
+
+.timeline-track {
+  display: flex; align-items: center; height: 10px;
+}
+.timeline-track-label {
+  width: 80px; font-size: 9px; color: var(--text-dim);
+  text-align: right; padding-right: 8px; flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+.timeline-track-bg {
+  flex: 1; height: 100%; position: relative;
+  background: rgba(255,255,255,0.02); border-radius: 2px;
+}
+.tbar {
+  position: absolute; height: 100%; border-radius: 2px; min-width: 2px;
+}
+.tbar.running { background: var(--status-running); opacity: 0.7; }
+.tbar.success { background: var(--status-success); opacity: 0.7; }
+.tbar.failed { background: var(--status-failed); opacity: 0.7; }
+.tbar.retrying { background: var(--status-retrying); opacity: 0.7; }
+
+.timeline-events-track .tmarker {
+  position: absolute; top: 50%; transform: translateY(-50%);
+}
+.tmarker.frame-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-dim); opacity: 0.6; }
+.tmarker.loop-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--status-retrying); opacity: 0.8; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <span class="header-run-id">smi_kanban_rl_01</span>
+    <span class="header-workflow">kanban</span>
+    <span class="status-badge finished"><span class="dot" style="animation:none;opacity:1"></span> finished</span>
+    <div class="header-stats">
+      <span class="header-stat">elapsed <strong>4m 38s</strong></span>
+      <span class="header-stat">nodes <strong>10/10</strong></span>
+      <span class="header-stat">loops <strong>2 iter</strong></span>
+      <span class="header-stat">tokens <strong>42.1k</strong></span>
+    </div>
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="important">Important</button>
+      <button class="filter-btn" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="nodes">Nodes</button>
+      <button class="filter-btn" data-filter="tools">Tools</button>
+      <button class="filter-btn" data-filter="frames">Frames</button>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="chronicle" id="chronicle"></div>
+    <div class="inspector" id="inspector">
+      <div class="inspector-empty">
+        <div class="inspector-empty-icon">◎</div>
+        <div class="inspector-empty-text">Select an event to inspect node details, tool calls, output, and connections</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline" id="timeline"></div>
+</div>
+
+<script>
+const RUN_ID = 'smi_kanban_rl_01';
+const START_MS = 1716648120000;
+
+const EVENTS = [
+  { seq: 1, offsetMs: 0, type: 'RunStarted', status: 'success', icon: '▶', summary: 'Run started', detail: `input: { goal: "Add rate limiting…", directory: "src/api", maxAgents: 3 }`, nodeId: null, iter: null, attempt: null },
+  { seq: 2, offsetMs: 12, type: 'FrameCommitted', status: 'frame', icon: '◇', summary: 'Frame 1 — mounted: triage', detail: 'xmlHash: a3f2c1…', nodeId: null, iter: null, attempt: null, isFrame: true, frameNo: 1 },
+  { seq: 3, offsetMs: 45, type: 'NodeStarted', status: 'running', icon: '→', summary: 'triage', detail: 'attempt 1 · claude-sonnet-4-20250514', nodeId: 'triage', iter: 0, attempt: 1 },
+  { seq: 4, offsetMs: 1200, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'triage → bash', detail: 'find src/api -name "*.ts" | head -20 → 14 files', nodeId: 'triage', iter: 0, attempt: 1 },
+  { seq: 5, offsetMs: 2400, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'triage → grep', detail: 'pattern: "router\\." path: src/api → 8 matches', nodeId: 'triage', iter: 0, attempt: 1 },
+  { seq: 6, offsetMs: 3100, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'triage → read', detail: 'src/api/routes/index.ts (67 lines)', nodeId: 'triage', iter: 0, attempt: 1 },
+  { seq: 7, offsetMs: 18200, type: 'TokenUsageReported', status: 'dim', icon: '◈', summary: 'triage — 3.2k in / 890 out', detail: 'claude-sonnet-4-20250514 · $0.014', nodeId: 'triage', iter: 0, attempt: 1 },
+  { seq: 8, offsetMs: 18400, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'triage finished — 4 items triaged', detail: 'output: triage (validated) · 18.4s', nodeId: 'triage', iter: 0, attempt: 1 },
+  { seq: 9, offsetMs: 18500, type: 'FrameCommitted', status: 'frame', icon: '◇', summary: 'Frame 2 — Loop iter 0: mounted work-rl-middleware, work-rl-config, work-rl-tests, work-rl-docs', detail: 'Parallel maxConcurrency=3', nodeId: null, iter: null, attempt: null, isFrame: true, frameNo: 2 },
+  { seq: 10, offsetMs: 18600, type: 'NodeStarted', status: 'running', icon: '→', summary: 'work-rl-middleware', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'work-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 11, offsetMs: 18700, type: 'NodeStarted', status: 'running', icon: '→', summary: 'work-rl-config', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'work-rl-config', iter: 0, attempt: 1 },
+  { seq: 12, offsetMs: 18800, type: 'NodeStarted', status: 'running', icon: '→', summary: 'work-rl-tests', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'work-rl-tests', iter: 0, attempt: 1 },
+  { seq: 13, offsetMs: 21000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-middleware → read', detail: 'src/api/middleware/index.ts (45 lines)', nodeId: 'work-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 14, offsetMs: 28000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-middleware → write', detail: 'src/api/middleware/rateLimit.ts (new, 62 lines)', nodeId: 'work-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 15, offsetMs: 32000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-middleware → edit', detail: 'src/api/middleware/index.ts:3-4 (+import, +export)', nodeId: 'work-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 16, offsetMs: 24000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-config → read', detail: 'src/api/config.ts (28 lines)', nodeId: 'work-rl-config', iter: 0, attempt: 1 },
+  { seq: 17, offsetMs: 30000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-config → edit', detail: 'src/api/config.ts:12-28 (+rateLimitConfig section)', nodeId: 'work-rl-config', iter: 0, attempt: 1 },
+  { seq: 18, offsetMs: 38000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'work-rl-config finished', detail: 'output: work (validated) · column: "review" · 19.3s', nodeId: 'work-rl-config', iter: 0, attempt: 1 },
+  { seq: 19, offsetMs: 26000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-tests → read', detail: 'src/api/__tests__/routes.test.ts (120 lines)', nodeId: 'work-rl-tests', iter: 0, attempt: 1 },
+  { seq: 20, offsetMs: 35000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-tests → write', detail: 'src/api/__tests__/rateLimit.test.ts (new, 89 lines)', nodeId: 'work-rl-tests', iter: 0, attempt: 1 },
+  { seq: 21, offsetMs: 42000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-tests → bash', detail: 'bun test src/api/__tests__/rateLimit.test.ts → 2 passed, 1 failed', nodeId: 'work-rl-tests', iter: 0, attempt: 1 },
+  { seq: 22, offsetMs: 44000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'work-rl-middleware finished', detail: 'output: work (validated) · column: "review" · files: 2 · 25.4s', nodeId: 'work-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 23, offsetMs: 52000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'work-rl-tests finished', detail: 'output: work (validated) · column: "review" · 33.2s', nodeId: 'work-rl-tests', iter: 0, attempt: 1 },
+  { seq: 24, offsetMs: 44100, type: 'NodeStarted', status: 'running', icon: '→', summary: 'work-rl-docs', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'work-rl-docs', iter: 0, attempt: 1 },
+  { seq: 25, offsetMs: 50000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-docs → read', detail: 'README.md (34 lines)', nodeId: 'work-rl-docs', iter: 0, attempt: 1 },
+  { seq: 26, offsetMs: 58000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-docs → edit', detail: 'README.md:28-34 (+rate limiting section)', nodeId: 'work-rl-docs', iter: 0, attempt: 1 },
+  { seq: 27, offsetMs: 64000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'work-rl-docs finished', detail: 'output: work (validated) · column: "review" · 19.9s', nodeId: 'work-rl-docs', iter: 0, attempt: 1 },
+  { seq: 28, offsetMs: 64100, type: 'FrameCommitted', status: 'frame', icon: '◇', summary: 'Frame 3 — mounted: review-rl-middleware, review-rl-config, review-rl-tests, review-rl-docs', detail: 'Parallel maxConcurrency=2', nodeId: null, iter: null, attempt: null, isFrame: true, frameNo: 3 },
+  { seq: 29, offsetMs: 64200, type: 'NodeStarted', status: 'running', icon: '→', summary: 'review-rl-middleware', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'review-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 30, offsetMs: 64300, type: 'NodeStarted', status: 'running', icon: '→', summary: 'review-rl-config', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'review-rl-config', iter: 0, attempt: 1 },
+  { seq: 31, offsetMs: 72000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'review-rl-middleware → read', detail: 'src/api/middleware/rateLimit.ts (62 lines)', nodeId: 'review-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 32, offsetMs: 78000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'review-rl-middleware — approved', detail: 'output: review (validated) · column: "done" · 13.8s', nodeId: 'review-rl-middleware', iter: 0, attempt: 1 },
+  { seq: 33, offsetMs: 80000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'review-rl-config — approved', detail: 'output: review (validated) · column: "done" · 15.7s', nodeId: 'review-rl-config', iter: 0, attempt: 1 },
+  { seq: 34, offsetMs: 78100, type: 'NodeStarted', status: 'running', icon: '→', summary: 'review-rl-tests', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'review-rl-tests', iter: 0, attempt: 1 },
+  { seq: 35, offsetMs: 80100, type: 'NodeStarted', status: 'running', icon: '→', summary: 'review-rl-docs', detail: 'attempt 1 · iter 0 · claude-sonnet-4-20250514', nodeId: 'review-rl-docs', iter: 0, attempt: 1 },
+  { seq: 36, offsetMs: 88000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'review-rl-tests → read', detail: 'src/api/__tests__/rateLimit.test.ts (89 lines)', nodeId: 'review-rl-tests', iter: 0, attempt: 1 },
+  { seq: 37, offsetMs: 96000, type: 'NodeFinished', status: 'failed', icon: '✗', summary: 'review-rl-tests — rejected → backlog', detail: 'output: review (validated) · column: "backlog" · feedback: "Missing edge case…" · 17.9s', nodeId: 'review-rl-tests', iter: 0, attempt: 1 },
+  { seq: 38, offsetMs: 94000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'review-rl-docs — approved', detail: 'output: review (validated) · column: "done" · 13.9s', nodeId: 'review-rl-docs', iter: 0, attempt: 1 },
+  { seq: 39, offsetMs: 96200, type: 'FrameCommitted', status: 'frame', icon: '◇', summary: 'Frame 4 — Loop iter 1: re-mounted work-rl-tests (backlog)', detail: 'until=false · 1 item remaining', nodeId: null, iter: null, attempt: null, isFrame: true, frameNo: 4 },
+  { seq: 40, offsetMs: 96300, type: 'NodeStarted', status: 'retrying', icon: '↻', summary: 'work-rl-tests', detail: 'attempt 1 · iter 1 · feedback: "Missing edge case for concurrent requests"', nodeId: 'work-rl-tests', iter: 1, attempt: 1 },
+  { seq: 41, offsetMs: 102000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-tests → read', detail: 'src/api/__tests__/rateLimit.test.ts (89 lines)', nodeId: 'work-rl-tests', iter: 1, attempt: 1 },
+  { seq: 42, offsetMs: 112000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-tests → edit', detail: 'src/api/__tests__/rateLimit.test.ts:45-89 (+concurrent request test)', nodeId: 'work-rl-tests', iter: 1, attempt: 1 },
+  { seq: 43, offsetMs: 120000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'work-rl-tests → bash', detail: 'bun test src/api/__tests__/rateLimit.test.ts → 4 passed, 0 failed', nodeId: 'work-rl-tests', iter: 1, attempt: 1 },
+  { seq: 44, offsetMs: 132000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'work-rl-tests finished (iter 1)', detail: 'output: work (validated) · column: "review" · 35.7s', nodeId: 'work-rl-tests', iter: 1, attempt: 1 },
+  { seq: 45, offsetMs: 132100, type: 'FrameCommitted', status: 'frame', icon: '◇', summary: 'Frame 5 — mounted: review-rl-tests (iter 1)', detail: null, nodeId: null, iter: null, attempt: null, isFrame: true, frameNo: 5 },
+  { seq: 46, offsetMs: 132200, type: 'NodeStarted', status: 'running', icon: '→', summary: 'review-rl-tests', detail: 'attempt 1 · iter 1 · claude-sonnet-4-20250514', nodeId: 'review-rl-tests', iter: 1, attempt: 1 },
+  { seq: 47, offsetMs: 140000, type: 'ToolCallFinished', status: 'success', icon: '🔧', summary: 'review-rl-tests → read', detail: 'src/api/__tests__/rateLimit.test.ts (112 lines)', nodeId: 'review-rl-tests', iter: 1, attempt: 1 },
+  { seq: 48, offsetMs: 148000, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'review-rl-tests — approved (iter 1)', detail: 'output: review (validated) · column: "done" · 15.8s', nodeId: 'review-rl-tests', iter: 1, attempt: 1 },
+  { seq: 49, offsetMs: 148200, type: 'FrameCommitted', status: 'frame', icon: '◇', summary: 'Frame 6 — Loop complete (until=true). Mounted: board', detail: 'all 4 items in "done"', nodeId: null, iter: null, attempt: null, isFrame: true, frameNo: 6 },
+  { seq: 50, offsetMs: 148300, type: 'NodeStarted', status: 'running', icon: '→', summary: 'board', detail: 'static output (compute)', nodeId: 'board', iter: 0, attempt: 1 },
+  { seq: 51, offsetMs: 148400, type: 'NodeFinished', status: 'success', icon: '✓', summary: 'board finished', detail: 'output: board (validated) · "Processed 4 items: 4 done, 0 blocked"', nodeId: 'board', iter: 0, attempt: 1 },
+  { seq: 52, offsetMs: 148500, type: 'RunFinished', status: 'success', icon: '✓', summary: 'Run finished — 4m 38s', detail: '10 nodes · 2 loop iterations · 42.1k tokens · $0.18', nodeId: null, iter: null, attempt: null },
+];
+
+const IMPORTANT_TYPES = new Set(['RunStarted', 'RunFinished', 'FrameCommitted', 'NodeStarted', 'NodeFinished']);
+
+const NODE_DETAILS = {
+  'triage': { name:'triage', status:'succeeded', nodeId:'triage', iteration:0, attempt:1, duration:'18.4s', agent:'claude-sonnet-4-20250514', outputTable:'triage', tokens:{input:3200,output:890,cost:0.014},
+    tools:[{name:'bash',detail:'find src/api -name "*.ts" | head -20',dur:'1.1s',ok:true},{name:'grep',detail:'"router\\." → 8 matches',dur:'1.2s',ok:true},{name:'read',detail:'src/api/routes/index.ts (67 lines)',dur:'0.7s',ok:true}],
+    output:`{\n  "items": [\n    { "id": "rl-middleware", "title": "Create rate limit middleware", … },\n    { "id": "rl-config", … },\n    { "id": "rl-tests", … },\n    { "id": "rl-docs", … }\n  ],\n  "totalItems": 4\n}`,
+    upstream:[], downstream:['work-rl-middleware','work-rl-config','work-rl-tests','work-rl-docs'] },
+  'work-rl-middleware': { name:'work-rl-middleware', status:'succeeded', nodeId:'work-rl-middleware', iteration:0, attempt:1, duration:'25.4s', agent:'claude-sonnet-4-20250514', outputTable:'work', tokens:{input:4100,output:1200,cost:0.019},
+    tools:[{name:'read',detail:'src/api/middleware/index.ts (45 lines)',dur:'0.1s',ok:true},{name:'write',detail:'src/api/middleware/rateLimit.ts (new, 62 lines)',dur:'0.2s',ok:true},{name:'edit',detail:'src/api/middleware/index.ts:3-4',dur:'0.1s',ok:true}],
+    output:`{\n  "itemId": "rl-middleware",\n  "column": "review",\n  "summary": "Created rateLimit middleware using sliding window algorithm",\n  "filesChanged": ["src/api/middleware/rateLimit.ts", "src/api/middleware/index.ts"]\n}`,
+    upstream:['triage'], downstream:['review-rl-middleware'] },
+  'board': { name:'board', status:'succeeded', nodeId:'board', iteration:0, attempt:1, duration:'<1ms', agent:null, outputTable:'board', tokens:null,
+    tools:[],
+    output:`{\n  "done": ["rl-middleware", "rl-config", "rl-tests", "rl-docs"],\n  "blocked": [],\n  "loopedBack": ["rl-tests"],\n  "summary": "Processed 4 items: 4 done, 0 blocked"\n}`,
+    upstream:['review-rl-middleware','review-rl-config','review-rl-tests','review-rl-docs'], downstream:[] },
+};
+
+function formatOffset(ms) {
+  if (ms < 1000) return `+${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `+${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = (s % 60).toFixed(0);
+  return `+${m}m${rem}s`;
+}
+
+function makeEl(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function renderFeed(events) {
+  const el = document.getElementById('chronicle');
+  el.replaceChildren();
+  for (const ev of events) {
+    if (ev.isFrame) {
+      const frameHeader = makeEl('div', 'feed-frame-header');
+      frameHeader.append(makeEl('span', 'frame-no', `frame ${ev.frameNo}`), ` ${formatOffset(ev.offsetMs)}`);
+      el.append(frameHeader);
+    }
+    const iconClass = ev.status==='success'?'success':ev.status==='running'?'running':ev.status==='failed'?'failed':ev.status==='retrying'?'retrying':'dim';
+
+    const item = makeEl('div', 'feed-item');
+    item.dataset.seq = ev.seq;
+    item.dataset.node = ev.nodeId || '';
+
+    item.append(makeEl('div', 'feed-seq', `#${ev.seq}`));
+    item.append(makeEl('div', `feed-rail ${ev.status}`));
+
+    const content = makeEl('div', 'feed-content');
+    const mainLine = makeEl('div', 'feed-main-line');
+    mainLine.append(makeEl('span', `feed-icon ${iconClass}`, ev.icon));
+    mainLine.append(makeEl('span', 'feed-type', ev.type));
+    mainLine.append(makeEl('span', 'feed-summary', ev.summary));
+    mainLine.append(makeEl('span', 'feed-offset', formatOffset(ev.offsetMs)));
+    content.append(mainLine);
+    if (ev.detail) content.append(makeEl('div', 'feed-detail', ev.detail));
+    item.append(content);
+
+    el.append(item);
+  }
+  el.querySelectorAll('.feed-item').forEach(item => {
+    item.addEventListener('click', () => {
+      el.querySelectorAll('.feed-item').forEach(i => i.classList.remove('selected'));
+      item.classList.add('selected');
+      renderInspector(item.dataset.node, parseInt(item.dataset.seq));
+    });
+  });
+}
+
+function makeKv(label, value) {
+  const kv = makeEl('div', 'inspector-kv');
+  kv.append(makeEl('span', 'inspector-kv-label', label));
+  kv.append(makeEl('span', 'inspector-kv-value', value));
+  return kv;
+}
+
+function makeSection(title) {
+  const section = makeEl('div', 'inspector-section');
+  section.append(makeEl('div', 'inspector-section-title', title));
+  return section;
+}
+
+function renderInspector(nodeId, seq) {
+  const el = document.getElementById('inspector');
+  const ev = EVENTS.find(e => e.seq === seq);
+  let detail = NODE_DETAILS[nodeId];
+  el.replaceChildren();
+
+  if (!detail) {
+    const header = makeEl('div', 'inspector-header');
+    const title = makeEl('div', 'inspector-node-title');
+    title.append(makeEl('span', 'inspector-node-name', ev ? ev.type : 'Event'));
+    header.append(title);
+    header.append(makeEl('div', 'inspector-subtitle', ev ? ev.summary : ''));
+
+    const body = makeEl('div', 'inspector-body');
+    const section = makeSection('Event');
+    section.append(makeKv('seq', ev?.seq));
+    section.append(makeKv('type', ev?.type));
+    section.append(makeKv('offset', ev ? formatOffset(ev.offsetMs) : ''));
+    if (ev?.nodeId) section.append(makeKv('nodeId', ev.nodeId));
+    body.append(section);
+
+    el.append(header, body);
+    return;
+  }
+
+  const header = makeEl('div', 'inspector-header');
+  const title = makeEl('div', 'inspector-node-title');
+  title.append(makeEl('span', 'inspector-node-name', detail.name));
+  title.append(makeEl('span', `inspector-node-status ${detail.status}`, detail.status));
+  header.append(title);
+  header.append(makeEl('div', 'inspector-subtitle', `iteration ${detail.iteration} · attempt ${detail.attempt} · output: ${detail.outputTable}`));
+
+  const tabs = makeEl('div', 'inspector-tabs');
+  tabs.append(makeEl('div', 'inspector-tab active', 'Summary'));
+  tabs.append(makeEl('div', 'inspector-tab', 'Output'));
+  tabs.append(makeEl('div', 'inspector-tab', 'Tools'));
+  tabs.append(makeEl('div', 'inspector-tab', 'Connections'));
+
+  const body = makeEl('div', 'inspector-body');
+
+  const nodeSection = makeSection('Node');
+  nodeSection.append(makeKv('nodeId', detail.nodeId));
+  nodeSection.append(makeKv('duration', detail.duration));
+  nodeSection.append(makeKv('agent', detail.agent || '(static)'));
+  nodeSection.append(makeKv('outputTable', detail.outputTable));
+  body.append(nodeSection);
+
+  if (detail.tokens) {
+    const tokSection = makeSection('Tokens');
+
+    const inputRow = makeEl('div', 'token-row');
+    inputRow.append(makeEl('span', 'token-label', 'input'));
+    const inputBar = makeEl('div', 'token-bar');
+    const inputFill = makeEl('div', 'token-bar-fill input');
+    inputFill.style.width = `${Math.min(100, detail.tokens.input / 80)}%`;
+    inputBar.append(inputFill);
+    inputRow.append(inputBar);
+    inputRow.append(makeEl('span', null, `${(detail.tokens.input / 1000).toFixed(1)}k`));
+    tokSection.append(inputRow);
+
+    const outputRow = makeEl('div', 'token-row');
+    outputRow.style.marginTop = '4px';
+    outputRow.append(makeEl('span', 'token-label', 'output'));
+    const outputBar = makeEl('div', 'token-bar');
+    const outputFill = makeEl('div', 'token-bar-fill output');
+    outputFill.style.width = `${Math.min(100, detail.tokens.output / 30)}%`;
+    outputBar.append(outputFill);
+    outputRow.append(outputBar);
+    outputRow.append(makeEl('span', null, `${(detail.tokens.output / 1000).toFixed(1)}k`));
+    tokSection.append(outputRow);
+
+    const cost = makeEl('div', null, `cost: $${detail.tokens.cost.toFixed(3)}`);
+    cost.style.cssText = 'font-size:10px;color:var(--text-dim);margin-top:4px;font-family:var(--font-mono)';
+    tokSection.append(cost);
+
+    body.append(tokSection);
+  }
+
+  if (detail.tools.length) {
+    const toolsSection = makeSection(`Tool calls (${detail.tools.length})`);
+    for (const t of detail.tools) {
+      const row = makeEl('div', 'tool-row');
+      row.append(makeEl('span', `tool-icon ${t.ok ? 'ok' : 'err'}`, t.ok ? '✓' : '✗'));
+      row.append(makeEl('span', 'tool-name', t.name));
+      row.append(makeEl('span', 'tool-detail', t.detail));
+      row.append(makeEl('span', 'tool-dur', t.dur));
+      toolsSection.append(row);
+    }
+    body.append(toolsSection);
+  }
+
+  const depSection = makeSection('Dependency chain');
+  const chain = [...detail.upstream.map(u=>({label:u,status:'done'})),{label:detail.nodeId,status:'done'},...detail.downstream.map(d=>({label:d,status:'pending'}))];
+  const depChain = makeEl('div', 'dep-chain');
+  chain.forEach((n, i) => {
+    depChain.append(makeEl('span', `dep-node ${n.status}`, n.label));
+    if (i < chain.length - 1) depChain.append(makeEl('span', 'dep-arrow', '→'));
+  });
+  depSection.append(depChain);
+  body.append(depSection);
+
+  const outputSection = makeSection('Output (validated)');
+  outputSection.append(makeEl('div', 'output-preview', detail.output));
+  body.append(outputSection);
+
+  const actionsSection = makeSection('Actions');
+  const actions = makeEl('div', 'inspector-actions');
+  ['↻ Retry', '◁ Revert', '⊟ Diff', '⎘ Copy ID'].forEach(label => {
+    actions.append(makeEl('button', 'action-btn', label));
+  });
+  actionsSection.append(actions);
+  body.append(actionsSection);
+
+  el.append(header, tabs, body);
+}
+
+function renderTimeline() {
+  const el = document.getElementById('timeline');
+  const totalMs = 148500;
+  const tracks = [
+    { label:'triage', bars:[{start:45,end:18400,st:'success'}] },
+    { label:'work-*', bars:[{start:18600,end:44000,st:'success'},{start:18700,end:38000,st:'success'},{start:18800,end:52000,st:'success'},{start:44100,end:64000,st:'success'},{start:96300,end:132000,st:'retrying'}] },
+    { label:'review-*', bars:[{start:64200,end:78000,st:'success'},{start:64300,end:80000,st:'success'},{start:78100,end:96000,st:'failed'},{start:80100,end:94000,st:'success'},{start:132200,end:148000,st:'success'}] },
+    { label:'board', bars:[{start:148300,end:148400,st:'success'}] },
+  ];
+  el.replaceChildren();
+
+  const tlHeader = makeEl('div', 'timeline-header');
+  tlHeader.append(makeEl('span', 'timeline-label', 'Timeline'));
+  tlHeader.append(makeEl('span', 'timeline-elapsed', '0:00 → 2:28'));
+  el.append(tlHeader);
+
+  for (const t of tracks) {
+    const track = makeEl('div', 'timeline-track');
+    track.append(makeEl('span', 'timeline-track-label', t.label));
+    const bg = makeEl('div', 'timeline-track-bg');
+    for (const b of t.bars) {
+      const bar = makeEl('div', `tbar ${b.st}`);
+      bar.style.left = `${(b.start/totalMs*100).toFixed(2)}%`;
+      bar.style.width = `${Math.max(0.5,(b.end-b.start)/totalMs*100).toFixed(2)}%`;
+      bg.append(bar);
+    }
+    track.append(bg);
+    el.append(track);
+  }
+
+  const frames=[0,18500,64100,96200,132100,148200];
+  const eventsTrack = makeEl('div', 'timeline-track');
+  eventsTrack.append(makeEl('span', 'timeline-track-label', 'events'));
+  const eventsBg = makeEl('div', 'timeline-track-bg timeline-events-track');
+  for (const f of frames) {
+    const dot = makeEl('div', 'tmarker frame-dot');
+    dot.style.left = `${(f/totalMs*100).toFixed(1)}%`;
+    eventsBg.append(dot);
+  }
+  const loopDot = makeEl('div', 'tmarker loop-dot');
+  loopDot.style.left = `${(96200/totalMs*100).toFixed(1)}%`;
+  eventsBg.append(loopDot);
+  eventsTrack.append(eventsBg);
+  el.append(eventsTrack);
+}
+
+function applyFilter(f) {
+  let evs = EVENTS;
+  if (f==='important') evs=EVENTS.filter(e=>IMPORTANT_TYPES.has(e.type));
+  else if(f==='nodes') evs=EVENTS.filter(e=>e.type.startsWith('Node'));
+  else if(f==='tools') evs=EVENTS.filter(e=>e.type==='ToolCallFinished');
+  else if(f==='frames') evs=EVENTS.filter(e=>e.type==='FrameCommitted');
+  renderFeed(evs);
+}
+
+document.querySelectorAll('.filter-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    applyFilter(btn.dataset.filter);
+  });
+});
+
+applyFilter('important');
+renderTimeline();
+</script>
+</body>
+</html>

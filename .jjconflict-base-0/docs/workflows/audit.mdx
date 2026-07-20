@@ -1,0 +1,54 @@
+---
+title: audit
+description: Audit feature groups for gaps and follow-up work.
+---
+
+`audit` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+
+`audit` runs a feature-by-feature or group-by-group review using `ForEachFeature`. It is designed to consume the output of `feature-enum`, but you can provide any feature map: an object whose keys are group names and whose values are arrays of feature identifiers:
+
+```json
+{ "GROUP_NAME": ["FEATURE_A", "FEATURE_B"] }
+```
+
+```bash
+bunx smithers-orchestrator workflow run audit \
+  --input '{"features":{"GATEWAY":["GATEWAY_RPC_LIST_RUNS"]},"focus":"test coverage"}'
+```
+
+<Frame caption="The audit UI fans out across feature groups and merges a single gap report covering tests, docs, and error handling.">
+  <img src="/images/workflow-ui/audit.png" alt="audit workflow UI fanning out across feature groups and merging a report" />
+</Frame>
+
+## Inputs
+
+| Input | Type | Default |
+| --- | --- | --- |
+| `features` | object | `{}` |
+| `focus` | string | `"code review"` |
+| `additionalContext` | string or null | `null` |
+| `maxConcurrency` | number | `5` |
+| `agentTier` | `"cheapFast"` \| `"smart"` \| `"smartTool"` \| `"planning"` \| `"review"` \| `"implement"` or null | `null` (falls back to `smart`) |
+
+## Output
+
+The workflow returns two structured outputs in the run result (nothing is written to disk):
+
+| Key | Shape | Description |
+| --- | --- | --- |
+| `auditFeature` | `{ groupName, result, featuresCovered[], score? }` | One entry per group processed in parallel |
+| `audit` | `{ totalGroups, summary, mergedResult, markdownBody }` | Merged report across all groups |
+
+## Use it when
+
+- You have a feature map (from [`feature-enum`](/workflows/feature-enum) or your own) and want a gap review per group.
+- You want findings on missing tests, docs, observability, error handling, or maintainability work.
+
+## Use something else when
+
+- You do not have a feature inventory yet: run [`feature-enum`](/workflows/feature-enum) first.
+- You want to review a diff rather than feature groups: use [`review`](/workflows/review).
+
+## Resume & retry
+
+`audit` processes groups in parallel and returns structured results in the run output; nothing is written to disk. Runs are durable and resume with `up --resume`.

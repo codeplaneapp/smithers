@@ -1,0 +1,30 @@
+---
+title: Reasoning
+description: Render a streaming-aware disclosure for model reasoning content.
+---
+
+`Reasoning` contains thinking or extended-reasoning content without coupling the
+UI package to a Markdown implementation. Pass `Markdown` or another renderer as
+children when the content is Markdown.
+
+```tsx
+import { Markdown, Reasoning } from "smithers-orchestrator/ui";
+
+<Reasoning streaming={isStreaming} duration={72}>
+  <Markdown content={reasoningText} />
+</Reasoning>
+```
+
+## Props
+
+| Prop | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `streaming` | `boolean` | `false` | Shimmers the title and controls automatic open/close while the user has not toggled the disclosure. |
+| `open` | `boolean` | uncontrolled | Controls the disclosure. |
+| `defaultOpen` | `boolean` | `streaming` | Sets the initial uncontrolled state. |
+| `onOpenChange` | `(open: boolean) => void` | none | Receives requested user toggles and automatic streaming transitions. |
+| `duration` | `number` | none | Renders elapsed seconds as `Thought for Ns` or `Mm SSs` after streaming. |
+| `title` | `string` | `Reasoning` | Header text. |
+
+In uncontrolled mode, a streaming transition opens or closes the block until
+the first user toggle. Controlled mode never changes itself.

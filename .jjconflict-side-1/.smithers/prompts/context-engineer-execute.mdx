@@ -1,0 +1,59 @@
+# Execute the contracted work
+
+You are the **executor** of the Context Engineer. The context contract is
+approved, the route is chosen, and the backpressure gates are defined. Carry out
+the work — or dispatch it along the chosen route — honoring every gate. You have
+shell + file tools.
+
+## The script
+
+{props.prompt}
+
+## Context contract
+
+{`\`\`\`json
+${JSON.stringify(props.contract, null, 2)}
+\`\`\``}
+
+## Chosen route
+
+{`\`\`\`json
+${JSON.stringify(props.route, null, 2)}
+\`\`\``}
+
+## Backpressure gates you must satisfy
+
+{`\`\`\`json
+${JSON.stringify(props.backpressure, null, 2)}
+\`\`\``}
+
+## Previous iteration (may be null)
+
+This task runs in a loop until `done` is true. If a prior iteration ran, here is
+what it reported — continue from there rather than restarting.
+
+{props.previous ? "```json\n" + JSON.stringify(props.previous, null, 2) + "\n```" : "(this is the first execution iteration)"}
+
+## Do the work along the route
+
+- If the route is `single_task` or `skills`: do the work directly with your
+  tools, loading the route's `selectedSkills` where helpful.
+- If the route is `workflow`: dispatch the chosen `selectedWorkflow` (e.g.
+  `bunx smithers-orchestrator workflow run <id> --input '{...}'`) and report what
+  you dispatched and how to watch it.
+- If the route is `manual`: do not force the work — summarize exactly what a human
+  must do and mark the relevant gate's evidence as pending.
+
+For every `blocking` gate, produce the `evidenceRequired` and run the
+`verificationMethod` (run the tests, capture the trace, etc.). Do not claim
+`done: true` until every blocking gate is satisfied with real evidence.
+
+## Output
+
+- `summary` — what you did or dispatched this iteration.
+- `done` — true only when the contracted work is fully carried out and every
+  blocking gate is satisfied; false to run another iteration.
+- `artifacts` — files written, outputs produced, or workflows dispatched.
+
+REQUIRED OUTPUT:
+{props.schema}

@@ -1,0 +1,8 @@
+---
+title: Third-Party React Hooks
+description: Folded into Recipes.
+---
+
+This material is now in [Recipes](/recipes#custom-hooks-over-ctx).
+
+`useState`, `useEffect`, `useRef`, `useMemo`, `useContext`, TanStack Query, and Zustand all work inside workflow components, but their state is process-local and resets on restart/resume. Anything the workflow must remember belongs in an output table, not in React state.

@@ -1,0 +1,18 @@
+# Audit Sweep
+
+OUTPUT_KIND: sweep
+SWEEP: {props.sweep.id}
+KIND: {props.sweep.kind}
+PATTERN: {props.sweep.pattern}
+SCOPE: {props.sweep.scope}
+REPO: {props.repo}
+
+Run this specialized audit sweep inside `REPO`.
+
+Survey deterministic candidates, classify risk, patch confirmed issues, verify the patch, and summarize fixed/skipped counts.
+
+Previous sweep result:
+{JSON.stringify(props.previous ?? null, null, 2)}
+
+Required output schema:
+{props.schema}

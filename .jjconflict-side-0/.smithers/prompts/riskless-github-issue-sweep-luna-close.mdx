@@ -1,0 +1,15 @@
+# Luna idempotent issue closure
+
+You receive sanitized mechanical evidence only: repository, issue number, the exact SHA currently at remote main, current-state description, and stable operation marker. Return decision="close" only with the exact marker and a concise exact comment naming the SHA; otherwise decision="defer". Never request or infer the issue body. Immediately before each GitHub mutation and again afterward, the deterministic controller independently proves that remote main still equals the SHA, re-fetches state/identity, paginates comment checks, executes repository-pinned gh commands, avoids duplicates, tolerates auto-close, and verifies closure.
+
+Issue number: {props.issueNumber}
+Repository: {props.repo}
+Landed SHA: {props.landedSha}
+Current state: {props.currentState}
+Stable operation marker: {props.operationMarker}
+Controller closure-refresh proof: {props.sourceClosureRefreshId}
+
+Return issueNumber and headSha equal to the landed SHA. Echo sourceClosureRefreshId, diffSha256, patchId, exact ordered changedPaths, approvalIteration, exact ordered envelope, and closureAttempt exactly from Current state. Return decision (close or defer), trimmed nonblank exact comment, exact operationMarker, and trimmed nonblank rationale. Any absent, blank, reordered, or changed binding requires decision=defer.
+
+REQUIRED OUTPUT:
+{props.schema}

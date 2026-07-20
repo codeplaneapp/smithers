@@ -1,0 +1,22 @@
+{
+  "name": "@smithers-orchestrator/telegram-summary",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Telegram daily summary bot and dashboard for smithers.sh",
+  "type": "module",
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/gateway-ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.0",
+    "alchemy": "^0.93.12",
+    "bun-types": "^1.3.14",
+    "typescript": "~6.0.3"
+  }
+}

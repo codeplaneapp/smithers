@@ -1,0 +1,35 @@
+---
+title: <MergeQueue>
+description: Queue child tasks so at most maxConcurrency run; defaults to single-lane.
+---
+
+```ts
+// Props
+import { MergeQueue } from "smithers-orchestrator";
+
+type MergeQueueProps = {
+  id?: string;
+  maxConcurrency?: number;  // default: 1
+  priority?: number; // inherited task priority; default 1000
+  failurePolicy?: "halt" | "quarantine";
+  skipIf?: boolean;
+  children?: ReactNode;
+};
+```
+
+```tsx
+<MergeQueue maxConcurrency={2}>
+  {items.map((it, i) => (
+    <Task key={i} id={`t${i}`} output={outputs.outputC}>{{ value: i }}</Task>
+  ))}
+</MergeQueue>
+```
+
+## Notes
+
+- Innermost group determines the effective cap for its descendants.
+- Tasks outside the queue are unaffected by its limit.
+- The default priority is `1000`, so ready landing work claims a free run slot
+  before ordinary tasks at priority `0`. An explicit child priority wins.
+- `failurePolicy="quarantine"` lets unrelated queue branches continue after a
+  child fails; the default `halt` behavior fails the run.

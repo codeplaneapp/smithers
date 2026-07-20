@@ -1,0 +1,9 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Draft read-only SQL for the supplied dialect. Include a LIMIT and explain how the query answers the plan.\n\nINPUT:\n"}
+      {JSON.stringify(props ?? {}, null, 2)}
+      {"\n\nReturn only structured data matching the task output schema."}
+    </>
+  );
+}

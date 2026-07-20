@@ -1,0 +1,8 @@
+## Verification norm
+
+It is expensive for the orchestrator to verify but cheap to make agents write
+verification, so demand MORE verification than a human would reasonably write — e2e tests
+wherever possible, plus unit/integration tests, corner cases, error cases, boundary
+conditions (largest inputs), fuzzing where applicable, and benchmarks for anything
+performance-critical. Tests must be able to FAIL: red-before-green evidence is required
+for fixes, and "the agent said it was done" is never evidence.

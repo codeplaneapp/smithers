@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Real-Stack E2E: plan</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --panel: #131822;
+    --panel2: #1a2130;
+    --ink: #e8edf6;
+    --dim: #93a0b4;
+    --line: #2a3447;
+    --app: #5aa7ff;      /* app / vite */
+    --plue: #4cd6a4;     /* plue cloud */
+    --gw: #b78cff;       /* gateway */
+    --llm: #ffb86b;      /* real LLM */
+    --warn: #ff7b8a;     /* human / risk */
+    --ok: #4cd6a4;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
+  .deck { height: 100%; position: relative; overflow: hidden; }
+  .slide { position: absolute; inset: 0; padding: 56px 72px 88px; display: none; overflow: auto; }
+  .slide.active { display: block; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
+  h1 { font-size: 44px; line-height: 1.15; margin: 0 0 10px; letter-spacing: -0.5px; }
+  h2 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.3px; }
+  h3 { font-size: 17px; margin: 18px 0 8px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+  p.lede { font-size: 19px; color: var(--dim); max-width: 880px; margin: 6px 0 18px; }
+  .kicker { font: 600 12px/1 var(--mono); color: var(--gw); text-transform: uppercase; letter-spacing: .14em; margin-bottom: 14px; }
+  .grid { display: grid; gap: 14px; }
+  .cols2 { grid-template-columns: 1fr 1fr; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card h4 { margin: 0 0 6px; font-size: 15px; }
+  .card p { margin: 0; color: var(--dim); font-size: 14px; }
+  code, .mono { font-family: var(--mono); font-size: 13px; }
+  pre { background: #0a0d12; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.6; overflow-x: auto; color: #cfe3ff; }
+  pre b { color: #fff; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th { text-align: left; color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.mono { color: #cfe3ff; white-space: nowrap; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px; padding: 6px 14px; font-size: 13px; margin: 4px 8px 4px 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .ok .dot { background: var(--ok); } .bad .dot { background: var(--warn); }
+  .pill { font: 600 11px/1 var(--mono); padding: 3px 8px; border-radius: 6px; }
+  .pill.plue { background: rgba(76,214,164,.15); color: var(--plue); }
+  .pill.gw   { background: rgba(183,140,255,.15); color: var(--gw); }
+  .pill.llm  { background: rgba(255,184,107,.15); color: var(--llm); }
+  .pill.app  { background: rgba(90,167,255,.15); color: var(--app); }
+  .pill.warn { background: rgba(255,123,138,.15); color: var(--warn); }
+  svg { display: block; max-width: 100%; height: auto; }
+  svg text { font-family: -apple-system, Inter, sans-serif; fill: var(--ink); }
+  svg .mono-t { font-family: var(--mono); }
+  svg .dim-t { fill: var(--dim); }
+  .nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px; background: linear-gradient(transparent, rgba(12,15,20,.92) 40%); z-index: 5; }
+  .nav button { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 16px; font-size: 14px; cursor: pointer; }
+  .nav button:hover { background: var(--panel2); }
+  .dots { display: flex; gap: 7px; }
+  .dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); cursor: pointer; }
+  .dots i.on { background: var(--app); }
+  .counter { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .footnote { color: var(--dim); font-size: 13px; margin-top: 14px; }
+  ul.tight { margin: 8px 0; padding-left: 20px; color: var(--dim); font-size: 14.5px; }
+  ul.tight li { margin: 5px 0; }
+  ul.tight b { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+<!-- ──────────────────────────── 1 · TITLE ──────────────────────────── -->
+<section class="slide active">
+  <div class="kicker">real-stack-e2e · plan · 2026-06-11</div>
+  <h1>The whole UI, end to end,<br/>with zero mocks. Today.</h1>
+  <p class="lede">One durable Smithers workflow drives <b>apps/smithers</b> to a new Playwright suite where every
+  backend is real: <span class="pill plue">Plue in Docker</span> <span class="pill gw">gateway in the cwd</span>
+  <span class="pill llm">real Gemini Flash now, Cerebras when ready, real Claude</span>. After the six base tickets it
+  enters a <b>ralph quality loop</b>: Claude Fable plans and reviews, Codex implements, and every iteration must pass
+  the full real gate. It blocks on you only when it genuinely needs a human.</p>
+  <h3>Preflight as of this morning</h3>
+  <div>
+    <span class="chip ok"><span class="dot"></span>Docker daemon up</span>
+    <span class="chip ok"><span class="dot"></span>claude CLI 2.1.173 on PATH (subscription auth)</span>
+    <span class="chip ok"><span class="dot"></span>codex CLI 0.139.0 + ChatGPT auth present</span>
+    <span class="chip ok"><span class="dot"></span>../plue checkout; seeds a real admin token (sign-in needs no setup)</span>
+    <span class="chip ok"><span class="dot"></span>GEMINI_API_KEY set &rarr; chat runs real Gemini Flash until Cerebras lands</span>
+  </div>
+  <p class="footnote">Workflow file: <code>.smithers/workflows/real-stack-e2e.tsx</code> (graph-validated). Navigate with &larr; &rarr;.</p>
+</section>
+
+<!-- ──────────────────────────── 2 · DEFINITION OF DONE ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">definition of done</div>
+  <h2>One command, green from a cold start</h2>
+  <pre>pnpm -C apps/smithers typecheck
+&amp;&amp; pnpm -C apps/smithers test:unit
+&amp;&amp; pnpm -C apps/smithers exec playwright test <b>--config playwright.real.config.ts</b></pre>
+  <div class="grid cols2" style="margin-top:16px">
+    <div class="card">
+      <h4>Existing fixture suite <span class="pill app">stays byte-identical</span></h4>
+      <p><code>playwright.config.ts</code> + <code>tests/e2e/**</code> (39 specs, ports 5275-5292, fake Plue, fake upstream).
+      The audit step fails any ticket that touches it. The real suite is additive.</p>
+    </div>
+    <div class="card">
+      <h4>New real suite <span class="pill plue">no mocks anywhere</span></h4>
+      <p><code>playwright.real.config.ts</code> + <code>tests/e2e-real/**</code>. No <code>page.route()</code>, no fixture
+      imports, no fallback data. Enforced by a deterministic grep audit on every iteration.</p>
+    </div>
+  </div>
+  <h3>The six specs that define "working e2e"</h3>
+  <table>
+    <tr><th>spec</th><th>proves</th></tr>
+    <tr><td class="mono">stack.spec.ts</td><td>Vite proxies reach the real gateway (<code>/health</code> JSON) and real Plue (<code>/api/user</code> 401 JSON); the app shell renders.</td></tr>
+    <tr><td class="mono">signin.spec.ts</td><td>Token sign-in lands as the real seeded Plue user "Alice Dev" and survives reload.</td></tr>
+    <tr><td class="mono">chat.spec.ts</td><td>Chat streams a real Cerebras completion through the real Worker code.</td></tr>
+    <tr><td class="mono">gatewayRun.spec.ts</td><td>A gateway workflow run makes a real Claude call and finishes, watched live in the UI.</td></tr>
+    <tr><td class="mono">approval.spec.ts</td><td>A run pauses on a human approval; approving from the UI resumes it to finished.</td></tr>
+    <tr><td class="mono">full suite (T6)</td><td>All of the above in one run, plus typecheck + unit tests, twice in a row.</td></tr>
+    <tr><td class="mono">ralph loop</td><td>Then continuous improvement: each iteration adds missing e2e specs, missing unit tests, or quality fixes, and must keep the full gate green.</td></tr>
+  </table>
+</section>
+
+<!-- ──────────────────────────── 3 · ARCHITECTURE ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">target architecture</div>
+  <h2>Everything behind one origin, every leg real</h2>
+  <svg viewBox="0 0 1060 430" style="margin-top:8px">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#93a0b4"/>
+      </marker>
+    </defs>
+    <!-- browser -->
+    <rect x="10" y="170" width="150" height="84" rx="10" fill="#131822" stroke="#2a3447"/>
+    <text x="85" y="205" text-anchor="middle" font-size="15" font-weight="600">Browser</text>
+    <text x="85" y="226" text-anchor="middle" font-size="12" class="dim-t">Playwright Chromium</text>
+    <!-- vite -->
+    <rect x="240" y="156" width="180" height="112" rx="10" fill="#131822" stroke="#5aa7ff"/>
+    <text x="330" y="186" text-anchor="middle" font-size="15" font-weight="600" fill="#5aa7ff">vite (real app)</text>
+    <text x="330" y="207" text-anchor="middle" font-size="12" class="mono-t dim-t">127.0.0.1:5375</text>
+    <text x="330" y="228" text-anchor="middle" font-size="12" class="dim-t">same-origin /api/* proxy</text>
+    <text x="330" y="248" text-anchor="middle" font-size="12" class="dim-t">(prod: the CF Worker)</text>
+    <line x1="160" y1="212" x2="236" y2="212" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr)"/>
+    <!-- plue -->
+    <rect x="560" y="20" width="220" height="96" rx="10" fill="#131822" stroke="#4cd6a4"/>
+    <text x="670" y="48" text-anchor="middle" font-size="15" font-weight="600" fill="#4cd6a4">Plue api (Docker)</text>
+    <text x="670" y="69" text-anchor="middle" font-size="12" class="mono-t dim-t">127.0.0.1:4000</text>
+    <text x="670" y="90" text-anchor="middle" font-size="12" class="dim-t">postgres · seed · repo-host</text>
+    <line x1="420" y1="180" x2="555" y2="68" stroke="#4cd6a4" stroke-width="1.6" marker-end="url(#arr)"/>
+    <text x="455" y="100" font-size="12" class="mono-t" fill="#4cd6a4">/api/auth /api/user</text>
+    <text x="455" y="118" font-size="12" class="mono-t" fill="#4cd6a4">/api/repos /api/orgs …</text>
+    <!-- gateway -->
+    <rect x="560" y="168" width="220" height="96" rx="10" fill="#131822" stroke="#b78cff"/>
+    <text x="670" y="196" text-anchor="middle" font-size="15" font-weight="600" fill="#b78cff">Smithers gateway (cwd)</text>
+    <text x="670" y="217" text-anchor="middle" font-size="12" class="mono-t dim-t">bun .smithers/gateway.ts :7342</text>
+    <text x="670" y="238" text-anchor="middle" font-size="12" class="dim-t">auto-mounts workflows/*.tsx</text>
+    <line x1="420" y1="212" x2="555" y2="212" stroke="#b78cff" stroke-width="1.6" marker-end="url(#arr)"/>
+    <text x="436" y="202" font-size="12" class="mono-t" fill="#b78cff">/v1/rpc(ws) /health /workflows</text>
+    <!-- worker -->
+    <rect x="560" y="316" width="220" height="96" rx="10" fill="#131822" stroke="#ffb86b"/>
+    <text x="670" y="344" text-anchor="middle" font-size="15" font-weight="600" fill="#ffb86b">Real Worker code</text>
+    <text x="670" y="365" text-anchor="middle" font-size="12" class="mono-t dim-t">127.0.0.1:5376</text>
+    <text x="670" y="386" text-anchor="middle" font-size="12" class="dim-t">src/worker.ts, no fixtures</text>
+    <line x1="420" y1="248" x2="555" y2="356" stroke="#ffb86b" stroke-width="1.6" marker-end="url(#arr)"/>
+    <text x="460" y="322" font-size="12" class="mono-t" fill="#ffb86b">/api/chat</text>
+    <!-- LLMs -->
+    <rect x="880" y="168" width="170" height="96" rx="10" fill="#131822" stroke="#ffb86b" stroke-dasharray="5 4"/>
+    <text x="965" y="200" text-anchor="middle" font-size="14" font-weight="600" fill="#ffb86b">Anthropic</text>
+    <text x="965" y="222" text-anchor="middle" font-size="12" class="dim-t">host claude CLI</text>
+    <text x="965" y="241" text-anchor="middle" font-size="12" class="dim-t">(subscription)</text>
+    <line x1="780" y1="212" x2="875" y2="212" stroke="#ffb86b" stroke-width="1.6" marker-end="url(#arr)"/>
+    <rect x="880" y="316" width="170" height="96" rx="10" fill="#131822" stroke="#ffb86b" stroke-dasharray="5 4"/>
+    <text x="965" y="344" text-anchor="middle" font-size="13" font-weight="600" fill="#ffb86b">Gemini Flash now</text>
+    <text x="965" y="363" text-anchor="middle" font-size="12" class="dim-t">(OpenAI-compatible API)</text>
+    <text x="965" y="382" text-anchor="middle" font-size="12" class="dim-t">Cerebras when its key lands</text>
+    <text x="965" y="400" text-anchor="middle" font-size="11" class="mono-t dim-t">GEMINI_API_KEY · CEREBRAS_API_KEY</text>
+    <line x1="780" y1="364" x2="875" y2="364" stroke="#ffb86b" stroke-width="1.6" marker-end="url(#arr)"/>
+  </svg>
+  <h3>Port map</h3>
+  <table>
+    <tr><th>port</th><th>what</th><th>rule</th></tr>
+    <tr><td class="mono">4000</td><td>Plue api (compose-fixed)</td><td>health gate: <code>GET /api/health</code></td></tr>
+    <tr><td class="mono">7342</td><td>e2e gateway, local bun process</td><td>booted/reused by the Playwright webServer</td></tr>
+    <tr><td class="mono">7331</td><td>dev gateway</td><td><b>never clobbered, never killed</b></td></tr>
+    <tr><td class="mono">5375 / 5376</td><td>real app origin / real Worker leg</td><td>new, collision-free</td></tr>
+    <tr><td class="mono">5275-5292</td><td>fixture suite</td><td>reserved, untouched</td></tr>
+  </table>
+</section>
+
+<!-- ──────────────────────────── 4 · PLUE ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">leg 1 · smithers cloud</div>
+  <h2>Plue: the real cloud, locally, in Docker</h2>
+  <svg viewBox="0 0 1040 170" style="margin:14px 0 4px">
+    <defs>
+      <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#4cd6a4"/>
+      </marker>
+    </defs>
+    <g>
+      <rect x="10" y="50" width="150" height="70" rx="10" fill="#131822" stroke="#4cd6a4"/>
+      <text x="85" y="80" text-anchor="middle" font-size="14" font-weight="600">postgres</text>
+      <text x="85" y="101" text-anchor="middle" font-size="11" class="mono-t dim-t">pg_isready ✓</text>
+      <rect x="225" y="50" width="150" height="70" rx="10" fill="#131822" stroke="#4cd6a4"/>
+      <text x="300" y="80" text-anchor="middle" font-size="14" font-weight="600">migrate</text>
+      <text x="300" y="101" text-anchor="middle" font-size="11" class="dim-t">atlas, ~3.4k lines</text>
+      <rect x="440" y="50" width="150" height="70" rx="10" fill="#131822" stroke="#4cd6a4"/>
+      <text x="515" y="80" text-anchor="middle" font-size="14" font-weight="600">seed</text>
+      <text x="515" y="101" text-anchor="middle" font-size="11" class="dim-t">db/seed.sql</text>
+      <rect x="655" y="12" width="170" height="62" rx="10" fill="#131822" stroke="#4cd6a4"/>
+      <text x="740" y="38" text-anchor="middle" font-size="14" font-weight="600">api :4000</text>
+      <text x="740" y="58" text-anchor="middle" font-size="11" class="mono-t dim-t">GET /api/health → ok</text>
+      <rect x="655" y="96" width="170" height="62" rx="10" fill="#131822" stroke="#2a3447"/>
+      <text x="740" y="122" text-anchor="middle" font-size="14" font-weight="600">repo-host :8080</text>
+      <text x="740" y="142" text-anchor="middle" font-size="11" class="dim-t">(ssh :2222 not needed)</text>
+      <line x1="160" y1="85" x2="221" y2="85" stroke="#4cd6a4" stroke-width="1.6" marker-end="url(#arr2)"/>
+      <line x1="375" y1="85" x2="436" y2="85" stroke="#4cd6a4" stroke-width="1.6" marker-end="url(#arr2)"/>
+      <line x1="590" y1="70" x2="651" y2="46" stroke="#4cd6a4" stroke-width="1.6" marker-end="url(#arr2)"/>
+      <line x1="590" y1="100" x2="651" y2="124" stroke="#4cd6a4" stroke-width="1.6" marker-end="url(#arr2)"/>
+      <rect x="855" y="50" width="175" height="70" rx="10" fill="rgba(76,214,164,.08)" stroke="#4cd6a4" stroke-dasharray="5 4"/>
+      <text x="942" y="80" text-anchor="middle" font-size="13" font-weight="600" fill="#4cd6a4">cold boot 30-60s</text>
+      <text x="942" y="100" text-anchor="middle" font-size="11" class="dim-t">migrations dominate</text>
+    </g>
+  </svg>
+  <div class="grid cols2">
+    <div class="card">
+      <h4>Sign-in needs zero setup</h4>
+      <p>The seed inserts user <b>alice</b> ("Alice Dev", admin) and the literal access token
+      <code>smithers_deadbeef…beef</code> with its sha-256 hash in <code>access_tokens</code>. The api validates
+      <code>Authorization: Bearer</code> by hash lookup. The sign-in spec pastes that real token into the real token box.</p>
+    </div>
+    <div class="card">
+      <h4>Already e2e-friendly</h4>
+      <p>The compose file ships <code>SMITHERS_ENABLE_E2E_TEST_ROUTES=true</code> (mint routes under
+      <code>/api/_test/</code>) and pins <code>SMITHERS_SERVER_ADDR=:4000</code>. Boot contract is proven daily by
+      <code>scripts/dev-with-plue.sh</code>: <code>compose up -d postgres migrate seed repo-host api</code>, then poll
+      <code>/api/health</code>.</p>
+    </div>
+  </div>
+  <p class="footnote">New helper: <code>scripts/e2e-real/plue-up.sh</code> wraps exactly that contract for the Playwright
+  webServer (boots, health-waits, then sleeps; <code>down</code>/<code>status</code> for humans; idempotent).</p>
+</section>
+
+<!-- ──────────────────────────── 5 · GATEWAY ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">leg 2 · orchestration</div>
+  <h2>The gateway runs in the cwd, as itself</h2>
+  <p class="lede">No container, no image build. The same entrypoint dev uses, on a dedicated port:
+  <code>PORT=7342 bun .smithers/gateway.ts</code>, owned by a Playwright webServer entry and reused when already healthy.</p>
+  <svg viewBox="0 0 1040 250" style="margin:6px 0">
+    <defs>
+      <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#b78cff"/>
+      </marker>
+    </defs>
+    <rect x="10" y="30" width="300" height="190" rx="12" fill="#131822" stroke="#2a3447"/>
+    <text x="160" y="60" text-anchor="middle" font-size="14" font-weight="600">.smithers/ (repo root)</text>
+    <text x="160" y="88" text-anchor="middle" font-size="12" class="mono-t dim-t">gateway.ts</text>
+    <text x="160" y="112" text-anchor="middle" font-size="12" class="mono-t dim-t">workflows/*.tsx  (40+, auto-mounted)</text>
+    <text x="160" y="136" text-anchor="middle" font-size="12" class="mono-t" fill="#b78cff">+ e2e-probe.tsx</text>
+    <text x="160" y="158" text-anchor="middle" font-size="12" class="mono-t" fill="#b78cff">+ e2e-approval-probe.tsx</text>
+    <text x="160" y="190" text-anchor="middle" font-size="12" class="mono-t dim-t">smithers.db (shared SQLite)</text>
+    <rect x="430" y="30" width="250" height="80" rx="10" fill="#131822" stroke="#2a3447" stroke-dasharray="5 4"/>
+    <text x="555" y="62" text-anchor="middle" font-size="14" font-weight="600" class="dim-t">dev gateway :7331</text>
+    <text x="555" y="86" text-anchor="middle" font-size="12" class="dim-t">your session; never touched</text>
+    <rect x="430" y="140" width="250" height="80" rx="10" fill="#131822" stroke="#b78cff"/>
+    <text x="555" y="172" text-anchor="middle" font-size="14" font-weight="600" fill="#b78cff">e2e gateway :7342</text>
+    <text x="555" y="196" text-anchor="middle" font-size="12" class="dim-t">booted by playwright webServer</text>
+    <line x1="310" y1="80" x2="426" y2="70" stroke="#2a3447" stroke-width="1.6"/>
+    <line x1="310" y1="170" x2="426" y2="178" stroke="#b78cff" stroke-width="1.6" marker-end="url(#arr3)"/>
+    <rect x="800" y="140" width="230" height="80" rx="10" fill="#131822" stroke="#ffb86b"/>
+    <text x="915" y="172" text-anchor="middle" font-size="14" font-weight="600" fill="#ffb86b">host claude CLI</text>
+    <text x="915" y="196" text-anchor="middle" font-size="12" class="dim-t">already authenticated here</text>
+    <line x1="680" y1="180" x2="796" y2="180" stroke="#ffb86b" stroke-width="1.6" marker-end="url(#arr3)"/>
+    <text x="738" y="170" font-size="11" class="mono-t dim-t">spawns</text>
+  </svg>
+  <ul class="tight">
+    <li><b>Why this beats the docker draft:</b> the earlier draft containerized the gateway, which forced a
+      <code>CLAUDE_CODE_OAUTH_TOKEN</code> hand-off into the image. In the cwd the gateway spawns the host claude CLI,
+      which is already logged in. One human gate deleted.</li>
+    <li><b>Auto-mount:</b> <code>gateway.ts</code> registers every <code>workflows/*.tsx</code> at boot, so the two tiny
+      probe workflows (one agent call; one approval gate) register by existing. A stale 7342 gateway gets restarted to
+      pick them up; 7331 is never touched.</li>
+    <li><b>Shared smithers.db:</b> the dev and e2e gateways read the same run store. Specs therefore assert on the runId
+      they launched, never on list counts, and the real config runs <code>workers: 1</code>.</li>
+  </ul>
+</section>
+
+<!-- ──────────────────────────── 6 · WORKFLOW ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">the machine that does the work</div>
+  <h2>One durable workflow, six phases</h2>
+  <svg viewBox="0 0 1060 300" style="margin:10px 0">
+    <defs>
+      <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#93a0b4"/>
+      </marker>
+    </defs>
+    <!-- phase 1 -->
+    <rect x="10" y="40" width="225" height="130" rx="12" fill="#131822" stroke="#ff7b8a"/>
+    <text x="122" y="68" text-anchor="middle" font-size="14" font-weight="600" fill="#ff7b8a">1 · Preflight loop</text>
+    <text x="122" y="92" text-anchor="middle" font-size="12" class="dim-t">probe docker · plue · claude</text>
+    <text x="122" y="110" text-anchor="middle" font-size="12" class="dim-t">auth (real call) · cerebras key</text>
+    <text x="122" y="134" text-anchor="middle" font-size="12" fill="#ff7b8a">missing? → HumanTask blocks</text>
+    <text x="122" y="154" text-anchor="middle" font-size="12" class="dim-t">answers → .env.e2e.local, re-probe</text>
+    <!-- phase 2 -->
+    <rect x="285" y="60" width="150" height="90" rx="12" fill="#131822" stroke="#2a3447"/>
+    <text x="360" y="95" text-anchor="middle" font-size="14" font-weight="600">2 · Write</text>
+    <text x="360" y="117" text-anchor="middle" font-size="12" class="dim-t">6 tickets to</text>
+    <text x="360" y="135" text-anchor="middle" font-size="12" class="mono-t dim-t">.smithers/tickets/</text>
+    <!-- phase 3 -->
+    <rect x="485" y="20" width="330" height="170" rx="12" fill="#131822" stroke="#b78cff"/>
+    <text x="650" y="48" text-anchor="middle" font-size="14" font-weight="600" fill="#b78cff">3 · Ticket pipelines (sequential)</text>
+    <g class="mono-t" font-size="12">
+      <text x="510" y="78" fill="#cfe3ff">T1 stack-boot</text>
+      <text x="510" y="100" fill="#cfe3ff">T2 signin</text>
+      <text x="510" y="122" fill="#cfe3ff">T3 chat-llm</text>
+      <text x="660" y="78" fill="#cfe3ff">T4 gateway-run</text>
+      <text x="660" y="100" fill="#cfe3ff">T5 approval</text>
+      <text x="660" y="122" fill="#cfe3ff">T6 full gate</text>
+    </g>
+    <text x="650" y="160" text-anchor="middle" font-size="12" class="dim-t">each = implement → verify → audit → review loop</text>
+    <!-- phase 4/5 -->
+    <rect x="865" y="20" width="180" height="75" rx="12" fill="#131822" stroke="#ffb86b"/>
+    <text x="955" y="44" text-anchor="middle" font-size="14" font-weight="600" fill="#ffb86b">4-5 · Ralph loop</text>
+    <text x="955" y="64" text-anchor="middle" font-size="11" class="dim-t">Fable plans · Codex builds</text>
+    <text x="955" y="81" text-anchor="middle" font-size="11" class="dim-t">full gate · push per iteration</text>
+    <rect x="865" y="115" width="180" height="75" rx="12" fill="#131822" stroke="#2a3447"/>
+    <text x="955" y="145" text-anchor="middle" font-size="14" font-weight="600">6 · Push + report</text>
+    <text x="955" y="168" text-anchor="middle" font-size="12" class="mono-t dim-t">artifacts/real-stack-e2e/</text>
+    <line x1="235" y1="105" x2="281" y2="105" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <line x1="435" y1="105" x2="481" y2="105" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <line x1="815" y1="58" x2="861" y2="58" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <line x1="955" y1="95" x2="955" y2="111" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <!-- durability strip -->
+    <rect x="10" y="225" width="1035" height="56" rx="10" fill="rgba(90,167,255,.07)" stroke="#2a3447"/>
+    <text x="30" y="248" font-size="13" font-weight="600" fill="#5aa7ff">Durable by construction</text>
+    <text x="30" y="268" font-size="12.5" class="dim-t">Every step persists to SQLite. Ctrl+C, crash, or laptop sleep: resume with --resume and completed tickets are skipped. Sequential tickets because agents share one git index and one port space.</text>
+  </svg>
+</section>
+
+<!-- ──────────────────────────── 7 · BACKPRESSURE LOOP ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">why the agent cannot cheat</div>
+  <h2>Per-ticket loop: four independent gates</h2>
+  <svg viewBox="0 0 1060 300" style="margin:10px 0">
+    <defs>
+      <marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#93a0b4"/>
+      </marker>
+    </defs>
+    <rect x="10" y="60" width="230" height="110" rx="12" fill="#131822" stroke="#5aa7ff"/>
+    <text x="125" y="90" text-anchor="middle" font-size="14" font-weight="600" fill="#5aa7ff">implement</text>
+    <text x="125" y="112" text-anchor="middle" font-size="12" class="dim-t">Claude Opus (fallback Sonnet)</text>
+    <text x="125" y="132" text-anchor="middle" font-size="12" class="dim-t">gets full failure feedback</text>
+    <text x="125" y="152" text-anchor="middle" font-size="12" class="dim-t">from the previous round</text>
+    <rect x="290" y="60" width="230" height="110" rx="12" fill="#131822" stroke="#4cd6a4"/>
+    <text x="405" y="90" text-anchor="middle" font-size="14" font-weight="600" fill="#4cd6a4">verify · compute</text>
+    <text x="405" y="112" text-anchor="middle" font-size="12" class="dim-t">the workflow itself runs the</text>
+    <text x="405" y="132" text-anchor="middle" font-size="12" class="dim-t">ticket's playwright command</text>
+    <text x="405" y="152" text-anchor="middle" font-size="12" fill="#4cd6a4">exit code is unfakeable</text>
+    <rect x="570" y="60" width="230" height="110" rx="12" fill="#131822" stroke="#ffb86b"/>
+    <text x="685" y="90" text-anchor="middle" font-size="14" font-weight="600" fill="#ffb86b">audit · compute</text>
+    <text x="685" y="112" text-anchor="middle" font-size="12" class="dim-t">rg for page.route / fixtures /</text>
+    <text x="685" y="132" text-anchor="middle" font-size="12" class="dim-t">fakePlueHost · protected files</text>
+    <text x="685" y="152" text-anchor="middle" font-size="12" class="dim-t">untouched · no secret prefixes</text>
+    <rect x="850" y="60" width="200" height="110" rx="12" fill="#131822" stroke="#b78cff"/>
+    <text x="950" y="90" text-anchor="middle" font-size="14" font-weight="600" fill="#b78cff">review · agent</text>
+    <text x="950" y="112" text-anchor="middle" font-size="12" class="dim-t">independent Claude reads</text>
+    <text x="950" y="132" text-anchor="middle" font-size="12" class="dim-t">the diff: vacuous asserts,</text>
+    <text x="950" y="152" text-anchor="middle" font-size="12" class="dim-t">sneaked mocks, bad commits</text>
+    <line x1="240" y1="115" x2="286" y2="115" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr5)"/>
+    <line x1="520" y1="115" x2="566" y2="115" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr5)"/>
+    <line x1="800" y1="115" x2="846" y2="115" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr5)"/>
+    <!-- loop back -->
+    <path d="M 950 170 L 950 230 L 125 230 L 125 174" fill="none" stroke="#ff7b8a" stroke-width="1.6" marker-end="url(#arr5)" stroke-dasharray="6 5"/>
+    <text x="537" y="222" text-anchor="middle" font-size="12.5" fill="#ff7b8a">any gate fails → loop with the verbatim failure (max 5 iterations, then the run FAILS loudly; no pretend-green)</text>
+    <text x="537" y="270" text-anchor="middle" font-size="12.5" class="dim-t">all four green → next ticket. LLM assertions are behavioral: "a non-empty assistant message streamed", never exact text.</text>
+  </svg>
+</section>
+
+<!-- ──────────────────────────── 8 · TICKETS ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">the six tickets</div>
+  <h2>Each ticket is a spec that passes against the real stack</h2>
+  <table style="margin-top:10px">
+    <tr><th style="width:200px">ticket</th><th>builds</th><th style="width:360px">verify (must exit 0)</th></tr>
+    <tr>
+      <td class="mono">t1-real-stack-boot</td>
+      <td><code>plue-up.sh</code>, the cwd-gateway webServer leg, <code>playwright.real.config.ts</code>, <code>stack.spec.ts</code></td>
+      <td class="mono" style="white-space:normal">playwright --config playwright.real.config.ts tests/e2e-real/stack.spec.ts</td>
+    </tr>
+    <tr>
+      <td class="mono">t2-real-signin</td>
+      <td>token sign-in with plue's seeded alice token; asserts "Alice Dev" from real postgres; reload-safe; live-plue assumption test</td>
+      <td class="mono" style="white-space:normal">… tests/e2e-real/signin.spec.ts</td>
+    </tr>
+    <tr>
+      <td class="mono">t3-real-chat-llm</td>
+      <td><code>worker.ts</code> leg (refuses boot without CEREBRAS_API_KEY) + chat spec streaming a real completion</td>
+      <td class="mono" style="white-space:normal">… tests/e2e-real/chat.spec.ts</td>
+    </tr>
+    <tr>
+      <td class="mono">t4-real-gateway-run</td>
+      <td><code>e2e-probe.tsx</code> workflow (one real Claude task), host credential probe script, launch-and-watch spec</td>
+      <td class="mono" style="white-space:normal">probe-agent-cred.sh && … tests/e2e-real/gatewayRun.spec.ts</td>
+    </tr>
+    <tr>
+      <td class="mono">t5-real-approval</td>
+      <td><code>e2e-approval-probe.tsx</code> + spec: pause on approval, approve from the UI, run resumes to finished</td>
+      <td class="mono" style="white-space:normal">… tests/e2e-real/approval.spec.ts</td>
+    </tr>
+    <tr>
+      <td class="mono">t6-real-suite-green</td>
+      <td>stabilization: whole suite in one run, docs, everything committed, idempotent twice in a row</td>
+      <td class="mono" style="white-space:normal">typecheck && test:unit && full real suite</td>
+    </tr>
+  </table>
+  <p class="footnote">Tickets are also written to <code>.smithers/tickets/real-stack-e2e/*.md</code> at run start, so you can read exactly what each agent was told.</p>
+</section>
+
+<!-- ──────────────────────────── 8b · RALPH LOOP ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">after the basics are green</div>
+  <h2>Ralph quality loop: keep raising the bar</h2>
+  <p class="lede">Once the six base tickets pass and push, the workflow stops following a fixed script and starts
+  hunting: each iteration, <b>Claude Fable plans</b> a batch of 1-3 high-value items, <b>Codex implements</b> it,
+  the <b>full gate</b> (typecheck + unit + entire real e2e suite) must stay green, <b>Fable reviews</b> the diff,
+  and the iteration pushes. Up to 12 iterations, or until the planner declares the remaining work low-value.</p>
+  <svg viewBox="0 0 1060 250" style="margin:8px 0">
+    <defs>
+      <marker id="arr6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#93a0b4"/>
+      </marker>
+    </defs>
+    <rect x="10" y="40" width="190" height="100" rx="12" fill="#131822" stroke="#b78cff"/>
+    <text x="105" y="70" text-anchor="middle" font-size="14" font-weight="600" fill="#b78cff">plan · Fable</text>
+    <text x="105" y="92" text-anchor="middle" font-size="11.5" class="dim-t">missing e2e specs · missing</text>
+    <text x="105" y="109" text-anchor="middle" font-size="11.5" class="dim-t">unit tests · quality fixes</text>
+    <text x="105" y="126" text-anchor="middle" font-size="11.5" class="dim-t">1-3 items, measurable checks</text>
+    <rect x="240" y="40" width="190" height="100" rx="12" fill="#131822" stroke="#5aa7ff"/>
+    <text x="335" y="70" text-anchor="middle" font-size="14" font-weight="600" fill="#5aa7ff">implement · Codex</text>
+    <text x="335" y="92" text-anchor="middle" font-size="11.5" class="dim-t">gpt-5.5, ChatGPT auth</text>
+    <text x="335" y="109" text-anchor="middle" font-size="11.5" class="dim-t">Claude fallback if codex</text>
+    <text x="335" y="126" text-anchor="middle" font-size="11.5" class="dim-t">is down (probed in preflight)</text>
+    <rect x="470" y="40" width="190" height="100" rx="12" fill="#131822" stroke="#4cd6a4"/>
+    <text x="565" y="70" text-anchor="middle" font-size="14" font-weight="600" fill="#4cd6a4">full gate · compute</text>
+    <text x="565" y="92" text-anchor="middle" font-size="11.5" class="dim-t">typecheck + unit tests +</text>
+    <text x="565" y="109" text-anchor="middle" font-size="11.5" class="dim-t">entire real e2e suite</text>
+    <text x="565" y="126" text-anchor="middle" font-size="11.5" class="dim-t">+ no-mock audit</text>
+    <rect x="700" y="40" width="170" height="100" rx="12" fill="#131822" stroke="#b78cff"/>
+    <text x="785" y="70" text-anchor="middle" font-size="14" font-weight="600" fill="#b78cff">review · Fable</text>
+    <text x="785" y="92" text-anchor="middle" font-size="11.5" class="dim-t">would the new tests fail</text>
+    <text x="785" y="109" text-anchor="middle" font-size="11.5" class="dim-t">if the feature broke?</text>
+    <rect x="910" y="40" width="140" height="100" rx="12" fill="#131822" stroke="#4cd6a4"/>
+    <text x="980" y="80" text-anchor="middle" font-size="14" font-weight="600" fill="#4cd6a4">push</text>
+    <text x="980" y="102" text-anchor="middle" font-size="11.5" class="dim-t">per green iteration</text>
+    <line x1="200" y1="90" x2="236" y2="90" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr6)"/>
+    <line x1="430" y1="90" x2="466" y2="90" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr6)"/>
+    <line x1="660" y1="90" x2="696" y2="90" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr6)"/>
+    <line x1="870" y1="90" x2="906" y2="90" stroke="#93a0b4" stroke-width="1.6" marker-end="url(#arr6)"/>
+    <path d="M 980 140 L 980 200 L 105 200 L 105 144" fill="none" stroke="#ffb86b" stroke-width="1.6" marker-end="url(#arr6)" stroke-dasharray="6 5"/>
+    <text x="540" y="192" text-anchor="middle" font-size="12.5" fill="#ffb86b">next iteration's planner sees everything: a red gate or a rejected review becomes item #1 of the next batch</text>
+    <text x="540" y="232" text-anchor="middle" font-size="12.5" class="dim-t">exit: planner sets done=true (low-value remainder) or 12 iterations; the run then finalizes instead of failing</text>
+  </svg>
+</section>
+
+<!-- ──────────────────────────── 9 · HUMAN GATES ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">where you come in</div>
+  <h2>Human gates: rare, explicit, blocking</h2>
+  <div class="grid cols2" style="margin-top:12px">
+    <div class="card">
+      <h4><span class="pill llm">already satisfied</span> chat upstream key</h4>
+      <p>GEMINI_API_KEY is set, so <code>/api/chat</code> runs real Gemini Flash through Gemini's OpenAI-compatible
+      endpoint, and preflight proves it with one real completion. When you get Cerebras set up, drop
+      <code>CEREBRAS_API_KEY</code> into <code>apps/smithers/.env.e2e.local</code> (chmod 600, gitignored); it takes
+      precedence automatically, no code change.</p>
+    </div>
+    <div class="card">
+      <h4><span class="pill gw">only if a probe fails</span> claude + codex auth</h4>
+      <p>Preflight makes one real <code>claude -p</code> call on <b>claude-fable-5</b> and one real
+      <code>codex exec</code> call on <b>gpt-5.5</b>. Both CLIs are installed and authenticated, so these should pass.
+      If codex fails: <code>codex login</code>, or answer <code>skipCodex: true</code> to fall back to Claude
+      implementation. If claude fails: <code>claude /login</code> or <code>claude setup-token</code>.</p>
+    </div>
+  </div>
+  <h3>How a gate reaches you</h3>
+  <pre># the run pauses (smithers up exits with code 3 = waiting on a human, by design)
+bunx smithers-orchestrator human inbox
+bunx smithers-orchestrator human answer &lt;requestId&gt; --value '{"cerebrasApiKey":"csk-…","claudeOauthToken":null,"anthropicApiKey":null,"note":null}'
+bunx smithers-orchestrator workflow run real-stack-e2e --resume &lt;RUN_ID&gt;   # if the runner exited</pre>
+  <ul class="tight">
+    <li><b>Mid-run asks:</b> implementation agents are instructed to raise <code>ask-human</code> when blocked on a credential or an irreversible step. Guessing and faking are prohibited by the ticket ground rules and caught by review.</li>
+    <li><b>T5 is intentionally human-shaped:</b> the approval spec approves from the UI itself, so that gate needs no operator.</li>
+    <li><b>Secret hygiene:</b> the audit greps every diff for <code>csk-</code> / <code>sk-ant-</code> prefixes; values never enter tracked files or logs.</li>
+  </ul>
+</section>
+
+<!-- ──────────────────────────── 10 · RISKS ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">eyes open</div>
+  <h2>Risks and how the plan absorbs them</h2>
+  <table style="margin-top:10px">
+    <tr><th style="width:340px">risk</th><th>mitigation</th></tr>
+    <tr><td>Real LLM latency and nondeterminism flake the suite</td>
+        <td>Behavioral assertions only; generous bounded timeouts; <code>workers: 1</code>; T6 exists purely to stabilize, and root-causes flakes instead of adding retries.</td></tr>
+    <tr><td>e2e gateway shares <code>smithers.db</code> with the dev gateway</td>
+        <td>Specs assert on the runId they launched; separate port 7342; the refuse-to-clobber rule from dev-with-plue.sh carries over.</td></tr>
+    <tr><td>Plue cold boot takes 30-60s and can mask failures</td>
+        <td>Health gate is <code>/api/health</code> JSON, never "port is open"; 240s webServer budget; reuseExistingServer makes warm runs fast.</td></tr>
+    <tr><td>Vite proxy and gateway WS quirks (custom-UI iframes use a root WS path that vite owns for HMR)</td>
+        <td>Specs assert run progress via the RPC path the app actually uses (poll + <code>/v1/rpc</code> with ws:true). The iframe WS limitation is dev-known and out of scope for these six specs.</td></tr>
+    <tr><td>OAuth buttons cannot complete on localhost (cross-origin cookie jar)</td>
+        <td>Token sign-in is the tested path; it is the documented reliable local flow.</td></tr>
+    <tr><td>Other agents share this working tree and git index</td>
+        <td>Explicit pathspecs only, no <code>git add -A</code>; sequential tickets; push happens once, after the full gate.</td></tr>
+    <tr><td>A ticket exhausts its 5 iterations</td>
+        <td>The run fails loudly with full verify/audit/review output persisted. Resume re-enters the loop after you intervene; nothing pretends to be green.</td></tr>
+  </table>
+</section>
+
+<!-- ──────────────────────────── 11 · LAUNCH ──────────────────────────── -->
+<section class="slide">
+  <div class="kicker">go</div>
+  <h2>Launch it, watch it, answer it</h2>
+  <pre># launch (from the repo root)
+bunx smithers-orchestrator workflow run <b>real-stack-e2e</b>
+
+# watch
+bunx smithers-orchestrator ps
+bunx smithers-orchestrator inspect &lt;RUN_ID&gt; --watch
+bunx smithers-orchestrator logs &lt;RUN_ID&gt; --follow
+bunx smithers-orchestrator why &lt;RUN_ID&gt;          # "why is it paused?"
+
+# when it blocks on you
+bunx smithers-orchestrator human inbox
+bunx smithers-orchestrator human answer &lt;id&gt; --value '{…}'</pre>
+  <h3>Today, roughly</h3>
+  <svg viewBox="0 0 1040 96">
+    <g font-size="12">
+      <rect x="10"  y="22" width="90"  height="34" rx="7" fill="rgba(255,123,138,.18)" stroke="#ff7b8a"/>
+      <text x="55"  y="43" text-anchor="middle" fill="#ff7b8a">preflight</text>
+      <rect x="104" y="22" width="200" height="34" rx="7" fill="rgba(90,167,255,.15)" stroke="#5aa7ff"/>
+      <text x="204" y="43" text-anchor="middle" fill="#5aa7ff">T1 stack boot</text>
+      <rect x="308" y="22" width="130" height="34" rx="7" fill="rgba(76,214,164,.15)" stroke="#4cd6a4"/>
+      <text x="373" y="43" text-anchor="middle" fill="#4cd6a4">T2 signin</text>
+      <rect x="442" y="22" width="130" height="34" rx="7" fill="rgba(255,184,107,.15)" stroke="#ffb86b"/>
+      <text x="507" y="43" text-anchor="middle" fill="#ffb86b">T3 chat</text>
+      <rect x="576" y="22" width="150" height="34" rx="7" fill="rgba(183,140,255,.15)" stroke="#b78cff"/>
+      <text x="651" y="43" text-anchor="middle" fill="#b78cff">T4 gateway run</text>
+      <rect x="730" y="22" width="120" height="34" rx="7" fill="rgba(183,140,255,.15)" stroke="#b78cff"/>
+      <text x="790" y="43" text-anchor="middle" fill="#b78cff">T5 approval</text>
+      <rect x="854" y="22" width="130" height="34" rx="7" fill="rgba(76,214,164,.15)" stroke="#4cd6a4"/>
+      <text x="919" y="43" text-anchor="middle" fill="#4cd6a4">T6 + push</text>
+      <text x="55"  y="76" text-anchor="middle" class="dim-t">~5m + your key</text>
+      <text x="204" y="76" text-anchor="middle" class="dim-t">~30-60m</text>
+      <text x="373" y="76" text-anchor="middle" class="dim-t">~30m</text>
+      <text x="507" y="76" text-anchor="middle" class="dim-t">~30m</text>
+      <text x="651" y="76" text-anchor="middle" class="dim-t">~30-45m</text>
+      <text x="790" y="76" text-anchor="middle" class="dim-t">~30m</text>
+      <text x="919" y="76" text-anchor="middle" class="dim-t">~30-60m</text>
+    </g>
+  </svg>
+  <ul class="tight" style="margin-top:14px">
+    <li><b>After T6:</b> the base suite pushes, then the ralph loop runs up to 12 plan&rarr;implement&rarr;gate&rarr;review&rarr;push iterations (roughly 45-90 min each; the full real suite runs every iteration). It self-terminates when the planner judges the remaining work low-value.</li>
+    <li><b>Your attention is needed rarely:</b> preflight only if a probe fails (all probes currently green), plus any mid-run <code>ask-human</code>. Everything else is agent wall-clock; the run is durable across interruptions.</li>
+    <li><b>Output you get:</b> a green one-command real suite on main, growing e2e + unit coverage from the ralph loop, and <code>artifacts/real-stack-e2e/report.md</code> with the evidence, port map, and how-to-run docs.</li>
+  </ul>
+</section>
+
+</div>
+
+<div class="nav">
+  <button id="prev">&larr; Prev</button>
+  <div class="dots" id="dots"></div>
+  <div style="display:flex;align-items:center;gap:16px">
+    <span class="counter" id="counter"></span>
+    <button id="next">Next &rarr;</button>
+  </div>
+</div>
+
+<script>
+  const slides = [...document.querySelectorAll(".slide")];
+  const dots = document.getElementById("dots");
+  const counter = document.getElementById("counter");
+  let i = 0;
+  slides.forEach((_, n) => {
+    const d = document.createElement("i");
+    d.onclick = () => go(n);
+    dots.appendChild(d);
+  });
+  function go(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle("active", k === i));
+    [...dots.children].forEach((d, k) => d.classList.toggle("on", k === i));
+    counter.textContent = (i + 1) + " / " + slides.length;
+  }
+  document.getElementById("prev").onclick = () => go(i - 1);
+  document.getElementById("next").onclick = () => go(i + 1);
+  addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === " " || e.key === "j") go(i + 1);
+    if (e.key === "ArrowLeft" || e.key === "k") go(i - 1);
+    if (e.key === "Home") go(0);
+    if (e.key === "End") go(slides.length - 1);
+  });
+  go(0);
+</script>
+</body>
+</html>

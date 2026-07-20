@@ -1,0 +1,17 @@
+# Backpressure matrix
+
+Build the verification backpressure matrix. Read docs/planning/01-prd.md and
+docs/planning/03-eng.md.
+
+For EVERY acceptance criterion of every requirement, emit a gate row: criterionId
+(REQ-x.y), criterion, verificationMethod, gateType, checkedBy (command or agent),
+failureAction, evidenceRequired[].
+
+Rules (non-negotiable):
+
+- Every blocking criterion MUST map to a real verification method that can FAIL.
+- Pick the cheapest method that actually proves it.
+- Never accept "the agent said it was done" as evidence.
+
+Write the matrix as a table to docs/planning/04-backpressure.md. The implementation
+workflow will wire every blocking gate into its merge checks — be precise.

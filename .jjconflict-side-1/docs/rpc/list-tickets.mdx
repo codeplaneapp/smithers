@@ -1,0 +1,16 @@
+---
+title: listTickets
+description: Gateway RPC for listing live work docs (tickets/plans/specs/proposals).
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listTickets`
+- Scope: `ticket:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ kind? }`
+- Response: `TicketRow[]`
+
+Lists LIVE work docs from `_smithers_docs`. Soft-deleted tombstones (`deleted_at_ms IS NOT NULL`) are filtered server-side and never returned. Pass `kind` (`ticket`/`plan`/`spec`/`proposal`) to scope to one kind; omit it to list every kind. Rows are newest-updated first.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.

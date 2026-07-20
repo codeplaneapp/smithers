@@ -1,0 +1,12 @@
+# Curated SWE-EVO subset: dvc instances (deterministic, filesystem-based tests,
+# no host-network dependence). dvc is 26 of the 48 SWE-EVO instances. These are
+# the smaller, environment-verified ones — run `bun verify-gold.ts --subset
+# subset-dvc.txt` to confirm each reproduces gold -> resolved=1 before trusting
+# benchmark scores. Lines are instance_ids; '#' comments and blanks are ignored.
+iterative__dvc_1.0.0b6_1.0.0
+iterative__dvc_1.11.12_1.11.13
+iterative__dvc_0.92.0_0.92.1
+iterative__dvc_2.21.1_2.21.2
+iterative__dvc_1.6.3_1.6.4
+iterative__dvc_0.30.0_0.30.1
+iterative__dvc_0.91.2_0.91.3

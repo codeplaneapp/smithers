@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 360" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <rect width="820" height="360" fill="#0b0f14"/>
+  <text x="410" y="38" fill="#e6edf3" font-size="20" font-weight="700" text-anchor="middle">Crash mid-run, resume from the last persisted step</text>
+
+  <!-- column headers -->
+  <text x="250" y="78" fill="#f85149" font-size="14" font-weight="700" text-anchor="middle">RUN 1 — killed while `plan` is in flight</text>
+  <text x="620" y="78" fill="#3fb950" font-size="14" font-weight="700" text-anchor="middle">RUN 2 — resumed</text>
+  <line x1="435" y1="92" x2="435" y2="332" stroke="#21262d" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+  <!-- RUN 1 tasks -->
+  <g font-size="14">
+    <rect x="80" y="104" width="320" height="48" rx="8" fill="#0f2e1a" stroke="#3fb950" stroke-width="1.5"/>
+    <text x="100" y="133" fill="#3fb950" font-weight="600">research</text>
+    <text x="380" y="133" fill="#8b949e" font-size="12" text-anchor="end">✓ done · persisted</text>
+
+    <rect x="80" y="164" width="320" height="48" rx="8" fill="#3a1418" stroke="#f85149" stroke-width="1.5"/>
+    <text x="100" y="193" fill="#f85149" font-weight="600">plan</text>
+    <text x="380" y="193" fill="#f85149" font-size="12" text-anchor="end">✗ interrupted (attempt 1)</text>
+
+    <rect x="80" y="224" width="320" height="48" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="100" y="253" fill="#6e7681" font-weight="600">implement</text>
+    <text x="380" y="253" fill="#6e7681" font-size="12" text-anchor="end">never started</text>
+  </g>
+
+  <!-- crash marker -->
+  <text x="240" y="300" fill="#f85149" font-size="13" text-anchor="middle" font-weight="700">^C  (laptop closed)</text>
+
+  <!-- RUN 2 tasks -->
+  <g font-size="14">
+    <rect x="460" y="104" width="300" height="48" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="480" y="133" fill="#adbac7" font-weight="600">research</text>
+    <text x="740" y="133" fill="#8b949e" font-size="12" text-anchor="end">skipped · already in DB</text>
+
+    <rect x="460" y="164" width="300" height="48" rx="8" fill="#0d1b2e" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="480" y="193" fill="#58a6ff" font-weight="600">plan</text>
+    <text x="740" y="193" fill="#58a6ff" font-size="12" text-anchor="end">re-runs as attempt 2</text>
+
+    <rect x="460" y="224" width="300" height="48" rx="8" fill="#0f2e1a" stroke="#3fb950" stroke-width="1.5"/>
+    <text x="480" y="253" fill="#3fb950" font-weight="600">implement</text>
+    <text x="740" y="253" fill="#8b949e" font-size="12" text-anchor="end">runs for the first time</text>
+  </g>
+
+  <text x="410" y="324" fill="#adbac7" font-size="13" text-anchor="middle" font-weight="600">No work lost. You wrote no recovery code.</text>
+</svg>

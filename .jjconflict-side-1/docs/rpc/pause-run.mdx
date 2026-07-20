@@ -1,0 +1,19 @@
+---
+title: pauseRun
+description: Gateway RPC for gracefully pausing an active run.
+maturity: stable
+apiVersion: v1
+---
+
+`pauseRun` gracefully pauses an active run: the engine stops scheduling new
+tasks, lets in-flight tasks finish, then parks the run in the resumable `paused`
+status. Unlike `cancelRun`, it never aborts running tasks. Resume with
+`resumeRun` (or `bunx smithers-orchestrator up --resume`).
+
+- Method: `pauseRun`
+- Scope: `run:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId }`
+- Response: `{ runId, status: "pausing" }`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `RUN_NOT_ACTIVE`, and `Internal`. `RUN_NOT_ACTIVE` means the run is not currently executing (only a live `running` run can be gracefully paused). Returns `Forbidden` if the caller lacks `run:write` scope.

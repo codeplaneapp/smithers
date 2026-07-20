@@ -1,0 +1,74 @@
+import { describe, expect, test } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resolveSandboxPath, assertPathWithinRoot } from "../src/sandboxPath.js";
+describe("resolveSandboxPath", () => {
+    const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+    test("resolves relative path within root", () => {
+        const result = resolveSandboxPath(root, "foo/bar.txt");
+        expect(result).toBe(join(root, "foo/bar.txt"));
+    });
+    test("resolves absolute path within root", () => {
+        const abs = join(root, "nested/file.ts");
+        expect(resolveSandboxPath(root, abs)).toBe(abs);
+    });
+    test("rejects path traversal with ../", () => {
+        expect(() => resolveSandboxPath(root, "../../../etc/passwd")).toThrow("Path escapes sandbox root");
+    });
+    test("rejects absolute path outside root", () => {
+        expect(() => resolveSandboxPath(root, "/etc/passwd")).toThrow("Path escapes sandbox root");
+    });
+    test("rejects empty string", () => {
+        expect(() => resolveSandboxPath(root, "")).toThrow("Path must be a string");
+    });
+    test("rejects non-string input", () => {
+        expect(() => resolveSandboxPath(root, null)).toThrow("Path must be a string");
+        expect(() => resolveSandboxPath(root, undefined)).toThrow("Path must be a string");
+    });
+    test("allows root path itself", () => {
+        expect(resolveSandboxPath(root, root)).toBe(root);
+    });
+});
+describe("assertPathWithinRoot", () => {
+    test("accepts path within root", async () => {
+        const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+        const file = join(root, "test.txt");
+        writeFileSync(file, "test");
+        await expect(assertPathWithinRoot(root, file)).resolves.toBeUndefined();
+    });
+    test("rejects symlink escaping root", async () => {
+        const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+        const target = mkdtempSync(join(tmpdir(), "escape-"));
+        writeFileSync(join(target, "secret"), "data");
+        const link = join(root, "escape");
+        symlinkSync(target, link);
+        await expect(assertPathWithinRoot(root, join(link, "secret"))).rejects.toThrow("Path escapes sandbox root");
+    });
+    test("accepts non-existent path within root (walks parents)", async () => {
+        const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+        const nonexistent = join(root, "a", "b", "c.txt");
+        await expect(assertPathWithinRoot(root, nonexistent)).resolves.toBeUndefined();
+    });
+    test("rejects when the root directory itself cannot be realpath'd", async () => {
+        // The rootDir does not exist, so realpath(root) fails and the effect
+        // surfaces the wrapped "realpath root" error before walking the target.
+        const missingRoot = join(mkdtempSync(join(tmpdir(), "sandbox-")), "does", "not", "exist");
+        await expect(assertPathWithinRoot(missingRoot, join(missingRoot, "child"))).rejects.toThrow(/realpath root|ENOENT/i);
+    });
+    test("rejects realpath failures other than missing path segments", async () => {
+        if (process.platform === "win32") {
+            return;
+        }
+        const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+        const locked = join(root, "locked");
+        mkdirSync(locked);
+        chmodSync(locked, 0o000);
+        try {
+            await expect(assertPathWithinRoot(root, join(locked, "child"))).rejects.toThrow(/EACCES|permission denied/i);
+        }
+        finally {
+            chmodSync(locked, 0o700);
+        }
+    });
+});

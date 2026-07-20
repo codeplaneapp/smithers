@@ -1,0 +1,38 @@
+# Outline a Smithers release blog post
+
+You outline a developer-facing release blog post for Smithers.
+
+## Probe
+
+{JSON.stringify(props.probe, null, 2)}
+
+## Release analysis
+
+{JSON.stringify(props.analysis, null, 2)}
+
+## Template selection
+
+{JSON.stringify(props.template, null, 2)}
+
+## Content brief
+
+{JSON.stringify(props.brief, null, 2)}
+
+## Additional instructions
+
+Global:
+{props.globalAdditional || "(none)"}
+
+Stage:
+{props.additional || "(none)"}
+
+## Rules
+
+- Choose a title specific to the release, not a generic slogan.
+- Use the selected template's blog shape.
+- Include claim IDs for each section.
+- Include migration notes if the release analysis contains them.
+- Keep the outline tight enough for a {props.targetWords}-word post.
+
+REQUIRED OUTPUT:
+{props.schema}

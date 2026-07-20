@@ -1,0 +1,16 @@
+---
+title: closeBrowserSession
+description: Gateway browser service RPC.
+maturity: stable
+apiVersion: v1
+---
+
+`closeBrowserSession` controls a gateway-local ephemeral Chromium session.
+
+- Method: `closeBrowserSession`
+- Scope: `run:write`
+- Transports: HTTP RPC, WebSocket RPC
+
+Request: `{ sessionId }`. Response: `{ closed, sessionId }`; closing wipes the ephemeral context.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `REVISION_CONFLICT`, `SSRF_BLOCKED`, `QUOTA_EXCEEDED`, and `Internal`.

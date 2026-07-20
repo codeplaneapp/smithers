@@ -1,0 +1,23 @@
+#!/bin/sh
+# Test fixture: a fake `bun` for apps/review/tests/action/runReview.test.ts.
+#
+# Checked in and executable (not written at test time) so spawning it never
+# races a fresh write-then-exec.
+#
+# Records the invocation (cwd via `pwd -P`, args) to the JSON file named by
+# $SMITHERS_FAKE_BUN_LOG, then exits with the code in $SMITHERS_FAKE_BUN_EXIT
+# (default 0).
+log=$SMITHERS_FAKE_BUN_LOG
+if [ -n "$log" ]; then
+  {
+    printf '{"cwd":"%s","args":[' "$(pwd -P)"
+    first=1
+    for a in "$@"; do
+      [ "$first" -eq 1 ] || printf ','
+      first=0
+      printf '"%s"' "$a"
+    done
+    printf ']}'
+  } > "$log"
+fi
+exit "${SMITHERS_FAKE_BUN_EXIT:-0}"

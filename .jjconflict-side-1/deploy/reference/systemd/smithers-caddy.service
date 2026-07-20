@@ -1,0 +1,15 @@
+[Unit]
+Description=Caddy reverse proxy for Smithers Gateway
+After=network-online.target smithers-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/caddy run --environ --config /etc/smithers/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/smithers/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

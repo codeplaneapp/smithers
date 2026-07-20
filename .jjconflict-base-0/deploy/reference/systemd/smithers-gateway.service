@@ -1,0 +1,22 @@
+[Unit]
+Description=Smithers Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smithers
+Group=smithers
+WorkingDirectory=/opt/smithers
+EnvironmentFile=/etc/smithers/gateway.env
+ExecStart=/usr/bin/bun run /opt/smithers/deploy/reference/reference-gateway.mjs
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/smithers
+
+[Install]
+WantedBy=multi-user.target

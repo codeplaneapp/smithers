@@ -1,0 +1,81 @@
+---
+title: Hello World
+description: A minimal workflow that generates a greeting. Two versions - MDX (default) and TypeScript SDK (advanced).
+---
+
+## MDX (default)
+
+This is a standalone hello-world example, not a workflow installed by the default init pack. Copy it into `.smithers/workflows/` if you want to try it.
+Edit the copied prompt or inline task to change what the agent says:
+
+```markdown
+Write a short, friendly one-sentence greeting for {props.name}.
+```
+
+Run it:
+
+```bash
+bunx smithers-orchestrator workflow run hello --name Ada
+```
+
+```
+[hello] Starting run abc123
+[greet] Running...
+[greet] Done -> Hello Ada! It's wonderful to have you here.
+[hello] Completed
+```
+
+Change the instruction - for example, ask for a haiku instead - and run again. No TypeScript needed.
+
+See [MDX Workflow Authoring](/guides/mdx-authoring) for how to create your own MDX-backed workflows.
+
+---
+
+## TypeScript SDK
+
+When you need branching, schemas, or parallel tasks, write the workflow in TypeScript:
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+// hello-world.tsx
+import { createSmithers, Sequence } from "smithers-orchestrator";
+import { ToolLoopAgent as Agent } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { z } from "zod";
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  greeting: z.object({
+    message: z.string(),
+  }),
+});
+
+const greeter = new Agent({
+  model: anthropic("claude-sonnet-5"),
+  instructions: "You are a friendly greeter. Respond with a short, warm greeting.",
+});
+
+export default smithers((ctx) => (
+  <Workflow name="hello-world">
+    <Sequence>
+      <Task id="greet" output={outputs.greeting} agent={greeter}>
+        Generate a warm greeting for someone named Alice.
+      </Task>
+    </Sequence>
+  </Workflow>
+));
+```
+
+Run it:
+
+```bash
+bunx smithers-orchestrator up hello-world.tsx --input '{}'
+```
+
+```
+[hello-world] Starting run abc123
+[greet] Running...
+[greet] Done -> { message: "Hello Alice! Welcome, it's wonderful to have you here!" }
+[hello-world] Completed
+```
+
+`createSmithers` registers a `greeting` table with a `message` field. `Task` sends the prompt to the agent and persists structured output. If the workflow crashes mid-run, re-running replays completed tasks from storage and continues from the last incomplete step.

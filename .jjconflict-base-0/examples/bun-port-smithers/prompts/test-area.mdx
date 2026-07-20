@@ -1,0 +1,26 @@
+# Test Area
+
+OUTPUT_KIND: test-area
+AREA: {props.area.id}
+BRANCH: {props.branch}
+CRATE: {props.area.crate}
+REPO: {props.repo}
+
+Run the focused Bun test area in the current worktree.
+
+Steps:
+1. Build `bun_bin`.
+2. Run the focused test glob against `./target/debug/bun-rs`.
+3. Group failures by panic location or assertion.
+4. Fix forward in the relevant Rust crate.
+5. Compare changed Rust files against their Zig specs for semantic divergence.
+6. Commit each coherent fix locally on `BRANCH`.
+
+Test glob:
+{props.area.glob}
+
+Previous area result:
+{JSON.stringify(props.previous ?? null, null, 2)}
+
+Required output schema:
+{props.schema}

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#4C8DFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#4C8DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#0C0E16"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+  <text font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF" letter-spacing="5"><tspan x="96" y="156">SMITHERS · V0.25.0</tspan></text>
+  <text font-size="58" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#E7E9EE" font-weight="800"><tspan x="96" y="262">New component: &lt;Sidecar&gt;</tspan></text>
+  <text font-size="30" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="96" y="314">Run Opus. Shadow-run a cheaper model on the same task.</tspan></text>
+
+  <rect x="96" y="372" width="1180" height="208" rx="16" fill="#11131C" stroke="#1C2030" stroke-width="2"/>
+  <g font-size="34" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">
+    <text fill="#6B7280"><tspan x="140" y="452">primary</tspan></text>
+    <text fill="#E7E9EE"><tspan x="372" y="452">Opus</tspan></text>
+    <text fill="#9CA3B4"><tspan x="572" y="452">score 0.92</tspan></text>
+    <text fill="#6B7280"><tspan x="140" y="524">sidecar</tspan></text>
+    <text fill="#C9CED9"><tspan x="372" y="524">Kimi</tspan></text>
+    <text fill="#9CA3B4"><tspan x="572" y="524">score 0.89</tspan></text>
+    <text fill="#4C8DFF"><tspan x="852" y="524">→ cheaperWins?</tspan></text>
+  </g>
+
+  <text font-size="28" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280"><tspan x="96" y="648">Built-in evals tell you when the cheap model is good enough to switch.</tspan></text>
+
+  <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
+  <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>
+  <text x="1504" y="826" font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="end">0.25.0</text>
+</svg>

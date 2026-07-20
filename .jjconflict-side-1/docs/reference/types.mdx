@@ -1,0 +1,2057 @@
+---
+title: Types
+description: Public TypeScript surface for smithers-orchestrator.
+---
+
+One source of truth: `tsc --emitDeclarationOnly` would produce something close to this. Import these types from `smithers-orchestrator` unless noted otherwise.
+
+`createSmithers` is a **named export**:
+
+```ts
+import { createSmithers } from "smithers-orchestrator";
+```
+
+It returns a local API object for that workflow module. Destructure the pieces
+you use (`Workflow`, `Task`, `Branch`, `Sandbox`, `smithers`, `outputs`) or keep
+the object and use property access (`api.Workflow`, `api.Task`). Both styles are
+equivalent for one factory; property access is clearer in files with multiple
+factories, such as parent/child workflow examples.
+
+There is no top-level default `smithers` export. The `smithers` wrapper function
+is the property returned by `createSmithers(...)`, and
+`smithers((ctx) => <Workflow ... />)` returns the `SmithersWorkflow` value that
+workflow files usually export as their default export.
+
+`input` is a reserved schema key on `createSmithers(...)`. It controls the
+TypeScript type of `ctx.input`; every other key is an output schema and becomes
+a typed output ref under `outputs.<key>`. Fresh runs validate the input row
+against the generated input table before inserting it, but Smithers does **not**
+call `inputSchema.parse()` and does not write Zod default values back into
+`ctx.input`. Treat required fields in the Zod schema as the authored TypeScript
+contract; for fields that may be omitted by a CLI/UI caller, use `.optional()` /
+`.nullable()` and coalesce inside the workflow (`ctx.input.dryRun ?? false`) or
+add an early compute task that performs stricter Zod parsing.
+
+Prefer `output={outputs.someKey}` on tasks, approvals, sandboxes, and subflows.
+The `outputs` object contains the exact Zod schema objects passed to
+`createSmithers(...)`, so the task can infer `outputSchema`, validate the
+returned row, persist it to the matching table, and feed the same schema to
+native structured-output agents.
+
+Major sections at a glance:
+- **Workflow / Context**: `SmithersWorkflow`, `WorkflowFileRef`, `SmithersCtx`, `RunOptions`, `RunResult`, the entry points for defining and running workflows.
+- **Task / Graph**: `TaskDescriptor`, `TaskProps`, `GraphSnapshot`, the shape of nodes at runtime and in the JSX layer.
+- **Component props**: `WorkflowProps`, `ApprovalProps`, `SignalProps`, `LoopProps`, etc., all JSX component interfaces.
+- **Errors**: `SmithersError`, `KnownSmithersErrorCode`, typed error codes; see [Errors](/reference/errors) for descriptions.
+- **Server / Gateway**: `ServerOptions`, `GatewayOptions`, `GatewayAuthConfig`, self-hosting configuration.
+- **Scorers / Memory / OpenAPI / Observability**: sub-path imports (`smithers-orchestrator/scorers`, `/memory`, `/openapi`, `/observability`).
+
+```ts
+// =============================================================================
+// Workflow
+// =============================================================================
+
+interface SmithersWorkflow<Schema = unknown> {
+  readonly readableName?: string;
+  readonly description?: string;
+  readonly ui?: WorkflowViewDefinition;
+  readonly tui?: WorkflowViewDefinition;
+  readonly db?: unknown;
+  readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
+  readonly opts: SmithersWorkflowOptions;
+  readonly memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
+  readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
+  readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
+}
+
+type WorkflowFileRef = {
+  path: string;
+  approvedRoot?: string;
+};
+
+type WorkflowViewDefinition = {
+  kind: "ui" | "tui";
+  title?: string;
+  props?: Record<string, unknown>;
+  entry?: string;
+  path?: string;
+  source?: string;
+  exportName?: string;
+  literal?: WorkflowLiteralViewNode;
+};
+
+type SmithersWorkflowOptions = {
+  alertPolicy?: SmithersAlertPolicy;
+  cache?: boolean;
+  // Explicit workflow-level output schema/table used to populate
+  // RunResult.output (and therefore a parent <Subflow>'s child result).
+  // Defaults to the schema key literally named `output`.
+  output?: SmithersWorkflowOutputTarget;
+  workflowHash?: string;
+};
+
+// A Zod schema (createSmithers(...).outputs.<key>), a Drizzle table, or a
+// string schema key. Restated in @smithers-orchestrator/scheduler, which must
+// not depend on zod or components.
+type SmithersWorkflowOutputTarget =
+  | { readonly _def: unknown }
+  | { readonly $inferSelect: Record<string, unknown> }
+  | string;
+
+type SchemaRegistryEntry = {
+  table: any;
+  zodSchema: import("zod").ZodObject<any>;
+};
+
+type SmithersAlertPolicy = {
+  defaults?: SmithersAlertPolicyDefaults;
+  rules?: Record<string, SmithersAlertPolicyRule>;
+  reactions?: Record<string, SmithersAlertReaction>;
+};
+
+type SmithersAlertSeverity = "info" | "warning" | "critical";
+type SmithersAlertLabels = Record<string, string>;
+type SmithersAlertPolicyDefaults = {
+  owner?: string;
+  severity?: SmithersAlertSeverity;
+  runbook?: string;
+  labels?: SmithersAlertLabels;
+};
+type SmithersAlertPolicyRule = SmithersAlertPolicyDefaults & {
+  afterMs?: number;
+  reaction?: string | SmithersAlertReaction;
+};
+type SmithersAlertReaction =
+  | { kind: "emit-only" }
+  | { kind: "pause" }
+  | { kind: "cancel" }
+  | { kind: "open-approval" }
+  | { kind: "deliver"; destination: string };
+
+// =============================================================================
+// Context
+// =============================================================================
+
+declare class SmithersCtx<Schema extends unknown = unknown> {
+  runId: string;
+  iteration: number;
+  iterations: Record<string, number> | undefined;
+  input: Schema extends { input: infer T } ? T : unknown;
+  auth: RunAuthContext | null;
+  outputs: OutputAccessor<Schema>;
+  outputRows: (output: any, options?: { nodeId?: string; scope?: string }) => Array<{
+    payload: unknown;
+    nodeId: string;
+    iteration: number;
+    seq: number;
+  }>;
+
+  // table is the schema key or output target from createSmithers,
+  // such as "review" or outputs.review, not the generated SQL table name.
+  output(table: any, key: OutputKey): any;
+  outputMaybe(table: any, key: OutputKey): any | undefined;
+  latest(table: any, nodeId: string): any | undefined;
+  prove(table: any, key: OutputKey): ProofBinding | undefined;
+  boundStale(nodeId: string): boolean;
+  latestArray(value: unknown, schema: SafeParser): unknown[];
+  iterationCount(table: any, nodeId: string): number;
+  resolveTableName(table: any): string;
+  resolveRow(table: any, key: OutputKey): any | undefined;
+}
+
+type OutputKey = { nodeId: string; iteration?: number };
+type ProofBinding = {
+  table: string;
+  nodeId: string;
+  iteration: number;
+  digest: string;                  // sha256:<hex> over canonical JSON row content
+};
+type SafeParser = {
+  safeParse(value: unknown):
+    | { success: true; data: unknown }
+    | { success: false; error?: unknown };
+};
+type InferRow<TTable> = TTable extends { $inferSelect: infer R } ? R : never;
+type InferOutputEntry<T> =
+  T extends import("zod").ZodTypeAny ? import("zod").infer<T>
+  : T extends { $inferSelect: any } ? InferRow<T>
+  : never;
+type FallbackTableName<Schema> = [keyof Schema & string] extends [never] ? string : never;
+type OutputAccessor<Schema, TRow = unknown> = {
+  (table: FallbackTableName<Schema>): Array<TRow>;
+  <K extends keyof Schema & string>(table: K): Array<InferOutputEntry<Schema[K]>>;
+} & {
+  [K in keyof Schema & string]: Array<InferOutputEntry<Schema[K]>>;
+};
+type OutputSnapshot<TFallback = unknown> = {
+  [tableName: string]: Array<TFallback>;
+};
+
+type RunAuthContext = {
+  triggeredBy: string;
+  scopes: string[];
+  role: string;
+  createdAt: string;
+};
+
+// =============================================================================
+// Run
+// =============================================================================
+
+type SmithersErrorReport = {
+  readonly error: SmithersError;
+  readonly rawError: unknown;
+  readonly runId: string;
+} & (
+  | {
+      readonly phase: "run";
+      readonly nodeId?: undefined;
+      readonly iteration?: undefined;
+      readonly attempt?: undefined;
+    }
+  | {
+      readonly phase: "node";
+      readonly nodeId: string;
+      readonly iteration: number;
+      readonly attempt: number;
+    }
+);
+
+type RunOptions = {
+  runId?: string;
+  parentRunId?: string | null;
+  input: Record<string, unknown>;
+  maxConcurrency?: number;          // default 4
+  maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted
+  requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
+  onProgress?: (e: SmithersEvent) => void;
+  onError?: (report: SmithersErrorReport) => void;  // once per NodeFailed or RunFailed occurrence
+  signal?: AbortSignal;
+  pauseSignal?: AbortSignal;        // graceful pause: stop scheduling, let in-flight finish, park `paused`
+  resume?: boolean;
+  force?: boolean;                  // resume even if marked running
+  acceptWorkflowChange?: boolean;   // resume same run id after workflow source changed, re-blessing hashes
+  workflowPath?: string;
+  rootDir?: string;
+  keepWorktrees?: boolean;          // default false; keep this run's <Worktree> dirs instead of reaping on success (SMITHERS_KEEP_WORKTREES=1 process-wide)
+  logDir?: string | null;
+  allowNetwork?: boolean;           // default false; bash tool network access
+  maxOutputBytes?: number;          // default 200000
+  toolTimeoutMs?: number;           // default 60000
+  hot?: boolean | HotReloadOptions;
+  annotations?: Record<string, string | number | boolean>;
+  auth?: RunAuthContext | null;
+  config?: Record<string, unknown>;
+  effectPlatformRuntime?: "bun" | "node" | "worker";     // swappable @effect/platform layer; "node"/"worker" require effectPlatformLayer
+  effectPlatformLayer?: Layer.Layer<any, never, never>;  // e.g. NodeContext.layer from a Node serverless entrypoint
+  cliAgentToolsDefault?: "all" | "explicit-only";  // default "all"
+  initialOutputs?: OutputSnapshot;  // seed prior outputs (resume/fork)
+  signals?: SignalRowInput[];       // fallback signal rows when the runtime adapter has no durable signal capability
+  initialIteration?: number;        // seed the starting loop iteration
+  initialIterations?: Record<string, number> | ReadonlyMap<string, number>;  // per-loop iteration seeds
+  resumeClaim?: {                   // internal supervisor coordination
+    claimOwnerId: string;
+    claimHeartbeatAtMs: number;
+    restoreRuntimeOwnerId?: string | null;
+    restoreHeartbeatAtMs?: number | null;
+  };
+};
+
+type HotReloadOptions = {
+  rootDir?: string;
+  outDir?: string;                  // default .smithers/hmr under rootDir
+  maxGenerations?: number;          // default 3
+  cancelUnmounted?: boolean;        // default false
+  debounceMs?: number;              // default 100
+};
+
+type RunResult = {
+  readonly runId: string;
+  readonly status: RunStatus;
+  readonly output?: unknown;
+  readonly error?: unknown;
+  readonly nextRunId?: string;      // set when the run continued-as-new
+};
+
+type RunStatus =
+  | "running"
+  | "waiting-approval"
+  | "waiting-event"
+  | "waiting-timer"
+  | "waiting-quota"
+  | "finished"
+  | "continued"
+  | "failed"
+  | "cancelled";
+
+type RetryTaskOptions = {
+  runId: string;
+  nodeId: string;
+  iteration?: number;
+  resetDependents?: boolean;        // default true
+  force?: boolean;                  // default false
+  onProgress?: (e: SmithersEvent) => void;
+};
+
+type RetryTaskResult = {
+  success: boolean;
+  resetNodes: string[];
+  error?: string;
+};
+
+// =============================================================================
+// Task
+// =============================================================================
+
+type TaskDescriptor = {
+  nodeId: string;
+  ordinal: number;
+  iteration: number;
+  ralphId?: string;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  proofBindingRequired?: boolean;
+  proofBindings?: readonly ProofBinding[];
+  proofBindingStatus?: "current" | "missing" | "stale";
+  forkSource?: string;              // logical id of the task whose session this task forks
+  worktreeId?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
+  worktreeBaseBranch?: string;
+  outputTable: unknown | null;
+  outputTableName: string;
+  outputRef?: import("zod").ZodObject<any>;
+  outputSchema?: import("zod").ZodObject<any>;
+  parallelGroupId?: string;
+  parallelMaxConcurrency?: number;
+  subtreeGroupId?: string;          // nearest ancestor <Parallel subtreeConcurrency> group
+  subtreeChildKey?: string;         // direct child of that parallel this task descends from
+  subtreeMax?: number;              // its cap on in-flight direct children
+  needsApproval: boolean;
+  waitAsync?: boolean;
+  approvalMode?: "gate" | "decision" | "select" | "rank";
+  approvalOnDeny?: "fail" | "continue" | "skip";
+  approvalOptions?: ApprovalOption[];
+  approvalAllowedScopes?: string[];
+  approvalAllowedUsers?: string[];
+  approvalAutoApprove?: {
+    after?: number;
+    audit?: boolean;
+    conditionMet?: boolean;
+    revertOnMet?: boolean;
+  };
+  skipIf: boolean;
+  retries: number;
+  retryPolicy?: RetryPolicy;
+  timeoutMs: number | null;
+  heartbeatTimeoutMs: number | null;
+  continueOnFail: boolean;
+  cachePolicy?: CachePolicy;
+  hijack?: boolean;
+  onHijackExit?: "complete" | "reopen";
+  agent?: AgentLike | AgentLike[];
+  prompt?: string;
+  staticPayload?: unknown;
+  computeFn?: () => unknown | Promise<unknown>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  scorers?: ScorersMap;
+  memoryConfig?: TaskMemoryConfig;
+};
+
+type RetryPolicy = {
+  backoff?: "fixed" | "linear" | "exponential";   // default "fixed"
+  initialDelayMs?: number;                         // default 0
+};
+
+type CachePolicy<Ctx = unknown> = {
+  by?: (ctx: Ctx) => unknown;
+  version?: string;
+  key?: string;
+  ttlMs?: number;
+  scope?: "run" | "workflow" | "global";
+  [key: string]: unknown;
+};
+
+type AgentToolDescriptor = {
+  description?: string;
+  source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";
+};
+
+type AgentCapabilityRegistry = {
+  version: 1;
+  engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
+  runtimeTools: Record<string, AgentToolDescriptor>;
+  mcp: {
+    bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
+    supportsProjectScope: boolean;
+    supportsUserScope: boolean;
+  };
+  skills: {
+    supportsSkills: boolean;
+    installMode?: "files" | "dir" | "plugin";
+    smithersSkillIds: string[];
+  };
+  humanInteraction: {
+    supportsUiRequests: boolean;
+    methods: string[];
+  };
+  builtIns: string[];
+};
+
+type AgentGenerateOptions = {
+  prompt?: unknown;
+  messages?: unknown;
+  timeout?: unknown;
+  abortSignal?: AbortSignal;
+  rootDir?: string;
+  resumeSession?: string;
+  maxOutputBytes?: number;
+  onStdout?: (text: string) => void;
+  onStderr?: (text: string) => void;
+  onEvent?: (event: unknown) => unknown;
+  retry?: unknown;
+  isRetry?: unknown;
+  retryAttempt?: unknown;
+  schemaRetry?: unknown;
+  taskContext?: {
+    runId?: string;
+    nodeId?: string;
+    iteration?: number;
+    attempt?: number;
+  };
+  [key: string]: unknown;
+};
+
+type AgentLike = {
+  id?: string;
+  tools?: Record<string, unknown>;
+  supportsNativeStructuredOutput?: boolean;
+  capabilities?: AgentCapabilityRegistry;
+  generate: (args?: AgentGenerateOptions) => Promise<unknown>;
+};
+
+type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}, MODEL = any> =
+  Omit<import("ai").ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, any, never>, "model"> & {
+    model: string | MODEL;
+  };
+
+type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
+  SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>;
+
+type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
+  Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>, "model"> & {
+    nativeStructuredOutput?: boolean;
+  } & (
+    | { model: string; baseURL?: string; apiKey?: string; api?: "responses" | "chat" }
+    | { model: import("ai").LanguageModel; baseURL?: never; apiKey?: never; api?: never }
+  );
+
+type HermesAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
+  Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>, "model"> & {
+    model?: string;                 // default "hermes"
+    baseURL?: string;               // falls back to HERMES_BASE_URL; required at runtime
+    apiKey?: string;                // falls back to HERMES_API_KEY, then "hermes"
+    nativeStructuredOutput?: boolean; // default false
+  };
+
+type BaseCliAgentOptions = {
+  id?: string;
+  model?: string;
+  systemPrompt?: string;
+  instructions?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  yolo?: boolean;
+  timeoutMs?: number;
+  idleTimeoutMs?: number;
+  maxOutputBytes?: number;
+  extraArgs?: string[];
+};
+
+type PiExtensionUiRequest = {
+  type: "extension_ui_request";
+  id: string;
+  method: string;
+  title?: string;
+  placeholder?: string;
+  [key: string]: unknown;
+};
+
+type PiExtensionUiResponse = {
+  type: "extension_ui_response";
+  id: string;
+  value?: string;
+  cancelled?: boolean;
+  [key: string]: unknown;
+};
+
+type PiAgentOptions = BaseCliAgentOptions & {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  mode?: "text" | "json" | "rpc";
+  print?: boolean;
+  continue?: boolean;
+  resume?: boolean;
+  session?: string;
+  sessionDir?: string;
+  noSession?: boolean;
+  models?: string | string[];
+  listModels?: boolean | string;
+  tools?: string[];
+  noTools?: boolean;
+  extension?: string[];
+  noExtensions?: boolean;
+  skill?: string[];
+  noSkills?: boolean;
+  promptTemplate?: string[];
+  noPromptTemplates?: boolean;
+  theme?: string[];
+  noThemes?: boolean;
+  thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  export?: string;
+  files?: string[];
+  verbose?: boolean;
+  onExtensionUiRequest?: (
+    request: PiExtensionUiRequest,
+  ) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null;
+};
+
+type VibeAgentOptions = BaseCliAgentOptions & {
+  agent?: string;
+  maxTurns?: number;
+  maxPrice?: number;
+  maxTokens?: number;
+  enabledTools?: string[];
+  sessionId?: string;
+  continueSession?: boolean;
+};
+
+type OpenCodeAgentOptions = BaseCliAgentOptions & {
+  model?: string;
+  agentName?: string;
+  attachFiles?: string[];
+  continueSession?: boolean;
+  sessionId?: string;
+  variant?: string;
+};
+
+type TaskMemoryConfig = {
+  bank?: string;
+  banks?: string[];
+  tags?: string[];
+  recall?:
+    | "auto"
+    | string
+    | false
+    // Legacy object form: preserved but inert.
+    | { namespace?: MemoryNamespace; query?: string; topK?: number };
+  budget?: "low" | "mid" | "high";
+  maxTokens?: number;
+  primers?: string[];
+  retain?: "on-complete" | "off";
+  tools?: boolean;
+  namespace?: string | MemoryNamespace; // Legacy: preserved but inert.
+  remember?: { namespace?: MemoryNamespace; key?: string }; // Legacy: inert.
+  threadId?: string; // Legacy: preserved but inert.
+};
+
+type MemoryNamespace = { kind: MemoryNamespaceKind; id: string };
+type MemoryNamespaceKind = "workflow" | "agent" | "user" | "global";
+
+// =============================================================================
+// Graph
+// =============================================================================
+
+type GraphSnapshot = {
+  readonly runId: string;
+  readonly frameNo: number;
+  readonly xml: XmlNode | null;
+  readonly tasks: readonly TaskDescriptor[];
+};
+
+type XmlNode = XmlElement | XmlText;
+
+type XmlElement = {
+  readonly kind: "element";
+  readonly tag: string;             // "Workflow" | "Task" | "Sequence" | ...
+  readonly props: Record<string, string>;
+  readonly children: readonly XmlNode[];
+};
+
+type XmlText = { readonly kind: "text"; readonly text: string };
+
+// =============================================================================
+// Events
+// =============================================================================
+//
+// `SmithersEvent` is the discriminated union understood by the runtime and
+// observability layer. Most variants are emitted by the runtime; reserved
+// variants are called out in Event Types. The full union is documented
+// separately to keep this file usable as the everyday type reference.
+//
+// See: /reference/event-types (rendered) or /llms-full.txt (LLM bundle).
+
+type SmithersEvent = { type: string; runId: string; timestampMs: number } & Record<string, unknown>;
+// (Each variant has additional fields per its `type`. See event-types.)
+
+// =============================================================================
+// Component props
+// =============================================================================
+
+type WorkflowProps = {
+  name: string;
+  cache?: boolean;
+  children?: React.ReactNode;
+};
+
+// OutputTarget accepts a Zod output schema (recommended, usually outputs.key),
+// a custom Drizzle table object, or a string schema key escape hatch.
+type OutputTarget = import("zod").ZodObject<any> | { $inferSelect: any } | string;
+type DepsSpec = Record<string, OutputTarget>;
+type InferDeps<D extends DepsSpec> = {
+  [K in keyof D]: D[K] extends string ? unknown : InferOutputEntry<D[K]>;
+};
+
+type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSpec = {}> = {
+  key?: string;
+  id: string;
+  output: Output;
+  outputSchema?: import("zod").ZodObject<any>;
+  maxSchemaRetries?: number;        // default 3; correction calls after the initial agent response
+  agent?: AgentLike | AgentLike[];
+  fallbackAgent?: AgentLike;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  deps?: D;
+  depsOptional?: boolean;
+  fork?: string;                    // start from another task's final agent session snapshot
+  bind?: ProofBinding | ProofBinding[];
+  skipIf?: boolean;
+  needsApproval?: boolean;
+  async?: boolean;                  // only with needsApproval
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;       // alias for heartbeatTimeoutMs
+  noRetry?: boolean;
+  retries?: number;                 // default Infinity (set 0 to disable)
+  retryPolicy?: RetryPolicy;
+  continueOnFail?: boolean;
+  cache?: CachePolicy;
+  scorers?: ScorersMap;
+  groundTruth?: unknown;
+  context?: unknown;
+  memory?: TaskMemoryConfig;
+  hijack?: boolean;
+  onHijackExit?: "complete" | "reopen";
+  allowTools?: string[];            // CLI-agent tool allowlist
+  priority?: number;
+  failurePolicy?: "halt" | "quarantine";
+  label?: string;
+  meta?: Record<string, unknown>;
+  // string = prompt literal; Row = static result; () => Row = compute fn;
+  // (deps) => result = deps-aware fn; React.ReactNode = JSX subtree
+  children: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | React.ReactNode);
+};
+
+type SequenceProps = {
+  key?: string;
+  label?: string;
+  failurePolicy?: "halt" | "quarantine";
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+type ParallelProps = {
+  id?: string;
+  label?: string;
+  maxConcurrency?: number;
+  subtreeConcurrency?: number;
+  priority?: number;
+  failurePolicy?: "halt" | "quarantine";
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+type MemoryProps = {
+  bank?: string;
+  banks?: string[];
+  tags?: string[];
+  recall?: "auto" | string | false;
+  budget?: "low" | "mid" | "high";
+  maxTokens?: number;
+  primers?: string[];
+  retain?: "on-complete" | "off";
+  tools?: boolean;
+  children?: React.ReactNode;
+};
+type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
+type LoopProps      = {
+  key?: string;
+  id?: string;
+  until?: boolean;
+  maxIterations?: number;
+  onMaxReached?: "fail" | "return-last";   // default "return-last"
+  continueAsNewEvery?: number;
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+type RalphProps     = LoopProps;            // deprecated alias
+
+type ApprovalDecision  = { approved: boolean; note: string | null; decidedBy: string | null; decidedAt: string | null };
+type ApprovalSelection = { selected: string; notes: string | null };
+type ApprovalRanking   = { ranked: string[]; notes: string | null };
+type ApprovalRequest   = { title: string; summary?: string; metadata?: Record<string, unknown> };
+type ApprovalMode      = "approve" | "select" | "rank";
+type ApprovalOption    = { key: string; label: string; summary?: string; metadata?: Record<string, unknown> };
+type ApprovalAutoApprove = {
+  after?: number;
+  condition?: ((ctx: SmithersCtx<unknown> | null) => boolean) | (() => boolean);
+  audit?: boolean;
+  revertOn?: ((ctx: SmithersCtx<unknown> | null) => boolean) | (() => boolean);
+};
+
+type ApprovalProps<Row = ApprovalDecision, Output extends OutputTarget = OutputTarget> = {
+  id: string;
+  mode?: ApprovalMode;
+  options?: ApprovalOption[];
+  output: Output;
+  outputSchema?: import("zod").ZodObject<any>;
+  request: ApprovalRequest;
+  onDeny?: "fail" | "continue" | "skip";
+  allowedScopes?: string[];
+  allowedUsers?: string[];
+  autoApprove?: ApprovalAutoApprove;
+  async?: boolean;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  skipIf?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;       // alias for heartbeatTimeoutMs
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  continueOnFail?: boolean;
+  cache?: CachePolicy;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+  children?: React.ReactNode;
+};
+
+type SignalProps<S extends import("zod").ZodObject<any> = import("zod").ZodObject<any>> = {
+  id: string;
+  schema: S;
+  correlationId?: string;
+  timeoutMs?: number;
+  onTimeout?: "fail" | "skip" | "continue";
+  async?: boolean;
+  skipIf?: boolean;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+  children?: (data: import("zod").infer<S>) => React.ReactNode;
+};
+
+type WaitForEventProps = {
+  id: string;
+  event: string;
+  correlationId?: string;
+  output: OutputTarget;
+  outputSchema?: import("zod").ZodObject<any>;
+  timeoutMs?: number;
+  onTimeout?: "fail" | "skip" | "continue";
+  tagged?: boolean;
+  async?: boolean;
+  skipIf?: boolean;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+};
+
+type TimerProps = {
+  id: string;
+  duration?: string;                // e.g. "30s", "5m"
+  until?: string | Date;            // absolute timestamp
+  every?: string;                   // reserved; recurring timers are not supported yet
+  skipIf?: boolean;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+};
+
+type SagaStepDef    = { id: string; action: React.ReactElement; compensation: React.ReactElement; label?: string };
+type SagaProps      = { id?: string; steps?: SagaStepDef[]; onFailure?: "compensate" | "compensate-and-fail" | "fail"; skipIf?: boolean; children?: React.ReactNode };
+type SagaStepProps  = { id: string; compensation: React.ReactElement; children: React.ReactElement };
+
+type TryCatchFinallyProps = {
+  id?: string;
+  try: React.ReactElement;
+  catch?: React.ReactElement | ((error: SmithersError) => React.ReactElement);
+  catchErrors?: SmithersErrorCode[];
+  finally?: React.ReactElement;
+  skipIf?: boolean;
+};
+
+// Higher-level composites
+type PollerProps = {
+  id?: string;
+  check: AgentLike | (() => unknown | Promise<unknown>);
+  checkOutput: OutputTarget;
+  maxAttempts?: number;
+  backoff?: "fixed" | "linear" | "exponential";
+  intervalMs?: number;
+  checkTimeoutMs?: number;
+  onTimeout?: "fail" | "return-last";
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
+type ColumnTaskProps = Omit<Partial<TaskProps<unknown>>, "agent" | "children" | "id" | "key" | "output" | "smithersContext">;
+
+type ColumnDef = {
+  name: string;
+  agent: AgentLike;
+  output: OutputTarget;
+  prompt?: (ctx: { item: unknown; column: string }) => string;
+  task?: ColumnTaskProps;
+};
+
+type KanbanProps = {
+  id?: string;
+  columns: ColumnDef[];
+  useTickets: () => Array<{ id: string; [key: string]: unknown }>;
+  agents?: Record<string, AgentLike>;
+  maxConcurrency?: number;
+  onComplete?: OutputTarget;
+  until?: boolean;
+  maxIterations?: number;
+  skipIf?: boolean;
+  children?: React.ReactNode | Record<string, unknown>;
+};
+
+type ApprovalGateProps = {
+  id: string;
+  output: OutputTarget;
+  request: ApprovalRequest;
+  when: boolean;                    // false auto-approves
+  onDeny?: "fail" | "continue" | "skip";
+  skipIf?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  continueOnFail?: boolean;
+};
+
+type HumanTaskProps = {
+  id: string;
+  output: OutputTarget;
+  outputSchema?: import("zod").ZodObject<any>;
+  prompt: string | React.ReactNode;
+  maxAttempts?: number;
+  async?: boolean;
+  skipIf?: boolean;
+  timeoutMs?: number;
+  continueOnFail?: boolean;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+};
+
+type CheckConfig = {
+  id: string;
+  agent?: AgentLike;
+  command?: string;
+  label?: string;
+  timeoutMs?: number;
+};
+type CheckSuiteProps = {
+  id?: string;
+  checks: CheckConfig[] | Record<string, Omit<CheckConfig, "id">>;
+  verdictOutput: OutputTarget;
+  strategy?: "all-pass" | "majority" | "any-pass";
+  maxConcurrency?: number;
+  continueOnFail?: boolean;
+  skipIf?: boolean;
+};
+
+type TokenBudgetConfig = { max: number; perTask?: number; onExceeded?: "fail" | "warn" | "skip-remaining" };
+type LatencySloConfig = { maxMs: number; perTask?: number; onExceeded?: "fail" | "warn" };
+type TrackingConfig = { tokens?: boolean; latency?: boolean };
+type AspectsProps = {
+  tokenBudget?: TokenBudgetConfig;
+  latencySlo?: LatencySloConfig;
+  tracking?: TrackingConfig;
+  children?: React.ReactNode;
+};
+
+type CategoryConfig = {
+  agent: AgentLike;
+  output?: OutputTarget;
+  prompt?: (item: unknown) => string;
+};
+type ClassifyAndRouteProps = {
+  id?: string;
+  items: unknown | unknown[];
+  categories: Record<string, AgentLike | CategoryConfig>;
+  classifierAgent: AgentLike;
+  classifierOutput: OutputTarget;
+  routeOutput: OutputTarget;
+  classificationResult?: {
+    classifications: Array<{ itemId?: string; category: string; [key: string]: unknown }>;
+  } | null;
+  maxConcurrency?: number;
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
+type SourceDef = {
+  agent: AgentLike;
+  prompt?: string;
+  output?: OutputTarget;
+  children?: React.ReactNode;
+};
+type GatherAndSynthesizeProps = {
+  id?: string;
+  sources: Record<string, SourceDef>;
+  synthesizer: AgentLike;
+  gatherOutput: OutputTarget;
+  synthesisOutput: OutputTarget;
+  gatheredResults?: Record<string, unknown> | null;
+  maxConcurrency?: number;
+  synthesisPrompt?: string;
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
+type ContentPipelineStage = { id: string; agent: AgentLike; output: OutputTarget; label?: string };
+type ContentPipelineProps = {
+  id?: string;
+  stages: ContentPipelineStage[];
+  skipIf?: boolean;
+  children: string | React.ReactNode;
+};
+
+type DebateProps = {
+  id?: string;
+  proposer: AgentLike;
+  opponent: AgentLike;
+  judge: AgentLike;
+  rounds?: number;
+  argumentOutput: OutputTarget;
+  verdictOutput: OutputTarget;
+  topic: string | React.ReactNode;
+  skipIf?: boolean;
+};
+
+type DecisionRule = { when: boolean; then: React.ReactElement; label?: string };
+type DecisionTableProps = {
+  id?: string;
+  rules: DecisionRule[];
+  default?: React.ReactElement;
+  strategy?: "first-match" | "all-match";
+  skipIf?: boolean;
+};
+
+type DriftDetectorProps = {
+  id?: string;
+  captureAgent: AgentLike;
+  compareAgent: AgentLike;
+  captureOutput: OutputTarget;
+  compareOutput: OutputTarget;
+  baseline: unknown;
+  alertIf?: (comparison: unknown) => boolean;
+  alert?: React.ReactElement;
+  poll?: { intervalMs?: number; maxPolls?: number };
+  skipIf?: boolean;
+};
+
+type EscalationLevel = {
+  agent: AgentLike;
+  output: OutputTarget;
+  label?: string;
+  escalateIf?: (result: unknown) => boolean;
+};
+type EscalationChainProps = {
+  id?: string;
+  levels: EscalationLevel[];
+  humanFallback?: boolean;
+  humanRequest?: ApprovalRequest;
+  escalationOutput: OutputTarget;
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
+type MergeQueueProps = { id?: string; maxConcurrency?: number; priority?: number; failurePolicy?: "halt" | "quarantine"; skipIf?: boolean; children?: React.ReactNode };
+
+type Tier = "fable" | "opus" | "sonnet" | "haiku";
+type DelegationAgents = Partial<Record<Tier, AgentLike | AgentLike[]>>;
+type DelegationOutputs = {
+  dcGoal: OutputTarget;
+  dcQuestion: OutputTarget;
+  dcForecast: OutputTarget;
+  dcGoalApproval: OutputTarget;
+  dcPlan: OutputTarget;
+  dcPreview: OutputTarget;
+  dcDevPreview?: OutputTarget;
+  dcGates: OutputTarget;
+  dcProbe: OutputTarget;
+  dcReplan: OutputTarget;
+  dcExec: OutputTarget;
+  dcReview: OutputTarget;
+  dcApproval?: OutputTarget;
+  dcEdit: OutputTarget;
+  dcSkip: OutputTarget;
+  dcPoll: OutputTarget;
+  dcBudget?: OutputTarget;
+  dcScore?: OutputTarget;
+};
+type DelegationBudget = { maxUsd?: number; maxMinutes?: number };
+type DelegationScorers = {
+  exec?: ScorersMap;
+  review?: ScorersMap;
+  run?: ScorersMap;
+};
+type DelegationSharedProps = {
+  idPrefix?: string;
+  agents: DelegationAgents;
+  outputs: DelegationOutputs;
+  approvalPolicy?: string;
+  tierOrder?: Tier[];
+  maxDepth?: number;
+  maxConcurrency?: number;
+  maxDeriskRounds?: number;
+  poll?: boolean;
+  budget?: DelegationBudget;
+  scorers?: DelegationScorers;
+  skipIf?: boolean;
+};
+type GoalRefinementProps = DelegationSharedProps & {
+  prompt: string;
+  maxQuestions?: number;
+  prefetchDepth?: number;
+};
+type DelegationPlanningProps = DelegationSharedProps & { prompt?: string };
+type DelegationPreviewProps = DelegationSharedProps;
+type BackpressurePlanningProps = DelegationSharedProps;
+type DeriskLoopProps = DelegationSharedProps;
+type DelegationExecutionProps = DelegationSharedProps & { maxAttempts?: number };
+type DelegationScoringProps = DelegationSharedProps;
+type DelegationEditListenerProps = DelegationSharedProps & {
+  until?: boolean;
+  maxEdits?: number;
+};
+type DelegationChainProps = DelegationSharedProps & {
+  prompt: string;
+  maxQuestions?: number;
+  prefetchDepth?: number;
+  maxAttempts?: number;
+  maxEdits?: number;
+};
+
+type DelegationV2Role = "sol" | "fable" | "terra" | "luna";
+type DelegationV2WorkKind =
+  | "refine_goal" | "plan" | "research" | "poc"
+  | "execute" | "review" | "preview" | "synthesize";
+type OutputContractId =
+  | "work_product" | "goal_contract" | "plan" | "evaluation"
+  | "classification" | "issue_scan" | "condition"
+  | "artifact_collection" | "evidence_collection";
+type GoalContract = {
+  objective: string;
+  context: string[];
+  constraints: string[];
+  nonGoals: string[];
+};
+type AcceptanceCriterion = {
+  id: string;
+  requirement: string;
+  verification: string;
+};
+type TrellisCriticalExecutionCategory =
+  | "security_boundary"
+  | "data_integrity"
+  | "concurrency_invariant"
+  | "protocol_core"
+  | "irreversible_migration";
+type TrellisAgents = Record<"sol" | "fable" | "terra" | "luna", AgentLike | AgentLike[]>;
+type TrellisOutputs = {
+  dv2Author: OutputTarget;
+  dv2Worker: OutputTarget;
+  dv2Validation: OutputTarget;
+  dv2Outcome: OutputTarget;
+  dv2Final: OutputTarget;
+  dv2Question: OutputTarget;
+  dv2Answer: OutputTarget;
+};
+type TrellisLimits = {
+  maxTotalAuthorTurns?: number;
+  maxAuthorGenerations?: number;
+  maxAuthorDepth?: number;
+  maxNodesPerProgram?: number;
+  maxProgramDepth?: number;
+  maxFanout?: number;
+  maxPromptBytes?: number;
+  maxTotalPromptBytes?: number;
+};
+type TrellisCriticalExecutionPolicy = {
+  allowedCategories: TrellisCriticalExecutionCategory[];
+  allowedPathPrefixes: string[];
+  maxChangedLines: number;
+};
+type TrellisProps = {
+  prompt: string;
+  goal?: GoalContract;
+  acceptance?: AcceptanceCriterion[];
+  instructions?: string;
+  role?: "sol" | "fable";
+  work?: DelegationV2WorkKind;
+  outputContract?: OutputContractId;
+  agents: TrellisAgents;
+  outputs: TrellisOutputs;
+  idPrefix?: string;
+  semanticRevision?: string;
+  criticalExecutionPolicy?: TrellisCriticalExecutionPolicy;
+  maxConcurrency?: number;
+  limits?: TrellisLimits;
+  skipIf?: boolean;
+};
+
+type OptimizerProps = {
+  id?: string;
+  generator: AgentLike;
+  evaluator: AgentLike | ((candidate: unknown) => unknown | Promise<unknown>);
+  generateOutput: OutputTarget;
+  evaluateOutput: OutputTarget;
+  targetScore?: number;
+  maxIterations?: number;
+  onMaxReached?: "return-last" | "fail";
+  skipIf?: boolean;
+  children: string | React.ReactNode;
+};
+
+type PanelistConfig = { agent: AgentLike | AgentLike[]; role?: string; label?: string };
+
+type PanelProps = {
+  id?: string;
+  // Each entry is an agent, a PanelistConfig, or a failover chain (AgentLike[]);
+  // a chain becomes one panelist run as failover.
+  panelists: Array<PanelistConfig | AgentLike | AgentLike[]>;
+  // the synthesizing moderator; a chain (AgentLike[]) runs as failover.
+  moderator: AgentLike | AgentLike[];
+  panelistOutput: OutputTarget;
+  moderatorOutput: OutputTarget;
+  strategy?: "synthesize" | "vote" | "consensus";
+  minAgree?: number;
+  maxConcurrency?: number;
+  // extra Task props for each panelist / the moderator (continueOnFail, timeouts)
+  panelistTaskProps?: { continueOnFail?: boolean; timeoutMs?: number; heartbeatTimeoutMs?: number; retries?: number };
+  moderatorTaskProps?: { continueOnFail?: boolean; timeoutMs?: number; heartbeatTimeoutMs?: number; retries?: number };
+  skipIf?: boolean;
+  children: string | React.ReactNode;
+};
+
+type SidecarProps = {
+  id?: string;
+  agent: AgentLike;
+  sidecar: AgentLike;
+  output: OutputTarget;
+  sidecarOutput?: OutputTarget;
+  scorers?: ScorersMap;
+  prompt?: string | React.ReactNode;
+  input?: string | React.ReactNode;
+  maxConcurrency?: number;
+  groundTruth?: unknown;
+  context?: unknown;
+  primaryLabel?: string;
+  sidecarLabel?: string;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
+};
+type SidecarDelta = {
+  primaryScore: number | null;
+  sidecarScore: number | null;
+  delta: number | null;
+  cheaperWins: boolean;
+};
+
+type ReviewLoopProps = {
+  id?: string;
+  producer: AgentLike;
+  reviewer: AgentLike | AgentLike[];
+  produceOutput: OutputTarget;
+  reviewOutput: OutputTarget;
+  maxIterations?: number;
+  onMaxReached?: "return-last" | "fail";
+  skipIf?: boolean;
+  children: string | React.ReactNode;
+};
+
+type RunbookStep = {
+  id: string;
+  agent?: AgentLike;
+  command?: string;
+  risk: "safe" | "risky" | "critical";
+  label?: string;
+  output?: OutputTarget;
+};
+type RunbookProps = {
+  id?: string;
+  steps: RunbookStep[];
+  defaultAgent?: AgentLike;
+  stepOutput: OutputTarget;
+  approvalRequest?: Partial<ApprovalRequest>;
+  onDeny?: "fail" | "skip";
+  skipIf?: boolean;
+};
+
+type ScanFixVerifyProps = {
+  id?: string;
+  scanner: AgentLike;
+  fixer: AgentLike | AgentLike[];
+  verifier: AgentLike;
+  scanOutput: OutputTarget;
+  fixOutput: OutputTarget;
+  verifyOutput: OutputTarget;
+  reportOutput: OutputTarget;
+  maxConcurrency?: number;
+  maxRetries?: number;
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
+type SupervisorProps = {
+  id?: string;
+  boss: AgentLike;
+  workers: Record<string, AgentLike>;
+  planOutput: OutputTarget;
+  workerOutput: OutputTarget;
+  reviewOutput: OutputTarget;
+  finalOutput: OutputTarget;
+  maxIterations?: number;
+  maxConcurrency?: number;
+  useWorktrees?: boolean;
+  skipIf?: boolean;
+  children: string | React.ReactNode;
+};
+
+type ContinueAsNewProps = { state?: unknown };
+
+// Sandbox
+type SandboxRuntime = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
+type SandboxEgressConfig = {
+  env?: Record<string, string>;
+  httpProxy?: string;
+  httpsProxy?: string;
+  noProxy?: string | string[];
+  caCertPem?: string;
+  caCertPath?: string;
+  secretBindings?: Record<string, string>;
+};
+type SandboxVolumeMount = { host: string; container: string; readonly?: boolean };
+type SandboxWorkspaceSpec = {
+  name: string;
+  snapshotId?: string;
+  idleTimeoutSecs?: number;
+  persistence?: "ephemeral" | "sticky";
+};
+type SandboxWorkflow = {
+  db?: unknown;
+  build: (ctx: unknown) => unknown;
+  opts?: Record<string, unknown>;
+  schemaRegistry?: unknown;
+  zodToKeyName?: unknown;
+};
+type SandboxChildWorkflowDefinition =
+  | SandboxWorkflow
+  | (() => SandboxWorkflow | unknown);
+type ExecuteSandboxChildWorkflowOptions = {
+  workflow: SandboxChildWorkflowDefinition;
+  input?: unknown;
+  runId?: string;
+  parentRunId?: string;
+  rootDir?: string;
+  allowNetwork?: boolean;
+  maxOutputBytes?: number;
+  toolTimeoutMs?: number;
+  workflowPath?: string;
+  signal?: AbortSignal;
+};
+type ExecuteSandboxChildWorkflow = (
+  parentWorkflow: SandboxWorkflow | undefined,
+  options: ExecuteSandboxChildWorkflowOptions,
+) => Promise<{ runId: string; status: string; output: unknown }>;
+type SandboxDiffBundleLike = {
+  seq: number;
+  baseRef: string;
+  patches: Array<{
+    path: string;
+    operation: "add" | "modify" | "delete";
+    diff: string;
+    binaryContent?: string;
+  }>;
+};
+type SandboxProviderRequest = {
+  runId: string;
+  sandboxId: string;
+  input?: unknown;
+  rootDir: string;
+  requestBundlePath: string;
+  resultBundlePath: string;
+  workflow: SandboxChildWorkflowDefinition;
+  parentWorkflow?: SandboxWorkflow;
+  executeChildWorkflow: ExecuteSandboxChildWorkflow;
+  allowNetwork: boolean;
+  maxOutputBytes: number;
+  toolTimeoutMs: number;
+  egress?: SandboxEgressConfig;
+  config: Record<string, unknown>;
+  signal?: AbortSignal;
+  heartbeat: (data?: unknown) => void;
+};
+type SandboxProviderResult =
+  | { bundlePath: string; remoteRunId?: string; workspaceId?: string; containerId?: string }
+  | {
+      status: "finished" | "failed" | "cancelled";
+      output?: unknown;
+      outputs?: unknown;
+      runId?: string;
+      remoteRunId?: string;
+      workspaceId?: string;
+      containerId?: string;
+      diffBundle?: SandboxDiffBundleLike;
+      patches?: Array<{ path: string; content: string }>;
+      artifacts?: Array<{ path: string; content: string }>;
+      streamLogPath?: string | null;
+    };
+type SandboxProvider = {
+  id: string;
+  run(request: SandboxProviderRequest): Promise<SandboxProviderResult> | SandboxProviderResult;
+  cleanup?(request: SandboxProviderRequest): Promise<void> | void;
+};
+type ExecuteSandboxOptions = {
+  parentWorkflow?: SandboxWorkflow;
+  sandboxId: string;
+  provider?: SandboxProvider | string;
+  runtime?: SandboxRuntime;
+  workflow: SandboxChildWorkflowDefinition;
+  executeChildWorkflow: ExecuteSandboxChildWorkflow;
+  applyDiffBundle?: (bundle: SandboxDiffBundleLike, targetDir: string) => Promise<void>;
+  input?: unknown;
+  rootDir: string;
+  allowNetwork: boolean;
+  maxOutputBytes: number;
+  toolTimeoutMs: number;
+  reviewDiffs?: boolean;
+  autoAcceptDiffs?: boolean;
+  allowNested?: boolean;
+  config?: Record<string, unknown>;
+};
+
+type SandboxProps = {
+  id: string;
+  workflow?: SmithersWorkflow<unknown>;
+  input?: unknown;
+  output: OutputTarget;
+  provider?: unknown;              // runtime accepts a provider object or registered provider id
+  runtime?: SandboxRuntime;            // legacy local transports
+  allowNetwork?: boolean;
+  reviewDiffs?: boolean;
+  autoAcceptDiffs?: boolean;
+  allowNested?: boolean;
+  image?: string;
+  env?: Record<string, string>;
+  egress?: SandboxEgressConfig;
+  ports?: Array<{ host: number; container: number }>;
+  volumes?: SandboxVolumeMount[];
+  memoryLimit?: string;
+  cpuLimit?: string;
+  command?: string;
+  workspace?: SandboxWorkspaceSpec;
+  skipIf?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;       // alias for heartbeatTimeoutMs
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  continueOnFail?: boolean;
+  cache?: CachePolicy;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+  children?: React.ReactNode;
+};
+
+type SubflowProps = {
+  id: string;
+  workflow: SmithersWorkflow<unknown>;
+  input?: unknown;
+  mode?: "childRun" | "inline";
+  output: OutputTarget;
+  skipIf?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;       // alias for heartbeatTimeoutMs
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  continueOnFail?: boolean;
+  cache?: CachePolicy;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+  children?: React.ReactNode;
+};
+
+type WorktreeProps = {
+  key?: string;
+  id?: string;
+  path: string;
+  branch?: string;
+  baseBranch?: string;             // default "main"
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
+type SuperSmithersProps = {
+  id?: string;                     // default "super-smithers"; prefixes internal task ids
+  strategy: string | React.ReactElement;
+  agent: AgentLike;
+  targetFiles?: string[];
+  reportOutput?: OutputTarget;
+  dryRun?: boolean;                // default false
+  skipIf?: boolean;
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+//
+// Every Smithers error is a SmithersError with a typed code. See the Errors page
+// for the full list of built-in codes.
+
+declare class SmithersError extends Error {
+  readonly code: SmithersErrorCode;
+  readonly summary: string;
+  readonly docsUrl: string;
+  readonly details?: Record<string, unknown>;
+  readonly cause?: unknown;
+}
+
+type SmithersErrorCode = KnownSmithersErrorCode | (string & {});
+type KnownSmithersErrorCode =
+  | "INVALID_INPUT" | "MISSING_INPUT" | "MISSING_INPUT_TABLE" | "RESUME_METADATA_MISMATCH"
+  | "UNKNOWN_OUTPUT_SCHEMA" | "INVALID_OUTPUT" | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
+  | "SNAPSHOT_NOT_FOUND" | "VCS_WORKSPACE_CREATE_FAILED" | "TASK_TIMEOUT"
+  | "TASK_HIJACK_UNSUPPORTED" | "TASK_FORK_SOURCE_NOT_FOUND" | "TASK_FORK_SOURCE_NOT_COMPLETE"
+  | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CYCLE" | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
+  | "SANDBOX_BUNDLE_INVALID" | "SANDBOX_BUNDLE_TOO_LARGE" | "WORKFLOW_EXECUTION_FAILED"
+  | "SANDBOX_EXECUTION_FAILED" | "TASK_HEARTBEAT_TIMEOUT" | "HEARTBEAT_PAYLOAD_TOO_LARGE"
+  | "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" | "TASK_ABORTED" | "RUN_CANCELLED" | "RUN_NOT_RESUMABLE"
+  | "RUN_OWNER_ALIVE" | "RUN_STILL_RUNNING" | "RUN_RESUME_CLAIM_LOST" | "RUN_RESUME_CLAIM_FAILED"
+  | "RUN_RESUME_ACTIVATION_FAILED" | "RUN_HIJACKED" | "CONTINUATION_STATE_TOO_LARGE"
+  | "INVALID_CONTINUATION_STATE" | "RALPH_MAX_REACHED" | "SCHEDULER_ERROR" | "SESSION_ERROR"
+  | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
+  | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
+  | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
+  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
+  | "TOOL_PATH_INVALID" | "TOOL_PATH_ESCAPE" | "TOOL_FILE_TOO_LARGE" | "TOOL_CONTENT_TOO_LARGE"
+  | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
+  | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
+  | "AGENT_CLI_ERROR" | "AGENT_QUOTA_EXCEEDED" | "AGENT_CONFIG_INVALID" | "AGENT_RPC_FILE_ARGS" | "AGENT_BUILD_COMMAND" | "AGENT_DIAGNOSTIC_TIMEOUT"
+  | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED"
+  | "SMITHERS_BACKEND_CONFLICT" | "SMITHERS_MIGRATION_REQUIRED"
+  | "STORAGE_ERROR" | "INTERNAL_ERROR" | "PROCESS_ABORTED" | "PROCESS_TIMEOUT"
+  | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
+  | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
+  | "SCORER_FAILED" | "WORKFLOW_EXISTS" | "CLI_DB_NOT_FOUND" | "CLI_AGENT_UNSUPPORTED"
+  | "PI_HTTP_ERROR" | "EXTERNAL_BUILD_FAILED" | "SCHEMA_DISCOVERY_FAILED"
+  | "OPENAPI_SPEC_LOAD_FAILED" | "OPENAPI_OPERATION_NOT_FOUND" | "OPENAPI_TOOL_EXECUTION_FAILED"
+  | "ACCOUNT_INVALID" | "ACCOUNT_NOT_FOUND" | "ACCOUNT_DUPLICATE_LABEL" | "ACCOUNTS_FILE_INVALID";
+
+// =============================================================================
+// Server
+// =============================================================================
+
+type SmithersDb = import("@smithers-orchestrator/db/adapter").SmithersDb;
+
+type ServerOptions = {
+  port?: number;
+  db?: unknown;
+  authToken?: string;
+  maxBodyBytes?: number;
+  rootDir?: string;
+  allowNetwork?: boolean;
+  headersTimeout?: number;
+  requestTimeout?: number;
+};
+
+type ServeOptions = {
+  workflow: SmithersWorkflow<unknown>;
+  adapter: SmithersDb;
+  runId: string;
+  abort: AbortController;
+  authToken?: string;
+  metrics?: boolean;
+};
+
+type GatewayTokenGrant = {
+  role: string;
+  scopes: string[];
+  userId?: string;
+  tokenId?: string;
+  issuedAtMs?: number;
+  expiresAtMs?: number;
+  revokedAtMs?: number;
+};
+type GatewayAuthConfig =
+  | {
+      mode: "token";
+      tokens: Record<string, GatewayTokenGrant>;
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+    }
+  | {
+      mode: "jwt";
+      issuer: string;
+      audience: string | string[];
+      secret: string;
+      scopesClaim?: string;          // default "scope"
+      roleClaim?: string;            // default "role"
+      userClaim?: string;            // default "sub"
+      defaultRole?: string;          // default "operator"
+      defaultScopes?: string[];      // default [] when scope claim is absent
+      clockSkewSeconds?: number;     // default 60; negative values clamp to 0
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+    }
+  | {
+      mode: "trusted-proxy";
+      trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+      defaultRole?: string;          // default "operator"
+      defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
+    };
+type GatewayDefaults = { cliAgentTools?: "all" | "explicit-only" };
+
+type GatewayOperatorUiConfig = {
+  path?: string;                    // default "/console"
+  title?: string;
+  props?: Record<string, unknown>;
+};
+
+type GatewayUiConfig =
+  | true
+  | {
+      entry: string;
+      path?: string;                // gateway default "/"; workflow default "/workflows/<workflowKey>"
+      title?: string;
+      props?: Record<string, unknown>;
+    };
+
+type GatewayWebhookSignalConfig = {
+  name: string;
+  correlationIdPath?: string;
+  runIdPath?: string;
+  payloadPath?: string;
+};
+
+type GatewayWebhookRunConfig = {
+  enabled?: boolean;
+  inputPath?: string;
+};
+
+type GatewayWebhookConfig = {
+  secret: string;
+  signatureHeader?: string;
+  signaturePrefix?: string;
+  signal?: GatewayWebhookSignalConfig;
+  run?: GatewayWebhookRunConfig;
+};
+
+type GatewayRegisterOptions = {
+  schedule?: string;
+  webhook?: GatewayWebhookConfig;
+  ui?: GatewayUiConfig;
+};
+
+type GatewayOptions = {
+  protocol?: number;
+  features?: string[];
+  heartbeatMs?: number;
+  auth?: GatewayAuthConfig;
+  ui?: GatewayUiConfig;
+  operatorUi?: GatewayOperatorUiConfig | false;
+  defaults?: GatewayDefaults;
+  maxBodyBytes?: number;
+  maxPayload?: number;
+  maxConnections?: number;
+  eventWindowSize?: number;
+  headersTimeout?: number;
+  requestTimeout?: number;
+};
+
+// =============================================================================
+// Scorers (smithers-orchestrator/scorers)
+// =============================================================================
+
+type ScoreResult  = { score: number; reason?: string; meta?: Record<string, unknown> };
+type ScorerInput  = { input: unknown; output: unknown; groundTruth?: unknown; context?: unknown; latencyMs?: number; outputSchema?: import("zod").ZodObject<any> };
+type ScorerFn     = (input: ScorerInput) => Promise<ScoreResult>;
+type Scorer       = { id: string; name: string; description: string; score: ScorerFn };
+type SamplingConfig =
+  | { type: "all" }
+  | { type: "ratio"; rate: number }
+  | { type: "none" };
+type ScorerBinding = { scorer: Scorer; sampling?: SamplingConfig };
+type ScorersMap    = Record<string, ScorerBinding>;
+
+type ScoreRow = {
+  id: string;
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  scorerId: string;
+  scorerName: string;
+  source: "live" | "batch";
+  score: number;
+  reason: string | null;
+  metaJson: string | null;
+  inputJson: string | null;
+  outputJson: string | null;
+  groundTruthJson: string | null;
+  contextJson: string | null;
+  latencyMs: number | null;
+  scoredAtMs: number;
+  durationMs: number | null;
+};
+
+type AggregateScore = {
+  scorerId: string;
+  scorerName: string;
+  count: number;
+  mean: number;
+  min: number;
+  max: number;
+  p50: number;
+  stddev: number;
+};
+
+type AggregateOptions = {
+  runId?: string;
+  nodeId?: string;
+  scorerId?: string;
+};
+
+type ScorerContext = {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  input: unknown;
+  output: unknown;
+  latencyMs?: number;
+  outputSchema?: import("zod").ZodObject<any>;
+};
+
+type LlmJudgeConfig = {
+  id: string;
+  name: string;
+  description: string;
+  judge: AgentLike;
+  instructions: string;
+  promptTemplate: (input: ScorerInput) => string;
+};
+type CreateScorerConfig = {
+  id: string;
+  name: string;
+  description: string;
+  score: ScorerFn;
+};
+
+// =============================================================================
+// Memory (smithers-orchestrator/memory)
+// =============================================================================
+
+type MemoryFact    = { namespace: string; key: string; valueJson: string; schemaSig?: string | null; createdAtMs: number; updatedAtMs: number; ttlMs?: number | null };
+type MemoryMessage = { id: string; threadId: string; role: string; contentJson: string; runId?: string | null; nodeId?: string | null; createdAtMs: number };
+type MemoryThread  = { threadId: string; namespace: string; title?: string | null; metadataJson?: string | null; createdAtMs: number; updatedAtMs: number };
+
+type MemoryProvenance = { runId?: string | null; nodeId?: string | null; iteration?: number | null };
+
+type MemoryNote = {
+  id: string;
+  namespace: string;
+  body: string;
+  kind?: string | null;
+  tagsJson?: string | null; // JSON-encoded string array; null when the note has no tags
+  author?: string | null;
+  status: string; // free-form; conventionally pending | accepted | rejected
+  statusChangedAtMs?: number | null;
+  createdAtMs: number;
+  runId?: string | null;
+  nodeId?: string | null;
+  iteration?: number | null;
+};
+
+type SaveNoteInput = {
+  namespace: MemoryNamespace;
+  body: string;
+  kind?: string;
+  tags?: string[];
+  author?: string;
+  status?: string; // defaults to "accepted"
+  provenance?: MemoryProvenance;
+  supersedes?: string[]; // note ids this note replaces
+  id?: string; // provide to make retries idempotent
+};
+
+type NoteReadFilter = {
+  status?: string | string[] | "any";
+  includeSuperseded?: boolean;
+  kind?: string;
+  namespace?: MemoryNamespace; // scope searchNotes to one namespace of the kind
+};
+
+type WorkingMemoryConfig<
+  T extends import("zod").ZodObject<import("zod").ZodRawShape> = import("zod").ZodObject<import("zod").ZodRawShape>,
+> = {
+  schema?: T;
+  namespace: MemoryNamespace;
+  ttlMs?: number;
+};
+
+type SemanticRecallConfig = {
+  topK?: number;
+  namespace?: MemoryNamespace;
+  similarityThreshold?: number;
+};
+
+type MessageHistoryConfig = {
+  lastMessages?: number;
+  threadId?: string;
+};
+
+type MemoryStore = {
+  getFact(ns: MemoryNamespace, key: string): Promise<MemoryFact | undefined>;
+  setFact(ns: MemoryNamespace, key: string, value: unknown, ttlMs?: number): Promise<void>;
+  deleteFact(ns: MemoryNamespace, key: string): Promise<void>;
+  listFacts(ns: MemoryNamespace): Promise<MemoryFact[]>;
+  listAllFacts(): Promise<MemoryFact[]>;
+  createThread(ns: MemoryNamespace, title?: string): Promise<MemoryThread>;
+  getThread(threadId: string): Promise<MemoryThread | undefined>;
+  deleteThread(threadId: string): Promise<void>;
+  saveMessage(msg: Omit<MemoryMessage, "createdAtMs"> & { createdAtMs?: number }): Promise<void>;
+  listMessages(threadId: string, limit?: number): Promise<MemoryMessage[]>;
+  countMessages(threadId: string): Promise<number>;
+  deleteExpiredFacts(): Promise<number>;
+  saveNote(input: SaveNoteInput): Promise<MemoryNote>;
+  getNote(id: string): Promise<MemoryNote | undefined>;
+  listNotes(ns: MemoryNamespace, filter?: NoteReadFilter): Promise<MemoryNote[]>;
+  setNoteStatus(id: string, status: string): Promise<void>;
+  enableNoteSearch(kind: string): Promise<void>;
+  searchNotes(kind: string, query: string, limit?: number, filter?: NoteReadFilter): Promise<MemoryNote[]>;
+  getFactEffect(ns: MemoryNamespace, key: string): Effect.Effect<MemoryFact | undefined, SmithersError>;
+  setFactEffect(ns: MemoryNamespace, key: string, value: unknown, ttlMs?: number): Effect.Effect<void, SmithersError>;
+  deleteFactEffect(ns: MemoryNamespace, key: string): Effect.Effect<void, SmithersError>;
+  listFactsEffect(ns: MemoryNamespace): Effect.Effect<MemoryFact[], SmithersError>;
+  listAllFactsEffect(): Effect.Effect<MemoryFact[], SmithersError>;
+  createThreadEffect(ns: MemoryNamespace, title?: string): Effect.Effect<MemoryThread, SmithersError>;
+  getThreadEffect(threadId: string): Effect.Effect<MemoryThread | undefined, SmithersError>;
+  deleteThreadEffect(threadId: string): Effect.Effect<void, SmithersError>;
+  saveMessageEffect(msg: Omit<MemoryMessage, "createdAtMs"> & { createdAtMs?: number }): Effect.Effect<void, SmithersError>;
+  listMessagesEffect(threadId: string, limit?: number): Effect.Effect<MemoryMessage[], SmithersError>;
+  countMessagesEffect(threadId: string): Effect.Effect<number, SmithersError>;
+  deleteExpiredFactsEffect(): Effect.Effect<number, SmithersError>;
+  saveNoteEffect(input: SaveNoteInput): Effect.Effect<MemoryNote, SmithersError>;
+  getNoteEffect(id: string): Effect.Effect<MemoryNote | undefined, SmithersError>;
+  listNotesEffect(ns: MemoryNamespace, filter?: NoteReadFilter): Effect.Effect<MemoryNote[], SmithersError>;
+  setNoteStatusEffect(id: string, status: string): Effect.Effect<void, SmithersError>;
+  enableNoteSearchEffect(kind: string): Effect.Effect<void, SmithersError>;
+  searchNotesEffect(kind: string, query: string, limit?: number, filter?: NoteReadFilter): Effect.Effect<MemoryNote[], SmithersError>;
+};
+
+type MemoryServiceApi = {
+  readonly getFact: (ns: MemoryNamespace, key: string) => Effect.Effect<MemoryFact | undefined, SmithersError>;
+  readonly setFact: (ns: MemoryNamespace, key: string, value: unknown, ttlMs?: number) => Effect.Effect<void, SmithersError>;
+  readonly deleteFact: (ns: MemoryNamespace, key: string) => Effect.Effect<void, SmithersError>;
+  readonly listFacts: (ns: MemoryNamespace) => Effect.Effect<MemoryFact[], SmithersError>;
+  readonly createThread: (ns: MemoryNamespace, title?: string) => Effect.Effect<MemoryThread, SmithersError>;
+  readonly getThread: (threadId: string) => Effect.Effect<MemoryThread | undefined, SmithersError>;
+  readonly deleteThread: (threadId: string) => Effect.Effect<void, SmithersError>;
+  readonly saveMessage: (msg: Omit<MemoryMessage, "createdAtMs"> & { createdAtMs?: number }) => Effect.Effect<void, SmithersError>;
+  readonly listMessages: (threadId: string, limit?: number) => Effect.Effect<MemoryMessage[], SmithersError>;
+  readonly countMessages: (threadId: string) => Effect.Effect<number, SmithersError>;
+  readonly deleteExpiredFacts: () => Effect.Effect<number, SmithersError>;
+  readonly saveNote: (input: SaveNoteInput) => Effect.Effect<MemoryNote, SmithersError>;
+  readonly getNote: (id: string) => Effect.Effect<MemoryNote | undefined, SmithersError>;
+  readonly listNotes: (ns: MemoryNamespace, filter?: NoteReadFilter) => Effect.Effect<MemoryNote[], SmithersError>;
+  readonly setNoteStatus: (id: string, status: string) => Effect.Effect<void, SmithersError>;
+  readonly enableNoteSearch: (kind: string) => Effect.Effect<void, SmithersError>;
+  readonly searchNotes: (kind: string, query: string, limit?: number, filter?: NoteReadFilter) => Effect.Effect<MemoryNote[], SmithersError>;
+  readonly store: MemoryStore;
+};
+
+type MemoryProcessorConfig = {
+  processors?: string[];
+};
+
+type MemoryProcessor = {
+  name: string;
+  process: (store: MemoryStore) => Promise<void>;
+  processEffect: (store: MemoryStore) => Effect.Effect<void, SmithersError>;
+};
+
+type MemoryLayerConfig = {
+  db: import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>;
+};
+
+// =============================================================================
+// OpenAPI tools (smithers-orchestrator/openapi)
+// =============================================================================
+
+type OpenApiAuth =
+  | { type: "apiKey"; name: string; in: "header" | "query"; value: string }
+  | { type: "bearer"; token: string }
+  | { type: "basic"; username: string; password: string };
+
+type OpenApiRefObject = {
+  $ref: string;
+};
+
+type OpenApiSchemaObject = {
+  type?: string;
+  format?: string;
+  description?: string;
+  properties?: Record<string, OpenApiSchemaObject | OpenApiRefObject>;
+  required?: string[];
+  items?: OpenApiSchemaObject | OpenApiRefObject;
+  enum?: unknown[];
+  default?: unknown;
+  nullable?: boolean;
+  oneOf?: Array<OpenApiSchemaObject | OpenApiRefObject>;
+  anyOf?: Array<OpenApiSchemaObject | OpenApiRefObject>;
+  allOf?: Array<OpenApiSchemaObject | OpenApiRefObject>;
+  additionalProperties?: boolean | OpenApiSchemaObject | OpenApiRefObject;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  $ref?: string;
+};
+
+type OpenApiParameterObject = {
+  name: string;
+  in: "query" | "header" | "path" | "cookie";
+  description?: string;
+  required?: boolean;
+  schema?: OpenApiSchemaObject | OpenApiRefObject;
+  deprecated?: boolean;
+};
+
+type OpenApiRequestBodyObject = {
+  description?: string;
+  required?: boolean;
+  content: Record<string, { schema?: OpenApiSchemaObject | OpenApiRefObject }>;
+};
+
+type OpenApiOperationObject = {
+  operationId?: string;
+  summary?: string;
+  description?: string;
+  parameters?: Array<OpenApiParameterObject | OpenApiRefObject>;
+  requestBody?: OpenApiRequestBodyObject | OpenApiRefObject;
+  responses?: Record<string, unknown>;
+  tags?: string[];
+  deprecated?: boolean;
+};
+
+type OpenApiPathItem = {
+  get?: OpenApiOperationObject;
+  post?: OpenApiOperationObject;
+  put?: OpenApiOperationObject;
+  delete?: OpenApiOperationObject;
+  patch?: OpenApiOperationObject;
+  parameters?: Array<OpenApiParameterObject | OpenApiRefObject>;
+};
+
+type OpenApiSpec = {
+  openapi: string;
+  info: {
+    title: string;
+    version: string;
+    description?: string;
+  };
+  servers?: Array<{
+    url: string;
+    description?: string;
+  }>;
+  paths: Record<string, OpenApiPathItem>;
+  components?: {
+    schemas?: Record<string, OpenApiSchemaObject>;
+    parameters?: Record<string, OpenApiParameterObject>;
+    requestBodies?: Record<string, OpenApiRequestBodyObject>;
+  };
+};
+
+type OpenApiToolsOptions = {
+  baseUrl?: string;
+  headers?: Record<string, string>;
+  auth?: OpenApiAuth;
+  include?: string[];
+  exclude?: string[];
+  namePrefix?: string;
+  operations?: Record<
+    string,
+    | false
+    | {
+        include?: boolean;
+        name?: string;
+        description?: string;
+        responseExamples?: Array<{
+          status?: string | number;
+          description?: string;
+          value: unknown;
+        }>;
+      }
+  >;
+};
+
+// =============================================================================
+// CreateSmithers
+// =============================================================================
+
+type CreateSmithersOptions = {
+  readableName?: string;
+  description?: string;
+  alertPolicy?: SmithersAlertPolicy;
+  dbPath?: string;
+  journalMode?: string;
+};
+
+type CreateSmithersPostgresOptions =
+  CreateSmithersOptions & (
+    | { provider?: "postgres"; connectionString?: string; connection?: object }
+    | { provider: "pglite"; dataDir?: string }
+  );
+
+// Named export from "smithers-orchestrator". The returned `smithers` property is
+// the workflow wrapper; there is no default-exported top-level smithers function.
+declare function createSmithers<Schemas extends Record<string, import("zod").ZodObject<any>>>(
+  schemas: Schemas,
+  opts?: CreateSmithersOptions,
+): CreateSmithersApi<Schemas>;
+
+declare function createSmithersPostgres<Schemas extends Record<string, import("zod").ZodObject<any>>>(
+  schemas: Schemas,
+  opts?: CreateSmithersPostgresOptions,
+): Promise<CreateSmithersApi<Schemas> & { close: () => Promise<void> }>;
+
+type SchemaOutput<Schema> = Extract<
+  Schema[keyof Schema],
+  import("zod").ZodObject<import("zod").ZodRawShape>
+>;
+type RuntimeSchema<Schema> =
+  Schema extends { input: infer Input }
+    ? Omit<Schema, "input"> & { input: Input extends import("zod").ZodTypeAny ? import("zod").infer<Input> : Input }
+    : Schema;
+
+type CreateSmithersApi<Schema = unknown> = {
+  Workflow: (props: WorkflowProps) => React.ReactElement;
+  Approval: <Row>(props: ApprovalProps<Row, SchemaOutput<Schema>>) => React.ReactElement;
+  Task: <Row, D extends DepsSpec = {}>(props: TaskProps<Row, SchemaOutput<Schema>, D>) => React.ReactElement;
+  Sequence: typeof Sequence;
+  Parallel: typeof Parallel;
+  MergeQueue: typeof MergeQueue;
+  Branch: typeof Branch;
+  Loop: typeof Loop;
+  Ralph: typeof Ralph;
+  ContinueAsNew: typeof ContinueAsNew;
+  continueAsNew: typeof continueAsNew;
+  Worktree: typeof Worktree;
+  Sandbox: (props: SandboxProps) => React.ReactElement;
+  Signal: <SignalSchema extends import("zod").ZodObject<import("zod").ZodRawShape>>(props: SignalProps<SignalSchema>) => React.ReactElement;
+  Timer: typeof Timer;
+  useCtx: () => SmithersCtx<RuntimeSchema<Schema>>;
+  smithers: (
+    build: (ctx: SmithersCtx<RuntimeSchema<Schema>>) => React.ReactElement,
+    opts?: SmithersWorkflowOptions,
+  ) => SmithersWorkflow<RuntimeSchema<Schema>>;
+  db: import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>;
+  tables: { [K in keyof Schema]: unknown };
+  outputs: { [K in keyof Schema]: Schema[K] };
+};
+
+type SerializedCtx = {
+  runId: string;
+  iteration: number;
+  iterations: Record<string, number>;
+  input: unknown;
+  outputs: OutputSnapshot;
+};
+
+type HostNodeJson =
+  | {
+      kind: "element";
+      tag: string;
+      props: Record<string, string>;
+      rawProps: Record<string, any>;
+      children: HostNodeJson[];
+    }
+  | {
+      kind: "text";
+      text: string;
+    };
+
+type ExternalSmithersConfig<S extends Record<string, import("zod").ZodObject<any>>> = {
+  schemas: S;
+  agents: Record<string, AgentLike>;
+  buildFn: (ctx: SerializedCtx) => HostNodeJson;
+  dbPath?: string;
+};
+
+declare function createExternalSmithers<S extends Record<string, import("zod").ZodObject<any>>>(
+  config: ExternalSmithersConfig<S>,
+): SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void };
+
+// =============================================================================
+// Observability (smithers-orchestrator/observability)
+// =============================================================================
+
+type SmithersLogFormat = "json" | "pretty";
+type SmithersObservabilityService = { emit(event: SmithersEvent): void | Promise<void> };
+type SmithersObservabilityOptions = { service?: SmithersObservabilityService; logFormat?: SmithersLogFormat };
+type ResolvedSmithersObservabilityOptions = SmithersObservabilityOptions & { metricsPort?: number; metricsPath?: string };
+```
+
+## Error reporting
+
+`RunOptions.onError` receives a normalized `SmithersError` plus the original
+error value and the available run, node, iteration, and attempt context. It
+fires once for each `NodeFailed` or `RunFailed` event. A retrying task therefore
+produces one node report per failed attempt, and a terminal run failure adds a
+run report. Smithers catches reporter failures so they cannot change the run
+outcome.
+
+```ts
+runWorkflow(workflow, {
+  input: {},
+  onError: (r) => Sentry.captureException(r.error, { extra: { runId: r.runId, nodeId: r.nodeId, phase: r.phase } }),
+});
+```
+
+For canonical, machine-checked types, install `smithers-orchestrator` and use editor go-to-definition. For runtime errors, see [Errors](/reference/errors).

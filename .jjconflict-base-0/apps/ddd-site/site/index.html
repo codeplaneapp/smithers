@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Docs-Driven Development | Write the contract, let the agents meet it</title>
+    <meta
+      name="description"
+      content="Agents ship green PRs that solved the wrong problem, because nothing pins the intent. Docs-Driven Development makes your docs the contract: generate them, scan the code for drift, and loop it back until the code matches."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0e13;
+        --panel: #12161d;
+        --panel2: #161c25;
+        --raise: #1c232e;
+        --line: rgba(231, 236, 243, 0.08);
+        --line2: rgba(231, 236, 243, 0.16);
+        --text: #e7ecf3;
+        --muted: #98a3b3;
+        --faint: #626c7a;
+        --cyan: #38bdf8;
+        --cyan-2: #67cffb;
+        --cyan-soft: rgba(56, 189, 248, 0.12);
+        --coral: #f2705a;
+        --coral-soft: rgba(242, 112, 90, 0.12);
+        --green: #46c98a;
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Code", Consolas, monospace;
+        --wrap: 1080px;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+        line-height: 1.6; letter-spacing: 0.1px; -webkit-font-smoothing: antialiased;
+        background-image:
+          radial-gradient(1050px 560px at 84% -8%, rgba(56, 189, 248, 0.09), transparent 60%),
+          radial-gradient(760px 460px at 4% 0%, rgba(242, 112, 90, 0.06), transparent 58%);
+        background-attachment: fixed;
+      }
+      a { color: inherit; text-decoration: none; }
+      h1, h2, h3 { margin: 0; text-wrap: balance; }
+      .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
+
+      header.top { position: sticky; top: 0; z-index: 40; backdrop-filter: blur(12px);
+        background: rgba(11, 14, 19, 0.74); border-bottom: 1px solid var(--line); }
+      .nav { display: flex; align-items: center; gap: 22px; height: 62px; }
+      .brand { font-weight: 660; letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: 9px; }
+      .brand .mark { width: 11px; height: 11px; border-radius: 3px; background: linear-gradient(135deg, var(--cyan), var(--coral)); }
+      .brand small { font-family: var(--mono); font-size: 0.72rem; color: var(--faint); font-weight: 500; }
+      .nav .links { display: flex; gap: 20px; margin-left: auto; font-size: 0.9rem; color: var(--muted); }
+      .nav .links a:hover { color: var(--text); }
+      .nav .ghost { border: 1px solid var(--line2); border-radius: 8px; padding: 7px 13px; font-size: 0.85rem; font-family: var(--mono); }
+      .nav .ghost:hover { border-color: var(--cyan); color: var(--cyan-2); }
+      @media (max-width: 760px) { .nav .links a:not(.ghost) { display: none; } }
+
+      .hero { padding: 70px 0 26px; display: grid; grid-template-columns: 1fr 1.06fr; gap: 44px; align-items: center; }
+      @media (max-width: 900px) { .hero { grid-template-columns: 1fr; gap: 32px; padding-top: 50px; } }
+      .eyebrow { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.15em; text-transform: uppercase;
+        color: var(--cyan); margin: 0 0 18px; }
+      .hero h1 { font-size: clamp(2.2rem, 4.6vw, 3.4rem); font-weight: 700; line-height: 1.06; letter-spacing: -0.022em; }
+      .hero h1 .hl { color: var(--cyan-2); }
+      .hero p.sub { margin: 20px 0 0; font-size: 1.13rem; color: var(--muted); max-width: 42ch; }
+      .cta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 28px; }
+      .install { font-family: var(--mono); font-size: 0.86rem; background: #0c0f14; border: 1px solid var(--line2);
+        border-radius: 10px; padding: 12px 15px; color: #d7e0ec; display: inline-flex; gap: 10px; align-items: center; }
+      .install .p { color: var(--cyan); }
+      .btn { font-family: var(--mono); font-size: 0.86rem; border-radius: 10px; padding: 12px 16px; background: var(--cyan);
+        color: #05222f; font-weight: 600; border: 1px solid var(--cyan); }
+      .btn:hover { background: var(--cyan-2); }
+      .trust { margin-top: 20px; font-size: 0.84rem; color: var(--faint); display: flex; gap: 16px; flex-wrap: wrap; }
+      .trust b { color: var(--muted); font-weight: 600; }
+
+      /* spec / review mock */
+      .doc { background: linear-gradient(180deg, #0e1219, #0b0e13); border: 1px solid var(--line2); border-radius: 14px;
+        box-shadow: 0 30px 66px -30px rgba(0, 0, 0, 0.8); overflow: hidden; }
+      .doc .chrome { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.02); }
+      .doc .chrome i { width: 11px; height: 11px; border-radius: 50%; background: #2a2f38; }
+      .doc .chrome span { margin-left: 8px; font-family: var(--mono); font-size: 0.72rem; color: var(--faint); }
+      .doc .split { display: grid; grid-template-columns: 1fr 0.92fr; }
+      @media (max-width: 480px) { .doc .split { grid-template-columns: 1fr; } }
+      .specpane { padding: 15px 16px; border-right: 1px solid var(--line); font-family: var(--mono); font-size: 0.78rem; line-height: 1.85; }
+      .specpane .h { color: var(--cyan-2); }
+      .specpane .ln { color: #8b95a5; display: flex; gap: 10px; }
+      .specpane .ln .g { color: #454f5e; width: 16px; text-align: right; flex: none; user-select: none; }
+      .specpane .mark { background: var(--cyan-soft); border-left: 2px solid var(--cyan); padding-left: 8px; margin-left: -10px; color: #d5e8f6; }
+      .revpane { padding: 15px 15px; background: var(--panel2); display: flex; flex-direction: column; gap: 10px; }
+      .revpane .rl { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+      .tik { border-radius: 10px; padding: 11px 12px; font-size: 0.8rem; opacity: 0; animation: rise .5s ease forwards; }
+      .tik.drift { background: var(--coral-soft); border: 1px solid rgba(242, 112, 90, 0.35); animation-delay: 0.6s; }
+      .tik.drift .t { color: var(--coral); font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; }
+      .tik.fix { background: rgba(70, 201, 138, 0.09); border: 1px solid rgba(70, 201, 138, 0.32); animation-delay: 1.6s; }
+      .tik.fix .t { color: var(--green); font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; }
+      .tik p { margin: 5px 0 0; color: #cdd6e2; }
+      .diff { font-family: var(--mono); font-size: 0.72rem; margin-top: 8px; line-height: 1.7; }
+      .diff .rm { color: var(--coral); } .diff .ad { color: var(--green); }
+      @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+
+      section.block { padding: 58px 0; border-top: 1px solid var(--line); }
+      .kicker { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
+      .block h2 { font-size: clamp(1.55rem, 3vw, 2.1rem); font-weight: 690; letter-spacing: -0.015em; max-width: 20ch; }
+      .block .lead { color: var(--muted); font-size: 1.06rem; max-width: 62ch; margin: 14px 0 0; }
+
+      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 32px; }
+      @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+      .step { background: linear-gradient(180deg, var(--panel), var(--panel2)); border: 1px solid var(--line); border-radius: 13px; padding: 22px; position: relative; }
+      .step .num { font-family: var(--mono); font-size: 0.82rem; color: var(--cyan-2); width: 30px; height: 30px; border-radius: 8px;
+        display: grid; place-items: center; margin-bottom: 14px; background: var(--cyan-soft); border: 1px solid var(--line); }
+      .step h3 { font-size: 1.05rem; margin-bottom: 7px; }
+      .step p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+      .step .arrow { position: absolute; right: -11px; top: 50%; transform: translateY(-50%); color: var(--faint); font-family: var(--mono); }
+      @media (max-width: 820px) { .step .arrow { display: none; } }
+
+      .feat { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin-top: 32px; background: var(--line);
+        border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+      @media (max-width: 720px) { .feat { grid-template-columns: 1fr; } }
+      .cell { background: var(--bg); padding: 22px; }
+      .cell .ic { font-family: var(--mono); color: var(--cyan-2); font-size: 0.86rem; margin-bottom: 9px; }
+      .cell h3 { font-size: 1rem; margin-bottom: 6px; }
+      .cell p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+
+      .band { border-top: 1px solid var(--line); padding: 62px 0; }
+      .bandcard { background: radial-gradient(600px 300px at 80% -20%, rgba(56, 189, 248, 0.14), transparent 60%), linear-gradient(180deg, var(--panel2), var(--panel));
+        border: 1px solid var(--line2); border-radius: 18px; padding: 44px; text-align: center; }
+      .bandcard h2 { font-size: clamp(1.55rem, 3vw, 2.15rem); font-weight: 700; letter-spacing: -0.015em; max-width: 24ch; margin: 0 auto; }
+      .bandcard p { color: var(--muted); margin: 13px auto 0; max-width: 54ch; }
+      .bandcard .cmds { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
+
+      footer { border-top: 1px solid var(--line); padding: 28px 0 56px; }
+      footer .row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; color: var(--faint); font-size: 0.86rem; }
+      footer .links { display: flex; gap: 18px; font-family: var(--mono); font-size: 0.8rem; }
+      footer a:hover { color: var(--text); }
+
+      @media (prefers-reduced-motion: reduce) { .tik { opacity: 1; animation: none; } }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap nav">
+        <a class="brand" href="#top"><span class="mark"></span>Smithers <small>DDD</small></a>
+        <nav class="links" aria-label="Primary">
+          <a href="#why">Why</a>
+          <a href="#how">The loop</a>
+          <a href="#inside">What you get</a>
+          <a class="ghost" href="#start">Start</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="wrap hero">
+        <div>
+          <p class="eyebrow">Docs-Driven Development</p>
+          <h1>Write the contract. Let the agents <span class="hl">build to meet it.</span></h1>
+          <p class="sub">
+            Your docs become the source of truth. Smithers generates them from
+            your code, scans for where the code has drifted, and loops it back
+            until the two agree.
+          </p>
+          <div class="cta">
+            <span class="install"><span class="p">$</span> smithers workflow run docs-driven-development</span>
+          </div>
+          <div class="trust">
+            <span><b>Docs</b> are the contract</span>
+            <span><b>Bug-scan</b> finds the drift</span>
+            <span><b>The loop</b> closes it</span>
+          </div>
+        </div>
+
+        <div class="doc" role="img" aria-label="A spec document on the left with a highlighted contract clause; on the right, a bug-scan ticket flags the code drifting from that clause, then an improve step resolves it with a diff.">
+          <div class="chrome"><i></i><i></i><i></i><span>deploy.spec.md — §3 Delivery</span></div>
+          <div class="split">
+            <div class="specpane">
+              <div class="ln"><span class="g">10</span><span class="h">## §3.2 Deploy retries</span></div>
+              <div class="ln"><span class="g">11</span><span></span></div>
+              <div class="ln"><span class="g">12</span><span class="mark">The deploy step retries 3&times; with</span></div>
+              <div class="ln"><span class="g">13</span><span class="mark">exponential backoff before failing.</span></div>
+              <div class="ln"><span class="g">14</span><span></span></div>
+              <div class="ln"><span class="g">15</span><span>Partial deploys roll back.</span></div>
+            </div>
+            <div class="revpane">
+              <span class="rl">bug-scan · against the contract</span>
+              <div class="tik drift">
+                <span class="t">drift · §3.2</span>
+                <p>deploy() throws on first failure. No retry, no backoff.</p>
+              </div>
+              <div class="tik fix">
+                <span class="t">improve · resolved</span>
+                <div class="diff">
+                  <div class="rm">- await deploy()</div>
+                  <div class="ad">+ await retry(deploy, { tries: 3, backoff })</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="block wrap" id="why">
+        <p class="kicker">Why this exists</p>
+        <h2>The agent shipped green. It still solved the wrong problem.</h2>
+        <p class="lead">
+          Tests pass, the PR looks clean, and you merge it. A week later you find
+          it does not do what you meant, because nothing ever pinned the intent.
+          There was no artifact the agent was accountable to.
+        </p>
+      </section>
+
+      <section class="block wrap" id="how">
+        <p class="kicker">The loop</p>
+        <h2>Generate. Scan. Improve. Repeat.</h2>
+        <p class="lead">Three workflows that turn a pile of code into a spec, then keep the code honest to it.</p>
+        <div class="steps">
+          <article class="step">
+            <span class="num">1</span>
+            <h3>Generate the docs</h3>
+            <p>Point it at your code and it writes the reference spec: what each part is supposed to do. That spec becomes the contract.</p>
+            <span class="arrow">&rarr;</span>
+          </article>
+          <article class="step">
+            <span class="num">2</span>
+            <h3>Scan for drift</h3>
+            <p>Bug-scan reads code against the spec and files a ticket wherever the two disagree. Real gaps, not guesses.</p>
+            <span class="arrow">&rarr;</span>
+          </article>
+          <article class="step">
+            <span class="num">3</span>
+            <h3>Improve to match</h3>
+            <p>The improve loop takes a ticket and edits the code until it meets the clause, with a test-coverage pass to prove it.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="block wrap" id="inside">
+        <p class="kicker">What you get</p>
+        <h2>A codebase that stays honest.</h2>
+        <div class="feat">
+          <div class="cell">
+            <div class="ic">§ contract</div>
+            <h3>Docs the agent answers to</h3>
+            <p>Generated reference docs become the spec every later change is checked against, not throwaway comments.</p>
+          </div>
+          <div class="cell">
+            <div class="ic">⌕ bug-scan</div>
+            <h3>Drift becomes tickets</h3>
+            <p>The scan turns "the code does not match the spec" into concrete, reviewable tickets on a board.</p>
+          </div>
+          <div class="cell">
+            <div class="ic">↻ quality loop</div>
+            <h3>Close the gap, on repeat</h3>
+            <p>The improve and quality-loop workflows keep pulling code toward the contract until they agree.</p>
+          </div>
+          <div class="cell">
+            <div class="ic">✓ coverage</div>
+            <h3>Proof it holds</h3>
+            <p>A test-coverage workflow backs each fix with a test, so the contract stays enforced over time.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="start">
+        <div class="wrap">
+          <div class="bandcard">
+            <h2>Stop reviewing green PRs that missed the point.</h2>
+            <p>Generate the spec, let the scan find the drift, and let the loop close it.</p>
+            <div class="cmds">
+              <span class="install"><span class="p">$</span> smithers workflow run docs-driven-development</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap row">
+        <span>Smithers — a durable control plane for long-running coding agents.</span>
+        <nav class="links" aria-label="Footer">
+          <a href="https://smithers.sh">smithers.sh</a>
+          <a href="https://plugins.smithers.sh">plugins</a>
+          <a href="#top">Back to top</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

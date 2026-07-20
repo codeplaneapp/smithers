@@ -1,0 +1,10 @@
+{
+  "fixture": "resource-leak",
+  "clean": false,
+  "bugClass": "resource-leak",
+  "category": "performance",
+  "severity": "major",
+  "file": "src/readConfig.ts",
+  "line": 5,
+  "description": "The file handle is no longer closed after reading, leaking descriptors on repeated config loads."
+}

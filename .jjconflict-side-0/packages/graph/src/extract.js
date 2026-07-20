@@ -1,0 +1,883 @@
+import { getTableName } from "drizzle-orm";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { validateForkSources } from "./validateForkSources.js";
+import { resolveStableId } from "./utils/tree-ids.js";
+import { coerceFiniteNumber } from "./utils/numeric-props.js";
+import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
+import { normalizeTaskMemoryConfig } from "./normalizeTaskMemoryConfig.js";
+/** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */
+/** @typedef {import("./ExtractOptions.ts").ExtractOptions} ExtractOptions */
+/** @typedef {import("./HostNode.ts").HostNode} HostNode */
+/** @typedef {import("./WorkflowGraph.ts").WorkflowGraph} WorkflowGraph */
+// Default per-task heartbeat timeout. 10 min is the floor for agent-backed
+// tasks: LLM CLIs (claude, codex, gemini, kimi) can sit silent for several
+// minutes during long deliberation or large-context reads. The previous
+// 5-minute default killed reviewer agents mid-review and broke ValidationLoop.
+// Overridable at runtime via SMITHERS_TASK_HEARTBEAT_MS.
+const HEARTBEAT_DEFAULT_MS = 600_000;
+function envHeartbeatTimeoutMs() {
+    const raw = typeof process !== "undefined" && process?.env
+        ? process.env.SMITHERS_TASK_HEARTBEAT_MS
+        : undefined;
+    if (typeof raw !== "string" || raw.length === 0)
+        return HEARTBEAT_DEFAULT_MS;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0)
+        return HEARTBEAT_DEFAULT_MS;
+    return Math.floor(parsed);
+}
+const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
+const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
+/**
+ * @param {unknown} value
+ * @returns {value is import("zod").ZodObject<any>}
+ */
+function isZodObject(value) {
+    return Boolean(value && typeof value === "object" && "shape" in value);
+}
+/**
+ * @param {unknown} value
+ * @returns {value is any}
+ */
+function isDrizzleTable(value) {
+    if (!value || typeof value !== "object")
+        return false;
+    try {
+        const name = getTableName(/** @type {any} */ (value));
+        return typeof name === "string" && name.length > 0;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function hasObjectChild(value) {
+    if (Array.isArray(value))
+        return value.some(hasObjectChild);
+    return value !== null && typeof value === "object";
+}
+/**
+ * Preserve whether `bind` was authored even when its value is undefined. An
+ * undefined proof is a real scheduling dependency, distinct from omitting the
+ * prop entirely. An authored-but-empty bind list carries zero proofs, so it
+ * must wait like an undefined proof rather than pass verification vacuously.
+ * @param {Record<string, unknown>} raw
+ * @returns {{ proofBindingRequired?: boolean; proofBindings?: import("./ProofBinding.ts").ProofBinding[] }}
+ */
+function proofBindingProps(raw) {
+    if (!Object.hasOwn(raw, "bind"))
+        return {};
+    const values = Array.isArray(raw.bind) ? raw.bind : [raw.bind];
+    const bindings = values.filter((value) => Boolean(value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        typeof value.table === "string" &&
+        typeof value.nodeId === "string" &&
+        typeof value.iteration === "number" &&
+        Number.isFinite(value.iteration) &&
+        typeof value.digest === "string"));
+    return {
+        proofBindingRequired: true,
+        ...(values.length > 0 && bindings.length === values.length ? { proofBindings: bindings } : {}),
+    };
+}
+/**
+ * @param {Record<string, unknown>} raw
+ * @returns {{ outputTable: unknown | null; outputTableName: string; outputRef: import("zod").ZodObject<any> | undefined; outputSchema: import("zod").ZodObject<any> | undefined; }}
+ */
+function resolveOutput(raw) {
+    const outputRaw = raw.output;
+    if (!outputRaw) {
+        return {
+            outputTable: null,
+            outputTableName: "",
+            outputRef: undefined,
+            outputSchema: undefined,
+        };
+    }
+    const outputTable = isDrizzleTable(outputRaw) ? outputRaw : null;
+    const outputTableName = outputTable
+        ? getTableName(/** @type {any} */ (outputTable))
+        : typeof outputRaw === "string"
+            ? outputRaw
+            : "";
+    const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
+    const outputSchema = isZodObject(raw.outputSchema) ? raw.outputSchema : outputRef;
+    return {
+        outputTable,
+        outputTableName,
+        outputRef,
+        outputSchema,
+    };
+}
+/**
+ * @param {Record<string, unknown>} raw
+ * @returns {number | null}
+ */
+function parseHeartbeatTimeoutMs(raw) {
+    const selected = raw.heartbeatTimeoutMs !== undefined
+        ? raw.heartbeatTimeoutMs
+        : raw.heartbeatTimeout;
+    const candidate = coerceFiniteNumber(selected);
+    if (candidate == null || candidate <= 0) {
+        return null;
+    }
+    return Math.floor(candidate);
+}
+/**
+ * @param {Record<string, unknown>} raw
+ * @param {boolean} [isAgent]
+ * @returns {{ retries: number; retryPolicy: import("./RetryPolicy.ts").RetryPolicy | undefined }}
+ */
+function resolveRetryConfig(raw, isAgent = false) {
+    const noRetry = Boolean(raw.noRetry);
+    const continueOnFail = Boolean(raw.continueOnFail);
+    const coercedRetries = coerceFiniteNumber(raw.retries);
+    const hasExplicitRetries = coercedRetries !== null;
+    const hasExplicitRetryPolicy = Boolean(raw.retryPolicy && typeof raw.retryPolicy === "object");
+    const defaultNoRetryForContinueOnFail = continueOnFail && !hasExplicitRetries && !hasExplicitRetryPolicy;
+    // Agent tasks (CLI agents like Codex/Claude) can hit transient upstream
+    // failures (e.g. "thread <uuid> not found"). Give them at least one free
+    // retry by default — even when the user opted into continueOnFail —
+    // unless they explicitly requested noRetry.
+    const retries = noRetry
+        ? 0
+        : defaultNoRetryForContinueOnFail
+            ? (isAgent ? 1 : 0)
+            : hasExplicitRetries
+                // Clamp negative values to 0 (one attempt, no retries): a
+                // negative budget would otherwise yield maxAttempts <= 0 and a
+                // task that fails without ever executing.
+                ? Math.max(0, coercedRetries)
+                : Infinity;
+    const retryPolicy = hasExplicitRetryPolicy
+        ? /** @type {import("./RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
+        : retries > 0
+            ? /** @type {import("./RetryPolicy.ts").RetryPolicy} */ ({ backoff: "exponential", initialDelayMs: 1000 })
+            : undefined;
+    return { retries, retryPolicy };
+}
+/**
+ * @param {HostNode} node
+ * @returns {XmlNode}
+ */
+function toXmlNode(node) {
+    if (node.kind === "text") {
+        return { kind: "text", text: node.text };
+    }
+    const element = {
+        kind: /** @type {"element"} */ ("element"),
+        tag: node.tag,
+        props: node.props ?? {},
+        children: node.children.map(toXmlNode),
+    };
+    return element;
+}
+/**
+ * @param {ExtractOptions | undefined} opts
+ * @param {string} id
+ * @returns {number}
+ */
+function getRalphIteration(opts, id) {
+    const map = opts?.ralphIterations;
+    const fallback = typeof opts?.defaultIteration === "number" ? opts.defaultIteration : 0;
+    if (!map)
+        return fallback;
+    if (map instanceof Map) {
+        return map.get(id) ?? fallback;
+    }
+    const value = /** @type {Record<string, number>} */ (map)[id];
+    return typeof value === "number" ? value : fallback;
+}
+/**
+ * @param {readonly { readonly ralphId: string; readonly iteration: number }[]} loopStack
+ * @returns {string}
+ */
+function buildLoopScope(loopStack) {
+    if (loopStack.length === 0)
+        return "";
+    return `@@${loopStack.map((entry) => `${entry.ralphId}=${entry.iteration}`).join(",")}`;
+}
+/**
+ * @param {unknown} value
+ * @returns {string[] | undefined}
+ */
+function strings(value) {
+    if (!Array.isArray(value))
+        return undefined;
+    const filtered = value.filter((entry) => typeof entry === "string");
+    return filtered.length > 0 ? filtered : undefined;
+}
+/**
+ * @param {unknown} value
+ * @param {"allowedScopes" | "allowedUsers"} field
+ * @param {string} nodeId
+ * @returns {string[] | undefined}
+ */
+function approvalRestriction(value, field, nodeId) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (!Array.isArray(value) || Array.from(value).some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
+        throw new SmithersError("INVALID_INPUT", `Approval ${nodeId} ${field} must be an array of non-empty strings.`);
+    }
+    return value;
+}
+/**
+ * @param {unknown} value
+ * @returns {Record<string, string> | undefined}
+ */
+function needs(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const filtered = Object.entries(value).filter((entry) => typeof entry[1] === "string");
+    return filtered.length > 0 ? Object.fromEntries(filtered) : undefined;
+}
+/**
+ * @param {unknown} value
+ * @returns {TaskDescriptor["approvalOptions"]}
+ */
+function approvalOptions(value) {
+    if (!Array.isArray(value))
+        return undefined;
+    const options = value
+        .filter((entry) => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
+        .map((entry) => ({
+        key: typeof entry.key === "string" ? entry.key : "",
+        label: typeof entry.label === "string" ? entry.label : "",
+        ...(typeof entry.summary === "string" ? { summary: entry.summary } : {}),
+        ...(entry.metadata &&
+            typeof entry.metadata === "object" &&
+            !Array.isArray(entry.metadata)
+            ? { metadata: entry.metadata }
+            : {}),
+    }))
+        .filter((entry) => entry.key.length > 0 && entry.label.length > 0);
+    return options.length > 0 ? options : undefined;
+}
+/**
+ * @param {unknown} value
+ * @returns {TaskDescriptor["approvalAutoApprove"]}
+ */
+function approvalAutoApprove(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = /** @type {Record<string, unknown>} */ (value);
+    return {
+        ...(typeof raw.after === "number" ? { after: raw.after } : {}),
+        ...(typeof raw.audit === "boolean" ? { audit: raw.audit } : {}),
+        ...(typeof raw.conditionMet === "boolean"
+            ? { conditionMet: raw.conditionMet }
+            : {}),
+        ...(typeof raw.revertOnMet === "boolean"
+            ? { revertOnMet: raw.revertOnMet }
+            : {}),
+    };
+}
+/**
+ * Normalize the `__aspects` element prop attached by `<Task>` into the
+ * `TaskAspects` budget metadata the engine enforces. Only the budget configs
+ * are kept; the render-time accumulator and tracking flags are dropped (the
+ * engine keeps its own durable per-run accumulator and budgets enforce
+ * regardless of tracking).
+ *
+ * @param {unknown} value
+ * @returns {import("./TaskAspects.ts").TaskAspects | undefined}
+ */
+function aspects(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = /** @type {Record<string, unknown>} */ (value);
+    /** @type {import("./TaskAspects.ts").TaskAspects} */
+    const out = {};
+    const token = raw.tokenBudget;
+    if (token && typeof token === "object" && !Array.isArray(token) &&
+        typeof (/** @type {Record<string, unknown>} */ (token).max) === "number") {
+        const t = /** @type {Record<string, unknown>} */ (token);
+        out.tokenBudget = {
+            max: /** @type {number} */ (t.max),
+            ...(typeof t.perTask === "number" ? { perTask: t.perTask } : {}),
+            ...(t.onExceeded === "warn" || t.onExceeded === "skip-remaining" || t.onExceeded === "fail"
+                ? { onExceeded: /** @type {"fail" | "warn" | "skip-remaining"} */ (t.onExceeded) }
+                : {}),
+        };
+    }
+    const latency = raw.latencySlo;
+    if (latency && typeof latency === "object" && !Array.isArray(latency) &&
+        typeof (/** @type {Record<string, unknown>} */ (latency).maxMs) === "number") {
+        const l = /** @type {Record<string, unknown>} */ (latency);
+        out.latencySlo = {
+            maxMs: /** @type {number} */ (l.maxMs),
+            ...(typeof l.perTask === "number" ? { perTask: l.perTask } : {}),
+            ...(l.onExceeded === "warn" || l.onExceeded === "fail"
+                ? { onExceeded: /** @type {"fail" | "warn"} */ (l.onExceeded) }
+                : {}),
+        };
+    }
+    return out.tokenBudget || out.latencySlo ? out : undefined;
+}
+/**
+ * Resolve task memory metadata. The explicit per-Task `memory` prop replaces
+ * the nearest `<Memory>` context configuration.
+ *
+ * @param {unknown} contextValue
+ * @param {unknown} taskValue
+ * @returns {TaskDescriptor["memoryConfig"]}
+ */
+function taskMemoryConfig(contextValue, taskValue) {
+    if (taskValue !== undefined) {
+        return normalizeTaskMemoryConfig(taskValue);
+    }
+    if (contextValue !== undefined) {
+        return normalizeTaskMemoryConfig(contextValue);
+    }
+    return undefined;
+}
+/**
+ * @param {"parallel" | "merge-queue"} tag
+ * @param {Record<string, unknown>} raw
+ * @param {readonly number[]} path
+ * @param {readonly { readonly id: string; readonly max?: number }[]} stack
+ */
+function pushGroup(tag, raw, path, stack) {
+    const id = resolveStableId(raw.id, tag, path);
+    // Coerce numeric strings (e.g. from MDX) in line with scheduler.parseNum
+    const parsed = Number(raw.maxConcurrency);
+    const rawMax = Number.isFinite(parsed) ? Math.floor(parsed) : undefined;
+    // Concurrency semantics: merge-queue defaults to DEFAULT_MERGE_QUEUE_CONCURRENCY
+    // and always clamps to >= 1; parallel treats undefined or <= 0 as unlimited
+    // (fractional values already floored).
+    let max;
+    if (tag === "merge-queue") {
+        max = Math.max(1, rawMax ?? DEFAULT_MERGE_QUEUE_CONCURRENCY);
+    }
+    else if (rawMax == null || rawMax <= 0) {
+        max = undefined;
+    }
+    else {
+        max = rawMax;
+    }
+    return [...stack, { id, max }];
+}
+/**
+ * Parse the opt-in `subtreeConcurrency` prop on a parallel element: a cap on
+ * how many DIRECT CHILD SUBTREES may be in flight at once (numeric strings
+ * coerced, fractional floored; undefined or < 1 disables the cap).
+ * @param {Record<string, unknown>} raw
+ * @returns {number | undefined}
+ */
+function parseSubtreeConcurrency(raw) {
+    const parsed = Number(raw.subtreeConcurrency);
+    if (!Number.isFinite(parsed))
+        return undefined;
+    const max = Math.floor(parsed);
+    return max >= 1 ? max : undefined;
+}
+/**
+ * Parse a `priority` prop (numeric strings coerced in line with
+ * `maxConcurrency`; non-finite values ignored). Higher-priority runnable
+ * tasks claim scarce concurrency slots first; unset means "inherit from the
+ * nearest container that set one", ultimately defaulting to 0.
+ * @param {unknown} value
+ * @returns {number | undefined}
+ */
+function parsePriority(value) {
+    if (value == null)
+        return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+/** @param {unknown} value @returns {"halt" | "quarantine" | undefined} */
+function parseFailurePolicy(value) {
+    return value === "halt" || value === "quarantine" ? value : undefined;
+}
+/**
+ * Stable key identifying a direct child of a subtree-capped parallel. Prefers
+ * an explicit key/id on the child element so resume stays stable across
+ * sibling insertions; falls back to the child's element ordinal.
+ * @param {Record<string, unknown>} raw
+ * @param {number} ordinal
+ * @returns {string}
+ */
+function resolveSubtreeChildKey(raw, ordinal) {
+    if (typeof raw.key === "string" && raw.key.trim().length > 0) {
+        return raw.key;
+    }
+    if (typeof raw.id === "string" && raw.id.trim().length > 0) {
+        return raw.id;
+    }
+    return `child:${ordinal}`;
+}
+/**
+ * @param {Record<string, unknown>} raw
+ * @param {string} kind
+ * @returns {string}
+ */
+function requireTaskId(raw, kind) {
+    if (!raw.id || typeof raw.id !== "string") {
+        throw new SmithersError("TASK_ID_REQUIRED", `${kind} id is required and must be a string.`);
+    }
+    return raw.id;
+}
+/**
+ * @param {Record<string, unknown>} raw
+ * @param {string} nodeId
+ * @param {string} kind
+ */
+function requireOutput(raw, nodeId, kind) {
+    if (!raw.output) {
+        throw new SmithersError("TASK_MISSING_OUTPUT", `${kind} ${nodeId} is missing output.`, { nodeId });
+    }
+}
+/**
+ * @param {HostNode | null} root
+ * @param {ExtractOptions} [opts]
+ * @returns {WorkflowGraph}
+ */
+export function extractGraph(root, opts) {
+    if (!root) {
+        return { xml: null, tasks: [], mountedTaskIds: [] };
+    }
+    /** @type {TaskDescriptor[]} */
+    const tasks = [];
+    /** @type {string[]} */
+    const mountedTaskIds = [];
+    const seen = new Set();
+    const seenRalph = new Set();
+    const seenWorktree = new Set();
+    const seenSaga = new Set();
+    const seenTcf = new Set();
+    let ordinal = 0;
+    /**
+   * @param {string} nodeId
+   * @param {string} kind
+   * @param {Omit<TaskDescriptor, "ordinal" | "nodeId">} descriptor
+   */
+    function addDescriptor(nodeId, kind, descriptor) {
+        if (seen.has(nodeId)) {
+            throw new SmithersError("DUPLICATE_ID", `Duplicate ${kind} id detected: ${nodeId}`, { id: nodeId });
+        }
+        seen.add(nodeId);
+        tasks.push({ nodeId, ordinal: ordinal++, ...descriptor });
+        mountedTaskIds.push(`${nodeId}::${descriptor.iteration}`);
+    }
+    /**
+   * @param {HostNode} node
+     * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; readonly priority?: number; readonly failurePolicy?: "halt" | "quarantine"; }} ctx
+   */
+    function walk(node, ctx) {
+        if (node.kind === "text")
+            return;
+        const raw = node.rawProps ?? {};
+        let iteration = ctx.iteration;
+        let ralphId = ctx.ralphId;
+        let loopStack = ctx.loopStack;
+        let nextParallelStack = ctx.parallelStack;
+        let nextWorktreeStack = ctx.worktreeStack;
+        // Priority inheritance: a <Parallel>/<MergeQueue> container's priority
+        // becomes the default for every descendant task node (explicit
+        // `priority` on a node still wins). <MergeQueue> defaults to
+        // MERGE_QUEUE_PRIORITY so landing work outranks starting new work.
+        let nextPriority = ctx.priority;
+        let nextFailurePolicy = ctx.failurePolicy;
+        if (node.tag === "smithers:parallel" || node.tag === "smithers:merge-queue" || node.tag === "smithers:sequence") {
+            nextFailurePolicy = parseFailurePolicy(raw.failurePolicy) ?? nextFailurePolicy;
+        }
+        if (node.tag === "smithers:ralph") {
+            if (ctx.parentIsRalph) {
+                const innerId = resolveStableId(raw.id, "ralph", ctx.path);
+                throw new SmithersError("NESTED_LOOP", `Nested <Loop>/<Ralph> is not supported: "${innerId}" is nested inside loop "${ctx.ralphId ?? "<outer loop>"}". Run the inner work through a queue such as <MergeQueue> and re-enter via the outer loop's next iteration instead of nesting loops.`, { outerLoopId: ctx.ralphId, innerLoopId: innerId });
+            }
+            const logicalId = resolveStableId(raw.id, "ralph", ctx.path);
+            const id = logicalId + buildLoopScope(loopStack);
+            if (seenRalph.has(id)) {
+                throw new SmithersError("DUPLICATE_ID", `Duplicate Ralph id detected: ${id}`, { kind: "ralph", id });
+            }
+            seenRalph.add(id);
+            ralphId = id;
+            iteration = getRalphIteration(opts, id);
+            loopStack = [...loopStack, { ralphId: logicalId, iteration }];
+        }
+        // A parallel may also opt into subtree-level concurrency: every
+        // descendant leaf task (not just innermost-group members) records the
+        // NEAREST such ancestor so the scheduler can cap in-flight direct
+        // children (whole subtrees) instead of leaf tasks.
+        let subtreePending;
+        if (node.tag === "smithers:parallel") {
+            nextParallelStack = pushGroup("parallel", raw, ctx.path, ctx.parallelStack);
+            nextPriority = parsePriority(raw.priority) ?? nextPriority;
+            const subtreeMax = parseSubtreeConcurrency(raw);
+            if (subtreeMax != null) {
+                subtreePending = {
+                    groupId: nextParallelStack[nextParallelStack.length - 1].id,
+                    max: subtreeMax,
+                };
+            }
+        }
+        if (node.tag === "smithers:merge-queue") {
+            nextParallelStack = pushGroup("merge-queue", raw, ctx.path, nextParallelStack);
+            nextPriority = parsePriority(raw.priority) ?? MERGE_QUEUE_PRIORITY;
+        }
+        if (node.tag === "smithers:worktree") {
+            const id = resolveStableId(raw.id, "worktree", ctx.path);
+            if (seenWorktree.has(id)) {
+                throw new SmithersError("DUPLICATE_ID", `Duplicate Worktree id detected: ${id}`, { kind: "worktree", id });
+            }
+            seenWorktree.add(id);
+            const pathVal = String(raw.path ?? "").trim();
+            if (!pathVal) {
+                throw new SmithersError("WORKTREE_EMPTY_PATH", WORKTREE_EMPTY_PATH_ERROR);
+            }
+            // extractGraph never statically imports the Node-only
+            // resolveWorktreePath itself (that would pull `node:path` into any
+            // browser bundle that imports this module, whether or not a
+            // <Worktree> is actually rendered) — the caller must inject a
+            // resolver via opts.resolveWorktreePath (WorkflowDriver sources
+            // this from runtimeAdapter.worktree.resolve). Fails closed with a
+            // typed, precise error when a <Worktree> is actually encountered
+            // and no resolver was configured, rather than silently producing
+            // an unresolved/incorrect path.
+            if (typeof opts?.resolveWorktreePath !== "function") {
+                throw new SmithersError("RUNTIME_CAPABILITY_UNAVAILABLE", `<Worktree path="${pathVal}"> requires a worktree path resolver, but extractGraph was not given one ` +
+                    `(opts.resolveWorktreePath). Configure a runtimeAdapter with a worktree.resolve implementation.`, { capability: "worktree", operation: "resolve", path: pathVal });
+            }
+            nextWorktreeStack = [
+                ...ctx.worktreeStack,
+                {
+                    id,
+                    path: opts.resolveWorktreePath(pathVal, opts),
+                    ...(raw.branch ? { branch: String(raw.branch) } : {}),
+                    ...(raw.baseBranch ? { baseBranch: String(raw.baseBranch) } : {}),
+                },
+            ];
+        }
+        const ancestorScope = loopStack.length > 1 ? buildLoopScope(loopStack.slice(0, -1)) : "";
+        const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
+        const topWorktree = nextWorktreeStack[nextWorktreeStack.length - 1];
+        const common = {
+            iteration,
+            ralphId,
+            worktreeId: topWorktree?.id,
+            worktreePath: topWorktree?.path,
+            worktreeBranch: topWorktree?.branch,
+            worktreeBaseBranch: topWorktree?.baseBranch,
+            dependsOn: strings(raw.dependsOn),
+            needs: needs(raw.needs),
+            parallelGroupId: parallelGroup?.id,
+            parallelMaxConcurrency: parallelGroup?.max,
+            subtreeGroupId: ctx.subtree?.groupId,
+            subtreeChildKey: ctx.subtree?.childKey,
+            subtreeMax: ctx.subtree?.max,
+            priority: parsePriority(raw.priority) ?? ctx.priority,
+            failurePolicy: parseFailurePolicy(raw.failurePolicy) ?? ctx.failurePolicy,
+        };
+        if (node.tag === "smithers:subflow") {
+            const logicalNodeId = requireTaskId(raw, "Subflow");
+            const mode = raw.__smithersSubflowMode ?? raw.mode ?? "childRun";
+            const nodeId = logicalNodeId + ancestorScope;
+            if (mode === "inline") {
+                if (seen.has(nodeId)) {
+                    throw new SmithersError("DUPLICATE_ID", `Duplicate Subflow id detected: ${nodeId}`, { id: nodeId });
+                }
+                seen.add(nodeId);
+            }
+            if (mode !== "inline") {
+                requireOutput(raw, nodeId, "Subflow");
+                const { retries, retryPolicy } = resolveRetryConfig(raw);
+                const output = resolveOutput(raw);
+                addDescriptor(nodeId, "Subflow", {
+                    ...common,
+                    ...output,
+                    needsApproval: false,
+                    skipIf: Boolean(raw.skipIf),
+                    retries,
+                    retryPolicy,
+                    timeoutMs: coerceFiniteNumber(raw.timeoutMs),
+                    heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw),
+                    continueOnFail: Boolean(raw.continueOnFail),
+                    cachePolicy: raw.cache && typeof raw.cache === "object"
+                        ? /** @type {import("./CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
+                        : undefined,
+                    label: typeof raw.label === "string" ? raw.label : undefined,
+                    meta: {
+                        ...(raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                            ? raw.meta
+                            : {}),
+                        __subflow: true,
+                        __subflowMode: mode,
+                        __subflowInput: raw.__smithersSubflowInput,
+                        __subflowWorkflow: raw.__smithersSubflowWorkflow,
+                    },
+                });
+            }
+        }
+        if (node.tag === "smithers:sandbox") {
+            const logicalNodeId = requireTaskId(raw, "Sandbox");
+            const nodeId = logicalNodeId + ancestorScope;
+            requireOutput(raw, nodeId, "Sandbox");
+            const { retries, retryPolicy } = resolveRetryConfig(raw);
+            const output = resolveOutput(raw);
+            const runtime = raw.__smithersSandboxRuntime ?? raw.runtime;
+            addDescriptor(nodeId, "Sandbox", {
+                ...common,
+                ...output,
+                needsApproval: false,
+                skipIf: Boolean(raw.skipIf),
+                retries,
+                retryPolicy,
+                timeoutMs: coerceFiniteNumber(raw.timeoutMs),
+                heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw) ?? DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS,
+                continueOnFail: Boolean(raw.continueOnFail),
+                cachePolicy: raw.cache && typeof raw.cache === "object"
+                    ? /** @type {import("./CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
+                    : undefined,
+                label: typeof raw.label === "string" ? raw.label : undefined,
+                meta: {
+                    ...(raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                        ? raw.meta
+                        : {}),
+                    __sandbox: true,
+                    __sandboxRuntime: runtime,
+                    __sandboxProvider: raw.__smithersSandboxProvider ?? raw.provider,
+                    __sandboxWorkflow: raw.__smithersSandboxWorkflow ?? raw.workflow,
+                    __sandboxInput: raw.__smithersSandboxInput ?? raw.input,
+                    __sandboxAllowNetwork: Boolean(raw.allowNetwork),
+                    __sandboxReviewDiffs: raw.reviewDiffs,
+                    __sandboxAutoAcceptDiffs: raw.autoAcceptDiffs,
+                    __sandboxAllowNested: raw.__smithersSandboxAllowNested ?? raw.allowNested,
+                    __sandboxConfig: {
+                        image: raw.image,
+                        env: raw.env,
+                        egress: raw.egress,
+                        ports: raw.ports,
+                        volumes: raw.volumes,
+                        memoryLimit: raw.memoryLimit,
+                        cpuLimit: raw.cpuLimit,
+                        command: raw.command,
+                        workspace: raw.workspace,
+                    },
+                },
+            });
+            return;
+        }
+        if (node.tag === "smithers:wait-for-event") {
+            const logicalNodeId = requireTaskId(raw, "WaitForEvent");
+            const nodeId = logicalNodeId + ancestorScope;
+            requireOutput(raw, nodeId, "WaitForEvent");
+            const output = resolveOutput(raw);
+            const onTimeout = raw.__smithersOnTimeout ?? raw.onTimeout ?? "fail";
+            addDescriptor(nodeId, "WaitForEvent", {
+                ...common,
+                ...output,
+                needsApproval: false,
+                waitAsync: Boolean(raw.waitAsync),
+                skipIf: Boolean(raw.skipIf),
+                retries: 0,
+                timeoutMs: coerceFiniteNumber(raw.timeoutMs),
+                heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw),
+                continueOnFail: onTimeout === "continue" || onTimeout === "skip",
+                label: typeof raw.label === "string" ? raw.label : undefined,
+                meta: {
+                    ...(raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                        ? raw.meta
+                        : {}),
+                    __waitForEvent: true,
+                    __eventName: raw.__smithersEventName ?? raw.event,
+                    __correlationId: raw.__smithersCorrelationId ?? raw.correlationId,
+                    __onTimeout: onTimeout,
+                    __taggedResult: raw.__smithersTaggedResult === true || raw.tagged === true,
+                },
+            });
+        }
+        if (node.tag === "smithers:timer") {
+            const logicalNodeId = requireTaskId(raw, "Timer");
+            if (logicalNodeId.length > 256) {
+                throw new SmithersError("INVALID_INPUT", `Timer id must be 256 characters or fewer (received ${logicalNodeId.length}).`, { nodeId: logicalNodeId, maxLength: 256 });
+            }
+            const nodeId = logicalNodeId + ancestorScope;
+            const duration = typeof (raw.__smithersTimerDuration ?? raw.duration) === "string"
+                ? String(raw.__smithersTimerDuration ?? raw.duration).trim()
+                : "";
+            const untilRaw = raw.__smithersTimerUntil ?? raw.until;
+            const until = typeof untilRaw === "string"
+                ? untilRaw.trim()
+                : untilRaw instanceof Date
+                    ? untilRaw.toISOString()
+                    : "";
+            const hasDuration = duration.length > 0;
+            const hasUntil = until.length > 0;
+            if ((hasDuration ? 1 : 0) + (hasUntil ? 1 : 0) !== 1) {
+                throw new SmithersError("INVALID_INPUT", `Timer ${nodeId} must define exactly one of duration or until.`, { nodeId, duration: raw.duration, until: raw.until });
+            }
+            if (raw.every !== undefined) {
+                throw new SmithersError("INVALID_INPUT", `Timer ${nodeId} uses every=, but recurring timers are not supported yet.`, { nodeId, every: raw.every });
+            }
+            addDescriptor(nodeId, "Timer", {
+                ...common,
+                outputTable: null,
+                outputTableName: "",
+                outputRef: undefined,
+                outputSchema: undefined,
+                needsApproval: false,
+                skipIf: Boolean(raw.skipIf),
+                retries: 0,
+                timeoutMs: null,
+                heartbeatTimeoutMs: null,
+                continueOnFail: false,
+                label: typeof raw.label === "string" ? raw.label : `timer:${nodeId}`,
+                meta: {
+                    ...(raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                        ? raw.meta
+                        : {}),
+                    __timer: true,
+                    __timerType: hasDuration ? "duration" : "absolute",
+                    ...(hasDuration ? { __timerDuration: duration } : {}),
+                    ...(hasUntil ? { __timerUntil: until } : {}),
+                },
+            });
+        }
+        if (node.tag === "smithers:saga") {
+            const id = resolveStableId(raw.id, "saga", ctx.path);
+            if (seenSaga.has(id)) {
+                throw new SmithersError("DUPLICATE_ID", `Duplicate Saga id detected: ${id}`, { kind: "saga", id });
+            }
+            seenSaga.add(id);
+        }
+        if (node.tag === "smithers:try-catch-finally") {
+            const id = resolveStableId(raw.id, "tcf", ctx.path);
+            if (seenTcf.has(id)) {
+                throw new SmithersError("DUPLICATE_ID", `Duplicate TryCatchFinally id detected: ${id}`, { kind: "try-catch-finally", id });
+            }
+            seenTcf.add(id);
+        }
+        if (node.tag === "smithers:task") {
+            const logicalNodeId = requireTaskId(raw, "Task");
+            const nodeId = logicalNodeId + ancestorScope;
+            requireOutput(raw, nodeId, "Task");
+            const output = resolveOutput(raw);
+            const approvalMode = raw.approvalMode === "decision" ||
+                raw.approvalMode === "select" ||
+                raw.approvalMode === "rank"
+                ? raw.approvalMode
+                : "gate";
+            const approvalOnDeny = raw.approvalOnDeny === "continue" ||
+                raw.approvalOnDeny === "skip" ||
+                raw.approvalOnDeny === "fail"
+                ? raw.approvalOnDeny
+                : undefined;
+            const approvalAllowedScopes = approvalRestriction(raw.approvalAllowedScopes, "allowedScopes", logicalNodeId);
+            const approvalAllowedUsers = approvalRestriction(raw.approvalAllowedUsers, "allowedUsers", logicalNodeId);
+            const kind = raw.__smithersKind;
+            if (kind === "human" &&
+                raw.retries !== undefined &&
+                coerceFiniteNumber(raw.retries) === null) {
+                const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                    ? /** @type {Record<string, unknown>} */ (raw.meta)
+                    : undefined;
+                const maxAttempts = typeof meta?.maxAttempts === "number" ? meta.maxAttempts : raw.retries;
+                throw new SmithersError("INVALID_INPUT", `<HumanTask id="${logicalNodeId}"> maxAttempts must be finite.`, {
+                    nodeId: logicalNodeId,
+                    maxAttempts: String(maxAttempts),
+                });
+            }
+            const isAgent = kind === "agent" || Boolean(raw.agent);
+            const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
+            const isCompute = (kind === "compute" || kind === "human") && typeof raw.__smithersComputeFn === "function";
+            const taskKind = kind === "human" && isCompute ? "human" : isAgent ? "agent" : isCompute ? "compute" : "static";
+            const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
+            const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
+                (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
+            if (isAgent && hasObjectChild(raw.children)) {
+                throw new SmithersError("MDX_PRELOAD_INACTIVE", `Task "${logicalNodeId}" prompt resolved to [object Object].`);
+            }
+            const prompt = isAgent ? String(raw.children ?? "") : undefined;
+            addDescriptor(nodeId, "Task", {
+                ...common,
+                ...output,
+                ...proofBindingProps(raw),
+                kind: /** @type {TaskDescriptor["kind"]} */ (taskKind),
+                forkSource: typeof raw.fork === "string" && raw.fork ? raw.fork : undefined,
+                needsApproval: Boolean(raw.needsApproval),
+                waitAsync: Boolean(raw.waitAsync),
+                approvalMode,
+                approvalOnDeny,
+                approvalOptions: approvalOptions(raw.approvalOptions),
+                approvalAllowedScopes,
+                approvalAllowedUsers,
+                approvalAutoApprove: approvalAutoApprove(raw.approvalAutoApprove),
+                skipIf: Boolean(raw.skipIf),
+                retries,
+                maxSchemaRetries: typeof raw.maxSchemaRetries === "number" ? raw.maxSchemaRetries : undefined,
+                retryPolicy,
+                timeoutMs: coerceFiniteNumber(raw.timeoutMs),
+                heartbeatTimeoutMs,
+                continueOnFail: Boolean(raw.continueOnFail),
+                cachePolicy: raw.cache && typeof raw.cache === "object"
+                    ? /** @type {import("./CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
+                    : undefined,
+                hijack: Boolean(raw.hijack),
+                onHijackExit: raw.onHijackExit === "reopen" ? "reopen" : "complete",
+                agent: /** @type {TaskDescriptor["agent"]} */ (raw.agent),
+                prompt,
+                staticPayload: isAgent || isCompute
+                    ? undefined
+                    : (raw.__smithersPayload ?? raw.__payload ?? raw.children),
+                computeFn: isCompute
+                    ? /** @type {() => unknown} */ (raw.__smithersComputeFn)
+                    : undefined,
+                label: typeof raw.label === "string" ? raw.label : undefined,
+                meta: raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                    ? /** @type {Record<string, unknown>} */ (raw.meta)
+                    : undefined,
+                scorers: raw.scorers && typeof raw.scorers === "object" && !Array.isArray(raw.scorers)
+                    ? /** @type {import("./ScorersMap.ts").ScorersMap} */ (raw.scorers)
+                    : undefined,
+                groundTruth: raw.groundTruth,
+                context: raw.context,
+                memoryConfig: taskMemoryConfig(raw.__memory, raw.memory),
+                aspects: aspects(raw.__aspects),
+            });
+        }
+        let elementIndex = 0;
+        for (const child of node.children) {
+            const childOrdinal = elementIndex;
+            const nextPath = child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
+            walk(child, {
+                path: nextPath,
+                iteration,
+                ralphId,
+                parentIsRalph: node.tag === "smithers:ralph",
+                parallelStack: nextParallelStack,
+                worktreeStack: nextWorktreeStack,
+                loopStack,
+                subtree: subtreePending && child.kind === "element"
+                    ? {
+                        groupId: subtreePending.groupId,
+                        max: subtreePending.max,
+                        childKey: resolveSubtreeChildKey(child.rawProps ?? {}, childOrdinal),
+                    }
+                    : ctx.subtree,
+                priority: nextPriority,
+                failurePolicy: nextFailurePolicy,
+            });
+        }
+    }
+    walk(root, {
+        path: [],
+        iteration: 0,
+        parentIsRalph: false,
+        parallelStack: [],
+        worktreeStack: [],
+        loopStack: [],
+    });
+    validateForkSources(tasks);
+    return { xml: toXmlNode(root), tasks, mountedTaskIds };
+}
+export const extractFromHost = extractGraph;

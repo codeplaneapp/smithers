@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --bg:#0C0E16; --surface-1:#141826; --surface-2:#1A2030;
+    --text-primary:rgba(255,255,255,.88); --text-secondary:rgba(255,255,255,.60); --text-tertiary:rgba(255,255,255,.45);
+    --border:rgba(255,255,255,.08); --fill-hover:rgba(255,255,255,.04); --fill-selected:rgba(76,141,255,.12);
+    --accent:#4C8DFF; --success:#34D399; --warning:#FBBF24; --danger:#F87171; --info:#60A5FA;
+    --accent-fill:rgba(76,141,255,.12); --accent-stroke:rgba(76,141,255,.35);
+    --font-sans:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#000;font-family:var(--font-sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .card{
+    width:1600px;height:900px;position:relative;overflow:hidden;
+    background:radial-gradient(1200px 700px at 78% -10%, rgba(76,141,255,.10), transparent 60%), var(--bg);
+    color:var(--text-primary);padding:84px 96px;display:flex;flex-direction:column;
+  }
+  .card + .card{margin-top:40px}
+  .kicker{font-family:var(--font-mono);font-size:22px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent);margin-bottom:26px}
+  h1{font-size:92px;line-height:.98;font-weight:800;letter-spacing:-.02em}
+  h2{font-size:64px;line-height:1.02;font-weight:800;letter-spacing:-.015em}
+  .sub{font-size:32px;line-height:1.4;color:var(--text-secondary);max-width:1180px;margin-top:26px}
+  .brand{position:absolute;left:96px;bottom:60px;display:flex;align-items:center;gap:16px;color:var(--text-tertiary);font-size:24px}
+  .brand .dot{width:14px;height:14px;border-radius:3px;background:var(--accent)}
+  .ver{position:absolute;right:96px;bottom:60px;font-family:var(--font-mono);font-size:24px;color:var(--text-tertiary)}
+  .spacer{flex:1}
+  .note{margin-top:50px;font-size:30px;line-height:1.4;color:var(--text-secondary);max-width:1200px}
+  .note b{color:var(--text-primary)}
+
+  /* command chips + prompt boxes */
+  .cmds{display:flex;flex-wrap:wrap;gap:16px;margin-top:54px}
+  .cmd{font-family:var(--font-mono);font-size:28px;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:20px 26px}
+  .cmd .p{color:var(--accent)}
+  .prompt{margin-top:48px;font-family:var(--font-mono);font-size:30px;background:#000;border:1px solid var(--accent-stroke);border-radius:12px;padding:28px 34px;display:inline-block;color:var(--text-primary)}
+  .prompt .p{color:var(--accent)}
+  .prompt .c{color:var(--text-tertiary)}
+
+  /* horizontal flow of steps with arrows */
+  .flow{display:flex;align-items:center;gap:20px;margin-top:56px;flex-wrap:wrap}
+  .step{font-family:var(--font-mono);font-size:27px;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:20px 26px;color:var(--text-secondary)}
+  .step.on{color:var(--accent);border-color:var(--accent-stroke);background:var(--accent-fill)}
+  .arrow{color:var(--text-tertiary);font-size:34px}
+
+  /* fork: one source to three targets */
+  .fork{display:flex;align-items:center;gap:34px;margin-top:60px}
+  .fork .src{font-family:var(--font-mono);font-size:30px;background:#000;border:1px solid var(--accent-stroke);border-radius:12px;padding:26px 32px;color:var(--accent)}
+  .fork .targets{display:flex;flex-direction:column;gap:18px}
+  .fork .t{font-family:var(--font-mono);font-size:28px;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:18px 28px;color:var(--text-secondary)}
+
+  /* pill chips */
+  .chips{display:flex;flex-wrap:wrap;gap:16px;margin-top:54px}
+  .chip{font-size:30px;background:var(--surface-1);border:1px solid var(--border);border-radius:999px;padding:18px 32px;color:var(--text-secondary)}
+  .chip.on{color:var(--accent);border-color:var(--accent-stroke);background:var(--accent-fill)}
+  .chip.new::after{content:"NEW";font-family:var(--font-mono);font-size:18px;letter-spacing:.12em;color:var(--success);margin-left:14px}
+
+  /* usage table */
+  .tbl{margin-top:48px;width:100%;max-width:1280px;border-collapse:collapse;font-size:30px}
+  .tbl th{font-family:var(--font-mono);font-size:21px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-tertiary);text-align:left;padding:18px 24px;border-bottom:1px solid var(--border)}
+  .tbl td{padding:22px 24px;border-bottom:1px solid var(--border);color:var(--text-secondary)}
+  .tbl .id{font-family:var(--font-mono);color:var(--accent)}
+  .tbl .win{font-family:var(--font-mono);color:var(--text-tertiary);font-size:26px}
+  .meter{display:flex;align-items:center;gap:20px}
+  .meter .track{width:360px;height:30px;background:var(--surface-1);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  .meter .fill{height:100%}
+  .meter .pct{font-family:var(--font-mono);font-size:26px;color:var(--text-primary);min-width:80px}
+
+  /* two-column lists */
+  .cols{display:flex;gap:26px;margin-top:50px}
+  .col{flex:1;background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:36px 38px}
+  .col h3{font-family:var(--font-mono);font-size:23px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:24px;color:var(--accent)}
+  .col.a h3{color:var(--info)} .col.b h3{color:var(--success)} .col.c h3{color:var(--warning)}
+  .item{display:flex;align-items:flex-start;gap:16px;font-size:27px;padding:11px 0;color:var(--text-secondary)}
+  .item .tick{font-size:24px;color:var(--accent);line-height:1.3}
+  .col.a .tick{color:var(--info)} .col.b .tick{color:var(--success)} .col.c .tick{color:var(--warning)}
+</style>
+</head>
+<body>
+
+<!-- 1. HERO :: create-workflow -->
+<div class="card" id="hero">
+  <div class="kicker">Smithers · v0.23.0</div>
+  <h1>Describe a workflow.<br/>Smithers builds it.</h1>
+  <div class="sub">The new <span style="font-family:var(--font-mono);color:var(--accent)">create-workflow</span> metaworkflow turns a plain-English ask into a runnable workflow: clarify the spec, design the graph, scaffold real files, verify until it compiles, then write the skill that documents it.</div>
+  <div class="flow">
+    <span class="step on">clarify</span><span class="arrow">→</span>
+    <span class="step">design</span><span class="arrow">→</span>
+    <span class="step">scaffold</span><span class="arrow">→</span>
+    <span class="step">verify</span><span class="arrow">→</span>
+    <span class="step">document</span>
+  </div>
+  <div class="prompt"><span class="p">$</span> bunx smithers-orchestrator init &nbsp;<span class="c"># seeds create-workflow</span></div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">0.23.0</div>
+</div>
+
+<!-- 2. POSTGRES -->
+<div class="card" id="postgres">
+  <div class="kicker">New · Persistence</div>
+  <h2>Run Smithers on Postgres.</h2>
+  <div class="fork">
+    <span class="src">your hand-written SQL</span>
+    <span class="arrow">→</span>
+    <div class="targets">
+      <span class="t">SQLite &nbsp;<span style="color:var(--text-tertiary)">bun:sqlite</span></span>
+      <span class="t">PGlite &nbsp;<span style="color:var(--text-tertiary)">embedded, in-process</span></span>
+      <span class="t">PostgreSQL &nbsp;<span style="color:var(--text-tertiary)">managed, production</span></span>
+    </div>
+  </div>
+  <div class="note">One dialect seam runs that exact SQL across all three with no query rewrites. Develop against an in-process PGlite, deploy against managed Postgres, <b>same code</b>.</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">createSmithersPostgres()</div>
+</div>
+
+<!-- 3. USAGE -->
+<div class="card" id="usage">
+  <div class="kicker">New · bunx smithers-orchestrator usage</div>
+  <h2>See how much quota each account burned.</h2>
+  <table class="tbl">
+    <tr><th>account</th><th>window</th><th>consumed</th></tr>
+    <tr>
+      <td class="id">claude-code</td><td class="win">5h</td>
+      <td><div class="meter"><div class="track"><div class="fill" style="width:72%;background:var(--warning)"></div></div><span class="pct">72%</span></div></td>
+    </tr>
+    <tr>
+      <td class="id">codex</td><td class="win">weekly</td>
+      <td><div class="meter"><div class="track"><div class="fill" style="width:41%;background:var(--accent)"></div></div><span class="pct">41%</span></div></td>
+    </tr>
+    <tr>
+      <td class="id">anthropic-api</td><td class="win">rate-limit</td>
+      <td><div class="meter"><div class="track"><div class="fill" style="width:18%;background:var(--success)"></div></div><span class="pct">18%</span></div></td>
+    </tr>
+    <tr>
+      <td class="id">openai-api</td><td class="win">rate-limit</td>
+      <td><div class="meter"><div class="track"><div class="fill" style="width:6%;background:var(--success)"></div></div><span class="pct">6%</span></div></td>
+    </tr>
+  </table>
+  <div class="note">One report across every provider. Credentials are read host-side and <b>never leave the process</b>. <span style="font-family:var(--font-mono)">--format json</span> for scripts.</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">--account · --provider · --fresh</div>
+</div>
+
+<!-- 4. ANY AGENT + MCP -->
+<div class="card" id="agents">
+  <div class="kicker">Agents</div>
+  <h2>Any agent. Any MCP server.</h2>
+  <div class="chips">
+    <span class="chip on">Claude Code</span>
+    <span class="chip on">Codex</span>
+    <span class="chip on">Gemini</span>
+    <span class="chip on">Antigravity</span>
+    <span class="chip on">Hermes</span>
+    <span class="chip on new">Vibe (Mistral)</span>
+  </div>
+  <div class="note">Every agent runs behind the same durable engine. New this release: a Vibe (Mistral) agent and a corrected Antigravity CLI. And <b>createMcpToolset</b> connects any stdio MCP server, projecting its tools straight into an SDK agent.</div>
+  <div class="prompt"><span class="p">const</span> { tools } = <span class="p">await</span> createMcpToolset({ command, args })</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">claude · codex · gemini · antigravity · hermes · vibe</div>
+</div>
+
+<!-- 5. CUSTOM WORKFLOW UIS / ULTRAGRILL -->
+<div class="card" id="customui">
+  <div class="kicker">New · Custom Workflow UIs</div>
+  <h2>Workflows ship their own UI.</h2>
+  <div class="note">A workflow registers a browser UI through the Gateway, served at <span style="font-family:var(--font-mono);color:var(--accent)">/workflows/&lt;key&gt;</span> with live run, event, and node-output hooks over real RPC.</div>
+  <div class="cmds">
+    <div class="cmd">gateway.register({ <span class="p">ui</span>: { entry } })</div>
+  </div>
+  <div class="note" style="margin-top:40px"><b>UltraGrill</b> is the showcase: an open-ended real-time collaboration workflow with a live custom UI, launched with one command.</div>
+  <div class="prompt"><span class="p">$</span> bun .smithers/scripts/ultragrill.ts <span style="color:var(--text-secondary)">"ship the landing page"</span></div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">gateway-react · gateway-client</div>
+</div>
+
+<!-- 6. ASK HUMAN -->
+<div class="card" id="askhuman">
+  <div class="kicker">New · Human in the loop</div>
+  <h2>Let an agent stop and ask a person.</h2>
+  <div class="flow">
+    <span class="step">blocked</span><span class="arrow">→</span>
+    <span class="step on">ask_human</span><span class="arrow">→</span>
+    <span class="step">waits</span><span class="arrow">→</span>
+    <span class="step">answer</span><span class="arrow">→</span>
+    <span class="step on">resumes</span>
+  </div>
+  <div class="note">When an agent is blocked, uncertain, or about to do something irreversible, it raises a durable request and <b>blocks until a human answers</b>. Available as the <span style="font-family:var(--font-mono)">ask-human</span> CLI and the <span style="font-family:var(--font-mono)">ask_human</span> MCP tool.</div>
+  <div class="prompt"><span class="p">$</span> bunx smithers-orchestrator ask-human <span style="color:var(--text-secondary)">"Which DB should I target?"</span> --choices sqlite,postgres</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">--choices · --context · --timeout</div>
+</div>
+
+<!-- 7. BUNDLED JJ -->
+<div class="card" id="jj">
+  <div class="kicker">New · Zero-install VCS</div>
+  <h2>jj, bundled.</h2>
+  <div class="chips">
+    <span class="chip">darwin-arm64</span>
+    <span class="chip">darwin-x64</span>
+    <span class="chip">linux-arm64</span>
+    <span class="chip">linux-x64</span>
+    <span class="chip">win32-x64</span>
+  </div>
+  <div class="note">Smithers ships a jj binary per platform, so worktree snapshots and forks work with <b>no system install</b>. A package manager pulls only the one matching your host, and the doctor tells you up front when no usable git or jj is present.</div>
+  <div class="prompt"><span class="p">$</span> bunx smithers-orchestrator workflow doctor &nbsp;<span class="c"># vcs: ok</span></div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">SMITHERS_JJ_PATH override · PATH fallback</div>
+</div>
+
+<!-- 8. PROOF / CTA -->
+<div class="card" id="proof">
+  <div class="kicker">Also in 0.23.0</div>
+  <h2>Benchmarks, examples, correctness.</h2>
+  <div class="cols">
+    <div class="col a">
+      <h3>Benchmarks</h3>
+      <div class="item"><span class="tick">›</span> SWE-Bench Pro</div>
+      <div class="item"><span class="tick">›</span> SWE-EVO</div>
+      <div class="item"><span class="tick">›</span> Claw-Eval-Live</div>
+      <div class="item"><span class="tick">›</span> RoadmapBench</div>
+      <div class="item" style="color:var(--text-tertiary)"><span class="tick" style="color:var(--text-tertiary)">·</span> Opus 4.8 + Codex</div>
+    </div>
+    <div class="col b">
+      <h3>Examples</h3>
+      <div class="item"><span class="tick">✓</span> defending-code (ASAN vuln discovery)</div>
+      <div class="item"><span class="tick">✓</span> open-code-review</div>
+    </div>
+    <div class="col c">
+      <h3>Correctness</h3>
+      <div class="item"><span class="tick">✓</span> outer-JSON extraction</div>
+      <div class="item"><span class="tick">✓</span> DevTools stream recovery</div>
+      <div class="item"><span class="tick">✓</span> strict Codex schemas</div>
+      <div class="item"><span class="tick">✓</span> Pi plugin MCP bridge</div>
+    </div>
+  </div>
+  <div class="note">Full changelog: <b>smithers.sh/changelogs/0.23.0</b></div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">0.23.0</div>
+</div>
+
+</body>
+</html>

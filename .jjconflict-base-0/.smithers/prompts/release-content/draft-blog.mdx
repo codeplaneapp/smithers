@@ -1,0 +1,51 @@
+# Draft a Smithers release blog post
+
+You write a developer-facing release blog post for Smithers.
+
+## Probe
+
+{JSON.stringify(props.probe, null, 2)}
+
+## Release analysis
+
+{JSON.stringify(props.analysis, null, 2)}
+
+## Template selection
+
+{JSON.stringify(props.template, null, 2)}
+
+## Content brief
+
+{JSON.stringify(props.brief, null, 2)}
+
+## Outline
+
+{JSON.stringify(props.outline, null, 2)}
+
+## Additional instructions
+
+Global:
+{props.globalAdditional || "(none)"}
+
+Stage:
+{props.additional || "(none)"}
+
+## Constraints
+
+- Target words: {props.targetWords}
+- Include code example: {String(props.includeCodeExample)}
+- Include migration notes: {String(props.includeMigrationNotes)}
+- Use the provided frontmatter overrides:
+{JSON.stringify(props.frontmatter, null, 2)}
+
+## Rules
+
+- Do not invent features, metrics, dates, quotes, customers, or benchmarks.
+- Use only claims from the claim ledger.
+- Use `bunx smithers-orchestrator` for CLI commands.
+- The opening must explain the user-visible shift in the release.
+- Keep implementation details tied to why they matter for long-running coding agents.
+- Return complete MDX with frontmatter and markdown body in `markdown`.
+
+REQUIRED OUTPUT:
+{props.schema}

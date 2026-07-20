@@ -1,0 +1,8 @@
+# Vendored canonical harness (cloned via `pnpm setup`; large)
+vendor/
+# Per-instance checkouts, scoring workspaces, reports
+.work/
+# Scratch e2e drivers
+.work-*.mjs
+# Dataset is regenerated with `node scripts/fetch-dataset.js` (24MB; not committed)
+data/*.jsonl

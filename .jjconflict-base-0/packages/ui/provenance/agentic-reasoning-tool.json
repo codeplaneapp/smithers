@@ -1,0 +1,40 @@
+[
+  {
+    "file": "src/agentic/Reasoning.tsx",
+    "exports": ["Reasoning"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/reasoning",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "immediate auto-collapse (upstream delays 1s)",
+      "flattened Trigger/Content compound"
+    ]
+  },
+  {
+    "file": "src/agentic/ChainOfThought.tsx",
+    "exports": ["ChainOfThought"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/chain-of-thought",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "per-step images/search-result chips",
+      "per-step collapsible content"
+    ],
+    "divergences": []
+  },
+  {
+    "file": "src/agentic/ToolCall.tsx",
+    "exports": ["ToolCall"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/tool",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "upstream CodeBlock-rendered output",
+      "image parts"
+    ],
+    "divergences": [
+      "approvalSlot is a seam rather than built-in approval buttons"
+    ]
+  }
+]

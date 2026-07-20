@@ -1,0 +1,58 @@
+# Render the run report slideshow
+
+You are the render step of the `report-slideshow` workflow. Turn the captured
+Smithers run state and artifacts into a single, self-contained HTML slideshow
+report. No external dependencies: inline all CSS in a `style` tag, use no
+JavaScript frameworks, no CDN links, no web fonts. The whole document must be one
+`.html` file a human can open directly.
+
+## Report title (use this unless the run clearly names itself something better)
+
+{props.title}
+
+## Run id
+
+{props.runId}
+
+## Captured run state
+
+This is the deterministic snapshot from `smithers inspect`. The `ok` field says
+whether the inspect call returned usable JSON; `nodes` is the flattened workflow
+graph; `raw` is the (truncated) raw payload you can mine for extra detail.
+
+{JSON.stringify(props.gather, null, 2)}
+
+## What the slideshow must cover
+
+Build one slide section per topic below. Each slide is a `section` element with a
+heading and concise content. Keep prose tight — this is a report, not an essay.
+
+1. **Title / objective** — the report title and a one-line objective for the run.
+2. **Decisions** — the key decisions or choices made during the run.
+3. **Workflow graph** — a text rendering of the node graph (ids, types, status),
+   derived from `nodes`. A simple indented list or a small table is fine.
+4. **Artifacts** — files written, outputs produced, or links surfaced by the run.
+5. **Tests / gates** — test results, approval gates, and verification steps.
+6. **Failures / retries** — any failed nodes, retries, or errors observed.
+7. **Remaining issues** — open questions or follow-ups still outstanding.
+
+If a topic has no data in the captured state, keep the slide but say so plainly
+(for example, a short "No failures recorded." line) rather than inventing detail.
+
+## HTML rules
+
+- Emit ONE complete document starting with a `DOCTYPE html` declaration.
+- Put all styling in a single inline `style` block in the `head`.
+- Each slide is a full-width `section`; separate slides visually with spacing,
+  a top border, or a subtle background — keep it clean and readable.
+- No script tags, no external URLs, no image hosts. Self-contained only.
+- Escape any literal angle brackets that appear inside text content so the page
+  renders them as text, not markup.
+
+## Output
+
+Return the chosen `title`, the full `html` document as a single string, and
+`slideCount` (the number of slide sections you produced).
+
+REQUIRED OUTPUT:
+{props.schema}

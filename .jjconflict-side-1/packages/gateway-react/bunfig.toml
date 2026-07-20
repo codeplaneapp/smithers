@@ -1,0 +1,5 @@
+# Preload a guard that neutralizes a happy-dom + `ws` teardown race where a
+# listener-less raw-socket 'error' crashes an unrelated test file in bun's
+# single-process runner. See tests/happy-dom-ws-guard.ts for the full rationale.
+[test]
+preload = ["./tests/happy-dom-ws-guard.ts"]

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#4C8DFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#4C8DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#0C0E16"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+<text font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF" letter-spacing="5"><tspan x="96" y="156">SMITHERS · V0.28.0</tspan></text>
+<text font-size="60" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#E7E9EE" font-weight="800"><tspan x="96" y="250">Fixed graph or adaptive graph.</tspan></text>
+<text font-size="29" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="96" y="304">Two bounded delegation models, both compiled into ordinary Smithers tasks.</tspan></text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">
+    <rect x="96" y="356" width="672" height="376" rx="16" fill="#141826" stroke="#31558E"/>
+    <text x="128" y="402" font-size="18" letter-spacing="2" fill="#4C8DFF">DELEGATIONCHAIN · STABLE</text>
+    <g font-size="21" fill="#E7E9EE" text-anchor="middle">
+      <rect x="132" y="466" width="122" height="70" rx="10" fill="#182641" stroke="#31558E"/>
+      <text x="193" y="509">refine</text>
+      <text x="276" y="509" fill="#6B7280">→</text>
+      <rect x="310" y="466" width="122" height="70" rx="10" fill="#182641" stroke="#31558E"/>
+      <text x="371" y="509">plan</text>
+      <text x="454" y="509" fill="#6B7280">→</text>
+      <rect x="488" y="466" width="122" height="70" rx="10" fill="#182641" stroke="#31558E"/>
+      <text x="549" y="509">execute</text>
+      <text x="632" y="509" fill="#6B7280">→</text>
+      <rect x="666" y="466" width="70" height="70" rx="10" fill="#182641" stroke="#31558E"/>
+      <text x="701" y="509" font-size="18">review</text>
+    </g>
+    <text x="128" y="658" font-size="24" fill="#9CA3B4">known graph · bounded replanning</text>
+
+    <rect x="832" y="356" width="672" height="376" rx="16" fill="#141826" stroke="#8A6A2A"/>
+    <text x="864" y="402" font-size="18" letter-spacing="2" fill="#FBBF24">TRELLIS · EXPERIMENTAL</text>
+    <rect x="1080" y="448" width="176" height="62" rx="10" fill="#292317" stroke="#8A6A2A"/>
+    <text x="1168" y="487" text-anchor="middle" font-size="21" fill="#E7E9EE">AUTHOR</text>
+    <line x1="1168" y1="510" x2="1168" y2="552" stroke="#FBBF24" stroke-width="3"/>
+    <line x1="950" y1="552" x2="1386" y2="552" stroke="#FBBF24" stroke-width="3"/>
+    <line x1="950" y1="552" x2="950" y2="574" stroke="#FBBF24" stroke-width="3"/>
+    <line x1="1168" y1="552" x2="1168" y2="574" stroke="#FBBF24" stroke-width="3"/>
+    <line x1="1386" y1="552" x2="1386" y2="574" stroke="#FBBF24" stroke-width="3"/>
+    <g font-size="19" fill="#E7E9EE" text-anchor="middle">
+      <rect x="870" y="574" width="160" height="60" rx="10" fill="#292317" stroke="#8A6A2A"/><text x="950" y="612">AGENT</text>
+      <rect x="1088" y="574" width="160" height="60" rx="10" fill="#292317" stroke="#8A6A2A"/><text x="1168" y="612">SEQUENCE</text>
+      <rect x="1306" y="574" width="160" height="60" rx="10" fill="#292317" stroke="#8A6A2A"/><text x="1386" y="612">PARALLEL</text>
+    </g>
+    <text x="864" y="690" font-size="24" fill="#9CA3B4">validated IR · fuel · depth · concurrency</text>
+  </g>
+
+  <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
+  <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>
+  <text x="1504" y="826" font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="end">0.28.0</text>
+</svg>

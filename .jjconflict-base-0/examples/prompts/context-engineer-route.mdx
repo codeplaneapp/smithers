@@ -1,0 +1,59 @@
+# Route the contracted work
+
+You are the **router** of the Context Engineer. The script has been classified
+and turned into a context contract, and any blocking ambiguity has been resolved
+by grilling. Decide how the contracted work should actually be carried out. Do
+NOT do the work here — only choose the route.
+
+## The script
+
+{props.prompt}
+
+## Classification
+
+{`\`\`\`json
+${JSON.stringify(props.classification, null, 2)}
+\`\`\``}
+
+## Context contract
+
+{`\`\`\`json
+${JSON.stringify(props.contract, null, 2)}
+\`\`\``}
+
+## Shared understanding from grilling (may be null)
+
+{props.sharedUnderstanding ?? "(grilling produced no extra shared understanding)"}
+
+## Durable seeded workflows you can route to
+
+{`\`\`\`json
+${JSON.stringify(props.workflows, null, 2)}
+\`\`\``}
+
+## Choose a route
+
+Pick exactly one `selectedRoute`:
+
+- `single_task` — one worker agent can finish this in a single pass.
+- `skills` — the work is best done by a worker agent loading specific skills.
+- `workflow` — the work earns a durable seeded workflow (ordering, loops,
+  approvals, crash-recovery).
+- `manual` — the work should be handed to a human, not executed automatically.
+
+Then fill in:
+
+- `selectedSkills` — skills the executor should load, best-first (lean on the
+  contract's `availableSkills`).
+- `selectedWorkflow` — if `selectedRoute` is `workflow`, the single best-fit id
+  from the list above; otherwise `null`.
+- `durableRequired` — true when the route genuinely needs durable execution.
+- `humanApprovalRequired` — true when a human gate is needed before side effects
+  (lean on the contract's `risks` and any side-effecting `desiredArtifacts`).
+- `reason` — why this route fits the contract and classification.
+
+Be decisive and concrete. The next steps add backpressure gates and then execute
+along this route.
+
+REQUIRED OUTPUT:
+{props.schema}

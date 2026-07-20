@@ -1,0 +1,15 @@
+{
+  "name": "smithers-hermes-site",
+  "version": "0.1.0",
+  "description": "Smithers × Hermes & Eliza marketing site — single-file static site deployed to Cloudflare via Alchemy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "deploy": "node alchemy.run.ts",
+    "destroy": "node alchemy.run.ts --destroy"
+  },
+  "devDependencies": {
+    "alchemy": "^0.93.12"
+  }
+}

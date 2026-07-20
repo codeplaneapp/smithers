@@ -1,0 +1,3 @@
+import { Metric } from "effect";
+import { fastBuckets } from "./_buckets.js";
+export const dbQueryDuration = Metric.histogram("smithers.db.query_ms", fastBuckets);

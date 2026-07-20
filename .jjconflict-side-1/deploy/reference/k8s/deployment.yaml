@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smithers-gateway
+  namespace: smithers
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smithers-gateway
+  template:
+    metadata:
+      labels:
+        app: smithers-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: ghcr.io/evmts/smithers:latest
+          imagePullPolicy: IfNotPresent
+          command: ["bun", "run", "/workspace/deploy/reference/reference-gateway.mjs"]
+          env:
+            - name: PORT
+              value: "7331"
+            - name: SMITHERS_DB_PATH
+              value: /data/smithers.db
+            - name: SMITHERS_TOKEN_STORE
+              value: /var/run/smithers/tokens.json
+            - name: HINDSIGHT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smithers-gateway-tokens
+                  key: hindsight-api-key
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: smithers-gateway-config
+          ports:
+            - containerPort: 7331
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: sqlite
+              mountPath: /data
+            - name: tokens
+              mountPath: /var/run/smithers
+              readOnly: true
+      volumes:
+        - name: sqlite
+          persistentVolumeClaim:
+            claimName: smithers-sqlite
+        - name: tokens
+          secret:
+            secretName: smithers-gateway-tokens

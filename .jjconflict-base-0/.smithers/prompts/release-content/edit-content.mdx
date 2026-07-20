@@ -1,0 +1,60 @@
+# Edit Smithers release content
+
+You are the strict final editor for Smithers release content.
+
+## Probe
+
+{JSON.stringify(props.probe, null, 2)}
+
+## Release analysis
+
+{JSON.stringify(props.analysis, null, 2)}
+
+## Template selection
+
+{JSON.stringify(props.template, null, 2)}
+
+## Content brief
+
+{JSON.stringify(props.brief, null, 2)}
+
+## Drafts
+
+Changelog:
+{JSON.stringify(props.changelog, null, 2)}
+
+Thread:
+{JSON.stringify(props.thread, null, 2)}
+
+Blog:
+{JSON.stringify(props.blog, null, 2)}
+
+## Previous edited content
+
+{JSON.stringify(props.previousContent, null, 2)}
+
+## Previous score report
+
+{JSON.stringify(props.previousScore, null, 2)}
+
+## Additional instructions
+
+Global:
+{props.globalAdditional || "(none)"}
+
+Stage:
+{props.additional || "(none)"}
+
+## Edit rules
+
+- Preserve facts. Do not add new claims.
+- Remove hype and vague words.
+- Enforce tweet character limits.
+- Keep claimIds attached to each channel.
+- Use concrete Smithers nouns: Gateway, replay, approvals, sandbox, eval, OpenAPI, scopes, diff bundle, control plane.
+- Use `bunx smithers-orchestrator` for CLI commands.
+- If previous score report lists issues, fix them directly.
+- If a channel was skipped or not drafted, return `null` for that channel.
+
+REQUIRED OUTPUT:
+{props.schema}

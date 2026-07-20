@@ -1,0 +1,158 @@
+# dependencies (bun install)
+node_modules
+
+# local gstack artifacts (security reports, analytics) — keep out of the repo
+.gstack/
+
+# output
+out
+dist
+# daily-ceo-intel: local archive + app-owned sqlite state (config/ stays tracked)
+/reports/????-??-??.md
+/reports/????-??-??.html
+/reports/????-??-??.json
+/data/*.sqlite*
+# staged local-UI bundle: built at pack time, shipped via apps/cli files, not committed
+apps/cli/ui-dist/
+artifacts/
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+examples/run-*.log
+# Tracked source directory: the smithers app's logs surface lives here.
+!apps/smithers/src/logs/
+!apps/smithers/src/logs/**
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# tsup transient bundled config (written during --dts builds, must never be committed)
+**/tsup.config.bundled_*.mjs
+
+# playwright
+playwright-report
+test-results
+tui-buffer.txt
+apps/cli/tmp/
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Gemini
+.gemini-clipboard/
+
+# Local workflow/runtime reports
+.smithers/reports/
+.claude/
+.claude/scheduled_tasks.lock
+.kanban-reports/
+pg_durable-smithers-report.html
+
+# Profiling artifacts
+default.profraw
+
+# Deno
+deno.lock
+
+# Smithers runtime artifacts
+**/.smithers/sandboxes/
+**/.smithers/executions/
+# Local `smithers bug-report` drafts (per-machine, not history)
+**/.smithers/bug-reports/
+# Benchmark eval staging projects written by `smithers eval` runs
+**/.smithers/eval-runs/
+# Behavioral-test temp op-console stores (random suffixes)
+**/.smithers-op-console-*/
+# PGlite/Postgres durable store (default backend's data dir) + migration marker
+**/.smithers/pg/
+**/.smithers/migrated.json
+# Claude Code plugin monitor subscriptions (per-machine session state)
+**/.smithers/claude-mirror-subscriptions.json
+.tui-test/
+.worktrees/
+worktrees/
+reference/
+!docs/reference/
+!docs/reference/*.mdx
+!deploy/reference/
+!deploy/reference/**
+codex/
+ghostty/
+burns
+observability/data/
+# The observability stack writes runtime data under apps/observability/data/; the
+# bare `observability/data/` rule above is root-anchored (mid-path slash) and never
+# matched it, so grafana/prometheus/loki/tempo state kept polluting the worktree.
+apps/observability/data/
+# Server test harness scratch dirs (`.test-serve-<rand>/` and `.test-workflows-<rand>/`
+# with sqlite db + generated tsx).
+packages/server/tests/.test-serve-*/
+packages/server/tests/.test-workflows-*/
+packages/server/tests/.test-lifecycle-*/
+# Engine dynamic-workflow e2e scratch dirs (sqlite + generated tsx, cleaned after the run
+# but visible to mid-test jj snapshots).
+packages/engine/tests/.tmp-dynamic-wf-*/
+# CLI pack-install e2e scratch dirs (fixture pack + lockfile, cleaned after the run but
+# visible to a concurrent snapshot, which fails the release stale-artifact check).
+apps/cli/tests/.tmp-*/
+**/cov*/
+**/tmp/verification/
+.context/
+
+# External reference repos
+.mastra-ref/
+.opentui_temp/
+temporal-*
+
+# Worktree script SQLite artifacts
+scripts/worktree-feature/*.db*
+smithers.db
+smithers.db-shm
+smithers.db-wal
+smithers.db.bak
+smithers.db.compact
+smithers.db.compact-journal
+workflows/*.db
+workflows/*.db-shm
+workflows/*.db-wal
+
+# smithers review (apps/review) per-repo state
+.smithers-review/
+.smithers/evals/reports/
+
+# Alchemy IaC local state
+.alchemy/
+
+# Wrangler local cache
+.wrangler/
+
+# smithers ui scratch workspaces
+packages/server/.smithers-root-landing-ui-*/
+
+# GitHub Actions daily canary cache restored locally only when debugging.
+.smithers-canary-state/
+
+# Stray local screenshots
+/output-fields.png
+
+# Claude plugin mirror runtime state
+.smithers/claude-mirror-subscriptions.json

@@ -1,0 +1,16 @@
+---
+title: createTicket
+description: Gateway RPC for creating or replacing a work doc.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `createTicket`
+- Scope: `ticket:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ path, content, kind?, status? }`
+- Response: `TicketRow`
+
+Creates or replaces a work doc by `path` in `_smithers_docs`. The handler stamps `content_hash = sha256(content)` and `updated_at_ms = now` through the same hash/clock the file-watcher uses, so RPC-written and file-derived hashes are comparable (last-write-wins). Writing a row revives a previously soft-deleted `path` by design.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.

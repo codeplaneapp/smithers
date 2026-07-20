@@ -1,0 +1,14 @@
+# Failure Fix
+
+OUTPUT_KIND: failure-fix
+FAILURE: {props.failure.failureKey}
+COMMAND: {props.failure.command}
+REPO: {props.repo}
+
+Fix the root cause for this unique probe failure by reading the Rust panic site and corresponding Zig spec.
+
+Failure:
+{JSON.stringify(props.failure, null, 2)}
+
+Required output schema:
+{props.schema}

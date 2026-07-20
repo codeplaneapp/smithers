@@ -1,0 +1,14 @@
+# Phase A Fix
+
+OUTPUT_KIND: phase-a-fix
+ZIG: {props.file.zig}
+RS: {props.file.rs}
+REPO: {props.repo}
+
+Apply only the verifier findings below. Do not rewrite the file wholesale.
+
+Findings:
+{JSON.stringify(props.issues, null, 2)}
+
+Required output schema:
+{props.schema}

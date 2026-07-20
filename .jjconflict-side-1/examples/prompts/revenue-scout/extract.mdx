@@ -1,0 +1,16 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Example prompt: revenue scout extract"}
+      {"\n\n"}
+      {JSON.stringify(
+        {
+          flaggedConversations: props.flaggedConversations,
+          accountContext: props.accountContext,
+        },
+        null,
+        2,
+      )}
+    </>
+  );
+}

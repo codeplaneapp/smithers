@@ -1,0 +1,17 @@
+---
+title: browserAct
+description: Gateway browser service RPC.
+maturity: stable
+apiVersion: v1
+---
+
+`browserAct` controls a gateway-local ephemeral Chromium session.
+
+- Method: `browserAct`
+- Scope: `run:write`
+- Transports: HTTP RPC, WebSocket RPC
+
+Request: `{ sessionId, actionId, expectedRevision?, action }`, where action is the closed navigate, history, click, type, press, scroll, or dialog union.
+Response: `{ revision, page, outcome }`. Replaying `actionId` returns the original outcome.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `REVISION_CONFLICT`, `SSRF_BLOCKED`, `QUOTA_EXCEEDED`, and `Internal`.

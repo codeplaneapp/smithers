@@ -1,0 +1,16 @@
+---
+title: getSchemaSignature
+description: Gateway RPC for reading the server schema signature.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `getSchemaSignature`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{}`
+- Response: `{ schemaVersion, signature, components }`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
+
+Use `schemaVersion` as the client persistence version for Gateway-backed synced collections. The value is derived from the server `_smithers_schema_migrations` head; when it changes, clients should clear local persisted rows and cold re-sync from the Gateway.

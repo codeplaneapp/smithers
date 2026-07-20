@@ -1,0 +1,16 @@
+---
+title: listRuns
+description: Gateway RPC for listing runs.
+maturity: stable
+apiVersion: v1
+---
+
+- Method: `listRuns`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ filter?: { status?, limit?, workflow? } }`
+- Response: `RunSummary[]`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
+
+`workflow` filters to runs attributed to that workflow key (gateway-started runs match by their registered config key, CLI runs by workflow name). Results are ordered newest first.

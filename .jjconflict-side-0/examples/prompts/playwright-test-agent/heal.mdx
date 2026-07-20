@@ -1,0 +1,9 @@
+export default function Prompt(props) {
+  return (
+    <>
+      {"Repair failing Playwright tests without weakening business assertions. Focus on selectors, waits, fixtures, setup, and invalid assumptions.\n\nINPUT:\n"}
+      {JSON.stringify(props ?? {}, null, 2)}
+      {"\n\nReturn the updated generated tests summary matching the task output schema."}
+    </>
+  );
+}

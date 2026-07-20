@@ -1,0 +1,57 @@
+{
+  "name": "@smithers-orchestrator/memory",
+  "version": "0.29.0",
+  "description": "Persistent and semantic memory services for Smithers",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./store": {
+      "types": "./src/index.d.ts",
+      "import": "./src/store/index.js",
+      "default": "./src/store/index.js"
+    },
+    "./metrics": {
+      "types": "./src/index.d.ts",
+      "import": "./src/metrics.js",
+      "default": "./src/metrics.js"
+    },
+    "./schema": {
+      "types": "./src/index.d.ts",
+      "import": "./src/schema.js",
+      "default": "./src/schema.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "build": "rm -f src/index.d.ts && tsup --dts-only",
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/db": "workspace:*",
+    "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/graph": "workspace:*",
+    "@smithers-orchestrator/observability": "workspace:*",
+    "@smithers-orchestrator/scheduler": "workspace:*",
+    "@vectorize-io/hindsight-client": "0.8.4",
+    "drizzle-orm": "^0.45.2",
+    "effect": "3.21.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~6.0.3"
+  }
+}
