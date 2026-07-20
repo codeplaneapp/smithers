@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { standaloneThemeCss } from "@smithers-orchestrator/ui";
+import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
 import { createReviewWorker } from "../../src/server/worker.ts";
 import { buildTestEnv } from "./helpers/buildTestEnv.ts";
 
