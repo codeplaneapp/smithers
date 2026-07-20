@@ -196,10 +196,10 @@ export default smithers((ctx) => {
           <Sequence>
             <Loop id="tf-loop" until={tfDone} maxIterations={maxIterations}>
               <Sequence>
-                <Task id="tf-work" output={outputs.tfWork} agent={tfLaneAgents} timeoutMs={60 * 60_000}>
+                <Task id="tf-work" output={outputs.tfWork} agent={tfLaneAgents} timeoutMs={150 * 60_000}>
                   {tfWorkPrompt(tfRunId, tfVerify?.remaining)}
                 </Task>
-                <Task id="tf-verify" output={outputs.tfVerify} agent={tfLaneAgents} timeoutMs={30 * 60_000}>
+                <Task id="tf-verify" output={outputs.tfVerify} agent={tfLaneAgents} timeoutMs={60 * 60_000}>
                   {tfVerifyPrompt(tfRunId, tfWork)}
                 </Task>
               </Sequence>
@@ -208,10 +208,10 @@ export default smithers((ctx) => {
           <Sequence>
             <Loop id="ui-loop" until={uiDone} maxIterations={maxIterations}>
               <Sequence>
-                <Task id="ui-work" output={outputs.uiWork} agent={uiLaneAgents} timeoutMs={60 * 60_000}>
+                <Task id="ui-work" output={outputs.uiWork} agent={uiLaneAgents} timeoutMs={150 * 60_000}>
                   {uiWorkPrompt(uiRunId, uiVerify?.remaining)}
                 </Task>
-                <Task id="ui-verify" output={outputs.uiVerify} agent={uiLaneAgents} timeoutMs={30 * 60_000}>
+                <Task id="ui-verify" output={outputs.uiVerify} agent={uiLaneAgents} timeoutMs={60 * 60_000}>
                   {uiVerifyPrompt(uiRunId, uiWork)}
                 </Task>
               </Sequence>
