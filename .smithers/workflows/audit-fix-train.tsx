@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, UI, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 
@@ -514,6 +514,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="audit-fix-train">
+      <UI entry="../ui/audit-fix-train.tsx" title={"Audit Fix Train"} />
       <Sequence>
         {/* ── Phase 1: discover findings from the audit backlog ───────────────── */}
         <Task id="discover" output={outputs.discover} timeoutMs={5 * 60_000}>
