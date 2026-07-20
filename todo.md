@@ -23,7 +23,7 @@ pre-existing breakage). Full recovery log: memory file
 - [ ] Remaining in-run path: fable-as-sol readiness re-review → (improvement rounds as needed) →
       consensus reviews → assess → `final-verify-and-summarize`. Watch via
       `smithers ui tf-final-replay-identity-20260718` or `smithers status`.
-- [ ] The last substantive blocker sol raised: root `pnpm test` red (8 failing workspaces —
+- [x] The last substantive blocker sol raised: root `pnpm test` red (8 failing workspaces —
       including the `apps/kimi-benchmarks-site` UI-inventory gate entry and the missing
       `@smithers-orchestrator/microsandbox` workspace link, both judged outside the target diff).
       If the run's improvement rounds don't clear them, fix/land these root-gate failures directly.
@@ -39,6 +39,9 @@ pre-existing breakage). Full recovery log: memory file
       CLI/DDD reruns pass, the DDD regeneration landed as `0c3526d3f7`, and the fixture exclusion
       plus regression test landed as `4ad19b20c8` with engine 1036/1036 passing. A fresh whole-root
       pass is still required before checking this item.)_
+      _(2026-07-20 ~02:25Z: a clean isolated whole-root `pnpm test` rerun completed successfully
+      across all 62 workspaces. `packages/components` passed 689/689, `packages/testing` passed
+      145/145, and the root command exited 0.)_
 
 ## After the run finishes
 - [ ] Verify the final summarize output + jj log; confirm all rounds are committed (the workflow
