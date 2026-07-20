@@ -31,7 +31,7 @@ Characters: 210
 
 ### 2. Tweet 2
 
-**Media:** live memory visualization — recall → task → retain (TODO, see media plan)
+**Media:** [memory lifecycle → assets/memory-live.png](assets/memory-live.png) — pending the retain fix
 
 > Agents that remember, declaratively.
 >
@@ -123,33 +123,31 @@ approve the gate, then
 `bunx smithers-orchestrator signal <runId> REVISE --data '{"feedback":"..."}'`
 and the machine advances `research → approval → draft-r0 → revise-r0 → draft-r1`.
 
-### Tweet 2 — Memory visualization (BLOCKED, needs a Hindsight instance)
+### Tweet 2 — Memory visualization (BLOCKED on a product defect)
 
-The demo and UI are built, committed, and tested
-(`.smithers/workflows/memory-recall-demo.tsx`, `.smithers/ui/memory-recall-demo.tsx`),
-and run `run-1784541678447` finished 3/3 nodes. The UI correctly renders the
-recall → task → retain lane per task and labels each policy
-(inherited / overridden / opted out).
+The demo, UI and tests are committed and both runs finish clean, but every
+RECALL/RETAIN lane is empty because **`<Memory>` is a silent no-op in this
+authoring path** — not because Hindsight is missing.
 
-**But every lane is empty**, and truthfully so:
+`engine.js:6595` reads `workflow.memoryService`; the only place it is ever
+attached is `openSmithersBackend.js:50`. `createSmithers()` attaches nothing, so
+`engine.js:4700` skips recall and tools and `retainTaskMemory()` returns at its
+`!service` guard. Two runs, six `retain="on-complete"` tasks, zero facts written
+(`memory list` still shows only an unrelated 6-day-old canary fact).
 
-- `HINDSIGHT_URL` is unset, so the bank-backed store is inactive. The UI shows
-  "No recalled block is exposed by the gateway" and "Retention is disabled".
-- Even with it set, the *first* run of a fresh bank has nothing to recall.
-  Memory only looks like anything on run two.
+Hindsight is NOT required for the demo: without `HINDSIGHT_URL` the documented
+behavior is a local SQLite facts store with keyword recall. It also runs locally
+(`HINDSIGHT_URL=http://127.0.0.1:8888`, Postgres 15+ with pgvector) if we ever
+want semantic recall and primers.
 
-So a screenshot today would show a memory feature recalling nothing — worse
-than no image. To produce it:
+Unblocking sequence:
 
-1. Set `HINDSIGHT_URL` (+ `HINDSIGHT_API_KEY`) against a real Hindsight
-   instance.
-2. Run the demo twice with related tickets, so run two recalls run one.
+1. Land the `createSmithers()` memory-service fix (in progress).
+2. Run the demo twice with related tickets so run two recalls run one.
 3. Capture run two, where the RECALL and RETAIN lanes carry real content.
 
-Open question to confirm while doing this: whether recalled blocks and
-remember/recall tool calls are exposed over the gateway at all, or whether the
-UI can only ever show resolved policy. If the former, that gap is a Smithers
-defect worth fixing before the tweet.
+Do not capture before step 1 — the image would show a memory feature recalling
+nothing.
 
 ### Tweets 1, 4, 5 — designed cards (SVG authored)
 
@@ -165,7 +163,7 @@ npm override conflict, use `.smithers/node_modules/.bin/playwright`).
 | Tweet | Asset | Kind | Status |
 |-------|-------|------|--------|
 | 1 | `assets/tweet-01-hero.png` | hero | ready |
-| 2 | `assets/memory-live.gif` | screen recording | **demo not built yet** |
+| 2 | `assets/memory-live.png` | memory lifecycle | **blocked on retain fix** |
 | 3 | `assets/xstate-devtools.png` | Stately inspector | ready |
 | 4 | `assets/tweet-04-diagram.png` | diagram | ready |
 | 5 | `assets/tweet-05-changelog.png` | changelog | ready |
