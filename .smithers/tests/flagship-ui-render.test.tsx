@@ -5,7 +5,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 GlobalRegistrator.register();
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const reactTestEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+const previousActEnvironment = reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT;
+reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
 const run = { runId: "run-flagship", workflowKey: "review", status: "running" };
 const output = { data: { row: { reviewer: "fixture reviewer", approved: true, feedback: "looks good", issues: [] } }, refetch: async () => {} };
@@ -36,7 +38,11 @@ beforeEach(() => {
 
 afterEach(async () => await act(async () => root.unmount()));
 
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(() => {
+  if (previousActEnvironment === undefined) delete reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  else reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  GlobalRegistrator.unregister();
+});
 
 describe("flagship pack UI composition", () => {
   test("renders the review dashboard through shared UI primitives", async () => {
