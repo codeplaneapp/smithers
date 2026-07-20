@@ -305,5 +305,8 @@ describe("ExtractPrompt", () => {
     expect(prompt(firstFrame, "sim:draft")).toContain("below");
     const simulated = simulate(harness((ctx, outputs) => <ExtractPrompt idPrefix="sim" output={rctfPromptSchema} agent={[]} threshold={.8} maxTurns={3} currentScore={ctx.latest(outputs.prompt, "sim:draft")?.score ?? null} latestDraft={ctx.latest(outputs.prompt, "sim:draft") ?? null} />), { input: {}, mocks: { "sim:draft": ({ iteration }: any) => iteration === 0 ? { prompt: "draft one", structured: draft.structured, score: .2, scoreReason: "below", nextQuestion: "q", nextPrinciple: "none", resolved: false, overridden: false, overrideReason: null } : { prompt: "final exact", structured: draft.structured, score: .9, scoreReason: "ready", nextQuestion: "", nextPrinciple: "none", resolved: true, overridden: false, overrideReason: null } } });
     await expect(simulated.run()).resolves.toBeDefined(); expect(simulated.executed).toEqual(["sim:draft", "sim:draft"]); expect(simulated.output).toMatchObject({ prompt: "final exact" });
-  });
+    // Six real renderWorkflow passes plus a full simulate().run() land at ~5s,
+    // exactly bun's default per-test timeout, so this needs an explicit budget
+    // or it fails in a loaded full-suite run while passing in isolation.
+  }, 30_000);
 });
