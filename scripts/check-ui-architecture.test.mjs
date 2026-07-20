@@ -148,6 +148,7 @@ test("agentic components are an approved typed props-driven UI layer", (context)
   const baseline = snapshot(root);
   assert.ok(
     !baseline.allowedLegacyViolations.some((entry) =>
+      entry.startsWith("ui-layer-direction ::") &&
       entry.includes("packages/ui/src/agentic/Reasoning.tsx"),
     ),
   );
@@ -284,6 +285,37 @@ for (const [name, mutate, expected] of [
         omissions: [],
         divergences: [],
       }]);
+    },
+    "shadcn-provenance",
+  ],
+  [
+    "missing agentic lane provenance",
+    (root) => write(
+      root,
+      "packages/ui/src/agentic/CodeBlock.tsx",
+      "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
+    ),
+    "shadcn-provenance",
+  ],
+  [
+    "unapproved agentic registry provenance",
+    (root) => {
+      write(
+        root,
+        "packages/ui/src/agentic/CodeBlock.tsx",
+        "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
+      );
+      json(root, "packages/ui/provenance/agentic-response-code.json", [
+        {
+          file: "src/agentic/CodeBlock.tsx",
+          exports: ["CodeBlock"],
+          collection: "agentic/ai-elements",
+          registryItem: "https://example.com/components/code-block",
+          ported: "partial-anatomy",
+          omissions: [],
+          divergences: [],
+        },
+      ]);
     },
     "shadcn-provenance",
   ],
@@ -701,6 +733,87 @@ test("valid official shadcn provenance passes", (context) => {
   ]);
   snapshot(root);
   assert.equal(check(root).ok, true);
+});
+
+test("the frozen version 2 provenance umbrella passes", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/ui/shadcn-provenance.json", {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    version: 2,
+    policy: {
+      registries: ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"],
+      collections: ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"],
+      entryFiles: [
+        "provenance/chat-foundation.json",
+        "provenance/agentic-reasoning-tool.json",
+        "provenance/agentic-response-code.json",
+        "provenance/agentic-plan-sources.json",
+      ],
+      verification: "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
+    },
+    entries: [],
+  });
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
+test("valid agentic lane provenance and the exact Markdown CodeBlock seam pass", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  write(
+    root,
+    "packages/ui/src/agentic/CodeBlock.tsx",
+    "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
+  );
+  write(
+    root,
+    "packages/ui/src/primitives/markdown.tsx",
+    'import { CodeBlock } from "../agentic/CodeBlock"; export function Markdown(props: { code: string }) { return <CodeBlock code={props.code} />; }\n',
+  );
+  json(root, "packages/ui/provenance/agentic-response-code.json", [
+    {
+      file: "src/agentic/CodeBlock.tsx",
+      exports: ["CodeBlock"],
+      collection: "agentic/ai-elements",
+      registryItem: "https://elements.ai-sdk.dev/components/code-block",
+      ported: "partial-anatomy",
+      omissions: [],
+      divergences: [],
+    },
+  ]);
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
+test("other primitives cannot import the agentic layer", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  write(
+    root,
+    "packages/ui/src/agentic/CodeBlock.tsx",
+    "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
+  );
+  json(root, "packages/ui/provenance/agentic-response-code.json", [
+    {
+      file: "src/agentic/CodeBlock.tsx",
+      exports: ["CodeBlock"],
+      collection: "agentic/ai-elements",
+      registryItem: "https://elements.ai-sdk.dev/components/code-block",
+      ported: "partial-anatomy",
+      omissions: [],
+      divergences: [],
+    },
+  ]);
+  snapshot(root);
+  write(
+    root,
+    "packages/ui/src/primitives/other.tsx",
+    'import { CodeBlock } from "../agentic/CodeBlock"; export function Other(props: { code: string }) { return <CodeBlock code={props.code} />; }\n',
+  );
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), /ui-layer-direction/);
 });
 
 test("type-only smithers-to-adapter imports pass", (context) => {

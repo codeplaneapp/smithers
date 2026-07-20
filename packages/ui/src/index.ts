@@ -179,4 +179,12 @@ export {
   type FileTreeNode,
   type FileTreeItem,
 } from "./file-tree";
-export { Markdown, type MarkdownProps, type MarkdownLinkClick } from "./primitives/markdown";
+export { Markdown, safeMarkdownHref, type MarkdownProps, type MarkdownLinkClick } from "./primitives/markdown";
+export { MessageResponse, type MessageResponseProps } from "./agentic/MessageResponse";
+export {
+  CodeBlock,
+  type CodeBlockProps,
+  type CodeBlockHighlighter,
+  type HighlightLine,
+  type HighlightedToken,
+} from "./agentic/CodeBlock";

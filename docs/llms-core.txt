@@ -11112,6 +11112,8 @@ All components accept `className` and `style`, forward refs, and carry
 | `CollapsiblePanel` | A collapsible titled section with a status pill/glyph, an optional meta line, and a pending/empty fallback. The shared shape workflow UIs previously hand-rolled as `Panel`/`PhaseCard`. Status drives a `StatusPill` (no re-derived classes). | `title`, `status`, `statusLabel`, `meta`, `defaultOpen`, `open`, `onOpenChange`, `pending`, `emptyText` |
 | `FileTree` | A flat list of `/`-delimited paths grouped into a nested, collapsible directory tree with controlled single selection and an optional per-leaf trailing affordance slot. | `nodes`, `selected`, `onSelect`, `renderAffordance`, `defaultCollapsed` |
 | `Markdown` | Dependency-free Markdown renderer for the subset a chat model emits: headings, ordered/unordered lists, fenced and inline code, bold, italics, and links. Renders through React children (never `innerHTML`) so it is XSS-safe by construction, and memoized on the source string. Unsafe-scheme links render without `href`, prevent default navigation, and do not invoke `onLinkClick`; allowed links pass their scheme-safe `href` to the callback, which also prevents default navigation. | `content`, `onLinkClick` |
+| [`MessageResponse`](/components/message-response) | Assistant-message Markdown content that remains structurally stable while fences or inline syntax are incomplete and shows a reduced-motion-safe streaming caret. | `content`, `streaming`, `onLinkClick` |
+| [`CodeBlock`](/components/code-block) | Token-themed fenced code with an optional language label and line numbers, controlled or uncontrolled wrapping, copy seam, and dependency-free highlighting adapter seam. | `code`, `language`, `showLineNumbers`, `wrap`, `onCopyCode`, `highlight` |
 
 ### Chat surface
 
@@ -11162,6 +11164,7 @@ can build a `DiffFile` from a raw patch and reason about it without a runtime:
 | `normalizeStatus`, `statusClass`, `formatStatus`, `isTerminalRunStatus` | The shared status vocabulary `StatusPill` is built on. |
 | `tokens` | The token bridge (`var(--token, #lightFallback)` strings) for inline styles that must match the components. |
 | `cn` | clsx class composition. |
+| `safeMarkdownHref` | Trim and allow scheme-less, `http`, `https`, or `mailto` links; reject all other schemes. |
 | `buttonVariants`, `badgeVariants`, `alertVariants`, `spinnerVariants` | CVA variant builders for styling your own elements like the components. |
 
 ### Adapters

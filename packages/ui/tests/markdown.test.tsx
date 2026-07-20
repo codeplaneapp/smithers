@@ -54,7 +54,7 @@ describe("Markdown (static markup)", () => {
     expect(html).toContain("<li>one</li>");
     expect(html).toContain("<li>first</li>");
     // fenced code
-    expect(html).toContain("sui-md-code-block");
+    expect(html).toContain("sui-codeblock");
     expect(html).toContain("const x = 1;");
   });
 

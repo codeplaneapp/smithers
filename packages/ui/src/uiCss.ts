@@ -494,6 +494,24 @@ export const markdownCss = `
 .sui-md-link:hover { text-decoration-thickness:2px; }
 `;
 
+export const agenticResponseCss = `
+.sui-response { min-width:0; }
+.sui-response-caret { display:inline-block; width:7px; height:14px; margin-left:2px; vertical-align:text-bottom; border-radius:2px; background:${t.mutedForeground}; animation:sui-caret-blink 1s steps(2, jump-none) infinite; }
+@keyframes sui-caret-blink { 50% { opacity:0; } }
+.sui-codeblock { margin:8px 0; border-radius:${t.radius}; background:${t.codeBg}; color:${t.codeText}; overflow:hidden; }
+.sui-codeblock-header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 10px; border-bottom:1px solid color-mix(in srgb, ${t.codeText} 12%, transparent); }
+.sui-codeblock-lang { font-family:${t.fontMono}; font-size:11px; color:color-mix(in srgb, ${t.codeText} 70%, transparent); text-transform:lowercase; }
+.sui-codeblock-actions { display:inline-flex; align-items:center; gap:6px; margin-left:auto; }
+.sui-codeblock-action { min-height:24px; padding:0 7px; border:1px solid color-mix(in srgb, ${t.codeText} 16%, transparent); border-radius:${t.radiusControl}; background:transparent; color:color-mix(in srgb, ${t.codeText} 76%, transparent); font:inherit; font-size:11px; cursor:pointer; }
+.sui-codeblock-action:hover { background:color-mix(in srgb, ${t.codeText} 9%, transparent); color:${t.codeText}; }
+.sui-codeblock-action:focus-visible { ${focusRing} }
+.sui-codeblock-body { margin:0; padding:12px 14px; font-family:${t.fontMono}; font-size:12px; line-height:1.5; overflow:auto; tab-size:4; }
+.sui-codeblock-body code { display:block; min-width:max-content; white-space:pre; font:inherit; color:inherit; }
+.sui-codeblock[data-wrap='true'] .sui-codeblock-body code { min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.sui-codeblock-lineno { display:inline-block; min-width:2.5em; padding-right:12px; text-align:right; color:color-mix(in srgb, ${t.codeText} 40%, transparent); user-select:none; }
+@media (prefers-reduced-motion: reduce) { .sui-response-caret { animation:none; opacity:.6; } }
+`;
+
 /* -------------------------------------------------------------------------- */
 /* PierreDiffView adapter (thin frame; CodeView owns the highlighted body)     */
 /* -------------------------------------------------------------------------- */
@@ -600,6 +618,7 @@ export const smithersUiCss = [
   diffCss,
   fileTreeCss,
   markdownCss,
+  agenticResponseCss,
   pierreDiffCss,
   stageStripCss,
   agenticReasoningCss,

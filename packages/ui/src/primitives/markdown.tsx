@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import { type ComponentProps, Fragment, memo, type MouseEvent, type ReactNode } from "react";
+import { CodeBlock } from "../agentic/CodeBlock";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
 
@@ -21,7 +22,7 @@ export type MarkdownLinkClick = (href: string, event: MouseEvent<HTMLAnchorEleme
  * anything scheme-bearing outside the allowlist is dropped (the anchor renders
  * with no `href`), while scheme-less relative/anchor links pass through.
  */
-function safeHref(raw: string): string | undefined {
+export function safeMarkdownHref(raw: string): string | undefined {
   const href = raw.trim();
   const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(href);
   if (scheme) {
@@ -58,7 +59,7 @@ function renderInline(text: string, keyPrefix: string, onLinkClick?: MarkdownLin
     } else if (token.startsWith("[")) {
       const link = LINK.exec(token)!;
       const label = link[1]!;
-      const href = safeHref(link[2]!);
+      const href = safeMarkdownHref(link[2]!);
       out.push(
         <a
           className="sui-md-link"
@@ -103,6 +104,8 @@ function renderBlocks(content: string, onLinkClick?: MarkdownLinkClick): ReactNo
     const line = lines[i]!;
 
     if (isFence(line)) {
+      const info = line.trimStart().slice(3).trim();
+      const language = info ? info.split(/\s+/, 1)[0]!.toLowerCase() : undefined;
       const code: string[] = [];
       i += 1;
       while (i < lines.length && !isFence(lines[i]!)) {
@@ -110,11 +113,7 @@ function renderBlocks(content: string, onLinkClick?: MarkdownLinkClick): ReactNo
         i += 1;
       }
       i += 1; // consume the closing fence (or run off the end)
-      blocks.push(
-        <pre className="sui-md-code-block" key={key++}>
-          <code>{code.join("\n")}</code>
-        </pre>,
-      );
+      blocks.push(<CodeBlock code={code.join("\n")} language={language} key={key++} />);
       continue;
     }
 
