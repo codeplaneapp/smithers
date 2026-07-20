@@ -222,6 +222,64 @@ export const tooltipCss = `
 `;
 
 /* -------------------------------------------------------------------------- */
+/* Agentic plan, task, sources, and inline citation                           */
+/* -------------------------------------------------------------------------- */
+
+export const agenticPlanCss = `
+.sui-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+.sui-plan { min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; overflow:hidden; }
+.sui-plan-header { min-width:0; display:flex; align-items:center; gap:10px; padding:8px 10px; }
+.sui-plan-trigger { min-width:0; min-height:28px; flex:1 1 auto; display:flex; align-items:center; gap:8px; margin:-4px; padding:4px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.foreground}; font:inherit; text-align:left; cursor:pointer; }
+.sui-plan-trigger:hover { background:${t.secondary}; }
+.sui-plan-trigger:focus-visible { ${focusRing} }
+.sui-plan-chevron { display:inline-flex; align-items:center; justify-content:center; width:12px; flex:none; color:${t.mutedForeground}; font-size:18px; line-height:1; transform:rotate(0deg); transition:transform .12s ease; }
+.sui-plan-trigger[aria-expanded='true'] .sui-plan-chevron { transform:rotate(90deg); }
+.sui-plan-title { min-width:0; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sui-plan-title[data-shimmer='true'] { background:linear-gradient(90deg, ${t.mutedForeground} 35%, ${t.foreground} 50%, ${t.mutedForeground} 65%); background-size:200% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; animation:sui-plan-shimmer-sweep 2s linear infinite; }
+.sui-plan-summary { flex:none; color:${t.mutedForeground}; font-size:11px; font-variant-numeric:tabular-nums; }
+.sui-plan-steps { display:grid; gap:0; margin:0; padding:0 10px 10px; list-style:none; }
+.sui-plan-step { position:relative; min-width:0; border-top:1px solid ${t.border}; }
+.sui-plan-step-row { min-width:0; display:grid; grid-template-columns:10px minmax(0, 1fr) auto; align-items:center; gap:8px; min-height:36px; }
+.sui-plan-step-dot, .sui-taskitem-dot { width:7px; height:7px; flex:none; border-radius:999px; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
+.sui-plan-step[data-status='running'] .sui-plan-step-dot { background:${t.info}; }
+.sui-plan-step[data-status='complete'] .sui-plan-step-dot { background:${t.success}; }
+.sui-plan-step[data-status='failed'] .sui-plan-step-dot { background:${t.destructive}; }
+.sui-plan-step[data-status='skipped'] .sui-plan-step-dot { background:${t.mutedForeground}; }
+.sui-plan-step-label { min-width:0; color:${t.foreground}; font-size:13px; line-height:1.4; overflow-wrap:anywhere; }
+.sui-plan-step[data-status='skipped'] .sui-plan-step-label { color:${t.mutedForeground}; text-decoration:line-through; }
+.sui-plan-step-toggle { min-height:24px; padding:2px 6px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:11px; cursor:pointer; }
+.sui-plan-step-toggle:hover { background:${t.secondary}; color:${t.foreground}; }
+.sui-plan-step-toggle:focus-visible { ${focusRing} }
+.sui-plan-step-detail { min-width:0; margin:0 0 9px 18px; padding:9px 10px; border-radius:${t.radiusControl}; background:${t.surface2}; color:${t.mutedForeground}; font-size:12px; line-height:1.45; }
+.sui-taskitem { min-width:0; display:flex; align-items:center; gap:8px; padding:7px 9px; color:${t.foreground}; font-size:12.5px; }
+.sui-taskitem-run .sui-taskitem-dot { background:${t.info}; }
+.sui-taskitem-ok .sui-taskitem-dot { background:${t.success}; }
+.sui-taskitem-warn .sui-taskitem-dot { background:${t.warning}; }
+.sui-taskitem-bad .sui-taskitem-dot { background:${t.destructive}; }
+.sui-taskitem-muted .sui-taskitem-dot { background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
+.sui-taskitem-label { min-width:0; flex:1 1 auto; overflow-wrap:anywhere; }
+.sui-taskitem-files { min-width:0; display:flex; align-items:center; justify-content:flex-end; gap:4px; flex-wrap:wrap; }
+.sui-taskitem-file { max-width:180px; padding:1px 6px; border:1px solid ${t.border}; border-radius:999px; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-family:${t.fontMono}; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sui-taskitem-elapsed { flex:none; color:${t.mutedForeground}; font-size:11px; font-variant-numeric:tabular-nums; }
+.sui-sources { min-width:0; color:${t.mutedForeground}; font-size:12px; }
+.sui-sources-trigger { min-height:28px; display:inline-flex; align-items:center; gap:5px; padding:3px 6px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:12px; cursor:pointer; }
+.sui-sources-trigger:hover { background:${t.secondary}; color:${t.foreground}; }
+.sui-sources-trigger:focus-visible { ${focusRing} }
+.sui-sources-list { display:grid; gap:5px; margin:3px 0 0; padding:7px 8px 7px 28px; border-left:1px solid ${t.border}; list-style:decimal; }
+.sui-sources-item { min-width:0; padding-left:2px; }
+.sui-sources-link { color:${t.primary}; text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
+.sui-sources-link:hover { text-decoration-thickness:2px; }
+.sui-sources-link:focus-visible { ${focusRing} }
+.sui-sources-label { color:${t.mutedForeground}; overflow-wrap:anywhere; }
+.sui-citation { line-height:0; }
+.sui-citation > a, .sui-citation > button { display:inline-flex; align-items:center; justify-content:center; margin:0 1px; padding:1px 4px; border:1px solid color-mix(in srgb, ${t.primary} 33%, transparent); border-radius:999px; background:color-mix(in srgb, ${t.primary} 10%, transparent); color:${t.primary}; font:inherit; font-size:10px; font-weight:650; line-height:1.2; text-decoration:none; vertical-align:super; cursor:pointer; }
+.sui-citation > a:hover, .sui-citation > button:hover { background:color-mix(in srgb, ${t.primary} 16%, transparent); }
+.sui-citation > a:focus-visible, .sui-citation > button:focus-visible { ${focusRing} }
+@keyframes sui-plan-shimmer-sweep { from { background-position:200% 0; } to { background-position:-200% 0; } }
+@media (prefers-reduced-motion: reduce) { .sui-plan-title[data-shimmer='true'] { animation:none; background:none; background-clip:initial; -webkit-background-clip:initial; color:${t.mutedForeground}; } .sui-plan-chevron { transition:none; } }
+`;
+
+/* -------------------------------------------------------------------------- */
 /* Select                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -473,6 +531,7 @@ export const smithersUiCss = [
   tabsCss,
   dialogCss,
   tooltipCss,
+  agenticPlanCss,
   selectCss,
   progressCss,
   skeletonCss,

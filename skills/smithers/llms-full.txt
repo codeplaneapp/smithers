@@ -11089,6 +11089,10 @@ All components accept `className` and `style`, forward refs, and carry
 | `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent` | Radix tabs. | Radix props |
 | `Dialog` family (`DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogFooter`, `DialogTitle`, `DialogDescription`, ...) | Radix dialog with portal and overlay. | Radix props |
 | `Tooltip`, `TooltipProvider`, `TooltipTrigger`, `TooltipContent` | Radix tooltip. | Radix props |
+| `Plan` | Structured, collapsible plan with ordered status steps, progress summary, and optional step details. | `steps`, `streaming`, `open`, `defaultOpen`, `onOpenChange`, `openStepIds`, `onOpenStepIdsChange` |
+| `TaskItem` | Compact unit-of-work row using the shared status vocabulary, with optional file badges and elapsed time. | `label`, `status`, `files`, `elapsedSeconds` |
+| `Sources` | Collapsible, text-only list of sanitized source links. | `sources`, `open`, `defaultOpen`, `onOpenChange`, `onNavigate` |
+| `InlineCitation` | Focusable superscript citation chip with a source-label tooltip and sanitized navigation. | `index`, `label`, `href`, `onNavigate` |
 | `Select` family (`SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, ...) | Radix select. | Radix props |
 | `Progress` | Determinate progress bar. | `value` |
 | `Separator`, `Skeleton`, `Spinner` | Hairline rule, loading placeholder, inline spinner. | `Spinner`: `size` |

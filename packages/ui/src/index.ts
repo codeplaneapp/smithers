@@ -115,6 +115,10 @@ export {
   type DialogContentProps,
 } from "./dialog";
 export { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "./tooltip";
+export { Plan, planStepStatus, type PlanProps, type PlanStep, type PlanStepStatus } from "./agentic/Plan";
+export { TaskItem, type TaskItemProps } from "./agentic/TaskItem";
+export { Sources, type SourcesProps, type SourceItem } from "./agentic/Sources";
+export { InlineCitation, type InlineCitationProps } from "./agentic/InlineCitation";
 export {
   Select,
   SelectGroup,
