@@ -49,7 +49,7 @@ function textFromPart(value: unknown, acceptedTypes?: ReadonlySet<string>): stri
 
 function joinParts(value: unknown, acceptedTypes?: ReadonlySet<string>): string | undefined {
   if (typeof value === "string") return value.trim() ? value : undefined;
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value)) return textFromPart(value, acceptedTypes);
   const parts = value
     .map((part) => textFromPart(part, acceptedTypes))
     .filter((part): part is string => part !== undefined);
@@ -69,9 +69,18 @@ function responseText(record: UnknownRecord): string | undefined {
 }
 
 function reasoningText(record: UnknownRecord): string | undefined {
-  const direct = readString(record, ["reasoningText", "reasoning_text", "thinking", "thought"]);
+  const direct = readString(record, [
+    "reasoningText",
+    "reasoning_text",
+    "thinkingText",
+    "thinking_text",
+    "thinking",
+    "thought",
+  ]);
   if (direct) return direct;
   return joinParts(record.reasoning, REASONING_PART_TYPES) ??
+    joinParts(record.thinking, REASONING_PART_TYPES) ??
+    joinParts(record.thought, REASONING_PART_TYPES) ??
     joinParts(record.content, REASONING_PART_TYPES);
 }
 

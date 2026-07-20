@@ -98,6 +98,7 @@ All components accept `className` and `style`, forward refs, and carry
 | [`Reasoning`](/reference/ui/reasoning) | A streaming-aware disclosure for extended reasoning content. It starts open while streaming and automatically closes when streaming ends unless the user has toggled it. | `streaming`, `open`, `defaultOpen`, `onOpenChange`, `duration`, `title` |
 | [`ChainOfThought`](/reference/ui/chain-of-thought) | An ordered disclosure of reasoning steps with pending, active, and done states mapped through the shared status vocabulary. | `steps`, `streaming`, `open`, `defaultOpen`, `onOpenChange`, `title` |
 | [`ToolCall`](/reference/ui/tool-call) | Compact or expanded tool invocation anatomy with lifecycle status, safe JSON input/output, and an approval-content seam. | `name`, `state`, `args`, `result`, `layout`, `open`, `approvalSlot` |
+| `AgentOutput` | A transport-neutral composition of Markdown response text, reasoning, and normalized tool calls for persisted agent output. | `model` from `parseAgentOutput` |
 | `EmptyState` | Centered zero-data block replacing bare "No runs yet." paragraphs. | `icon`, `title`, `description`, `action` |
 | `SectionHeader`, `Eyebrow` | Section heading row: eyebrow plus title on the left, actions on the right. | `title`, `eyebrow`, `actions` |
 | `RowButton` | Full-width selectable list row with button semantics (the house run-row recipe). | `active` |
@@ -158,6 +159,7 @@ can build a `DiffFile` from a raw patch and reason about it without a runtime:
 | `tokens` | The token bridge (`var(--token, #lightFallback)` strings) for inline styles that must match the components. |
 | `cn` | clsx class composition. |
 | `safeMarkdownHref` | Trim and allow scheme-less, `http`, `https`, or `mailto` links; reject all other schemes. |
+| `parseAgentOutput` | Recognize common AI SDK and CLI-agent output rows and normalize response text, reasoning, streaming state, and tool calls for `AgentOutput`; returns `null` for arbitrary rows. |
 | `buttonVariants`, `badgeVariants`, `alertVariants`, `spinnerVariants` | CVA variant builders for styling your own elements like the components. |
 
 ### Adapters

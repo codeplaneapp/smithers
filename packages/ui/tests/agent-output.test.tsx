@@ -60,6 +60,10 @@ describe("parseAgentOutput", () => {
       state: "running",
       argsText: '{"path":"README.md"}',
     });
+
+    expect(parseAgentOutput({
+      thinking: [{ type: "thinking", text: "Inspect the result" }],
+    })?.reasoning).toBe("Inspect the result");
   });
 });
 
