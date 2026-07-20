@@ -95,8 +95,8 @@ function statusForNode(state: NodeStatus): string {
   if (state === "running") return "running";
   return state;
 }
-function SummaryCard({ title, runId, nodeId, state }: { title: string; runId?: string; nodeId: string; state: NodeStatus }) {
-  return <Card><CardHeader><CardTitle>{title}</CardTitle><StatusPill status={statusForNode(state)} /></CardHeader><CardContent><NodeOutputView runId={runId} nodeId={nodeId} /></CardContent></Card>;
+function SummaryCard({ title, runId, nodeId, iteration, state }: { title: string; runId?: string; nodeId: string; iteration: number; state: NodeStatus }) {
+  return <Card><CardHeader><CardTitle>{title}</CardTitle><StatusPill status={statusForNode(state)} /></CardHeader><CardContent><NodeOutputView runId={runId} nodeId={nodeId} iteration={iteration} /></CardContent></Card>;
 }
 
 export function IssueBlitzApp() {
@@ -123,12 +123,12 @@ export function IssueBlitzApp() {
     <Card><CardHeader><CardTitle>Delivery stages</CardTitle></CardHeader><CardContent>{stages.map(([label, state]) => <StatusPill key={label} status={statusForNode(state)} label={label} />)}<StatusPill status={doneItems === ITEMS.length ? "finished" : "running"} label={`isolated worktrees ×${ITEMS.length}`} /></CardContent></Card>
     <SectionHeader title="Isolated lanes" />
     <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Issues</TableHead><TableHead>Implementer</TableHead><TableHead>Plan</TableHead><TableHead>Implement</TableHead><TableHead>Snapshot</TableHead><TableHead>Exact review</TableHead><TableHead>Ready</TableHead><TableHead>Iter</TableHead></TableRow></TableHeader><TableBody>{ITEMS.map((item) => <TableRow key={item.key}><TableCell><strong>{item.key}</strong><br />{item.title}</TableCell><TableCell>{item.issues.map((number) => `#${number}`).join(" ")}</TableCell><TableCell><Badge variant={item.kind === "hard" ? "warning" : "default"}>{item.kind === "hard" ? "terra" : "luna"}</Badge></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:plan`))} label="plan" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:implement`))} label="impl" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:candidate`))} label="sha" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:review`))} label="review" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:ready`))} label="ready" /></TableCell><TableCell>{(iteration.get(`${item.key}:implement`) ?? 0) + 1}</TableCell></TableRow>)}</TableBody></Table>
-    {terminal("commit-all") ? <SummaryCard title="Serialized integration" runId={runId} nodeId="commit-all" state={st("commit-all")} /> : null}
-    {terminal("local-gate") ? <SummaryCard title="Sandboxed local gate" runId={runId} nodeId="local-gate" state={st("local-gate")} /> : null}
-    {terminal("fable-review") ? <SummaryCard title="Fable exact-head review" runId={runId} nodeId="fable-review" state={st("fable-review")} /> : null}
-    {terminal("approve-push") ? <SummaryCard title="Human publication decision" runId={runId} nodeId="approve-push" state={st("approve-push")} /> : null}
-    {terminal("push") ? <SummaryCard title="Exact-SHA publication" runId={runId} nodeId="push" state={st("push")} /> : null}
-    <Tabs defaultValue="tree"><TabsList><TabsTrigger value="tree">Run tree</TabsTrigger><TabsTrigger value="events" count={(events ?? []).length}>Events</TabsTrigger></TabsList><TabsContent value="tree"><RunTree runId={runId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} /><NodeOutputView runId={runId} nodeId={selectedNodeId} /></TabsContent><TabsContent value="events">{runId ? <RunEventLog runId={runId} /> : <EmptyState title="Select a run." />}</TabsContent></Tabs>
+    {terminal("commit-all") ? <SummaryCard title="Serialized integration" runId={runId} nodeId="commit-all" iteration={iteration.get("commit-all") ?? 0} state={st("commit-all")} /> : null}
+    {terminal("local-gate") ? <SummaryCard title="Sandboxed local gate" runId={runId} nodeId="local-gate" iteration={iteration.get("local-gate") ?? 0} state={st("local-gate")} /> : null}
+    {terminal("fable-review") ? <SummaryCard title="Fable exact-head review" runId={runId} nodeId="fable-review" iteration={iteration.get("fable-review") ?? 0} state={st("fable-review")} /> : null}
+    {terminal("approve-push") ? <SummaryCard title="Human publication decision" runId={runId} nodeId="approve-push" iteration={iteration.get("approve-push") ?? 0} state={st("approve-push")} /> : null}
+    {terminal("push") ? <SummaryCard title="Exact-SHA publication" runId={runId} nodeId="push" iteration={iteration.get("push") ?? 0} state={st("push")} /> : null}
+    <Tabs defaultValue="tree"><TabsList><TabsTrigger value="tree">Run tree</TabsTrigger><TabsTrigger value="events" count={(events ?? []).length}>Events</TabsTrigger></TabsList><TabsContent value="tree"><RunTree runId={runId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} /><NodeOutputView runId={runId} nodeId={selectedNodeId} iteration={selectedNodeId ? iteration.get(selectedNodeId) : undefined} /></TabsContent><TabsContent value="events">{runId ? <RunEventLog runId={runId} /> : <EmptyState title="Select a run." />}</TabsContent></Tabs>
   </main>;
 }
 

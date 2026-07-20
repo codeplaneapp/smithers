@@ -68,6 +68,8 @@ describe("issue-blitz safety contract", () => {
     expect(uiSource).toContain("terminal(\"commit-all\")");
     expect(uiSource).toContain("buildIssueBlitzNodeState");
     expect(uiSource).toContain("NodeOutputView");
+    expect(uiSource).toContain('iteration={iteration.get("commit-all") ?? 0}');
+    expect(uiSource).toContain("iteration={selectedNodeId ? iteration.get(selectedNodeId) : undefined}");
     expect(uiSource).toContain("SmithersUiStyles");
     expect(uiSource).toContain('typeof document !== "undefined" && document.getElementById("root")');
     expect(uiSource).not.toContain("<style");
