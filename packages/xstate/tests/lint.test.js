@@ -173,6 +173,26 @@ describe("lintMachine re-entry task-identity", () => {
         expect(() => lintMachine("m", machine)).toThrow(/bare constant|deadlock/);
     });
 
+    test("a child-to-ancestor reset re-enters the ancestor's initial child", () => {
+        const machine = createMachine({
+            id: "workflow",
+            initial: "parent",
+            states: {
+                parent: {
+                    id: "parent",
+                    initial: "child",
+                    states: {
+                        child: {
+                            meta: { smithersTaskId: "draft" },
+                            on: { RESET: "#parent" },
+                        },
+                    },
+                },
+            },
+        });
+        expect(() => lintMachine("m", machine)).toThrow(/bare constant|deadlock/);
+    });
+
     test("a context-derived (function) smithersTaskId on a re-enterable state is allowed", () => {
         const machine = createMachine({
             context: { rev: 0 },

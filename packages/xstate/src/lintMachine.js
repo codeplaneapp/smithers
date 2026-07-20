@@ -57,6 +57,11 @@ function findReenterableStateIds(root) {
             for (const defs of node.transitions.values()) addTargets(defs);
         }
         addTargets(node.always);
+        if (node.type === "compound") {
+            for (const target of node.initial?.target ?? []) {
+                if (target?.id) edges.add(target.id);
+            }
+        }
         adjacency.set(node.id, edges);
         for (const child of Object.values(node.states ?? {})) collect(/** @type {any} */ (child), node);
     })(root, null);

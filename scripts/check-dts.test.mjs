@@ -33,6 +33,10 @@ test("the declaration gate covers gateway bundle drift and restores the tree", (
   assert.equal(readFileSync(declaration, "utf8"), "export declare const stale: true;\n");
 });
 
+test("the default declaration gate covers the xstate package", () => {
+  assert.ok(DEFAULT_DECLARATION_PACKAGES.includes("packages/xstate"));
+});
+
 test("the declaration gate fails when an expected package has no tsup config", (context) => {
   const repoRoot = mkdtempSync(join(tmpdir(), "smithers-check-dts-"));
   context.after(() => rmSync(repoRoot, { recursive: true, force: true }));
