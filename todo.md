@@ -72,8 +72,10 @@ pre-existing breakage). Full recovery log: memory file
 - [ ] DB-swap operational trap: renamed live DB stays pinned by every open handle —
       `smithers claude monitor` daemons held 100GB of deleted inode for a day. A swap/compact
       command should kill/restart all workspace smithers processes, not just engines.
-- [ ] Gateway mounts workflow UIs only at boot (`smithers ui` opened the wrong/no UI until the
-      gateway was restarted) — known defect, still open.
+- [x] Gateway mounts workflow UIs only at boot (`smithers ui` opened the wrong/no UI until the
+      gateway was restarted).
+      _(2026-07-20: fixed at the source on local main by `593ea1f1ab` with live-gateway and CLI
+      regression coverage; GitHub issue #1335 is closed.)_
 
 ## Housekeeping
 - [x] `smithers.db.bak` already deleted; disk stable (204GB free, db compacted to 6.3GB — verified 2026-07-19). Nothing further.
