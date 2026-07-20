@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/daytona",
-  "version": "0.29.1",
+  "version": "0.29.0",
   "description": "Daytona sandbox provider for Smithers: run sandboxed workflows on Daytona sandboxes",
   "type": "module",
   "sideEffects": false,

@@ -4,9 +4,9 @@ This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
 the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
-## 0.29.1 (2026-07-19)
+## 0.29.0 (2026-07-20)
 
-199 commits since [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.1): 701 files changed, +101238 / -7536 lines. Release notes: [smithers.sh/changelogs/0.29.1](https://smithers.sh/changelogs/0.29.1).
+202 commits since [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.0): 698 files changed, +82404 / -7536 lines. Release notes: [smithers.sh/changelogs/0.29.0](https://smithers.sh/changelogs/0.29.0).
 
 ### Features (29 changes, 30 commits)
 
@@ -116,7 +116,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 ### Chores and maintenance (109 changes, 111 commits)
 
 - publish env dumps atomically ([8b1676155a](https://github.com/smithersai/smithers/commit/8b1676155a))
-- finalize 0.29.1 changelogs ([60a00fc090](https://github.com/smithersai/smithers/commit/60a00fc090))
+- finalize combined 0.29.0 changelogs ([60a00fc090](https://github.com/smithersai/smithers/commit/60a00fc090))
 - preserve child diagnostics in replay probes ([6641cedaec](https://github.com/smithersai/smithers/commit/6641cedaec))
 - harden testing campaign verification loops ([e10e97b9eb](https://github.com/smithersai/smithers/commit/e10e97b9eb))
 - derive finish-campaign node types from the run tree ([342380d249](https://github.com/smithersai/smithers/commit/342380d249))
@@ -127,7 +127,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - record final root gate isolation ([f45f8ce5f0](https://github.com/smithersai/smithers/commit/f45f8ce5f0))
 - exclude workspace state from package fixtures ([4ad19b20c8](https://github.com/smithersai/smithers/commit/4ad19b20c8))
 - regenerate XState feature inventory ([0c3526d3f7](https://github.com/smithersai/smithers/commit/0c3526d3f7))
-- update 0.29.1 for XState ([2e91c7f704](https://github.com/smithersai/smithers/commit/2e91c7f704))
+- update the release notes for XState ([2e91c7f704](https://github.com/smithersai/smithers/commit/2e91c7f704))
 - keep renderer version synchronized ([dbe817b68d](https://github.com/smithersai/smithers/commit/dbe817b68d))
 - inventory XState public package ([9434001ffc](https://github.com/smithersai/smithers/commit/9434001ffc))
 - match released DevTools version ([e22a677a83](https://github.com/smithersai/smithers/commit/e22a677a83))
@@ -137,7 +137,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - record testing campaign gate progress ([a71241fc30](https://github.com/smithersai/smithers/commit/a71241fc30))
 - seal riskless gate toolchain PATH ([f3cb53a48a](https://github.com/smithersai/smithers/commit/f3cb53a48a))
 - regenerate llms bundles for the rebased xstate docs ([c23ae3f9a9](https://github.com/smithersai/smithers/commit/c23ae3f9a9))
-- align package version with the 0.29.1 release ([d5a165cf29](https://github.com/smithersai/smithers/commit/d5a165cf29))
+- align the XState package with the release version ([d5a165cf29](https://github.com/smithersai/smithers/commit/d5a165cf29))
 - pin shared-clock seq uniqueness across concurrent signals and outputs ([2cd3246aa0](https://github.com/smithersai/smithers/commit/2cd3246aa0))
 - mark the xstate peer optional and gate the facade's isolation ([faf4476118](https://github.com/smithersai/smithers/commit/faf4476118))
 - keep provenance seq on the live completion row ([bbc9d85481](https://github.com/smithersai/smithers/commit/bbc9d85481))
@@ -151,8 +151,8 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - support fork provenance reads ([feb3e0565a](https://github.com/smithersai/smithers/commit/feb3e0565a))
 - declare workflow UI runtime dependency ([58f55edb85](https://github.com/smithersai/smithers/commit/58f55edb85))
 - refresh generated artifacts ([c346de1686](https://github.com/smithersai/smithers/commit/c346de1686))
-- 0.29.1 ([0a0d47706a](https://github.com/smithersai/smithers/commit/0a0d47706a))
-- prepare 0.29.1 changelog ([5b5c647431](https://github.com/smithersai/smithers/commit/5b5c647431))
+- synchronize workspace release versions ([0a0d47706a](https://github.com/smithersai/smithers/commit/0a0d47706a))
+- prepare the combined release changelog ([5b5c647431](https://github.com/smithersai/smithers/commit/5b5c647431))
 - track current schema migration head ([39d167e040](https://github.com/smithersai/smithers/commit/39d167e040), [efc6ecfa92](https://github.com/smithersai/smithers/commit/efc6ecfa92))
 - expose durable signal rows to workflow contexts ([893d5abeb6](https://github.com/smithersai/smithers/commit/893d5abeb6))
 - sync tokens to design system v2 and render the workspace picker mark ([88506c1f3e](https://github.com/smithersai/smithers/commit/88506c1f3e))
