@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.29.1 (2026-07-19)
 
-195 commits since [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.1): 700 files changed, +101203 / -7533 lines. Release notes: [smithers.sh/changelogs/0.29.1](https://smithers.sh/changelogs/0.29.1).
+199 commits since [v0.28.0](https://github.com/smithersai/smithers/compare/v0.28.0...v0.29.1): 701 files changed, +101238 / -7536 lines. Release notes: [smithers.sh/changelogs/0.29.1](https://smithers.sh/changelogs/0.29.1).
 
 ### Features (29 changes, 30 commits)
 
@@ -47,7 +47,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ### Bug fixes (32)
 
-- fix(smithers): raise finish-campaigns lane timeouts (150m work / 60m verify); sol xhigh attempts were killed twice at the 60m cap ([088978480c](https://github.com/smithersai/smithers/commit/088978480c))
+- fix(smithers): raise finish-campaigns lane timeouts (150m work / 60m verify); sol xhigh attempts were killed twice at the 60m cap ([5cd322459f](https://github.com/smithersai/smithers/commit/5cd322459f))
 - fix(time-travel): skip cwds never jj-snapshotted in planSandboxReverts ([59a528e463](https://github.com/smithersai/smithers/commit/59a528e463))
 - fix(signal): declare alchemy and @cloudflare/containers as runtime dependencies ([eef472ab57](https://github.com/smithersai/smithers/commit/eef472ab57))
 - fix(ceo-intel): narrow assess-batch id filter so tsc accepts the regex test ([4c96d0d12e](https://github.com/smithersai/smithers/commit/4c96d0d12e))
@@ -113,11 +113,15 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: align onboarding with the curated workflow pack ([63f7e29121](https://github.com/smithersai/smithers/commit/63f7e29121))
 - docs: correct 0.28.0 release stats for the re-pointed tag (1188 commits, 424 fixes) ([06a02a892c](https://github.com/smithersai/smithers/commit/06a02a892c))
 
-### Chores and maintenance (105 changes, 107 commits)
+### Chores and maintenance (109 changes, 111 commits)
 
-- preserve child diagnostics in replay probes ([79ff1fc10d](https://github.com/smithersai/smithers/commit/79ff1fc10d))
-- harden testing campaign verification loops ([6db65c019b](https://github.com/smithersai/smithers/commit/6db65c019b))
-- derive finish-campaign node types from the run tree ([1dce4526fd](https://github.com/smithersai/smithers/commit/1dce4526fd))
+- publish env dumps atomically ([8b1676155a](https://github.com/smithersai/smithers/commit/8b1676155a))
+- finalize 0.29.1 changelogs ([60a00fc090](https://github.com/smithersai/smithers/commit/60a00fc090))
+- preserve child diagnostics in replay probes ([6641cedaec](https://github.com/smithersai/smithers/commit/6641cedaec))
+- harden testing campaign verification loops ([e10e97b9eb](https://github.com/smithersai/smithers/commit/e10e97b9eb))
+- derive finish-campaign node types from the run tree ([342380d249](https://github.com/smithersai/smithers/commit/342380d249))
+- record green testing campaign root gate ([c2e8c1aafc](https://github.com/smithersai/smithers/commit/c2e8c1aafc))
+- settle durable poll exhaustion ([0bf8a82a19](https://github.com/smithersai/smithers/commit/0bf8a82a19))
 - settle durable poll after retry ([d800574045](https://github.com/smithersai/smithers/commit/d800574045))
 - budget account regeneration under load ([2149759ce0](https://github.com/smithersai/smithers/commit/2149759ce0))
 - record final root gate isolation ([f45f8ce5f0](https://github.com/smithersai/smithers/commit/f45f8ce5f0))
