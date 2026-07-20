@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -35,9 +35,9 @@ async function click(element: Element): Promise<void> {
   });
 }
 
-async function wait(ms: number): Promise<void> {
+async function advanceTimersByTime(ms: number): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    jest.advanceTimersByTime(ms);
   });
 }
 
@@ -57,27 +57,33 @@ describe("CodeBlock", () => {
   });
 
   test("copy calls the seam and repeated clicks restart the copied timer", async () => {
-    const copied: string[] = [];
-    await render(
-      <CodeBlock code="copy me" copiedDurationMs={1_000} onCopyCode={(code) => copied.push(code)} />,
-    );
-    const block = container!.querySelector('[data-slot="code-block"]')!;
-    const button = container!.querySelector('[data-slot="code-block-copy"]')!;
+    jest.useFakeTimers();
+    try {
+      const copied: string[] = [];
+      await render(
+        <CodeBlock code="copy me" copiedDurationMs={1_000} onCopyCode={(code) => copied.push(code)} />,
+      );
+      const block = container!.querySelector('[data-slot="code-block"]')!;
+      const button = container!.querySelector('[data-slot="code-block-copy"]')!;
 
-    await click(button);
-    expect(copied).toEqual(["copy me"]);
-    expect(block.getAttribute("data-copied")).toBe("true");
-    expect(button.textContent).toBe("Copied");
+      await click(button);
+      expect(copied).toEqual(["copy me"]);
+      expect(block.getAttribute("data-copied")).toBe("true");
+      expect(button.textContent).toBe("Copied");
 
-    await wait(25);
-    await click(button);
-    await wait(500);
-    expect(copied).toEqual(["copy me", "copy me"]);
-    expect(block.getAttribute("data-copied")).toBe("true");
+      await advanceTimersByTime(400);
+      await click(button);
+      await advanceTimersByTime(601);
+      expect(copied).toEqual(["copy me", "copy me"]);
+      expect(block.getAttribute("data-copied")).toBe("true");
 
-    await wait(550);
-    expect(block.getAttribute("data-copied")).toBe("false");
-    expect(button.textContent).toBe("Copy");
+      await advanceTimersByTime(399);
+      expect(block.getAttribute("data-copied")).toBe("false");
+      expect(button.textContent).toBe("Copy");
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   });
 
   test("wrap toggle updates aria-pressed, data-wrap, and the change seam", async () => {
