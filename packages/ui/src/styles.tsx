@@ -1,9 +1,10 @@
 /** @jsxImportSource react */
 import { useInsertionEffect } from "react";
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { standaloneThemeCss, workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
 import { smithersUiCss } from "./uiCss";
 
 export { smithersUiCss } from "./uiCss";
+export { standaloneThemeCss };
 
 /**
  * Marker attribute carried by the injected/rendered style element. Both

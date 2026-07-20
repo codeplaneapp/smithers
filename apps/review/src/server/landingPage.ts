@@ -1,4 +1,4 @@
-import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { standaloneThemeCss } from "@smithers-orchestrator/ui";
 
 export const landingPage = `<!doctype html>
 <html lang="en">

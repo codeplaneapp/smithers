@@ -32,7 +32,6 @@
     "legacyPackageUsage": [
       "apps/cli/src/monitor-ui/monitor.tsx -> smithers-orchestrator/gateway-ui",
       "apps/review/package.json#dependencies:@smithers-orchestrator/gateway-ui@workspace:*",
-      "apps/review/src/server/landingPage.ts -> @smithers-orchestrator/gateway-ui/styleguide-css",
       "apps/smithers/package.json#dependencies:@smithers-orchestrator/gateway-ui@workspace:*",
       "apps/smithers/src/main.tsx -> @smithers-orchestrator/gateway-ui",
       "apps/telegram-summary/package.json#dependencies:@smithers-orchestrator/gateway-ui@workspace:*",
@@ -223,7 +222,8 @@
       "apps/cli/src/monitor-ui/monitor.tsx -> smithers-orchestrator/gateway-ui",
       "apps/cli/src/monitor-ui/monitor.tsx -> smithers-orchestrator/ui",
       "apps/cli/src/monitor-ui/monitorShell.tsx -> smithers-orchestrator/ui",
-      "apps/review/src/server/landingPage.ts -> @smithers-orchestrator/gateway-ui/styleguide-css",
+      "apps/review/src/server/landingPage.ts -> @smithers-orchestrator/ui",
+      "apps/review/src/walkthrough/walkthroughCss.ts -> @smithers-orchestrator/ui",
       "apps/signal/site/src/App.tsx -> smithers-orchestrator/ui",
       "apps/signal/site/src/components/ArchivePage.tsx -> smithers-orchestrator/ui",
       "apps/signal/site/src/components/BriefList.tsx -> smithers-orchestrator/ui",

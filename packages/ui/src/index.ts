@@ -49,6 +49,7 @@ export {
   SmithersUiStyles,
   composeSmithersUiStyles,
   smithersUiCss,
+  standaloneThemeCss,
   SMITHERS_UI_STYLE_ATTR,
   type SmithersUiStylesProps,
 } from "./styles";

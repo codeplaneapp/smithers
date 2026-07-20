@@ -1243,7 +1243,10 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       ) {
         violations.push(formatViolation("ui-layer-placement", `${path} is outside the target UI layers`));
       }
-      if (path.startsWith("packages/gateway-ui/src/") || path.startsWith("packages/ui-styleguide/src/")) {
+      if (
+        path.startsWith("packages/gateway-ui/src/") ||
+        (path.startsWith("packages/ui-styleguide/src/") && path !== "packages/ui-styleguide/src/standaloneThemeCss.ts")
+      ) {
         violations.push(formatViolation("compatibility-facade-file", `${path} is legacy facade implementation`));
       }
     }

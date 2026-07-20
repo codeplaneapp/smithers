@@ -1,4 +1,4 @@
-import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { standaloneThemeCss } from "@smithers-orchestrator/ui";
 
 /**
  * The walkthrough design system composes the standalone shared theme with
