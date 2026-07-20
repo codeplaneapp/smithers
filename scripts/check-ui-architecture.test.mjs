@@ -124,6 +124,23 @@ test("a compliant pack UI passes", (context) => {
   assert.equal(check(root).ok, true);
 });
 
+test("pack UI imports are limited to the pack composition surface", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  snapshot(root);
+  write(
+    root,
+    "examples/ui/unsupported-import.tsx",
+    'import { createRoot } from "react-dom/client"; export function UnsupportedImport() { return <div />; }\n',
+  );
+  const result = check(root);
+  assert.equal(result.ok, false);
+  assert.match(
+    result.errors.join("\n"),
+    /New architecture violation: pack-ui-imports :: examples\/ui\/unsupported-import\.tsx imports react-dom\/client/,
+  );
+});
+
 test("a fresh pack UI style block fails", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
