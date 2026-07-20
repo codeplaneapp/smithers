@@ -6,9 +6,9 @@ description: "Smithers 0.29.0 introduces first-class memory alongside durable XS
 **Smithers 0.29.0 is the first npm release since 0.28.0.** It combines the
 first-class `<Memory>` system with durable XState folds, a shared cross-app UI
 library, Microsandbox support, and broad security and durability hardening.
-Across the full `v0.28.0..HEAD` range that is 202 commits, 698 files changed,
-82,404 insertions and 7,536 deletions, including 30 emoji-prefixed feature
-commits, 32 bug-fix commits, 3 refactors, 6 test commits, and 15 docs commits.
+Across the full `v0.28.0..HEAD` range that is 212 commits, 698 files changed,
+82,562 insertions and 7,559 deletions, including 48 feature commits, 67 bug-fix
+commits, 3 refactors, 22 test commits, and 42 docs commits.
 
 ## Upgrading
 
@@ -98,17 +98,29 @@ contract, re-entry rules, time-travel semantics, and performance bounds.
 If you have built a custom workflow UI, you have probably rebuilt a
 terminal, a diff view, or a markdown renderer more than once. 0.29.0 ships a
 shared component library across `smithers-orchestrator/ui` and
-`smithers-orchestrator/gateway-ui` so you do not have to:
+`smithers-orchestrator/gateway-ui` so you do not have to.
 
-- A **Terminal** adapter over xterm.js.
+From `smithers-orchestrator/ui` directly:
+
 - A dependency-free **Markdown** renderer that renders through React
-  children, never `innerHTML`, so it is XSS-safe by construction.
-- A **MarkdownEditor** adapter over Milkdown Crepe.
-- A **PierreDiffView** diff adapter, plus a dependency-free **DiffHunks**
-  component and diff domain for when you do not need the full adapter.
+  children, never `innerHTML`, so it is XSS-safe by construction. Links with
+  an unsafe scheme render without an `href` and never reach your
+  `onLinkClick` handler.
+- A dependency-free **DiffHunks** component and diff domain, for when you do
+  not need the full diff adapter.
 - **FileTree**, **CollapsiblePanel**, and **StageStrip** components.
-- In `gateway-ui`: a ReactFlow and dagre powered **WorkflowGraph** DAG
-  canvas, and a run-aware **NodeOutputCard**.
+
+The three adapters carry heavy dependencies, so they ship as their own
+subpaths rather than from the `ui` barrel. Import each from its own path:
+
+- **Terminal** over xterm.js, from `smithers-orchestrator/ui/adapters/terminal`.
+- **MarkdownEditor** over Milkdown Crepe, from
+  `smithers-orchestrator/ui/adapters/markdown-editor`.
+- **PierreDiffView** over `@pierre/diffs`, from
+  `smithers-orchestrator/ui/adapters/pierre-diff-view`.
+
+From `smithers-orchestrator/gateway-ui`: a ReactFlow and dagre powered
+**WorkflowGraph** DAG canvas, and a run-aware **NodeOutputCard**.
 
 See the [UI component library reference](/reference/ui) for the full
 catalog.
@@ -160,7 +172,8 @@ security-scoped:
 
 Additional boundary hardening includes configurable response-body caps for
 generated OpenAPI tools and the built-in HTTP and transcription tools
-(`maxResponseBodyBytes`, default 1 MiB), plus Gateway WebSocket run-event
+(`maxResponseBodyBytes`, default 1 MiB, except the transcription tool's remote
+audio download which keeps its 25 MiB default), plus Gateway WebSocket run-event
 subscription caps at every scope (gateway 256, per-user 32, per-connection 8,
 per-run 64). Alongside those:
 
@@ -177,8 +190,6 @@ per-run 64). Alongside those:
   (default 30s), races the retry wait against the call's `AbortSignal`, and
   no longer treats an aborted body read as a retryable error that could
   trigger a duplicate request.
-- A `bind={[]}` provenance binding is now parked as missing instead of being
-  dispatched as unproven.
 - Claude subscription accounts with organization-level overage purchasing
   disabled no longer have every agent invocation misclassified as a quota
   rejection.
@@ -190,9 +201,6 @@ per-run 64). Alongside those:
 - Eval suites support LLM-judge assertions.
 - The observability package supports OTLP authentication headers for
   authenticated trace export.
-- `defineTool` moved to a new shared `@smithers-orchestrator/tool-context`
-  package, re-exported from all existing entry points, so your imports keep
-  working unchanged.
 - Detached (`up -d`) run logs now default to
   `<workspace>/.smithers/logs/<runId>.log` with automatic retention-window
   and total-size-capped cleanup, instead of accumulating indefinitely in the
@@ -225,9 +233,6 @@ per-run 64). Alongside those:
   because recalled context is a mutable input that is not part of the cache
   identity. Legacy namespace or object-form memory metadata remains inert
   and keeps its previous cache semantics.
-- **`defineTool` moved, imports unaffected.** It now lives in
-  `@smithers-orchestrator/tool-context`, but is re-exported from every
-  existing entry point, so no code changes are required.
 - **`HindsightMemoryStore` assumes a single writer per contract store.**
   This constraint and its invariant tests are documented in the memory
   guides.
@@ -239,6 +244,19 @@ per-run 64). Alongside those:
   directory. An explicit `--log-dir` still overrides, and
   `SMITHERS_LOG_RETENTION_DAYS` / `SMITHERS_LOG_MAX_TOTAL_BYTES` tune the
   automatic cleanup.
+- **Tool response bodies are capped by default.** Generated OpenAPI tools and
+  the built-in HTTP tool now stop reading a response body at 1 MiB. The
+  transcription tool's remote audio download keeps its 25 MiB default. Raise
+  or lower either with `maxResponseBodyBytes`. A call that previously
+  streamed a larger body now fails with an explicit limit error instead of
+  buffering without bound.
+- **The Freestyle sandbox provider was removed.** It shipped as an example
+  provider and Microsandbox replaces it. Switch to Microsandbox or one of the
+  other first-class providers (Vercel, AWS, GCP, Daytona).
+- **`StatusClass` gained a `run` member and `statusClass()` re-buckets.**
+  Running now maps to the brand class, and waiting, paused, queued and
+  pending map to their new classes. An exhaustive `switch` or lookup map over
+  `StatusClass` will fail to compile until you handle `run`.
 
 ## The full changelog
 
