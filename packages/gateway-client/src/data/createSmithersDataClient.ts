@@ -225,6 +225,19 @@ function fetchEventSource(
         }) as StreamHttpError);
         return;
       }
+      // An OK response that is not an SSE stream cannot be the gateway's
+      // change stream — a SPA history fallback answers 200 + text/html here.
+      // Fail before onopen so the client parks in its normal offline/backoff
+      // path instead of flapping online (each bogus open would emit a reset
+      // and refetch every collection). Mirrors the browser EventSource, which
+      // also rejects non-`text/event-stream` responses.
+      const streamMediaType = (response.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+      if (streamMediaType !== "text/event-stream") {
+        fail(Object.assign(new Error(`Smithers stream endpoint answered with ${streamMediaType || "no content-type"} instead of text/event-stream; no gateway behind this URL.`), {
+          status: response.status,
+        }) as StreamHttpError);
+        return;
+      }
       source.onopen?.(new Event("open"));
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -366,11 +379,27 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
 
   // Shared `/v1/api/*` envelope handling for request/mutate: parse, flip to
   // unauthorized on 401/403, and throw the gateway's error (or an HTTP
-  // fallback) when the envelope is not ok.
+  // fallback) when the envelope is not ok. A 2xx response whose body is not an
+  // envelope at all means no gateway answered this URL (the host app's SPA
+  // fallback serves index.html for `/v1/api/*` when nothing is wired); that
+  // classifies as GATEWAY_UNAVAILABLE so consumers can degrade quietly
+  // (isGatewayUnavailableError) instead of reporting "Gateway HTTP 200".
   const readEnvelope = async <T>(path: string, response: Response): Promise<ApiEnvelope<T>> => {
-    const json = await response.json().catch(() => undefined) as ApiEnvelope<T> | undefined;
+    const raw: unknown = await response.json().catch(() => undefined);
+    const envelopeShaped =
+      typeof raw === "object" && raw !== null && typeof (raw as { ok?: unknown }).ok === "boolean";
+    const json = envelopeShaped ? (raw as ApiEnvelope<T>) : undefined;
     if (!json?.ok) {
       if (isUnauthorizedStatus(response.status)) setStatus({ status: "unauthorized" });
+      if (response.ok && !envelopeShaped) {
+        throw new GatewayRpcError({
+          method: path,
+          status: response.status,
+          code: "GATEWAY_UNAVAILABLE",
+          message:
+            "The response is not a Smithers gateway envelope; this URL is likely served by an app's HTML fallback because no gateway is wired.",
+        });
+      }
       throw new GatewayRpcError({
         method: path,
         status: response.status,
@@ -386,8 +415,25 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     return json;
   };
 
+  // A fetch-level rejection (connection refused, DNS failure, no fetch in this
+  // environment) means nothing is listening at all — the dead-endpoint twin of
+  // readEnvelope's SPA-fallback case — so it classifies as GATEWAY_UNAVAILABLE
+  // too and consumers degrade quietly. Any actual Response, ok or not, passes
+  // through to readEnvelope, which keeps real gateway and HTTP errors loud.
+  const fetchGateway = async (path: string, init: RequestInit): Promise<Response> => {
+    try {
+      return await fetchImpl(`${apiBaseUrl}${path}`, init);
+    } catch (cause) {
+      throw new GatewayRpcError({
+        method: path,
+        code: "GATEWAY_UNAVAILABLE",
+        message: `No Smithers gateway reachable at ${apiBaseUrl}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      });
+    }
+  };
+
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await fetchImpl(`${apiBaseUrl}${path}`, {
+    const response = await fetchGateway(path, {
       method,
       headers: headers(mode.token, body !== undefined),
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -397,7 +443,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
   }
 
   async function mutate<T>(method: string, path: string, body?: unknown) {
-    const response = await fetchImpl(`${apiBaseUrl}${path}`, {
+    const response = await fetchGateway(path, {
       method,
       headers: headers(mode.token, true),
       body: JSON.stringify(body ?? {}),

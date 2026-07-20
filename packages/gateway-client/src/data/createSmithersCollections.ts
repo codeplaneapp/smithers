@@ -19,6 +19,8 @@ import type {
   ListWorkflowsRequest,
   SubmitApprovalRequest,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
+import { isGatewayUnavailableError } from "../isGatewayUnavailableError.ts";
+import { noteGatewayUnavailable } from "./gatewayUnavailableNotice.ts";
 import type { GatewayApprovalRow } from "../sync/GatewayApprovalRow.ts";
 import type { GatewayCronRow } from "../sync/GatewayCronRow.ts";
 import type { GatewayMemoryFactRow } from "../sync/GatewayMemoryFactRow.ts";
@@ -333,11 +335,32 @@ function createSmithersCollectionsWithClient(
     const id = cacheKey(queryKey);
     const existing = collections.get(id);
     if (existing) return existing as unknown as Collection<TRow, TKey>;
+    // No gateway answering (SPA HTML fallback on /v1/api/*) reads as data, not
+    // an error: a rejected queryFn makes @tanstack/query-db-collection
+    // console.error "[QueryCollection] Error observing query ..." for EVERY
+    // collection on every boot without a gateway. Observers settle on the last
+    // rows a real gateway served (empty before the first success) while
+    // useGatewayConnectionStatus reports the outage, and the stream's reset on
+    // reconnect refetches real rows once a gateway appears. A single
+    // session-level info notice replaces the per-query spam; real gateway
+    // errors still reject and surface loudly.
+    let lastRows: TRow[] = [];
+    const quietWhenUnavailable = async () => {
+      try {
+        return (lastRows = await queryFn());
+      } catch (cause) {
+        if (isGatewayUnavailableError(cause)) {
+          noteGatewayUnavailable(cause);
+          return lastRows;
+        }
+        throw cause;
+      }
+    };
     const options = smithersLocalCollectionOptions<TRow, QueryKey, TKey>({
       id,
       queryKey,
       queryClient,
-      queryFn,
+      queryFn: quietWhenUnavailable,
       getKey,
       ...(mutationHandlers as Partial<{
         onInsert: InsertMutationFn<TRow, TKey>;

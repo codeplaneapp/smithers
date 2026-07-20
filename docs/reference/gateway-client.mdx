@@ -211,6 +211,37 @@ try {
 
 **Source** [`GatewayRpcError.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/GatewayRpcError.ts) · **Tests** [`gateway-client.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/tests/gateway-client.test.ts)
 
+## isGatewayUnavailableError
+
+True when an error means nothing that speaks the gateway protocol answered the
+URL: a 2xx response whose body is not an `{ ok, ... }` envelope, or a
+fetch-level rejection (connection refused, DNS failure) because nothing is
+listening at all. The usual cause is a host app's SPA fallback serving
+`index.html` for `/v1/api/*` because no gateway is wired. The data client
+throws these with code
+`GATEWAY_UNAVAILABLE`, and the QueryCollection layer already degrades them
+quietly: collections settle on the last rows a real gateway served (empty
+before the first success), a single session-level `console.info` notice
+replaces the per-collection `[QueryCollection]` error spam, and the SSE change
+stream refuses non-`text/event-stream` answers so the connection status parks
+`offline` instead of flapping online. Recovery is automatic — the stream's
+reconnect backoff keeps probing, and the reset emitted on a real reconnect
+refetches every collection. Branch on it when you call `api.*` directly and
+want the same behavior.
+
+```ts
+try {
+  await client.api.listRuns();
+} catch (error) {
+  if (isGatewayUnavailableError(error)) return []; // no gateway here; show empty state
+  throw error;
+}
+```
+
+Real gateway errors and non-2xx HTTP failures never classify as unavailable.
+
+**Source** [`isGatewayUnavailableError.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/isGatewayUnavailableError.ts) · **Tests** [`gatewayUnavailableQuietDegrade.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/tests/data/gatewayUnavailableQuietDegrade.test.ts)
+
 ## gatewayBackoffDelay
 
 Exponential backoff with full jitter for one 0-based attempt. The resilient

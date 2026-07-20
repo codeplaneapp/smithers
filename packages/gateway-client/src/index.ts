@@ -1,5 +1,6 @@
 export { gatewayBackoffDelay, type GatewayBackoffOptions } from "./gatewayBackoffDelay.ts";
 export { GatewayRpcError } from "./rpc.ts";
+export { isGatewayUnavailableError } from "./isGatewayUnavailableError.ts";
 export { SmithersGatewayClient } from "./SmithersGatewayClient.ts";
 export type { GatewayStreamReconnectEvent } from "./SmithersGatewayClient.ts";
 export {
