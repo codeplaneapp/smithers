@@ -44,12 +44,15 @@ const workflowOwners = {
   "./tests/land-shared-ui.test.tsx": ["land-shared-ui.tsx"],
   "./tests/riskless-github-issue-sweep.test.ts": ["riskless-github-issue-sweep.tsx"],
   "./tests/shared-ui-library.test.tsx": ["shared-ui-library.tsx"],
+  "./tests/xstate-release-train.test.tsx": ["xstate-release-train.tsx"],
+  "./tests/memory-recall-demo.test.tsx": ["memory-recall-demo.tsx"],
 } as const;
 
 const componentOwners = {
   "./tests/component-workflow-core.test.tsx": ["CommandProbe.tsx", "Estimate.tsx", "FeatureEnum.tsx", "ForEachFeature.tsx", "GrillMe.tsx", "LoopUntilScored.tsx", "PlanPanel.tsx", "Review.tsx"],
   "./tests/component-workflow-advanced.test.tsx": ["ShipTickets.tsx", "TestFortress.tsx", "ValidationLoop.tsx", "VerifiableGoals.tsx", "extract-prompt/ExtractPrompt.tsx"],
   "./tests/component-helpers.test.ts": ["extract-prompt/MarkdownPromptCache.ts", "extract-prompt/MemoryPromptCache.ts", "extract-prompt/PromptCache.ts", "extract-prompt/SqlitePromptCache.ts", "extract-prompt/index.ts", "extract-prompt/rctfCompletenessScorer.ts", "extract-prompt/rctfPromptSchema.ts", "extract-prompt/readLatestScore.ts", "extract-prompt/stakesToThreshold.ts", "roles.ts"],
+  "./tests/xstate-release-train.test.tsx": ["releaseTrainMachine.ts"],
 } as const;
 
 function physicalWorkflowEntries(): string[] {

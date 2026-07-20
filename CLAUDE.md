@@ -31,6 +31,12 @@ pnpm -C e2e test
 pnpm docs:llms                  # after docs changes
 ```
 
+## Replies
+
+- Be extremely concise. Minimum words to convey the point. Long replies go unread.
+- Lead with the answer or result. No preamble, no recap of what you just did.
+- Do the work instead of asking permission or listing options.
+
 ## Invariants
 
 - Use `jj st`/`jj diff` for working-copy truth. Preserve unrelated concurrent changes; never blanket-stage.

@@ -8,11 +8,13 @@ import { createRequire } from 'node:module';
 
 const here = dirname(fileURLToPath(import.meta.url));
 let chromium = null;
+const repoRoot = join(here, '..', '..', '..');
 const bases = [
   here,
-  join(here, '..', '..', '..'),
-  join(here, '..', '..', '..', 'apps', 'smithers'),
-  join(here, '..', '..', '..', 'apps', 'smithers-studio-2'),
+  repoRoot,
+  join(repoRoot, '.smithers'),
+  join(repoRoot, 'apps', 'smithers'),
+  join(repoRoot, 'apps', 'smithers-studio-2'),
 ];
 for (const base of bases) {
   try {
