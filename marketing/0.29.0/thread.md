@@ -1,8 +1,8 @@
 # Smithers 0.29.0 launch thread
 
 Ready-to-post X/Twitter thread for the Smithers 0.29.0 release. Numbers are
-taken verbatim from the release stats (`git log v0.28.0..HEAD`): 216 commits,
-719 files changed, 84,182 insertions, 7,561 deletions, 50 feature commits,
+taken verbatim from the release stats (`git log v0.28.0..HEAD`): 217 commits,
+721 files changed, 84,201 insertions, 7,561 deletions, 50 feature commits,
 67 bug-fix commits, 22 test commits, 42 docs commits.
 
 Five tweets. The shared UI component library, the XState mount-time lint, and
@@ -19,7 +19,7 @@ recall/retain visualization (tweet 2). See the [media plan](#media-plan).
 
 **Media:** hero card (TODO)
 
-> Smithers 0.29.0 is out. 216 commits, 719 files changed, 84,182 insertions.
+> Smithers 0.29.0 is out. 217 commits, 721 files changed, 84,201 insertions.
 >
 > First-class agent memory, XState machines folded over durable rows, and Microsandbox microVMs.
 >
@@ -47,7 +47,7 @@ Characters: 271
 
 ### 3. Tweet 3
 
-**Media:** live XState machine visualization on a realistic workflow (TODO, see media plan)
+**Media:** [Stately inspector → assets/xstate-devtools.png](assets/xstate-devtools.png)
 
 > XState v5, without a second scheduler.
 >
@@ -75,7 +75,7 @@ Characters: 253
 
 **Media:** release inventory card (TODO)
 
-> The honest shape of this release: 67 of 216 commits are fixes, 22 are tests.
+> The honest shape of this release: 67 of 217 commits are fixes, 22 are tests.
 >
 > An empty bind={[]} provenance binding now parks as missing instead of dispatching an unproven task. Cron fires are claimed by compare-and-set, so nothing double-fires.
 >
@@ -100,22 +100,29 @@ Present in the changelog, deliberately not tweeted:
 
 ## Media plan
 
-### Tweet 3 — XState visualization (blocking, must be built)
+### Tweet 3 — XState devtools (DONE)
 
-There is no example workflow using `useSmithersMachine` in the repo and no
-state-chart visualization anywhere in the UI packages. Both have to be built
-before this tweet can ship:
+`assets/xstate-devtools.png` is a real Stately inspector rendering of
+`releaseTrainMachine`, captured with `drafting` active after a REVISE.
 
-1. A realistic example workflow under `examples/` that folds a machine over
-   durable rows (revision loop with approval + external `REVISE` signal is the
-   shape the docs already teach).
-2. A live UI at `.smithers/ui/<key>.tsx` that draws the machine: states, the
-   active state, transitions, and the durable rows that drove each transition.
-   `WorkflowGraph` from `smithers-orchestrator/gateway-ui` is the closest
-   existing primitive.
-3. Record the run driving the machine through states, including a
-   `bunx smithers-orchestrator signal <runId> REVISE` from the terminal so the
-   external-event path is visible.
+**Caption honestly.** Smithers never creates an actor — `packages/xstate/src`
+only calls pure `transition()`, which is the whole point of the feature. The
+Stately inspector attaches to an actor, so it cannot observe a Smithers fold
+directly. This image was produced by replaying the same events the fold derives
+into a **display-only actor** built purely for visualization. Wording like
+"visualizing the folded events" is accurate; anything implying Smithers runs an
+actor inverts the feature.
+
+Reproduce (throwaway, nothing committed): bundle a `createActor` +
+`createBrowserInspector` entry from inside `.smithers` so deps resolve, serve
+it, and screenshot the `stately.ai/registry/inspect` tab with Playwright.
+
+The workflow itself (`.smithers/workflows/xstate-release-train.tsx`) and its
+custom statechart UI are committed and verified end-to-end: run
+`bunx smithers-orchestrator up .smithers/workflows/xstate-release-train.tsx`,
+approve the gate, then
+`bunx smithers-orchestrator signal <runId> REVISE --data '{"feedback":"..."}'`
+and the machine advances `research → approval → draft-r0 → revise-r0 → draft-r1`.
 
 ### Tweet 2 — Memory visualization (blocking, must be built)
 
@@ -130,22 +137,17 @@ the 0.28.0 cards. Note this palette is marketing-card convention only, copied
 from `marketing/0.28.0/assets/`; it is not the product design token set
 (`packages/ui/src/tokens.ts` uses `--brand, #6d56d8`).
 
-**They are not yet rasterized.** `render-pngs.mjs` needs Playwright, which is
-not installed anywhere in this repo (it is an unmet optional dependency of
-`.smithers`). X does not accept SVG uploads, so before posting:
-
-```sh
-pnpm -C .smithers install playwright && npx playwright install chromium
-node marketing/0.29.0/assets/render-pngs.mjs
-```
+Rendered at 3200×1800 with `node marketing/0.29.0/assets/render-pngs.mjs`
+(Playwright resolves from `.smithers`; `npx playwright` fails in this repo on an
+npm override conflict, use `.smithers/node_modules/.bin/playwright`).
 
 | Tweet | Asset | Kind | Status |
 |-------|-------|------|--------|
-| 1 | `assets/tweet-01-hero.svg` | hero | authored, needs PNG |
+| 1 | `assets/tweet-01-hero.png` | hero | ready |
 | 2 | `assets/memory-live.gif` | screen recording | **demo not built yet** |
-| 3 | `assets/xstate-live.gif` | screen recording | **demo in progress** |
-| 4 | `assets/tweet-04-diagram.svg` | diagram | authored, needs PNG |
-| 5 | `assets/tweet-05-changelog.svg` | changelog | authored, needs PNG |
+| 3 | `assets/xstate-devtools.png` | Stately inspector | ready |
+| 4 | `assets/tweet-04-diagram.png` | diagram | ready |
+| 5 | `assets/tweet-05-changelog.png` | changelog | ready |
 
 The hero, microsandbox diagram, and release-shape cards are also copied into
 `docs/images/0.29.0/` and embedded in the changelog page.
