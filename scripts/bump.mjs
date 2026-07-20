@@ -4,7 +4,7 @@
 // workspace package, refreshes the lockfile, and stages everything so that
 // pnpm's own `git commit` + tag includes the whole bump in one commit.
 
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -79,18 +79,21 @@ export function stageReleasePaths(rootDir, paths, env = process.env) {
   execFileSync("git", ["add", "--", ...paths], { cwd: rootDir, stdio: "inherit", env });
 }
 
-function main() {
-  const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+/**
+ * @param {{rootDir?: string, env?: NodeJS.ProcessEnv}} [options]
+ */
+export function bump({ rootDir = root, env = process.env } = {}) {
+  const version = JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8")).version;
 
   console.log(`▸ propagating version ${version} to workspace packages`);
 
   const dirs = [
-    ...readdirSync(join(root, "packages"), { withFileTypes: true })
+    ...readdirSync(join(rootDir, "packages"), { withFileTypes: true })
       .filter((d) => d.isDirectory())
-      .map((d) => join(root, "packages", d.name)),
-    ...readdirSync(join(root, "apps"), { withFileTypes: true })
+      .map((d) => join(rootDir, "packages", d.name)),
+    ...readdirSync(join(rootDir, "apps"), { withFileTypes: true })
       .filter((d) => d.isDirectory())
-      .map((d) => join(root, "apps", d.name)),
+      .map((d) => join(rootDir, "apps", d.name)),
   ];
 
   const changed = [];
@@ -112,7 +115,7 @@ function main() {
 
   // .smithers/lib/plue-provider.ts pins the orchestrator version it provisions;
   // its test asserts the pin matches the root version, so sync it here.
-  const providerPath = join(root, ".smithers", "lib", "plue-provider.ts");
+  const providerPath = join(rootDir, ".smithers", "lib", "plue-provider.ts");
   const provider = readFileSync(providerPath, "utf8");
   const syncedProvider = provider.replace(
     /(export const DEFAULT_ORCHESTRATOR_VERSION = ")[^"]+(")/,
@@ -132,7 +135,7 @@ function main() {
   // gateway-client reports DEFAULT_CLIENT_VERSION in its connect handshake when
   // the caller supplies none; a test asserts it matches package.json, so sync it
   // here too or a release bump would leave every default client stale.
-  const clientPath = join(root, "packages", "gateway-client", "src", "SmithersGatewayClient.ts");
+  const clientPath = join(rootDir, "packages", "gateway-client", "src", "SmithersGatewayClient.ts");
   const clientSource = readFileSync(clientPath, "utf8");
   const syncedClient = clientSource.replace(
     /(const DEFAULT_CLIENT_VERSION = ")[^"]+(")/,
@@ -151,7 +154,7 @@ function main() {
 
   // react-reconciler identifies its renderer version to React DevTools. Keep
   // that runtime value aligned with the package manifest on every release.
-  const reconcilerPath = join(root, "packages", "react-reconciler", "src", "reconciler.js");
+  const reconcilerPath = join(rootDir, "packages", "react-reconciler", "src", "reconciler.js");
   const reconcilerSource = readFileSync(reconcilerPath, "utf8");
   const syncedReconciler = reconcilerSource.replace(
     /(const injectedDevToolsConfig = \{[\s\S]*?\n\s*version: ")[^"]+(")/,
@@ -168,18 +171,31 @@ function main() {
     console.log(`  synced React DevTools renderer version in ${reconcilerPath}`);
   }
 
-  execSync("pnpm install --prefer-offline", { cwd: root, stdio: "inherit" });
+  execFileSync("pnpm", ["install", "--prefer-offline"], { cwd: rootDir, stdio: "inherit", env });
 
   console.log("▸ regenerating llms bundles for the new version");
-  execSync("pnpm docs:llms", { cwd: root, stdio: "inherit" });
+  execFileSync("pnpm", ["docs:llms"], { cwd: rootDir, stdio: "inherit", env });
 
-  stageReleasePaths(root, [
+  try {
+    execFileSync("bun", ["--version"], { cwd: rootDir, stdio: "ignore", env });
+  } catch (error) {
+    const detail = error?.code === "ENOENT" ? "bun was not found on PATH" : `bun preflight failed: ${error.message}`;
+    throw new Error(`bump.mjs requires Bun to refresh bun.lock — ${detail}; install Bun and retry`, { cause: error });
+  }
+  execFileSync("bun", ["install", "--lockfile-only", "--offline"], {
+    cwd: rootDir,
+    stdio: "inherit",
+    env,
+  });
+
+  stageReleasePaths(rootDir, [
     ...changed,
-    join(root, "pnpm-lock.yaml"),
-    ...expandArtifactPatterns(root, llmsArtifactPatterns),
-  ]);
+    join(rootDir, "pnpm-lock.yaml"),
+    join(rootDir, "bun.lock"),
+    ...expandArtifactPatterns(rootDir, llmsArtifactPatterns),
+  ], env);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  bump();
 }
