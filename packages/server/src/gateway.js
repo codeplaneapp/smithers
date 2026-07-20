@@ -59,6 +59,7 @@ import { SmithersCtx } from "@smithers-orchestrator/driver";
 import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 import { createBrowserSessionRegistry } from "./browser.js";
 import { validateBrowserRequest } from "./gatewayRoutes/browser.js";
+import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -2696,6 +2697,17 @@ export class Gateway {
         }
         const host = headerValue(req, "host") ?? "127.0.0.1";
         const url = new URL(`http://${host}${req.url ?? "/"}`);
+        const browserViewer = url.pathname.match(/^\/browser\/([^/]+)\/viewer$/);
+        if (browserViewer) {
+            try {
+                this.browser.get(decodeURIComponent(browserViewer[1]));
+            }
+            catch {
+                sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Route not found" } });
+                return true;
+            }
+            return sendText(res, 200, renderBrowserViewer(decodeURIComponent(browserViewer[1]), url.searchParams), "text/html; charset=utf-8");
+        }
         const requestedWorkflowKey = workflowKeyFromUiPath(url.pathname);
         if (requestedWorkflowKey && !this.workflows.has(requestedWorkflowKey)) {
             await this.refreshWorkflowRegistryOnMiss(requestedWorkflowKey);
@@ -5809,6 +5821,9 @@ a { color: var(--brand); }</style>
             // slot for a socket that never authenticated, or the
             // authenticated slot otherwise (#1008).
             this.preAuthConnections.delete(connection);
+            for (const sessionId of connection.subscribedBrowserSessions ?? []) {
+                this.browser.setFrameSubscribers?.(sessionId, this.browserSubscriberCount(sessionId));
+            }
             this.cleanupDevToolsSubscribers(connection);
             this.cleanupRunEventSubscribers(connection);
             // Async cleanup runs detached: a malicious or buggy extension
@@ -5953,6 +5968,9 @@ a { color: var(--brand); }</style>
         connection.subscribedBrowserSessions = new Set(Array.isArray(request.subscribe)
             ? request.subscribe.filter((value) => typeof value === "string" && value.startsWith("browser:")).map((value) => value.slice(8))
             : []);
+        for (const sessionId of connection.subscribedBrowserSessions) {
+            this.browser.setFrameSubscribers?.(sessionId, this.browserSubscriberCount(sessionId));
+        }
         this.startHeartbeat(connection);
         this.recordAuthEvent("ws", "success", connection, {
             clientId: request.client.id,
@@ -6603,6 +6621,13 @@ a { color: var(--brand); }</style>
    * @param {string} event
    * @param {unknown} [payload]
    */
+    browserSubscriberCount(sessionId) {
+        let count = 0;
+        for (const connection of this.connections) {
+            if (connection.authenticated && !connection.closed && connection.subscribedBrowserSessions?.has(sessionId)) count += 1;
+        }
+        return count;
+    }
     broadcastEvent(event, payload) {
         const runId = eventRunId(payload);
         const browserSessionId = eventBrowserSessionId(event, payload);

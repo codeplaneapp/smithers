@@ -823,6 +823,9 @@ The bundle is one file. Two shipping shapes:
 | Headline counts on an overview | `KpiStat` |
 | Any run/node status badge | `StatusPill` (feed it `normalizeStatus`) |
 | A zero-data state ("no runs yet") | `EmptyState` |
+| Raw shell/test log output, live (ANSI, scrollback) | `Terminal` from `smithers-orchestrator/ui/adapters/terminal` — a real xterm surface, not a styled HTML list |
+| Where a run sits in a fixed pipeline of stages | `StageStrip` |
+| Browsing the files a run changed | `FileTree` |
 
 The bundle reads `?runId=<id>` from `location.search` for the run to scope to, and optionally `__SMITHERS_GATEWAY_UI__` (a `GatewayUiBootConfig`) for the mount path, RPC path, WebSocket path, and free-form `props` you set at `gateway.register({ ui: { props } })`.
 

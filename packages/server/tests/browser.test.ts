@@ -23,7 +23,7 @@ describe("browser session registry", () => {
   test("drives a real headless Chromium page", async () => {
     const require = createRequire(new URL("../../../apps/cli/package.json", import.meta.url));
     const { chromium } = require("playwright");
-    const server = createServer((_request, response) => response.end("<button>Continue</button>"));
+    const server = createServer((_request, response) => response.end(`<button>Continue</button><button>Same</button><button>Same</button><input data-testid="password" type="password"><p>${"x".repeat(21000)}</p>`));
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as { port: number }).port;
     const registry = createBrowserSessionRegistry({ playwright: { chromium } });
@@ -32,6 +32,13 @@ describe("browser session registry", () => {
       expect(session.status).toBe("ready");
       const result = await registry.act({ sessionId: session.sessionId, actionId: "smoke", action: { kind: "click", locator: { role: "button", name: "Continue" } } });
       expect(result.revision).toBe(1);
+      const typed = await registry.act({ sessionId: session.sessionId, actionId: "password", action: { kind: "type", locator: { testId: "password" }, text: "secret" } });
+      expect(typed.outcome).toMatchObject({ redacted: true, length: 6 });
+      const context = await registry.context({ sessionId: session.sessionId, include: ["visible-text", "recent-actions"] });
+      expect(context.visibleTextTruncated).toBe(true);
+      expect(context.recentActions.at(-1).action.text).toMatchObject({ redacted: true });
+      const picked = await registry.pick({ sessionId: session.sessionId, point: { x: 90, y: 10 } });
+      expect(picked.locator).toHaveProperty("css");
       await registry.close(session.sessionId);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

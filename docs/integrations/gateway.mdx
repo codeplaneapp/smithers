@@ -86,6 +86,15 @@ Gateway client exports:
 | `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
 | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
 
+## Live browser viewer
+
+Browser sessions expose a stationary viewer at `/browser/<sessionId>/viewer`.
+It paints ephemeral `browser.frame` screencast events onto a canvas and sends
+pointer, keyboard, and toolbar input back through `browserAct`. The page has no
+credentials. Embed it through the authenticated proxy that serves the Gateway,
+and use `theme`, `hostOrigin`, and `embed` query parameters when the embedding
+consumer needs to control presentation or postMessage behavior.
+
 ## Bun controllers and cron jobs
 
 Run one Gateway singleton per workspace. Discover its verified URL with the
