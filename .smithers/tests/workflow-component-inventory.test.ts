@@ -24,7 +24,7 @@ const workflowOwners = {
   "./tests/seeded-onboarding-mission.test.tsx": ["make-workflow-tutorial.tsx", "mission.tsx", "smithering.tsx"],
   "./tests/seeded-core-workflows.test.tsx": ["plan.tsx", "ralph.tsx", "research-plan-implement.tsx", "research.tsx", "review.tsx", "route-task.tsx", "ticket-create.tsx", "tickets-create.tsx"],
   "./tests/seeded-ops-workflows.test.tsx": ["release.tsx", "report-slideshow.tsx", "smoketest.tsx", "ticket-fleet-monitor.tsx", "triage-run.tsx", "workflow-skill.tsx"],
-  "./tests/local-workflows-a-audit.test.tsx": ["audit-burndown.tsx", "audit-fix-train.tsx", "break-smithers.tsx", "build-tui-monitor.tsx", "bulletproof-audit.tsx", "close-issues.tsx"],
+  "./tests/local-workflows-a-audit.test.tsx": ["audit-burndown.tsx", "audit-fix-train.tsx", "break-smithers.tsx", "build-tui-monitor.tsx", "bulletproof-audit.tsx", "bulletproof-ui-design-pass.tsx", "bulletproof-ui-watchdog.tsx", "bulletproof-ui.tsx", "close-issues.tsx"],
   "./tests/local-workflows-a-queue.test.tsx": ["codex-issue-merge-queue.tsx", "consolidate-tanstack-db.tsx", "context-engineering-levers.tsx", "coverage-codex-swarm.tsx", "crash-recovery.tsx"],
   "./tests/local-workflows-a-maintenance.test.tsx": ["daily-benchmark-maintenance.tsx", "daily-canary.tsx", "demo.tsx", "dynamic-demo.tsx", "e2e-approval-probe.tsx", "e2e-ask-human-probe.tsx", "e2e-probe.tsx", "fail-probe.tsx"],
   "./tests/local-workflows-a-issues.test.tsx": ["fix-all-issues.tsx", "fix-six-issues.tsx", "implement-codex-antigravity.tsx"],

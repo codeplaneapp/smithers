@@ -124,6 +124,19 @@ test("a compliant pack UI passes", (context) => {
   assert.equal(check(root).ok, true);
 });
 
+test("pack UIs may reuse local non-visual helpers", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  write(
+    root,
+    ".smithers/ui/compliant.tsx",
+    'import { helper } from "../lib/helper"; export function Compliant() { return <div>{helper()}</div>; }\n',
+  );
+  write(root, ".smithers/lib/helper.ts", 'export function helper() { return "ready"; }\n');
+  snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
 test("pack UI imports are limited to the pack composition surface", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));

@@ -231,6 +231,18 @@ describe("Local-A audit and landing workflows", () => {
     const report = findLike(completed, "report"); expect(report.needs && Object.values(report.needs)).toEqual(["audit:workflow-engine"]);
   });
 
+  test("bulletproof UI campaign, design pass, and watchdog render their initial control tasks", async () => {
+    const campaign = await render("bulletproof-ui.tsx", { maxConcurrency: 2, perLaneIterations: 1, baseBranch: "main" });
+    expect(ids(campaign)).toContain("design-freeze");
+
+    const designPass = await render("bulletproof-ui-design-pass.tsx", { maxConcurrency: 3 });
+    expect(ids(designPass)).toContain("design-ui-core");
+    expect(designPass.tasks.filter((task) => task.nodeId.startsWith("design-")).length).toBe(10);
+
+    const watchdog = await render("bulletproof-ui-watchdog.tsx", { watchedRunId: "run-live", intervalSeconds: 60, maxChecks: 1 });
+    expect(ids(watchdog)).toContain("bpui-health-check");
+  });
+
   test("close-issues has exact no-issue terminal, isolated lanes, stale approval rejection, and serial approved landing", async () => {
     const empty = await render("close-issues.tsx", {}, { discovery: row("discover", { issues: [], summary: "none" }) });
     expect(ids(empty)).toContain("landing-skipped"); expect(ids(empty)).not.toContain("approve-landing"); expect(find(empty, "landing-skipped").outputSchema!.safeParse({ issueNumber: 0, prNumber: null, merged: false, summary: "No open issues were discovered; nothing to land." }).success).toBe(true);

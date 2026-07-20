@@ -29,9 +29,10 @@ import {
   TabsList,
   TabsTrigger,
 } from "smithers-orchestrator/ui";
-
-type NodeStatus = "pending" | "running" | "done" | "failed" | "waiting" | "skipped";
-type NodeState = { status: Map<string, NodeStatus>; iteration: Map<string, number> };
+import {
+  buildIssueBlitzNodeState,
+  type IssueBlitzNodeStatus as NodeStatus,
+} from "../lib/buildIssueBlitzNodeState";
 
 const ITEMS: Array<{ key: string; kind: "hard" | "quick"; issues: number[]; title: string }> = [
   { key: "ci-postgres", kind: "hard", issues: [1331], title: "CI test-postgres red (PGlite migrate suites)" },
@@ -48,42 +49,6 @@ const ITEMS: Array<{ key: string; kind: "hard" | "quick"; issues: number[]; titl
 ];
 
 function asString(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function eventStatus(type: string): NodeStatus | undefined {
-  const normalized = type.replaceAll("_", ".").toLowerCase();
-  if (normalized === "nodefinished" || normalized === "node.finished") return "done";
-  if (["nodefailed", "node.failed", "nodecancelled", "node.cancelled"].includes(normalized)) return "failed";
-  if (["nodeskipped", "node.skipped"].includes(normalized)) return "skipped";
-  if (["nodewaitingapproval", "node.waiting.approval", "approvalrequested", "approval.requested"].includes(normalized)) return "waiting";
-  if (["nodestarted", "node.started", "noderetrying", "node.retrying", "taskheartbeat", "task.heartbeat"].includes(normalized)) return "running";
-  return undefined;
-}
-export function buildIssueBlitzNodeState(events: readonly unknown[]): NodeState {
-  const status = new Map<string, NodeStatus>();
-  const iteration = new Map<string, number>();
-  for (const raw of events) {
-    const frame = isRecord(raw) ? raw : {};
-    const envelope = isRecord(frame.payload) ? frame.payload : {};
-    const nodePayload = isRecord(envelope.payload) ? envelope.payload : {};
-    const legacyEvent = isRecord(frame.event) ? frame.event : {};
-    const nodeId = asString(nodePayload.nodeId) ?? asString(envelope.nodeId) ?? asString(legacyEvent.nodeId) ?? asString(frame.nodeId);
-    const type = asString(envelope.event) ?? asString(nodePayload.type) ?? asString(legacyEvent.type) ?? asString(frame.type) ?? asString(frame.event);
-    if (!nodeId || !type) continue;
-    const rawIteration = nodePayload.iteration ?? envelope.iteration ?? legacyEvent.iteration ?? frame.iteration;
-    const nextIteration = typeof rawIteration === "number" && Number.isFinite(rawIteration) ? rawIteration : iteration.get(nodeId);
-    const priorIteration = iteration.get(nodeId);
-    if (nextIteration !== undefined) iteration.set(nodeId, Math.max(priorIteration ?? 0, nextIteration));
-    const nextStatus = eventStatus(type);
-    if (!nextStatus) continue;
-    const priorStatus = status.get(nodeId);
-    const startsNewIteration = nextStatus === "running" && nextIteration !== undefined && (priorIteration === undefined || nextIteration > priorIteration);
-    const priorTerminal = priorStatus === "done" || priorStatus === "failed" || priorStatus === "skipped";
-    if (nextStatus !== "running" || !priorTerminal || startsNewIteration) status.set(nodeId, nextStatus);
-  }
-  return { status, iteration };
-}
 function runIdFromUrl(): string | undefined {
   if (typeof location === "undefined") return undefined;
   return new URLSearchParams(location.search).get("runId") ?? undefined;

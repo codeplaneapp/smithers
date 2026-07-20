@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { renderWorkflow } from "smithers-orchestrator/testing";
 
-import { buildIssueBlitzNodeState } from "../ui/issue-blitz";
+import { buildIssueBlitzNodeState } from "../lib/buildIssueBlitzNodeState";
 
 const workflowSource = readFileSync(join(import.meta.dir, "../workflows/issue-blitz.tsx"), "utf8");
 const issueTrainSource = readFileSync(join(import.meta.dir, "../workflows/issue-train.tsx"), "utf8");
@@ -81,6 +81,7 @@ describe("issue-blitz safety contract", () => {
       "smithers-orchestrator/gateway-react",
       "smithers-orchestrator/gateway-ui",
       "smithers-orchestrator/ui",
+      "../lib/buildIssueBlitzNodeState",
     ]);
     expect(uiSource).toContain('aria-label="Issue Blitz workflow dashboard"');
   });

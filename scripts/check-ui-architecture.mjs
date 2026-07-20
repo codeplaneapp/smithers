@@ -308,7 +308,19 @@ function isPackLocalImport(path, specifier) {
   if (!specifier.startsWith(".")) return false;
   const root = PACK_UI_DIRECTORIES.find((directory) => path.startsWith(`${directory}/`));
   const target = posix.normalize(posix.join(posix.dirname(path), specifier));
-  return Boolean(root && (target === root || target.startsWith(`${root}/`)));
+  const helperRoot = root === ".smithers/ui"
+    ? ".smithers/lib"
+    : root === "examples/ui"
+      ? "examples/lib"
+      : undefined;
+  return Boolean(
+    root
+    && (
+      target === root
+      || target.startsWith(`${root}/`)
+      || (helperRoot && (target === helperRoot || target.startsWith(`${helperRoot}/`)))
+    )
+  );
 }
 
 function isAllowedPackUiImport(path, specifier) {

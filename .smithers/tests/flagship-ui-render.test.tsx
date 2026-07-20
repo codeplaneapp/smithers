@@ -3,6 +3,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import * as gatewayReact from "@smithers-orchestrator/gateway-react";
+import * as gatewayUi from "@smithers-orchestrator/gateway-ui";
 
 GlobalRegistrator.register();
 const reactTestEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -13,6 +15,7 @@ const run = { runId: "run-flagship", workflowKey: "review", status: "running" };
 const output = { data: { row: { reviewer: "fixture reviewer", approved: true, feedback: "looks good", issues: [] } }, refetch: async () => {} };
 
 mock.module("smithers-orchestrator/gateway-react", () => ({
+  ...gatewayReact,
   createGatewayReactRoot: () => {},
   useGatewayActions: () => ({ launchRun: async () => run, cancelRun: async () => {} }),
   useGatewayNodeOutput: () => output,
@@ -22,6 +25,7 @@ mock.module("smithers-orchestrator/gateway-react", () => ({
 }));
 
 mock.module("smithers-orchestrator/gateway-ui", () => ({
+  ...gatewayUi,
   NodeOutputView: ({ nodeId }: { nodeId?: string }) => <div data-testid="node-output">{nodeId}</div>,
   RunEventLog: () => <div data-testid="event-log" />,
   RunTree: ({ onSelectNode }: { onSelectNode?: (node: { id: string }) => void }) => <button data-testid="run-tree" onClick={() => onSelectNode?.({ id: "ci-postgres:ready" })}>tree</button>,
