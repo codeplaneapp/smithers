@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
 import { createReviewWorker } from "../../src/server/worker.ts";
 import { buildTestEnv } from "./helpers/buildTestEnv.ts";
 
@@ -13,7 +14,7 @@ function makeWorker() {
 }
 
 describe("landing page", () => {
-  test("onboards new users to review cloud", async () => {
+  test("onboards new users to review cloud with the shared standalone theme", async () => {
     const worker = makeWorker();
     const env = await buildTestEnv();
     const res = await worker.fetch(new Request("https://review.test/"), env);
@@ -26,5 +27,6 @@ describe("landing page", () => {
     expect(body).toContain("/api/sessions");
     expect(body).toContain("/api/plan");
     expect(body).toContain("/w/");
+    expect(body).toContain(standaloneThemeCss());
   });
 });

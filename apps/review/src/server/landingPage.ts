@@ -8,12 +8,9 @@ export const landingPage = `<!doctype html>
 <title>smithers review</title>
 <style>
 ${standaloneThemeCss()}
-body { margin: 0; font-size: 16px; line-height: 1.6; color: var(--text); background: var(--bg); }
 main { max-width: 720px; margin: 0 auto; padding: 64px 24px; }
 h1 { font-size: 28px; margin: 0 0 8px; }
-p { color: var(--muted); max-width: 65ch; }
-pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 13px; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+p { max-width: 65ch; }
 </style>
 </head>
 <body>
