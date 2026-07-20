@@ -939,6 +939,8 @@ Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience,
 
 Use `createTranscriptionTool` when an SDK agent needs to transcribe audio as part of its tool loop. The tool accepts either an `audioUrl` or `audioBase64` input and normalizes Whisper or Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
 
+For Whisper, remote audio downloads are capped at 25 MiB by default. Set `maxResponseBodyBytes` to choose a different cap; the deprecated `maxResponseBytes` option remains a compatibility fallback when `maxResponseBodyBytes` is omitted. The generic `createHttpTool` has its own independent 1 MiB default.
+
 ```ts
 import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
 

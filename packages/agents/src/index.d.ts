@@ -44,14 +44,15 @@ type CreateTranscriptionToolOptions$1 = {
     fetch?: typeof fetch;
     /**
      * Maximum response-body bytes buffered from a remote audio URL before a
-     * Whisper upload. Defaults to 1,048,576 bytes (1 MiB) and must be a positive
-     * safe integer.
+     * Whisper upload. Defaults to 25 MiB and must be a positive safe integer.
      */
     maxResponseBodyBytes?: number;
     /**
      * Maximum bytes accepted from a transcription provider response. For
      * compatibility, this also caps a remote audio URL when
-     * `maxResponseBodyBytes` is omitted. Defaults to 25 MiB.
+     * `maxResponseBodyBytes` is omitted. Defaults to 25 MiB. This remains the
+     * compatibility fallback for the audio cap when the canonical option is
+     * omitted.
      */
     maxResponseBytes?: number;
     /**

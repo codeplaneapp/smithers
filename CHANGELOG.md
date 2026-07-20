@@ -61,7 +61,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(db): probe output tables via sqlite_master on sqlite-dialect external backends ([2c1c1c724e](https://github.com/smithersai/smithers/commit/2c1c1c724e))
 - fix(cron): claim each fire via compare-and-set before launching so schedulers cannot double-fire ([adda406287](https://github.com/smithersai/smithers/commit/adda406287))
 - fix(testing): give anonymous runner bindings unique identities and reject explicit binding conflicts ([0bf025540d](https://github.com/smithersai/smithers/commit/0bf025540d))
-- fix(agents): bound http and transcription tool response bodies ([88e0e3ff12](https://github.com/smithersai/smithers/commit/88e0e3ff12))
+- fix(agents): bound HTTP tool bodies at 1 MiB and transcription audio at 25 MiB ([88e0e3ff12](https://github.com/smithersai/smithers/commit/88e0e3ff12))
 - fix(cli): move detached run logs to .smithers/logs and reap them ([d794200db1](https://github.com/smithersai/smithers/commit/d794200db1))
 - fix(cli): stop smithers ui opening the wrong workflow UI on a stale gateway ([593ea1f1ab](https://github.com/smithersai/smithers/commit/593ea1f1ab))
 - fix(cli): tolerate jj conflict markers in the workspace package.json ([569eabc697](https://github.com/smithersai/smithers/commit/569eabc697))

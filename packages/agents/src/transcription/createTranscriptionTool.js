@@ -6,7 +6,6 @@ import { guardedAudioDownload } from "./guardedAudioDownload.js";
 
 const defaultPinnedAudioTransport = createPinnedAudioTransport();
 
-const DEFAULT_MAX_RESPONSE_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
 
 /** @typedef {{ maxBytes: number, usesCanonicalOption: boolean }} ResponseBodyLimit */
@@ -113,7 +112,7 @@ function resolveAudioResponseBodyLimit(options) {
   if (options.maxResponseBytes !== undefined) {
     return { maxBytes: options.maxResponseBytes, usesCanonicalOption: false };
   }
-  return { maxBytes: DEFAULT_MAX_RESPONSE_BODY_BYTES, usesCanonicalOption: true };
+  return { maxBytes: DEFAULT_MAX_RESPONSE_BYTES, usesCanonicalOption: true };
 }
 
 /**

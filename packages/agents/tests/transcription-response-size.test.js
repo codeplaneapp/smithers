@@ -6,7 +6,29 @@ const callOptions = { toolCallId: "response-size", messages: [] };
 const audioUrl = "https://cdn.example.com/audio.mp3";
 
 describe("createTranscriptionTool downloaded response body size limit", () => {
-  test("rejects an oversized declared Content-Length before acquiring a reader", async () => {
+  test("accepts an optionless audio response just over 1 MiB and uploads it", async () => {
+    const audioBytes = new Uint8Array(1_048_577);
+    audioBytes.fill(7);
+    const streamed = makeStreamResponse([audioBytes], {
+      "content-length": String(audioBytes.byteLength),
+      "content-type": "audio/mpeg",
+    });
+    let uploadedBytes;
+    const providerFetch = mock(async (_url, init) => {
+      const file = init.body.get("file");
+      uploadedBytes = new Uint8Array(await file.arrayBuffer());
+      return Response.json({ text: "large transcript" });
+    });
+    const harness = createWhisperHarness(streamed.response, { fetch: providerFetch });
+
+    const result = await harness.tool.execute({ audioUrl }, callOptions);
+
+    expect(result).toEqual({ text: "large transcript", provider: "whisper" });
+    expect(uploadedBytes).toEqual(audioBytes);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects an optionless audio response over 25 MiB before acquiring a reader", async () => {
     const getReader = mock(() => {
       throw new Error("body reader must not be acquired");
     });
@@ -16,7 +38,7 @@ describe("createTranscriptionTool downloaded response body size limit", () => {
       statusText: "OK",
       ok: true,
       headers: new Headers({
-        "content-length": "1048577",
+        "content-length": "26214401",
         "content-type": "audio/mpeg",
       }),
       body: { getReader, cancel },
@@ -24,7 +46,7 @@ describe("createTranscriptionTool downloaded response body size limit", () => {
 
     const error = await captureRejection(harness.tool.execute({ audioUrl }, callOptions));
 
-    expect(String(error)).toMatch(/maxResponseBodyBytes.*1048576/);
+    expect(String(error)).toMatch(/maxResponseBodyBytes.*26214400/);
     expect(getReader).not.toHaveBeenCalled();
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(cancel.mock.calls[0][0]).toBeInstanceOf(Error);
@@ -33,14 +55,14 @@ describe("createTranscriptionTool downloaded response body size limit", () => {
 
   test("counts a chunked audio response and stops reading as soon as it crosses the cap", async () => {
     const streamed = makeStreamResponse(["1234", "56789", "unread"]);
-    const harness = createWhisperHarness(streamed.response, { maxResponseBodyBytes: 8 });
+    const harness = createWhisperHarness(streamed.response, { maxResponseBytes: 8 });
 
     const error = await captureRejection(harness.tool.execute({ audioUrl }, callOptions));
 
-    expect(String(error)).toMatch(/maxResponseBodyBytes.*8/);
+    expect(String(error)).toMatch(/exceeds 8 bytes/);
     expect(streamed.pullCount()).toBe(2);
     expect(streamed.cancelReason()).toBeInstanceOf(Error);
-    expect(String(streamed.cancelReason())).toMatch(/maxResponseBodyBytes/);
+    expect(String(streamed.cancelReason())).toMatch(/exceeds 8 bytes/);
     expect(harness.providerFetch).not.toHaveBeenCalled();
   });
 
