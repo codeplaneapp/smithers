@@ -272,7 +272,11 @@ describe("Poller", () => {
           </Sequence>
         </Workflow>);
         });
-        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        // Exhaustion also crosses Poller's durable inter-attempt timer. Resume
+        // it explicitly so the assertion does not depend on a 1ms timer firing
+        // during the initial engine invocation under workspace load.
+        const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        const result = await resumeUntilSettled(workflow, first);
         expect(result.status).toBe("failed");
         expect(calls).toBe(2);
         const checkRows = db
