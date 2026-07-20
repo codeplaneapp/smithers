@@ -172,7 +172,11 @@ describe("Poller", () => {
           </Sequence>
         </Workflow>);
         });
-        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        // The transient task retry completes the first poll iteration. The next
+        // poll is still separated by Poller's durable timer, so settle it the
+        // same way the production gateway timer sweep would.
+        const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        const result = await resumeUntilSettled(workflow, first);
         expect(result.status).toBe("finished");
         expect(calls).toBe(3);
         const checkRows = db
