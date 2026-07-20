@@ -29,7 +29,6 @@
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
-    "@smithers-orchestrator/gateway-ui": "workspace:*",
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
     "effect": "3.21.4",
     "mermaid": "^11.16.0",

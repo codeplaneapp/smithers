@@ -1,5 +1,0 @@
-declare const DEFAULT_MERGE_QUEUE_CONCURRENCY: 1;
-declare const MERGE_QUEUE_PRIORITY: 1000;
-declare const WORKTREE_EMPTY_PATH_ERROR: "<Worktree> requires a non-empty path prop";
-
-export { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR };

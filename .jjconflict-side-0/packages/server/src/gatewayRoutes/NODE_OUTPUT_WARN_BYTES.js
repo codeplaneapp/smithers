@@ -1,1 +1,0 @@
-export const NODE_OUTPUT_WARN_BYTES = 1_048_576;

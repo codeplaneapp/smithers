@@ -1,7 +1,0 @@
-[
-  {
-    "name": "smithers-runs",
-    "command": "bunx smithers-orchestrator claude monitor",
-    "description": "Streams actionable transitions (approval pending, human request, failed, stalled) for the Smithers runs THIS session started or subscribed to; runs from other sessions and pre-existing runs never notify. Subscriptions are recorded automatically by `smithers claude tick` (the /workflows mirror) and Claude-launched runs, or explicitly via `smithers claude subscribe <runId>`. Finished/cancelled runs are not broadcast (the /workflows mirror reports those). Exits silently in projects without a Smithers store."
-  }
-]

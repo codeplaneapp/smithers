@@ -1,5 +1,0 @@
-{
-  "fixture": "clean-refactor",
-  "clean": true,
-  "description": "Equivalent discount calculation refactor; a review should not surface findings."
-}

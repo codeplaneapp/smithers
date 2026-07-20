@@ -653,9 +653,6 @@ importers:
       '@smithers-orchestrator/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@smithers-orchestrator/gateway-ui':
-        specifier: workspace:*
-        version: link:../../packages/gateway-ui
       '@smithers-orchestrator/ui-styleguide':
         specifier: workspace:*
         version: link:../../packages/ui-styleguide
