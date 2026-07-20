@@ -20,6 +20,25 @@ function json(root, path, value) {
   write(root, path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function provenanceManifest() {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    version: 2,
+    policy: {
+      registries: ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"],
+      collections: ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"],
+      verification: "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
+      entryFiles: [
+        "provenance/chat-foundation.json",
+        "provenance/agentic-reasoning-tool.json",
+        "provenance/agentic-response-code.json",
+        "provenance/agentic-plan-sources.json",
+      ],
+    },
+    entries: [],
+  };
+}
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "smithers-ui-architecture-"));
   json(root, "package.json", { name: "smithers-orchestrator", exports: {} });
@@ -28,14 +47,7 @@ function fixture() {
     exports: { ".": "./src/index.ts" },
   });
   write(root, "packages/ui/src/index.ts", "export const ui = true;\n");
-  json(root, "packages/ui/shadcn-provenance.json", {
-    version: 1,
-    policy: {
-      registry: "https://ui.shadcn.com",
-      collections: ["chat/shadcn", "primitives/shadcn"],
-    },
-    entries: [],
-  });
+  json(root, "packages/ui/shadcn-provenance.json", provenanceManifest());
   json(root, "packages/components/package.json", {
     name: "@smithers-orchestrator/components",
     exports: { ".": "./src/index.js" },
@@ -239,18 +251,39 @@ for (const [name, mutate, expected] of [
     "shadcn-provenance",
   ],
   [
+    "legacy shadcn provenance schema",
+    (root) => json(root, "packages/ui/shadcn-provenance.json", {
+      version: 1,
+      policy: {
+        registry: "https://ui.shadcn.com",
+        collections: ["chat/shadcn", "primitives/shadcn"],
+      },
+      entries: [],
+    }),
+    "shadcn-provenance",
+  ],
+  [
+    "incomplete lane provenance",
+    (root) => {
+      write(root, "packages/ui/src/chat/MessageScroller.tsx", "export function MessageScroller() { return <div />; }\n");
+      json(root, "packages/ui/provenance/chat-foundation.json", []);
+    },
+    "shadcn-provenance",
+  ],
+  [
     "community shadcn provenance",
     (root) => {
       const path = "packages/ui/src/primitives/shadcn/button.tsx";
       write(root, path, "export function Button() { return <button />; }\n");
-      json(root, "packages/ui/shadcn-provenance.json", {
-        version: 1,
-        policy: {
-          registry: "https://ui.shadcn.com",
-          collections: ["chat/shadcn", "primitives/shadcn"],
-        },
-        entries: [{ path, component: "button", sourceUrl: "https://community.example/r/button.json" }],
-      });
+      json(root, "packages/ui/provenance/chat-foundation.json", [{
+        file: "src/primitives/shadcn/button.tsx",
+        exports: ["Button"],
+        collection: "primitives/shadcn",
+        registryItem: "https://community.example/r/button.json",
+        ported: "partial-anatomy",
+        omissions: [],
+        divergences: [],
+      }]);
     },
     "shadcn-provenance",
   ],
@@ -655,20 +688,17 @@ test("valid official shadcn provenance passes", (context) => {
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const path = "packages/ui/src/primitives/shadcn/button.tsx";
   write(root, path, "export function Button() { return <button />; }\n");
-  json(root, "packages/ui/shadcn-provenance.json", {
-    version: 1,
-    policy: {
-      registry: "https://ui.shadcn.com",
-      collections: ["chat/shadcn", "primitives/shadcn"],
+  json(root, "packages/ui/provenance/chat-foundation.json", [
+    {
+      file: "src/primitives/shadcn/button.tsx",
+      exports: ["Button"],
+      collection: "primitives/shadcn",
+      registryItem: "https://ui.shadcn.com/r/styles/new-york-v4/button.json",
+      ported: "partial-anatomy",
+      omissions: [],
+      divergences: [],
     },
-    entries: [
-      {
-        path,
-        component: "button",
-        sourceUrl: "https://ui.shadcn.com/r/styles/new-york-v4/button.json",
-      },
-    ],
-  });
+  ]);
   snapshot(root);
   assert.equal(check(root).ok, true);
 });

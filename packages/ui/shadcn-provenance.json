@@ -1,13 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "version": 1,
+  "version": 2,
   "policy": {
-    "registry": "https://ui.shadcn.com",
-    "collections": [
-      "chat/shadcn",
-      "primitives/shadcn"
-    ],
-    "verification": "Each future source file in an approved collection must name its exact official ui.shadcn.com registry item URL. This records provenance; it is not a cryptographic upstream verification."
+    "registries": ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"],
+    "collections": ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"],
+    "verification": "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
+    "entryFiles": [
+      "provenance/chat-foundation.json",
+      "provenance/agentic-reasoning-tool.json",
+      "provenance/agentic-response-code.json",
+      "provenance/agentic-plan-sources.json"
+    ]
   },
   "entries": []
 }

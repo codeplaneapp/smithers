@@ -1,8 +1,13 @@
 /** @jsxImportSource react */
-import { Children, type ComponentProps, type ReactNode } from "react";
+import { Children, type ComponentProps, type ReactNode, type Ref } from "react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
 import { ChatMessage } from "./ChatMessage";
+import {
+  MessageScroller,
+  type MessageScrollerHandle,
+  type MessageScrollerProps,
+} from "./MessageScroller";
 
 export type ChatTranscriptProps = ComponentProps<"div"> & {
   /** Whether a reply is currently being generated or streamed. */
@@ -11,6 +16,10 @@ export type ChatTranscriptProps = ComponentProps<"div"> & {
   pendingLabel?: string;
   /** Content shown when there are no messages. */
   empty?: ReactNode;
+  /** Optional overrides for the internal conversation scroller. */
+  scrollerProps?: Omit<MessageScrollerProps, "children" | "contentClassName">;
+  /** Imperative access to the internal conversation scroller. */
+  scrollerRef?: Ref<MessageScrollerHandle>;
 };
 
 /** Scrollable, accessible transcript container for Smithers chat surfaces. */
@@ -18,12 +27,18 @@ export function ChatTranscript({
   pending = false,
   pendingLabel,
   empty,
+  scrollerProps,
+  scrollerRef,
   className,
   children,
   ...props
 }: ChatTranscriptProps) {
   useInjectUiCss();
   const isEmpty = Children.count(children) === 0;
+  const internalScrollerProps = scrollerProps as
+    | Omit<MessageScrollerProps, "children" | "contentClassName" | "ref">
+    | undefined;
+  const internalScrollerRef = scrollerRef as ComponentProps<typeof MessageScroller>["ref"];
   return (
     <div
       data-slot="chat-transcript"
@@ -32,10 +47,15 @@ export function ChatTranscript({
       className={cn("sui-chat-transcript", className)}
       {...props}
     >
-      <div className="sui-chat-messages">
+      <MessageScroller
+        ref={internalScrollerRef}
+        streaming={pending}
+        contentClassName="sui-chat-messages"
+        {...internalScrollerProps}
+      >
         {isEmpty && empty ? <div className="sui-chat-empty">{empty}</div> : children}
         {pending ? <ChatMessage role="assistant" pending pendingLabel={pendingLabel} /> : null}
-      </div>
+      </MessageScroller>
     </div>
   );
 }

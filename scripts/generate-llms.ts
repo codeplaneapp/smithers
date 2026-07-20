@@ -126,6 +126,11 @@ const CORE_PAGES = [
   // surfaces, ...): the primitives agents compose around the gateway-ui run
   // widgets instead of hand-rolling markup and CSS.
   "reference/ui.mdx",
+  "reference/ui/message-scroller.mdx",
+  "reference/ui/bubble.mdx",
+  "reference/ui/attachment.mdx",
+  "reference/ui/marker.mdx",
+  "reference/ui/shimmer.mdx",
   // Building a workflow UI from the raw gateway-react hooks: live events
   // (frame.event/frame.payload), node output rows, and the submitApproval
   // `decision` shape — the details agents get wrong when hand-rolling a UI.

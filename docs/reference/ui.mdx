@@ -114,9 +114,14 @@ hooks into the visual layer.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
-| `ChatTranscript` | Scrollable, accessible transcript container. | `pending`, `pendingLabel`, `empty` |
+| `ChatTranscript` | Accessible transcript container composed over `MessageScroller`. | `pending`, `pendingLabel`, `empty`, `scrollerProps`, `scrollerRef` |
 | `ChatMessage` | One chat row with the Multi bubble geometry. | `role` (`assistant`, `user`, `system`), `label`, `meta`, `variant` (`default`, `terminal`), `pending` |
 | `ChatComposer` | Controlled glass composer. Enter submits, Shift+Enter inserts a newline. | `value`, `onValueChange`, `onSubmit`, `status`, `actions`, `disabled`, `docked` |
+| [`MessageScroller`](/reference/ui/message-scroller) | Anchored conversation viewport with streaming follow, prepend compensation, edge fades, and a jump-to-latest affordance. | `stickToBottom`, `streaming`, `bottomThreshold`, `firstItemKey`, `fade`, `onFollowChange` |
+| [`Bubble`](/reference/ui/bubble) | User, assistant, or system message surface with alignment and mounted-content clamp disclosure. | `variant`, `align`, `collapsible`, `collapsedHeight`, `expanded`, `onExpandedChange` |
+| [`Attachment`](/reference/ui/attachment) | File or image chip with metadata, upload/processing states, progress, and removal. | `name`, `state`, `sizeBytes`, `mediaType`, `thumbnailUrl`, `progress`, `onRemove` |
+| [`Marker`](/reference/ui/marker) | Accessible labeled separator, system note, or live streaming-status row. | `variant`, `live`, `shimmer` |
+| [`Shimmer`](/reference/ui/shimmer) | Reduced-motion-safe live text shimmer; the same stylesheet also exports the `sui-scroll-fade` edge utility. | `active` |
 
 ### Diff viewer
 

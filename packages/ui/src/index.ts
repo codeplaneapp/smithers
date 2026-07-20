@@ -90,6 +90,11 @@ export {
 } from "./chat/ChatMessage";
 export { ChatTranscript, type ChatTranscriptProps } from "./chat/ChatTranscript";
 export { ChatComposer, type ChatComposerProps } from "./chat/ChatComposer";
+export { MessageScroller, type MessageScrollerProps, type MessageScrollerHandle } from "./chat/MessageScroller";
+export { Bubble, bubbleVariants, type BubbleProps } from "./chat/Bubble";
+export { Attachment, type AttachmentProps, type AttachmentState } from "./chat/Attachment";
+export { Marker, type MarkerProps } from "./chat/Marker";
+export { Shimmer, type ShimmerProps } from "./chat/Shimmer";
 export { Alert, AlertTitle, AlertDescription, alertVariants, type AlertProps } from "./alert";
 export {
   Table,

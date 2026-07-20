@@ -120,6 +120,56 @@ const SHADCN_DIRECTORIES = [
   "packages/ui/src/chat/shadcn",
   "packages/ui/src/primitives/shadcn",
 ];
+const SHADCN_PROVENANCE_SCHEMA = "https://json-schema.org/draft/2020-12/schema";
+const SHADCN_PROVENANCE_REGISTRIES = ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"];
+const SHADCN_PROVENANCE_COLLECTIONS = ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"];
+const SHADCN_PROVENANCE_ENTRY_FILES = [
+  "provenance/chat-foundation.json",
+  "provenance/agentic-reasoning-tool.json",
+  "provenance/agentic-response-code.json",
+  "provenance/agentic-plan-sources.json",
+];
+const SHADCN_PROVENANCE_TRIGGERS = new Map([
+  ["provenance/chat-foundation.json", "packages/ui/src/chat/MessageScroller.tsx"],
+  ["provenance/agentic-reasoning-tool.json", "packages/ui/src/agentic/Reasoning.tsx"],
+  ["provenance/agentic-response-code.json", "packages/ui/src/agentic/MessageResponse.tsx"],
+  ["provenance/agentic-plan-sources.json", "packages/ui/src/agentic/Plan.tsx"],
+]);
+const SHADCN_PROVENANCE_REQUIRED_FILES = new Map([
+  ["provenance/chat-foundation.json", [
+    "src/chat/MessageScroller.tsx",
+    "src/chat/Bubble.tsx",
+    "src/chat/Attachment.tsx",
+    "src/chat/Marker.tsx",
+    "src/chat/Shimmer.tsx",
+    "src/uiCss.ts",
+  ]],
+  ["provenance/agentic-reasoning-tool.json", [
+    "src/agentic/Reasoning.tsx",
+    "src/agentic/ChainOfThought.tsx",
+    "src/agentic/ToolCall.tsx",
+  ]],
+  ["provenance/agentic-response-code.json", [
+    "src/agentic/MessageResponse.tsx",
+    "src/agentic/CodeBlock.tsx",
+  ]],
+  ["provenance/agentic-plan-sources.json", [
+    "src/agentic/Plan.tsx",
+    "src/agentic/TaskItem.tsx",
+    "src/agentic/Sources.tsx",
+    "src/agentic/InlineCitation.tsx",
+  ]],
+]);
+const SHADCN_PROVENANCE_ENTRY_KEYS = [
+  "collection",
+  "divergences",
+  "exports",
+  "file",
+  "omissions",
+  "ported",
+  "registryItem",
+];
+const SHADCN_PROVENANCE_VERIFICATION = "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.";
 const INTRINSIC_VISUAL_TAGS = new Set([
   "a", "article", "aside", "button", "canvas", "code", "div", "footer", "form",
   "h1", "h2", "h3", "header", "iframe", "img", "input", "label", "li", "main",
@@ -850,54 +900,124 @@ function shadcnViolations(root, files) {
   } catch (error) {
     return [formatViolation("shadcn-provenance", `${manifestPath} is invalid JSON: ${error.message}`)];
   }
-  if (manifest.version !== 1) violations.push(formatViolation("shadcn-provenance", "version must be 1"));
-  if (manifest.policy?.registry !== "https://ui.shadcn.com") {
-    violations.push(formatViolation("shadcn-provenance", "policy.registry must be https://ui.shadcn.com"));
+  if (manifest.$schema !== SHADCN_PROVENANCE_SCHEMA) {
+    violations.push(formatViolation("shadcn-provenance", `\$schema must be ${SHADCN_PROVENANCE_SCHEMA}`));
   }
-  const expectedCollections = ["chat/shadcn", "primitives/shadcn"];
-  if (JSON.stringify(manifest.policy?.collections) !== JSON.stringify(expectedCollections)) {
-    violations.push(formatViolation("shadcn-provenance", `policy.collections must equal ${JSON.stringify(expectedCollections)}`));
+  if (manifest.version !== 2) {
+    violations.push(formatViolation("shadcn-provenance", "version must be 2"));
   }
-  const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
-  if (!Array.isArray(manifest.entries)) violations.push(formatViolation("shadcn-provenance", "entries must be an array"));
-  const paths = new Set();
-  for (const entry of entries) {
-    const path = typeof entry?.path === "string" ? toPosix(entry.path) : "";
-    if (!path || paths.has(path)) {
-      violations.push(formatViolation("shadcn-provenance", `${path || "<missing path>"} is missing or duplicated`));
+  if (JSON.stringify(manifest.policy?.registries) !== JSON.stringify(SHADCN_PROVENANCE_REGISTRIES)) {
+    violations.push(formatViolation("shadcn-provenance", `policy.registries must equal ${JSON.stringify(SHADCN_PROVENANCE_REGISTRIES)}`));
+  }
+  if (JSON.stringify(manifest.policy?.collections) !== JSON.stringify(SHADCN_PROVENANCE_COLLECTIONS)) {
+    violations.push(formatViolation("shadcn-provenance", `policy.collections must equal ${JSON.stringify(SHADCN_PROVENANCE_COLLECTIONS)}`));
+  }
+  if (manifest.policy?.verification !== SHADCN_PROVENANCE_VERIFICATION) {
+    violations.push(formatViolation("shadcn-provenance", "policy.verification does not match the frozen provenance policy"));
+  }
+  if (JSON.stringify(manifest.policy?.entryFiles) !== JSON.stringify(SHADCN_PROVENANCE_ENTRY_FILES)) {
+    violations.push(formatViolation("shadcn-provenance", `policy.entryFiles must equal ${JSON.stringify(SHADCN_PROVENANCE_ENTRY_FILES)}`));
+  }
+  if (!Array.isArray(manifest.entries) || manifest.entries.length !== 0) {
+    violations.push(formatViolation("shadcn-provenance", "entries must be an empty array; lane entries belong under provenance/"));
+  }
+
+  const recordedPaths = new Set();
+  const fileSet = new Set(files);
+  for (const entryFile of SHADCN_PROVENANCE_ENTRY_FILES) {
+    const laneManifestPath = `packages/ui/${entryFile}`;
+    const laneManifestAbsolutePath = join(root, laneManifestPath);
+    const triggerPath = SHADCN_PROVENANCE_TRIGGERS.get(entryFile);
+    if (!existsSync(laneManifestAbsolutePath)) {
+      if (triggerPath && fileSet.has(triggerPath)) {
+        violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} is missing`));
+      }
       continue;
     }
-    paths.add(path);
-    if (!SHADCN_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`))) {
-      violations.push(formatViolation("shadcn-provenance", `${path} is outside an approved shadcn directory`));
-    }
-    if (typeof entry.component !== "string" || !entry.component) {
-      violations.push(formatViolation("shadcn-provenance", `${path} has no component name`));
-    }
+
+    let laneEntries;
     try {
-      const sourceUrl = new URL(entry.sourceUrl);
-      if (
-        sourceUrl.origin !== "https://ui.shadcn.com" ||
-        sourceUrl.username ||
-        sourceUrl.password ||
-        !sourceUrl.pathname.startsWith("/r/") ||
-        !sourceUrl.pathname.endsWith(".json") ||
-        sourceUrl.pathname.split("/").at(-1) !== `${entry.component}.json` ||
-        sourceUrl.search ||
-        sourceUrl.hash
-      ) {
-        throw new Error("not an official registry item URL");
+      laneEntries = readJson(laneManifestAbsolutePath);
+    } catch (error) {
+      violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} is invalid JSON: ${error.message}`));
+      continue;
+    }
+    if (!Array.isArray(laneEntries)) {
+      violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} must contain an array`));
+      continue;
+    }
+
+    const laneRecordedPaths = new Set();
+    for (const entry of laneEntries) {
+      const entryPath = typeof entry?.file === "string" ? toPosix(entry.file) : "";
+      const fullPath = entryPath ? `packages/ui/${entryPath}` : "";
+      if (JSON.stringify(Object.keys(entry ?? {}).sort()) !== JSON.stringify(SHADCN_PROVENANCE_ENTRY_KEYS)) {
+        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} does not use the frozen entry shape`));
       }
-    } catch {
-      violations.push(formatViolation("shadcn-provenance", `${path} sourceUrl must be an exact https://ui.shadcn.com/r/*.json URL`));
+      if (!entryPath || entryPath.startsWith("/") || entryPath.split("/").includes("..")) {
+        violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} has an invalid or missing file`));
+      } else if (recordedPaths.has(fullPath)) {
+        violations.push(formatViolation("shadcn-provenance", `${fullPath} has duplicate provenance entries`));
+      } else {
+        recordedPaths.add(fullPath);
+        laneRecordedPaths.add(entryPath);
+        if (!fileSet.has(fullPath)) {
+          violations.push(formatViolation("shadcn-provenance", `${fullPath} is a stale provenance entry`));
+        }
+      }
+
+      if (!Array.isArray(entry?.exports) || entry.exports.length === 0 || entry.exports.some((value) => typeof value !== "string" || !value)) {
+        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} exports must be a non-empty string array`));
+      }
+      if (!SHADCN_PROVENANCE_COLLECTIONS.includes(entry?.collection)) {
+        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} has an unapproved collection`));
+      }
+      if (entry?.ported !== "partial-anatomy") {
+        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} ported must be partial-anatomy`));
+      }
+      for (const field of ["omissions", "divergences"]) {
+        if (!Array.isArray(entry?.[field]) || entry[field].some((value) => typeof value !== "string")) {
+          violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} ${field} must be a string array`));
+        }
+      }
+
+      try {
+        const registryItem = new URL(entry?.registryItem);
+        const expectedOrigin = entry?.collection === "agentic/ai-elements"
+          ? "https://elements.ai-sdk.dev"
+          : "https://ui.shadcn.com";
+        const approvedPath = expectedOrigin === "https://elements.ai-sdk.dev"
+          ? registryItem.pathname.startsWith("/components/")
+          : registryItem.pathname.startsWith("/docs/components/base/") ||
+            registryItem.pathname.startsWith("/docs/utils/") ||
+            registryItem.pathname.startsWith("/r/");
+        if (
+          registryItem.origin !== expectedOrigin ||
+          registryItem.username ||
+          registryItem.password ||
+          !approvedPath ||
+          registryItem.search ||
+          registryItem.hash
+        ) {
+          throw new Error("not an approved registry item URL");
+        }
+      } catch {
+        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} registryItem must be an exact approved registry URL`));
+      }
+    }
+
+    if (triggerPath && fileSet.has(triggerPath)) {
+      for (const requiredFile of SHADCN_PROVENANCE_REQUIRED_FILES.get(entryFile) ?? []) {
+        if (!laneRecordedPaths.has(requiredFile)) {
+          violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} has no entry for ${requiredFile}`));
+        }
+      }
     }
   }
+
   const shadcnFiles = files.filter((path) => SHADCN_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`)));
   for (const path of shadcnFiles) {
-    if (!paths.has(path)) violations.push(formatViolation("shadcn-provenance", `${path} has no provenance entry`));
-  }
-  for (const path of paths) {
-    if (!shadcnFiles.includes(path)) violations.push(formatViolation("shadcn-provenance", `${path} is a stale provenance entry`));
+    if (!recordedPaths.has(path)) violations.push(formatViolation("shadcn-provenance", `${path} has no provenance entry`));
   }
   return violations;
 }

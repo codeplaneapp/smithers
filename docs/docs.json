@@ -396,6 +396,16 @@
               "reference/gateway-react",
               "reference/gateway-ui",
               "reference/ui",
+              {
+                "group": "Chat UI",
+                "pages": [
+                  "reference/ui/message-scroller",
+                  "reference/ui/bubble",
+                  "reference/ui/attachment",
+                  "reference/ui/marker",
+                  "reference/ui/shimmer"
+                ]
+              },
               "reference/packs",
               "reference/db",
               "reference/time-travel"

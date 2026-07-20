@@ -224,7 +224,7 @@ quietly: collections settle on the last rows a real gateway served (empty
 before the first success), a single session-level `console.info` notice
 replaces the per-collection `[QueryCollection]` error spam, and the SSE change
 stream refuses non-`text/event-stream` answers so the connection status parks
-`offline` instead of flapping online. Recovery is automatic — the stream's
+`offline` instead of flapping online. Recovery is automatic: the stream's
 reconnect backoff keeps probing, and the reset emitted on a real reconnect
 refetches every collection. Branch on it when you call `api.*` directly and
 want the same behavior.

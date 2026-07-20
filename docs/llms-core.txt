@@ -11121,9 +11121,14 @@ hooks into the visual layer.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
-| `ChatTranscript` | Scrollable, accessible transcript container. | `pending`, `pendingLabel`, `empty` |
+| `ChatTranscript` | Accessible transcript container composed over `MessageScroller`. | `pending`, `pendingLabel`, `empty`, `scrollerProps`, `scrollerRef` |
 | `ChatMessage` | One chat row with the Multi bubble geometry. | `role` (`assistant`, `user`, `system`), `label`, `meta`, `variant` (`default`, `terminal`), `pending` |
 | `ChatComposer` | Controlled glass composer. Enter submits, Shift+Enter inserts a newline. | `value`, `onValueChange`, `onSubmit`, `status`, `actions`, `disabled`, `docked` |
+| [`MessageScroller`](/reference/ui/message-scroller) | Anchored conversation viewport with streaming follow, prepend compensation, edge fades, and a jump-to-latest affordance. | `stickToBottom`, `streaming`, `bottomThreshold`, `firstItemKey`, `fade`, `onFollowChange` |
+| [`Bubble`](/reference/ui/bubble) | User, assistant, or system message surface with alignment and mounted-content clamp disclosure. | `variant`, `align`, `collapsible`, `collapsedHeight`, `expanded`, `onExpandedChange` |
+| [`Attachment`](/reference/ui/attachment) | File or image chip with metadata, upload/processing states, progress, and removal. | `name`, `state`, `sizeBytes`, `mediaType`, `thumbnailUrl`, `progress`, `onRemove` |
+| [`Marker`](/reference/ui/marker) | Accessible labeled separator, system note, or live streaming-status row. | `variant`, `live`, `shimmer` |
+| [`Shimmer`](/reference/ui/shimmer) | Reduced-motion-safe live text shimmer; the same stylesheet also exports the `sui-scroll-fade` edge utility. | `active` |
 
 ### Diff viewer
 
@@ -11270,6 +11275,158 @@ in the workflow, and open it with `bunx smithers-orchestrator ui RUN_ID`. See
 [Custom Workflow UIs](/guides/custom-workflow-ui) for the full wiring guide and
 [Workflow UI Design Principles](/guides/workflow-ui-design) for the visual
 language these components implement.
+
+---
+
+## MessageScroller
+
+> Anchored conversation scrolling with streaming follow, prepend compensation, edge fades, and jump-to-latest.
+
+`MessageScroller` is the transport-neutral scroll container behind
+`ChatTranscript`. It follows new content by default, stops following when the
+reader scrolls away, and exposes a jump button without coupling the UI to a
+Gateway or streaming client.
+
+```tsx
+import { MessageScroller } from "smithers-orchestrator/ui";
+
+<MessageScroller streaming={pending} firstItemKey={messages[0]?.id}>
+  {messages.map((message) => <article key={message.id}>{message.text}</article>)}
+</MessageScroller>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `stickToBottom` | `boolean` | `true` | Follow content growth while the reader remains at the bottom. |
+| `streaming` | `boolean` | `false` | Exposes streaming state through `data-streaming`. |
+| `bottomThreshold` | `number` | `24` | Pixel distance treated as the bottom. |
+| `firstItemKey` | `string \| number` | Not set | Compensates scroll position when older history is prepended. |
+| `fade` | `boolean` | `true` | Enables token-free mask fades at scrollable edges. |
+| `hideJumpToLatest` | `boolean` | `false` | Hides the jump affordance while away from the bottom. |
+| `jumpToLatestLabel` | `string` | `"Jump to latest"` | Accessible jump-button label. |
+| `onFollowChange` | `(following: boolean) => void` | Not set | Fires only when follow state transitions, never on mount. |
+| `contentClassName` | `string` | Not set | Class applied to the inner content element. |
+
+The forwarded `MessageScrollerHandle` provides `scrollToBottom(behavior?)` and
+`isFollowing()`. `stickToBottom={false}` disables all automatic scrolling while
+retaining fades and one-shot jump behavior.
+
+---
+
+## Bubble
+
+> User, assistant, and system message surfaces with alignment and long-content clamp disclosure.
+
+`Bubble` renders a standalone chat message surface. Its optional collapse mode
+uses a clamp: content stays mounted for selection and accessibility while the
+surface clips it visually.
+
+```tsx
+import { Bubble } from "smithers-orchestrator/ui";
+
+<Bubble variant="assistant" collapsible collapsedHeight={320}>
+  {longResponse}
+</Bubble>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `variant` | `"user" \| "assistant" \| "system"` | `"assistant"` | Surface and text treatment. |
+| `align` | `"start" \| "end" \| "center"` | derived | User ends, assistant starts, system centers. |
+| `collapsible` | `boolean` | `false` | Enables measured long-content clamping. |
+| `collapsedHeight` | `number` | `320` | Clamp height in pixels. |
+| `expanded`, `defaultExpanded` | `boolean` | `false` | Controlled or initial expansion state. |
+| `onExpandedChange` | `(expanded: boolean) => void` | Not set | Receives expansion requests. |
+| `expandLabel`, `collapseLabel` | `string` | `"Show more"`, `"Show less"` | Visible disclosure labels. |
+
+Use `bubbleVariants({ variant })` when another element needs the same visual
+variant classes.
+
+---
+
+## Attachment
+
+> File and image attachment chips with metadata, upload states, and determinate or indeterminate progress.
+
+`Attachment` presents file metadata without owning upload transport. Supply
+state and progress from any uploader.
+
+```tsx
+import { Attachment } from "smithers-orchestrator/ui";
+
+<Attachment
+  name="report.pdf"
+  state="uploading"
+  sizeBytes={8192}
+  progress={48}
+  onRemove={() => removeFile("report.pdf")}
+/>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | required | Visible filename and removal label. |
+| `state` | `"uploading" \| "processing" \| "ready" \| "error"` | `"ready"` | Upload lifecycle state. |
+| `sizeBytes` | `number` | Not set | Humanized with the shared `byteCountString`. |
+| `mediaType` | `string` | Not set | MIME metadata shown for ready files. |
+| `thumbnailUrl` | `string` | Not set | Image preview; otherwise an extension tile renders. |
+| `progress` | `number \| null` | Not set | `0–100` is determinate; `null` is indeterminate; omitted hides the bar. |
+| `onRemove` | `() => void` | Not set | Adds an accessible removal button. |
+
+---
+
+## Marker
+
+> Accessible labeled separators, system notes, and live streaming-status rows for chat transcripts.
+
+`Marker` keeps its label in the accessibility tree and draws separator lines
+with CSS pseudo-elements. It deliberately never uses `role="separator"`.
+
+```tsx
+import { Marker } from "smithers-orchestrator/ui";
+
+<Marker>Earlier messages</Marker>
+<Marker variant="status" live shimmer>Searching sources</Marker>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `variant` | `"separator" \| "note" \| "status"` | `"separator"` | Selects rule, pill, or status-row presentation. |
+| `live` | `boolean` | `false` | Adds `aria-live="polite"`. |
+| `shimmer` | `boolean` | `false` | Wraps the visible label in an active `Shimmer`. |
+| `children` | `ReactNode` | required | Visible and accessible label. |
+
+---
+
+## Shimmer and scroll fade
+
+> Reduced-motion-safe live text shimmer and the CSS-only scroll-aware edge-fade utility.
+
+`Shimmer` marks live status text without changing its content. Its root always
+has `sui-shimmer`; animation and gradient styling apply only while `active`.
+Reduced-motion environments render readable muted text with no animation.
+
+```tsx
+import { Shimmer } from "smithers-orchestrator/ui";
+
+<Shimmer active={streaming}>Generating response</Shimmer>
+```
+
+`active` defaults to `true`. Set it to `false` to retain ordinary inherited
+text styling.
+
+The same `chatScrollerCss` block ships `.sui-scroll-fade`. Apply it to a
+scrollable element with `data-fade-top="true|false"` and
+`data-fade-bottom="true|false"`; `MessageScroller` manages those attributes
+automatically.
 
 ---
 

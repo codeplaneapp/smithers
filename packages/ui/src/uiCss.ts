@@ -111,7 +111,7 @@ export const formCss = `
 /* -------------------------------------------------------------------------- */
 
 export const chatCss = `
-.sui-chat-transcript { flex:1 1 auto; min-width:0; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.sui-chat-transcript { flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .sui-chat-messages { display:flex; flex-direction:column; gap:18px; width:min(100%, 720px); min-height:100%; margin:0 auto; padding:36px 24px 156px; }
 .sui-chat-empty { display:grid; place-items:center; flex:1; min-height:240px; color:${t.mutedForeground}; text-align:center; }
 .sui-chat-message { display:grid; max-width:100%; animation:sui-chat-message-in 140ms ease-out both; }
@@ -147,6 +147,60 @@ export const chatCss = `
 @keyframes sui-chat-typing { 0%, 60%, 100% { opacity:.3; } 30% { opacity:1; } }
 @media (max-width: 620px) { .sui-chat-messages { padding:24px 14px 146px; } .sui-chat-bubble { max-width:90%; } .sui-chat-composer[data-docked='true'] { right:12px; left:12px; bottom:max(10px, env(safe-area-inset-bottom)); } }
 @media (prefers-reduced-motion: reduce) { .sui-chat-message, .sui-chat-typing span { animation-duration:1ms; animation-iteration-count:1; } }
+`;
+
+export const chatScrollerCss = `
+.sui-msg-scroller { position:relative; flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; }
+.sui-msg-scroller-viewport { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.sui-msg-scroller-content { min-width:0; }
+.sui-msg-scroller-jump { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border:1px solid ${t.border}; border-radius:999px; background:${t.glassStrong}; color:${t.foreground}; font:inherit; cursor:pointer; box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.06), 0 8px 24px rgb(${t.shadowRgb} / 0.10); }
+.sui-msg-scroller-jump:hover { background:${t.secondary}; }
+.sui-msg-scroller-jump:focus-visible { ${focusRing} }
+.sui-scroll-fade[data-fade-top='true'][data-fade-bottom='false'] { mask-image:linear-gradient(to bottom, transparent, black 32px); -webkit-mask-image:linear-gradient(to bottom, transparent, black 32px); }
+.sui-scroll-fade[data-fade-top='false'][data-fade-bottom='true'] { mask-image:linear-gradient(to bottom, black calc(100% - 32px), transparent); -webkit-mask-image:linear-gradient(to bottom, black calc(100% - 32px), transparent); }
+.sui-scroll-fade[data-fade-top='true'][data-fade-bottom='true'] { mask-image:linear-gradient(to bottom, transparent, black 32px, black calc(100% - 32px), transparent); -webkit-mask-image:linear-gradient(to bottom, transparent, black 32px, black calc(100% - 32px), transparent); }
+.sui-bubble { max-width:80%; padding:11px 15px; border-radius:18px; font-size:15px; line-height:1.5; overflow-wrap:anywhere; }
+.sui-bubble[data-align='start'] { align-self:flex-start; }
+.sui-bubble[data-align='end'] { align-self:flex-end; }
+.sui-bubble[data-align='center'] { align-self:center; }
+.sui-bubble-user { background:${t.inverseBg}; color:${t.inverseText}; white-space:pre-wrap; }
+.sui-bubble-assistant { background:${t.secondary}; color:${t.secondaryForeground}; }
+.sui-bubble-system { border:1px solid ${t.border}; background:${t.glassStrong}; color:${t.mutedForeground}; font-size:13px; text-align:center; }
+.sui-bubble-content > :first-child { margin-top:0; }
+.sui-bubble-content > :last-child { margin-bottom:0; }
+.sui-bubble[data-expanded='false'] .sui-bubble-content { max-height:var(--sui-bubble-clamp, 320px); overflow:hidden; mask-image:linear-gradient(to bottom, black calc(100% - 32px), transparent); -webkit-mask-image:linear-gradient(to bottom, black calc(100% - 32px), transparent); }
+.sui-bubble-toggle { display:inline-flex; align-items:center; justify-content:center; margin:9px auto 0; padding:3px 8px; border:1px solid ${t.border}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.mutedForeground}; font:inherit; font-size:11px; font-weight:650; cursor:pointer; }
+.sui-bubble-toggle:hover { background:${t.secondary}; color:${t.foreground}; }
+.sui-bubble-toggle:focus-visible { ${focusRing} }
+.sui-attachment { position:relative; display:grid; grid-template-columns:40px minmax(0, 1fr) auto; align-items:center; gap:10px; min-width:0; max-width:360px; padding:8px 10px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.foreground}; }
+.sui-attachment-thumb { width:40px; height:40px; display:grid; place-items:center; overflow:hidden; border-radius:${t.radiusControl}; background:${t.secondary}; color:${t.mutedForeground}; }
+.sui-attachment-thumb img { width:100%; height:100%; object-fit:cover; }
+.sui-attachment-ext { max-width:100%; padding:0 3px; font-family:${t.fontMono}; font-size:9px; font-weight:700; overflow:hidden; text-overflow:ellipsis; }
+.sui-attachment-details { min-width:0; display:grid; gap:3px; }
+.sui-attachment-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; font-weight:650; }
+.sui-attachment-meta { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:${t.mutedForeground}; font-size:11px; }
+.sui-attachment-progress { position:relative; width:100%; height:3px; overflow:hidden; border-radius:999px; background:color-mix(in srgb, ${t.primary} 14%, transparent); }
+.sui-attachment-progress-bar { display:block; height:100%; border-radius:inherit; background:${t.primary}; }
+.sui-attachment-progress-indeterminate { width:40%; animation:sui-attachment-indeterminate 1.2s ease-in-out infinite; }
+.sui-attachment-remove { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:17px; cursor:pointer; }
+.sui-attachment-remove:hover { background:${t.secondary}; color:${t.foreground}; }
+.sui-attachment-remove:focus-visible { ${focusRing} }
+.sui-attachment[data-state='error'] .sui-attachment-name, .sui-attachment[data-state='error'] .sui-attachment-meta { color:${t.destructive}; }
+.sui-marker { display:flex; align-items:center; gap:10px; min-width:0; color:${t.mutedForeground}; font-size:11px; }
+.sui-marker-label { min-width:0; }
+.sui-marker[data-variant='separator']::before, .sui-marker[data-variant='separator']::after { content:""; flex:1; height:1px; background:${t.border}; }
+.sui-marker[data-variant='separator'] .sui-marker-label { flex:none; text-align:center; }
+.sui-marker[data-variant='note'] { justify-content:center; }
+.sui-marker[data-variant='note'] .sui-marker-label { max-width:100%; padding:4px 10px; border:1px solid ${t.border}; border-radius:999px; background:${t.glassStrong}; text-align:center; }
+.sui-marker[data-variant='status'] { justify-content:flex-start; }
+.sui-shimmer { display:inline; }
+.sui-shimmer[data-active='true'] { background:linear-gradient(90deg, ${t.mutedForeground} 35%, ${t.foreground} 50%, ${t.mutedForeground} 65%); background-size:200% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; animation:sui-shimmer-sweep 2s linear infinite; }
+@keyframes sui-shimmer-sweep { from { background-position:200% 0; } to { background-position:-200% 0; } }
+@keyframes sui-attachment-indeterminate { from { transform:translateX(-100%); } to { transform:translateX(250%); } }
+@media (prefers-reduced-motion: reduce) {
+  .sui-shimmer[data-active='true'] { animation:none; background:none; background-clip:initial; -webkit-background-clip:initial; color:${t.mutedForeground}; }
+  .sui-attachment-progress-indeterminate { width:40%; animation:none; transform:none; }
+}
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -526,6 +580,7 @@ export const smithersUiCss = [
   cardCss,
   formCss,
   chatCss,
+  chatScrollerCss,
   alertCss,
   tableCss,
   tabsCss,
