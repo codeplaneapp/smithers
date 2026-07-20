@@ -68,7 +68,7 @@ function renderInline(text: string, keyPrefix: string, onLinkClick?: MarkdownLin
             onLinkClick
               ? (event) => {
                   event.preventDefault();
-                  onLinkClick(href ?? link[2]!, event);
+                  if (href !== undefined) onLinkClick(href, event);
                 }
               : undefined
           }

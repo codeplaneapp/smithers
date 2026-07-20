@@ -127,6 +127,25 @@ describe("Markdown (link activation)", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  test("rejects unsafe links without invoking onLinkClick", async () => {
+    const seen: string[] = [];
+    await render(
+      <Markdown
+        content="Click [this](javascript:alert)"
+        onLinkClick={(href) => seen.push(href)}
+      />,
+    );
+    const anchor = container!.querySelector("a.sui-md-link") as HTMLAnchorElement;
+    expect(anchor).toBeTruthy();
+    expect(anchor.hasAttribute("href")).toBe(false);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    await act(async () => {
+      anchor.dispatchEvent(event);
+    });
+    expect(seen).toEqual([]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   test("without onLinkClick the anchor keeps its href and default is not prevented", async () => {
     await render(<Markdown content="[docs](https://smithers.sh/docs)" />);
     const anchor = container!.querySelector("a.sui-md-link") as HTMLAnchorElement;
