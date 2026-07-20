@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getR2Object, putR2Object } from "../../../.smithers/lib/daily-ceo-intel/cloudflare";
 import { runOnce } from "../runner/src/entry";
 
@@ -6,12 +9,15 @@ const CF_ENV_KEYS = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLAR
 const originalEnv = Object.fromEntries(CF_ENV_KEYS.map((key) => [key, process.env[key]]));
 const originalSpawn = Bun.spawn;
 const originalFetch = globalThis.fetch;
+const runtimeDbDirectory = mkdtempSync(join(tmpdir(), "smithers-signal-runner-"));
+const runtimeDbPath = join(runtimeDbDirectory, "ceo-intel.sqlite");
 
 afterEach(() => {
   for (const key of CF_ENV_KEYS) {
     if (originalEnv[key] === undefined) delete process.env[key];
     else process.env[key] = originalEnv[key];
   }
+  rmSync(runtimeDbDirectory, { force: true, recursive: true });
   Bun.spawn = originalSpawn;
   globalThis.fetch = originalFetch;
 });
@@ -121,7 +127,7 @@ describe("entry.ts: runOnce() orchestration", () => {
   test("no Cloudflare credentials: ok reflects only the CLI exit code (archive-only expected)", async () => {
     clearCfCreds();
     mockSpawn({ upExitCode: 0, publishOutput: { published: false, skippedReason: "Cloudflare credentials are not present in env." } });
-    const result = await runOnce();
+    const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(true);
     expect(result.cliExitCode).toBe(0);
     expect(result.stateSyncedDown).toBe(false);
@@ -132,8 +138,10 @@ describe("entry.ts: runOnce() orchestration", () => {
   test("with Cloudflare credentials: published=true and ok=true when publish output reports published", async () => {
     setCfCreds();
     mockR2Fetch();
+    mkdirSync(join(runtimeDbPath, ".."), { recursive: true });
+    await Bun.write(runtimeDbPath, new Uint8Array([1, 2, 3]));
     mockSpawn({ upExitCode: 0, publishOutput: { published: true, idempotentSkip: false }, finalizeOutput: { status: "published" } });
-    const result = await runOnce();
+    const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(true);
     expect(result.published).toBe(true);
     expect(result.finalizeStatus).toBe("published");
@@ -144,7 +152,7 @@ describe("entry.ts: runOnce() orchestration", () => {
     setCfCreds();
     mockR2Fetch();
     mockSpawn({ upExitCode: 0, publishOutput: { published: false, idempotentSkip: true, skippedReason: "Already delivered for this issue date; KV writes skipped." } });
-    const result = await runOnce();
+    const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(true);
     expect(result.published).toBe(true);
     expect(result.publishSkippedReason).toBe("Already delivered for this issue date; KV writes skipped.");
@@ -154,7 +162,7 @@ describe("entry.ts: runOnce() orchestration", () => {
     setCfCreds();
     mockR2Fetch();
     mockSpawn({ upExitCode: 0, publishOutput: { published: false, idempotentSkip: false, skippedReason: "The composed issue failed verification." } });
-    const result = await runOnce();
+    const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(false);
     expect(result.published).toBe(false);
     expect(result.publishSkippedReason).toBe("The composed issue failed verification.");
@@ -163,7 +171,7 @@ describe("entry.ts: runOnce() orchestration", () => {
   test("non-zero CLI exit code: ok=false and the exit code plus stderr tail are captured", async () => {
     clearCfCreds();
     mockSpawn({ upExitCode: 1, upStderr: "boom: workflow crashed" });
-    const result = await runOnce();
+    const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(false);
     expect(result.cliExitCode).toBe(1);
     expect(result.published).toBe(false);
@@ -181,7 +189,7 @@ describe("entry.ts: runOnce() orchestration", () => {
       }
       throw new Error(`unexpected spawn: ${argv.join(" ")}`);
     }) as typeof Bun.spawn;
-    const result = await runOnce();
+    const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(false);
     expect(outputCalls).toBe(0);
   });
@@ -189,7 +197,7 @@ describe("entry.ts: runOnce() orchestration", () => {
   test("runId is derived from today's date and a random suffix", async () => {
     clearCfCreds();
     mockSpawn({ upExitCode: 0, publishOutput: { published: false } });
-    const result = await runOnce();
+    const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.runId).toMatch(/^signal-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$/);
   });
 });

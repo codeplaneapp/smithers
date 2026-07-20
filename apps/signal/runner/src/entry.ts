@@ -33,17 +33,15 @@ function readCreds(): CloudflareCreds | null {
   return { accountId, apiToken, kvNamespaceId, r2Bucket };
 }
 
-async function syncStateDown(creds: CloudflareCreds): Promise<{ synced: boolean }> {
+async function syncStateDown(creds: CloudflareCreds, dbPath: string): Promise<{ synced: boolean }> {
   const bytes = await getR2Object(creds, R2_STATE_KEY);
   if (!bytes) return { synced: false };
-  const dbPath = join(REPO_ROOT, DB_RELATIVE_PATH);
   mkdirSync(dirname(dbPath), { recursive: true });
   await Bun.write(dbPath, bytes);
   return { synced: true };
 }
 
-async function syncStateUp(creds: CloudflareCreds): Promise<{ synced: boolean }> {
-  const dbPath = join(REPO_ROOT, DB_RELATIVE_PATH);
+async function syncStateUp(creds: CloudflareCreds, dbPath: string): Promise<{ synced: boolean }> {
   if (!existsSync(dbPath)) return { synced: false };
   const bytes = new Uint8Array(await Bun.file(dbPath).arrayBuffer());
   await putR2Object(creds, R2_STATE_KEY, bytes, "application/vnd.sqlite3");
@@ -106,8 +104,9 @@ async function readNodeOutput(runId: string, nodeId: string): Promise<Record<str
   }
 }
 
-export async function runOnce(): Promise<RunResult> {
+export async function runOnce(options: { dbPath?: string } = {}): Promise<RunResult> {
   const creds = readCreds();
+  const dbPath = options.dbPath ?? join(REPO_ROOT, DB_RELATIVE_PATH);
   const runId = `signal-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
   const errors: string[] = [];
   let stateSyncedDown = false;
@@ -115,7 +114,7 @@ export async function runOnce(): Promise<RunResult> {
 
   if (creds) {
     try {
-      stateSyncedDown = (await syncStateDown(creds)).synced;
+      stateSyncedDown = (await syncStateDown(creds, dbPath)).synced;
     } catch (error) {
       errors.push(`state sync down failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -154,7 +153,7 @@ export async function runOnce(): Promise<RunResult> {
 
   if (creds) {
     try {
-      stateSyncedUp = (await syncStateUp(creds)).synced;
+      stateSyncedUp = (await syncStateUp(creds, dbPath)).synced;
     } catch (error) {
       errors.push(`state sync up failed: ${error instanceof Error ? error.message : String(error)}`);
     }

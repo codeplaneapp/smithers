@@ -8,10 +8,10 @@ node_modules
 out
 dist
 # daily-ceo-intel: local archive + app-owned sqlite state (config/ stays tracked)
-/reports/
-/data/*.sqlite
-/data/*.sqlite-shm
-/data/*.sqlite-wal
+/reports/????-??-??.md
+/reports/????-??-??.html
+/reports/????-??-??.json
+/data/*.sqlite*
 # staged local-UI bundle: built at pack time, shipped via apps/cli files, not committed
 apps/cli/ui-dist/
 artifacts/

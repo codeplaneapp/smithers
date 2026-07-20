@@ -386,6 +386,10 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "**/.smithers/pg/",
       "**/.smithers/migrated.json",
       ".smithers/evals/reports/",
+      "/data/*.sqlite*",
+      "/reports/????-??-??.md",
+      "/reports/????-??-??.html",
+      "/reports/????-??-??.json",
       "smithers.db",
       "smithers.db-shm",
       "smithers.db-wal",
@@ -394,6 +398,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     ]) {
       expect(lines).toContain(pattern);
     }
+    expect(lines).not.toContain("/reports/");
     expect(lines).not.toContain(".smithers/");
     expect(lines).toContain("!docs/reference/");
     expect(lines).toContain("!deploy/reference/");
