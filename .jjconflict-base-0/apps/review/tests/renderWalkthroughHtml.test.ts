@@ -92,6 +92,21 @@ describe("renderWalkthroughHtml", () => {
     expect(html).toContain(standaloneThemeCss());
   });
 
+  test("keeps standalone code rules from outranking Pierre's layered cascade", async () => {
+    const html = await render();
+    const standaloneCss = standaloneThemeCss();
+    const standaloneIndex = html.indexOf(standaloneCss);
+    const pierreBaseIndex = html.indexOf("@layer base", standaloneIndex + standaloneCss.length);
+    expect(standaloneIndex).toBeGreaterThan(-1);
+    expect(pierreBaseIndex).toBeGreaterThan(standaloneIndex);
+
+    const codeRules = [...standaloneCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) =>
+      /(?:^|[\s,])(?:pre|code)(?=[:\s,{])/.test(selector),
+    );
+    expect(codeRules.length).toBe(3);
+    for (const [, selector] of codeRules) expect(selector).toContain(":not(:where(.pierre-diff *))");
+  });
+
   test("escapes all dynamic chrome content", async () => {
     const html = await render();
     expect(html).toContain("Replaces removed with added &lt;script&gt;");

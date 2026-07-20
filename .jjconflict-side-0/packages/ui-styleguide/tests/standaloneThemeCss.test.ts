@@ -16,4 +16,13 @@ describe("standaloneThemeCss", () => {
     expect(css).toContain("border-bottom:1px solid var(--border)");
     expect(css).toContain("border-top:1px solid var(--border)");
   });
+
+  test("keeps unlayered code defaults out of embedded Pierre diffs", () => {
+    const css = standaloneThemeCss();
+    const guard = ":not(:where(.pierre-diff *))";
+    expect(css).toContain(`code${guard} {`);
+    expect(css).toContain(`pre${guard} {`);
+    expect(css).toContain(`pre${guard} code${guard} {`);
+    expect(css).not.toMatch(/(?:^|})\s*(?:code|pre|pre code)\s*\{/);
+  });
 });
