@@ -965,7 +965,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         connected: new Set(["connected", "gateway-react", "internal", "smithers", "styles"]),
         internal: new Set(["internal"]),
         primitives: new Set(["internal", "primitives", "styles"]),
-        smithers: new Set(["adapters", "ai", "internal", "primitives", "smithers", "styles"]),
+        smithers: new Set(["adapters", "agentic", "ai", "internal", "primitives", "smithers", "styles"]),
         styles: new Set(["internal", "styles"]),
       };
       if (layer) {
