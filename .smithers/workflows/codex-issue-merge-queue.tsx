@@ -23,7 +23,7 @@ const MAX_REVIEW_DIFF_BYTES = 200_000;
 
 const repoRoot = (() => {
   try {
-    return execFileSync("jj", ["workspace", "root"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return execFileSync("jj", ["workspace", "root", "--ignore-working-copy"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
     try {
       return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -319,9 +319,10 @@ function git(args: string[], cwd = repoRoot, env?: NodeJS.ProcessEnv): string {
     env: env ?? process.env,
   }).trim();
 }
-function currentHead(cwd: string): string {
+export function currentHead(cwd: string): string {
+  if (existsSync(join(cwd, ".git"))) return git(["rev-parse", "HEAD"], cwd);
   try {
-    return execFileSync("jj", ["log", "-r", "@", "--no-graph", "-T", "commit_id"], {
+    return execFileSync("jj", ["log", "-r", "@", "--no-graph", "-T", "commit_id", "--ignore-working-copy"], {
       cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch {
