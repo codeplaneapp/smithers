@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
-import { smithersUiCss } from "../src/uiCss";
+import { agentOutputCss, smithersUiCss } from "../src/uiCss";
 import { tokens } from "../src/tokens";
 
 /**
@@ -93,5 +93,11 @@ describe("css contract", () => {
     const defaultRule = smithersUiCss.match(/\.sui-button-default \{[^}]+\}/)?.[0] ?? "";
     expect(defaultRule).toContain("color-mix(in srgb, var(--brand, #6d56d8) 10%,");
     expect(defaultRule).toContain("color:var(--brand, #6d56d8)");
+  });
+
+  test("composes the agent output block into the shipped stylesheet", () => {
+    expect(agentOutputCss).toContain(".sui-agent-output {");
+    expect(agentOutputCss).toContain(".sui-agent-output-tools {");
+    expect(smithersUiCss).toContain(agentOutputCss);
   });
 });

@@ -182,6 +182,13 @@ export {
 export { Markdown, safeMarkdownHref, type MarkdownProps, type MarkdownLinkClick } from "./primitives/markdown";
 export { MessageResponse, type MessageResponseProps } from "./agentic/MessageResponse";
 export {
+  AgentOutput,
+  type AgentOutputProps,
+  type AgentOutputModel,
+  type AgentOutputToolCall,
+} from "./agentic/AgentOutput";
+export { parseAgentOutput } from "./agentic/parseAgentOutput";
+export {
   CodeBlock,
   type CodeBlockProps,
   type CodeBlockHighlighter,

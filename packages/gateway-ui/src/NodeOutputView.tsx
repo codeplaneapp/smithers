@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import type { CSSProperties } from "react";
 import { useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
+import { AgentOutput, parseAgentOutput } from "@smithers-orchestrator/ui";
 import { theme } from "./theme";
 
 export type NodeOutputViewProps = {
@@ -63,14 +64,27 @@ export function formatOutput(data: unknown): string {
 
 /**
  * The output of a single node, fetched on demand via {@link useGatewayNodeOutput}.
- * Renders the node's `output`/`text` field when present, else pretty JSON. Wire
- * it to {@link RunTree}'s `onSelectNode` to inspect a node.
+ * Renders recognizable agent rows through the shared agentic composition and
+ * keeps pretty JSON for arbitrary output. Wire it to {@link RunTree}'s
+ * `onSelectNode` to inspect a node.
  */
 export function NodeOutputView({ runId, nodeId, iteration, className, style }: NodeOutputViewProps) {
   const { data, loading, error } = useGatewayNodeOutput({ runId, nodeId, iteration });
+  const { status, row } = unwrapNodeOutput(data);
+  const waiting = loading && data == null;
+  const agentOutput = nodeId && !error && !waiting && status === "produced"
+    ? parseAgentOutput(row)
+    : null;
+  const fallback = !nodeId
+    ? "Select a node to see its output."
+    : error
+      ? error.message
+      : waiting
+        ? "Loading…"
+        : formatOutput(data) || "No output.";
 
   return (
-    <pre
+    <div
       className={className}
       style={{
         margin: 0,
@@ -79,20 +93,26 @@ export function NodeOutputView({ runId, nodeId, iteration, className, style }: N
         background: theme.bg,
         border: `1px solid ${theme.border}`,
         borderRadius: theme.radius,
-        fontFamily: theme.fontMono,
+        fontFamily: theme.fontSans,
         fontSize: 12,
         color: theme.text,
-        whiteSpace: "pre-wrap",
         ...style,
       }}
     >
-      {!nodeId
-        ? "Select a node to see its output."
-        : error
-          ? error.message
-          : loading
-            ? "Loading…"
-            : formatOutput(data) || "No output."}
-    </pre>
+      {agentOutput ? (
+        <AgentOutput model={agentOutput} />
+      ) : (
+        <pre
+          data-slot="node-output-fallback"
+          style={{
+            margin: 0,
+            fontFamily: theme.fontMono,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {fallback}
+        </pre>
+      )}
+    </div>
   );
 }

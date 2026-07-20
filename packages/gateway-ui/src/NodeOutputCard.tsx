@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import type { CSSProperties, ReactNode } from "react";
 import { useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
+import { AgentOutput, parseAgentOutput } from "@smithers-orchestrator/ui";
 import { formatOutput, unwrapNodeOutput, type NodeOutputStatus } from "./NodeOutputView";
 import { theme } from "./theme";
 
@@ -35,7 +36,8 @@ export type NodeOutputCardProps = {
   /**
    * Body render prop given the unwrapped row + status. Equivalent to passing a
    * function as `children`; if both are set, `children` wins. When neither is
-   * provided the card falls back to a {@link NodeOutputView}-style formatted dump.
+   * provided the card renders recognizable agent output, then falls back to a
+   * {@link NodeOutputView}-style formatted dump for arbitrary rows.
    */
   body?: NodeOutputCardBody;
   /** Function-as-children form of {@link NodeOutputCardProps.body}. */
@@ -123,8 +125,12 @@ function NodeOutputCardInner({
   } else if (render) {
     content = render(row, { status, loading, error });
   } else {
-    content = (
+    const agentOutput = status === "produced" ? parseAgentOutput(row) : null;
+    content = agentOutput ? (
+      <AgentOutput model={agentOutput} />
+    ) : (
       <pre
+        data-slot="node-output-fallback"
         style={{
           margin: 0,
           overflow: "auto",

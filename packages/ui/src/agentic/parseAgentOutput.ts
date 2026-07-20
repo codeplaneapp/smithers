@@ -1,0 +1,196 @@
+import type { AgentOutputModel, AgentOutputToolCall } from "./AgentOutput";
+import type { ToolCallState } from "./ToolCall";
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(record: UnknownRecord, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function readBoolean(record: UnknownRecord, keys: readonly string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+function readArray(record: UnknownRecord, keys: readonly string[]): unknown[] {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value;
+    if (typeof value === "string" && value.trimStart().startsWith("[")) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // A partial streaming JSON value is not an array yet.
+      }
+    }
+  }
+  return [];
+}
+
+function textFromPart(value: unknown, acceptedTypes?: ReadonlySet<string>): string | undefined {
+  if (typeof value === "string") return value.trim() ? value : undefined;
+  if (!isRecord(value)) return undefined;
+  const type = readString(value, ["type", "kind"]);
+  if (acceptedTypes && type && !acceptedTypes.has(type.toLowerCase())) return undefined;
+  return readString(value, ["text", "content", "markdown", "value"]);
+}
+
+function joinParts(value: unknown, acceptedTypes?: ReadonlySet<string>): string | undefined {
+  if (typeof value === "string") return value.trim() ? value : undefined;
+  if (!Array.isArray(value)) return undefined;
+  const parts = value
+    .map((part) => textFromPart(part, acceptedTypes))
+    .filter((part): part is string => part !== undefined);
+  return parts.length ? parts.join("\n\n") : undefined;
+}
+
+const RESPONSE_PART_TYPES = new Set(["text", "output_text", "message", "assistant"]);
+const REASONING_PART_TYPES = new Set(["reasoning", "thinking", "thought"]);
+const TOOL_PART_TYPES = new Set(["tool-call", "tool_call", "tool-use", "tool_use"]);
+
+function responseText(record: UnknownRecord): string | undefined {
+  const direct = readString(record, ["markdown", "text", "response", "message", "output"]);
+  if (direct) return direct;
+  const message = isRecord(record.message) ? record.message : undefined;
+  const messageContent = message ? joinParts(message.content, RESPONSE_PART_TYPES) : undefined;
+  return messageContent ?? joinParts(record.content, RESPONSE_PART_TYPES);
+}
+
+function reasoningText(record: UnknownRecord): string | undefined {
+  const direct = readString(record, ["reasoningText", "reasoning_text", "thinking", "thought"]);
+  if (direct) return direct;
+  return joinParts(record.reasoning, REASONING_PART_TYPES) ??
+    joinParts(record.content, REASONING_PART_TYPES);
+}
+
+function normalizeToolState(value: unknown, call: UnknownRecord, streaming: boolean): ToolCallState {
+  const state = typeof value === "string" ? value.toLowerCase().replaceAll("_", "-") : "";
+  if (
+    state === "input-streaming" || state === "input-available" ||
+    state === "approval-requested" || state === "approval-responded" ||
+    state === "running" || state === "output-available" ||
+    state === "output-error" || state === "output-denied"
+  ) return state;
+  if (["streaming", "partial"].includes(state)) return "input-streaming";
+  if (["pending", "ready", "queued"].includes(state)) return "input-available";
+  if (["in-progress", "inprogress", "active"].includes(state)) return "running";
+  if (["complete", "completed", "done", "success", "succeeded", "ok"].includes(state)) {
+    return "output-available";
+  }
+  if (["error", "failed", "failure"].includes(state)) return "output-error";
+  if (["denied", "rejected"].includes(state)) return "output-denied";
+  if (call.error !== undefined || call.errorText !== undefined || call.error_text !== undefined) {
+    return "output-error";
+  }
+  if (call.result !== undefined || call.output !== undefined) return "output-available";
+  return streaming ? "running" : "input-available";
+}
+
+function formatError(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.message;
+  if (isRecord(value)) {
+    const message = readString(value, ["message", "detail", "reason"]);
+    if (message) return message;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseToolCall(
+  value: unknown,
+  index: number,
+  streaming: boolean,
+  resultById: ReadonlyMap<string, UnknownRecord>,
+): AgentOutputToolCall | undefined {
+  if (!isRecord(value)) return undefined;
+  const functionCall = isRecord(value.function) ? value.function : undefined;
+  const name = readString(value, ["toolName", "tool_name", "name", "tool"])
+    ?? (functionCall ? readString(functionCall, ["name"]) : undefined);
+  if (!name) return undefined;
+  const id = readString(value, ["toolCallId", "tool_call_id", "id"]) ?? `${name}:${index}`;
+  const matchedResult = resultById.get(id);
+  const args = value.input ?? value.args ?? value.arguments ?? functionCall?.arguments;
+  const result = value.result ?? value.output ?? matchedResult?.result ?? matchedResult?.output;
+  const error = value.errorText ?? value.error_text ?? value.error ?? matchedResult?.error;
+  const state = normalizeToolState(value.state ?? value.status ?? matchedResult?.state ?? matchedResult?.status, {
+    ...value,
+    ...(result === undefined ? {} : { result }),
+    ...(error === undefined ? {} : { error }),
+  }, streaming);
+  return {
+    id,
+    name,
+    state,
+    ...(typeof args === "string" ? { argsText: args } : args === undefined ? {} : { args }),
+    ...(typeof result === "string" ? { resultText: result } : result === undefined ? {} : { result }),
+    ...(error === undefined ? {} : { errorText: formatError(error) }),
+  };
+}
+
+function toolCalls(record: UnknownRecord, streaming: boolean): AgentOutputToolCall[] {
+  const results = [
+    ...readArray(record, ["toolResults", "tool_results"]),
+    ...readArray(record, ["staticToolResults"]),
+    ...readArray(record, ["dynamicToolResults"]),
+  ];
+  const resultById = new Map<string, UnknownRecord>();
+  for (const result of results) {
+    if (!isRecord(result)) continue;
+    const id = readString(result, ["toolCallId", "tool_call_id", "id"]);
+    if (id) resultById.set(id, result);
+  }
+
+  let calls = readArray(record, ["toolCalls", "tool_calls"]);
+  if (!calls.length) {
+    calls = [
+      ...readArray(record, ["staticToolCalls"]),
+      ...readArray(record, ["dynamicToolCalls"]),
+      ...readArray(record, ["content"]).filter((part) => {
+        if (!isRecord(part)) return false;
+        const type = readString(part, ["type", "kind"]);
+        return type ? TOOL_PART_TYPES.has(type.toLowerCase()) : false;
+      }),
+    ];
+  }
+  return calls
+    .map((call, index) => parseToolCall(call, index, streaming, resultById))
+    .filter((call): call is AgentOutputToolCall => call !== undefined);
+}
+
+/** Parse common AI SDK and CLI-agent output shapes without claiming arbitrary rows. */
+export function parseAgentOutput(value: unknown): AgentOutputModel | null {
+  if (typeof value === "string") {
+    return value.trim() ? { response: value, toolCalls: [], streaming: false } : null;
+  }
+  if (!isRecord(value)) return null;
+
+  const status = readString(value, ["status", "state"]);
+  const streaming = readBoolean(value, ["streaming", "isStreaming", "is_streaming"])
+    ?? (status ? ["streaming", "running", "in-progress", "in_progress"].includes(status.toLowerCase()) : false);
+  const response = responseText(value);
+  const reasoning = reasoningText(value);
+  const calls = toolCalls(value, streaming);
+  if (!response && !reasoning && calls.length === 0) return null;
+  return {
+    ...(response ? { response } : {}),
+    ...(reasoning ? { reasoning } : {}),
+    toolCalls: calls,
+    streaming,
+  };
+}

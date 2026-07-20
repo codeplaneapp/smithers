@@ -347,9 +347,27 @@ describe("NodeOutputView", () => {
     expect(harness.container.textContent).toContain("the-text");
   });
 
+  test("renders recognizable agent rows through agentic components", async () => {
+    const harness = await renderOutput({
+      status: "produced",
+      row: {
+        text: "Final **answer**",
+        reasoningText: "Inspect first",
+        toolCalls: [{ toolName: "read", input: { path: "README.md" }, result: "ok" }],
+      },
+    });
+    expect(harness.container.querySelector('[data-slot="agent-output"]')).not.toBeNull();
+    expect(harness.container.querySelector('[data-slot="message-response"]')).not.toBeNull();
+    expect(harness.container.querySelector('[data-slot="reasoning"]')).not.toBeNull();
+    expect(harness.container.querySelector('[data-slot="tool-call"]')).not.toBeNull();
+    expect(harness.container.querySelector('[data-slot="node-output-fallback"]')).toBeNull();
+  });
+
   test("produced envelope with an object row falls back to pretty JSON", async () => {
     const harness = await renderOutput({ status: "produced", row: { foo: 42 } });
     expect(harness.container.textContent).toContain("foo");
+    expect(harness.container.querySelector('[data-slot="node-output-fallback"]')).not.toBeNull();
+    expect(harness.container.querySelector('[data-slot="agent-output"]')).toBeNull();
   });
 
   test("produced envelope with a string row", async () => {
@@ -469,6 +487,22 @@ describe("NodeOutputCard", () => {
     expect(harness.container.textContent).toContain("plan-node");
     expect(harness.container.textContent).toContain("Produced");
     expect(harness.container.textContent).toContain("the-body");
+    expect(harness.container.querySelector('[data-slot="agent-output"]')).not.toBeNull();
+  });
+
+  test("keeps arbitrary default bodies on the JSON fallback", async () => {
+    const gw = boot();
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputCard, {
+        runId: "run-a",
+        nodeId: "n1",
+        useNodeOutput: hookReturning({ status: "produced", row: { count: 2 } }),
+      }),
+    );
+    await harness.flush(20);
+    expect(harness.container.querySelector('[data-slot="node-output-fallback"]')).not.toBeNull();
+    expect(harness.container.querySelector('[data-slot="agent-output"]')).toBeNull();
   });
 
   test("surfaces the hook error as failed chrome", async () => {
@@ -688,6 +722,27 @@ describe("RunEventLog", () => {
     const harness = await mount(gw, createElement(RunEventLog, { runId: undefined, follow: false }));
     await harness.flush(20);
     expect(harness.container.textContent).toContain("Select a run to stream");
+  });
+
+  test("renders task heartbeats and active status rows as shimmering markers", async () => {
+    const gw = boot({
+      events: {
+        "run-a": [
+          { runId: "run-a", seq: 1, event: "task.heartbeat", payload: { nodeId: "agent" } },
+          { runId: "run-a", seq: 2, event: "node.status", payload: { state: "running" } },
+          { runId: "run-a", seq: 3, event: "node.output", payload: { text: "plain" } },
+        ],
+      },
+    });
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
+    await harness.flush(60);
+    const markers = harness.container.querySelectorAll('[data-slot="marker"]');
+    expect(markers.length).toBe(2);
+    expect(markers[0]?.getAttribute("data-variant")).toBe("status");
+    expect(markers[0]?.querySelector('[data-slot="shimmer"]')?.getAttribute("data-active")).toBe(
+      "true",
+    );
+    expect(harness.container.textContent).toContain("node.output");
   });
 
   test("shows the waiting/empty state for a run with no events", async () => {

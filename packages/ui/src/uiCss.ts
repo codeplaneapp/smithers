@@ -512,6 +512,11 @@ export const agenticResponseCss = `
 @media (prefers-reduced-motion: reduce) { .sui-response-caret { animation:none; opacity:.6; } }
 `;
 
+export const agentOutputCss = `
+.sui-agent-output { min-width:0; display:grid; align-content:start; gap:10px; }
+.sui-agent-output-tools { min-width:0; display:grid; align-content:start; gap:8px; }
+`;
+
 /* -------------------------------------------------------------------------- */
 /* PierreDiffView adapter (thin frame; CodeView owns the highlighted body)     */
 /* -------------------------------------------------------------------------- */
@@ -619,6 +624,7 @@ export const smithersUiCss = [
   fileTreeCss,
   markdownCss,
   agenticResponseCss,
+  agentOutputCss,
   pierreDiffCss,
   stageStripCss,
   agenticReasoningCss,

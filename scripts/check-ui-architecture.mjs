@@ -128,12 +128,14 @@ const SHADCN_PROVENANCE_ENTRY_FILES = [
   "provenance/agentic-reasoning-tool.json",
   "provenance/agentic-response-code.json",
   "provenance/agentic-plan-sources.json",
+  "provenance/node-output-agentic.json",
 ];
 const SHADCN_PROVENANCE_TRIGGERS = new Map([
   ["provenance/chat-foundation.json", "packages/ui/src/chat/MessageScroller.tsx"],
   ["provenance/agentic-reasoning-tool.json", "packages/ui/src/agentic/Reasoning.tsx"],
   ["provenance/agentic-response-code.json", "packages/ui/src/agentic/MessageResponse.tsx"],
   ["provenance/agentic-plan-sources.json", "packages/ui/src/agentic/Plan.tsx"],
+  ["provenance/node-output-agentic.json", "packages/ui/src/agentic/AgentOutput.tsx"],
 ]);
 const SHADCN_PROVENANCE_REQUIRED_FILES = new Map([
   ["provenance/chat-foundation.json", [
@@ -159,6 +161,26 @@ const SHADCN_PROVENANCE_REQUIRED_FILES = new Map([
     "src/agentic/Sources.tsx",
     "src/agentic/InlineCitation.tsx",
   ]],
+  ["provenance/node-output-agentic.json", [
+    "src/agentic/AgentOutput.tsx",
+  ]],
+]);
+const SHADCN_PROVENANCE_COMPONENTS = new Map([
+  ["src/chat/MessageScroller.tsx", "provenance/chat-foundation.json"],
+  ["src/chat/Bubble.tsx", "provenance/chat-foundation.json"],
+  ["src/chat/Attachment.tsx", "provenance/chat-foundation.json"],
+  ["src/chat/Marker.tsx", "provenance/chat-foundation.json"],
+  ["src/chat/Shimmer.tsx", "provenance/chat-foundation.json"],
+  ["src/agentic/Reasoning.tsx", "provenance/agentic-reasoning-tool.json"],
+  ["src/agentic/ChainOfThought.tsx", "provenance/agentic-reasoning-tool.json"],
+  ["src/agentic/ToolCall.tsx", "provenance/agentic-reasoning-tool.json"],
+  ["src/agentic/MessageResponse.tsx", "provenance/agentic-response-code.json"],
+  ["src/agentic/CodeBlock.tsx", "provenance/agentic-response-code.json"],
+  ["src/agentic/Plan.tsx", "provenance/agentic-plan-sources.json"],
+  ["src/agentic/TaskItem.tsx", "provenance/agentic-plan-sources.json"],
+  ["src/agentic/Sources.tsx", "provenance/agentic-plan-sources.json"],
+  ["src/agentic/InlineCitation.tsx", "provenance/agentic-plan-sources.json"],
+  ["src/agentic/AgentOutput.tsx", "provenance/node-output-agentic.json"],
 ]);
 const SHADCN_PROVENANCE_ENTRY_KEYS = [
   "collection",
@@ -170,6 +192,9 @@ const SHADCN_PROVENANCE_ENTRY_KEYS = [
   "registryItem",
 ];
 const SHADCN_PROVENANCE_VERIFICATION = "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.";
+const UI_LAYER_DIRECTION_EXCEPTIONS = new Set([
+  "packages/ui/src/primitives/markdown.tsx -> ../agentic/CodeBlock",
+]);
 const INTRINSIC_VISUAL_TAGS = new Set([
   "a", "article", "aside", "button", "canvas", "code", "div", "footer", "form",
   "h1", "h2", "h3", "header", "iframe", "img", "input", "label", "li", "main",
@@ -923,6 +948,7 @@ function shadcnViolations(root, files) {
   }
 
   const recordedPaths = new Set();
+  const recordedManifests = new Map();
   const fileSet = new Set(files);
   for (const entryFile of SHADCN_PROVENANCE_ENTRY_FILES) {
     const laneManifestPath = `packages/ui/${entryFile}`;
@@ -960,6 +986,7 @@ function shadcnViolations(root, files) {
         violations.push(formatViolation("shadcn-provenance", `${fullPath} has duplicate provenance entries`));
       } else {
         recordedPaths.add(fullPath);
+        recordedManifests.set(entryPath, entryFile);
         laneRecordedPaths.add(entryPath);
         if (!fileSet.has(fullPath)) {
           violations.push(formatViolation("shadcn-provenance", `${fullPath} is a stale provenance entry`));
@@ -1018,6 +1045,17 @@ function shadcnViolations(root, files) {
   const shadcnFiles = files.filter((path) => SHADCN_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`)));
   for (const path of shadcnFiles) {
     if (!recordedPaths.has(path)) violations.push(formatViolation("shadcn-provenance", `${path} has no provenance entry`));
+  }
+  for (const [entryPath, expectedManifest] of SHADCN_PROVENANCE_COMPONENTS) {
+    if (
+      fileSet.has(`packages/ui/${entryPath}`) &&
+      recordedManifests.get(entryPath) !== expectedManifest
+    ) {
+      violations.push(formatViolation(
+        "shadcn-provenance",
+        `packages/ui/${entryPath} has no entry in packages/ui/${expectedManifest}`,
+      ));
+    }
   }
   return violations;
 }
@@ -1091,7 +1129,11 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       if (layer) {
         for (const specifier of specifiers) {
           const target = importedUiLayer(path, specifier);
-          if (target && !allowedLayers[layer].has(target)) {
+          if (
+            target &&
+            !allowedLayers[layer].has(target) &&
+            !UI_LAYER_DIRECTION_EXCEPTIONS.has(`${path} -> ${specifier}`)
+          ) {
             violations.push(formatViolation("ui-layer-direction", `${path} (${layer}) imports ${specifier} (${target})`));
           }
         }

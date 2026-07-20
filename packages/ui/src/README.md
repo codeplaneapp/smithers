@@ -32,7 +32,8 @@ How the pieces fit, infrastructure first:
   SSE text, PTY screen snapshots, or stored messages without bringing runtime
   hooks into the visual layer.
 - `agentic/` contains props-driven AI interaction anatomy such as reasoning
-  disclosures, ordered thought steps, and tool invocations. It may compose the
+  disclosures, ordered thought steps, tool invocations, and the `AgentOutput`
+  composition over parsed response/reasoning/tool models. It may compose the
   chat and primitive layers but remains independent of agent/runtime SDKs.
 - `adapters/` wraps heavy third-party widgets that must NOT weigh down the base
   barrel. Each ships behind its own package subpath, never `index.ts`, so

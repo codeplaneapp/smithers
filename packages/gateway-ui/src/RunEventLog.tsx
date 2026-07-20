@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, type CSSProperties } from "react";
 import { useGatewayRunEvents } from "@smithers-orchestrator/gateway-react";
+import { Marker } from "@smithers-orchestrator/ui";
 import { theme } from "./theme";
 
 export type RunEventLogProps = {
@@ -27,6 +28,30 @@ export function summarize(payload: unknown): string {
   } catch {
     return "";
   }
+}
+
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function markerState(event: string, payload: unknown, streaming: boolean) {
+  const record = recordOf(payload);
+  const payloadType = typeof record?.type === "string" ? record.type : "";
+  const eventType = payloadType || event;
+  const normalized = eventType.toLowerCase().replaceAll(/[^a-z]/g, "");
+  const status = typeof record?.status === "string"
+    ? record.status
+    : typeof record?.state === "string"
+      ? record.state
+      : "";
+  const heartbeat = normalized === "taskheartbeat";
+  const statusRow = normalized.includes("status") || normalized.includes("state") || status !== "";
+  if (!heartbeat && !statusRow) return null;
+  const active = ["active", "in-progress", "in_progress", "pending", "queued", "running", "waiting"]
+    .includes(status.toLowerCase());
+  return { shimmer: streaming && (heartbeat || active) };
 }
 
 /**
@@ -77,15 +102,28 @@ export function RunEventLog({
           {streaming ? "Waiting for events…" : "No events."}
         </div>
       ) : null}
-      {events.map((frame) => (
-        <div key={frame.seq} style={{ display: "flex", gap: 8, whiteSpace: "pre-wrap" }}>
-          <span style={{ color: theme.textDim, flexShrink: 0 }}>
-            {String(frame.seq).padStart(4, "0")}
-          </span>
-          <span style={{ color: theme.accent, flexShrink: 0 }}>{frame.event}</span>
-          <span style={{ color: theme.textDim }}>{summarize(frame.payload)}</span>
-        </div>
-      ))}
+      {events.map((frame) => {
+        const marker = markerState(frame.event, frame.payload, streaming);
+        const seq = String(frame.seq).padStart(4, "0");
+        const detail = summarize(frame.payload);
+        return marker ? (
+          <Marker
+            key={frame.seq}
+            variant="status"
+            live
+            shimmer={marker.shimmer}
+            data-seq={frame.seq}
+          >
+            {[seq, frame.event, detail].filter(Boolean).join("  ")}
+          </Marker>
+        ) : (
+          <div key={frame.seq} style={{ display: "flex", gap: 8, whiteSpace: "pre-wrap" }}>
+            <span style={{ color: theme.textDim, flexShrink: 0 }}>{seq}</span>
+            <span style={{ color: theme.accent, flexShrink: 0 }}>{frame.event}</span>
+            <span style={{ color: theme.textDim }}>{detail}</span>
+          </div>
+        );
+      })}
       <div ref={endRef} />
     </div>
   );

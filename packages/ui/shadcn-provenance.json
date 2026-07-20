@@ -9,7 +9,8 @@
       "provenance/chat-foundation.json",
       "provenance/agentic-reasoning-tool.json",
       "provenance/agentic-response-code.json",
-      "provenance/agentic-plan-sources.json"
+      "provenance/agentic-plan-sources.json",
+      "provenance/node-output-agentic.json"
     ]
   },
   "entries": []
