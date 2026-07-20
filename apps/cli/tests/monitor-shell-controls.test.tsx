@@ -14,6 +14,7 @@
  */
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 // happy-dom replaces fetch with a node:http one; keep bun's native fetch so
 // unrelated network-using tests in the same process stay on the real stack.
@@ -34,6 +35,7 @@ const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRail
 const { monitorCss, RunProgressCell, RunsRail, RunsTable, StatCard, StatusTag } = await import(
   "../src/monitor-ui/monitor.tsx"
 );
+const monitorSource = readFileSync(new URL("../src/monitor-ui/monitor.tsx", import.meta.url), "utf8");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -205,9 +207,45 @@ describe("migrated monitor surfaces", () => {
     expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
     expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
   });
+
+  test("keyboard: run rows activate with Enter and Space", async () => {
+    const selected: string[] = [];
+    await render(
+      <RunsTable
+        runs={[run]}
+        loading={false}
+        page={1}
+        onPageChange={() => {}}
+        onSelect={(runId) => selected.push(runId)}
+      />,
+    );
+
+    const scrollport = document.querySelector<HTMLElement>(".mon-runs-scroll")!;
+    expect(scrollport.tabIndex).toBe(0);
+    expect(scrollport.getAttribute("role")).toBe("region");
+    expect(scrollport.getAttribute("aria-label")).toBe("Runs table");
+
+    const row = document.querySelector<HTMLElement>(".mon-runs-table-row")!;
+    expect(row.tabIndex).toBe(0);
+    expect(row.getAttribute("role")).toBe("button");
+    await act(async () => row.focus());
+    expect(document.activeElement).toBe(row);
+
+    await keydown(row, "Enter");
+    await keydown(row, " ");
+    expect(selected).toEqual([run.runId, run.runId]);
+  });
 });
 
 describe("monitor theme contract", () => {
+  test("execution views expose named focusable regions without claiming an incomplete ARIA tree", () => {
+    expect(monitorSource).not.toContain('role="tree"');
+    expect(monitorSource).not.toContain('role="treeitem"');
+    expect(monitorSource).toContain('aria-label="Execution tree"');
+    expect(monitorSource).toContain('aria-label="Execution tree XML"');
+    expect(monitorSource).toContain("aria-expanded={expanded}");
+  });
+
   test("inherits explicit light/dark and OS-fallback tokens from the shared theme", () => {
     expect(workflowUiThemeCss).toContain(":root:not([data-theme='light'])");
     expect(workflowUiThemeCss).toContain(":root[data-theme='dark']");

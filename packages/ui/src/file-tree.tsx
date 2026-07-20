@@ -99,7 +99,7 @@ function FileTreeLevel({
               <span className="sui-file-tree-dir-name">{child.name}</span>
             </button>
             {isCollapsed ? null : (
-              <div className="sui-file-tree-children" role="group">
+              <div className="sui-file-tree-children">
                 <FileTreeLevel
                   dir={child}
                   selected={selected}
@@ -170,7 +170,7 @@ export function FileTree({
     });
   };
   return (
-    <div data-slot="file-tree" role="tree" className={cn("sui-file-tree", className)} {...props}>
+    <div data-slot="file-tree" className={cn("sui-file-tree", className)} {...props}>
       <FileTreeLevel
         dir={root}
         selected={selected}

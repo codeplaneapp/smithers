@@ -151,6 +151,26 @@ async function fireResize(target = getContent()): Promise<void> {
 }
 
 describe("MessageScroller", () => {
+  test("keyboard: the named scroll region takes focus and cancels follow on PageUp", async () => {
+    const changes: boolean[] = [];
+    await render(
+      <MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    const viewport = getViewport();
+    expect(viewport.tabIndex).toBe(0);
+    expect(viewport.getAttribute("role")).toBe("region");
+    expect(viewport.getAttribute("aria-label")).toBe("Conversation messages");
+    await act(async () => viewport.focus());
+    expect(document.activeElement).toBe(viewport);
+
+    metrics().scrollTop = 400;
+    await act(async () =>
+      viewport.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true })),
+    );
+    expect(changes).toEqual([false]);
+  });
+
   test("pins to the bottom on mount without reporting an initial follow transition", async () => {
     const changes: boolean[] = [];
     const handle = createRef<MessageScrollerHandle>();

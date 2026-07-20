@@ -55,7 +55,8 @@ describe("FileTree", () => {
   test("groups a flat path list into a nested tree and toggles collapse", async () => {
     await render(<FileTree nodes={PATHS} />);
 
-    expect(container!.querySelector('[role="tree"]')).not.toBeNull();
+    expect(container!.querySelector('[role="tree"]')).toBeNull();
+    expect(container!.querySelector('[role="treeitem"]')).toBeNull();
 
     // Directories: src, src/app, src/app/util (README.md is a root leaf).
     const dirNames = dirToggles().map((toggle) =>

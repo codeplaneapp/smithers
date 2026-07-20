@@ -44,14 +44,20 @@ export function ChatMessage({
       {label ? <div className="sui-chat-message-label">{label}</div> : null}
       <div
         className={cn("sui-chat-bubble", pending && "sui-chat-bubble-pending")}
-        aria-label={pending ? pendingLabel : undefined}
+        role={pending ? "status" : variant === "terminal" ? "region" : undefined}
+        aria-live={pending ? "polite" : undefined}
+        aria-label={!pending && variant === "terminal" ? "Terminal output" : undefined}
+        tabIndex={!pending && variant === "terminal" ? 0 : undefined}
       >
         {pending ? (
-          <span className="sui-chat-typing" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
+          <>
+            <span className="sui-sr-only">{pendingLabel}</span>
+            <span className="sui-chat-typing" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          </>
         ) : (
           children
         )}

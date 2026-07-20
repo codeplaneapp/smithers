@@ -63,6 +63,28 @@ describe("flagship pack UI composition", () => {
     expect(host.querySelector('[data-testid="review-status"]')?.textContent).toContain("Running");
   });
 
+  test("keyboard: Enter and Space toggle a focusable reviewer lane", async () => {
+    const { ReviewApp } = await import("../ui/review.tsx");
+    await act(async () => root.render(<ReviewApp />));
+    const lane = host.querySelector<HTMLElement>('[data-testid="review-reviewer-0"]')!;
+
+    expect(lane.tabIndex).toBe(0);
+    expect(lane.getAttribute("role")).toBe("button");
+    expect(lane.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => lane.focus());
+    expect(document.activeElement).toBe(lane);
+
+    await act(async () =>
+      lane.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })),
+    );
+    expect(lane.getAttribute("aria-expanded")).toBe("true");
+
+    await act(async () =>
+      lane.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })),
+    );
+    expect(lane.getAttribute("aria-expanded")).toBe("false");
+  });
+
   test("renders issue-blitz live lane state with shared status components", async () => {
     const { IssueBlitzApp } = await import("../ui/issue-blitz.tsx");
     const runStatus = () => host.querySelector('[data-testid="issue-blitz-run-status"]');

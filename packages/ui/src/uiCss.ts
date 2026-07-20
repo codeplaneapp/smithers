@@ -81,6 +81,9 @@ export const badgeCss = `
 
 export const cardCss = `
 .sui-card { min-width:0; display:grid; align-content:start; gap:10px; padding:14px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; box-shadow:${shadowCard}; }
+.sui-card[role='button'] { cursor:pointer; }
+.sui-card[role='button']:hover { background:${t.secondary}; }
+.sui-card[role='button']:focus-visible { ${focusRing} }
 .sui-card-header { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .sui-card-title { min-width:0; color:${t.cardForeground}; font-size:14px; font-weight:700; }
 .sui-card-description { min-width:0; color:${t.mutedForeground}; font-size:12px; line-height:1.45; }
@@ -123,6 +126,7 @@ export const chatCss = `
 .sui-chat-message[data-role='assistant'] .sui-chat-bubble { border-bottom-left-radius:${t.radiusControl}; }
 .sui-chat-message[data-role='system'] .sui-chat-bubble { max-width:min(92%, 620px); border:1px solid ${t.border}; background:${t.glassStrong}; color:${t.mutedForeground}; font-size:13px; text-align:center; }
 .sui-chat-message[data-variant='terminal'] .sui-chat-bubble { width:min(100%, 680px); max-width:96%; max-height:min(52vh, 520px); overflow:auto; border:1px solid ${t.border}; background:${t.codeBg}; color:${t.codeText}; font-family:${t.fontMono}; font-size:12px; line-height:1.5; white-space:pre; tab-size:4; }
+.sui-chat-message[data-variant='terminal'] .sui-chat-bubble:focus-visible { ${focusRing} }
 .sui-chat-message-label, .sui-chat-message-meta { max-width:80%; padding:0 8px; color:${t.mutedForeground}; font-size:11px; line-height:1.4; }
 .sui-chat-message-label { margin-bottom:5px; font-weight:650; }
 .sui-chat-message-meta { margin-top:5px; }
@@ -152,6 +156,7 @@ export const chatCss = `
 export const chatScrollerCss = `
 .sui-msg-scroller { position:relative; flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; }
 .sui-msg-scroller-viewport { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.sui-msg-scroller-viewport:focus-visible { ${focusRing} }
 .sui-msg-scroller-content { min-width:0; }
 .sui-msg-scroller-jump { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border:1px solid ${t.border}; border-radius:999px; background:${t.glassStrong}; color:${t.foreground}; font:inherit; cursor:pointer; box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.06), 0 8px 24px rgb(${t.shadowRgb} / 0.10); }
 .sui-msg-scroller-jump:hover { background:${t.secondary}; }
@@ -506,6 +511,7 @@ export const agenticResponseCss = `
 .sui-codeblock-action:hover { background:color-mix(in srgb, ${t.codeText} 9%, transparent); color:${t.codeText}; }
 .sui-codeblock-action:focus-visible { ${focusRing} }
 .sui-codeblock-body { margin:0; padding:12px 14px; font-family:${t.fontMono}; font-size:12px; line-height:1.5; overflow:auto; tab-size:4; }
+.sui-codeblock-body:focus-visible { ${focusRing} }
 .sui-codeblock-body code { display:block; min-width:max-content; white-space:pre; font:inherit; color:inherit; }
 .sui-codeblock[data-wrap='true'] .sui-codeblock-body code { min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .sui-codeblock-lineno { display:inline-block; min-width:2.5em; padding-right:12px; text-align:right; color:color-mix(in srgb, ${t.codeText} 40%, transparent); user-select:none; }
@@ -585,6 +591,7 @@ export const agenticReasoningCss = `
 .sui-toolcall-section { min-width:0; display:grid; gap:5px; }
 .sui-toolcall-section-title { color:${t.mutedForeground}; font-size:10.5px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
 .sui-toolcall-pre { margin:0; padding:10px 12px; border-radius:${t.radiusControl}; background:${t.codeBg}; color:${t.codeText}; font-family:${t.fontMono}; font-size:12px; line-height:1.5; white-space:pre-wrap; overflow:auto; max-height:320px; }
+.sui-toolcall-pre:focus-visible { ${focusRing} }
 .sui-toolcall-error { color:${t.destructive}; }
 .sui-toolcall[data-layout='expanded'] .sui-toolcall-body { border-top:0; }
 

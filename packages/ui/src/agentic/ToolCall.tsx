@@ -145,20 +145,39 @@ export function ToolCall({
           {hasArgs ? (
             <section data-slot="tool-call-args" className="sui-toolcall-section">
               <div className="sui-toolcall-section-title">Input</div>
-              <pre className="sui-toolcall-pre">{argsText ?? formatJsonSafe(args)}</pre>
+              <pre
+                className="sui-toolcall-pre"
+                role="region"
+                aria-label={`Tool input: ${name}`}
+                tabIndex={0}
+              >
+                {argsText ?? formatJsonSafe(args)}
+              </pre>
             </section>
           ) : null}
           {isFailure ? (
             <section data-slot="tool-call-result" className="sui-toolcall-section">
               <div className="sui-toolcall-section-title">Output</div>
-              <pre className="sui-toolcall-pre sui-toolcall-error">
+              <pre
+                className="sui-toolcall-pre sui-toolcall-error"
+                role="region"
+                aria-label={`Tool output: ${name}`}
+                tabIndex={0}
+              >
                 {errorText ?? (state === "output-denied" ? "Denied" : "Tool call failed")}
               </pre>
             </section>
           ) : hasResult ? (
             <section data-slot="tool-call-result" className="sui-toolcall-section">
               <div className="sui-toolcall-section-title">Output</div>
-              <pre className="sui-toolcall-pre">{resultText ?? formatJsonSafe(result)}</pre>
+              <pre
+                className="sui-toolcall-pre"
+                role="region"
+                aria-label={`Tool output: ${name}`}
+                tabIndex={0}
+              >
+                {resultText ?? formatJsonSafe(result)}
+              </pre>
             </section>
           ) : null}
         </div>

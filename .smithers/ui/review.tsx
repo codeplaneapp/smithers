@@ -35,7 +35,7 @@ type Severity = (typeof SEVERITIES)[number];
 
 type RunSummary = { runId: string; workflowKey?: string; status?: string; createdAtMs?: number };
 type ReviewIssue = { severity: Severity; title: string; file: string | null; description: string };
-type ReviewRow = {
+export type ReviewRow = {
   index: number;
   reviewer: string;
   approved: boolean;
@@ -135,6 +135,53 @@ function extractSynthesis(value: unknown): Synthesis | null {
     description: asString(it.description) ?? "",
   }));
   return { approved: row.approved === true, feedback: asString(row.feedback) ?? "", issues };
+}
+
+export function ReviewerLane({
+  review,
+  open,
+  onToggle,
+}: {
+  review: ReviewRow;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const feedbackId = `review-reviewer-feedback-${review.index}`;
+  return (
+    <Card
+      data-testid={`review-reviewer-${review.index}`}
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      aria-controls={feedbackId}
+      aria-label={`${open ? "Collapse" : "Expand"} review from ${review.reviewer}`}
+      onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onToggle();
+      }}
+    >
+      <CardHeader>
+        <CardTitle>{review.reviewer}</CardTitle>
+        <StatusPill
+          status={review.approved ? "finished" : "failed"}
+          label={review.approved ? "approved" : "denied"}
+        />
+      </CardHeader>
+      <CardContent id={feedbackId}>
+        {open ? review.feedback || "No feedback provided." : review.feedback.slice(0, 180) || "No feedback provided."}
+        {SEVERITIES.map((severity) => {
+          const count = review.issues.filter((issue) => issue.severity === severity).length;
+          return count ? (
+            <Badge key={severity} variant={severity === "critical" ? "destructive" : "warning"}>
+              {severity} {count}
+            </Badge>
+          ) : null;
+        })}
+      </CardContent>
+    </Card>
+  );
 }
 
 
@@ -245,7 +292,7 @@ export function ReviewApp() {
     {hasContent ? <>
       <Card data-testid="review-verdict"><CardHeader><CardTitle>{verdictState === "pending" ? "Awaiting synthesized verdict" : verdictState === "missing" ? "No synthesized verdict — the moderator produced none" : verdictApproved ? "Approved — synthesized verdict" : "Blocked — synthesized verdict"}</CardTitle><StatusPill status={verdictState === "approved" ? "finished" : verdictState === "blocked" || verdictState === "missing" ? "failed" : "waiting"} /></CardHeader><CardContent><CardDescription>{approvedCount} of {reviews.length} panelists approved{verdictState === "pending" ? " · awaiting moderator synthesis" : verdictState === "missing" ? " · moderator produced no verdict" : " · moderator synthesized"}</CardDescription>{synthesis?.feedback ? <p data-testid="review-synthesis-feedback">{synthesis.feedback}</p> : null}{SEVERITIES.map((s) => <Badge key={s} variant={s === "critical" ? "destructive" : s === "major" || s === "minor" ? "warning" : "muted"}>{s} {sevCounts[s]}</Badge>)}</CardContent></Card>
       <SectionHeader title={`Panelists (${reviews.length})`} />
-      <div data-testid="review-reviewers">{reviews.map((r) => <Card key={r.index} data-testid={`review-reviewer-${r.index}`} onClick={() => setOpenLanes((prev) => ({ ...prev, [r.index]: !prev[r.index] }))}><CardHeader><CardTitle>{r.reviewer}</CardTitle><StatusPill status={r.approved ? "finished" : "failed"} label={r.approved ? "approved" : "denied"} /></CardHeader><CardContent>{openLanes[r.index] ? r.feedback || "No feedback provided." : r.feedback.slice(0, 180) || "No feedback provided."}{SEVERITIES.map((s) => { const count = r.issues.filter((issue) => issue.severity === s).length; return count ? <Badge key={s} variant={s === "critical" ? "destructive" : "warning"}>{s} {count}</Badge> : null; })}</CardContent></Card>)}</div>
+      <div data-testid="review-reviewers">{reviews.map((review) => <ReviewerLane key={review.index} review={review} open={openLanes[review.index] ?? false} onToggle={() => setOpenLanes((prev) => ({ ...prev, [review.index]: !prev[review.index] }))} />)}</div>
       <SectionHeader title="Issues" actions={<Tabs value={sevFilter} onValueChange={(value) => setSevFilter(value as Severity | "all")}><TabsList><TabsTrigger value="all" data-testid="review-filter-all" count={allIssues.length}>All</TabsTrigger>{SEVERITIES.map((s) => <TabsTrigger key={s} value={s} data-testid={`review-filter-${s}`} count={sevCounts[s]}>{s}</TabsTrigger>)}</TabsList></Tabs>} />
       <div data-testid="review-issues">{visibleIssues.map((it, i) => <Card key={i} data-testid="review-issue"><CardHeader><CardTitle>{it.title}</CardTitle><Badge variant={it.severity === "critical" ? "destructive" : it.severity === "nit" ? "muted" : "warning"}>{it.severity}</Badge></CardHeader><CardContent><CardDescription>{it.file ? `${it.file} · ` : ""}flagged by {it.reviewer}</CardDescription>{it.description}</CardContent></Card>)}{visibleIssues.length === 0 ? <EmptyState data-testid="review-issues-empty" title={issuesEmptyMessage} /> : null}</div>
     </> : <EmptyState data-testid="review-empty" title={activeRunId ? "Waiting for the review panel…" : "No review runs yet."} description="Launch a review to have code changes examined by panelists and synthesized by a moderator." action={<Button data-testid="review-launch-empty" onClick={() => void launch()} disabled={busy}>Launch Review</Button>} />}

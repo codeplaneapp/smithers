@@ -266,7 +266,9 @@ export const MessageScroller: ForwardRefExoticComponent<
           onWheel={cancelProgrammaticScroll}
           onTouchMove={cancelProgrammaticScroll}
           onKeyDown={onKeyDown}
-          tabIndex={-1}
+          role="region"
+          aria-label="Conversation messages"
+          tabIndex={0}
         >
           <div
             ref={contentRef}

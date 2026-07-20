@@ -54,6 +54,9 @@ describe("CodeBlock", () => {
     expect(html).toContain("sui-codeblock-lineno");
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain('aria-label="Copy code"');
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain('role="region"');
+    expect(html).toContain('aria-label="typescript code"');
   });
 
   test("copy calls the seam and repeated clicks restart the copied timer", async () => {

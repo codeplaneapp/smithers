@@ -191,7 +191,12 @@ describe("chat", () => {
     expect(html).toContain('data-role="user"');
     expect(html).toContain('data-role="assistant"');
     expect(html).toContain('data-variant="terminal"');
-    expect(html).toContain('aria-label="Agent is working"');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain("Agent is working");
+    expect(html).toContain('role="region"');
+    expect(html).toContain('aria-label="Terminal output"');
+    expect(html).toContain('tabindex="0"');
     expect(html).toContain("sui-chat-typing");
   });
 
@@ -346,7 +351,7 @@ describe("misc primitives", () => {
         renderAffordance={(node) => (node.path === "README.md" ? <span className="dot" /> : null)}
       />,
     );
-    expect(html).toContain('role="tree"');
+    expect(html).not.toContain('role="tree"');
     expect(html).toContain('data-slot="file-tree"');
     expect(html).toContain("sui-file-tree-dir-toggle");
     expect(html).toContain("main.ts");

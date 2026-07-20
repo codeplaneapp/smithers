@@ -80,6 +80,24 @@ describe("ToolCall", () => {
     expect(expanded).toContain('data-slot="tool-call-header"');
     expect(expanded).not.toContain('data-slot="tool-call-trigger"');
     expect(expanded).toContain("&quot;hits&quot;");
+    expect(expanded).toContain('tabindex="0"');
+    expect(expanded).toContain('role="region"');
+    expect(expanded).toContain('aria-label="Tool output: search"');
+  });
+
+  test("labels each focusable input and output scroll region", () => {
+    const html = renderToStaticMarkup(
+      <ToolCall
+        name="inspect"
+        state="output-available"
+        layout="expanded"
+        args={{ path: "src" }}
+        result={{ files: 2 }}
+      />,
+    );
+    expect(html).toContain('aria-label="Tool input: inspect"');
+    expect(html).toContain('aria-label="Tool output: inspect"');
+    expect(html.match(/tabindex="0"/g)?.length).toBe(2);
   });
 
   test("renders under the dark theme", () => {

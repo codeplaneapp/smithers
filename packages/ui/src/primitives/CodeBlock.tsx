@@ -118,7 +118,13 @@ export function CodeBlock({
           ) : null}
         </span>
       </div>
-      <pre data-slot="code-block-body" className="sui-codeblock-body">
+      <pre
+        data-slot="code-block-body"
+        className="sui-codeblock-body"
+        role="region"
+        aria-label={language ? `${language} code` : "Code"}
+        tabIndex={0}
+      >
         <code>
           {lines.map((line, lineIndex) => (
             <span key={lineIndex}>

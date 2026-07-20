@@ -1026,7 +1026,7 @@ export function RunsTable({
           All runs <span className="mon-count">{total}</span>
         </h2>
       </header>
-      <div className="mon-runs-scroll">
+      <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
         <Table className="mon-runs-table" data-testid="monitor-runs-table">
           <TableHeader>
             <TableRow>
@@ -1044,7 +1044,14 @@ export function RunsTable({
                 key={run.runId}
                 className="mon-runs-table-row"
                 data-run-id={run.runId}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelect(run.runId)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  onSelect(run.runId);
+                }}
               >
                 <TableCell>
                   <StatusTag status={run.status} />
@@ -1189,7 +1196,13 @@ function XmlRow({
         style={{ paddingLeft: 8 + depth * 16 }}
       >
         {children.length > 0 ? (
-          <button type="button" className="mon-tree-chevron" onClick={() => onToggle(key)} aria-label="Toggle">
+          <button
+            type="button"
+            className="mon-tree-chevron"
+            onClick={() => onToggle(key)}
+            aria-expanded={expanded}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
+          >
             {expanded ? "▾" : "▸"}
           </button>
         ) : (
@@ -1256,11 +1269,15 @@ function TreeRow({
       <div
         className={`mon-tree-row${key === selectedNodeKey ? " is-active" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
-        role="treeitem"
-        aria-expanded={children.length > 0 ? expanded : undefined}
       >
         {children.length > 0 ? (
-          <button type="button" className="mon-tree-chevron" onClick={() => onToggle(key)} aria-label="Toggle">
+          <button
+            type="button"
+            className="mon-tree-chevron"
+            onClick={() => onToggle(key)}
+            aria-expanded={expanded}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
+          >
             {expanded ? "▾" : "▸"}
           </button>
         ) : (
@@ -1369,7 +1386,13 @@ function ExecutionTree({
   }
   if (asXml) {
     return (
-      <div role="tree" className={`mon-tree mon-tree-xml${isStatic ? " is-static" : ""}`} data-testid="monitor-tree-xml">
+      <div
+        role="region"
+        aria-label="Execution tree XML"
+        tabIndex={0}
+        className={`mon-tree mon-tree-xml${isStatic ? " is-static" : ""}`}
+        data-testid="monitor-tree-xml"
+      >
         <XmlRow
           node={root}
           depth={0}
@@ -1391,7 +1414,13 @@ function ExecutionTree({
     );
   }
   return (
-    <div role="tree" className={`mon-tree${isStatic ? " is-static" : ""}`} data-testid="monitor-tree">
+    <div
+      role="region"
+      aria-label="Execution tree"
+      tabIndex={0}
+      className={`mon-tree${isStatic ? " is-static" : ""}`}
+      data-testid="monitor-tree"
+    >
       <TreeRow
         node={root}
         depth={0}
@@ -3405,6 +3434,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: 0; }
 .mon-runs-table-panel .mon-panel-head { margin-bottom: var(--sp-2); }
 .mon-runs-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
+.mon-runs-scroll:focus-visible, .mon-tree:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
 /* The shared Table wraps itself in an overflow-x container; inside the
    monitor's scrollports that inner scroller would defeat the sticky header,
    so let the outer .mon-*-scroll own all scrolling. */
@@ -3414,6 +3444,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table td { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mon-runs-table tbody tr:last-child td { border-bottom: 0; }
 .mon-runs-table-row { cursor: pointer; }
+.mon-runs-table-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
 .mon-table-workflow { font-weight: 600; max-width: 0; width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .mon-table-failed { color: var(--tone); font-weight: 600; }
 .mon-runs-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-3); flex-wrap: wrap; }
