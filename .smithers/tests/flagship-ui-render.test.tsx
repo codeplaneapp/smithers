@@ -12,6 +12,8 @@ const previousActEnvironment = reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT;
 reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
 const run = { runId: "run-flagship", workflowKey: "review", status: "running" };
+let mockedRun: typeof run | undefined = run;
+let mockedEvents: unknown[] = [{ payload: { event: "node.finished", payload: { nodeId: "ci-postgres:ready", iteration: 0 } } }];
 const output = { data: { row: { reviewer: "fixture reviewer", approved: true, feedback: "looks good", issues: [] } }, refetch: async () => {} };
 
 mock.module("smithers-orchestrator/gateway-react", () => ({
@@ -19,8 +21,8 @@ mock.module("smithers-orchestrator/gateway-react", () => ({
   createGatewayReactRoot: () => {},
   useGatewayActions: () => ({ launchRun: async () => run, cancelRun: async () => {} }),
   useGatewayNodeOutput: () => output,
-  useGatewayRun: () => ({ data: run, refetch: async () => {} }),
-  useGatewayRunEvents: () => ({ events: [{ payload: { event: "node.finished", payload: { nodeId: "ci-postgres:ready", iteration: 0 } } }] }),
+  useGatewayRun: () => ({ data: mockedRun, refetch: async () => {} }),
+  useGatewayRunEvents: () => ({ events: mockedEvents }),
   useGatewayRuns: () => ({ data: [run], refetch: async () => {} }),
 }));
 
@@ -35,6 +37,8 @@ let root: Root;
 let host: HTMLDivElement;
 
 beforeEach(() => {
+  mockedRun = run;
+  mockedEvents = [{ payload: { event: "node.finished", payload: { nodeId: "ci-postgres:ready", iteration: 0 } } }];
   host = document.createElement("div");
   document.body.replaceChildren(host);
   root = createRoot(host);
@@ -61,11 +65,48 @@ describe("flagship pack UI composition", () => {
 
   test("renders issue-blitz live lane state with shared status components", async () => {
     const { IssueBlitzApp } = await import("../ui/issue-blitz.tsx");
+    const runStatus = () => host.querySelector('[data-testid="issue-blitz-run-status"]');
+    const isolatedStatus = () => host.querySelector('[data-testid="issue-blitz-isolated-status"]');
+
+    mockedRun = undefined;
+    mockedEvents = [];
     await act(async () => root.render(<IssueBlitzApp />));
 
     expect(host.querySelector('[data-testid="issue-blitz-ui"]')).not.toBeNull();
     expect(host.textContent).toContain("ci-postgres");
     expect(host.textContent).toContain("isolated worktrees");
     expect(host.querySelector('[data-testid="run-tree"]')).not.toBeNull();
+    expect(runStatus()?.getAttribute("data-status")).toBe("unknown");
+    expect(isolatedStatus()?.getAttribute("data-status")).toBe("pending");
+
+    mockedRun = { ...run, status: "idle" };
+    await act(async () => root.render(<IssueBlitzApp />));
+    expect(runStatus()?.getAttribute("data-status")).toBe("idle");
+    expect(isolatedStatus()?.getAttribute("data-status")).toBe("pending");
+
+    mockedRun = run;
+    mockedEvents = [{ payload: { event: "node.started", payload: { nodeId: "ci-postgres:implement", iteration: 0 } } }];
+    await act(async () => root.render(<IssueBlitzApp />));
+    expect(runStatus()?.getAttribute("data-status")).toBe("running");
+    expect(isolatedStatus()?.getAttribute("data-status")).toBe("running");
+
+    mockedRun = { ...run, status: "failed" };
+    mockedEvents = [{ payload: { event: "node.failed", payload: { nodeId: "ci-postgres:implement", iteration: 0 } } }];
+    await act(async () => root.render(<IssueBlitzApp />));
+    expect(runStatus()?.getAttribute("data-status")).toBe("failed");
+    expect(isolatedStatus()?.getAttribute("data-status")).toBe("pending");
+
+    mockedRun = { ...run, status: "cancelled" };
+    mockedEvents = [{ payload: { event: "node.cancelled", payload: { nodeId: "ci-postgres:implement", iteration: 0 } } }];
+    await act(async () => root.render(<IssueBlitzApp />));
+    expect(runStatus()?.getAttribute("data-status")).toBe("cancelled");
+    expect(isolatedStatus()?.getAttribute("data-status")).toBe("pending");
+
+    mockedRun = { ...run, status: "finished" };
+    mockedEvents = ["ci-postgres", "e2e-orphans", "dual-react", "url-schemes", "pack-home", "pack-scan", "workflow-dirs", "dead-code", "mcp-confirm", "coerce-props", "audit-atomic"]
+      .map((item) => ({ payload: { event: "node.finished", payload: { nodeId: `${item}:ready`, iteration: 0 } } }));
+    await act(async () => root.render(<IssueBlitzApp />));
+    expect(runStatus()?.getAttribute("data-status")).toBe("finished");
+    expect(isolatedStatus()?.getAttribute("data-status")).toBe("done");
   });
 });

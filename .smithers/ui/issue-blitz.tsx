@@ -28,6 +28,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  normalizeStatus,
 } from "smithers-orchestrator/ui";
 import {
   buildIssueBlitzNodeState,
@@ -72,8 +73,14 @@ export function IssueBlitzApp() {
   const { status, iteration } = useMemo(() => buildIssueBlitzNodeState(events as unknown[]), [events]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
   const st = (nodeId: string): NodeStatus => status.get(nodeId) ?? "pending";
-  const runStatus = asString(run.data?.status) ?? "waiting";
+  const runStatus = normalizeStatus(asString(run.data?.status)) || "unknown";
   const doneItems = ITEMS.filter((item) => st(`${item.key}:ready`) === "done").length;
+  const isolatedStatus = doneItems === ITEMS.length
+    ? "done"
+    : ITEMS.some((item) => ["bootstrap", "plan", "implement", "review"]
+      .some((stage) => normalizeStatus(st(`${item.key}:${stage}`)) === "running"))
+      ? "running"
+      : "pending";
   const terminal = (nodeId: string) => ["done", "failed", "skipped"].includes(st(nodeId));
   const stages: Array<[string, NodeStatus]> = [
     ["discover", st("discover")], ["serial integration", st("commit-all")], ["sandboxed gate", st("local-gate")],
@@ -82,10 +89,10 @@ export function IssueBlitzApp() {
 
   return <main aria-label="Issue Blitz workflow dashboard" data-testid="issue-blitz-ui">
     <SmithersUiStyles />
-    <SectionHeader title="⚡ Issue Blitz" eyebrow={runId?.slice(0, 8) ?? "--"} actions={<><StatusPill status={runStatus} /><Button variant="destructive" onClick={() => runId && cancelRun({ runId })}>Cancel run</Button></>}>
+    <SectionHeader title="⚡ Issue Blitz" eyebrow={runId?.slice(0, 8) ?? "--"} actions={<><StatusPill data-testid="issue-blitz-run-status" status={runStatus} /><Button variant="destructive" onClick={() => runId && cancelRun({ runId })}>Cancel run</Button></>}>
       {doneItems}/{ITEMS.length} isolated lanes settled · exact candidate review → serial integration → sandboxed gate → human-approved exact-SHA push
     </SectionHeader>
-    <Card><CardHeader><CardTitle>Delivery stages</CardTitle></CardHeader><CardContent>{stages.map(([label, state]) => <StatusPill key={label} status={statusForNode(state)} label={label} />)}<StatusPill status={doneItems === ITEMS.length ? "finished" : "running"} label={`isolated worktrees ×${ITEMS.length}`} /></CardContent></Card>
+    <Card><CardHeader><CardTitle>Delivery stages</CardTitle></CardHeader><CardContent>{stages.map(([label, state]) => <StatusPill key={label} status={statusForNode(state)} label={label} />)}<StatusPill data-testid="issue-blitz-isolated-status" status={isolatedStatus} label={`isolated worktrees ×${ITEMS.length}`} /></CardContent></Card>
     <SectionHeader title="Isolated lanes" />
     <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Issues</TableHead><TableHead>Implementer</TableHead><TableHead>Plan</TableHead><TableHead>Implement</TableHead><TableHead>Snapshot</TableHead><TableHead>Exact review</TableHead><TableHead>Ready</TableHead><TableHead>Iter</TableHead></TableRow></TableHeader><TableBody>{ITEMS.map((item) => <TableRow key={item.key}><TableCell><strong>{item.key}</strong><br />{item.title}</TableCell><TableCell>{item.issues.map((number) => `#${number}`).join(" ")}</TableCell><TableCell><Badge variant={item.kind === "hard" ? "warning" : "default"}>{item.kind === "hard" ? "terra" : "luna"}</Badge></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:plan`))} label="plan" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:implement`))} label="impl" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:candidate`))} label="sha" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:review`))} label="review" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:ready`))} label="ready" /></TableCell><TableCell>{(iteration.get(`${item.key}:implement`) ?? 0) + 1}</TableCell></TableRow>)}</TableBody></Table>
     {terminal("commit-all") ? <SummaryCard title="Serialized integration" runId={runId} nodeId="commit-all" iteration={iteration.get("commit-all") ?? 0} state={st("commit-all")} /> : null}
