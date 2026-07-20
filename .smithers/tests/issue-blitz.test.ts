@@ -64,10 +64,23 @@ describe("issue-blitz safety contract", () => {
     expect(workflowSource).not.toMatch(/git\(\["push",\s*"origin",\s*"main"\]\)/);
   });
 
-  test("mounts one-shot output cards only after terminal events and keys remounts", () => {
+  test("composes terminal output cards with the shared gateway and UI libraries", () => {
     expect(uiSource).toContain("terminal(\"commit-all\")");
-    expect(uiSource).toContain("key={`commit-all:${st(\"commit-all\")}");
     expect(uiSource).toContain("buildIssueBlitzNodeState");
+    expect(uiSource).toContain("NodeOutputView");
+    expect(uiSource).toContain("SmithersUiStyles");
+    expect(uiSource).toContain('typeof document !== "undefined" && document.getElementById("root")');
+    expect(uiSource).not.toContain("<style");
+    expect(uiSource).not.toContain("style={{");
+    expect(uiSource).not.toMatch(/#[0-9a-fA-F]{3,8}/);
+    const imports = [...uiSource.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
+    expect(imports).toEqual([
+      "react",
+      "smithers-orchestrator/gateway-react",
+      "smithers-orchestrator/gateway-ui",
+      "smithers-orchestrator/ui",
+    ]);
+    expect(uiSource).toContain('aria-label="Issue Blitz workflow dashboard"');
   });
 
   test("renders isolated lanes, exact-head gates, approval, and publication in causal order", async () => {
