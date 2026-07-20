@@ -32,7 +32,9 @@ async function makeFakeCliWithEnvDump(name, stdoutEmitter) {
     const script = [
         'const fs = require("node:fs");',
         "if (process.env.SMITHERS_ENV_DUMP_FILE) {",
-        "  fs.writeFileSync(process.env.SMITHERS_ENV_DUMP_FILE, JSON.stringify({",
+        "  const dumpFile = process.env.SMITHERS_ENV_DUMP_FILE;",
+        "  const tempFile = `${dumpFile}.${process.pid}.tmp`;",
+        "  fs.writeFileSync(tempFile, JSON.stringify({",
         "    ARGS: process.argv.slice(2),",
         "    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? null,",
         "    CODEX_HOME: process.env.CODEX_HOME ?? null,",
@@ -42,6 +44,7 @@ async function makeFakeCliWithEnvDump(name, stdoutEmitter) {
         "    OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null,",
         "    GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? null,",
         '  }), "utf8");',
+        "  fs.renameSync(tempFile, dumpFile);",
         "}",
         stdoutEmitter,
         "",
@@ -50,7 +53,17 @@ async function makeFakeCliWithEnvDump(name, stdoutEmitter) {
 }
 
 async function readEnvDump(dumpFile) {
-    return JSON.parse(await readFile(dumpFile, "utf8"));
+    let lastError;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+            return JSON.parse(await readFile(dumpFile, "utf8"));
+        }
+        catch (error) {
+            lastError = error;
+            await Bun.sleep(10);
+        }
+    }
+    throw lastError;
 }
 
 describe("ClaudeCodeAgent configDir/apiKey", () => {
