@@ -1,67 +1,56 @@
 import { describe, expect, test } from "bun:test";
 import { renderWorkflow } from "smithers-orchestrator/testing";
-import workflow from "../workflows/memory-recall-demo";
+import workflow, {
+	INHERITED_MEMORY,
+	INVESTIGATION_MEMORY,
+	RESPONSE_MEMORY,
+} from "../workflows/memory-recall-demo";
 
 const workflowPath = `${import.meta.dir}/../workflows/memory-recall-demo.tsx`;
-const triageOutput = {
-	classification: "billing",
-	likelyCause: "retry race",
-	knownFacts: ["duplicate invoice"],
-	nextChecks: ["inspect idempotency key"],
+
+const triage = {
+	classification: "billing retry",
+	likelyCause: "missing idempotency key",
+	knownFacts: ["duplicate invoices follow a retried request"],
+	nextChecks: ["compare retry headers"],
 };
-const investigationOutput = {
-	findings: ["same retry race as prior incidents"],
-	verifiedCause: "missing idempotency guard",
-	recommendedFix: "deduplicate the retry path",
+
+const investigation = {
+	findings: ["the retry path does not preserve the idempotency key"],
+	verifiedCause: "the billing retry creates a second invoice",
+	recommendedFix: "persist the key before retrying",
 };
 
 describe("memory recall demo", () => {
-	test("renders the inherited triage task with the complete provider config", async () => {
+	test("renders the inherited triage policy exactly", async () => {
 		const frame = await renderWorkflow(workflow, { workflowPath, input: {} });
-		expect(frame.tasks.map((task) => task.nodeId)).toEqual(["triage"]);
-		expect(frame.tasks[0]?.memoryConfig).toEqual({
-			bank: "support-triage-demo",
-			tags: ["source:run", "scope:main", "branch:main", "stream:release-demo"],
-			recall: "auto",
-			budget: "low",
-			maxTokens: 1200,
-			primers: ["support-triage-primer"],
-			retain: "on-complete",
-			tools: true,
-		});
+		const task = frame.tasks.find((candidate) => candidate.nodeId === "triage");
+
+		expect(task?.memoryConfig).toEqual(INHERITED_MEMORY);
 	});
 
-	test("resolves the fixed-query investigation override", async () => {
+	test("replaces the inherited policy for investigation", async () => {
 		const frame = await renderWorkflow(workflow, {
 			workflowPath,
 			input: {},
-			outputs: { triage: [{ nodeId: "triage", iteration: 0, ...triageOutput }] },
+			outputs: { triage: [{ nodeId: "triage", iteration: 0, ...triage }] },
 		});
 		const task = frame.tasks.find((candidate) => candidate.nodeId === "investigation");
-		expect(task).toBeDefined();
-		expect(task?.memoryConfig).toMatchObject({ recall: "duplicate invoice retry idempotency history", retain: "off", tools: true });
+
+		expect(task?.memoryConfig).toEqual(INVESTIGATION_MEMORY);
 	});
 
-	test("resolves the response task as a memory opt-out", async () => {
+	test("fully opts the customer response out of memory", async () => {
 		const frame = await renderWorkflow(workflow, {
 			workflowPath,
 			input: {},
 			outputs: {
-				triage: [{ nodeId: "triage", iteration: 0, ...triageOutput }],
-				investigation: [{ nodeId: "investigation", iteration: 0, ...investigationOutput }],
+				triage: [{ nodeId: "triage", iteration: 0, ...triage }],
+				investigation: [{ nodeId: "investigation", iteration: 0, ...investigation }],
 			},
 		});
 		const task = frame.tasks.find((candidate) => candidate.nodeId === "customer-response");
-		expect(task).toBeDefined();
-		expect(task?.memoryConfig).toEqual({
-			bank: "support-triage-demo",
-			tags: ["source:run", "scope:main", "branch:main", "stream:release-demo"],
-			recall: false,
-			budget: "mid",
-			maxTokens: 2048,
-			primers: [],
-			retain: "off",
-			tools: false,
-		});
+
+		expect(task?.memoryConfig).toEqual(RESPONSE_MEMORY);
 	});
 });
