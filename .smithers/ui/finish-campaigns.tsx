@@ -13,7 +13,7 @@ import {
   StatusPill,
   WorkflowUiShell,
 } from "smithers-orchestrator/gateway-ui";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+type GatewayRunNode = ReturnType<typeof useGatewayRunTree>["nodes"][number];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
