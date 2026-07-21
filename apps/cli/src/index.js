@@ -5344,6 +5344,26 @@ const cli = Cli.create({
         const overrideEntry = localPack ? join(localPack.packDir, "workflows", "oneshot.tsx") : undefined;
         const hasOverride = Boolean(overrideEntry && existsSync(overrideEntry));
         const effectiveRunId = process.env.SMITHERS_ONESHOT_RUN_ID ?? `oneshot-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+        if (c.options.interactive) {
+            if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
+                return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY).", exitCode: 4 });
+            }
+            if (hasOverride) {
+                return runTuiCommand({ ...c, options: { ...upOptions.parse({}), input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), interactive: true } }, fail, { preselect: { id: "oneshot", entryFile: overrideEntry } });
+            }
+            const selectedArgs = [];
+            if (c.options.goalFile) selectedArgs.push("--goal-file", resolve(process.cwd(), c.options.goalFile));
+            else selectedArgs.push(goal);
+            selectedArgs.push("--cwd", taskCwd, "--detach", "false", "--open", "false", "--review", review ? "on" : "off");
+            if (c.options.model) selectedArgs.push("--model", c.options.model);
+            if (c.options.agent) selectedArgs.push("--agent", c.options.agent);
+            return runTuiCommand({ ...c, options: { ...upOptions.parse({}), interactive: true } }, fail, {
+                preselect: { id: "oneshot", displayName: "Oneshot", description: goal, entryFile: ONESHOT_UI_ENTRY },
+                suppliedInput: {},
+                buildDetachedArgs: ({ indexPath }) => [indexPath, "oneshot", ...selectedArgs],
+                childEnv: ({ runId }) => ({ SMITHERS_ONESHOT_RUN_ID: runId }),
+            });
+        }
         if (c.options.detach) {
             await reapDetachedRunLogs({ cwd: taskCwd });
             const logFile = resolveDetachedRunLogFile(effectiveRunId, { cwd: taskCwd });
@@ -5364,7 +5384,7 @@ const cli = Cli.create({
             closeSync(fd);
             child.unref();
             if (c.options.open) {
-                const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", effectiveRunId], { cwd: taskCwd, detached: true, stdio: "ignore", env: process.env });
+                const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", effectiveRunId, "--workflow", "oneshot"], { cwd: taskCwd, detached: true, stdio: "ignore", env: process.env });
                 opener.unref();
             }
             return c.ok({ runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" }, {
@@ -5378,9 +5398,6 @@ const cli = Cli.create({
             });
         }
         if (hasOverride) {
-            if (c.options.interactive) {
-                return runTuiCommand({ ...c, options: { ...upOptions.parse({}), input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), interactive: true } }, fail, { preselect: { id: "oneshot", entryFile: overrideEntry } });
-            }
             return executeUpCommand(c, overrideEntry, { ...upOptions.parse({}), runId: effectiveRunId, input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), root: taskCwd }, fail);
         }
         try {
@@ -5395,7 +5412,10 @@ const cli = Cli.create({
                 onProgress: buildProgressReporter(), signal: setupAbortSignal().signal,
             }));
             process.exitCode = formatStatusExitCode(result.status);
-            if (c.options.open && result.runId) openInBrowser(`http://127.0.0.1:7331/workflows/oneshot?runId=${encodeURIComponent(result.runId)}`);
+            if (c.options.open && result.runId) {
+                const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", result.runId, "--workflow", "oneshot"], { cwd: taskCwd, detached: true, stdio: "ignore", env: process.env });
+                opener.unref();
+            }
             return c.ok(summarizeRunResult(result), { cta: result.runId ? [
                 { command: `ui ${result.runId}`, description: "Open the oneshot UI" },
                 { command: `chat ${result.runId}`, description: "Read the agent transcript" },

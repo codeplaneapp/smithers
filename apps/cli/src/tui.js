@@ -1837,7 +1837,12 @@ export function resolveInteractiveAnnotations(options) {
  *
  * @param {{ ok: (...args: any[]) => any; error?: (...args: any[]) => any; options?: Record<string, any> }} c
  * @param {(opts: { code: string; message: string; exitCode?: number; [key: string]: unknown }) => any} fail
- * @param {{ preselect?: { entryFile: string; id?: string; displayName?: string; description?: string } }} [opts]
+ * @param {{
+ *   preselect?: { entryFile: string; id?: string; displayName?: string; description?: string };
+ *   suppliedInput?: Record<string, unknown>;
+ *   buildDetachedArgs?: (input: { indexPath: string; workflow: { entryFile: string }; runId: string; inputs: Record<string, unknown>; options: Record<string, unknown> }) => string[];
+ *   childEnv?: (input: { runId: string; logFile: string }) => NodeJS.ProcessEnv;
+ * }} [opts]
  */
 export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok({ ran: false, reason: opts.code }), opts = {}) {
     intro(`${pc.bgCyan(pc.black(" smithers "))} ${pc.dim("interactive")}`);
@@ -1919,18 +1924,20 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     // Parse any user-supplied `--input`/`--prompt` BEFORE prompting so an invalid
     // payload fails fast (before making the user answer prompts), and so it can be
     // merged into — never dropped by — the prompted values below.
-    let suppliedInput;
-    try {
-        suppliedInput = normalizeSuppliedInput(c.options);
-    } catch (err) {
-        return fail({
-            code: "TUI_INVALID_INPUT",
-            message: err?.message ?? String(err),
-            exitCode: 4,
-        });
+    let suppliedInput = opts.suppliedInput;
+    if (!suppliedInput) {
+        try {
+            suppliedInput = normalizeSuppliedInput(c.options);
+        } catch (err) {
+            return fail({
+                code: "TUI_INVALID_INPUT",
+                message: err?.message ?? String(err),
+                exitCode: 4,
+            });
+        }
     }
 
-    const prompted = await askWorkflowInputs(workflow, suppliedInput);
+    const prompted = opts.suppliedInput ? {} : await askWorkflowInputs(workflow, suppliedInput);
     if (prompted === null) {
         cancel("Cancelled.");
         return c.ok({ ran: false, reason: "cancelled" });
@@ -1970,11 +1977,13 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             // rather than the raw c.options so the stdin-less child can't be handed
             // a `-` it would fail on.
             const childOptions = { ...c.options, annotations: resolvedAnnotations };
-            const upArgs = buildDetachedUpArgs(indexPath, workflow.entryFile, runId, inputs, childOptions);
+            const upArgs = opts.buildDetachedArgs
+                ? opts.buildDetachedArgs({ indexPath, workflow, runId, inputs, options: childOptions })
+                : buildDetachedUpArgs(indexPath, workflow.entryFile, runId, inputs, childOptions);
             child = spawn("bun", upArgs, {
                 detached: true,
                 stdio: ["ignore", fd, fd],
-                env: { ...process.env, [DETACHED_RUN_LOG_FILE_ENV]: logFile },
+                env: { ...process.env, ...opts.childEnv?.({ runId, logFile }), [DETACHED_RUN_LOG_FILE_ENV]: logFile },
             });
         } finally {
             closeSync(fd);
