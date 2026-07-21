@@ -189,7 +189,20 @@ export function runRpcCommandEffect(command, args, options) {
         /**
     * @param {string} reason
     */
+        let abortSent = false;
+        const sendAbort = () => {
+            if (command !== "omp" || abortSent || !child.stdin || child.stdin.destroyed)
+                return;
+            abortSent = true;
+            try {
+                child.stdin.write(`${JSON.stringify({ id: randomUUID(), type: "abort" })}\n`, () => { });
+            }
+            catch {
+                // The process may already have closed stdin; forced cleanup below remains authoritative.
+            }
+        };
         const kill = (reason) => {
+            sendAbort();
             terminateChild();
             handleError(makeAgentCliError(reason), "agent RPC command interrupted");
         };
@@ -273,8 +286,9 @@ export function runRpcCommandEffect(command, args, options) {
             if (event.usage) {
                 extractedUsage = event.usage;
             }
-            if (type === "turn_end" || type === "agent_end" || type === "prompt_result") {
-                const message = event.message;
+            const localPromptCompletion = type === "response" && event.command === "prompt" && event.success === true && event.data?.agentInvoked === false;
+            if (type === "turn_end" || type === "agent_end" || type === "prompt_result" || localPromptCompletion) {
+                const message = event.message ?? (Array.isArray(event.messages) ? event.messages.find((value) => value?.role === "assistant") : undefined);
                 if (message?.role === "assistant") {
                     finalMessage = event.message ?? finalMessage;
                     if (message.usage)
@@ -294,6 +308,13 @@ export function runRpcCommandEffect(command, args, options) {
                         return;
                     }
                     finalize(text, finalMessage ?? text);
+                    child.stdin?.end();
+                    terminateChild();
+                }
+                else if (type === "agent_end" || type === "prompt_result" || localPromptCompletion) {
+                    inactivity.clear();
+                    totalTimeout.clear();
+                    finalize(textDeltas, finalMessage ?? textDeltas);
                     child.stdin?.end();
                     terminateChild();
                 }

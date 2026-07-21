@@ -201,6 +201,23 @@ test("smithers init uses OpenCode for OpenCode-only credentials", () => {
     expectSingleProviderFallback(agentsSource, "opencode");
     expect(active).not.toContain("openrouter: createOpenRouterAgent()");
 });
+test("smithers init discovers OMP and emits a usable OmpAgent provider", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    const ompPath = join(binDir, "omp");
+    writeFileSync(ompPath, "#!/bin/sh\nprintf 'omp/17.0.5\\n'\n");
+    chmodSync(ompPath, 0o755);
+    const result = runSmithers(["init"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir),
+    });
+    expect(result.exitCode).toBe(0);
+    const source = repo.read(".smithers/agents.ts");
+    expect(source).toContain('OmpAgent as SmithersOmpAgent');
+    expect(source).toContain('omp: new SmithersOmpAgent({ model: "gpt-5.6-luna" })');
+    expect(uncommented(source)).toContain("providers.omp");
+});
 test("smithers init can use OpenClaw as the only workflow agent", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();

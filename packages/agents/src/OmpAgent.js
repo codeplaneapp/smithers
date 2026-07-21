@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { BaseCliAgent, asString, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName } from "./BaseCliAgent/index.js";
+import { BaseCliAgent, asString, extractPrompt, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 
 /** @typedef {import("./OmpAgentOptions.ts").OmpAgentOptions} OmpAgentOptions */
@@ -73,13 +73,21 @@ export class OmpAgent extends BaseCliAgent {
       const start = () => { if (!started) { started = true; events.push({ type: "started", engine: "omp", title: "OMP", resume: this.issuedSessionId }); } };
       start();
       if (payload.type === "session") this.issuedSessionId = asString(payload.id) ?? this.issuedSessionId;
+      if (payload.type === "session_info_update") this.issuedSessionId = asString(payload.sessionId) ?? asString(payload.sessionFile) ?? this.issuedSessionId;
+      if (payload.type === "response" && payload.command === "get_state") this.issuedSessionId = asString(payload.data?.sessionId) ?? this.issuedSessionId;
       const ae = payload.assistantMessageEvent;
       if (payload.type === "message_update" && ae?.type === "text_delta" && typeof ae.delta === "string") { answer += ae.delta; events.push({ type: "action", engine: "omp", phase: "updated", entryType: "message", action: { id: "omp-answer", kind: "turn", title: "assistant" }, message: ae.delta }); }
       if (payload.type === "tool_execution_start" || payload.type === "tool_execution_update" || payload.type === "tool_execution_end") {
         const name = asString(payload.toolName) ?? "tool"; const phase = payload.type === "tool_execution_start" ? "started" : payload.type === "tool_execution_end" ? "completed" : "updated";
         events.push({ type: "action", engine: "omp", phase, entryType: "thought", action: { id: asString(payload.toolCallId) ?? name, kind: toolKindFromName(name), title: name }, message: name, ok: payload.isError !== true });
       }
-      if (payload.type === "agent_end" || payload.type === "prompt_result") { completed = true; events.push({ type: "completed", engine: "omp", ok: true, answer: answer || extractTextFromJsonValue(payload), resume: this.issuedSessionId }); }
+      if (payload.type === "agent_end" || payload.type === "prompt_result") {
+        completed = true;
+        const messages = Array.isArray(payload.messages) ? payload.messages : [payload.message];
+        const assistant = messages.find((message) => message?.role === "assistant");
+        const failed = assistant?.stopReason === "error" || assistant?.stopReason === "aborted";
+        events.push({ type: "completed", engine: "omp", ok: !failed, answer: answer || undefined, error: failed ? (assistant.errorMessage || `Request ${assistant.stopReason}`) : undefined, resume: this.issuedSessionId });
+      }
       return events;
     };
     return { onStdoutLine: (line) => { try { return eventsFor(JSON.parse(line)); } catch { return []; } }, onExit: (result) => completed ? [] : [{ type: "completed", engine: "omp", ok: (result.exitCode ?? 0) === 0, answer: answer || undefined, error: (result.exitCode ?? 0) === 0 ? undefined : result.stderr?.trim() || `omp exited with code ${result.exitCode}`, resume: this.issuedSessionId }] };
