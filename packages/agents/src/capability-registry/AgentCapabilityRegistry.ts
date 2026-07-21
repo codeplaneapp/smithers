@@ -2,7 +2,7 @@ import type { AgentToolDescriptor } from "./AgentToolDescriptor";
 
 export type AgentCapabilityRegistry = {
   version: 1;
-  engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
+  engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
   runtimeTools: Record<string, AgentToolDescriptor>;
   mcp: {
     bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";

@@ -89,7 +89,8 @@ describe("detectAvailableAgents", () => {
         expect(ids).toContain("hermes");
         expect(ids).toContain("openclaw");
         expect(ids).toContain("pool");
-        expect(results.length).toBe(12);
+        expect(ids).toContain("omp");
+        expect(results.length).toBe(13);
 
         const availabilitySource = readFileSync(
             new URL("../src/AgentAvailability.ts", import.meta.url),

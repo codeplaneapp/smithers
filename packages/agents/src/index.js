@@ -72,6 +72,7 @@ export { ClaudeCodeAgent } from "./ClaudeCodeAgent.js";
 export { CodexAgent } from "./CodexAgent.js";
 export { GeminiAgent } from "./GeminiAgent.js";
 export { PiAgent } from "./PiAgent.js";
+export { OmpAgent, createOmpCapabilityRegistry } from "./OmpAgent.js";
 export { KimiAgent } from "./KimiAgent.js";
 export { ForgeAgent } from "./ForgeAgent.js";
 export { OpenCodeAgent } from "./OpenCodeAgent.js";

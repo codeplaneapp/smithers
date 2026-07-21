@@ -1,0 +1,22 @@
+---
+title: Oh My Pi (OMP)
+description: Run Smithers agents through the Oh My Pi coding harness.
+---
+
+Smithers exposes OMP v17 through `OmpAgent` from `@smithers-orchestrator/agents` (and `smithers-orchestrator`). It uses OMP's headless `--print` interface, JSON streaming, and RPC mode.
+
+```js
+import { OmpAgent } from "@smithers-orchestrator/agents";
+
+const agent = new OmpAgent({
+  provider: "openai",
+  model: "gpt-4.1",
+  mode: "json",
+  cwd: process.cwd(),
+  autoApprove: true,
+});
+```
+
+OMP supports `--model`, `--provider`, `--api-key`, system prompts, `--cwd`, `--continue`, valued `--resume`, session controls, tools, extensions, plural comma-separated skills, thinking, hooks, `--max-time`, and approval controls. `--resume` takes precedence over `continueSession`.
+
+In JSON print mode OMP emits a session header and agent-session events. RPC mode starts with `ready`, obtains session state with `get_state`, and completes on `agent_end`; it does not emit the print-mode session header. Smithers does not emit Pi-only flags such as `--session`, `--list-models`, singular `--skill`, `--prompt-template`, or `--theme`.

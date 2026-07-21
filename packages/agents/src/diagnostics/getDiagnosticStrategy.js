@@ -840,6 +840,9 @@ const strategies = {
  * @returns {AgentDiagnosticStrategy | null}
  */
 export function getDiagnosticStrategy(command, hints) {
+    if (command === "omp") {
+        return { agentId: "omp", command: "omp", checks: [checkCliInstalled("omp", "Oh My Pi"), ...(hints?.apiKey ? [{ id: "api_key", run: async () => ({ id: "api_key", status: "pass", message: "OMP API key supplied explicitly", durationMs: 0 }) }] : [])] };
+    }
     if (command === "pi") {
         return {
             agentId: "pi",
