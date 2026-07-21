@@ -62,6 +62,18 @@ describe("browser session registry", () => {
       expect(context.recentActions.at(-1).action.text).toMatchObject({ redacted: true });
       const picked = await registry.pick({ sessionId: session.sessionId, point: { x: 90, y: 10 } });
       expect(picked.locator).toHaveProperty("css");
+      // Viewer keyboard input arrives as one `press` per keystroke; with a
+      // sensitive field focused the raw key must never reach the journal,
+      // while non-printable keys (Enter) stay readable for debugging.
+      await registry.act({ sessionId: session.sessionId, actionId: "focus-password", action: { kind: "click", locator: { testId: "password" } } });
+      const pressed = await registry.act({ sessionId: session.sessionId, actionId: "press-masked", action: { kind: "press", key: "s" } });
+      expect(pressed.outcome).toMatchObject({ ok: true, redacted: true });
+      const entered = await registry.act({ sessionId: session.sessionId, actionId: "press-return", action: { kind: "press", key: "Enter" } });
+      expect(entered.outcome).toMatchObject({ ok: true });
+      expect(entered.outcome).not.toHaveProperty("redacted");
+      const pressJournal = (await registry.context({ sessionId: session.sessionId, include: ["recent-actions"] })).recentActions;
+      expect(pressJournal.find((entry: any) => entry.actionId === "press-masked").action.key).toMatchObject({ redacted: true, length: 1 });
+      expect(pressJournal.find((entry: any) => entry.actionId === "press-return").action.key).toBe("Enter");
       await registry.close(session.sessionId);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
