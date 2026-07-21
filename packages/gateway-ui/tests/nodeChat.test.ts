@@ -117,6 +117,21 @@ describe("runNodeStatus helpers", () => {
     expect(index.get("plan")).toBe("ok");
   });
 
+  test("nodeStatusIndex lets a recovered retry override its earlier failure", () => {
+    const index = nodeStatusIndex([
+      { id: "task", status: "failed", iteration: 0, attempt: 1 },
+      { id: "task", status: "ok", iteration: 0, attempt: 2 },
+      { id: "loop", status: "failed", iteration: 1 },
+      { id: "loop", status: "ok", iteration: 2 },
+      // A later-iteration failure must still surface as failed.
+      { id: "regressed", status: "ok", iteration: 1 },
+      { id: "regressed", status: "failed", iteration: 2 },
+    ]);
+    expect(index.get("task")).toBe("ok");
+    expect(index.get("loop")).toBe("ok");
+    expect(index.get("regressed")).toBe("failed");
+  });
+
   test("rollupNodeStatus reads a pipeline's aggregate state", () => {
     const index = nodeStatusIndex([
       { id: "a:implement", status: "ok" },
