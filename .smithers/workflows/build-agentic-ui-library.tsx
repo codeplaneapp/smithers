@@ -803,6 +803,25 @@ export default smithers((ctx) => {
   const readyForAudit = specSettled && lanesSettled && mergesSettled && integrationSettled
     && (integrationDone ? adoptionSettled && multiCiSettled : true);
 
+  const manifestLanes: z.infer<typeof manifestSchema>["lanes"] = [
+    ...ALL_LANES.map((lane) => ({
+      laneId: lane.id,
+      title: lane.title,
+      kind: (lane.id.startsWith("adopt-") ? "adoption" : "component") as "adoption" | "component" | "integration",
+      implementModel: "opencode/kimi-for-coding-k3 (fallback claude-sonnet-5)",
+      reviewSeats: lane.seats as string[],
+      components: lane.components,
+    })),
+    {
+      laneId: "integration",
+      title: integrationLane.title,
+      kind: "integration",
+      implementModel: "opencode/kimi-for-coding-k3 (fallback claude-sonnet-5)",
+      reviewSeats: ["fable", "sol"],
+      components: [],
+    },
+  ];
+
   return (
     <Workflow name="build-agentic-ui-library">
       <UI entry="../ui/build-agentic-ui-library.tsx" title="Agentic UI Library Program" />
@@ -811,21 +830,7 @@ export default smithers((ctx) => {
           {{
             programTitle: "Agentic UI component program",
             plannedComponents: plannedComponentTotal,
-            lanes: ALL_LANES.map((lane) => ({
-              laneId: lane.id,
-              title: lane.title,
-              kind: lane.id.startsWith("adopt-") ? "adoption" as const : "component" as const,
-              implementModel: "opencode/kimi-for-coding-k3 (fallback claude-sonnet-5)",
-              reviewSeats: lane.seats,
-              components: lane.components,
-            })).concat([{
-              laneId: "integration" as const,
-              title: integrationLane.title,
-              kind: "integration" as const,
-              implementModel: "opencode/kimi-for-coding-k3 (fallback claude-sonnet-5)",
-              reviewSeats: ["fable", "sol"],
-              components: [],
-            }]),
+            lanes: manifestLanes,
           }}
         </Task>
 
