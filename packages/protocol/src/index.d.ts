@@ -61,6 +61,12 @@ type DevToolsNode = {
             engine?: string;
             model?: string;
         };
+        /**
+         * The task's initial prompt, read from the latest attempt's persisted
+         * metadata (bounded to a few thousand chars — the full text stays in
+         * attempt metadata). Absent for queued nodes and tasks with no prompt.
+         */
+        prompt?: string;
         /** Attempt budget (declared retries + 1) when finite; absent for unbounded retries. */
         maxAttempts?: number;
     };

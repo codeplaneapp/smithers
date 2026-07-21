@@ -42,6 +42,7 @@ export const DEFAULT_DECLARATION_PACKAGES = [
   "packages/graph",
   "packages/integrations",
   "packages/microsandbox",
+  "packages/protocol",
   "packages/smithers",
   "packages/xstate",
 ];
