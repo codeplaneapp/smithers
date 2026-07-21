@@ -224,17 +224,45 @@ describe("ContextUsage", () => {
     expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
   });
 
-  test("controlled mode ignores hover entirely (no open, no onOpenChange)", async () => {
+  test("controlled mode emits hover open/close intents without self-toggling", async () => {
     const changes: boolean[] = [];
     await render(<ContextUsage open={false} usage={{}} onOpenChange={(open) => changes.push(open)} />);
+    const rootEl = container!.querySelector('[data-slot="context-usage"]')!;
     const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
     await act(async () => {
       trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-      trigger.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     });
     await act(async () => sleep(400));
-    expect(changes).toEqual([]);
+    expect(changes).toEqual([true]);
     expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+    await act(async () => {
+      rootEl.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+    });
+    expect(changes).toEqual([true, false]);
+    expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+  });
+
+  test("a controlled external close clears the hover-open state (no spurious close on mouseleave)", async () => {
+    const changes: boolean[] = [];
+    function Controlled({ open }: { open: boolean }) {
+      return <ContextUsage open={open} usage={{}} onOpenChange={(next) => changes.push(next)} />;
+    }
+    await render(<Controlled open={false} />);
+    const rootEl = container!.querySelector('[data-slot="context-usage"]')!;
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    await act(async () => sleep(400));
+    expect(changes).toEqual([true]);
+    await act(async () => root!.render(<Controlled open={true} />));
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+    await act(async () => root!.render(<Controlled open={false} />));
+    expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+    await act(async () => {
+      rootEl.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+    });
+    expect(changes).toEqual([true]);
   });
 
   test("click during a pending hover timer wins over hover close", async () => {
@@ -274,6 +302,75 @@ describe("ContextUsage", () => {
     expect(calls).toEqual(["enter", "focus", "blur"]);
     await act(async () => sleep(400));
     expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+  });
+
+  test("blur closes a focus-opened panel and clears the auto-open state", async () => {
+    const changes: boolean[] = [];
+    await render(<ContextUsage usage={{}} onOpenChange={(open) => changes.push(open)} />);
+    const rootEl = container!.querySelector('[data-slot="context-usage"]')!;
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    });
+    await act(async () => sleep(400));
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+    expect(changes).toEqual([true]);
+    await act(async () => {
+      trigger.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+    expect(changes).toEqual([true, false]);
+    await act(async () => {
+      rootEl.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      rootEl.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+    });
+    await act(async () => sleep(400));
+    expect(changes).toEqual([true, false]);
+  });
+
+  test("focus moving from the trigger into the content keeps the panel open", async () => {
+    await render(<ContextUsage usage={{}} />);
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    });
+    await act(async () => sleep(400));
+    const content = container!.querySelector('[data-slot="context-content"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: content }));
+    });
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+  });
+
+  test("focus leaving the content to outside the root closes the panel", async () => {
+    const changes: boolean[] = [];
+    await render(<ContextUsage usage={{}} onOpenChange={(open) => changes.push(open)} />);
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    });
+    await act(async () => sleep(400));
+    const content = container!.querySelector('[data-slot="context-content"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: content }));
+    });
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+    await act(async () => {
+      content.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: document.body }));
+    });
+    expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+    expect(changes).toEqual([true, false]);
+  });
+
+  test("a click-opened panel stays open across blur", async () => {
+    await render(<ContextUsage usage={{}} />);
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => trigger.click());
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+    await act(async () => {
+      trigger.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
   });
 
   test("root composes host onMouseLeave with hover-close behavior", async () => {

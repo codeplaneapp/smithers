@@ -99,6 +99,7 @@ export function ContextUsage({
   className,
   children,
   onMouseLeave,
+  onBlur,
   ...props
 }: ContextUsageProps) {
   useInjectUiCss();
@@ -121,6 +122,14 @@ export function ContextUsage({
 
   useEffect(() => cancelHoverTimer, []);
 
+  useEffect(() => {
+    if (isOpen) {
+      cancelHoverTimer();
+    } else {
+      hoverOpened.current = false;
+    }
+  }, [isOpen]);
+
   function setOpen(next: boolean) {
     if (!isControlled) setUncontrolledOpen(next);
     onOpenChange?.(next);
@@ -140,22 +149,29 @@ export function ContextUsage({
   }
 
   function scheduleHoverOpen() {
-    if (!openOnHover || isControlled || isOpen) return;
+    if (!openOnHover || isOpen) return;
     cancelHoverTimer();
     hoverTimer.current = setTimeout(() => {
       hoverTimer.current = null;
       hoverOpened.current = true;
-      setUncontrolledOpen(true);
+      if (!isControlled) setUncontrolledOpen(true);
       onOpenChange?.(true);
     }, HOVER_OPEN_DELAY_MS);
   }
 
   function cancelHoverOpen(closeIfHoverOpened: boolean) {
     cancelHoverTimer();
-    if (closeIfHoverOpened && hoverOpened.current && !isControlled) {
+    if (closeIfHoverOpened && hoverOpened.current) {
       hoverOpened.current = false;
-      setUncontrolledOpen(false);
+      if (!isControlled) setUncontrolledOpen(false);
       onOpenChange?.(false);
+    }
+  }
+
+  function onFocusOut(event: React.FocusEvent<HTMLDivElement>) {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node && event.currentTarget.contains(next))) {
+      cancelHoverOpen(true);
     }
   }
 
@@ -191,6 +207,10 @@ export function ContextUsage({
         }}
         {...props}
         onKeyDown={onKeyDown}
+        onBlur={(event) => {
+          onFocusOut(event);
+          onBlur?.(event);
+        }}
       >
         {children ?? (
           <>
@@ -220,7 +240,6 @@ export function ContextTrigger({
   onClick,
   onMouseEnter,
   onFocus,
-  onBlur,
   ...props
 }: ComponentProps<"button">) {
   useInjectUiCss();
@@ -254,10 +273,6 @@ export function ContextTrigger({
       onFocus={(event) => {
         ctx.scheduleHoverOpen();
         onFocus?.(event);
-      }}
-      onBlur={(event) => {
-        ctx.cancelHoverOpen(false);
-        onBlur?.(event);
       }}
       {...props}
     >
