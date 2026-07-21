@@ -17,6 +17,7 @@ export { useGatewayRunDiff } from "./useGatewayRunDiff.ts";
 export { useGatewayRpc } from "./useGatewayRpc.ts";
 export { useGatewayRun } from "./useGatewayRun.ts";
 export { useGatewayRunEvents } from "./useGatewayRunEvents.ts";
+export { useGatewayNodeEvents } from "./useGatewayNodeEvents.ts";
 export { useGatewayRuns } from "./useGatewayRuns.ts";
 export { useGatewayWorkflows } from "./useGatewayWorkflows.ts";
 export { useSmithersGateway } from "./useSmithersGateway.ts";

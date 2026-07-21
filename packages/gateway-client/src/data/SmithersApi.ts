@@ -56,7 +56,7 @@ export type SmithersApi = {
   cancelRun(params: CancelRunRequest): Promise<ApiMutationResult<CancelRunResponse>>;
   hijackRun(params: HijackRunRequest): Promise<ApiMutationResult<HijackRunResponse>>;
   rewindRun(params: RewindRunRequest): Promise<ApiMutationResult<Record<string, unknown>>>;
-  listRunEvents(params: { runId: string; afterSeq?: number; limit?: number }): Promise<GatewayRunEventRow[]>;
+  listRunEvents(params: { runId: string; nodeId?: string; afterSeq?: number; limit?: number }): Promise<GatewayRunEventRow[]>;
   getRunTree(params: { runId: string; frameNo?: number }): Promise<GatewayRunNode[]>;
   getNodeOutput(params: NodeRequest): Promise<Record<string, unknown>>;
   getNodeDiff(params: NodeRequest): Promise<Record<string, unknown>>;

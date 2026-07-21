@@ -113,6 +113,31 @@ const FLEET_TREE = {
 };
 
 describe("NodeChatStream (live SSE)", () => {
+  test("retains an early node transcript after unrelated events evict the run ring", async () => {
+    const unrelated = Array.from({ length: 1_025 }, (_, index) => ({
+      runId: "run-a",
+      seq: index + 2,
+      event: "NodeOutput",
+      payload: { nodeId: "other:node", text: `unrelated-${index}`, stream: "stdout" },
+    }));
+    const gw = boot({
+      runs: [{ runId: "run-a", workflowKey: "fleet", status: "running" }],
+      events: {
+        "run-a": [
+          { runId: "run-a", seq: 1, event: "NodeOutput", payload: { nodeId: "a:implement", text: "Early transcript.", stream: "stdout" } },
+          ...unrelated,
+        ],
+      },
+    });
+    const harness = await mount(
+      gw,
+      createElement(NodeChatStream, { runId: "run-a", nodeId: "a:implement" }),
+    );
+    await waitFor(harness, () => harness.container.textContent?.includes("Early transcript.") === true, "early transcript");
+    expect(harness.container.textContent).toContain("Early transcript.");
+    expect(harness.container.textContent).not.toContain("unrelated-1024");
+  }, 20_000);
+
   test("streams a node's chunks into chat bubbles and follows pushed events", async () => {
     const gw = boot({
       runs: [{ runId: "run-a", workflowKey: "fleet", status: "running" }],

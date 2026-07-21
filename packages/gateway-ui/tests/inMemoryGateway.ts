@@ -151,7 +151,14 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
       // GET /v1/api/events
       if (path === "/v1/api/events" && request.method === "GET") {
         const runId = url.searchParams.get("runId") ?? "";
-        return ok(state.events[runId] ?? []);
+        const nodeId = url.searchParams.get("nodeId");
+        const afterSeq = Number(url.searchParams.get("afterSeq") ?? "-1");
+        const limit = Number(url.searchParams.get("limit") ?? "100");
+        const rows = (state.events[runId] ?? [])
+          .filter((row) => !nodeId || (row.payload as { nodeId?: string } | undefined)?.nodeId === nodeId)
+          .filter((row) => Number(row.seq) > afterSeq)
+          .sort((left, right) => Number(left.seq) - Number(right.seq));
+        return ok(rows.slice(Math.max(0, rows.length - limit)));
       }
       // GET /v1/api/nodes/:runId/:nodeId/output
       const outMatch = path.match(/^\/v1\/api\/nodes\/([^/]+)\/([^/]+)\/output$/);

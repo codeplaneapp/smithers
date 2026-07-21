@@ -14,6 +14,7 @@ import {
   useGatewayActions,
   useGatewayApprovals,
   useGatewayNodeOutput,
+  useGatewayNodeEvents,
   useGatewayRun,
   useGatewayRunEvents,
 } from "smithers-orchestrator/gateway-react";
@@ -60,6 +61,9 @@ createGatewayReactRoot(<App />);
 
 - `useGatewayRuns`, `useGatewayRun`, `useGatewayRunEvents`, and
   `useGatewayRunTree` read live run state.
+- `useGatewayNodeEvents(runId, nodeId)` loads durable indexed node history and
+  polls incrementally by sequence; use it for complete node transcripts on
+  long runs. `useGatewayRunEvents` remains the bounded run-wide event feed.
 - `useGatewayApprovals`, `useGatewayActions`, and `useGatewayNodeOutput` cover
   the common operator controls for workflow UIs.
 - `useGatewayExtensionResource`, `useGatewayExtensionAction`, and

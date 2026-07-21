@@ -191,6 +191,18 @@ describe("createSmithersDataClient api requests", () => {
     client.close();
   });
 
+  test("listRunEvents forwards nodeId with its history cursor", async () => {
+    const { client, calls } = capturingClient({ ok: true, data: [] });
+    await client.api.listRunEvents({ runId: "run one", nodeId: "node:early", afterSeq: 41, limit: 25 });
+    const url = urlOf(calls[0]!);
+    expect(url.pathname).toBe("/v1/api/events");
+    expect(url.searchParams.get("runId")).toBe("run one");
+    expect(url.searchParams.get("nodeId")).toBe("node:early");
+    expect(url.searchParams.get("afterSeq")).toBe("41");
+    expect(url.searchParams.get("limit")).toBe("25");
+    client.close();
+  });
+
   test("getRunTree flattens a devtools snapshot into keyed run-node rows", async () => {
     const { client, calls } = capturingClient({
       ok: true,

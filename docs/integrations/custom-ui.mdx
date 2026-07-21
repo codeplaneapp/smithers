@@ -280,6 +280,11 @@ const title = out.data?.row?.title;   // ✅  the task's output field
 
 ### Pushed updates (with ring-buffer)
 
+For a complete transcript for one node, use `useGatewayNodeEvents(runId,
+nodeId)`. It reads the indexed node-filtered history endpoint and polls with an
+`afterSeq` cursor, so it is not affected by eviction from the bounded
+run-wide ring. `NodeChatStream` uses this durable node-scoped feed.
+
 `useGatewayRunEvents(runId, { afterSeq?, maxEvents? })` subscribes via `streamRunEventsResilient` and exposes:
 
 - `events`: a capped array of run-event frames. Defaults to 1000; setting `maxEvents` keeps the buffer bounded so a long-lived run does not balloon memory.

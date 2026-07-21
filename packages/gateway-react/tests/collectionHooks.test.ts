@@ -28,6 +28,7 @@ import {
   useGatewayCrons,
   useGatewayMemoryFacts,
   useGatewayMutation,
+  useGatewayNodeEvents,
   useGatewayNodeOutput,
   useGatewayPrompts,
   useGatewayRun,
@@ -205,6 +206,7 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
       captured.run = useGatewayRun(runId);
       captured.runDisabled = useGatewayRun(undefined);
       captured.runEvents = useGatewayRunEvents(runId, { maxEvents: 500 });
+      captured.nodeEvents = useGatewayNodeEvents(runId, "task1", { pollIntervalMs: 25 });
       captured.runEventsAfter = useGatewayRunEvents(runId, { afterSeq: 0 });
       captured.runEventsDisabled = useGatewayRunEvents(undefined);
       captured.runTree = useGatewayRunTree(runId);
@@ -245,6 +247,8 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     // Run events arrive from the real SSE-backed collection.
     await waitFor(() => captured.runEvents.events.length > 0, "run events");
     expect(captured.runEvents.streaming).toBe(true);
+    await waitFor(() => captured.nodeEvents.events.length > 0, "node-filtered events");
+    expect(captured.nodeEvents.events.every((event: any) => event.payload?.nodeId === "task1")).toBe(true);
     expect(captured.runEventsDisabled.streaming).toBe(false);
     expect(captured.runEventsDisabled.events).toEqual([]);
 

@@ -21,7 +21,7 @@ Component map:
 - Pure components: `StatusPill`, `NodeRow`.
 - Hook-driven: `RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`,
   `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`,
-  `NodeOutputCard`.
+  `NodeOutputCard`, `NodeChatStream`.
 - `SimpleWorkflowDashboard` — the batteries-included composition of the above.
 - `WorkflowGraph` — an n8n-style ReactFlow + dagre DAG canvas built from a
   `WorkflowSpecNode[]`; each node is a self-styled `SmithersTaskNode` card (kind
@@ -34,6 +34,10 @@ Component map:
 in card chrome with an ok/fail/pending status glyph and a render-prop body given
 the unwrapped row — the generic form of the `OutputCard`/`SummaryPanel` shape
 hand-rolled across `.smithers/ui/*` (ticket-fleet, issue-train, orchbench, …).
+
+`NodeChatStream` uses durable indexed node-filtered history with incremental
+sequence polling, so early-node transcripts remain complete after unrelated
+run events exceed the bounded run-wide event ring.
 It also folds in the `key={remountKey + ":" + nodeId}` remount convention.
 
 Gotchas: list-shaped RPCs (runs, approvals) are pull-only on the local gateway

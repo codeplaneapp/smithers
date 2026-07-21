@@ -2,8 +2,8 @@ import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import type { ToolCallState } from "@smithers-orchestrator/ui";
 
 /**
- * Pure transcript model behind {@link NodeChatStream}: fold a run's event
- * frames (`useGatewayRunEvents`) down to one node's live agent conversation.
+ * Pure transcript model behind {@link NodeChatStream}: fold node-scoped event
+ * frames down to one node's live agent conversation.
  *
  * The engine emits two chat-bearing event types per agent node:
  * - `NodeOutput` — raw stdout/stderr text chunks (`{ nodeId, text, stream }`)

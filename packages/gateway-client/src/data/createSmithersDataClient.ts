@@ -470,6 +470,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       listRunEvents: async (params) => {
         const search = new URLSearchParams();
         append(search, "runId", params.runId);
+        append(search, "nodeId", params.nodeId);
         append(search, "afterSeq", params.afterSeq);
         append(search, "limit", params.limit);
         const rows = await request<unknown[]>("GET", withSearch("/v1/api/events", search));

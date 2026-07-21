@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import type { CSSProperties, ReactNode } from "react";
-import { useGatewayRunEvents } from "@smithers-orchestrator/gateway-react";
+import { useGatewayNodeEvents } from "@smithers-orchestrator/gateway-react";
 import {
   ChatMessage,
   ChatTranscript,
@@ -17,7 +17,7 @@ import { theme } from "./theme";
 export type NodeChatStreamProps = {
   /** The run to stream from. */
   runId: string | undefined;
-  /** The agent node whose live chat to render. */
+  /** The agent node whose durable live chat history to render. */
   nodeId: string | undefined;
   /** Card heading. Defaults to the `nodeId`. */
   title?: ReactNode;
@@ -25,9 +25,7 @@ export type NodeChatStreamProps = {
   subtitle?: ReactNode;
   /**
    * Node status for the header pill. When omitted it is derived from the
-   * node's lifecycle frames in the event stream; pass the run-tree status
-   * (see `nodeStatusIndex`) on long runs where early frames may have been
-   * evicted from the bounded event ring.
+   * node's lifecycle frames in its indexed event history.
    */
   status?: string;
   /** Scrolling transcript height (default 320). Pass "auto" to grow freely. */
@@ -37,11 +35,11 @@ export type NodeChatStreamProps = {
   className?: string;
   style?: CSSProperties;
   /**
-   * Test seam: the run-events hook to read from. Defaults to
-   * {@link useGatewayRunEvents}.
+   * Test seam: the node-events hook to read from. Defaults to
+   * {@link useGatewayNodeEvents}.
    * @internal
    */
-  useRunEvents?: typeof useGatewayRunEvents;
+  useNodeEvents?: typeof useGatewayNodeEvents;
 };
 
 function ChatItem({ item, streaming }: { item: NodeChatItem; streaming: boolean }) {
@@ -83,8 +81,8 @@ function ChatItem({ item, streaming }: { item: NodeChatItem; streaming: boolean 
 
 /**
  * Live agent chat for one node — the "what is this agent actually doing right
- * now" card every run dashboard needs next to its status pills. Binds to the
- * run event stream via {@link useGatewayRunEvents}, folds the node's
+ * now" card every run dashboard needs next to its status pills. Loads durable
+ * node-filtered history and polls its sequence cursor, then folds the node's
  * stdout/stderr chunks, tool calls, reasoning, and file-change actions into a
  * chat transcript (see `buildNodeChatTranscript`), and follows the tail while
  * the node is running.
@@ -111,9 +109,9 @@ export function NodeChatStream({
   maxItems,
   className,
   style,
-  useRunEvents = useGatewayRunEvents,
+  useNodeEvents = useGatewayNodeEvents,
 }: NodeChatStreamProps) {
-  const { events, error, loading } = useRunEvents(runId);
+  const { events, error, loading } = useNodeEvents(runId, nodeId);
   const transcript = nodeId
     ? buildNodeChatTranscript(events, nodeId, { maxItems })
     : { items: [], status: undefined, engine: undefined, streaming: false };
