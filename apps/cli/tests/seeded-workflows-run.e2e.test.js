@@ -343,6 +343,10 @@ function isValidSmokeOutcome(id, status, exitCode) {
 
 for (const id of SEEDED_WORKFLOW_IDS) {
   if (id === "create-workflow") continue;
+  // create-ui requires a concurrently running real Gateway and verifies both
+  // workflow UI routes. Its author, loop, and compliance behavior has dedicated
+  // coverage in seeded-workflows-a-foundations and create-ui-compliance tests.
+  if (id === "create-ui") continue;
   // eval-suite-run requires a pre-saved suite (a real `_smithers_eval_suites`
   // row) to do anything meaningful — this generic single-command fake-agent
   // smoke harness has no way to seed one. It gets its own dedicated e2e

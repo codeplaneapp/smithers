@@ -44,12 +44,12 @@ test("canonical skill carries the current frontmatter, not the retired orchestra
 
 // The exact failure this skill guards against: an agent asked to "create a
 // Smithers workflow" prints how-to prose (or stops in plan mode) instead of
-// invoking its tools. The "Do it — don't describe it" section must survive doc
+// invoking its tools. The "Do it - don't describe it" section must survive doc
 // edits, so assert its load-bearing instructions are present.
 test("skill contains the execute-don't-describe imperative", () => {
     const skill = readRepoFile("skills/smithers/SKILL.md");
 
-    expect(skill).toContain("Do it — don't describe it");
+    expect(skill).toContain("Do it - don't describe it");
     expect(skill).toContain("Describing the work is not the work.");
     // Names the concrete create-a-workflow action and forbids the plan-mode trap.
     expect(skill).toMatch(/\.smithers\/workflows\/<id>\.tsx/);
