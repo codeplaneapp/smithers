@@ -2,6 +2,10 @@ import { createRequire } from "node:module";
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 import { randomUUID } from "node:crypto";
+import { createServer as createHttpServer } from "node:http";
+import { request as requestHttp } from "node:http";
+import { request as requestHttps } from "node:https";
+import { connect as connectTcp } from "node:net";
 
 const requireFromServer = createRequire(new URL("../package.json", import.meta.url));
 const DEFAULTS = { idleTtlMs: 10 * 60_000, hardLifetimeMs: 2 * 60 * 60_000, maxConcurrent: 2, artifactRetentionMs: 7 * 24 * 60 * 60_000, screencastFps: 8 };
@@ -29,23 +33,64 @@ async function assertDestination(raw, policy) {
   const host = parsed.hostname.toLowerCase();
   if (policy.devPort !== undefined) {
     if (parsed.protocol !== "http:" || host !== "127.0.0.1" || (parsed.port || "80") !== String(policy.devPort)) throw new BrowserError("SSRF_BLOCKED", "The dev-server session may only use its declared loopback port.");
-    return parsed.toString();
+    return { url: parsed.toString(), host, address: host, port: Number(parsed.port || 80) };
   }
   if (host === "localhost" || host === "metadata.google.internal" || privateAddress(host)) throw new BrowserError("SSRF_BLOCKED", "Private and loopback destinations are not allowed.");
   let addresses;
   try { addresses = isIP(host) ? [host] : (await (policy.resolveHost || lookup)(host, { all: true })).map((entry) => typeof entry === "string" ? entry : entry.address); } catch { throw new BrowserError("SSRF_BLOCKED", "Destination DNS resolution failed."); }
-  if (addresses.some(privateAddress)) throw new BrowserError("SSRF_BLOCKED", "Destination resolves to a private address.");
-  return parsed.toString();
+  if (!addresses.length || addresses.some(privateAddress)) throw new BrowserError("SSRF_BLOCKED", "Destination resolves to a private address.");
+  return { url: parsed.toString(), host, address: addresses[0], port: Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80)) };
+}
+
+function createDestinationProxy(policy, resolveHost, initial, connect = connectTcp, upstreamRequest = null) {
+  const pinned = new Map();
+  const keyFor = (host, port) => `${host}:${port}`;
+  if (initial) pinned.set(keyFor(initial.host, initial.port), initial);
+  const resolve = async (raw) => {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("unsupported destination");
+    const host = parsed.hostname.toLowerCase();
+    const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+    const key = keyFor(host, port);
+    if (pinned.has(key)) return { parsed, ...pinned.get(key) };
+    const destination = await assertDestination(parsed.toString(), { ...policy, resolveHost });
+    pinned.set(key, destination);
+    return { parsed, ...destination };
+  };
+  const server = createHttpServer(async (request, response) => {
+    try {
+      if (request.headers.upgrade) throw new Error("unsupported upgrade");
+      const destination = await resolve(request.url);
+      const headers = { ...request.headers, host: destination.parsed.host };
+      delete headers["proxy-connection"];
+      const requestUpstream = upstreamRequest || (destination.parsed.protocol === "https:" ? requestHttps : requestHttp);
+      const upstream = requestUpstream({ hostname: destination.address, port: destination.port, method: request.method, path: `${destination.parsed.pathname}${destination.parsed.search}`, headers, servername: destination.host }, (result) => {
+        response.writeHead(result.statusCode || 502, result.headers);
+        result.pipe(response);
+      });
+      upstream.on("error", () => response.destroy());
+      request.pipe(upstream);
+    } catch { response.writeHead(403).end(); }
+  });
+  server.on("connect", async (request, client, head) => {
+    try {
+      const destination = await resolve(`http://${request.url}`);
+      const upstream = connect(destination.port, destination.address);
+      upstream.once("connect", () => { client.write("HTTP/1.1 200 Connection Established\r\n\r\n"); if (head.length) upstream.write(head); upstream.pipe(client); client.pipe(upstream); });
+      upstream.on("error", () => client.destroy());
+    } catch { client.end("HTTP/1.1 403 Forbidden\r\n\r\n"); }
+  });
+  return { server, pinned, pin: (destination) => pinned.set(keyFor(destination.host, destination.port), destination), listen: () => new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", () => resolve(server.address().port)); }), close: () => new Promise((resolve) => server.close(() => resolve())) };
 }
 
 async function sourceUrl(source, resolveHost) {
   if (source?.kind === "dev-server") {
     if (!Number.isInteger(source.port) || source.port < 1 || source.port > 65535 || typeof source.path !== "undefined" && (!source.path.startsWith("/") || source.path.includes("@"))) throw new BrowserError("INVALID_REQUEST", "Invalid dev-server source.");
     const path = source.path || "/";
-    return { url: await assertDestination(`http://127.0.0.1:${source.port}${path}`, { devPort: source.port, resolveHost }), policy: { devPort: source.port } };
+    return { destination: await assertDestination(`http://127.0.0.1:${source.port}${path}`, { devPort: source.port, resolveHost }), policy: { devPort: source.port } };
   }
   if (source?.kind !== "url") throw new BrowserError("INVALID_REQUEST", "source must be a url or dev-server.");
-  return { url: await assertDestination(source.url, { resolveHost }), policy: {} };
+  return { destination: await assertDestination(source.url, { resolveHost }), policy: {} };
 }
 
 function redact(text) { return { redacted: true, length: text.length }; }
@@ -104,7 +149,7 @@ export function createBrowserSessionRegistry(options = {}) {
   const pageInfo = async (session) => session.page ? { url: sanitize(session, session.page.url()), title: sanitize(session, await session.page.title().catch(() => "")), canGoBack: Boolean(await session.page.evaluate(() => history.length > 1).catch(() => false)), canGoForward: false } : null;
   const snapshot = async (session) => ({ sessionId: session.sessionId, source: sanitize(session, sourceCopy(session.source)), status: session.status, revision: session.revision, page: await pageInfo(session), viewport: session.viewport, control: { owner: session.owner } });
   const armTimer = (session) => { clearTimeout(session.timer); const remaining = Math.max(1, Math.min(limits.idleTtlMs - (Date.now() - session.lastUsed), limits.hardLifetimeMs - (Date.now() - session.createdAt))); session.timer = setTimeout(() => void reap(), remaining); session.timer.unref?.(); };
-  const close = async (sessionId) => { const session = sessions.get(sessionId); if (!session) return { closed: true }; sessions.delete(sessionId); session.status = "closed"; clearTimeout(session.timer); await stopScreencast(session); await session.context.close().catch(() => {}); await session.browser.close().catch(() => {}); return { closed: true, sessionId }; };
+  const close = async (sessionId) => { const session = sessions.get(sessionId); if (!session) return { closed: true }; sessions.delete(sessionId); session.status = "closed"; clearTimeout(session.timer); await stopScreencast(session); await session.context.close().catch(() => {}); await session.browser.close().catch(() => {}); await session.proxy?.close().catch(() => {}); return { closed: true, sessionId }; };
   const reap = async () => { const now = Date.now(); for (const [ref, value] of artifacts) if (value.expiresAt <= now) artifacts.delete(ref); for (const session of [...sessions.values()]) { if (now - session.lastUsed >= limits.idleTtlMs || now - session.createdAt >= limits.hardLifetimeMs) await close(session.sessionId); else armTimer(session); } };
   const settle = async (session, actionId, actor, action, result) => {
     session.revision += 1; session.lastUsed = Date.now();
@@ -125,19 +170,23 @@ export function createBrowserSessionRegistry(options = {}) {
     await reap(); if (sessions.size + creating >= limits.maxConcurrent) throw new BrowserError("QUOTA_EXCEEDED", "Browser session quota reached.");
     creating += 1;
     if (!Number.isInteger(viewport.width) || !Number.isInteger(viewport.height) || viewport.width < 1 || viewport.height < 1 || viewport.width > 3840 || viewport.height > 2160) throw new BrowserError("INVALID_REQUEST", "Viewport is outside the supported bounds.");
-    let destination; let browser; let context;
-    try { destination = await sourceUrl(source, options.resolveHost); browser = await getPlaywright().chromium.launch({ headless: true }); context = await browser.newContext({ viewport, acceptDownloads: false }); } finally { creating -= 1; }
-    const session = { sessionId: randomUUID(), source, status: "starting", revision: 0, viewport, owner: null, context, browser, page: null, createdAt: Date.now(), lastUsed: Date.now(), ledger: new Map(), journal: [], artifacts: new Map(), sensitiveActions: new Set(), sensitiveValues: new Set(), queue: Promise.resolve(), policy: destination.policy, console: [], network: [], timer: null, cdp: null, frameSubscribers: 0, lastFrameAt: 0, screencastStarting: false, screencastTransition: Promise.resolve() };
+    let destination; let browser; let context; let proxy;
+    try {
+      destination = await sourceUrl(source, options.resolveHost);
+      proxy = createDestinationProxy(destination.policy, options.resolveHost, destination.destination, options.connect, options.request);
+      const proxyPort = await proxy.listen();
+      browser = await getPlaywright().chromium.launch({ headless: true, proxy: { server: `http://127.0.0.1:${proxyPort}`, bypass: "" } });
+      context = await browser.newContext({ viewport, acceptDownloads: false });
+    } catch (error) { await context?.close().catch(() => {}); await browser?.close().catch(() => {}); await proxy?.close().catch(() => {}); throw error; } finally { creating -= 1; }
+    const session = { sessionId: randomUUID(), source, status: "starting", revision: 0, viewport, owner: null, context, browser, page: null, proxy, createdAt: Date.now(), lastUsed: Date.now(), ledger: new Map(), journal: [], artifacts: new Map(), sensitiveActions: new Set(), sensitiveValues: new Set(), queue: Promise.resolve(), policy: destination.policy, console: [], network: [], timer: null, cdp: null, frameSubscribers: 0, lastFrameAt: 0, screencastStarting: false, screencastTransition: Promise.resolve() };
     sessions.set(session.sessionId, session);
-    const validateRequest = async (route) => { try { await assertDestination(route.request().url(), session.policy); await route.continue(); } catch { await route.abort(); } };
-    await context.route("**/*", validateRequest);
     session.page = await context.newPage();
     session.page.on?.("dialog", (dialog) => { session.dialog = dialog; });
     session.page.on?.("download", (download) => void download.cancel().catch(() => {}));
     session.page.on?.("console", (message) => { session.console.push({ type: trim(message.type(), 80), text: sanitize(session, message.text(), 1000) }); if (session.console.length > MAX.console) session.console.shift(); });
     session.page.on?.("request", (request) => { session.network.push({ method: trim(request.method(), 80), url: sanitize(session, request.url(), 2000) }); if (session.network.length > MAX.network) session.network.shift(); });
     context.on?.("page", (popup) => { if (popup !== session.page) void popup.close().catch(() => {}); });
-    try { await session.page.goto(destination.url, { waitUntil: "domcontentloaded" }); session.status = "ready"; } catch { session.status = "failed"; }
+    try { await session.page.goto(destination.destination.url, { waitUntil: "domcontentloaded" }); session.status = "ready"; } catch { session.status = "failed"; }
     armTimer(session);
     return snapshot(session);
   };
@@ -147,7 +196,7 @@ export function createBrowserSessionRegistry(options = {}) {
     const action = params.action; let result;
     if (action.kind === "type" && sensitiveField(`${action.locator?.role || ""} ${action.locator?.name || ""} ${action.locator?.testId || ""} ${action.locator?.css || ""}`)) session.sensitiveActions.add(params.actionId);
     try {
-      if (action.kind === "navigate") await session.page.goto(await assertDestination(action.url, session.policy), { waitUntil: "domcontentloaded" });
+      if (action.kind === "navigate") { const destination = await assertDestination(action.url, { ...session.policy, resolveHost: options.resolveHost }); session.proxy.pin(destination); await session.page.goto(destination.url, { waitUntil: "domcontentloaded" }); }
       else if (action.kind === "back") await session.page.goBack(); else if (action.kind === "forward") await session.page.goForward(); else if (action.kind === "reload") await session.page.reload(); else if (action.kind === "stop") await session.page.evaluate(() => window.stop());
       else if (action.kind === "click") { if (!action.locator && !action.point) throw new BrowserError("INVALID_REQUEST", "click requires locator or point."); const beforeUrl = session.page.url(); if (action.locator) await resolveLocator(session.page, action.locator).click({ button: action.button, modifiers: action.modifiers }); else await session.page.mouse.click(action.point.x, action.point.y, { button: action.button, modifiers: action.modifiers }); const afterUrl = session.page.url(); result = afterUrl !== beforeUrl ? { ok: true, redirectedTo: trim(afterUrl, 2_000) } : { ok: true }; }
       else if (action.kind === "type") { const locator = resolveLocator(session.page, action.locator); let info = ""; try { info = await locator.evaluate((element) => `${element.getAttribute("type") || ""} ${element.getAttribute("name") || ""} ${element.getAttribute("autocomplete") || ""}`); } catch {} if (sensitiveField(info) || sensitiveField(`${action.locator?.role || ""} ${action.locator?.name || ""} ${action.locator?.testId || ""} ${action.locator?.css || ""}`)) session.sensitiveActions.add(params.actionId); if (session.sensitiveActions.has(params.actionId)) session.sensitiveValues.add(action.text); if (action.replace === false) await locator.pressSequentially(action.text); else await locator.fill(action.text); result = { ok: true, ...(session.sensitiveActions.has(params.actionId) ? { redacted: true, length: action.text.length } : {}) }; }

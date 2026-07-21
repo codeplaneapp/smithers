@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { createBrowserSessionRegistry } from "../src/browser.js";
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
+import { request as requestHttp } from "node:http";
+import { connect as connectTcp } from "node:net";
 import { WebSocket } from "ws";
 import { Gateway } from "../src/gateway.js";
 
@@ -21,6 +23,78 @@ describe("browser session registry", () => {
     await expect(registry.create({ source: { kind: "url", url: "http://127.0.0.1:1" } })).rejects.toMatchObject({ code: "SSRF_BLOCKED" });
     await registry.create({ source: { kind: "dev-server", port: 3000, path: "/" } });
     await expect(registry.create({ source: { kind: "url", url: "https://example.com" } })).rejects.toMatchObject({ code: "QUOTA_EXCEEDED" });
+  });
+  test("pins DNS across a real proxied redirect and subresource fetch", async () => {
+    let publicRequests = 0;
+    let privateRequests = 0;
+    const fixture = createServer((request, response) => {
+      publicRequests += 1;
+      if (request.url === "/") return void response.writeHead(302, { location: "/page" }).end();
+      response.end(request.url === "/page" ? "<img src='/private'>page" : "fixture");
+    });
+    const privateFixture = createServer(() => { privateRequests += 1; });
+    await Promise.all([
+      new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve)),
+      new Promise<void>((resolve) => privateFixture.listen(0, "127.0.0.1", resolve)),
+    ]);
+    const fixturePort = (fixture.address() as { port: number }).port;
+    const privatePort = (privateFixture.address() as { port: number }).port;
+    const lookups: string[] = [];
+    let proxyServer: string;
+    const connectedAddresses: string[] = [];
+    const resolveHost = async (host: string) => {
+      lookups.push(host);
+      return lookups.length === 1 ? [{ address: "93.184.216.34", family: 4 }] : [{ address: "127.0.0.1", family: 4 }];
+    };
+    const fetchThroughProxy = async (url: string): Promise<{ status: number; headers: Headers; body: string }> => {
+      const proxy = new URL(proxyServer);
+      const response = await new Promise<{ status: number; headers: Headers; body: string }>((resolve, reject) => {
+        const request = requestHttp({ hostname: proxy.hostname, port: Number(proxy.port), path: url, headers: { host: new URL(url).host } }, (result) => {
+          const chunks: Buffer[] = [];
+          result.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          result.on("end", () => resolve({ status: result.statusCode || 0, headers: new Headers(result.headers as Record<string, string>), body: Buffer.concat(chunks).toString() }));
+        });
+        request.on("error", reject);
+        request.end();
+      });
+      if (response.status >= 300 && response.status < 400) return fetchThroughProxy(new URL(response.headers.get("location")!, url).toString());
+      const body = response.body;
+      const resource = body.match(/src='([^']+)'/)?.[1];
+      if (resource) await fetchThroughProxy(new URL(resource, url).toString());
+      return { ...response, body };
+    };
+    const rebindingPlaywright = { chromium: { launch: async (options: any) => {
+      proxyServer = options.proxy.server;
+      return { newContext: async () => ({ newPage: async () => ({ ...page, goto: (url: string) => fetchThroughProxy(url) }), close: async () => {} }), close: async () => {} };
+    } } };
+    const connect = (port: number, address: string) => {
+      connectedAddresses.push(address);
+      return connectTcp(port === 80 ? (address === "93.184.216.34" ? fixturePort : privatePort) : privatePort, "127.0.0.1");
+    };
+    const request = (options: any, callback: any) => {
+      connectedAddresses.push(options.hostname);
+      return requestHttp({ ...options, hostname: "127.0.0.1", port: options.hostname === "93.184.216.34" ? fixturePort : privatePort }, callback);
+    };
+    const registry = createBrowserSessionRegistry({ playwright: rebindingPlaywright, resolveHost, connect, request });
+    try {
+      const session = await registry.create({ source: { kind: "url", url: "http://rebound.example/" } });
+      expect(session.status).toBe("ready");
+      expect(publicRequests).toBe(3);
+      expect(privateRequests).toBe(0);
+      expect(connectedAddresses).toEqual(["93.184.216.34", "93.184.216.34", "93.184.216.34"]);
+      expect(lookups).toEqual(["rebound.example"]);
+      await registry.close(session.sessionId);
+    } finally {
+      await registry.shutdown();
+      await Promise.all([
+        new Promise<void>((resolve) => fixture.close(() => resolve())),
+        new Promise<void>((resolve) => privateFixture.close(() => resolve())),
+      ]);
+    }
+  });
+  test("rejects a mixed public and private DNS answer", async () => {
+    const registry = createBrowserSessionRegistry({ playwright, resolveHost: async () => [{ address: "93.184.216.34", family: 4 }, { address: "127.0.0.1", family: 4 }] });
+    await expect(registry.create({ source: { kind: "url", url: "http://mixed.example/" } })).rejects.toMatchObject({ code: "SSRF_BLOCKED" });
   });
   test("coalesces a redirecting click into one journal entry and reaps idle sessions", async () => {
     const server = createServer((request, response) => {
