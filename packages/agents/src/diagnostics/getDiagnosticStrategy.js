@@ -740,6 +740,11 @@ function piProviderChecks(hints) {
  * @returns {Record<string, string> | undefined}
  */
 export function diagnosticApiKeyEnv(command, hints) {
+    // OMP receives explicit credentials through its verified --api-key CLI flag;
+    // do not invent an OMP_API_KEY environment contract for diagnostics.
+    if (command === "omp") {
+        return undefined;
+    }
     if (command !== "pi" || !hints?.apiKey) {
         return undefined;
     }
@@ -841,7 +846,7 @@ const strategies = {
  */
 export function getDiagnosticStrategy(command, hints) {
     if (command === "omp") {
-        return { agentId: "omp", command: "omp", checks: [checkCliInstalled("omp", "Oh My Pi"), ...(hints?.apiKey ? [{ id: "api_key", run: async () => ({ id: "api_key", status: "pass", message: "OMP API key supplied explicitly", durationMs: 0 }) }] : [])] };
+        return { agentId: "omp", command: "omp", checks: [checkCliInstalled("omp", "Oh My Pi"), ...(hints?.apiKey ? [{ id: "api_key_valid", run: async () => ({ id: "api_key_valid", status: "pass", message: "OMP API key supplied explicitly via --api-key", durationMs: 0 }) }] : [])] };
     }
     if (command === "pi") {
         return {

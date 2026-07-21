@@ -83,6 +83,26 @@ review, or repeated failure. Other adapters stay later in automatic sequential
 fallback chains, while an explicitly constructed provider agent remains a
 deliberate choice. See [SOTA role defaults](/reference/sota-models#role-defaults).
 
+## Oh My Pi (OMP) CLI Agent
+
+`OmpAgent` runs the installed OMP v17.0.5 harness in headless text, JSON print, or RPC mode.
+
+```ts
+import { OmpAgent } from "smithers-orchestrator";
+
+const omp = new OmpAgent({
+  provider: "openai",
+  model: "gpt-5.2",
+  mode: "json",
+  cwd: process.cwd(),
+  autoApprove: true,
+});
+```
+
+Smithers emits only flags verified by `omp --help`: `--print`, `--mode`, model/provider/API-key and system-prompt options, `--cwd`, session controls, tools, extensions, plural comma-separated `--skills`, thinking (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `auto`), hooks, `--max-time`, and approval controls. A valued `--resume` takes precedence over `continueSession`; `--continue` selects OMP's recent session. In RPC mode, prompts are sent over stdin and file arguments are rejected.
+
+JSON print mode emits a session header followed by agent-session events such as text deltas, tool execution lifecycle events, and `agent_end`. RPC mode begins with `ready`, negotiates `get_state`, then sends a correlated `prompt`; it has no print-mode session header and completes on `agent_end` or documented local-only prompt completion. Pi-only flags such as `--session`, `--list-models`, singular `--skill`, `--prompt-template`, and `--theme` are not emitted.
+
 ## Codex CLI Agent
 
 `CodexAgent` is the Smithers wrapper for OpenAI's `codex` CLI. It runs `codex exec` in non-interactive mode, sends the task prompt over stdin, forces `--json` so Smithers can stream structured progress, and captures the final assistant message via `--output-last-message`.

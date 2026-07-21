@@ -18,7 +18,7 @@ export type OmpAgentOptions = BaseCliAgentOptions & {
   noExtensions?: boolean;
   skills?: string[];
   noSkills?: boolean;
-  thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "auto";
   hideThinking?: boolean;
   printThoughts?: boolean;
   hooks?: string[];

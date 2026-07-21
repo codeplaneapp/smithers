@@ -240,6 +240,13 @@ describe("pi google checks", () => {
 });
 
 describe("amp + apiKey env mapping + provider resolution", () => {
+  test("OMP diagnostics accept an explicit key without inventing OMP_API_KEY", async () => {
+    const strategy = getDiagnosticStrategy("omp", { provider: "openai", apiKey: "secret" });
+    expect(strategy.agentId).toBe("omp");
+    expect(check(strategy, "api_key_valid")).toBeTruthy();
+    expect((await check(strategy, "api_key_valid").run({ env: {}, cwd: "/tmp" })).status).toBe("pass");
+    expect(diagnosticApiKeyEnv("omp", { provider: "openai", apiKey: "secret" })).toBeUndefined();
+  });
   test("amp api-key and rate-limit checks both skip", async () => {
     const strategy = getDiagnosticStrategy("amp");
     expect((await check(strategy, "api_key_valid").run({ env: {}, cwd: "/tmp" })).status).toBe("skip");
