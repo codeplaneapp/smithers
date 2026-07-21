@@ -829,9 +829,19 @@ describe("RunEventLog", () => {
       createElement(RunEventLog, { runId: "run-a", maxEvents: 100, follow: true }),
     );
     await harness.flush(60);
+    // Structured rows (a kind badge + zero-padded seq), not raw JSON lines. The
+    // hook filters the run-level `run.heartbeat` frame, so 4 of the 5 remain.
+    const rows = harness.container.querySelectorAll('[data-slot="event-row"]');
+    expect(rows.length).toBe(4);
     expect(harness.container.textContent).toContain("run.started");
     expect(harness.container.textContent).toContain("0000");
-    expect(harness.container.textContent).toContain("a string payload");
+    // The full payload is collapsed; expand the first row's JSON toggle to see it.
+    const toggle = rows[0]!.querySelector(".gw-event-row-toggle") as HTMLButtonElement;
+    click(toggle);
+    await harness.flush();
+    expect(rows[0]!.querySelector('[data-slot="event-json"]')?.textContent).toContain(
+      "a string payload",
+    );
   });
 
   test("renders the select-a-run prompt with no runId", async () => {
@@ -841,31 +851,90 @@ describe("RunEventLog", () => {
     expect(harness.container.textContent).toContain("Select a run to stream");
   });
 
-  test("renders task heartbeats and active status rows as shimmering markers", async () => {
+  test("coalesces consecutive per-node heartbeats and toggles to show them all", async () => {
     const gw = boot({
       events: {
         "run-a": [
-          {
-            runId: "run-a",
-            seq: 1,
-            event: "TaskHeartbeat",
-            payload: { type: "progress", nodeId: "agent" },
-          },
-          { runId: "run-a", seq: 2, event: "node.status", payload: { state: "running" } },
-          { runId: "run-a", seq: 3, event: "node.output", payload: { text: "plain" } },
+          { runId: "run-a", seq: 1, event: "NodeStarted", payload: { type: "NodeStarted", nodeId: "build" } },
+          { runId: "run-a", seq: 2, event: "TaskHeartbeat", payload: { type: "TaskHeartbeat", nodeId: "build" } },
+          { runId: "run-a", seq: 3, event: "TaskHeartbeat", payload: { type: "TaskHeartbeat", nodeId: "build" } },
+          { runId: "run-a", seq: 4, event: "TaskHeartbeat", payload: { type: "TaskHeartbeat", nodeId: "build" } },
+          { runId: "run-a", seq: 5, event: "NodeFinished", payload: { type: "NodeFinished", nodeId: "build" } },
         ],
       },
     });
     const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
     await harness.flush(60);
-    const markers = harness.container.querySelectorAll('[data-slot="marker"]');
-    expect(markers.length).toBe(2);
-    expect(markers[0]?.getAttribute("data-variant")).toBe("status");
-    expect(markers[0]?.getAttribute("data-event")).toBe("TaskHeartbeat");
-    expect(markers[0]?.querySelector('[data-slot="shimmer"]')?.getAttribute("data-active")).toBe(
-      "true",
+    // 5 frames fold to 3 rows: started, one coalesced heartbeat (×3), finished.
+    let rows = harness.container.querySelectorAll('[data-slot="event-row"]');
+    expect(rows.length).toBe(3);
+    const hb = harness.container.querySelector('[data-slot="event-row"][data-heartbeat="true"]');
+    expect(hb).not.toBeNull();
+    expect(hb?.textContent).toContain("×3");
+    expect(harness.container.textContent).toContain("build finished");
+
+    // The toolbar toggle expands every heartbeat into its own row.
+    const toggle = [...harness.container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Show all heartbeats"),
+    )!;
+    expect(toggle).toBeDefined();
+    click(toggle);
+    await harness.flush(20);
+    rows = harness.container.querySelectorAll('[data-slot="event-row"]');
+    expect(rows.length).toBe(5);
+    expect(
+      [...harness.container.querySelectorAll("button")].some((b) =>
+        b.textContent?.includes("Coalesce heartbeats"),
+      ),
+    ).toBe(true);
+  });
+
+  test("makes a failed node visually prominent with an error summary", async () => {
+    const gw = boot({
+      events: {
+        "run-a": [
+          {
+            runId: "run-a",
+            seq: 7,
+            event: "NodeFailed",
+            payload: { type: "NodeFailed", nodeId: "flaky", error: "boom happened" },
+          },
+        ],
+      },
+    });
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
+    await harness.flush(40);
+    const failed = harness.container.querySelector('[data-slot="event-row"][data-tone="failed"]');
+    expect(failed).not.toBeNull();
+    expect(failed?.getAttribute("data-node")).toBe("flaky");
+    expect(failed?.textContent).toContain("flaky failed: boom happened");
+  });
+
+  test("selects a node when a node-bearing row is clicked and highlights the active node", async () => {
+    const gw = boot({
+      events: {
+        "run-a": [
+          { runId: "run-a", seq: 1, event: "NodeStarted", payload: { type: "NodeStarted", nodeId: "plan" } },
+        ],
+      },
+    });
+    const selected: string[] = [];
+    const harness = await mount(
+      gw,
+      createElement(RunEventLog, {
+        runId: "run-a",
+        selectedNodeId: "plan",
+        onSelectNode: (id: string) => selected.push(id),
+      }),
     );
-    expect(harness.container.textContent).toContain("node.output");
+    await harness.flush(40);
+    const row = harness.container.querySelector('[data-slot="event-row"][data-node="plan"]');
+    expect(row?.getAttribute("data-active")).toBe("true");
+    const main = row!.querySelector(".gw-event-row-main") as HTMLButtonElement;
+    expect(main.getAttribute("data-selectable")).toBe("true");
+    click(main);
+    await harness.flush();
+    expect(selected).toContain("plan");
   });
 
   test("shows the waiting/empty state for a run with no events", async () => {

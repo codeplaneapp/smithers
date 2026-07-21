@@ -54,8 +54,25 @@ export {
 export { StatusPill, type StatusPillProps } from "./StatusPill";
 export { ConnectionBadge, type ConnectionBadgeProps } from "./ConnectionBadge";
 export { RunList, type RunListProps } from "./RunList";
-export { RunEventLog, type RunEventLogProps } from "./RunEventLog";
+export {
+  RunEventLog,
+  summarize,
+  summarizeEvent,
+  eventKind,
+  eventNodeId,
+  kindTone,
+  buildLogRows,
+  type RunEventLogProps,
+  type EventTone,
+} from "./RunEventLog";
 export { RunTree, type RunTreeProps } from "./RunTree";
+export {
+  MonitorButton,
+  monitorHref,
+  DEFAULT_MONITOR_PATH,
+  type MonitorButtonProps,
+  type MonitorHrefOptions,
+} from "./MonitorButton";
 export { ApprovalPanel, type ApprovalPanelProps } from "./ApprovalPanel";
 export { LaunchButton, type LaunchButtonProps } from "./LaunchButton";
 export { WorkflowPicker, type WorkflowPickerProps } from "./WorkflowPicker";

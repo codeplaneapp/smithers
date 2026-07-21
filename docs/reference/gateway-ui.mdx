@@ -29,15 +29,16 @@ tokens, never hex-plus-alpha.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
-| `SimpleWorkflowDashboard` | A complete one-workflow dashboard: prompt box + Start button, run list, node tree, and event log. The one-component UI. | `workflow`, `title`, `promptPlaceholder`, `inputFromPrompt`, `runLimit` |
+| `SimpleWorkflowDashboard` | A complete one-workflow dashboard: prompt box + Start button, run list, node tree, structured event log, a live per-node chat pane (click a node to follow it), and a `MonitorButton` header link. The one-component UI. | `workflow`, `title`, `promptPlaceholder`, `inputFromPrompt`, `runLimit` |
 | `WorkflowUiShell` | The standard page scaffold: injects the style guide, renders a topbar (title, meta, actions), and wraps your content. | `title`, `meta`, `actions` |
 | `WorkflowUiStyles` | Just the shared style-guide `<style>` block, when you bring your own layout. | `mode`, `extra` |
 | `RunList` | A live, selectable list of runs with a status pill per row. | `filter`, `activeRunId`, `onSelect`, `pollMs` |
 | `RunTree` | The node tree for a run (initial snapshot plus live updates). | `runId`, `onSelectNode`, `activeNodeId` |
-| `RunEventLog` | A scrolling, auto-following event log for a run. | `runId`, `maxEvents`, `follow` |
+| `RunEventLog` | A scrolling, auto-following event log for a run. One structured row per frame: a severity-tinted kind badge (`NodeStarted`/`NodeFinished`/`NodeFailed`/`TaskHeartbeat`/...), a compact nodeId chip, iteration/attempt when set, and a human one-line summary ("audit-docs finished", "flaky failed: <error>"), with the full JSON payload collapsed behind a per-row toggle. Failures are prominent, consecutive per-node heartbeats coalesce into one de-emphasized row (a toolbar toggle shows them all), and passing `onSelectNode` makes node rows open that node's live chat. | `runId`, `maxEvents`, `follow`, `onSelectNode`, `selectedNodeId` |
 | `NodeOutputView` | The output of a single node: shows the pending state before the node produces, then the formatted output; updates as the run progresses. | `runId`, `nodeId`, `iteration` |
 | `ApprovalPanel` | The pending approval queue with Approve and Deny buttons. | `filter`, `pollMs`, `onError` |
 | `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `onLaunched` |
+| `MonitorButton` | A button (rendered as a real link) that opens the Smithers Monitor, the live all-runs control surface the Gateway serves at `/monitor`, deep-linked to the current run via `?runId`. Same-origin with the served workflow UI, so no base URL is needed. | `runId`, `monitorPath`, `baseUrl`, `newTab` |
 | `WorkflowPicker` | A select of the workflows registered on the Gateway. | `value`, `onChange`, `hasUiOnly` |
 | `ConnectionBadge` | A live Gateway connection indicator. | none |
 | `StatusPill` | A colored status badge for any run or node status string. | `status`, `label` |
@@ -96,6 +97,8 @@ import {
   ApprovalPanel,
   ConnectionBadge,
   LaunchButton,
+  MonitorButton,
+  NodeChatStream,
   NodeOutputView,
   RunEventLog,
   RunList,
@@ -115,6 +118,7 @@ function App() {
         <h1 style={{ margin: 0, fontSize: 18 }}>Implement</h1>
         <ConnectionBadge />
         <span style={{ flex: 1 }} />
+        <MonitorButton runId={runId} />
         <LaunchButton workflow={WORKFLOW} onLaunched={setRunId} />
       </header>
 
@@ -122,8 +126,16 @@ function App() {
         <RunList filter={{ workflow: WORKFLOW, limit: 20 }} activeRunId={runId} onSelect={setRunId} />
         <RunTree runId={runId} activeNodeId={nodeId} onSelectNode={(node) => setNodeId(node.id)} />
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Clicking a node row in either the tree or the event log selects it,
+              opening its live agent chat below and its output above. */}
           <NodeOutputView runId={runId} nodeId={nodeId} />
-          <RunEventLog runId={runId} style={{ height: 240 }} />
+          <RunEventLog
+            runId={runId}
+            style={{ height: 240 }}
+            selectedNodeId={nodeId}
+            onSelectNode={setNodeId}
+          />
+          <NodeChatStream runId={runId} nodeId={nodeId} />
         </div>
       </div>
 
@@ -136,8 +148,10 @@ createGatewayReactRoot(<App />);
 ```
 
 That is the whole UI. `RunList` polls for new runs, `RunTree` and `RunEventLog`
-stream live as the run advances, `ApprovalPanel` lets you clear human gates, and
-`LaunchButton` starts a fresh run. Mix these with raw
+stream live as the run advances, clicking a node in either opens its live
+`NodeChatStream` transcript, `ApprovalPanel` lets you clear human gates,
+`LaunchButton` starts a fresh run, and `MonitorButton` jumps to the full run
+fleet in the Monitor. Mix these with raw
 [`gateway-react`](/reference/gateway-react) hooks whenever you need something the
 components do not cover.
 

@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useGatewayActions, useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import { formatStatus, statusClass } from "./theme";
 import { ConnectionBadge } from "./ConnectionBadge";
+import { MonitorButton } from "./MonitorButton";
+import { NodeChatStream } from "./NodeChatStream";
 import { RunEventLog } from "./RunEventLog";
 import { RunTree } from "./RunTree";
 import { WorkflowUiShell } from "./styleguide";
@@ -50,6 +52,7 @@ export function SimpleWorkflowDashboard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
+  const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
   const runsRaw = useGatewayRuns({ filter: { workflow, limit: runLimit } });
   const actions = useGatewayActions();
   const runs = useMemo(
@@ -62,6 +65,12 @@ export function SimpleWorkflowDashboard({
   useEffect(() => {
     if (runs.length > 0 && !selectedRunPresent) setSelectedRunId(runs[0]!.runId);
   }, [runs, selectedRunPresent]);
+
+  // Reset the selected node when switching runs — a nodeId is only meaningful
+  // within its own run.
+  useEffect(() => {
+    setSelectedNodeId(undefined);
+  }, [activeRunId]);
 
   async function start() {
     setBusy(true);
@@ -83,7 +92,12 @@ export function SimpleWorkflowDashboard({
       title={title}
       testId={testId}
       meta={<span className="pill">{runs.length || (runsRaw.loading ? "..." : "0")} runs</span>}
-      actions={<ConnectionBadge className="chip" />}
+      actions={
+        <>
+          <MonitorButton runId={activeRunId} />
+          <ConnectionBadge className="chip" />
+        </>
+      }
     >
       <section className="card">
         <div className="workflow-launch">
@@ -123,20 +137,39 @@ export function SimpleWorkflowDashboard({
             ))
           )}
         </div>
-        <div className="workflow-detail" aria-label="Run detail">
-          <div className="panel">
-            <div className="section-head">
-              <span>Nodes</span>
-              {activeRunId ? <span className="mono">{shortRunId(activeRunId)}</span> : null}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+          <div className="workflow-detail" aria-label="Run detail">
+            <div className="panel">
+              <div className="section-head">
+                <span>Nodes</span>
+                {activeRunId ? <span className="mono">{shortRunId(activeRunId)}</span> : null}
+              </div>
+              <RunTree
+                runId={activeRunId}
+                className="workflow-tree"
+                activeNodeId={selectedNodeId}
+                onSelectNode={(node) => setSelectedNodeId(node.id)}
+              />
             </div>
-            <RunTree runId={activeRunId} className="workflow-tree" />
+            <div className="panel">
+              <div className="section-head">
+                <span>Events</span>
+                {activeRunId ? <span className="mono">{shortRunId(activeRunId)}</span> : null}
+              </div>
+              <RunEventLog
+                runId={activeRunId}
+                className="workflow-events"
+                selectedNodeId={selectedNodeId}
+                onSelectNode={setSelectedNodeId}
+              />
+            </div>
           </div>
-          <div className="panel">
+          <div className="panel" aria-label="Node chat">
             <div className="section-head">
-              <span>Events</span>
-              {activeRunId ? <span className="mono">{shortRunId(activeRunId)}</span> : null}
+              <span>Chat</span>
+              {selectedNodeId ? <span className="mono">{selectedNodeId}</span> : null}
             </div>
-            <RunEventLog runId={activeRunId} className="workflow-events" />
+            <NodeChatStream runId={activeRunId} nodeId={selectedNodeId} height="auto" />
           </div>
         </div>
       </section>

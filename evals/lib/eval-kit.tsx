@@ -76,7 +76,8 @@ function artifactContract(kind: VerifyKind): string {
       "  • Start with the pragma: /** @jsxImportSource react */",
       "  • Mount with createGatewayReactRoot(<App />) from 'smithers-orchestrator/gateway-react' and read the run to scope to from `?runId` in location.search. Handle loading / empty / error states.",
       "  • Compose from the shipped component libraries BEFORE hand-rolling markup — a hand-rolled version of a shipped component is a wrong answer:",
-      "      - 'smithers-orchestrator/gateway-ui' run-shaped widgets (self-connecting): SimpleWorkflowDashboard, WorkflowUiShell, RunList, RunTree, RunEventLog, NodeOutputView, ApprovalPanel, LaunchButton, WorkflowPicker, ConnectionBadge, StatusPill",
+      "      - 'smithers-orchestrator/gateway-ui' run-shaped widgets (self-connecting): SimpleWorkflowDashboard, WorkflowUiShell, RunList, RunTree, RunEventLog, NodeChatStream, NodeOutputView, ApprovalPanel, LaunchButton, MonitorButton, WorkflowPicker, ConnectionBadge, StatusPill",
+      "      - Include a MonitorButton (from 'smithers-orchestrator/gateway-ui') in the UI so operators can open the Smithers Monitor deep-linked to the current run.",
       "      - 'smithers-orchestrator/ui' primitives: Button, Card, Input, Tabs, Dialog, Table, KpiStat, EmptyState, ChatTranscript, ChatComposer, DiffHunks, StageStrip, FileTree, Markdown (plus MarkdownEditor via 'smithers-orchestrator/ui/adapters/markdown-editor', Terminal via 'smithers-orchestrator/ui/adapters/terminal')",
       "      - 'smithers-orchestrator/gateway-react' hooks for bespoke panes the widgets don't cover: useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions, useGatewayRuns",
       "  • It must be valid TSX that transpiles. Do not invent hooks, components, or props that don't exist.",
@@ -95,6 +96,7 @@ function artifactContract(kind: VerifyKind): string {
       "  • Render the 'report' node's OUTPUT via useGatewayNodeOutput({ runId, nodeId: 'report', iteration: 0 }).",
       "  • SURFACE THE FAILED NODE: the 'flaky' task fails — show its failed state and error message (NodeFailed frames carry payload.error).",
       "  • Show PENDING APPROVALS from useGatewayApprovals({ filter: { runId } }) with a working Approve button that calls useGatewayActions().submitApproval({ runId, nodeId, approved: true }).",
+      "  • Include the monitor-open affordance: a MonitorButton from 'smithers-orchestrator/gateway-ui' that deep-links this run into the Smithers Monitor.",
       "  • Mount with createGatewayReactRoot(<App />). Handle loading / empty / error states. Do not invent hooks or props that don't exist.",
     ].join("\n");
   }
@@ -141,7 +143,7 @@ function qualityPrompt(
 ): string {
   const lines = [
     "You rate a Smithers custom workflow UI bundle (React + smithers-orchestrator/gateway-react).",
-    "Score 0-1 on: correct use of createGatewayReactRoot + the gateway hooks (useGatewayRun/RunEvents/NodeOutput/Approvals/Actions/Runs); handling of loading/empty/error states; scoping to the ?runId in location.search; clean component structure; sensible layout/UX and basic accessibility; and absence of obvious bugs or invented APIs.",
+    "Score 0-1 on: correct use of createGatewayReactRoot + the gateway hooks (useGatewayRun/RunEvents/NodeOutput/Approvals/Actions/Runs); handling of loading/empty/error states; scoping to the ?runId in location.search; clean component structure; sensible layout/UX and basic accessibility; whether it includes the monitor-open affordance (a MonitorButton from smithers-orchestrator/gateway-ui deep-linking the run into the Smithers Monitor); and absence of obvious bugs or invented APIs.",
   ];
   if (functional) {
     lines.push(
