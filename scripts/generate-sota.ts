@@ -29,7 +29,7 @@ const BADGE_LABELS: Record<string, string> = {
   "best-value-coding": "Best value coding",
 };
 
-const REQUIRED_ROUTING_SLOTS = ["luna", "terra", "sol", "fable"] as const;
+const REQUIRED_ROUTING_SLOTS = ["luna", "terra", "sol", "opus", "fable"] as const;
 
 const ROLES = [
   "orchestrator",
@@ -302,7 +302,7 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   lines.push("## Role defaults");
   lines.push("");
   lines.push(
-    "The Codex-first workflow tiers resolve to these ids; see [Recipes](/recipes) for practical workflow patterns:",
+    "The workflow role seats resolve to these ids (Codex builds and reviews; Claude orchestrates and gates); see [Recipes](/recipes) for practical workflow patterns:",
   );
   lines.push("");
   lines.push("| Role | Default model |");
@@ -336,8 +336,10 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
     if (!model) throw new Error(`missing routing model for ${name}`);
     return model.id;
   };
-  lines.push(`const researcher = new CodexAgent({ model: "${routingId("luna")}", config: { model_reasoning_effort: "medium" } });`);
-  lines.push(`const implementer = new CodexAgent({ model: "${routingId("luna")}", config: { model_reasoning_effort: "medium" } });`);
+  lines.push(`const orchestrator = new ClaudeCodeAgent({ model: "${routingId("opus")}" });`);
+  lines.push(`const planner = new ClaudeCodeAgent({ model: "${routingId("fable")}" });`);
+  lines.push(`const implementer = new CodexAgent({ model: "${routingId("terra")}" });`);
+  lines.push(`const trivialFixer = new CodexAgent({ model: "${routingId("luna")}", config: { model_reasoning_effort: "medium" } });`);
   lines.push(`const validator = new CodexAgent({ model: "${routingId("terra")}" });`);
   lines.push(`const reviewer = new CodexAgent({ model: "${routingId("sol")}" });`);
   lines.push(`const fableFallback = new ClaudeCodeAgent({ model: "${routingId("fable")}" });`);

@@ -149,24 +149,28 @@ OpenClaw agent, `sessionId` to resume a session with `--session-id`, `workspace`
 to set the workspace path, and `continueSession` when the installed CLI should
 continue its active session.
 
-## Codex-first defaults
+## Default routing: Codex builds, Claude gates
 
-When `bunx smithers-orchestrator init` detects usable Codex authentication, its
-generated pools start with Codex workers using exact model pins:
+When `bunx smithers-orchestrator init` detects usable Codex authentication,
+its generated building pools start with Codex workers using exact model pins,
+and the orchestration seats run on Claude:
 
 | Work | Model |
 |---|---|
-| Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
-| Mid-tier judgment, validation, or tool-heavy work that needs extra checking | `gpt-5.6-terra` |
-| **Research, implementation, ordinary tool use, UI, and routine-to-substantial execution** | `gpt-5.6-luna` |
+| The hardest implementation, final review, and the deepest reasoning | `gpt-5.6-sol` |
+| **Substantial implementation, validation, and tool-heavy checking** | `gpt-5.6-terra` |
+| Trivial, minimal-risk edits, cheap passes, and research gathering | `gpt-5.6-luna` |
+| Orchestration and gating: scope, direction, progress, done-or-not | `claude-opus-4-8` |
+| Planning, design freezes, and premium judgment calls | `claude-fable-5` |
 
-Start with Luna for most work, including substantial implementation and
-ordinary tool use; change size alone does not require Sol. Escalate to Terra
-for stronger validation or structured tool-heavy judgment, and to Sol for
-ambiguity, high-stakes decisions, novel architecture, orchestration, final
-review, or repeated failure. Other adapters stay later in automatic sequential
-fallback chains, while an explicitly constructed provider agent remains a
-deliberate choice. See [SOTA role defaults](/reference/sota-models#role-defaults).
+Start substantial implementation on Terra; escalate to Sol for ambiguity,
+high-stakes decisions, novel architecture, final review, or repeated failure;
+keep Luna on trivial, minimal-risk work only. Never give GPT-5.6 Sol or Terra
+the orchestration or gating seat; those decisions run on Claude, with Codex
+Sol behind it only as an availability fallback. Other adapters stay later in
+automatic sequential fallback chains, while an explicitly constructed
+provider agent remains a deliberate choice.
+See [SOTA role defaults](/reference/sota-models#role-defaults).
 
 ## Codex CLI Agent
 

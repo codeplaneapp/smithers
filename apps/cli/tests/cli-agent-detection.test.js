@@ -41,14 +41,19 @@ describe("detectAvailableAgents", () => {
     const CODEX_DEFAULT_TIERS = {
         cheapFast: "codexLuna",
         research: "codexLuna",
-        implement: "codexLuna",
+        implement: "codexTerra",
         midTier: "codexTerra",
         smartTool: "codexTerra",
         validate: "codexTerra",
         smart: "codexSol",
         review: "codexSol",
-        planning: "codexSol",
-        orchestrator: "codexSol",
+    };
+
+    // Orchestration/gating and planning lead with Claude when it is available;
+    // Codex Sol stays in those chains as an availability fallback only.
+    const CLAUDE_LED_TIERS = {
+        planning: "claude",
+        orchestrator: "claudeOpus",
     };
 
     function activePoolProviders(source, pool) {
@@ -223,6 +228,10 @@ describe("detectAvailableAgents", () => {
         expect(source).toContain('codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
         for (const [tier, provider] of Object.entries(CODEX_DEFAULT_TIERS)) {
             expect(activePoolProviders(source, tier)[0], `${tier} must start with Codex`).toBe(provider);
+        }
+        for (const [tier, provider] of Object.entries(CLAUDE_LED_TIERS)) {
+            expect(activePoolProviders(source, tier)[0], `${tier} must start with Claude`).toBe(provider);
+            expect(activePoolProviders(source, tier), `${tier} keeps Codex Sol as a fallback`).toContain("codexSol");
         }
         expect(activePoolProviders(source, "implement").slice(1)).toContain("claudeSonnet");
         expect(activePoolProviders(source, "review").slice(1)).toContain("claude");

@@ -4,9 +4,9 @@
 // default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model
 // bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.
 
-export const SOTA_REGISTRY_VERSION = 3;
+export const SOTA_REGISTRY_VERSION = 4;
 
-export const SOTA_REGISTRY_UPDATED_AT = "2026-07-10";
+export const SOTA_REGISTRY_UPDATED_AT = "2026-07-21";
 
 /** Stable handle → current best model id for that seat. */
 export const SOTA_SLOTS = Object.freeze({
@@ -27,16 +27,16 @@ export const SOTA_SLOTS = Object.freeze({
 
 /** Workflow role → current best model id. */
 export const SOTA_ROLE_MODELS = Object.freeze({
-  "orchestrator": "gpt-5.6-sol",
-  "planning": "gpt-5.6-sol",
+  "orchestrator": "claude-opus-4-8",
+  "planning": "claude-fable-5",
   "review": "gpt-5.6-sol",
   "smart": "gpt-5.6-sol",
   "midTier": "gpt-5.6-terra",
   "smartTool": "gpt-5.6-terra",
   "validate": "gpt-5.6-terra",
-  "implement": "gpt-5.6-luna",
+  "implement": "gpt-5.6-terra",
   "cheapFast": "gpt-5.6-luna",
-  "ui": "gpt-5.6-luna",
+  "ui": "gpt-5.6-terra",
   "realtime": "gpt-5.3-codex-spark",
   "research": "gpt-5.6-luna"
 });
@@ -46,8 +46,8 @@ export const SOTA_DEPRECATED_MODELS = Object.freeze({
   "claude-sonnet-4-6": "claude-sonnet-5",
   "claude-sonnet-4-7": "claude-sonnet-5",
   "claude-sonnet-4-20250514": "claude-sonnet-5",
-  "gpt-5.3-codex": "gpt-5.6-luna",
-  "gpt-5.2": "gpt-5.6-luna",
+  "gpt-5.3-codex": "gpt-5.6-terra",
+  "gpt-5.2": "gpt-5.6-terra",
   "gpt-4o": "gpt-5.4-mini",
   "kimi-latest": "kimi-k2.7-code"
 });
@@ -66,12 +66,11 @@ export const SOTA_MODELS = Object.freeze([
     ],
     "badges": [],
     "roles": [
-      "orchestrator",
       "planning",
       "review",
       "smart"
     ],
-    "description": "Anthropic's Mythos-class model for ambitious, long, complex knowledge and coding work. Developers can use `claude-fable-5` through the Claude API at $10 per million input tokens and $50 per million output tokens. Anthropic's July 1 redeployment restored access on Claude Platform, Claude.ai, Claude Code, and Claude Cowork; the temporary included window for eligible subscription plans runs through July 12, 2026 at 11:59:59 PM PT ([promotion details](https://support.claude.com/en/articles/15424964-claude-fable-5-promotional-access)), and cloud-platform availability remains subject to the marketplace, provider, and account. Its updated safeguards may reroute blocked requests to Opus 4.8 and may false-positive during routine coding and debugging. Current Claude applications and Claude Code enable that switching by default, while API customers must opt in and configure it ([default product behavior and API opt-in](https://support.claude.com/en/articles/15363606-why-claude-switched-models-in-your-conversation-with-fable-5)); treat the notice as current product behavior rather than a permanent provider guarantee. Smithers uses Fable as a non-Codex fallback for Sol-backed smart, planning, review, and orchestration roles or as a deliberate Claude-native specialist. Claude Code uses `claude-fable-5`; Smithers' OpenCode configuration uses the provider-qualified id `anthropic/claude-fable-5`. See [Anthropic's launch announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5), [redeployment update](https://www.anthropic.com/news/redeploying-fable-5), and [current Fable availability](https://www.anthropic.com/claude/fable)."
+    "description": "Anthropic's Mythos-class model for ambitious, long, complex knowledge and coding work. Developers can use `claude-fable-5` through the Claude API at $10 per million input tokens and $50 per million output tokens. Anthropic's July 1 redeployment restored access on Claude Platform, Claude.ai, Claude Code, and Claude Cowork; the temporary included window for eligible subscription plans runs through July 12, 2026 at 11:59:59 PM PT ([promotion details](https://support.claude.com/en/articles/15424964-claude-fable-5-promotional-access)), and cloud-platform availability remains subject to the marketplace, provider, and account. Its updated safeguards may reroute blocked requests to Opus 4.8 and may false-positive during routine coding and debugging. Current Claude applications and Claude Code enable that switching by default, while API customers must opt in and configure it ([default product behavior and API opt-in](https://support.claude.com/en/articles/15363606-why-claude-switched-models-in-your-conversation-with-fable-5)); treat the notice as current product behavior rather than a permanent provider guarantee. Smithers runs planning and design-freeze steps on Fable, escalates unusually consequential orchestration calls to it (Opus 4.8 holds the orchestrator default), and keeps it as the non-Codex fallback for Sol-backed review and smart work. Claude Code uses `claude-fable-5`; Smithers' OpenCode configuration uses the provider-qualified id `anthropic/claude-fable-5`. See [Anthropic's launch announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5), [redeployment update](https://www.anthropic.com/news/redeploying-fable-5), and [current Fable availability](https://www.anthropic.com/claude/fable)."
   },
   {
     "id": "claude-opus-4-8",
@@ -83,11 +82,14 @@ export const SOTA_MODELS = Object.freeze([
       "claude",
       "opencode"
     ],
-    "badges": [],
+    "badges": [
+      "best-orchestrator"
+    ],
     "roles": [
+      "orchestrator",
       "smart"
     ],
-    "description": "Anthropic's Opus tier. Still a top-shelf generalist and the always-present fallback behind Fable in the smart, planning, and review pools."
+    "description": "Anthropic's Opus tier and the default Smithers orchestrator. Orchestration and gating decisions (scope, choosing direction, judging progress, deciding whether work is done, approving or denying gates) run here at medium reasoning effort rather than on GPT-5.6 Sol or Terra, which are strong reviewers but poor gatekeepers. Also a top-shelf generalist and the always-present fallback behind Fable in the smart, planning, and review pools."
   },
   {
     "id": "claude-sonnet-5",
@@ -105,7 +107,7 @@ export const SOTA_MODELS = Object.freeze([
       "implement",
       "cheapFast"
     ],
-    "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for Luna/Terra-backed research, implementation, validation, mid-tier, and tool-heavy work when Codex is unavailable; Sol-backed orchestration, planning, review, and smart work fall back to Fable instead."
+    "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for Codex-backed research, implementation, validation, mid-tier, and tool-heavy work when Codex is unavailable; Sol-backed review and smart work fall back to Fable instead, and orchestration and planning already run on Claude (Opus 4.8 and Fable 5)."
   },
   {
     "id": "claude-haiku-4-5",
@@ -132,17 +134,14 @@ export const SOTA_MODELS = Object.freeze([
       "pi"
     ],
     "badges": [
-      "best-orchestrator",
       "smartest-reviewer",
       "smartest-coder"
     ],
     "roles": [
-      "orchestrator",
-      "planning",
       "review",
       "smart"
     ],
-    "description": "OpenAI's GPT-5.6 flagship for the hardest reasoning, coding, and judgment-heavy work. Keep Sol for orchestration, planning, final review, ambiguous or high-stakes decisions, and recovery when a lower-cost pass is not enough; do not spend it on routine implementation by default. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
+    "description": "OpenAI's GPT-5.6 flagship for the hardest reasoning, coding, and judgment-heavy work. Use Sol for the hardest implementation, final code review, ambiguous or high-stakes changes, and recovery when a lower-cost pass is not enough. Do not use Sol for orchestration or gating (scope, direction, progress, done-or-not): it is a strong reviewer but a poor gatekeeper, and those seats belong to Claude (Opus 4.8 by default). See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
   },
   {
     "id": "gpt-5.6-terra",
@@ -156,11 +155,13 @@ export const SOTA_MODELS = Object.freeze([
     ],
     "badges": [],
     "roles": [
+      "implement",
       "midTier",
       "smartTool",
-      "validate"
+      "validate",
+      "ui"
     ],
-    "description": "OpenAI's balanced GPT-5.6 model for validation and higher-judgment, explicitly tool-heavy work. Terra is the `smartTool` escalation when a routine Luna pass needs more checking or consistency but the task does not need Sol's top-tier planning and review; ordinary tool use starts with Luna. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
+    "description": "OpenAI's balanced GPT-5.6 model and the default implementer: substantial implementation starts on Terra, as do validation, structured checking, and explicitly tool-heavy work. Escalate to Sol when the change is genuinely hard, ambiguous, or high-stakes. Like Sol, Terra does not orchestrate or gate; its validation findings feed the Claude orchestrator's decision. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
   },
   {
     "id": "gpt-5.6-luna",
@@ -177,12 +178,10 @@ export const SOTA_MODELS = Object.freeze([
       "best-value-coding"
     ],
     "roles": [
-      "implement",
       "cheapFast",
-      "research",
-      "ui"
+      "research"
     ],
-    "description": "OpenAI's fastest and most affordable GPT-5.6 tier, with strong capability across the family’s software, knowledge-work, research, computer-use, and tool-using workloads. Ordinary tool use starts with Luna, which is the default for research, implementation, routine-to-substantial execution, UI work, cheapFast tasks, and the first pass on many tasks that do not require Sol's judgment. Escalate to Terra only for explicit tool-heavy validation or higher-judgment checking; escalate to Sol for ambiguity, high stakes, repeated failure, or unusually long-horizon reasoning rather than assuming task size alone requires Sol. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/) and the [GPT-5.6 preview release](https://openai.com/index/previewing-gpt-5-6-sol/)."
+    "description": "OpenAI's fastest and most affordable GPT-5.6 tier. In Smithers, Luna handles trivial, minimal-risk work only: tiny scoped edits, mechanical transforms, quick research and lookups, and high-volume cheap passes. Substantial implementation starts on Terra instead, with Sol for the hardest changes; escalate rather than letting Luna carry work with real blast radius. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/) and the [GPT-5.6 preview release](https://openai.com/index/previewing-gpt-5-6-sol/)."
   },
   {
     "id": "gpt-5.5",
@@ -391,13 +390,13 @@ export const SOTA_MODELS = Object.freeze([
     "provider": "openai",
     "name": "GPT-5.3-Codex",
     "status": "deprecated",
-    "replacedBy": "gpt-5.6-luna",
+    "replacedBy": "gpt-5.6-terra",
     "engines": [
       "codex"
     ],
     "badges": [],
     "roles": [],
-    "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Luna for implementation or select a role-specific GPT-5.6 tier."
+    "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Terra for implementation or select a role-specific GPT-5.6 tier."
   },
   {
     "id": "gpt-5.2",
@@ -405,13 +404,13 @@ export const SOTA_MODELS = Object.freeze([
     "provider": "openai",
     "name": "GPT-5.2",
     "status": "deprecated",
-    "replacedBy": "gpt-5.6-luna",
+    "replacedBy": "gpt-5.6-terra",
     "engines": [
       "codex"
     ],
     "badges": [],
     "roles": [],
-    "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Luna for implementation or select a role-specific GPT-5.6 tier."
+    "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Terra for implementation or select a role-specific GPT-5.6 tier."
   },
   {
     "id": "gpt-4o",
@@ -425,7 +424,7 @@ export const SOTA_MODELS = Object.freeze([
     ],
     "badges": [],
     "roles": [],
-    "description": "Two generations old. Use GPT-5.6 Luna for implementation and research, Terra for balanced validation, or Sol for planning and review."
+    "description": "Two generations old. Use GPT-5.6 Terra for implementation and validation, Luna for trivial cheap passes and lookups, or Sol for the hardest work and final review."
   },
   {
     "id": "kimi-latest",

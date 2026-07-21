@@ -266,9 +266,9 @@ const DETECTORS = [
     },
 ];
 const ROLE_PREFERENCES = {
-    spec: ["codex", "claude", "opencode", "pool", "openclaw"],
+    spec: ["claude", "codex", "opencode", "pool", "openclaw"],
     research: ["codex", "kimi", "antigravity", "opencode", "pool", "claude", "openclaw"],
-    plan: ["codex", "claude", "opencode", "pool", "antigravity", "kimi", "openclaw"],
+    plan: ["claude", "codex", "opencode", "pool", "antigravity", "kimi", "openclaw"],
     implement: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi"],
     validate: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi"],
     review: ["codex", "claude", "amp", "opencode", "pool", "openclaw", "kimi"],
@@ -342,23 +342,29 @@ const LOCAL_SCAFFOLDED_PROVIDERS = {
 const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
     ...SCAFFOLDED_PROVIDER_FILES,
 };
-// Codex-first role routing. When any usable Codex detection or registered
-// Codex/OpenAI account exists, every default chain starts with Codex: Sol for
-// judgment-heavy work, Terra for balanced/tool-heavy work, and Luna (the base
-// `codex` provider) for implementation, research, and cheap work. Detected
-// non-Codex providers remain after Codex as dormant runtime fallbacks; a healthy
-// Codex attempt completes the task before any fallback is invoked.
+// Role routing. Codex leads the building tiers: Terra for substantial
+// implementation, validation, and tool-heavy work, Sol for the hardest
+// reasoning and review, and Luna (the base `codex` provider) only for
+// trivial, minimal-risk cheap/research work. Orchestration, gating, and
+// planning are Claude-led: Opus for orchestrator decisions (scope, direction,
+// progress, done-or-not), Fable (the base `claude` provider) for planning;
+// GPT-5.6 Sol/Terra are strong reviewers but poor gatekeepers, so they appear
+// in those chains only as availability fallbacks. Each chain's `order` is the
+// chain order; the Codex block (detected variant + every registered Codex
+// account) is inserted at the codexVariant's position in `order`. Later
+// entries are dormant runtime fallbacks; a healthy earlier attempt completes
+// the task before any fallback is invoked.
 const TIER_PREFERENCES = {
     cheapFast: { codexVariant: "codexLuna", order: ["codexLuna", "claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"], maxSize: 3 },
     research: { codexVariant: "codexLuna", order: ["codexLuna", "kimi", "antigravity", "opencode", "claudeSonnet", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
-    implement: { codexVariant: "codexLuna", order: ["codexLuna", "claudeSonnet", "kimi", "antigravity", "claude", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    implement: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "claude", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     midTier: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     smartTool: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     validate: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     smart: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "antigravity", "amp", "kimi"], maxSize: 3 },
     review: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "claudeSonnet", "kimi", "amp", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
-    planning: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "claudeSonnet", "kimi", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
-    orchestrator: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "kimi", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    planning: { codexVariant: "codexSol", order: ["claude", "claudeOpus", "codexSol", "claudeSonnet", "kimi", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    orchestrator: { codexVariant: "codexSol", order: ["claudeOpus", "claude", "kimi", "codexSol", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
 };
 const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
@@ -948,7 +954,7 @@ const ACCOUNT_PROVIDER_DEFAULT_MODEL = {
 const CODEX_TIER_MODEL = {
     cheapFast: SOTA_SLOTS.codex,
     research: SOTA_SLOTS.codex,
-    implement: SOTA_SLOTS.codex,
+    implement: SOTA_SLOTS.codexTerra,
     midTier: SOTA_SLOTS.codexTerra,
     smartTool: SOTA_SLOTS.codexTerra,
     validate: SOTA_SLOTS.codexTerra,
@@ -1314,7 +1320,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
             const accountVariants = codexAccounts.map((account) => codexAccountVariantId(account, model));
             // Never cap Codex accounts ahead of a provider-family boundary.
             // Every registered Codex credential must be exhausted before a
-            // non-Codex fallback can run; maxSize limits fallback breadth only.
+            // later fallback can run; maxSize limits non-Codex breadth only.
             const codexProviders = [...detected, ...accountVariants];
             const fallbackOrder = order.filter((id) => id !== codexVariant && baseAgentIdForProviderId(id) !== "codex");
             const fallbackFamilies = new Set(fallbackOrder.map(baseAgentIdForProviderId));
@@ -1326,23 +1332,43 @@ export function generateAgentsTs(env = process.env, options = {}) {
                 members.push(labelToCamel(account.label));
                 accountFallbacksByFamily.set(family, members);
             }
-            const orderedFallbacks = [];
+            // The Codex block sits at the codexVariant's position in `order`,
+            // so Codex-led tiers (implement, validate, ...) start with Codex
+            // while Claude-led tiers (orchestrator, planning) run Claude first
+            // and keep Codex as an availability fallback only.
+            const orderedMembers = [];
             const emittedAccountFamilies = new Set();
-            for (const id of fallbackOrder) {
-                if (allProviderIds.has(id)) orderedFallbacks.push(id);
+            let codexEmitted = false;
+            for (const id of order) {
+                if (id === codexVariant || baseAgentIdForProviderId(id) === "codex") {
+                    if (!codexEmitted) orderedMembers.push(...codexProviders.map((member) => ({ id: member, codex: true })));
+                    codexEmitted = true;
+                    continue;
+                }
+                if (allProviderIds.has(id)) orderedMembers.push({ id, codex: false });
                 const family = baseAgentIdForProviderId(id);
                 if (emittedAccountFamilies.has(family)) continue;
                 emittedAccountFamilies.add(family);
-                orderedFallbacks.push(...(accountFallbacksByFamily.get(family) ?? []));
+                orderedMembers.push(...(accountFallbacksByFamily.get(family) ?? []).map((member) => ({ id: member, codex: false })));
             }
-            const runtimeFallbacks = [...new Set(orderedFallbacks)].slice(0, maxSize);
+            if (!codexEmitted) orderedMembers.push(...codexProviders.map((member) => ({ id: member, codex: true })));
+            const seenMembers = new Set();
+            const members = [];
+            let nonCodexCount = 0;
+            for (const member of orderedMembers) {
+                if (seenMembers.has(member.id)) continue;
+                seenMembers.add(member.id);
+                if (!member.codex) {
+                    if (nonCodexCount >= maxSize) continue;
+                    nonCodexCount += 1;
+                }
+                members.push(member.id);
+            }
             const unavailableFallbacks = fallbackOrder.filter((id) => !allProviderIds.has(id));
-            return renderTierLine(
-                tier,
-                [...codexProviders, ...runtimeFallbacks],
-                unavailableFallbacks,
-                ["  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails."],
-            );
+            const leadComment = order[0] === codexVariant
+                ? "  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails."
+                : "  // Claude leads this seat (Codex 5.6 does not orchestrate or gate). Later entries, including Codex, are runtime fallbacks.";
+            return renderTierLine(tier, members, unavailableFallbacks, [leadComment]);
         }
         let resolved = order
             .filter((id) => allProviderIds.has(id))

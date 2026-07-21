@@ -34,15 +34,17 @@ function uncommented(source) {
 const CODEX_DEFAULT_TIERS = {
     cheapFast: "Luna",
     research: "Luna",
-    implement: "Luna",
+    implement: "Terra",
     midTier: "Terra",
     smartTool: "Terra",
     validate: "Terra",
     smart: "Sol",
     review: "Sol",
-    planning: "Sol",
-    orchestrator: "Sol",
 };
+
+// Orchestration/gating and planning are Claude-led; Codex Sol appears there
+// only as an availability fallback.
+const CLAUDE_LED_TIERS = ["planning", "orchestrator"];
 
 function activePoolProviders(source, pool) {
     const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
@@ -59,7 +61,7 @@ function expectCodexFirstDefaultTiers(source, providerPrefix = "codex") {
 }
 
 function expectSingleProviderFallback(source, providerId) {
-    for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
+    for (const tier of [...Object.keys(CODEX_DEFAULT_TIERS), ...CLAUDE_LED_TIERS]) {
         expect(activePoolProviders(source, tier), `${tier} should use the available fallback`).toEqual([providerId]);
     }
 }
@@ -87,7 +89,7 @@ test("smithers init prefers Claude when only a Claude CLI signal is available", 
     expect(agentsSource).toMatch(/midTier:\s*\[\s*providers\.claudeSonnet,/);
     expect(agentsSource).toMatch(/validate:\s*\[\s*providers\.claudeSonnet,/);
     expect(agentsSource).toMatch(/planning:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
-    expect(agentsSource).toMatch(/orchestrator:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
+    expect(agentsSource).toMatch(/orchestrator:\s*\[\s*providers\.claudeOpus,\s*providers\.claude,/);
     expect(uncommented(agentsSource)).not.toContain("providers.codex");
 });
 test("smithers init routes every default tier to its Codex 5.6 model", () => {
@@ -109,6 +111,9 @@ test("smithers init routes every default tier to its Codex 5.6 model", () => {
     expect(agentsSource).toContain('codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
     expect(agentsSource).toContain('codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
     expectCodexFirstDefaultTiers(agentsSource);
+    // With no Claude available, the Claude-led seats fall back to Codex Sol.
+    expect(agentsSource).toMatch(/planning:\s*\[\s*providers\.codexSol,/);
+    expect(agentsSource).toMatch(/orchestrator:\s*\[\s*providers\.codexSol,/);
     expect(agentsSource).toContain("Codex runs first. Later entries are runtime fallbacks");
 });
 
@@ -292,6 +297,12 @@ test("smithers init creates role-specific Sol, Terra, and Luna variants for a Co
     expectCodexFirstDefaultTiers(agentsSource, "codexWork");
     for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
         expect(activePoolProviders(agentsSource, tier)).toContain("claudeBackup");
+    }
+    // The registered Claude account leads the Claude-led seats; the Codex
+    // account's Sol sibling stays behind it as the availability fallback.
+    for (const tier of CLAUDE_LED_TIERS) {
+        expect(activePoolProviders(agentsSource, tier)[0]).toBe("claudeBackup");
+        expect(activePoolProviders(agentsSource, tier)).toContain("codexWorkSol");
     }
 });
 test("smithers init emits OpenRouter default when no usable agents are detected", () => {

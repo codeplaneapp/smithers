@@ -31,15 +31,18 @@ function uncommented(source) {
 const CODEX_DEFAULT_TIERS = {
     cheapFast: "Luna",
     research: "Luna",
-    implement: "Luna",
+    implement: "Terra",
     midTier: "Terra",
     smartTool: "Terra",
     validate: "Terra",
     smart: "Sol",
     review: "Sol",
-    planning: "Sol",
-    orchestrator: "Sol",
 };
+
+// Orchestration/gating and planning are Claude-led; Codex Sol appears in these
+// chains only as an availability fallback.
+const CLAUDE_LED_TIERS = ["planning", "orchestrator"];
+const ALL_TIERS = [...Object.keys(CODEX_DEFAULT_TIERS), ...CLAUDE_LED_TIERS];
 
 function activePoolProviders(source, pool) {
     const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
@@ -82,6 +85,18 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain('codexWorkLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
         expectCodexFirstDefaultTiers(generated, "codexWork");
         expect(activePoolProviders(generated, "implement").slice(1)).toContain("claudeWork");
+        // Claude accounts lead the orchestrator/planning seats; Codex Sol is
+        // only the availability fallback behind them.
+        expect(activePoolProviders(generated, "orchestrator").slice(0, 3)).toEqual([
+            "claudeWork",
+            "claudePersonal",
+            "codexWorkSol",
+        ]);
+        expect(activePoolProviders(generated, "planning").slice(0, 3)).toEqual([
+            "claudeWork",
+            "claudePersonal",
+            "codexWorkSol",
+        ]);
         expect(uncommented(generated)).not.toContain("cwd: process.cwd()");
     });
 
@@ -100,10 +115,10 @@ describe("generateAgentsTs (account-driven)", () => {
 
         const providers = activePoolProviders(generateAgentsTs(env), "implement");
         expect(providers.slice(0, 4)).toEqual([
-            "codexALuna",
-            "codexBLuna",
-            "codexCLuna",
-            "codexDLuna",
+            "codexATerra",
+            "codexBTerra",
+            "codexCTerra",
+            "codexDTerra",
         ]);
         expect(providers.indexOf("claudeBackup")).toBeGreaterThan(3);
     });
@@ -145,6 +160,12 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain('openaiProdLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
         expectCodexFirstDefaultTiers(generated, "openaiProd");
         expect(activePoolProviders(generated, "review")).toContain("anthropicProd");
+        // The Claude account leads orchestration; the Codex Sol sibling stays
+        // behind it as the availability fallback.
+        expect(activePoolProviders(generated, "orchestrator").slice(0, 2)).toEqual([
+            "anthropicProd",
+            "openaiProdSol",
+        ]);
     });
 
     test("does not serialize both configDir and apiKey for malformed account entries", () => {
@@ -193,6 +214,20 @@ describe("generateAgentsTs (account-driven)", () => {
             "claudeOpus",
             "claudeSonnet",
         ]);
+        // Detected Claude variants lead orchestration and planning; Codex Sol
+        // is spliced in behind them as the availability fallback.
+        expect(activePoolProviders(generated, "orchestrator")).toEqual([
+            "claudeOpus",
+            "claude",
+            "codexSol",
+            "opencode",
+        ]);
+        expect(activePoolProviders(generated, "planning")).toEqual([
+            "claude",
+            "claudeOpus",
+            "codexSol",
+            "claudeSonnet",
+        ]);
     });
 
     test("direct generated CLI providers leave cwd to the task root and Worktree", () => {
@@ -232,7 +267,7 @@ describe("generateAgentsTs (account-driven)", () => {
             "opencode",
         ]);
         expect(activePoolProviders(generated, "implement")).toEqual([
-            "codexLuna",
+            "codexTerra",
             "claudeSonnet",
             "kimiBackup",
             "antigravity",
@@ -250,7 +285,7 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(active).toMatch(/smart:\s*\[\s*providers\.opencode,/);
         expect(active).toMatch(/smartTool:\s*\[\s*providers\.opencode,/);
         expect(active).toMatch(/review:\s*\[\s*providers\.opencode,/);
-        for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
+        for (const tier of ALL_TIERS) {
             expect(activePoolProviders(generated, tier)).toEqual(["opencode"]);
         }
     });
@@ -374,7 +409,7 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(active).toContain("smart: [\n    providers.openrouter,");
         expect(active).toContain("smartTool: [\n    providers.openrouter,");
         expect(active).toContain("review: [\n    providers.openrouter,");
-        for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
+        for (const tier of ALL_TIERS) {
             expect(activePoolProviders(generated, tier)).toEqual(["openrouter"]);
         }
         expect(active).not.toContain("providers.claude");

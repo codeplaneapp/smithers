@@ -69,7 +69,7 @@ describe("the checked-in registry", () => {
   test("holds the expected badges", () => {
     const registry = loadRegistry();
     const badge = (name: string) => registry.models.find((m: { badges: string[] }) => m.badges.includes(name))?.id;
-    expect(badge("best-orchestrator")).toBe("gpt-5.6-sol");
+    expect(badge("best-orchestrator")).toBe("claude-opus-4-8");
     expect(badge("smartest-reviewer")).toBe("gpt-5.6-sol");
     expect(badge("smartest-coder")).toBe("gpt-5.6-sol");
     expect(badge("best-ui")).toBe("gemini-3.5-flash");
@@ -79,15 +79,18 @@ describe("the checked-in registry", () => {
     expect(badge("best-open-source")).toBe("kimi-k2.6");
   });
 
-  test("role defaults prefer sota entries", () => {
+  test("role defaults split building from gating", () => {
     const defaults = roleDefaults(loadRegistry());
-    expect(defaults.orchestrator).toBe("gpt-5.6-sol");
+    expect(defaults.orchestrator).toBe("claude-opus-4-8");
+    expect(defaults.planning).toBe("claude-fable-5");
     expect(defaults.review).toBe("gpt-5.6-sol");
+    expect(defaults.smart).toBe("gpt-5.6-sol");
     expect(defaults.smartTool).toBe("gpt-5.6-terra");
     expect(defaults.validate).toBe("gpt-5.6-terra");
-    expect(defaults.implement).toBe("gpt-5.6-luna");
+    expect(defaults.implement).toBe("gpt-5.6-terra");
+    expect(defaults.ui).toBe("gpt-5.6-terra");
+    expect(defaults.cheapFast).toBe("gpt-5.6-luna");
     expect(defaults.research).toBe("gpt-5.6-luna");
-    expect(defaults.ui).toBe("gpt-5.6-luna");
     expect(defaults.realtime).toBe("gpt-5.3-codex-spark");
   });
 
