@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useInsertionEffect, useState, type CSSProperties } from "react";
 import { useGatewayActions, useGatewayApprovals } from "@smithers-orchestrator/gateway-react";
-import { theme } from "./theme";
+import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type ApprovalPanelProps = {
   /** Filter passed to `useGatewayApprovals({ filter })`. */
@@ -35,6 +35,7 @@ function approvalKey(row: ApprovalRow): string {
  * actionable from your UI.
  */
 export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style }: ApprovalPanelProps) {
+  useInsertionEffect(ensureGatewayUiStyles, []);
   const { data, loading, error, refetch } = useGatewayApprovals(filter ? { filter } : undefined);
   const actions = useGatewayActions();
   const [busy, setBusy] = useState<string | null>(null);
@@ -114,7 +115,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
                 type="button"
                 disabled={isBusy}
                 onClick={() => decide(row, true)}
-                style={approvalButtonStyle(theme.success, theme.successSoft, theme.successBorder, isBusy)}
+                className="gw-approval-button gw-approval-button-success"
               >
                 Approve
               </button>
@@ -122,7 +123,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
                 type="button"
                 disabled={isBusy}
                 onClick={() => decide(row, false)}
-                style={approvalButtonStyle(theme.danger, theme.dangerSoft, theme.dangerBorder, isBusy)}
+                className="gw-approval-button gw-approval-button-danger"
               >
                 Deny
               </button>
@@ -135,23 +136,4 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
       })}
     </div>
   );
-}
-
-export function approvalButtonStyle(
-  color: string,
-  background: string,
-  borderColor: string,
-  disabled: boolean,
-): CSSProperties {
-  return {
-    padding: "6px 14px",
-    borderRadius: 6,
-    border: `1px solid ${borderColor}`,
-    background,
-    color,
-    fontWeight: 600,
-    fontSize: 13,
-    cursor: disabled ? "default" : "pointer",
-    opacity: disabled ? 0.6 : 1,
-  };
 }

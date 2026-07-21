@@ -275,6 +275,21 @@ describe("monitor theme contract", () => {
     }
     expect(monitorCss).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(monitorCss).not.toContain("background: white");
+    expect(monitorCss).not.toContain("color-mix");
+  });
+
+  test("tree, timeline, approval, and summary controls expose the house focus ring", () => {
+    for (const selector of [
+      ".mon-tree-chevron:focus-visible",
+      ".mon-tree-main:focus-visible",
+      ".mon-timeline-row:focus-visible",
+      ".mon-approval-main:focus-visible",
+      ".mon-diff-summary:focus-visible",
+      ".mon-scores-summary:focus-visible",
+    ]) {
+      expect(monitorCss).toContain(selector);
+    }
+    expect(monitorCss).toContain("box-shadow: 0 0 0 3px var(--ring)");
   });
 });
 

@@ -243,6 +243,7 @@ describe("RunList", () => {
     await harness.flush(40);
     const buttons = harness.container.querySelectorAll("button");
     expect(buttons.length).toBe(2);
+    expect(buttons[0]?.className).toContain("gw-run-row");
     // run-a has createdAtMs (shortTime present); run-b has none (shortTime "").
     click(buttons[1]);
     await harness.flush();
@@ -313,6 +314,7 @@ describe("RunTree", () => {
     await harness.flush(50);
     const buttons = harness.container.querySelectorAll("button");
     expect(buttons.length).toBeGreaterThanOrEqual(4);
+    expect(buttons[0]?.className).toContain("gw-node-row");
     click(buttons[0]);
     await harness.flush();
     expect(selectedNodes.length).toBeGreaterThan(0);
@@ -744,6 +746,7 @@ describe("ApprovalPanel", () => {
     const approveButtons = [...harness.container.querySelectorAll("button")].filter(
       (b) => b.textContent === "Approve",
     );
+    expect(approveButtons[0]?.className).toContain("gw-approval-button-success");
     click(approveButtons[0]);
     await harness.flush(60);
     expect(gw.approvalsSubmitted.length).toBeGreaterThanOrEqual(1);

@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
-import type { CSSProperties } from "react";
-import { formatStatus, statusClass, statusColor } from "./theme";
+import { useInsertionEffect, type CSSProperties } from "react";
+import { ensureGatewayUiStyles, formatStatus, statusClass } from "./theme";
 
 export type StatusPillProps = {
   /** A run/node status string, e.g. "running", "ok", "failed", "waiting". */
@@ -17,29 +17,20 @@ export type StatusPillProps = {
  * waiting = warning, failed/cancelled = danger, everything else = neutral).
  */
 export function StatusPill({ status, label, className, style }: StatusPillProps) {
-  const color = statusColor(status);
+  useInsertionEffect(ensureGatewayUiStyles, []);
+  const tone = statusClass(status);
   const text = label ?? formatStatus(status);
   return (
     <span
-      className={className ?? `badge ${statusClass(status)}`}
+      className={["gw-status-pill", "badge", tone, className].filter(Boolean).join(" ")}
       data-status={status}
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 600,
-        color,
-        background: `color-mix(in srgb, ${color} 12%, transparent)`,
-        border: `1px solid color-mix(in srgb, ${color} 33%, transparent)`,
         ...style,
       }}
     >
       <span
         aria-hidden
-        style={{ width: 6, height: 6, borderRadius: 999, background: color }}
+        className="gw-status-pill-dot"
       />
       {text}
     </span>

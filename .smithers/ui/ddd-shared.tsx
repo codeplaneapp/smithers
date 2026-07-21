@@ -1894,7 +1894,7 @@ export const styles = [
     " --surface-glass:rgba(255,255,255,0.72); --surface-glass-strong:rgba(255,255,255,0.85);" +
     " --border:rgba(10,10,10,0.08); --border-strong:rgba(10,10,10,0.14); --border-solid:#ededed;" +
     " --hover:#f4f4f4; --hover-subtle:rgba(10,10,10,0.03); --inverse-bg:#0a0a0a; --inverse-text:#ffffff;" +
-    " --code-bg:#0a0a0a; --code-text:#f4f4f4; --brand:#6d56d8; --success:#0f8f78; --danger:#e5484d; --warning:#bf7100; --shadow-rgb:10 10 10;" +
+    " --code-bg:#0a0a0a; --code-text:#f4f4f4; --brand:#6d56d8; --success:#087461; --danger:#c5343f; --warning:#955600; --shadow-rgb:10 10 10;" +
     " --panel:var(--surface); --card:var(--surface); --line:var(--border-solid); --muted:var(--text-muted);" +
     " --ok:var(--success); --warn:var(--warning); --bad:var(--danger); --blue:var(--brand); }",
   "@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { color-scheme:dark;" +

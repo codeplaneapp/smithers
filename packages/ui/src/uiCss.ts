@@ -528,9 +528,12 @@ export const agentOutputCss = `
 /* -------------------------------------------------------------------------- */
 
 export const pierreDiffCss = `
-.sui-pierre-diff { display:block; min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; overflow:hidden; }
-.sui-pierre-diff-empty { padding:24px; text-align:center; color:${t.mutedForeground}; font-size:13px; }
+.sui-pierre-diff-frame { min-width:0; border-radius:${t.radius}; background:${t.card}; color:${t.foreground}; }
+.sui-pierre-diff { --diffs-font-family:${t.fontMono}; --diffs-header-font-family:${t.fontSans}; --diffs-light-bg:${t.card}; --diffs-dark-bg:${t.card}; --diffs-light:${t.foreground}; --diffs-dark:${t.foreground}; --diffs-addition-color:${t.success}; --diffs-deletion-color:${t.destructive}; --diffs-bg-addition-override:${t.successSoft}; --diffs-bg-deletion-override:${t.destructiveSoft}; --diffs-bg-context-override:${t.surface2}; --diffs-bg-separator-override:${t.surface2}; --diffs-fg-number-override:${t.mutedForeground}; display:block; min-width:0; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.foreground}; overflow:hidden; }
+.sui-pierre-diff-empty { padding:24px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; text-align:center; color:${t.mutedForeground}; font-size:13px; }
 .sui-pierre-diff-stat { font-family:${t.fontMono}; font-size:11px; color:${t.mutedForeground}; }
+.sui-pierre-diff-stat-add { color:${t.success}; }
+.sui-pierre-diff-stat-del { color:${t.destructive}; }
 `;
 
 /* -------------------------------------------------------------------------- */

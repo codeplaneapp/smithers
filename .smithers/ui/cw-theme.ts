@@ -12,7 +12,7 @@ export const themeCss = [
     " --border:rgba(10,10,10,0.08); --border-strong:rgba(10,10,10,0.14); --border-solid:#ededed;" +
     " --hover:#f4f4f4; --hover-subtle:rgba(10,10,10,0.03); --inverse-bg:#0a0a0a; --inverse-text:#ffffff;" +
     " --code-bg:#0a0a0a; --code-text:#f4f4f4; --inline-code-bg:rgba(10,10,10,0.07);" +
-    " --brand:#6d56d8; --success:#0f8f78; --danger:#e5484d; --warning:#bf7100; --shadow-rgb:10 10 10;" +
+    " --brand:#6d56d8; --success:#087461; --danger:#c5343f; --warning:#955600; --shadow-rgb:10 10 10;" +
     " --graph-bg:#fafbfc; --graph-border:#eef0f3; --graph-dots:#e2e7ef;" +
     " --node-bg:#ffffff; --node-border:#d7e0eb; --node-title:#182230; --node-muted:#607087; --node-shadow:rgb(30 42 60 / 10%);" +
     " --panel:var(--surface); --card:var(--surface); --line:var(--border-solid); --muted:var(--text-muted);" +
@@ -130,7 +130,7 @@ export const themeCss = [
   ".smithers-node.is-running { box-shadow:0 0 0 2px color-mix(in srgb,var(--brand) 55%,transparent), 0 8px 18px var(--node-shadow); }",
   ".smithers-node.is-done { border-color:color-mix(in srgb,var(--ok) 45%,var(--node-border)); }",
   ".smithers-node.is-failed { border-color:color-mix(in srgb,var(--bad) 55%,var(--node-border)); }",
-  ".smithers-node-agent { border-left-color:#0f8f78; }",
+  ".smithers-node-agent { border-left-color:var(--success); }",
   ".smithers-node-approval { border-left-color:#bf5b16; }",
   ".smithers-node-compute { border-left-color:#356fd2; }",
   ".smithers-node-loop { border-left-color:#6d56d8; }",

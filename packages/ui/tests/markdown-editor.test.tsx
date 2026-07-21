@@ -177,6 +177,11 @@ describe("MarkdownEditor styling", () => {
     expect(markdownEditorCss).toContain("--crepe-color-primary:var(--brand,#6d56d8)");
     expect(markdownEditorCss).toContain("--crepe-font-default:var(--font-sans");
     expect(markdownEditorCss).toContain("--crepe-font-code:var(--font-mono");
+    expect(markdownEditorCss).toContain(".milkdown :focus-visible{outline:2px solid var(--ring-border");
+    expect(markdownEditorCss).toContain("transparent))!important;outline-offset:2px}");
+    expect(markdownEditorCss).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(markdownEditorCss).toContain("animation-duration:0.001ms!important");
+    expect(markdownEditorCss).toContain("--crepe-color-outline:var(--text-faint,#8c8c95)");
   });
 
   test("explicit data-theme toggles the Crepe palette independently of the OS", async () => {

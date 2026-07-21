@@ -1,9 +1,9 @@
 /** @jsxImportSource react */
-import { useEffect, type CSSProperties } from "react";
+import { useEffect, useInsertionEffect, type CSSProperties } from "react";
 import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import type { GatewayRunSummaryRow } from "@smithers-orchestrator/gateway-client";
 import { StatusPill } from "./StatusPill";
-import { theme } from "./theme";
+import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type RunListProps = {
   /** Filter passed straight to `useGatewayRuns({ filter })`. */
@@ -49,6 +49,7 @@ export function RunList({
   style,
   useRuns = useGatewayRuns,
 }: RunListProps) {
+  useInsertionEffect(ensureGatewayUiStyles, []);
   const { data, loading, error, refetch } = useRuns(filter ? { filter } : undefined);
   const runs = (data ?? []) as GatewayRunSummaryRow[];
 
@@ -89,19 +90,8 @@ export function RunList({
             key={run.runId}
             type="button"
             onClick={() => onSelect?.(run.runId)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "8px 10px",
-              borderRadius: theme.radius,
-              border: `1px solid ${active ? theme.accent : theme.border}`,
-              background: active ? `color-mix(in srgb, ${theme.accent} 10%, transparent)` : theme.panel,
-              color: theme.text,
-              cursor: "pointer",
-              textAlign: "left",
-            }}
+            className="gw-run-row"
+            data-active={active}
           >
             <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>

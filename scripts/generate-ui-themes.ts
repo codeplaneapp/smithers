@@ -121,8 +121,8 @@ const crepeLightHouseTokens = crepeHouseTokens({
   inverseText: "#fafafa",
   inlineCodeBg: "rgba(24,24,27,0.06)",
   brand: "#6d56d8",
-  success: "#0f8f78",
-  danger: "#e5484d",
+  success: "#087461",
+  danger: "#c5343f",
   shadow1: "0 1px 2px rgb(24 24 27 / 0.05)",
   shadow2: "0 1px 2px rgb(24 24 27 / 0.04),0 8px 24px rgb(24 24 27 / 0.07)",
 });
@@ -130,7 +130,7 @@ const crepeDarkHouseTokens = crepeHouseTokens({
   background: "#09090b",
   text: "#f4f4f5",
   textMuted: "#a1a1aa",
-  textFaint: "#71717a",
+  textFaint: "#8c8c95",
   surface: "#141417",
   surface2: "#1b1b20",
   hover: "#1f1f24",
@@ -151,6 +151,8 @@ const crepeCss = [
   `.milkdown{${crepeLightHouseTokens}}`,
   `@media (prefers-color-scheme: dark){:root:not([data-theme='light']) .milkdown{${crepeDarkHouseTokens}}}`,
   `:root[data-theme='dark'] .milkdown{${crepeDarkHouseTokens}}`,
+  `.milkdown :focus-visible{outline:2px solid var(--ring-border,color-mix(in srgb,var(--brand,#6d56d8) 50%,transparent))!important;outline-offset:2px}`,
+  `@media (prefers-reduced-motion: reduce){.milkdown *,.milkdown *::before,.milkdown *::after{animation-delay:0ms!important;animation-duration:0.001ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-delay:0ms!important;transition-duration:0.001ms!important}}`,
 ].join("\n");
 emit(
   "crepeTheme.generated.ts",

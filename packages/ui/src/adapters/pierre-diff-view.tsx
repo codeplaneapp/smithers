@@ -48,14 +48,14 @@ export function normalizeDiffPath(path: string | undefined): string {
   return (path ?? "").replace(/^"(.*)"$/, "$1").replace(/^[ab]\//, "");
 }
 
-function diffStats(file: FileDiffMetadata): string {
+function diffStats(file: FileDiffMetadata): { additions: number; deletions: number } {
   let add = 0;
   let del = 0;
   for (const hunk of file.hunks) {
     add += hunk.additionLines;
     del += hunk.deletionLines;
   }
-  return `+${add} -${del}`;
+  return { additions: add, deletions: del };
 }
 
 /**
@@ -128,8 +128,18 @@ export function PierreDiffView({
     );
   }
 
+  const renderStats = (file: FileDiffMetadata) => {
+    const stats = diffStats(file);
+    return (
+      <span className="sui-pierre-diff-stat">
+        <span className="sui-pierre-diff-stat-add">+{stats.additions}</span>{" "}
+        <span className="sui-pierre-diff-stat-del">-{stats.deletions}</span>
+      </span>
+    );
+  };
+
   return (
-    <div data-slot="pierre-diff-view" data-theme-mode={resolvedMode}>
+    <div className="sui-pierre-diff-frame" data-slot="pierre-diff-view" data-theme-mode={resolvedMode}>
       <CodeView
         className={cn("sui-pierre-diff", className)}
         disableWorkerPool
@@ -145,7 +155,7 @@ export function PierreDiffView({
           themeType: resolvedMode,
         }}
         renderHeaderMetadata={(item) =>
-          item.type === "diff" ? <span className="sui-pierre-diff-stat">{diffStats(item.fileDiff)}</span> : null
+          item.type === "diff" ? renderStats(item.fileDiff) : null
         }
       />
     </div>

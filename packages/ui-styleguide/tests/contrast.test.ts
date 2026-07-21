@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { workflowUiThemeCss } from "../src/index";
+import { standaloneThemeCss, workflowUiThemeCss } from "../src/index";
 
 type Rgb = readonly [number, number, number];
 type ThemeName = "light" | "dark";
@@ -22,6 +22,19 @@ function themeTokens(theme: ThemeName): Map<string, string> {
 
   const darkBlock = workflowUiThemeCss.match(/:root\[data-theme='dark'\] \{ ([^}]+) \}/)?.[1];
   if (!darkBlock) throw new Error("dark token block not found");
+  for (const [name, value] of parseDeclarations(darkBlock)) tokens.set(name, value);
+  return tokens;
+}
+
+function standaloneTokens(theme: ThemeName): Map<string, string> {
+  const css = standaloneThemeCss();
+  const lightBlock = css.match(/^:root \{ ([^}]+) \}/m)?.[1];
+  if (!lightBlock) throw new Error("standalone light token block not found");
+  const tokens = parseDeclarations(lightBlock);
+  if (theme === "light") return tokens;
+
+  const darkBlock = css.match(/:root\[data-theme="dark"\] \{ ([^}]+) \}/)?.[1];
+  if (!darkBlock) throw new Error("standalone dark token block not found");
   for (const [name, value] of parseDeclarations(darkBlock)) tokens.set(name, value);
   return tokens;
 }
@@ -93,4 +106,10 @@ describe("documented text token contrast", () => {
       expect(ratio).toBeGreaterThanOrEqual(AA_MINIMUM);
     });
   }
+
+  test("standalone dark --text-faint on --surface meets WCAG AA", () => {
+    const tokens = standaloneTokens("dark");
+    const ratio = contrastRatio(resolveColor("--text-faint", tokens), resolveColor("--surface", tokens));
+    expect(ratio).toBeGreaterThanOrEqual(AA_MINIMUM);
+  });
 });

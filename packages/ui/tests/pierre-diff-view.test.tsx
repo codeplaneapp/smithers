@@ -18,6 +18,7 @@ import {
   PierreDiffView,
 } from "../src/adapters/pierre-diff-view";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
+import { smithersUiCss } from "../src/uiCss";
 
 const PATCH = `diff --git a/greet.ts b/greet.ts
 index 1111111..2222222 100644
@@ -55,6 +56,20 @@ describe("theme + layout mapping", () => {
   test("layout maps onto CodeView diffStyle (split=side-by-side, inline=unified)", () => {
     expect(diffStyleForLayout("split")).toBe("split");
     expect(diffStyleForLayout("inline")).toBe("unified");
+  });
+
+  test("maps Pierre chrome and semantic diff colors onto house tokens", () => {
+    const rule = smithersUiCss.match(/\.sui-pierre-diff \{[^}]+\}/)?.[0] ?? "";
+    for (const token of [
+      "var(--surface, #ffffff)",
+      "var(--text, #18181b)",
+      "var(--success, #087461)",
+      "var(--danger, #c5343f)",
+      "var(--success-soft,",
+      "var(--danger-soft,",
+    ]) {
+      expect(rule).toContain(token);
+    }
   });
 
   test("normalizeDiffPath strips quotes and a/ b/ prefixes", () => {
@@ -163,6 +178,8 @@ describe("PierreDiffView live render (happy-dom)", () => {
       const stat = el.querySelector(".sui-pierre-diff-stat");
       expect(stat).not.toBeNull();
       expect(stat!.textContent).toBe("+1 -1");
+      expect(stat!.querySelector(".sui-pierre-diff-stat-add")?.textContent).toBe("+1");
+      expect(stat!.querySelector(".sui-pierre-diff-stat-del")?.textContent).toBe("-1");
     });
   }
 

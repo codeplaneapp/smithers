@@ -50,6 +50,13 @@ How the pieces fit, infrastructure first:
     (side-by-side) vs `"inline"` (unified). The pure
     seams `diffsThemeForMode`, `diffStyleForLayout`, and `patchToCodeViewItems`
     are exported alongside the component.
+    Its frame, diff additions/deletions, gutters, and stats are bridged onto
+    house surface/text/success/danger tokens, and its default mode follows the
+    shared `resolveTheme()` contract. Syntax token colors remain the bundled
+    Shiki `github-light`/`github-dark` pair: Pierre's `CodeView` accepts a theme
+    name but exposes no custom theme-registration prop, so replacing those
+    tokens requires owning a separate highlighter/worker registration path and
+    is intentionally deferred until that integration can be tested end to end.
   - `Terminal` (`@smithers-orchestrator/ui/adapters/terminal`, also
     `smithers-orchestrator/ui/adapters/terminal` off the published facade) — a
     generic xterm.js render surface. The data source is lifted entirely onto

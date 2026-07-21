@@ -28,3 +28,14 @@ test("generated seeded pack matches canonical .smithers sources", () => {
         ).toBe(source);
     }
 });
+
+test("seeded create-workflow theme ships the AA semantic ramp", () => {
+    const theme = GENERATED_SEEDED_FILES.find((file) => file.path === ".smithers/ui/cw-theme.ts");
+    expect(theme).toBeDefined();
+    expect(theme.contents).toContain("--success:#087461; --danger:#c5343f; --warning:#955600");
+    expect(theme.contents).toContain(".smithers-node-agent { border-left-color:var(--success); }");
+    for (const stale of ["#0f8f78", "#e5484d", "#bf7100"]) {
+        expect(theme.contents).not.toContain(stale);
+        expect(GENERATED_SEEDED_FILES.every((file) => !file.contents.includes(stale))).toBe(true);
+    }
+});

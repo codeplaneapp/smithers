@@ -1,9 +1,9 @@
 /** @jsxImportSource react */
-import type { CSSProperties } from "react";
+import { useInsertionEffect, type CSSProperties } from "react";
 import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { NodeRow } from "./NodeRow";
-import { theme } from "./theme";
+import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type RunTreeProps = {
   /** The run to render the node tree for. */
@@ -22,6 +22,7 @@ export type RunTreeProps = {
  * `onSelectNode` to drive a {@link NodeOutputView}.
  */
 export function RunTree({ runId, onSelectNode, activeNodeId, className, style }: RunTreeProps) {
+  useInsertionEffect(ensureGatewayUiStyles, []);
   const { root, isLoading, error } = useGatewayRunTree(runId);
 
   return (

@@ -1,8 +1,8 @@
 /** @jsxImportSource react */
 import { runNodeKey } from "@smithers-orchestrator/gateway-client";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { CSSProperties } from "react";
 import { StatusPill } from "./StatusPill";
-import { theme } from "./theme";
 
 export type NodeRowProps = {
   node: GatewayRunNode;
@@ -24,29 +24,16 @@ export function NodeRow({ node, depth, activeNodeId, onSelectNode }: NodeRowProp
       <button
         type="button"
         onClick={() => onSelectNode?.(node)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          width: "100%",
-          padding: "6px 8px",
-          paddingLeft: 8 + depth * 16,
-          border: "none",
-          borderLeft: `2px solid ${active ? theme.accent : "transparent"}`,
-          background: active ? `color-mix(in srgb, ${theme.accent} 10%, transparent)` : "transparent",
-          color: theme.text,
-          cursor: onSelectNode ? "pointer" : "default",
-          textAlign: "left",
-          fontFamily: theme.fontSans,
-          fontSize: 13,
-        }}
+        className="gw-node-row"
+        data-active={active}
+        data-interactive={Boolean(onSelectNode)}
+        style={{ "--gw-node-depth": depth } as CSSProperties}
       >
         <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {node.cardLabel ?? node.name}
           </span>
-          <span style={{ fontSize: 11, color: theme.textDim }}>{node.kind}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted, #52525b)" }}>{node.kind}</span>
         </span>
         <StatusPill status={node.status} />
       </button>

@@ -112,6 +112,14 @@ export type TerminalProps = Omit<ComponentProps<"div">, "onResize"> & {
 const DEFAULT_FONT_FAMILY =
   "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(REDUCED_MOTION_QUERY).matches;
+}
+
 /** Inject the xterm base sheet + surface chrome once per document (browser only). */
 function injectTerminalStyles(): void {
   if (typeof document === "undefined") return;
@@ -218,7 +226,7 @@ export function Terminal({
         theme: palette,
         fontFamily,
         fontSize,
-        cursorBlink,
+        cursorBlink: cursorBlink && !prefersReducedMotion(),
         convertEol: true,
         disableStdin: readOnly,
         scrollback,

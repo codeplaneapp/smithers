@@ -33,4 +33,10 @@ describe("standaloneThemeCss", () => {
     expect(css.endsWith(reducedMotionCss)).toBe(true);
     expect(css.match(/@media \(prefers-reduced-motion: reduce\)/g)).toHaveLength(1);
   });
+
+  test("uses the corrected dark faint token in both dark selectors", () => {
+    const css = standaloneThemeCss();
+    expect(css.match(/--text-faint:#8c8c95/g)).toHaveLength(2);
+    expect(css).not.toContain("--text-faint:#71717a; --text-placeholder:#63636b");
+  });
 });

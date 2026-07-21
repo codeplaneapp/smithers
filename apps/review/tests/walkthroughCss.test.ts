@@ -12,4 +12,9 @@ describe("walkthrough CSS design contract", () => {
     expect(walkthroughCss).toContain(reducedMotionCss);
     expect(walkthroughCss.match(/@media \(prefers-reduced-motion: reduce\)/g)).toHaveLength(1);
   });
+
+  test("reveals otherwise hidden anchor links for keyboard focus", () => {
+    expect(walkthroughCss).toContain(".anchor-link:focus-visible { opacity: 1; }");
+    expect(walkthroughCss).toContain(":focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }");
+  });
 });

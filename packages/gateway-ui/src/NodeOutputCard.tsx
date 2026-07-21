@@ -1,9 +1,9 @@
 /** @jsxImportSource react */
-import type { CSSProperties, ReactNode } from "react";
+import { useInsertionEffect, type CSSProperties, type ReactNode } from "react";
 import { useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
 import { AgentOutput, parseAgentOutput } from "@smithers-orchestrator/ui";
 import { formatOutput, unwrapNodeOutput, type NodeOutputStatus } from "./NodeOutputView";
-import { statusColor, theme } from "./theme";
+import { ensureGatewayUiStyles, theme } from "./theme";
 
 /** State handed to a {@link NodeOutputCard} body render prop alongside the row. */
 export type NodeOutputCardBodyState = {
@@ -104,6 +104,7 @@ function NodeOutputCardInner({
   style,
   useNodeOutput = useGatewayNodeOutput,
 }: Omit<NodeOutputCardProps, "remountKey">) {
+  useInsertionEffect(ensureGatewayUiStyles, []);
   const { data, loading, error } = useNodeOutput({ runId, nodeId, iteration });
   const { status: envelopeStatus, row } = unwrapNodeOutput(data);
   // Before the first envelope lands (or on error) show pending/failed chrome
@@ -114,7 +115,6 @@ function NodeOutputCardInner({
       ? "pending"
       : envelopeStatus;
   const { glyph, label } = STATUS_GLYPH[status];
-  const color = statusColor(status);
   const render = typeof children === "function" ? children : body;
 
   let content: ReactNode;
@@ -149,7 +149,7 @@ function NodeOutputCardInner({
 
   return (
     <section
-      className={className}
+      className={["gw-node-output-card", className].filter(Boolean).join(" ")}
       data-status={status}
       style={{
         display: "flex",
@@ -168,19 +168,7 @@ function NodeOutputCardInner({
         <span
           aria-label={label}
           title={label}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 18,
-            height: 18,
-            borderRadius: 999,
-            flexShrink: 0,
-            fontSize: 12,
-            fontWeight: 700,
-            color,
-            background: `color-mix(in srgb, ${color} 14%, transparent)`,
-          }}
+          className="gw-node-output-glyph"
         >
           {glyph}
         </span>
