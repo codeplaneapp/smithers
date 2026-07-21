@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, type ReactElement } from "react";
+import { act, type MouseEvent, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
@@ -217,9 +217,10 @@ describe("AgentCard", () => {
 
   test("host onClick composes with onSelect instead of replacing it", async () => {
     const calls: string[] = [];
-    await render(
-      <AgentCard name="coder" onSelect={() => calls.push("select")} onClick={() => calls.push("click")} />,
-    );
+    const onClick = (event: MouseEvent<HTMLDivElement>) => {
+      calls.push(event.currentTarget.tagName === "BUTTON" ? "click" : "unexpected");
+    };
+    await render(<AgentCard name="coder" onSelect={() => calls.push("select")} onClick={onClick} />);
     const button = container!.querySelector<HTMLButtonElement>('[data-slot="agent-card"]')!;
     await act(async () => button.click());
     expect(calls).toEqual(["select", "click"]);

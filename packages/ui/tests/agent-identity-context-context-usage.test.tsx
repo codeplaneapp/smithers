@@ -177,6 +177,19 @@ describe("ContextUsage", () => {
     expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
   });
 
+  test("controlled mode ignores hover entirely (no open, no onOpenChange)", async () => {
+    const changes: boolean[] = [];
+    await render(<ContextUsage open={false} usage={{}} onOpenChange={(open) => changes.push(open)} />);
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      trigger.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    });
+    await act(async () => sleep(400));
+    expect(changes).toEqual([]);
+    expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+  });
+
   test("click during a pending hover timer wins over hover close", async () => {
     await render(<ContextUsage usage={{}} />);
     const rootEl = container!.querySelector('[data-slot="context-usage"]')!;

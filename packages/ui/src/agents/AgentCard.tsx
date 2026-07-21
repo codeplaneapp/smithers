@@ -6,7 +6,7 @@ import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss } from "./agentsCss";
 import { AgentAvailabilityBadge, type AgentAvailability } from "./AgentDefinition";
 
-export type AgentCardProps = Omit<ComponentProps<"div">, "children" | "title" | "onSelect" | "onClick"> & {
+export type AgentCardProps = Omit<ComponentProps<"div">, "children" | "title" | "onSelect"> & {
   name: string;
   provider?: string;
   model?: string;
@@ -15,7 +15,6 @@ export type AgentCardProps = Omit<ComponentProps<"div">, "children" | "title" | 
   selected?: boolean;
   disabled?: boolean;
   onSelect?: () => void;
-  onClick?: (event: MouseEvent<HTMLElement>) => void;
   children?: ReactNode;
 };
 
@@ -67,7 +66,7 @@ export function AgentCard({
         disabled={disabled}
         onClick={(event) => {
           onSelect();
-          onClick?.(event);
+          onClick?.(event as unknown as MouseEvent<HTMLDivElement>);
         }}
         className={cn("sui-agentcard sui-agentcard-selectable", className)}
         {...(props as ComponentProps<"button">)}
