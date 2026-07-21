@@ -92,6 +92,19 @@ describe("renderWalkthroughHtml", () => {
     expect(html).toContain(standaloneThemeCss());
   });
 
+  test("forces Pierre diffs to follow the root data-theme override", async () => {
+    const html = await render();
+    const pierreTheme = html.indexOf('data-theme-css=""');
+    const bridge = html.lastIndexOf(':root[data-theme="dark"] .pierre-diff { color-scheme: dark; }');
+
+    expect(pierreTheme).toBeGreaterThan(-1);
+    expect(html.indexOf("color-scheme: light;", pierreTheme)).toBeGreaterThan(pierreTheme);
+    expect(bridge).toBeGreaterThan(pierreTheme);
+    expect(html).toContain(
+      '@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pierre-diff { color-scheme: dark; } }',
+    );
+  });
+
   test("keeps standalone code rules from outranking Pierre's layered cascade", async () => {
     const html = await render();
     const standaloneCss = standaloneThemeCss();

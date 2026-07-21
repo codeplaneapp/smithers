@@ -171,7 +171,12 @@ async function renderDiffBodies(
         return;
       }
       try {
-        const html = await renderPierreFileDiff({ diff: file.diff, diffStyle, themeType: "system" });
+        // Pierre's `system` mode declares `color-scheme: light dark` on its
+        // own host, which follows the OS even when the walkthrough shell has
+        // an explicit `data-theme`. Start from a deterministic light render;
+        // walkthroughRestoreCss (emitted after Pierre's styles) switches that
+        // host to dark under the same data-theme-wins contract as the shell.
+        const html = await renderPierreFileDiff({ diff: file.diff, diffStyle, themeType: "light" });
         const assets = extractDiffAssets(html);
         for (const style of assets.styles) styles.add(style);
         if (!sprite) sprite = assets.sprite;
@@ -287,8 +292,8 @@ function sidebarToc(args: {
  * renders the diffs; Mermaid renders narrator diagrams (gzipped runtime
  * inlined only when diagrams exist); a deterministic SVG chart shows the
  * change shape; an optional reviewer quiz checks comprehension. Light and
- * dark via light-dark() tokens with a persisted theme toggle. No external
- * assets; opens from file://.
+ * dark via the shared data-theme-wins contract with a persisted theme toggle.
+ * No external assets; opens from file://.
  */
 export async function renderWalkthroughHtml(opts: {
   title: string;

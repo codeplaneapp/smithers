@@ -18,7 +18,7 @@ try {
 globalThis.fetch = nativeFetch;
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { act, createElement, useSyncExternalStore, type ReactElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SmithersCollectionsProvider } from "@smithers-orchestrator/gateway-react";
 import {
@@ -31,9 +31,9 @@ import {
   RunList,
   RunTree,
   SimpleWorkflowDashboard,
+  WorkflowGraph,
   WorkflowPicker,
 } from "../src/index.ts";
-import { resolveTheme, subscribeTheme } from "../src/theme.ts";
 import { startInMemoryGateway, type InMemoryGateway, type SeedState } from "./inMemoryGateway.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -148,24 +148,19 @@ afterEach(async () => {
 
 describe("WorkflowGraph theme", () => {
   test("updates its resolved mode when root data-theme changes", async () => {
-    function ThemeProbe() {
-      const mode = useSyncExternalStore(subscribeTheme, resolveTheme, () => "light");
-      return createElement("output", { "data-theme-mode": mode }, mode);
-    }
-
     document.documentElement.setAttribute("data-theme", "light");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
     try {
-      await act(async () => root.render(createElement(ThemeProbe)));
-      expect(container.querySelector("output")?.getAttribute("data-theme-mode")).toBe("light");
+      await act(async () => root.render(createElement(WorkflowGraph, { spec: [] })));
+      expect(container.querySelector(".smithers-graph")?.getAttribute("data-theme-mode")).toBe("light");
 
       await act(async () => {
         document.documentElement.setAttribute("data-theme", "dark");
         await sleep(20);
       });
-      expect(container.querySelector("output")?.getAttribute("data-theme-mode")).toBe("dark");
+      expect(container.querySelector(".smithers-graph")?.getAttribute("data-theme-mode")).toBe("dark");
     } finally {
       await act(async () => root.unmount());
       container.remove();

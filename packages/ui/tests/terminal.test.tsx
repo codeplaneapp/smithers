@@ -131,12 +131,11 @@ describe("<Terminal> headless rendering", () => {
     expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("light");
     expect(ready.options.theme?.background).toBe("#fbfcfd");
 
-    term = null;
     await act(async () => {
       document.documentElement.setAttribute("data-theme", "dark");
       await Promise.resolve();
     });
-    ready = await waitFor(() => term);
+    await waitFor(() => ready.options.theme?.background === "#07090d");
     expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("dark");
     expect(ready.options.theme?.background).toBe("#07090d");
   });

@@ -151,6 +151,8 @@ export function Terminal({
   useInsertionEffect(injectTerminalStyles, []);
   const houseTheme = useResolvedTheme();
   const resolvedTheme = theme ?? houseTheme;
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
 
   // Latest-value refs keep the mount effect stable (it only re-runs on config
   // that requires rebuilding the emulator) while still calling current props.
@@ -168,6 +170,19 @@ export function Terminal({
   colorsRef.current = colors;
 
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<XTerminal | null>(null);
+
+  // Palette changes do not rebuild the emulator (or lose its buffer). xterm
+  // accepts live option updates, so a root data-theme toggle repaints the
+  // existing adapter in place.
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term) return;
+    term.options.theme = {
+      ...(resolvedTheme === "light" ? LIGHT_THEME : DARK_THEME),
+      ...colors,
+    };
+  }, [resolvedTheme, colors]);
 
   useEffect(() => {
     const host = mountRef.current;
@@ -195,7 +210,10 @@ export function Terminal({
       // emulator into it.
       host.replaceChildren();
 
-      const palette = { ...(resolvedTheme === "light" ? LIGHT_THEME : DARK_THEME), ...colorsRef.current };
+      const palette = {
+        ...(resolvedThemeRef.current === "light" ? LIGHT_THEME : DARK_THEME),
+        ...colorsRef.current,
+      };
       term = new XtermTerminal({
         theme: palette,
         fontFamily,
@@ -205,6 +223,7 @@ export function Terminal({
         disableStdin: readOnly,
         scrollback,
       });
+      terminalRef.current = term;
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.open(host);
@@ -246,9 +265,10 @@ export function Terminal({
       if (typeof streamTeardown === "function") streamTeardown();
       resizeObserver?.disconnect();
       dataDisposable?.dispose();
+      if (terminalRef.current === term) terminalRef.current = null;
       term?.dispose();
     };
-  }, [resolvedTheme, fontSize, fontFamily, cursorBlink, readOnly, scrollback]);
+  }, [fontSize, fontFamily, cursorBlink, readOnly, scrollback]);
 
   const surfaceBackground = (resolvedTheme === "light" ? LIGHT_THEME : DARK_THEME).background;
 
