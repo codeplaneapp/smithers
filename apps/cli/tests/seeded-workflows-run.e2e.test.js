@@ -348,6 +348,25 @@ for (const id of SEEDED_WORKFLOW_IDS) {
   // smoke harness has no way to seed one. It gets its own dedicated e2e
   // coverage instead: apps/cli/tests/eval-suite-run.e2e.test.js.
   if (id === "eval-suite-run") continue;
+  if (id === "create-ui") {
+    // create-ui's compliance loop became a HARD gate (author must report
+    // verified=true and the gate independently checks the served Gateway
+    // routes). This harness runs a bare engine with fake agents and no
+    // gateway, so the only healthy outcome is failing closed at the
+    // iteration cap -- completing "successfully" here would be the exact
+    // unverified-UI false-pass the gate exists to prevent.
+    test(`seeded workflow ${id} fails closed without a verifiable gateway UI`, () => {
+      const { repo, env } = initWorkflowPack();
+      const result = runSmithers(
+        ["workflow", "run", id, "--input", JSON.stringify(workflowInput(id))],
+        { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS },
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.json?.status).toBe("failed");
+      expect(JSON.stringify(result.json?.error ?? {})).toContain("RALPH_MAX_REACHED");
+    }, SMOKE_TEST_TIMEOUT_MS);
+    continue;
+  }
   if (id === "docs-driven-development") {
     test(`seeded workflow ${id} runs with fake agents and writes spec artifacts`, () => {
       const { repo, env } = initWorkflowPack();
