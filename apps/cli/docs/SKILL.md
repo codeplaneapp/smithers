@@ -832,6 +832,7 @@ The bundle is one file. Two shipping shapes:
 | Raw shell/test log output, live (ANSI, scrollback) | `Terminal` from `smithers-orchestrator/ui/adapters/terminal` — a real xterm surface, not a styled HTML list |
 | Where a run sits in a fixed pipeline of stages | `StageStrip` |
 | Browsing the files a run changed | `FileTree` |
+| Charting data (counts per category, trends, magnitudes) | `ChartContainer` + `ChartTooltipContent`/`ChartLegendContent` + `chartConfig` from `smithers-orchestrator/ui/adapters/chart` (Recharts elements as children, series colors via the validated palette slots) — never `<canvas>`, chart.js, or hand-rolled SVG bars |
 
 The bundle reads `?runId=<id>` from `location.search` for the run to scope to, and optionally `__SMITHERS_GATEWAY_UI__` (a `GatewayUiBootConfig`) for the mount path, RPC path, WebSocket path, and free-form `props` you set at `gateway.register({ ui: { props } })`.
 

@@ -175,6 +175,7 @@ never pulls their runtime. Import them from the matching
 | `MarkdownEditor` | The shared WYSIWYG Milkdown Crepe markdown editor: the user edits rendered markdown directly, never raw source. Its generated theme maps Crepe colors and fonts onto house tokens and honors explicit `data-theme` before OS preference. Under server render and test DOMs it degrades to a controlled `<textarea>` honoring the same contract. | `value`, `onChange`, `readOnly`, `resetKey`, plus an imperative `getMarkdown` / `setMarkdown` handle |
 | `PierreDiffView` | Syntax-highlighted split or inline diffs over `@pierre/diffs`. | `patch`, `layout`, optional `mode` override (otherwise active house theme) |
 | `Terminal` | xterm.js terminal surface with snapshot and streaming seams. | `lines`, `stream`, optional `theme` override (otherwise active house theme) |
+| `ChartContainer` (+ `ChartTooltip`/`ChartLegend` content, `chartConfig`) | Recharts-backed charts on the validated categorical series palette; per-series CSS vars follow `data-theme` and the OS scheme. See [Chart](/reference/ui/chart). | `config`, Recharts children |
 
 The editor is generic and store-free: multiplayer sync, draft reconciliation,
 and persistence stay a caller concern, wired through `onChange` and the

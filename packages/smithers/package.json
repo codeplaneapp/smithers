@@ -169,6 +169,11 @@
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
       "default": "./src/*.js"
+    },
+    "./ui/adapters/chart": {
+      "types": "./src/ui/adapters/chart.d.ts",
+      "import": "./src/ui/adapters/chart.js",
+      "default": "./src/ui/adapters/chart.js"
     }
   },
   "files": [
