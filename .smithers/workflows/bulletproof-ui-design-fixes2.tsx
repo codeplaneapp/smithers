@@ -105,8 +105,8 @@ const GATE_COMMANDS = [
 
 export default smithers((ctx) => {
   const input = inputSchema.parse({
-    maxRounds: ctx.input.maxRounds ?? 3,
-    baseBranch: ctx.input.baseBranch ?? "main",
+    maxRounds: Number(ctx.input?.maxRounds ?? 3),
+    baseBranch: String(ctx.input?.baseBranch ?? "main"),
   });
   const repoRoot = resolveRepoRoot();
   const runSlug = String((ctx as any).runId ?? "bpui-df2").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
