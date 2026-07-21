@@ -10853,7 +10853,7 @@ tokens, never hex-plus-alpha.
 | `RunList` | A live, selectable list of runs with a status pill per row. | `filter`, `activeRunId`, `onSelect`, `pollMs` |
 | `RunTree` | The node tree for a run (initial snapshot plus live updates). | `runId`, `onSelectNode`, `activeNodeId` |
 | `RunEventLog` | A scrolling, auto-following event log for a run. | `runId`, `maxEvents`, `follow` |
-| `NodeOutputView` | The output of a single node: shows the pending state before the node produces, then the formatted output — updates as the run progresses. | `runId`, `nodeId`, `iteration` |
+| `NodeOutputView` | The output of a single node: shows the pending state before the node produces, then the formatted output; updates as the run progresses. | `runId`, `nodeId`, `iteration` |
 | `ApprovalPanel` | The pending approval queue with Approve and Deny buttons. | `filter`, `pollMs`, `onError` |
 | `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `onLaunched` |
 | `WorkflowPicker` | A select of the workflows registered on the Gateway. | `value`, `onChange`, `hasUiOnly` |

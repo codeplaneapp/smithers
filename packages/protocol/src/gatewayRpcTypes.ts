@@ -77,7 +77,7 @@ export type GatewayRpcMethod =
   | "browserPick"
   | "closeBrowserSession"
   | "listBrowserSessions";
-  
+
 export type BrowserSource = { kind: "url"; url: string } | { kind: "dev-server"; port: number; path?: string };
 export type BrowserSnapshot = { sessionId: string; source: BrowserSource; status: "starting" | "ready" | "loading" | "suspended" | "closed" | "failed"; revision: number; page: { url: string; title: string; canGoBack: boolean; canGoForward: boolean } | null; viewport: { width: number; height: number }; control: { owner: "user" | "agent" | null } };
 export type BrowserLocator = { testId: string } | { role: string; name?: string } | { css: string };
