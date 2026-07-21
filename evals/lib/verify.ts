@@ -4,6 +4,8 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
+import { build } from "esbuild";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
 
@@ -266,31 +268,149 @@ function normalizeScalar(json: string): string {
   return json.trim();
 }
 
-/** Transpile a candidate UI/code bundle (proves it's syntactically valid TSX) and
- * require the key API tokens. Pairs with the ui-quality llmJudge scorer, which
- * grades design/UX. Zero model spend, no module resolution. */
-function buildVerify(artifact: string, v: VerifySpec): EvalVerdict {
-  let transpiled = false;
-  let err = "";
-  try {
-    new Bun.Transpiler({ loader: "tsx" }).transformSync(artifact);
-    transpiled = true;
-  } catch (e) {
-    err = e instanceof Error ? e.message : String(e);
+type ImportBinding = { imported: string; local: string; module: string; namespace: boolean };
+
+// The UI deliverables are not required to pass the repository's full strict
+// typecheck (they are authored snippets), but these diagnostics are essential
+// to the build gate: they prove imports resolve, exports exist, and type-only
+// or nonexistent namespace bindings are not being used as runtime UI values.
+const STRUCTURAL_DIAGNOSTIC_CODES = new Set([1361, 2305, 2307, 2339, 2614, 2694]);
+
+function importedBindings(source: ts.SourceFile): ImportBinding[] {
+  const result: ImportBinding[] = [];
+  for (const node of source.statements) {
+    if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) continue;
+    const module = node.moduleSpecifier.text;
+    const clause = node.importClause;
+    if (!clause) continue;
+    if (clause.name) result.push({ imported: "default", local: clause.name.text, module, namespace: false });
+    const named = clause.namedBindings;
+    if (!named) continue;
+    if (ts.isNamespaceImport(named)) result.push({ imported: "*", local: named.name.text, module, namespace: true });
+    else for (const element of named.elements) result.push({ imported: element.propertyName?.text ?? element.name.text, local: element.name.text, module, namespace: false });
   }
-  const checks: EvalVerdict["checks"] = [
-    { name: "transpiles", passed: transpiled, detail: transpiled ? "valid tsx" : err.slice(0, 200) },
-    ...v.must.map((m) => ({ name: `must:${m}`, passed: matchesToken(artifact, m), detail: m })),
-    ...v.mustNot.map((m) => ({ name: `mustNot:${m}`, passed: !matchesToken(artifact, m), detail: m })),
-  ];
-  const passed = checks.every((c) => c.passed);
-  return {
-    passed,
-    score: scoreFromChecks(checks),
-    reason: passed ? "bundle transpiles and uses the required API" : `failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`,
-    method: "build",
-    checks,
+  return result;
+}
+
+function isImportedModule(bindings: ImportBinding[], token: string): boolean {
+  return bindings.some((b) => b.module === token || b.module.endsWith(`/${token}`));
+}
+
+function hasPropertyAccess(source: ts.SourceFile, property: string): boolean {
+  let found = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isPropertyAccessExpression(node) && node.name.text === property) found = true;
+    if (!found) ts.forEachChild(node, visit);
   };
+  visit(source);
+  return found;
+}
+
+function hasDottedAccess(source: ts.SourceFile, expression: string): boolean {
+  let found = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isPropertyAccessExpression(node) && node.getText(source) === expression) found = true;
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+function hasCallOrJsxUse(source: ts.SourceFile, bindings: ImportBinding[], name: string, jsxOnly = false): boolean {
+  const relevant = bindings.filter((b) => b.imported === name || b.namespace);
+  if (relevant.length === 0) return false;
+  let found = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningLikeElement(node)) {
+      const tag = node.tagName;
+      if (relevant.some((b) => (b.namespace && tag.getText() === `${b.local}.${name}`) || (!b.namespace && tag.getText() === b.local))) found = true;
+    }
+    if (!jsxOnly && ts.isCallExpression(node)) {
+      const callee = node.expression;
+      if (relevant.some((b) => (b.namespace && ts.isPropertyAccessExpression(callee) && callee.expression.getText() === b.local && callee.name.text === name) || (!b.namespace && callee.getText() === b.local))) found = true;
+    }
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+function hasJsxTag(source: ts.SourceFile, token: string): boolean {
+  const name = token.slice(1).split(/[.\s]/, 1)[0];
+  let found = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningLikeElement(node) && node.tagName.getText().split(".").pop() === name) found = true;
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+function structuralRequirement(source: ts.SourceFile, bindings: ImportBinding[], token: string): boolean {
+  if (token.startsWith("<")) return hasJsxTag(source, token);
+  if (token.includes("/") || token.startsWith("@")) return isImportedModule(bindings, token);
+  if (token.startsWith(".") && token.length > 1) return hasPropertyAccess(source, token.slice(1));
+  if (token.includes(".")) return hasDottedAccess(source, token);
+  const imported = bindings.find((b) => b.imported === token);
+  const isGatewayCall = /^(createGateway|useGateway)/.test(token);
+  return imported || bindings.some((b) => b.namespace) ? hasCallOrJsxUse(source, bindings, token, !isGatewayCall) : false;
+}
+
+function forbiddenStructure(source: ts.SourceFile, bindings: ImportBinding[], token: string): boolean {
+  if (token.startsWith("<")) return !hasJsxTag(source, token);
+  if (token.startsWith(".") && token.length > 1) return !hasPropertyAccess(source, token.slice(1));
+  if (token.includes(".")) return !hasDottedAccess(source, token);
+  const callName = token.endsWith("(") ? token.slice(0, -1) : token;
+  if (token.endsWith("(") && bindings.some((b) => b.imported === callName)) return !hasCallOrJsxUse(source, bindings, callName);
+  return !structuralRequirement(source, bindings, token);
+}
+
+/** Bundle against the real workspace, then require imported APIs/components to be used structurally. */
+async function buildVerify(artifact: string, v: VerifySpec): Promise<EvalVerdict> {
+  const checks: EvalVerdict["checks"] = [];
+  const root = repoRoot();
+  const tmpBase = join(root, ".smithers", "state");
+  let dir: string | null = null;
+  let source: ts.SourceFile | null = null;
+  let typeDiagnostics: readonly ts.Diagnostic[] = [];
+  try {
+    if (!artifact.trim()) throw new Error("empty artifact");
+    mkdirSync(tmpBase, { recursive: true });
+    dir = mkdtempSync(join(tmpBase, "eval-build-"));
+    const file = join(dir, "candidate.tsx");
+    writeFileSync(file, artifact, "utf8");
+    await build({ absWorkingDir: root, entryPoints: [file], bundle: true, write: false, platform: "browser", format: "esm", logLevel: "silent" });
+    checks.push({ name: "bundles", passed: true, detail: "resolved workspace modules and exports" });
+    source = ts.createSourceFile(file, artifact, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const parseErrors = (source as unknown as { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
+    checks.push({ name: "parses", passed: parseErrors.length === 0, detail: parseErrors[0]?.messageText?.toString() ?? "valid TSX" });
+    if (parseErrors.length === 0) {
+      const config = ts.readConfigFile(join(root, "tsconfig.json"), ts.sys.readFile);
+      const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+      const program = ts.createProgram([file], { ...parsed.options, noEmit: true }, undefined);
+      typeDiagnostics = ts
+        .getPreEmitDiagnostics(program, program.getSourceFile(file))
+        .filter((diagnostic) => STRUCTURAL_DIAGNOSTIC_CODES.has(diagnostic.code));
+    }
+    checks.push({
+      name: "typechecks",
+      passed: typeDiagnostics.length === 0,
+      detail: typeDiagnostics.length === 0 ? "imports and exports are valid" : ts.flattenDiagnosticMessageText(typeDiagnostics[0].messageText, " ").slice(0, 300),
+    });
+  } catch (err) {
+    checks.push({ name: "bundles", passed: false, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300) });
+  } finally {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+  if (source) {
+    const bindings = importedBindings(source);
+    for (const token of v.must) checks.push({ name: `must:${token}`, passed: structuralRequirement(source, bindings, token), detail: "imported and structurally used" });
+    for (const token of v.mustNot) checks.push({ name: `mustNot:${token}`, passed: forbiddenStructure(source, bindings, token), detail: "forbidden structure absent" });
+  } else {
+    for (const token of [...v.must, ...v.mustNot]) checks.push({ name: `${v.must.includes(token) ? "must" : "mustNot"}:${token}`, passed: false, detail: "artifact did not parse/build" });
+  }
+  const passed = checks.length > 0 && checks.every((c) => c.passed);
+  return { passed, score: scoreFromChecks(checks), reason: passed ? "bundle resolves and uses required UI structures" : `failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`, method: "build", checks };
 }
 
 /** The DEFAULT_UI_CHECKS full functional set, in display order. */
@@ -390,7 +510,7 @@ export async function computeVerdict(
     case "query":
       return await queryVerify(artifact, verify);
     case "build":
-      return buildVerify(artifact, verify);
+      return await buildVerify(artifact, verify);
     case "ui-functional":
       return functionalVerify(artifact, verify);
     case "contains":

@@ -107,7 +107,7 @@ spend **no model**:
 | `contains` | artifact contains all `must` tokens, none of `mustNot` | short keyword knowledge |
 | `graph` | candidate's workflow renders via `smithers graph` + uses required `<Component>` tags | authoring workflows |
 | `query` | runs the candidate's **SQL** against a seeded run-history fixture, checks the scalar | `db-query` |
-| `build` | transpiles the candidate's UI bundle (Bun) + checks it uses the gateway-react API | `ui-authoring` |
+| `build` | bundles against the real workspace (resolving modules/exports) + structurally checks imported API/component usage | `ui-authoring` |
 | `judge` | a SOTA judge grades correctness against a rubric (the only model-spending gate) | concepts, non-workflow code |
 
 **UI evals** additionally attach the `ui-quality` llmJudge scorer, which scores a
@@ -124,4 +124,3 @@ the surfaced friction and, per gap, decides:
 - **library fix** → a GitHub issue **citing the eval + a source-grounded suggested solution**
   (issues #295–#298 on this branch: run-status masking, `z.number()`→INTEGER, `<Worktree>`
   path anchoring, `waiting-event` overload). Filed when the robust fix is code, not docs.
-

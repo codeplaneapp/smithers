@@ -103,3 +103,61 @@ describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namesp
     expect(verdict.passed).toBe(false);
   });
 });
+
+describe("build verifier resolves and structurally uses UI requirements", () => {
+  function buildSpec(over: Partial<VerifySpec>): VerifySpec {
+    return { kind: "build", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], ...over };
+  }
+
+  const reportUi = (artifact: string): CandidateReport => ({ artifact } as unknown as CandidateReport);
+
+  test("rejects marker strings, comments, unresolved imports, unused imports, and forbidden JSX", async () => {
+    const cases = [
+      [`const marker = "RunTree"; export default () => <div />;`, ["RunTree"], []],
+      [`import { RunTree } from "smithers-orchestrator/not-real"; export default () => <RunTree />;`, ["RunTree"], []],
+      [`import { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <div />;`, ["RunTree"], []],
+      [`import { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <textarea />;`, ["RunTree"], ["<textarea"]],
+      [`import { InventedExport } from "smithers-orchestrator/gateway-ui"; export default () => <InventedExport />;`, ["InventedExport"], []],
+    ] as const;
+    for (const [artifact, must, mustNot] of cases) {
+      expect((await computeVerdict(buildSpec({ must: [...must], mustNot: [...mustNot] }), reportUi(artifact))).passed).toBe(false);
+    }
+  });
+
+  test("accepts real named, aliased, namespace imports, calls, JSX, modules, and member access", async () => {
+    const artifact = `
+      import { createGatewayReactRoot as mount, useGatewayRun as useRun } from "smithers-orchestrator/gateway-react";
+      import * as UI from "smithers-orchestrator/gateway-ui";
+      export default function App() { useRun("run"); return <UI.RunTree runId="run" className={styles.row} />; }
+      const styles = { row: "row" }; mount(<App />);
+    `;
+    const verdict = await computeVerdict(buildSpec({ must: ["smithers-orchestrator/gateway-react", "createGatewayReactRoot", "useGatewayRun", "RunTree", ".row"] }), reportUi(artifact));
+    expect(verdict.passed).toBe(true);
+  });
+
+  test("requires module-path requirements to be imports and validates real exports", async () => {
+    const artifact = `import { MarkdownEditor } from "@smithers-orchestrator/ui/adapters/markdown-editor"; export default () => <MarkdownEditor value="" />;`;
+    expect((await computeVerdict(buildSpec({ must: ["adapters/markdown-editor"] }), reportUi(artifact))).passed).toBe(true);
+    expect((await computeVerdict(buildSpec({ must: ["adapters/not-real"] }), reportUi(artifact))).passed).toBe(false);
+  });
+
+  test("rejects type-only imports and nonexistent namespace exports", async () => {
+    const typeOnly = `import type { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <RunTree />;`;
+    const unresolvedTypeOnly = `import type { RunTree } from "definitely-not-a-real-module"; export default () => <div />;`;
+    const nonexistentNamespace = `import * as UI from "smithers-orchestrator/gateway-ui"; export default () => <UI.NotARealComponent />;`;
+    expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(typeOnly))).passed).toBe(false);
+    expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(unresolvedTypeOnly))).passed).toBe(false);
+    expect((await computeVerdict(buildSpec({ must: ["NotARealComponent"] }), reportUi(nonexistentNamespace))).passed).toBe(false);
+  });
+
+  test("structurally recognizes the real location.search requirement", async () => {
+    const artifact = `
+      import { createGatewayReactRoot as mount, useGatewayRun } from "smithers-orchestrator/gateway-react";
+      const styles = { row: "row" };
+      function App() { const runId = new URLSearchParams(location.search).get("runId") ?? undefined; useGatewayRun(runId); const row = styles.row; return null; }
+      mount(<App />);
+    `;
+    const verdict = await computeVerdict(buildSpec({ must: ["createGatewayReactRoot", "useGatewayRun", "location.search", ".row"] }), reportUi(artifact));
+    expect(verdict.passed).toBe(true);
+  });
+});
