@@ -29,6 +29,7 @@ import {
 import { PierreDiffView } from "smithers-orchestrator/ui/adapters/pierre-diff-view";
 
 type HijackCandidate = { nodeId?: string; engine?: string };
+type OneshotChainEntry = { engine?: string; model?: string };
 
 function runIdFromUrl() {
   if (typeof location === "undefined") return undefined;
@@ -90,7 +91,12 @@ function App() {
     try { return typeof run?.configJson === "string" ? JSON.parse(run.configJson) as Record<string, unknown> : {}; }
     catch { return {}; }
   }, [run?.configJson]);
-  const model = typeof config.model === "string" ? config.model : "Auto chain";
+  const chain = config.oneshot && typeof config.oneshot === "object" && "chain" in config.oneshot
+    ? (config.oneshot as { chain?: OneshotChainEntry[] }).chain
+    : undefined;
+  const primary = Array.isArray(chain) ? chain[0] : undefined;
+  const model = [primary?.engine, primary?.model].filter(Boolean).join(" · ") || "Auto chain";
+  const hasReview = Boolean(config.oneshot && typeof config.oneshot === "object" && "review" in config.oneshot && (config.oneshot as { review?: unknown }).review);
 
   const controls = <>
     <Button variant="outline" onClick={() => runId && actions.resumeRun({ runId })} disabled={!runId}>Resume</Button>
@@ -108,7 +114,7 @@ function App() {
       <Card>
         <CardContent style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, paddingTop: 16 }}>
           <KpiStat label="Status" value={status} />
-          <KpiStat label="Model" value={model} />
+          <KpiStat label="Engine / model" value={model} />
           <KpiStat label="Elapsed" value={elapsedLabel(
             typeof run?.startedAtMs === "number" ? run.startedAtMs : undefined,
             typeof run?.finishedAtMs === "number" ? run.finishedAtMs : undefined,
@@ -125,7 +131,7 @@ function App() {
         </TabsList>
         <TabsContent value="chat">
           <NodeChatStream runId={runId} nodeId="implement" title="Implement" height={420} />
-          <NodeChatStream runId={runId} nodeId="review" title="Review" height={320} />
+          {hasReview ? <NodeChatStream runId={runId} nodeId="review" title="Review" height={320} /> : null}
         </TabsContent>
         <TabsContent value="diff">
           {oversized
