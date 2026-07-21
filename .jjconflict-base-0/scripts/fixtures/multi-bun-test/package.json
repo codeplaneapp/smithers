@@ -1,7 +1,0 @@
-{
-  "name": "smithers-multi-bun-test-fixture",
-  "private": true,
-  "scripts": {
-    "test": "bun test tests/segment-one.test.js && bun test tests/segment-two.test.js"
-  }
-}

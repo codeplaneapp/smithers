@@ -27,7 +27,6 @@ import {
   observeReducedMotion,
   prefersReducedMotion,
   SmithersUiStyles,
-  statusColors,
   Table,
   TableBody,
   TableCell,
@@ -3329,11 +3328,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-size: var(--fs
 button, input, select { font: inherit; color: inherit; }
 code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-1); padding: 0 var(--sp-1); }
 
-.tone-running { --tone: ${statusColors.run}; }
-.tone-ok { --tone: ${statusColors.ok}; }
-.tone-waiting { --tone: ${statusColors.warn}; }
-.tone-failed { --tone: ${statusColors.bad}; }
-.tone-idle { --tone: ${statusColors.muted}; }
+.tone-running { --tone: var(--brand); }
+.tone-ok { --tone: var(--ok); }
+.tone-waiting { --tone: var(--warn); }
+.tone-failed { --tone: var(--err); }
+.tone-idle { --tone: var(--muted); }
 
 .mon-shell { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .mon-topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; background: var(--surface-glass-strong); -webkit-backdrop-filter: blur(18px) saturate(180%); backdrop-filter: blur(18px) saturate(180%); }

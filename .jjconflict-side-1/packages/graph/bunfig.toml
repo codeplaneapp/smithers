@@ -1,2 +1,0 @@
-[test]
-preload = ["./tests/setup-heartbeat-env.js"]

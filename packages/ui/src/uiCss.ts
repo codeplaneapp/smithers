@@ -23,6 +23,7 @@
  *   so components are pixel-compatible with the legacy class vocabulary.
  */
 import { tokens as t } from "./tokens";
+import { statusColors } from "./status";
 
 const shadowCard = `0 1px 2px rgb(${t.shadowRgb} / 0.04), 0 8px 24px rgb(${t.shadowRgb} / 0.06)`;
 const shadowOverlay = `0 4px 12px rgb(${t.shadowRgb} / 0.10), 0 16px 48px rgb(${t.shadowRgb} / 0.16)`;
@@ -300,10 +301,11 @@ export const agenticPlanCss = `
 .sui-plan-step { position:relative; min-width:0; border-top:1px solid ${t.border}; }
 .sui-plan-step-row { min-width:0; display:grid; grid-template-columns:10px minmax(0, 1fr) auto; align-items:center; gap:8px; min-height:36px; }
 .sui-plan-step-dot, .sui-taskitem-dot { width:7px; height:7px; flex:none; border-radius:999px; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
-.sui-plan-step[data-status='running'] .sui-plan-step-dot { background:${t.info}; }
-.sui-plan-step[data-status='complete'] .sui-plan-step-dot { background:${t.success}; }
-.sui-plan-step[data-status='failed'] .sui-plan-step-dot { background:${t.destructive}; }
-.sui-plan-step[data-status='skipped'] .sui-plan-step-dot { background:${t.mutedForeground}; }
+.sui-plan-step[data-status-class='run'] .sui-plan-step-dot { background:${statusColors.run}; }
+.sui-plan-step[data-status-class='ok'] .sui-plan-step-dot { background:${statusColors.ok}; }
+.sui-plan-step[data-status-class='warn'] .sui-plan-step-dot { background:${statusColors.warn}; }
+.sui-plan-step[data-status-class='bad'] .sui-plan-step-dot { background:${statusColors.bad}; }
+.sui-plan-step[data-status-class='muted'] .sui-plan-step-dot { background:${statusColors.muted}; }
 .sui-plan-step-label { min-width:0; color:${t.foreground}; font-size:13px; line-height:1.4; overflow-wrap:anywhere; }
 .sui-plan-step[data-status='skipped'] .sui-plan-step-label { color:${t.mutedForeground}; text-decoration:line-through; }
 .sui-plan-step-toggle { min-height:24px; padding:2px 6px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:11px; cursor:pointer; }
@@ -311,11 +313,11 @@ export const agenticPlanCss = `
 .sui-plan-step-toggle:focus-visible { ${focusRing} }
 .sui-plan-step-detail { min-width:0; margin:0 0 9px 18px; padding:9px 10px; border-radius:${t.radiusControl}; background:${t.surface2}; color:${t.mutedForeground}; font-size:12px; line-height:1.45; }
 .sui-taskitem { min-width:0; display:flex; align-items:center; gap:8px; padding:7px 9px; color:${t.foreground}; font-size:${t.fontSizeCompact}; }
-.sui-taskitem-run .sui-taskitem-dot { background:${t.info}; }
-.sui-taskitem-ok .sui-taskitem-dot { background:${t.success}; }
-.sui-taskitem-warn .sui-taskitem-dot { background:${t.warning}; }
-.sui-taskitem-bad .sui-taskitem-dot { background:${t.destructive}; }
-.sui-taskitem-muted .sui-taskitem-dot { background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
+.sui-taskitem-run .sui-taskitem-dot { background:${statusColors.run}; }
+.sui-taskitem-ok .sui-taskitem-dot { background:${statusColors.ok}; }
+.sui-taskitem-warn .sui-taskitem-dot { background:${statusColors.warn}; }
+.sui-taskitem-bad .sui-taskitem-dot { background:${statusColors.bad}; }
+.sui-taskitem-muted .sui-taskitem-dot { background:${statusColors.muted}; }
 .sui-taskitem-label { min-width:0; flex:1 1 auto; overflow-wrap:anywhere; }
 .sui-taskitem-files { min-width:0; display:flex; align-items:center; justify-content:flex-end; gap:4px; flex-wrap:wrap; }
 .sui-taskitem-file { max-width:180px; padding:1px 6px; border:1px solid ${t.border}; border-radius:999px; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-family:${t.fontMono}; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -570,8 +572,11 @@ export const agenticReasoningCss = `
 .sui-cot-step::before { content:""; position:absolute; left:5px; top:13px; bottom:-9px; border-left:1px solid ${t.border}; }
 .sui-cot-step:last-child::before { display:none; }
 .sui-cot-step-dot { position:relative; z-index:1; width:10px; height:10px; margin-top:4px; border:2px solid ${t.card}; border-radius:999px; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
-.sui-cot-step[data-status='running'] .sui-cot-step-dot { background:${t.info}; }
-.sui-cot-step[data-status='complete'] .sui-cot-step-dot { background:${t.success}; }
+.sui-cot-step[data-status-class='run'] .sui-cot-step-dot { background:${statusColors.run}; }
+.sui-cot-step[data-status-class='ok'] .sui-cot-step-dot { background:${statusColors.ok}; }
+.sui-cot-step[data-status-class='warn'] .sui-cot-step-dot { background:${statusColors.warn}; }
+.sui-cot-step[data-status-class='bad'] .sui-cot-step-dot { background:${statusColors.bad}; }
+.sui-cot-step[data-status-class='muted'] .sui-cot-step-dot { background:${statusColors.muted}; }
 .sui-cot-step-label { min-width:0; overflow-wrap:anywhere; }
 .sui-cot-step-detail { grid-column:2; min-width:0; margin-top:2px; color:${t.mutedForeground}; font-size:12px; overflow-wrap:anywhere; }
 

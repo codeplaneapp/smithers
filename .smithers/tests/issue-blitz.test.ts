@@ -71,6 +71,9 @@ describe("issue-blitz safety contract", () => {
     expect(uiSource).toContain('iteration={iteration.get("commit-all") ?? 0}');
     expect(uiSource).toContain("iteration={selectedNodeId ? iteration.get(selectedNodeId) : undefined}");
     expect(uiSource).toContain("SmithersUiStyles");
+    expect(uiSource).toContain("statusClass");
+    expect(uiSource).toContain("isTerminalRunStatus");
+    expect(uiSource).not.toContain("function statusForNode");
     expect(uiSource).toContain("WorkflowUiShell");
     expect(uiSource).toContain("<WorkflowUiShell");
     expect(uiSource).not.toContain("<main");

@@ -1,5 +1,0 @@
-{
-  "fixture": "clean-error-message",
-  "clean": true,
-  "description": "Copy-only checkout error message clarification; a review should not surface findings."
-}

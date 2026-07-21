@@ -12,8 +12,9 @@ How the pieces fit, infrastructure first:
 - `tokens.ts` — the `var(--house-token, #lightFallback)` bridge onto the
   styleguide theme. Never emits `:root`; shared semantic tints resolve through
   the styleguide's `*-soft`/`*-border` tokens, with byte-equal light fallbacks.
-- `status.ts` — shared status vocabulary: `normalizeStatus`, `statusClass`,
-  `formatStatus`, `isTerminalRunStatus`.
+- `status.ts` — shared status vocabulary and token colors: `normalizeStatus`,
+  `statusClass`, `statusColor`, `statusColors`, `formatStatus`,
+  `isTerminalRunStatus`.
 - `uiCss.ts` — the whole stylesheet as one JS string; per-component blocks
   composed into `smithersUiCss`, followed by one shared reduced-motion guard.
 - `styles.tsx` — `SmithersUiStyles` render path plus the `useInjectUiCss`

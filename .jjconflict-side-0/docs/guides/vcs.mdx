@@ -1,8 +1,0 @@
----
-title: VCS Integration
-description: Folded into Recipes.
----
-
-This material is now in [Recipes](/recipes#vcs-revert--per-attempt-snapshots).
-
-Smithers prefers `.jj` over `.git` in colocated repos; pure Git repos work without JJ installed but cannot use `revert`. The JJ pointer stored in `_smithers_attempts.jj_pointer` is the **change ID**, not the operation ID, so it survives `jj amend` and `jj rebase`. On resume of a worktree run, Smithers auto-rebases onto the base branch (default `main`) and continues even if the rebase fails.

@@ -29,7 +29,9 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  isTerminalRunStatus,
   normalizeStatus,
+  statusClass,
 } from "smithers-orchestrator/ui";
 import {
   buildIssueBlitzNodeState,
@@ -55,15 +57,8 @@ function runIdFromUrl(): string | undefined {
   if (typeof location === "undefined") return undefined;
   return new URLSearchParams(location.search).get("runId") ?? undefined;
 }
-function statusForNode(state: NodeStatus): string {
-  if (state === "done") return "finished";
-  if (state === "failed") return "failed";
-  if (state === "waiting") return "waiting";
-  if (state === "running") return "running";
-  return state;
-}
 function SummaryCard({ title, runId, nodeId, iteration, state }: { title: string; runId?: string; nodeId: string; iteration: number; state: NodeStatus }) {
-  return <Card><CardHeader><CardTitle>{title}</CardTitle><StatusPill status={statusForNode(state)} /></CardHeader><CardContent><NodeOutputView runId={runId} nodeId={nodeId} iteration={iteration} /></CardContent></Card>;
+  return <Card><CardHeader><CardTitle>{title}</CardTitle><StatusPill status={state} /></CardHeader><CardContent><NodeOutputView runId={runId} nodeId={nodeId} iteration={iteration} /></CardContent></Card>;
 }
 
 export function IssueBlitzApp() {
@@ -79,10 +74,10 @@ export function IssueBlitzApp() {
   const isolatedStatus = doneItems === ITEMS.length
     ? "done"
     : ITEMS.some((item) => ["bootstrap", "plan", "implement", "review"]
-      .some((stage) => normalizeStatus(st(`${item.key}:${stage}`)) === "running"))
+      .some((stage) => statusClass(st(`${item.key}:${stage}`)) === "run"))
       ? "running"
       : "pending";
-  const terminal = (nodeId: string) => ["done", "failed", "skipped"].includes(st(nodeId));
+  const terminal = (nodeId: string) => isTerminalRunStatus(st(nodeId));
   const stages: Array<[string, NodeStatus]> = [
     ["discover", st("discover")], ["serial integration", st("commit-all")], ["sandboxed gate", st("local-gate")],
     ["review (fable)", st("fable-review")], ["human approval", st("approve-push")], ["exact-SHA push", st("push")],
@@ -95,9 +90,9 @@ export function IssueBlitzApp() {
     testId="issue-blitz-ui"
   >
     <SmithersUiStyles />
-    <Card><CardHeader><CardTitle>Delivery stages</CardTitle></CardHeader><CardContent><CardDescription>{doneItems}/{ITEMS.length} isolated lanes settled · exact candidate review → serial integration → sandboxed gate → human-approved exact-SHA push</CardDescription>{stages.map(([label, state]) => <StatusPill key={label} status={statusForNode(state)} label={label} />)}<StatusPill data-testid="issue-blitz-isolated-status" status={isolatedStatus} label={`isolated worktrees ×${ITEMS.length}`} /></CardContent></Card>
+    <Card><CardHeader><CardTitle>Delivery stages</CardTitle></CardHeader><CardContent><CardDescription>{doneItems}/{ITEMS.length} isolated lanes settled · exact candidate review → serial integration → sandboxed gate → human-approved exact-SHA push</CardDescription>{stages.map(([label, state]) => <StatusPill key={label} status={state} label={label} />)}<StatusPill data-testid="issue-blitz-isolated-status" status={isolatedStatus} label={`isolated worktrees ×${ITEMS.length}`} /></CardContent></Card>
     <SectionHeader title="Isolated lanes" />
-    <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Issues</TableHead><TableHead>Implementer</TableHead><TableHead>Plan</TableHead><TableHead>Implement</TableHead><TableHead>Snapshot</TableHead><TableHead>Exact review</TableHead><TableHead>Ready</TableHead><TableHead>Iter</TableHead></TableRow></TableHeader><TableBody>{ITEMS.map((item) => <TableRow key={item.key}><TableCell><strong>{item.key}</strong><br />{item.title}</TableCell><TableCell>{item.issues.map((number) => `#${number}`).join(" ")}</TableCell><TableCell><Badge variant={item.kind === "hard" ? "warning" : "default"}>{item.kind === "hard" ? "terra" : "luna"}</Badge></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:plan`))} label="plan" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:implement`))} label="impl" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:candidate`))} label="sha" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:review`))} label="review" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:ready`))} label="ready" /></TableCell><TableCell>{(iteration.get(`${item.key}:implement`) ?? 0) + 1}</TableCell></TableRow>)}</TableBody></Table>
+    <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Issues</TableHead><TableHead>Implementer</TableHead><TableHead>Plan</TableHead><TableHead>Implement</TableHead><TableHead>Snapshot</TableHead><TableHead>Exact review</TableHead><TableHead>Ready</TableHead><TableHead>Iter</TableHead></TableRow></TableHeader><TableBody>{ITEMS.map((item) => <TableRow key={item.key}><TableCell><strong>{item.key}</strong><br />{item.title}</TableCell><TableCell>{item.issues.map((number) => `#${number}`).join(" ")}</TableCell><TableCell><Badge variant={item.kind === "hard" ? "warning" : "default"}>{item.kind === "hard" ? "terra" : "luna"}</Badge></TableCell><TableCell><StatusPill status={st(`${item.key}:plan`)} label="plan" /></TableCell><TableCell><StatusPill status={st(`${item.key}:implement`)} label="impl" /></TableCell><TableCell><StatusPill status={st(`${item.key}:candidate`)} label="sha" /></TableCell><TableCell><StatusPill status={st(`${item.key}:review`)} label="review" /></TableCell><TableCell><StatusPill status={st(`${item.key}:ready`)} label="ready" /></TableCell><TableCell>{(iteration.get(`${item.key}:implement`) ?? 0) + 1}</TableCell></TableRow>)}</TableBody></Table>
     {terminal("commit-all") ? <SummaryCard title="Serialized integration" runId={runId} nodeId="commit-all" iteration={iteration.get("commit-all") ?? 0} state={st("commit-all")} /> : null}
     {terminal("local-gate") ? <SummaryCard title="Sandboxed local gate" runId={runId} nodeId="local-gate" iteration={iteration.get("local-gate") ?? 0} state={st("local-gate")} /> : null}
     {terminal("fable-review") ? <SummaryCard title="Fable exact-head review" runId={runId} nodeId="fable-review" iteration={iteration.get("fable-review") ?? 0} state={st("fable-review")} /> : null}
