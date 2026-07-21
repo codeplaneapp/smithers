@@ -203,6 +203,9 @@ export function deriveRoute(
   if (pathname === "/crons") {
     return { view: "home", surface: { kind: "crons" }, project, workspaceRoot };
   }
+  if (pathname === "/gallery") {
+    return { view: "home", surface: { kind: "gallery" }, project, workspaceRoot };
+  }
   if (pathname === "/palette") {
     return {
       view: "home",

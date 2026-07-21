@@ -405,7 +405,8 @@
                   "reference/ui/bubble",
                   "reference/ui/attachment",
                   "reference/ui/marker",
-                  "reference/ui/shimmer"
+                  "reference/ui/shimmer",
+                  "reference/ui/agentic-ui"
                 ]
               },
               "reference/packs",

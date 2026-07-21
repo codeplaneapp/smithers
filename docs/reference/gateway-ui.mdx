@@ -46,6 +46,10 @@ tokens, never hex-plus-alpha.
 | `NodeOutputCard` | A run-aware output card for one node with ok/fail/pending chrome and an unwrapped-row render prop. Use for deterministic nodes. | `runId`, `nodeId`, `title`, `summary`, `body`, `remountKey` |
 | `FleetTable` | A selectable fan-out ledger: one row per work item, live status pill rolled up from the item's pipeline `nodeIds`. | `runId`, `items`, `columns`, `selectedKey`, `onSelect` |
 | `NodeStageStrip` | A `StageStrip` bound to live node statuses: pipeline chips that track `queued → running → done/failed`. | `runId`, `stages` |
+| `GatewayApprovalList` | The pending approval queue rendered with the agentic `ApprovalCard` anatomy (risk, resources, reviewer note), resolved through `submitApproval`. | `filter`, `note`, `empty`, `onResolved` |
+| `GatewayApprovalConfirmation` | One pending approval row as the `Confirmation` lifecycle anatomy with approve/deny actions. | `row`, `note`, `onResolved` |
+| `GatewayCheckpointControls` | Durability checkpoint actions (restore, fork, replay, rewind, return-to-live) bound to the run's real Gateway action RPCs. | `runId`, `checkpoint` |
+| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. | ReactFlow `NodeProps` |
 
 `StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
 also exported for building your own rows that match the components, plus the

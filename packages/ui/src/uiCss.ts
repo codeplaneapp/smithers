@@ -24,6 +24,16 @@
  */
 import { tokens as t } from "./tokens";
 import { statusColors } from "./status";
+import { conversationFoundationCss } from "./chat/conversationFoundationCss";
+import { promptAttachmentsCss } from "./prompt/promptAttachmentsCss";
+import { reasoningToolsCss } from "./agentic/reasoningToolsCss";
+import { plansTasksQueuesCss } from "./agentic/plansTasksQueuesCss";
+import { approvalsCss } from "./approvals/approvalsCss";
+import { sourcesCitationsCss } from "./agentic/sourcesCitationsCss";
+import { agentsCss } from "./agents/agentsCss";
+import { artifactsCss } from "./artifacts/artifactsCss";
+import { sandboxCss } from "./sandbox/sandboxCss";
+import { canvasCss } from "./canvas/canvasCss";
 
 const shadowCard = `0 1px 2px rgb(${t.shadowRgb} / 0.04), 0 8px 24px rgb(${t.shadowRgb} / 0.06)`;
 const shadowOverlay = `0 4px 12px rgb(${t.shadowRgb} / 0.10), 0 16px 48px rgb(${t.shadowRgb} / 0.16)`;
@@ -637,6 +647,16 @@ export const smithersUiCss = [
   pierreDiffCss,
   stageStripCss,
   agenticReasoningCss,
+  conversationFoundationCss,
+  promptAttachmentsCss,
+  reasoningToolsCss,
+  plansTasksQueuesCss,
+  approvalsCss,
+  sourcesCitationsCss,
+  agentsCss,
+  artifactsCss,
+  sandboxCss,
+  canvasCss,
   reducedMotionCss,
 ]
   .map((block) => block.trim())

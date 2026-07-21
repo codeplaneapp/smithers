@@ -125,6 +125,92 @@ hooks into the visual layer.
 | [`Attachment`](/reference/ui/attachment) | File or image chip with metadata, upload/processing states, progress, and removal. | `name`, `state`, `sizeBytes`, `mediaType`, `thumbnailUrl`, `progress`, `onRemove` |
 | [`Marker`](/reference/ui/marker) | Accessible labeled separator, system note, or live streaming-status row. | `variant`, `live`, `shimmer` |
 | [`Shimmer`](/reference/ui/shimmer) | Reduced-motion-safe live text shimmer; the same stylesheet also exports the `sui-scroll-fade` edge utility. | `active` |
+| `Message` family (`MessageAvatar`, `MessageHeader`, `MessageContent`, `MessageFooter`, `MessageActions`, `MessageGroup`) | One chat turn with avatar, header, content, footer, and actions slots; `MessageGroup` clusters consecutive turns. | `role`, `align`, `grouped` |
+| `MessageBranch` family (`MessageBranchContent`, `MessageBranchSelector`, `MessageBranchPrevious`, `MessageBranchNext`, `MessageBranchPage`) | Alternate-response navigator with prev/next paging and a polite page indicator. | `count`, `index`, `defaultIndex`, `onIndexChange` |
+| `CompactGroup` | Collapsed run of compacted conversation turns behind a disclosure. | `count`, `label`, `open` |
+| `ConversationCheckpoint` | Labeled durable-checkpoint separator row inside a transcript. | `label`, `timestampMs`, `actions` |
+
+### Prompt and attachments
+
+The composer surface: a controlled `PromptInput` form with submit/stop
+streaming states and an attachments context that drives the `Attachment`
+compound.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `PromptInput` family (`PromptInputHeader`, `PromptInputBody`, `PromptInputTextarea`, `PromptInputFooter`, `PromptInputTools`, `PromptInputButton`, `PromptInputSubmit`, `PromptInputStop`, `PromptInputActionMenu` family, `PromptInputActionAddAttachments`) | Composer form with Enter/Mod+Enter submit, streaming stop, global drop, and an action menu. | `value`, `onValueChange`, `onSubmit`, `onStop`, `status`, `submitKey`, `accept`, `maxFiles` |
+| `usePromptInputAttachments` | Attachment controller for the enclosing `PromptInput` (add, remove, clear, openFileDialog). | context hook |
+| `Attachment` compound (`AttachmentMedia`, `AttachmentContent`, `AttachmentTitle`, `AttachmentDescription`, `AttachmentActions`, `AttachmentAction`, `AttachmentTrigger`, `AttachmentGroup`, `AttachmentPreview`, `AttachmentRemove`) | Upload-state file chip anatomy (`uploading`, `processing`, `ready`, `error`) with preview and remove slots. | `name`, `state`, `sizeBytes`, `progress`, `onRemove` |
+
+### Plans, tasks, and queues
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `Plan` compound (`PlanHeader`, `PlanTitle`, `PlanDescription`, `PlanTrigger`, `PlanContent`, `PlanStep`, `PlanAction`, `PlanFooter`) | Full plan anatomy alongside the legacy `steps` props form. | `defaultOpen`, `open`, `onOpenChange` |
+| `AgentTask` family (`AgentTaskTrigger`, `AgentTaskContent`, `AgentTaskGroup`) | Collapsible unit of agent work. | `title`, `status`, `defaultOpen` |
+| `Queue` family (`QueueSection`, `QueueSectionTrigger`, `QueueSectionLabel`, `QueueSectionContent`, `QueueList`, `QueueItem`, `QueueItemIndicator`, `QueueItemContent`, `QueueItemDescription`) | Pending and completed work in collapsible sections. | `status`, `completed` |
+| `ActivityTimeline`, `ActivityItem`, `ActivityGroup` | Run activity grouped into labeled clusters with kind glyphs. | `items`, `kind`, `actor`, `timestampMs` |
+
+### Approvals and checkpoints
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `Confirmation` family (`ConfirmationTitle`, `ConfirmationRequest`, `ConfirmationAccepted`, `ConfirmationRejected`, `ConfirmationActions`, `ConfirmationAction`) | Approval lifecycle anatomy (requested through approved/denied/expired) with a polite live-region status. | `state`, `decision`, `onDecide` |
+| `ApprovalCard`, `ApprovalRisk`, `ApprovalResources`, `ApprovalNote` | Rich approval card with risk level, affected resources, and a reviewer note wired into the decision callbacks. | `title`, `state`, `risk`, `resources`, `onApprove`, `onDeny` |
+| `Checkpoint` family (`CheckpointIcon`, `CheckpointMetadata`, `CheckpointTrigger`, `CheckpointActions`) | Durability checkpoint row with restore, fork, replay, rewind, and return-to-live actions. | `checkpoint`, `actions`, `onAction`, `busy` |
+
+### Sources, citations, and suggestions
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `SourcesTrigger`, `SourcesContent`, `Source` | Compound attribution list: trigger plus rich source rows (favicon, title, domain, excerpt). | `href`, `title`, `domain`, `onNavigate` |
+| `CitationCard`, `CitationCarousel`, `CitationQuote` | Single-source preview card, keyboard-accessible multi-source carousel, and verbatim quote block. | `source`, `sources`, `index`, `quote` |
+| `Suggestion`, `SuggestionGroup` | Follow-up prompt pills. | `suggestion`, `onClick` |
+| `OpenInChat` | Deep-link a file, diff, issue, test, run, log, error, or artifact into a chat surface. | `subject`, `onOpen`, `label` |
+
+### Agents and context
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `AgentDefinition` family (`AgentHeader`, `AgentContent`, `AgentInstructions`, `AgentTools`, `AgentTool`, `AgentOutputSchema`, `AgentAvailabilityBadge`) | Agent identity card: instructions, tool descriptors, declared output schema, availability. | `name`, `provider`, `model`, `availability` |
+| `AgentCard` | Compact selectable agent card (`aria-pressed` when selectable). | `name`, `model`, `selected`, `onSelect` |
+| `ModelSelector` family (`ModelSelectorTrigger`, `ModelSelectorContent`, `ModelSelectorGroup`, `ModelSelectorItem`) | Grouped model picker composed over the Radix `Select` primitives. | `options`, `groups`, `value`, `onValueChange` |
+| `ModelBadge`, `ProviderBadge` | Model and provider identity chips. | `model`, `provider`, `icon` |
+| `ContextUsage` family (`ContextTrigger`, `ContextContent`, `ContextContentHeader`, `ContextContentBody`, `ContextContentFooter`, `ContextInputUsage`, `ContextOutputUsage`, `ContextReasoningUsage`, `ContextCacheUsage`) | Token-usage disclosure (input, output, reasoning, cache) with an honest percent only when derivable. | `usage`, `openOnHover` |
+
+### Coding artifacts
+
+The review surface: test rollups, commits, diffs-in-brief, stack traces, and
+the side-panel artifact container.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `Artifact` family (`ArtifactHeader`, `ArtifactTitle`, `ArtifactDescription`, `ArtifactActions`, `ArtifactAction`, `ArtifactClose`, `ArtifactContent`) | Side-panel artifact container. | slots |
+| `Snippet` | One-line command chip with copy seam. | `code`, `language`, `onCopyCode` |
+| `PackageInfo` | Package identity card with install snippet. | `name`, `version`, `installCommand` |
+| `SchemaDisplay` | Collapsible JSON-schema view. | `schema`, `name` |
+| `StackTrace`, `StackFrame`, `parseStackTrace` | Collapsible structured stack trace; the parser turns raw text into frames. | `frames`, `raw`, `defaultOpen` |
+| `TestResults` family (`TestResultsHeader`, `TestResultsSummary`, `TestResultsDuration`, `TestResultsProgress`, `TestResultsContent`, `TestSuite`, `TestRow`, `TestStatus`, `TestName`) | Test run rollup, model-driven (`suites`) or compound; failures nest error and stack. | `suites`, `running` |
+| `Commit` family (`CommitHeader`, `CommitAuthor`, `CommitInfo`, `CommitMessage`, `CommitMetadata`, `CommitHash`, `CommitTimestamp`, `CommitActions`, `CommitFiles`, `CommitFile`, `CommitFileStatus`, `CommitFilePath`) | Commit card with hash/change-id chip and file list. | `commit` |
+| `ChangeSummary` | Additions/deletions/changed-file rollup. | `additions`, `deletions`, `filesChanged`, `vcs` |
+| `EnvironmentVariables`, `EnvironmentVariable`, `SecretField` | Environment rows; secrets are masked with a fixed bullet count and a reveal toggle. | `variables`, `secret`, `value` |
+
+### Sandbox previews
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `AgentSandbox` family (`AgentSandboxHeader`, `AgentSandboxStatus`, `AgentSandboxActions`, `AgentSandboxContent`) | Sandbox lifecycle unit (provisioning through destroyed) with honest empty states. | `state`, `workspace`, `onRetry`, `onReconnect` |
+| `WebPreview` family (`WebPreviewToolbar`, `WebPreviewAddress`, `WebPreviewContent`) | Sandboxed iframe preview; navigation callbacks are host-owned and the sandbox tokens are explicit. | `url`, `defaultUrl`, `sandboxAllow` |
+| `JSXPreview` | Inert preview of a caller-provided React node. | `node`, `inert`, `unavailableReason` |
+
+### Workflow canvas
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `WorkflowCanvas`, `WorkflowNode` family, `WorkflowEdge`, `WorkflowConnection`, `WorkflowControls`, `WorkflowPanel`, `WorkflowToolbar`, `WorkflowMinimap` | Canvas anatomy for workflow graphs; geometry belongs to the renderer (`WorkflowGraph` consumes these slots through `nodeTypes`). | `status`, `selected`, `position` |
+
+See [Agentic UI components](/reference/ui/agentic-ui) for the full import
+surface of every family in one place.
 
 ### Diff viewer
 

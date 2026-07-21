@@ -34,6 +34,7 @@ type SurfaceRoute =
   | { to: "/scores"; params?: undefined }
   | { to: "/crons"; params?: undefined }
   | { to: "/vcs"; params?: undefined }
+  | { to: "/gallery"; params?: undefined }
   | { to: "/workflow/$id"; params: { id: string } }
   | { to: "/palette"; params?: undefined }
   | { to: "/gw/$workflowKey/$runId"; params: { workflowKey: string; runId: string } }
@@ -106,6 +107,8 @@ export function surfaceToRoute(surface: Surface): SurfaceRoute {
       return { to: "/crons" };
     case "vcs":
       return { to: "/vcs" };
+    case "gallery":
+      return { to: "/gallery" };
     case "workflowEditor":
       return { to: "/workflow/$id", params: { id: surface.id } };
     case "palette":

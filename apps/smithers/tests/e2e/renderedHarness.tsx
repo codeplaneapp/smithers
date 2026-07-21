@@ -151,6 +151,10 @@ async function renderSurface() {
       }
       return <VcsCanvas />;
     }
+    case "gallery": {
+      const { GalleryCanvas } = await import("../../src/gallery/GalleryCanvas");
+      return <GalleryCanvas />;
+    }
     default:
       return <div data-testid="harness-error">Unknown surface: {surface}</div>;
   }

@@ -10887,6 +10887,10 @@ tokens, never hex-plus-alpha.
 | `NodeOutputCard` | A run-aware output card for one node with ok/fail/pending chrome and an unwrapped-row render prop. Use for deterministic nodes. | `runId`, `nodeId`, `title`, `summary`, `body`, `remountKey` |
 | `FleetTable` | A selectable fan-out ledger: one row per work item, live status pill rolled up from the item's pipeline `nodeIds`. | `runId`, `items`, `columns`, `selectedKey`, `onSelect` |
 | `NodeStageStrip` | A `StageStrip` bound to live node statuses: pipeline chips that track `queued → running → done/failed`. | `runId`, `stages` |
+| `GatewayApprovalList` | The pending approval queue rendered with the agentic `ApprovalCard` anatomy (risk, resources, reviewer note), resolved through `submitApproval`. | `filter`, `note`, `empty`, `onResolved` |
+| `GatewayApprovalConfirmation` | One pending approval row as the `Confirmation` lifecycle anatomy with approve/deny actions. | `row`, `note`, `onResolved` |
+| `GatewayCheckpointControls` | Durability checkpoint actions (restore, fork, replay, rewind, return-to-live) bound to the run's real Gateway action RPCs. | `runId`, `checkpoint` |
+| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. | ReactFlow `NodeProps` |
 
 `StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
 also exported for building your own rows that match the components, plus the
@@ -11174,6 +11178,92 @@ hooks into the visual layer.
 | [`Attachment`](/reference/ui/attachment) | File or image chip with metadata, upload/processing states, progress, and removal. | `name`, `state`, `sizeBytes`, `mediaType`, `thumbnailUrl`, `progress`, `onRemove` |
 | [`Marker`](/reference/ui/marker) | Accessible labeled separator, system note, or live streaming-status row. | `variant`, `live`, `shimmer` |
 | [`Shimmer`](/reference/ui/shimmer) | Reduced-motion-safe live text shimmer; the same stylesheet also exports the `sui-scroll-fade` edge utility. | `active` |
+| `Message` family (`MessageAvatar`, `MessageHeader`, `MessageContent`, `MessageFooter`, `MessageActions`, `MessageGroup`) | One chat turn with avatar, header, content, footer, and actions slots; `MessageGroup` clusters consecutive turns. | `role`, `align`, `grouped` |
+| `MessageBranch` family (`MessageBranchContent`, `MessageBranchSelector`, `MessageBranchPrevious`, `MessageBranchNext`, `MessageBranchPage`) | Alternate-response navigator with prev/next paging and a polite page indicator. | `count`, `index`, `defaultIndex`, `onIndexChange` |
+| `CompactGroup` | Collapsed run of compacted conversation turns behind a disclosure. | `count`, `label`, `open` |
+| `ConversationCheckpoint` | Labeled durable-checkpoint separator row inside a transcript. | `label`, `timestampMs`, `actions` |
+
+### Prompt and attachments
+
+The composer surface: a controlled `PromptInput` form with submit/stop
+streaming states and an attachments context that drives the `Attachment`
+compound.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `PromptInput` family (`PromptInputHeader`, `PromptInputBody`, `PromptInputTextarea`, `PromptInputFooter`, `PromptInputTools`, `PromptInputButton`, `PromptInputSubmit`, `PromptInputStop`, `PromptInputActionMenu` family, `PromptInputActionAddAttachments`) | Composer form with Enter/Mod+Enter submit, streaming stop, global drop, and an action menu. | `value`, `onValueChange`, `onSubmit`, `onStop`, `status`, `submitKey`, `accept`, `maxFiles` |
+| `usePromptInputAttachments` | Attachment controller for the enclosing `PromptInput` (add, remove, clear, openFileDialog). | context hook |
+| `Attachment` compound (`AttachmentMedia`, `AttachmentContent`, `AttachmentTitle`, `AttachmentDescription`, `AttachmentActions`, `AttachmentAction`, `AttachmentTrigger`, `AttachmentGroup`, `AttachmentPreview`, `AttachmentRemove`) | Upload-state file chip anatomy (`uploading`, `processing`, `ready`, `error`) with preview and remove slots. | `name`, `state`, `sizeBytes`, `progress`, `onRemove` |
+
+### Plans, tasks, and queues
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `Plan` compound (`PlanHeader`, `PlanTitle`, `PlanDescription`, `PlanTrigger`, `PlanContent`, `PlanStep`, `PlanAction`, `PlanFooter`) | Full plan anatomy alongside the legacy `steps` props form. | `defaultOpen`, `open`, `onOpenChange` |
+| `AgentTask` family (`AgentTaskTrigger`, `AgentTaskContent`, `AgentTaskGroup`) | Collapsible unit of agent work. | `title`, `status`, `defaultOpen` |
+| `Queue` family (`QueueSection`, `QueueSectionTrigger`, `QueueSectionLabel`, `QueueSectionContent`, `QueueList`, `QueueItem`, `QueueItemIndicator`, `QueueItemContent`, `QueueItemDescription`) | Pending and completed work in collapsible sections. | `status`, `completed` |
+| `ActivityTimeline`, `ActivityItem`, `ActivityGroup` | Run activity grouped into labeled clusters with kind glyphs. | `items`, `kind`, `actor`, `timestampMs` |
+
+### Approvals and checkpoints
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `Confirmation` family (`ConfirmationTitle`, `ConfirmationRequest`, `ConfirmationAccepted`, `ConfirmationRejected`, `ConfirmationActions`, `ConfirmationAction`) | Approval lifecycle anatomy (requested through approved/denied/expired) with a polite live-region status. | `state`, `decision`, `onDecide` |
+| `ApprovalCard`, `ApprovalRisk`, `ApprovalResources`, `ApprovalNote` | Rich approval card with risk level, affected resources, and a reviewer note wired into the decision callbacks. | `title`, `state`, `risk`, `resources`, `onApprove`, `onDeny` |
+| `Checkpoint` family (`CheckpointIcon`, `CheckpointMetadata`, `CheckpointTrigger`, `CheckpointActions`) | Durability checkpoint row with restore, fork, replay, rewind, and return-to-live actions. | `checkpoint`, `actions`, `onAction`, `busy` |
+
+### Sources, citations, and suggestions
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `SourcesTrigger`, `SourcesContent`, `Source` | Compound attribution list: trigger plus rich source rows (favicon, title, domain, excerpt). | `href`, `title`, `domain`, `onNavigate` |
+| `CitationCard`, `CitationCarousel`, `CitationQuote` | Single-source preview card, keyboard-accessible multi-source carousel, and verbatim quote block. | `source`, `sources`, `index`, `quote` |
+| `Suggestion`, `SuggestionGroup` | Follow-up prompt pills. | `suggestion`, `onClick` |
+| `OpenInChat` | Deep-link a file, diff, issue, test, run, log, error, or artifact into a chat surface. | `subject`, `onOpen`, `label` |
+
+### Agents and context
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `AgentDefinition` family (`AgentHeader`, `AgentContent`, `AgentInstructions`, `AgentTools`, `AgentTool`, `AgentOutputSchema`, `AgentAvailabilityBadge`) | Agent identity card: instructions, tool descriptors, declared output schema, availability. | `name`, `provider`, `model`, `availability` |
+| `AgentCard` | Compact selectable agent card (`aria-pressed` when selectable). | `name`, `model`, `selected`, `onSelect` |
+| `ModelSelector` family (`ModelSelectorTrigger`, `ModelSelectorContent`, `ModelSelectorGroup`, `ModelSelectorItem`) | Grouped model picker composed over the Radix `Select` primitives. | `options`, `groups`, `value`, `onValueChange` |
+| `ModelBadge`, `ProviderBadge` | Model and provider identity chips. | `model`, `provider`, `icon` |
+| `ContextUsage` family (`ContextTrigger`, `ContextContent`, `ContextContentHeader`, `ContextContentBody`, `ContextContentFooter`, `ContextInputUsage`, `ContextOutputUsage`, `ContextReasoningUsage`, `ContextCacheUsage`) | Token-usage disclosure (input, output, reasoning, cache) with an honest percent only when derivable. | `usage`, `openOnHover` |
+
+### Coding artifacts
+
+The review surface: test rollups, commits, diffs-in-brief, stack traces, and
+the side-panel artifact container.
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `Artifact` family (`ArtifactHeader`, `ArtifactTitle`, `ArtifactDescription`, `ArtifactActions`, `ArtifactAction`, `ArtifactClose`, `ArtifactContent`) | Side-panel artifact container. | slots |
+| `Snippet` | One-line command chip with copy seam. | `code`, `language`, `onCopyCode` |
+| `PackageInfo` | Package identity card with install snippet. | `name`, `version`, `installCommand` |
+| `SchemaDisplay` | Collapsible JSON-schema view. | `schema`, `name` |
+| `StackTrace`, `StackFrame`, `parseStackTrace` | Collapsible structured stack trace; the parser turns raw text into frames. | `frames`, `raw`, `defaultOpen` |
+| `TestResults` family (`TestResultsHeader`, `TestResultsSummary`, `TestResultsDuration`, `TestResultsProgress`, `TestResultsContent`, `TestSuite`, `TestRow`, `TestStatus`, `TestName`) | Test run rollup, model-driven (`suites`) or compound; failures nest error and stack. | `suites`, `running` |
+| `Commit` family (`CommitHeader`, `CommitAuthor`, `CommitInfo`, `CommitMessage`, `CommitMetadata`, `CommitHash`, `CommitTimestamp`, `CommitActions`, `CommitFiles`, `CommitFile`, `CommitFileStatus`, `CommitFilePath`) | Commit card with hash/change-id chip and file list. | `commit` |
+| `ChangeSummary` | Additions/deletions/changed-file rollup. | `additions`, `deletions`, `filesChanged`, `vcs` |
+| `EnvironmentVariables`, `EnvironmentVariable`, `SecretField` | Environment rows; secrets are masked with a fixed bullet count and a reveal toggle. | `variables`, `secret`, `value` |
+
+### Sandbox previews
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `AgentSandbox` family (`AgentSandboxHeader`, `AgentSandboxStatus`, `AgentSandboxActions`, `AgentSandboxContent`) | Sandbox lifecycle unit (provisioning through destroyed) with honest empty states. | `state`, `workspace`, `onRetry`, `onReconnect` |
+| `WebPreview` family (`WebPreviewToolbar`, `WebPreviewAddress`, `WebPreviewContent`) | Sandboxed iframe preview; navigation callbacks are host-owned and the sandbox tokens are explicit. | `url`, `defaultUrl`, `sandboxAllow` |
+| `JSXPreview` | Inert preview of a caller-provided React node. | `node`, `inert`, `unavailableReason` |
+
+### Workflow canvas
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `WorkflowCanvas`, `WorkflowNode` family, `WorkflowEdge`, `WorkflowConnection`, `WorkflowControls`, `WorkflowPanel`, `WorkflowToolbar`, `WorkflowMinimap` | Canvas anatomy for workflow graphs; geometry belongs to the renderer (`WorkflowGraph` consumes these slots through `nodeTypes`). | `status`, `selected`, `position` |
+
+See [Agentic UI components](/reference/ui/agentic-ui) for the full import
+surface of every family in one place.
 
 ### Diff viewer
 
@@ -11478,6 +11568,202 @@ The same `chatScrollerCss` block ships `.sui-scroll-fade`. Apply it to a
 scrollable element with `data-fade-top="true|false"` and
 `data-fade-bottom="true|false"`; `MessageScroller` manages those attributes
 automatically.
+
+---
+
+## Agentic UI components
+
+> The agentic component families in smithers-orchestrator/ui for prompt, approvals, artifacts, sandbox, and canvas surfaces.
+
+`smithers-orchestrator/ui` ships a full set of agentic UI families with shadcn
+component anatomy: compound slots, `data-slot` attributes, typed props, and
+self-injected namespaced (`sui-*`) styles. Every component calls
+`useInjectUiCss()` plus its lane fragment, so rendering any component is enough
+to style it; rendering `<SmithersUiStyles />` once at the root composes all
+fragments in one sheet with the reduced-motion block last.
+
+All families are correct in light and dark themes and honor
+`prefers-reduced-motion`.
+
+## Conversation
+
+Compound transcript primitives from `smithers-orchestrator/ui`.
+
+```tsx
+import {
+  Message, MessageAvatar, MessageHeader, MessageContent, MessageFooter, MessageActions, MessageGroup,
+  MessageBranch, MessageBranchContent, MessageBranchSelector, MessageBranchPrevious, MessageBranchNext, MessageBranchPage,
+  Bubble, BubbleContent, BubbleActions, BubbleReactions,
+  CompactGroup, ConversationCheckpoint, Marker, Shimmer,
+  MessageScroller, MessageScrollerProvider, MessageScrollerViewport, MessageScrollerContent,
+  MessageScrollerItem, MessageScrollerButton,
+  useMessageScroller, useMessageVisibility, useMessageScrollerState,
+} from "smithers-orchestrator/ui";
+```
+
+- `Message` family: one chat turn with avatar, header, content, footer, and actions slots. `MessageGroup` clusters consecutive turns.
+- `MessageBranch` family: branch selector with previous/next/page controls for alternate completions.
+- `Bubble` family: lightweight bubble layout with content, actions, and reactions slots.
+- `MessageScroller`: both a drop-in scrollport (existing API) and a compound provider/viewport/content/item/button anatomy with `useMessageScroller` commands, `useMessageVisibility`, and `useMessageScrollerState` for streaming transcripts.
+- `CompactGroup`, `ConversationCheckpoint`, `Marker`, `Shimmer`: transcript density, checkpoint separators, and streaming placeholders.
+
+## Prompt and attachments
+
+```tsx
+import {
+  PromptInput, PromptInputHeader, PromptInputBody, PromptInputTextarea, PromptInputFooter,
+  PromptInputTools, PromptInputButton, PromptInputSubmit, PromptInputStop,
+  PromptInputActionMenu, PromptInputActionMenuTrigger, PromptInputActionMenuContent, PromptInputActionAddAttachments,
+  usePromptInputAttachments,
+  Attachment, AttachmentMedia, AttachmentContent, AttachmentTitle, AttachmentDescription,
+  AttachmentActions, AttachmentAction, AttachmentTrigger, AttachmentGroup, AttachmentPreview, AttachmentRemove,
+} from "smithers-orchestrator/ui";
+```
+
+`PromptInput` is a controlled composer form with submit/stop states
+(`ready | submitted | streaming | error`) and an action menu; the attachments
+context (`usePromptInputAttachments`) drives the `Attachment` compound, which
+renders upload states (`uploading | processing | ready | error`) with preview
+and remove slots.
+
+## Reasoning and tools
+
+```tsx
+import {
+  Reasoning, ReasoningTrigger, ReasoningContent, ReasoningSummary,
+  ChainOfThought, ChainOfThoughtStep, chainOfThoughtStepStatus,
+  ToolCall, ToolCallHeader, ToolCallContent, ToolCallInput, ToolCallOutput, ToolCallError, ToolCallApproval,
+  toolCallStatus, TOOL_CALL_STATE_LABELS,
+  AgentOutput, MessageResponse, parseAgentOutput, formatPartialJson,
+  CodeBlock, CodeBlockHeader, CodeBlockFilename, CodeBlockGroup, CodeBlockTabs,
+} from "smithers-orchestrator/ui";
+```
+
+- `Reasoning`: collapsible reasoning trace with a streaming-aware `ReasoningSummary`.
+- `ChainOfThought`: ordered step list; `ChainOfThoughtStep` is both the step model type and the row component.
+- `ToolCall`: legacy flat props or the compound header/content/input/output/error/approval anatomy. `toolCallStatus` maps tool states onto status tones.
+- `CodeBlock`: token-themed code with header, filename, multi-file groups, and tabs (see [CodeBlock](/components/code-block)).
+- `formatPartialJson` repairs truncated JSON for streaming previews; `parseAgentOutput` normalizes agent envelopes for `AgentOutput`.
+
+## Plans, tasks, and queues
+
+```tsx
+import {
+  Plan, PlanHeader, PlanTitle, PlanDescription, PlanTrigger, PlanContent, PlanStep, PlanAction, PlanFooter, planStepStatus,
+  TaskItem, TaskItemFile,
+  AgentTask, AgentTaskTrigger, AgentTaskContent, AgentTaskGroup,
+  Queue, QueueSection, QueueSectionTrigger, QueueSectionLabel, QueueSectionContent,
+  QueueList, QueueItem, QueueItemIndicator, QueueItemContent, QueueItemDescription,
+  ActivityTimeline, ActivityItem, ActivityGroup,
+} from "smithers-orchestrator/ui";
+```
+
+`Plan` renders a step plan (legacy props or compound anatomy) with per-step
+status; `AgentTask` is a collapsible unit of agent work; `Queue` lists pending
+and completed work in sections; `ActivityTimeline` groups run activity into
+labeled clusters.
+
+## Approvals and checkpoints
+
+```tsx
+import {
+  Confirmation, ConfirmationTitle, ConfirmationRequest, ConfirmationAccepted, ConfirmationRejected,
+  ConfirmationActions, ConfirmationAction, approvalStateToStatus,
+  ApprovalCard, ApprovalRisk, ApprovalResources, ApprovalNote,
+  Checkpoint, CheckpointIcon, CheckpointMetadata, CheckpointTrigger, CheckpointActions,
+  useCheckpoint, CHECKPOINT_ACTION_KINDS,
+} from "smithers-orchestrator/ui";
+```
+
+`Confirmation` renders the approval lifecycle (pending, accepted, rejected)
+with action slots; `ApprovalCard` adds risk level, affected resources, and a
+reviewer note; `Checkpoint` presents a durability checkpoint with restore,
+fork, replay, rewind, and return-to-live actions. Gateway-bound wrappers live
+in `smithers-orchestrator/gateway-ui` as `GatewayApprovalList`,
+`GatewayApprovalConfirmation`, and `GatewayCheckpointControls`.
+
+## Sources and citations
+
+```tsx
+import {
+  Sources, SourcesTrigger, SourcesContent, Source,
+  InlineCitation, CitationCard, CitationCarousel, CitationQuote,
+  Suggestion, SuggestionGroup, OpenInChat,
+} from "smithers-orchestrator/ui";
+```
+
+`Sources` lists cited origins; `InlineCitation` anchors inline references with
+card, carousel, and quote companions; `Suggestion` renders follow-up prompts;
+`OpenInChat` deep-links a subject into a chat surface.
+
+## Agents and context
+
+```tsx
+import {
+  AgentDefinition, AgentHeader, AgentContent, AgentInstructions, AgentTools, AgentTool, AgentOutputSchema,
+  AgentAvailabilityBadge, availabilityLabel,
+  AgentCard,
+  ModelSelector, ModelSelectorTrigger, ModelSelectorContent, ModelSelectorGroup, ModelSelectorItem,
+  ModelBadge, ProviderBadge,
+  ContextUsage, ContextTrigger, ContextContent, ContextContentHeader, ContextContentBody, ContextContentFooter,
+  ContextInputUsage, ContextOutputUsage, ContextReasoningUsage, ContextCacheUsage, contextUsagePercent,
+} from "smithers-orchestrator/ui";
+```
+
+`AgentDefinition` documents an agent (instructions, tools, output schema) with
+availability badges; `ModelSelector` is a grouped model picker built on
+`Select`; `ContextUsage` breaks down token usage (input, output, reasoning,
+cache) in a popover anatomy.
+
+## Coding artifacts
+
+```tsx
+import {
+  Artifact, ArtifactHeader, ArtifactTitle, ArtifactDescription, ArtifactActions, ArtifactAction, ArtifactClose, ArtifactContent,
+  Snippet, PackageInfo, SchemaDisplay,
+  StackTrace, StackFrame, parseStackTrace,
+  TestResults, TestResultsHeader, TestResultsSummary, TestResultsDuration, TestResultsProgress, TestResultsContent,
+  TestSuite, TestSuiteName, TestSuiteStats, TestSuiteContent, TestRow, TestStatus, TestName,
+  testCaseStatusToStatus, formatTestDuration,
+  Commit, CommitHeader, CommitAuthor, CommitInfo, CommitMessage, CommitMetadata, CommitHash, CommitTimestamp,
+  CommitActions, CommitFiles, CommitFile, CommitFileStatus, CommitFilePath, useCommitModel,
+  ChangeSummary, EnvironmentVariables, EnvironmentVariable, SecretField,
+} from "smithers-orchestrator/ui";
+```
+
+Review-surface families: `TestResults` (suite/test rows with status and
+duration), `Commit` (hash, author, files), `ChangeSummary`, `StackTrace`
+(parsed frames via `parseStackTrace`), `Artifact` (side-panel container),
+plus `Snippet`, `PackageInfo`, `SchemaDisplay`, `EnvironmentVariables`, and
+`SecretField` for redacted secrets.
+
+## Sandbox previews
+
+```tsx
+import {
+  AgentSandbox, AgentSandboxHeader, AgentSandboxStatus, AgentSandboxActions, AgentSandboxContent, sandboxStateToStatus,
+  WebPreview, WebPreviewToolbar, WebPreviewAddress, WebPreviewContent,
+  JSXPreview,
+} from "smithers-orchestrator/ui";
+```
+
+`AgentSandbox` shows sandbox lifecycle state; `WebPreview` embeds a sandboxed
+iframe preview with toolbar and address slots; `JSXPreview` renders an inert
+React subtree.
+
+## Workflow canvas
+
+```tsx
+import {
+  WorkflowCanvas, WorkflowNode, WorkflowNodeHeader, WorkflowNodeContent, WorkflowNodeStatus,
+  WorkflowEdge, WorkflowConnection, WorkflowControls, WorkflowPanel, WorkflowToolbar, WorkflowMinimap,
+} from "smithers-orchestrator/ui";
+```
+
+Canvas anatomy for workflow graphs. The gateway binding
+(`SmithersCanvasNode`, `SmithersNodeHandles` from
+`smithers-orchestrator/gateway-ui`) adapts these slots into
+`WorkflowGraph` `nodeTypes`.
 
 ---
 

@@ -131,6 +131,7 @@ const CORE_PAGES = [
   "reference/ui/attachment.mdx",
   "reference/ui/marker.mdx",
   "reference/ui/shimmer.mdx",
+  "reference/ui/agentic-ui.mdx",
   // Building a workflow UI from the raw gateway-react hooks: live events
   // (frame.event/frame.payload), node output rows, and the submitApproval
   // `decision` shape — the details agents get wrong when hand-rolling a UI.

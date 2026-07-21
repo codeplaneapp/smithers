@@ -11,9 +11,9 @@ import {
   ConfirmationRejected,
   ConfirmationRequest,
   ConfirmationTitle,
+  ApprovalNote,
   type ApprovalState,
-} from "../../ui/src/approvals/Confirmation";
-import { ApprovalNote } from "../../ui/src/approvals/ApprovalCard";
+} from "@smithers-orchestrator/ui";
 
 /** The canonical synthetic id for a pending approval row. */
 export function gatewayApprovalKey(row: GatewayApprovalRow): string {

@@ -63,20 +63,45 @@ export {
 export { Button, buttonVariants, type ButtonProps } from "./button";
 export { Badge, badgeVariants, type BadgeProps } from "./badge";
 export { StatusPill, type StatusPillProps } from "./status-pill";
-export { Reasoning, type ReasoningProps } from "./agentic/Reasoning";
+export {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+  ReasoningSummary,
+  type ReasoningProps,
+  type ReasoningTriggerProps,
+  type ReasoningContentProps,
+  type ReasoningSummaryProps,
+} from "./agentic/Reasoning";
 export {
   ChainOfThought,
+  ChainOfThoughtStep,
   chainOfThoughtStepStatus,
   type ChainOfThoughtProps,
-  type ChainOfThoughtStep,
+  type ChainOfThoughtStepProps,
   type ChainOfThoughtStepStatus,
 } from "./agentic/ChainOfThought";
 export {
   ToolCall,
+  ToolCallHeader,
+  ToolCallContent,
+  ToolCallInput,
+  ToolCallOutput,
+  ToolCallError,
+  ToolCallApproval,
   toolCallStatus,
   TOOL_CALL_STATE_LABELS,
   type ToolCallProps,
   type ToolCallState,
+  type ToolResultPart,
+  type ToolCallLegacyProps,
+  type ToolCallCompoundProps,
+  type ToolCallHeaderProps,
+  type ToolCallContentProps,
+  type ToolCallInputProps,
+  type ToolCallOutputProps,
+  type ToolCallErrorProps,
+  type ToolCallApprovalProps,
 } from "./agentic/ToolCall";
 export { formatJsonSafe } from "./agentic/formatJsonSafe";
 export {
@@ -97,9 +122,52 @@ export {
 } from "./chat/ChatMessage";
 export { ChatTranscript, type ChatTranscriptProps } from "./chat/ChatTranscript";
 export { ChatComposer, type ChatComposerProps } from "./chat/ChatComposer";
-export { MessageScroller, type MessageScrollerProps, type MessageScrollerHandle } from "./chat/MessageScroller";
-export { Bubble, bubbleVariants, type BubbleProps } from "./chat/Bubble";
-export { Attachment, type AttachmentProps, type AttachmentState } from "./chat/Attachment";
+export {
+  MessageScroller,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerButton,
+  useMessageScroller,
+  useMessageVisibility,
+  useMessageScrollerState,
+  type MessageScrollerProps,
+  type MessageScrollerHandle,
+  type MessageScrollerCommands,
+  type MessageScrollerProviderProps,
+  type MessageScrollerViewportProps,
+  type MessageScrollerContentProps,
+  type MessageScrollerItemProps,
+  type MessageScrollerButtonProps,
+} from "./chat/MessageScroller";
+export {
+  Bubble,
+  BubbleContent,
+  BubbleActions,
+  BubbleReactions,
+  bubbleVariants,
+  type BubbleProps,
+  type BubbleReaction,
+  type BubbleReactionsProps,
+} from "./chat/Bubble";
+export {
+  Attachment,
+  AttachmentMedia,
+  AttachmentContent,
+  AttachmentTitle,
+  AttachmentDescription,
+  AttachmentActions,
+  AttachmentAction,
+  AttachmentTrigger,
+  AttachmentGroup,
+  AttachmentPreview,
+  AttachmentRemove,
+  type AttachmentProps,
+  type AttachmentState,
+  type AttachmentActionProps,
+  type AttachmentPreviewProps,
+} from "./chat/Attachment";
 export { Marker, type MarkerProps } from "./chat/Marker";
 export { Shimmer, type ShimmerProps } from "./chat/Shimmer";
 export { Alert, AlertTitle, AlertDescription, alertVariants, type AlertProps } from "./alert";
@@ -127,10 +195,46 @@ export {
   type DialogContentProps,
 } from "./dialog";
 export { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "./tooltip";
-export { Plan, planStepStatus, type PlanProps, type PlanStep, type PlanStepStatus } from "./agentic/Plan";
-export { TaskItem, type TaskItemProps } from "./agentic/TaskItem";
-export { Sources, type SourcesProps, type SourceItem } from "./agentic/Sources";
-export { InlineCitation, type InlineCitationProps } from "./agentic/InlineCitation";
+export {
+  Plan,
+  PlanHeader,
+  PlanTitle,
+  PlanDescription,
+  PlanTrigger,
+  PlanContent,
+  PlanStep,
+  PlanAction,
+  PlanFooter,
+  planStepStatus,
+  type PlanProps,
+  type PlanStepStatus,
+  type PlanLegacyProps,
+  type PlanCompoundProps,
+  type PlanStepProps,
+} from "./agentic/Plan";
+export { TaskItem, TaskItemFile, type TaskItemProps, type TaskItemFileProps } from "./agentic/TaskItem";
+export {
+  Sources,
+  SourcesTrigger,
+  SourcesContent,
+  Source,
+  type SourcesProps,
+  type SourceItem,
+  type SourcesTriggerProps,
+  type SourcesContentProps,
+  type SourceProps,
+} from "./agentic/Sources";
+export {
+  InlineCitation,
+  CitationCard,
+  CitationCarousel,
+  CitationQuote,
+  type InlineCitationProps,
+  type CitationSource,
+  type CitationCardProps,
+  type CitationCarouselProps,
+  type CitationQuoteProps,
+} from "./agentic/InlineCitation";
 export {
   Select,
   SelectGroup,
@@ -197,11 +301,311 @@ export {
 export { parseAgentOutput } from "./agentic/parseAgentOutput";
 export {
   CodeBlock,
+  CodeBlockHeader,
+  CodeBlockFilename,
+  CodeBlockGroup,
+  CodeBlockTabs,
   type CodeBlockProps,
   type CodeBlockHighlighter,
+  type CodeBlockHeaderProps,
+  type CodeBlockFilenameProps,
+  type CodeBlockGroupProps,
+  type CodeBlockGroupItem,
+  type CodeBlockTabsProps,
   type HighlightLine,
   type HighlightedToken,
 } from "./agentic/CodeBlock";
+
+// lane:conversation-foundation
+export {
+  Message,
+  MessageAvatar,
+  MessageHeader,
+  MessageContent,
+  MessageFooter,
+  MessageActions,
+  MessageGroup,
+  type MessageProps,
+  type MessageRole,
+  type MessageAvatarProps,
+  type MessageActionsProps,
+} from "./chat/Message";
+export {
+  MessageBranch,
+  MessageBranchContent,
+  MessageBranchSelector,
+  MessageBranchPrevious,
+  MessageBranchNext,
+  MessageBranchPage,
+  type MessageBranchProps,
+} from "./chat/MessageBranch";
+export { CompactGroup, type CompactGroupProps } from "./chat/CompactGroup";
+export { ConversationCheckpoint, type ConversationCheckpointProps } from "./chat/ConversationCheckpoint";
+
+// lane:prompt-attachments
+export {
+  PromptInput,
+  PromptInputHeader,
+  PromptInputBody,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputTools,
+  PromptInputButton,
+  PromptInputSubmit,
+  PromptInputStop,
+  PromptInputActionMenu,
+  PromptInputActionMenuTrigger,
+  PromptInputActionMenuContent,
+  PromptInputActionAddAttachments,
+  usePromptInputAttachments,
+  type PromptInputProps,
+  type PromptInputAttachmentItem,
+  type PromptInputMessage,
+  type PromptInputStatus,
+  type PromptInputError,
+  type PromptInputTextareaProps,
+  type PromptInputActionMenuProps,
+} from "./prompt/PromptInput";
+
+// lane:reasoning-tools
+export { formatPartialJson } from "./agentic/formatPartialJson";
+
+// lane:plans-tasks-queues
+export {
+  AgentTask,
+  AgentTaskTrigger,
+  AgentTaskContent,
+  AgentTaskGroup,
+  type AgentTaskProps,
+} from "./agentic/AgentTask";
+export {
+  Queue,
+  QueueSection,
+  QueueSectionTrigger,
+  QueueSectionLabel,
+  QueueSectionContent,
+  QueueList,
+  QueueItem,
+  QueueItemIndicator,
+  QueueItemContent,
+  QueueItemDescription,
+  type QueueSectionProps,
+  type QueueSectionLabelProps,
+  type QueueItemProps,
+  type QueueItemIndicatorProps,
+} from "./agentic/Queue";
+export {
+  ActivityTimeline,
+  ActivityItem,
+  ActivityGroup,
+  type ActivityTimelineProps,
+  type ActivityItemProps,
+  type ActivityGroupProps,
+  type ActivityKind,
+  type ActivityItemModel,
+} from "./agentic/ActivityTimeline";
+
+// lane:approvals-checkpoints exports (integration: keep)
+export {
+  Confirmation,
+  ConfirmationTitle,
+  ConfirmationRequest,
+  ConfirmationAccepted,
+  ConfirmationRejected,
+  ConfirmationActions,
+  ConfirmationAction,
+  approvalStateToStatus,
+  type ConfirmationProps,
+  type ConfirmationActionProps,
+  type ApprovalState,
+} from "./approvals/Confirmation";
+export {
+  ApprovalCard,
+  ApprovalRisk,
+  ApprovalResources,
+  ApprovalNote,
+  type ApprovalCardProps,
+  type ApprovalRiskProps,
+  type ApprovalResourcesProps,
+  type ApprovalNoteProps,
+  type ApprovalRiskLevel,
+  type ApprovalResource,
+} from "./approvals/ApprovalCard";
+export {
+  Checkpoint,
+  CheckpointIcon,
+  CheckpointMetadata,
+  CheckpointTrigger,
+  CheckpointActions,
+  useCheckpoint,
+  CHECKPOINT_ACTION_KINDS,
+  type CheckpointProps,
+  type CheckpointModel,
+  type CheckpointActionKind,
+  type CheckpointTriggerProps,
+  type CheckpointActionsProps,
+} from "./approvals/Checkpoint";
+
+// lane:sources-citations
+export { Suggestion, SuggestionGroup, type SuggestionProps, type SuggestionGroupProps } from "./agentic/Suggestion";
+export { OpenInChat, type OpenInChatProps, type OpenInChatSubject, type OpenInChatSubjectKind } from "./agentic/OpenInChat";
+
+// lane:agent-identity-context
+export {
+  AgentDefinition,
+  AgentHeader,
+  AgentContent,
+  AgentInstructions,
+  AgentTools,
+  AgentTool,
+  AgentOutputSchema,
+  AgentAvailabilityBadge,
+  availabilityLabel,
+  type AgentDefinitionProps,
+  type AgentAvailability,
+  type AgentToolDescriptorModel,
+  type AgentAvailabilityBadgeProps,
+  type AgentInstructionsProps,
+  type AgentToolProps,
+  type AgentOutputSchemaProps,
+} from "./agents/AgentDefinition";
+export { AgentCard, type AgentCardProps } from "./agents/AgentCard";
+export {
+  ModelSelector,
+  ModelSelectorTrigger,
+  ModelSelectorContent,
+  ModelSelectorGroup,
+  ModelSelectorItem,
+  type ModelSelectorProps,
+  type ModelOption,
+  type ModelSelectorItemProps,
+} from "./agents/ModelSelector";
+export { ModelBadge, ProviderBadge, type ModelBadgeProps, type ProviderBadgeProps } from "./agents/badges";
+export {
+  ContextUsage,
+  ContextTrigger,
+  ContextContent,
+  ContextContentHeader,
+  ContextContentBody,
+  ContextContentFooter,
+  ContextInputUsage,
+  ContextOutputUsage,
+  ContextReasoningUsage,
+  ContextCacheUsage,
+  contextUsagePercent,
+  type ContextUsageProps,
+  type TokenUsageModel,
+} from "./agents/ContextUsage";
+
+// lane:coding-artifacts
+export {
+  Artifact,
+  ArtifactHeader,
+  ArtifactTitle,
+  ArtifactDescription,
+  ArtifactActions,
+  ArtifactAction,
+  ArtifactClose,
+  ArtifactContent,
+  type ArtifactActionProps,
+  type ArtifactCloseProps,
+} from "./artifacts/Artifact";
+export { Snippet, type SnippetProps } from "./artifacts/Snippet";
+export { PackageInfo, type PackageInfoProps } from "./artifacts/PackageInfo";
+export { SchemaDisplay, type SchemaDisplayProps } from "./artifacts/SchemaDisplay";
+export {
+  StackTrace,
+  StackFrame,
+  parseStackTrace,
+  type StackTraceProps,
+  type StackFrameProps,
+  type StackFrameData,
+} from "./artifacts/StackTrace";
+export {
+  TestResults,
+  TestResultsHeader,
+  TestResultsSummary,
+  TestResultsDuration,
+  TestResultsProgress,
+  TestResultsContent,
+  TestSuite,
+  TestSuiteName,
+  TestSuiteStats,
+  TestSuiteContent,
+  TestRow,
+  TestStatus,
+  TestName,
+  testCaseStatusToStatus,
+  formatTestDuration,
+  type TestResultsProps,
+  type TestResultsDurationProps,
+  type TestSuiteProps,
+  type TestRowProps,
+  type TestStatusProps,
+  type TestCaseStatus,
+  type TestCaseModel,
+  type TestSuiteModel,
+} from "./artifacts/TestResults";
+export {
+  Commit,
+  CommitHeader,
+  CommitAuthor,
+  CommitInfo,
+  CommitMessage,
+  CommitMetadata,
+  CommitHash,
+  CommitTimestamp,
+  CommitActions,
+  CommitFiles,
+  CommitFile,
+  CommitFileStatus,
+  CommitFilePath,
+  useCommitModel,
+  type CommitProps,
+  type CommitModel,
+  type CommitFileModel,
+  type CommitFileStatusKind,
+  type CommitHashProps,
+  type CommitTimestampProps,
+  type CommitFileProps,
+  type CommitFileStatusProps,
+  type CommitFilePathProps,
+} from "./artifacts/Commit";
+export { ChangeSummary, type ChangeSummaryProps } from "./artifacts/ChangeSummary";
+export {
+  EnvironmentVariables,
+  EnvironmentVariable,
+  type EnvironmentVariablesProps,
+  type EnvironmentVariableProps,
+  type EnvironmentVariableModel,
+} from "./artifacts/EnvironmentVariables";
+export { SecretField, type SecretFieldProps } from "./artifacts/SecretField";
+
+// lane:sandbox-previews
+export {
+  AgentSandbox,
+  AgentSandboxHeader,
+  AgentSandboxStatus,
+  AgentSandboxActions,
+  AgentSandboxContent,
+  sandboxStateToStatus,
+  type AgentSandboxProps,
+  type AgentSandboxStatusProps,
+  type AgentSandboxActionsProps,
+  type SandboxState,
+} from "./sandbox/AgentSandbox";
+export {
+  WebPreview,
+  WebPreviewToolbar,
+  WebPreviewAddress,
+  WebPreviewContent,
+  type WebPreviewProps,
+  type WebPreviewToolbarProps,
+  type WebPreviewAddressProps,
+  type WebPreviewContentProps,
+  type WebPreviewSandboxToken,
+} from "./sandbox/WebPreview";
+export { JSXPreview, type JSXPreviewProps } from "./sandbox/JSXPreview";
 
 // lane:workflow-canvas exports (integration: keep)
 export {

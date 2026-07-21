@@ -22,6 +22,7 @@ import { promptsRoute } from "../prompts/promptsRoute";
 import { scoresRoute } from "../scores/scoresRoute";
 import { cronsRoute } from "../crons/cronsRoute";
 import { vcsRoute } from "../vcs/vcsRoute";
+import { galleryRoute } from "../gallery/galleryRoute";
 import { workflowEditorRoute } from "../store/workflowEditorRoute";
 import { paletteRoute } from "../palette/paletteRoute";
 import { storeRoute } from "../store/storeRoute";
@@ -49,6 +50,7 @@ const routeTree = rootRoute.addChildren([
   scoresRoute,
   cronsRoute,
   vcsRoute,
+  galleryRoute,
   workflowEditorRoute,
   paletteRoute,
   gatewayRunRoute,

@@ -111,3 +111,15 @@ export {
   type FleetTableProps,
 } from "./FleetTable";
 export { RunMeta, type RunMetaProps } from "./RunMeta";
+export {
+  GatewayApprovalConfirmation,
+  GatewayApprovalList,
+  gatewayApprovalKey,
+  type GatewayApprovalConfirmationProps,
+  type GatewayApprovalListProps,
+} from "./GatewayApprovals";
+export {
+  GatewayCheckpointControls,
+  type GatewayCheckpointControlsProps,
+} from "./GatewayCheckpointControls";
+export { SmithersCanvasNode, SmithersNodeHandles } from "./SmithersCanvasNode";

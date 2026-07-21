@@ -1,11 +1,1 @@
-[
-  {
-    "file": "src/agentic/AgentOutput.tsx",
-    "exports": ["AgentOutput"],
-    "collection": "agentic/ai-elements",
-    "registryItem": "https://elements.ai-sdk.dev/components/message",
-    "ported": "partial-anatomy",
-    "omissions": ["message avatar and actions", "provider-specific content parts"],
-    "divergences": ["normalizes persisted agent rows into Response, Reasoning, and Tool compositions"]
-  }
-]
+[]

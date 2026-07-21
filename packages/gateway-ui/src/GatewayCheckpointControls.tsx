@@ -8,7 +8,7 @@ import {
   CheckpointMetadata,
   type CheckpointActionKind,
   type CheckpointModel,
-} from "../../ui/src/approvals/Checkpoint";
+} from "@smithers-orchestrator/ui";
 
 export type GatewayCheckpointControlsProps = {
   runId: string;

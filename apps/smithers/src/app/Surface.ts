@@ -19,6 +19,7 @@ export type Surface =
   | { kind: "scores" }
   | { kind: "crons" }
   | { kind: "vcs" }
+  | { kind: "gallery" }
   | { kind: "workflowEditor"; id: string }
   | { kind: "palette" }
   | {

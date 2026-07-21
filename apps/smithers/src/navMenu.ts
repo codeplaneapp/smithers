@@ -23,4 +23,5 @@ export const NAV_LINKS: NavLink[] = [
   { id: "prompts", label: "Prompts", surface: { kind: "prompts" } },
   { id: "scores", label: "Scores", surface: { kind: "scores" } },
   { id: "crons", label: "Crons", surface: { kind: "crons" } },
+  { id: "gallery", label: "UI Gallery", surface: { kind: "gallery" } },
 ];

@@ -126,8 +126,31 @@ const SHADCN_DIRECTORIES = [
 // file to this set in its own branch, and the blanket legacy-facade rule below
 // (which predates the program) would otherwise reject it outright.
 const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
+  "packages/gateway-ui/src/GatewayApprovals.tsx",
+  "packages/gateway-ui/src/GatewayCheckpointControls.tsx",
   "packages/gateway-ui/src/SmithersCanvasNode.tsx",
 ]);
+// Sanctioned program files are gateway-data bindings: they may import
+// @smithers-orchestrator/gateway-react (data hooks) in addition to the
+// @smithers-orchestrator/ui barrel.
+const SANCTIONED_GATEWAY_UI_PROGRAM_SPECIFIERS = new Set([
+  "@smithers-orchestrator/ui",
+  "@smithers-orchestrator/gateway-react",
+  "smithers-orchestrator/ui",
+  "smithers-orchestrator/gateway-react",
+]);
+// The frozen agentic-ui program assigns these component files to lanes whose
+// CSS fragment lives in the lane's own directory (integrationContract A), so
+// these cross-layer fragment edges are sanctioned.
+const SANCTIONED_UI_LAYER_EDGES = new Set([
+  "packages/ui/src/primitives/CodeBlock.tsx -> ../agentic/reasoningToolsCss",
+  "packages/ui/src/chat/Attachment.tsx -> ../prompt/promptAttachmentsCss",
+]);
+// The frozen agentic-ui program exports component-anatomy hooks
+// (usePromptInputAttachments, useMessageScroller, ...) from the
+// @smithers-orchestrator/ui barrel (integrationContract B), so the
+// single-public-hook rule does not apply to its root entry.
+const HOOK_EXPORT_EXEMPT_PACKAGES = new Set(["@smithers-orchestrator/ui"]);
 const SHADCN_PROVENANCE_SCHEMA = "https://json-schema.org/draft/2020-12/schema";
 const SHADCN_PROVENANCE_REGISTRIES = ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"];
 const SHADCN_PROVENANCE_COLLECTIONS = ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"];
@@ -137,6 +160,16 @@ const SHADCN_PROVENANCE_ENTRY_FILES = [
   "provenance/agentic-response-code.json",
   "provenance/agentic-plan-sources.json",
   "provenance/node-output-agentic.json",
+  "provenance/conversation-foundation.json",
+  "provenance/prompt-attachments.json",
+  "provenance/reasoning-tools.json",
+  "provenance/plans-tasks-queues.json",
+  "provenance/approvals-checkpoints.json",
+  "provenance/sources-citations.json",
+  "provenance/agent-identity-context.json",
+  "provenance/coding-artifacts.json",
+  "provenance/sandbox-previews.json",
+  "provenance/workflow-canvas.json",
 ];
 const SHADCN_PROVENANCE_TRIGGERS = new Map([
   ["provenance/chat-foundation.json", "packages/ui/src/chat/MessageScroller.tsx"],
@@ -144,51 +177,142 @@ const SHADCN_PROVENANCE_TRIGGERS = new Map([
   ["provenance/agentic-response-code.json", "packages/ui/src/agentic/MessageResponse.tsx"],
   ["provenance/agentic-plan-sources.json", "packages/ui/src/agentic/Plan.tsx"],
   ["provenance/node-output-agentic.json", "packages/ui/src/agentic/AgentOutput.tsx"],
+  ["provenance/conversation-foundation.json", "packages/ui/src/chat/Message.tsx"],
+  ["provenance/prompt-attachments.json", "packages/ui/src/prompt/PromptInput.tsx"],
+  ["provenance/reasoning-tools.json", "packages/ui/src/agentic/ToolCall.tsx"],
+  ["provenance/plans-tasks-queues.json", "packages/ui/src/agentic/Queue.tsx"],
+  ["provenance/approvals-checkpoints.json", "packages/ui/src/approvals/Confirmation.tsx"],
+  ["provenance/sources-citations.json", "packages/ui/src/agentic/Suggestion.tsx"],
+  ["provenance/agent-identity-context.json", "packages/ui/src/agents/AgentCard.tsx"],
+  ["provenance/coding-artifacts.json", "packages/ui/src/artifacts/Artifact.tsx"],
+  ["provenance/sandbox-previews.json", "packages/ui/src/sandbox/AgentSandbox.tsx"],
+  ["provenance/workflow-canvas.json", "packages/ui/src/canvas/WorkflowCanvas.tsx"],
 ]);
 const SHADCN_PROVENANCE_REQUIRED_FILES = new Map([
   ["provenance/chat-foundation.json", [
-    "src/chat/MessageScroller.tsx",
-    "src/chat/Bubble.tsx",
-    "src/chat/Attachment.tsx",
-    "src/chat/Marker.tsx",
-    "src/chat/Shimmer.tsx",
     "src/uiCss.ts",
   ]],
-  ["provenance/agentic-reasoning-tool.json", [
+  ["provenance/agentic-reasoning-tool.json", []],
+  ["provenance/agentic-response-code.json", []],
+  ["provenance/agentic-plan-sources.json", []],
+  ["provenance/node-output-agentic.json", []],
+  ["provenance/conversation-foundation.json", [
+    "src/chat/MessageScroller.tsx",
+    "src/chat/Message.tsx",
+    "src/chat/MessageBranch.tsx",
+    "src/chat/Bubble.tsx",
+    "src/chat/CompactGroup.tsx",
+    "src/chat/ConversationCheckpoint.tsx",
+    "src/chat/Marker.tsx",
+    "src/chat/Shimmer.tsx",
+  ]],
+  ["provenance/prompt-attachments.json", [
+    "src/prompt/PromptInput.tsx",
+    "src/chat/Attachment.tsx",
+  ]],
+  ["provenance/reasoning-tools.json", [
     "src/agentic/Reasoning.tsx",
     "src/agentic/ChainOfThought.tsx",
     "src/agentic/ToolCall.tsx",
-  ]],
-  ["provenance/agentic-response-code.json", [
     "src/agentic/MessageResponse.tsx",
+    "src/agentic/AgentOutput.tsx",
     "src/agentic/CodeBlock.tsx",
   ]],
-  ["provenance/agentic-plan-sources.json", [
+  ["provenance/plans-tasks-queues.json", [
     "src/agentic/Plan.tsx",
     "src/agentic/TaskItem.tsx",
+    "src/agentic/AgentTask.tsx",
+    "src/agentic/Queue.tsx",
+    "src/agentic/ActivityTimeline.tsx",
+  ]],
+  ["provenance/approvals-checkpoints.json", [
+    "src/approvals/Confirmation.tsx",
+    "src/approvals/ApprovalCard.tsx",
+    "src/approvals/Checkpoint.tsx",
+  ]],
+  ["provenance/sources-citations.json", [
     "src/agentic/Sources.tsx",
     "src/agentic/InlineCitation.tsx",
+    "src/agentic/Suggestion.tsx",
+    "src/agentic/OpenInChat.tsx",
   ]],
-  ["provenance/node-output-agentic.json", [
-    "src/agentic/AgentOutput.tsx",
+  ["provenance/agent-identity-context.json", [
+    "src/agents/AgentDefinition.tsx",
+    "src/agents/AgentCard.tsx",
+    "src/agents/ModelSelector.tsx",
+    "src/agents/badges.tsx",
+    "src/agents/ContextUsage.tsx",
+  ]],
+  ["provenance/coding-artifacts.json", [
+    "src/artifacts/Artifact.tsx",
+    "src/artifacts/Snippet.tsx",
+    "src/artifacts/PackageInfo.tsx",
+    "src/artifacts/SchemaDisplay.tsx",
+    "src/artifacts/StackTrace.tsx",
+    "src/artifacts/TestResults.tsx",
+    "src/artifacts/Commit.tsx",
+    "src/artifacts/ChangeSummary.tsx",
+    "src/artifacts/EnvironmentVariables.tsx",
+    "src/artifacts/SecretField.tsx",
+  ]],
+  ["provenance/sandbox-previews.json", [
+    "src/sandbox/AgentSandbox.tsx",
+    "src/sandbox/WebPreview.tsx",
+    "src/sandbox/JSXPreview.tsx",
+  ]],
+  ["provenance/workflow-canvas.json", [
+    "src/canvas/WorkflowCanvas.tsx",
+    "src/canvas/canvasCss.ts",
   ]],
 ]);
 const SHADCN_PROVENANCE_COMPONENTS = new Map([
-  ["src/chat/MessageScroller.tsx", "provenance/chat-foundation.json"],
-  ["src/chat/Bubble.tsx", "provenance/chat-foundation.json"],
-  ["src/chat/Attachment.tsx", "provenance/chat-foundation.json"],
-  ["src/chat/Marker.tsx", "provenance/chat-foundation.json"],
-  ["src/chat/Shimmer.tsx", "provenance/chat-foundation.json"],
-  ["src/agentic/Reasoning.tsx", "provenance/agentic-reasoning-tool.json"],
-  ["src/agentic/ChainOfThought.tsx", "provenance/agentic-reasoning-tool.json"],
-  ["src/agentic/ToolCall.tsx", "provenance/agentic-reasoning-tool.json"],
-  ["src/agentic/MessageResponse.tsx", "provenance/agentic-response-code.json"],
-  ["src/agentic/CodeBlock.tsx", "provenance/agentic-response-code.json"],
-  ["src/agentic/Plan.tsx", "provenance/agentic-plan-sources.json"],
-  ["src/agentic/TaskItem.tsx", "provenance/agentic-plan-sources.json"],
-  ["src/agentic/Sources.tsx", "provenance/agentic-plan-sources.json"],
-  ["src/agentic/InlineCitation.tsx", "provenance/agentic-plan-sources.json"],
-  ["src/agentic/AgentOutput.tsx", "provenance/node-output-agentic.json"],
+  ["src/chat/MessageScroller.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/Message.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/MessageBranch.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/Bubble.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/CompactGroup.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/ConversationCheckpoint.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/Marker.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/Shimmer.tsx", "provenance/conversation-foundation.json"],
+  ["src/chat/Attachment.tsx", "provenance/prompt-attachments.json"],
+  ["src/prompt/PromptInput.tsx", "provenance/prompt-attachments.json"],
+  ["src/agentic/Reasoning.tsx", "provenance/reasoning-tools.json"],
+  ["src/agentic/ChainOfThought.tsx", "provenance/reasoning-tools.json"],
+  ["src/agentic/ToolCall.tsx", "provenance/reasoning-tools.json"],
+  ["src/agentic/MessageResponse.tsx", "provenance/reasoning-tools.json"],
+  ["src/agentic/AgentOutput.tsx", "provenance/reasoning-tools.json"],
+  ["src/agentic/CodeBlock.tsx", "provenance/reasoning-tools.json"],
+  ["src/agentic/Plan.tsx", "provenance/plans-tasks-queues.json"],
+  ["src/agentic/TaskItem.tsx", "provenance/plans-tasks-queues.json"],
+  ["src/agentic/AgentTask.tsx", "provenance/plans-tasks-queues.json"],
+  ["src/agentic/Queue.tsx", "provenance/plans-tasks-queues.json"],
+  ["src/agentic/ActivityTimeline.tsx", "provenance/plans-tasks-queues.json"],
+  ["src/approvals/Confirmation.tsx", "provenance/approvals-checkpoints.json"],
+  ["src/approvals/ApprovalCard.tsx", "provenance/approvals-checkpoints.json"],
+  ["src/approvals/Checkpoint.tsx", "provenance/approvals-checkpoints.json"],
+  ["src/agentic/Sources.tsx", "provenance/sources-citations.json"],
+  ["src/agentic/InlineCitation.tsx", "provenance/sources-citations.json"],
+  ["src/agentic/Suggestion.tsx", "provenance/sources-citations.json"],
+  ["src/agentic/OpenInChat.tsx", "provenance/sources-citations.json"],
+  ["src/agents/AgentDefinition.tsx", "provenance/agent-identity-context.json"],
+  ["src/agents/AgentCard.tsx", "provenance/agent-identity-context.json"],
+  ["src/agents/ModelSelector.tsx", "provenance/agent-identity-context.json"],
+  ["src/agents/badges.tsx", "provenance/agent-identity-context.json"],
+  ["src/agents/ContextUsage.tsx", "provenance/agent-identity-context.json"],
+  ["src/artifacts/Artifact.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/Snippet.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/PackageInfo.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/SchemaDisplay.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/StackTrace.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/TestResults.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/Commit.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/ChangeSummary.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/EnvironmentVariables.tsx", "provenance/coding-artifacts.json"],
+  ["src/artifacts/SecretField.tsx", "provenance/coding-artifacts.json"],
+  ["src/sandbox/AgentSandbox.tsx", "provenance/sandbox-previews.json"],
+  ["src/sandbox/WebPreview.tsx", "provenance/sandbox-previews.json"],
+  ["src/sandbox/JSXPreview.tsx", "provenance/sandbox-previews.json"],
+  ["src/canvas/WorkflowCanvas.tsx", "provenance/workflow-canvas.json"],
 ]);
 const SHADCN_PROVENANCE_ENTRY_KEYS = [
   "collection",
@@ -913,7 +1037,7 @@ function uiLayer(path) {
   const relativePath = path.slice(prefix.length);
   if (relativePath.startsWith("smithers/connected/")) return "connected";
   const layer = relativePath.split("/")[0];
-  return ["adapters", "agentic", "ai", "canvas", "chat", "internal", "primitives", "smithers", "styles"].includes(layer)
+  return ["adapters", "agentic", "agents", "ai", "approvals", "artifacts", "canvas", "chat", "internal", "primitives", "prompt", "sandbox", "smithers", "styles"].includes(layer)
     ? layer
     : null;
 }
@@ -1045,13 +1169,15 @@ function shadcnViolations(root, files) {
   if (JSON.stringify(manifest.policy?.entryFiles) !== JSON.stringify(SHADCN_PROVENANCE_ENTRY_FILES)) {
     violations.push(formatViolation("shadcn-provenance", `policy.entryFiles must equal ${JSON.stringify(SHADCN_PROVENANCE_ENTRY_FILES)}`));
   }
-  if (!Array.isArray(manifest.entries) || manifest.entries.length !== 0) {
-    violations.push(formatViolation("shadcn-provenance", "entries must be an empty array; lane entries belong under provenance/"));
+  if (!Array.isArray(manifest.entries)) {
+    violations.push(formatViolation("shadcn-provenance", "entries must be an array aggregating the provenance/ fragments"));
   }
 
   const recordedPaths = new Set();
   const recordedManifests = new Map();
   const fileSet = new Set(files);
+  const aggregatedEntries = [];
+  const aggregatedByFile = new Map();
   for (const entryFile of SHADCN_PROVENANCE_ENTRY_FILES) {
     const laneManifestPath = `packages/ui/${entryFile}`;
     const laneManifestAbsolutePath = join(root, laneManifestPath);
@@ -1090,6 +1216,7 @@ function shadcnViolations(root, files) {
         recordedPaths.add(fullPath);
         recordedManifests.set(entryPath, entryFile);
         laneRecordedPaths.add(entryPath);
+        aggregatedByFile.set(entryPath, entry);
         if (!fileSet.has(fullPath)) {
           violations.push(formatViolation("shadcn-provenance", `${fullPath} is a stale provenance entry`));
         }
@@ -1101,8 +1228,8 @@ function shadcnViolations(root, files) {
       if (!SHADCN_PROVENANCE_COLLECTIONS.includes(entry?.collection)) {
         violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} has an unapproved collection`));
       }
-      if (entry?.ported !== "partial-anatomy") {
-        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} ported must be partial-anatomy`));
+      if (entry?.ported !== "partial-anatomy" && entry?.ported !== "full-anatomy") {
+        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} ported must be partial-anatomy or full-anatomy`));
       }
       for (const field of ["omissions", "divergences"]) {
         if (!Array.isArray(entry?.[field]) || entry[field].some((value) => typeof value !== "string")) {
@@ -1111,6 +1238,9 @@ function shadcnViolations(root, files) {
       }
 
       try {
+        if (entry?.registryItem === null) {
+          // Smithers-native component with no upstream registry item.
+        } else {
         const registryItem = new URL(entry?.registryItem);
         const expectedOrigin = entry?.collection === "agentic/ai-elements"
           ? "https://elements.ai-sdk.dev"
@@ -1130,6 +1260,7 @@ function shadcnViolations(root, files) {
         ) {
           throw new Error("not an approved registry item URL");
         }
+        }
       } catch {
         violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} registryItem must be an exact approved registry URL`));
       }
@@ -1142,6 +1273,11 @@ function shadcnViolations(root, files) {
         }
       }
     }
+  }
+
+  for (const entry of aggregatedByFile.values()) aggregatedEntries.push(entry);
+  if (Array.isArray(manifest.entries) && JSON.stringify(manifest.entries) !== JSON.stringify(aggregatedEntries)) {
+    violations.push(formatViolation("shadcn-provenance", "entries must equal the aggregation of the provenance/ fragments (superseded entries removed)"));
   }
 
   const shadcnFiles = files.filter((path) => SHADCN_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`)));
@@ -1185,10 +1321,11 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     for (const specifier of specifiers) {
       if (!isPackUiPath(path)) {
         // Sanctioned program files import ONLY the @smithers-orchestrator/ui
-        // barrel (integrationContract E); that single edge is exempt from the
-        // frozen uiImports inventory. Any other specifier still inventories.
+        // barrel and the @smithers-orchestrator/gateway-react data hooks
+        // (integrationContract E); those edges are exempt from the frozen
+        // uiImports inventory. Any other specifier still inventories.
         const sanctionedBarrelEdge =
-          SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path) && specifier === "@smithers-orchestrator/ui";
+          SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path) && SANCTIONED_GATEWAY_UI_PROGRAM_SPECIFIERS.has(specifier);
         if (isUiSpecifier(specifier) && !sanctionedBarrelEdge) inventories.uiImports.push(`${path} -> ${specifier}`);
         if (isLegacyUiPackage(specifier)) inventories.legacyPackageUsage.push(`${path} -> ${specifier}`);
         if (STYLE_EXTENSIONS.has(extname(specifier))) inventories.styleEntryPoints.push(`${path} -> ${specifier}`);
@@ -1213,6 +1350,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         kind === "smithers" &&
         !isPackUiPath(path) &&
         isGatewayReact(specifier) &&
+        !SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path) &&
         !path.startsWith("packages/ui/src/smithers/connected/")
       ) {
         violations.push(formatViolation("gateway-react-location", `${path} imports ${specifier}`));
@@ -1229,19 +1367,24 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       const allowedLayers = {
         adapters: new Set(["adapters", "internal", "primitives", "styles"]),
         agentic: new Set(["agentic", "chat", "internal", "primitives", "styles"]),
+        agents: new Set(["agentic", "agents", "internal", "primitives", "styles"]),
         ai: new Set(["ai", "chat", "internal", "primitives", "styles"]),
+        approvals: new Set(["agentic", "approvals", "internal", "primitives", "styles"]),
+        artifacts: new Set(["agentic", "artifacts", "internal", "primitives", "styles"]),
         canvas: new Set(["canvas", "internal", "primitives", "styles"]),
         chat: new Set(["chat", "internal", "primitives", "styles"]),
         connected: new Set(["connected", "gateway-react", "internal", "smithers", "styles"]),
         internal: new Set(["internal"]),
         primitives: new Set(["internal", "primitives", "styles"]),
+        prompt: new Set(["chat", "internal", "primitives", "prompt", "styles"]),
+        sandbox: new Set(["internal", "primitives", "sandbox", "styles"]),
         smithers: new Set(["adapters", "agentic", "ai", "internal", "primitives", "smithers", "styles"]),
         styles: new Set(["internal", "styles"]),
       };
       if (layer) {
         for (const specifier of specifiers) {
           const target = importedUiLayer(path, specifier);
-          if (target && !allowedLayers[layer].has(target)) {
+          if (target && !allowedLayers[layer].has(target) && !SANCTIONED_UI_LAYER_EDGES.has(`${path} -> ${specifier}`)) {
             violations.push(formatViolation("ui-layer-direction", `${path} (${layer}) imports ${specifier} (${target})`));
           }
         }
@@ -1399,7 +1542,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     if (
       kind === "smithers" &&
       manifest.name !== "@smithers-orchestrator/gateway-react" &&
-      !permitsWorkflowRenderHooks
+      !permitsWorkflowRenderHooks &&
+      !HOOK_EXPORT_EXEMPT_PACKAGES.has(manifest.name)
     ) {
       for (const entryPath of publicEntryPaths(absoluteRoot, path, manifest, files)) {
         const entrySource = readFileSync(join(absoluteRoot, entryPath), "utf8");
