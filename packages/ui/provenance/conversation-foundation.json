@@ -1,0 +1,105 @@
+[
+  {
+    "file": "src/chat/MessageScroller.tsx",
+    "exports": [
+      "MessageScroller",
+      "MessageScrollerProvider",
+      "MessageScrollerViewport",
+      "MessageScrollerContent",
+      "MessageScrollerItem",
+      "MessageScrollerButton",
+      "useMessageScroller",
+      "useMessageVisibility",
+      "useMessageScrollerState"
+    ],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/components/base/message-scroller",
+    "ported": "full-anatomy",
+    "omissions": [],
+    "divergences": [
+      "Upstream explicitly rejects default auto-scroll (scrollAnchor default 'none'); the flat compat component keeps our opt-out stickToBottom (default true, passed as scrollAnchor 'bottom') because every Smithers surface streams",
+      "Flat compat component retained with its exact legacy props/DOM/classes",
+      "Marker integration slots remain the host's composition responsibility"
+    ]
+  },
+  {
+    "file": "src/chat/Message.tsx",
+    "exports": [
+      "Message",
+      "MessageAvatar",
+      "MessageHeader",
+      "MessageContent",
+      "MessageFooter",
+      "MessageActions",
+      "MessageGroup"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/message",
+    "ported": "partial-anatomy",
+    "omissions": ["MessageResponse part (our MessageResponse lives in agentic)"],
+    "divergences": ["align prop drives row direction instead of upstream from-user/from-assistant classes"]
+  },
+  {
+    "file": "src/chat/MessageBranch.tsx",
+    "exports": [
+      "MessageBranch",
+      "MessageBranchContent",
+      "MessageBranchSelector",
+      "MessageBranchPrevious",
+      "MessageBranchNext",
+      "MessageBranchPage"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/message",
+    "ported": "full-anatomy",
+    "omissions": [],
+    "divergences": [
+      "Branch content rendering is the host's composition (MessageBranchContent is a region, branch switching is by props)"
+    ]
+  },
+  {
+    "file": "src/chat/Bubble.tsx",
+    "exports": ["Bubble", "bubbleVariants", "BubbleContent", "BubbleActions", "BubbleReactions"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/components/base/bubble",
+    "ported": "partial-anatomy",
+    "omissions": ["BubbleGroup", "4 of the 7 upstream visual variants (we ship user/assistant/system only)"],
+    "divergences": ["Clamp-collapse for long content is a Smithers addition; composed mode renders children verbatim"]
+  },
+  {
+    "file": "src/chat/CompactGroup.tsx",
+    "exports": ["CompactGroup"],
+    "collection": "agentic/ai-elements",
+    "registryItem": null,
+    "ported": "full-anatomy",
+    "omissions": [],
+    "divergences": ["smithers-original: collapsed run of compacted turns"]
+  },
+  {
+    "file": "src/chat/ConversationCheckpoint.tsx",
+    "exports": ["ConversationCheckpoint"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/checkpoint",
+    "ported": "partial-anatomy",
+    "omissions": ["Checkpoint icon/trigger/tooltip parts (owned by the approvals-checkpoints lane)"],
+    "divergences": ["Marker-style separator row rather than a bookmark list item"]
+  },
+  {
+    "file": "src/chat/Marker.tsx",
+    "exports": ["Marker"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/components/base/marker",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": ["status variant (streaming rows) is a Smithers addition"]
+  },
+  {
+    "file": "src/chat/Shimmer.tsx",
+    "exports": ["Shimmer"],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/utils/shimmer",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": []
+  }
+]

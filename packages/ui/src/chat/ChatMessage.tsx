@@ -2,6 +2,8 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
+import { useInjectLaneCss } from "../internal/useInjectLaneCss";
+import { CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss } from "./conversationFoundationCss";
 
 export type ChatMessageRole = "assistant" | "user" | "system";
 
@@ -33,6 +35,7 @@ export function ChatMessage({
   ...props
 }: ChatMessageProps) {
   useInjectUiCss();
+  useInjectLaneCss(CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss);
   return (
     <article
       data-slot="chat-message"

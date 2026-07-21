@@ -2,6 +2,8 @@
 import { Children, type ComponentProps, type ReactNode, type Ref } from "react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
+import { useInjectLaneCss } from "../internal/useInjectLaneCss";
+import { CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss } from "./conversationFoundationCss";
 import { ChatMessage } from "./ChatMessage";
 import {
   MessageScroller,
@@ -34,6 +36,7 @@ export function ChatTranscript({
   ...props
 }: ChatTranscriptProps) {
   useInjectUiCss();
+  useInjectLaneCss(CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss);
   const isEmpty = Children.count(children) === 0;
   const internalScrollerProps = scrollerProps as
     | Omit<MessageScrollerProps, "children" | "contentClassName" | "ref">
