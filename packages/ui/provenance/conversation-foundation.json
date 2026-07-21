@@ -54,7 +54,7 @@
     "ported": "full-anatomy",
     "omissions": [],
     "divergences": [
-      "Branch content rendering is the host's composition (MessageBranchContent is a region, branch switching is by props)"
+      "MessageBranchContent keeps every branch mounted and hides the inactive ones (upstream behavior) so per-branch state survives navigation"
     ]
   },
   {

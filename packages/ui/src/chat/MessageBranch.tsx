@@ -1,9 +1,11 @@
 /** @jsxImportSource react */
 import {
+  Children,
   createContext,
   useContext,
   useState,
   type ComponentProps,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { cn } from "../cn";
@@ -75,14 +77,25 @@ export function MessageBranch({
 }
 
 /** Region hosting the active branch's rendered response. */
-export function MessageBranchContent({ className, ...props }: ComponentProps<"div">) {
+export function MessageBranchContent({ className, children, ...props }: ComponentProps<"div">) {
   useBranchLaneCss();
+  const { index } = useMessageBranch("MessageBranchContent");
+  const branches = Children.toArray(children);
   return (
-    <div
-      data-slot="message-branch-content"
-      className={cn("sui-msg-branch-content", className)}
-      {...props}
-    />
+    <>
+      {branches.map((branch, branchIndex) => (
+        <div
+          key={(branch as ReactElement).key ?? branchIndex}
+          data-slot="message-branch-content"
+          className={cn("sui-msg-branch-content", className)}
+          hidden={branchIndex !== index}
+          aria-hidden={branchIndex !== index ? true : undefined}
+          {...props}
+        >
+          {branch}
+        </div>
+      ))}
+    </>
   );
 }
 

@@ -208,6 +208,38 @@ describe("MessageBranch", () => {
     expect(container!.querySelector('[data-slot="message-branch-page"]')!.textContent).toBe("2 of 2");
   });
 
+  test("branch content swaps the rendered branch while keeping state mounted", async () => {
+    await render(
+      <MessageBranch count={2}>
+        <MessageBranchContent>
+          <div>first response</div>
+          <div>second response</div>
+        </MessageBranchContent>
+        <MessageBranchSelector>
+          <MessageBranchPrevious />
+          <MessageBranchNext />
+        </MessageBranchSelector>
+      </MessageBranch>,
+    );
+    const panels = () =>
+      Array.from(container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]'));
+    expect(panels()).toHaveLength(2);
+    expect(panels()[0]!.hidden).toBe(false);
+    expect(panels()[0]!.textContent).toBe("first response");
+    expect(panels()[1]!.hidden).toBe(true);
+    expect(panels()[1]!.getAttribute("aria-hidden")).toBe("true");
+    await act(async () =>
+      container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-next"]')!.click(),
+    );
+    expect(panels()[0]!.hidden).toBe(true);
+    expect(panels()[1]!.hidden).toBe(false);
+    await act(async () =>
+      container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-previous"]')!.click(),
+    );
+    expect(panels()[0]!.hidden).toBe(false);
+    expect(panels()[1]!.hidden).toBe(true);
+  });
+
   test("uses accessible button labels", () => {
     const html = renderToStaticMarkup(
       <MessageBranch count={2}>

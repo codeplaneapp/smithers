@@ -24,6 +24,9 @@ type Metrics = { scrollHeight: number; clientHeight: number; scrollTop: number }
 const metricsByElement = new WeakMap<HTMLElement, Metrics>();
 const geometryByMessageId = new Map<string, { top: number; height: number }>();
 let defaultMetrics: Metrics = { scrollHeight: 0, clientHeight: 0, scrollTop: 0 };
+// Simulates the transcript sitting below page chrome: rect coordinates carry
+// this offset while scroll-content coordinates never do.
+let pageOffset = 0;
 const originalDescriptors = new Map<string, PropertyDescriptor | undefined>();
 const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -47,7 +50,7 @@ class ManualResizeObserver implements ResizeObserver {
 }
 
 beforeAll(() => {
-  for (const property of ["scrollHeight", "clientHeight", "scrollTop", "offsetTop", "offsetHeight"]) {
+  for (const property of ["scrollHeight", "clientHeight", "scrollTop", "offsetTop", "offsetHeight", "getBoundingClientRect"]) {
     originalDescriptors.set(property, Object.getOwnPropertyDescriptor(HTMLElement.prototype, property));
   }
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
@@ -91,6 +94,25 @@ beforeAll(() => {
       return (id && geometryByMessageId.get(id)?.height) || 0;
     },
   });
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value(this: HTMLElement): DOMRect {
+      const base = { left: 0, right: 0, width: 0, x: 0, toJSON: () => ({}) };
+      if (this.dataset.slot === "message-scroller-viewport") {
+        const height = this.clientHeight;
+        return { ...base, top: pageOffset, bottom: pageOffset + height, height, y: pageOffset } as DOMRect;
+      }
+      const id = this.dataset.messageId;
+      const geom = id ? geometryByMessageId.get(id) : undefined;
+      if (geom) {
+        const viewport = document.querySelector<HTMLElement>('[data-slot="message-scroller-viewport"]');
+        const scrollTop = viewport?.scrollTop ?? 0;
+        const top = pageOffset + geom.top - scrollTop;
+        return { ...base, top, bottom: top + geom.height, height: geom.height, y: top } as DOMRect;
+      }
+      return { ...base, top: 0, bottom: 0, height: 0, y: 0 } as DOMRect;
+    },
+  });
   globalThis.ResizeObserver = ManualResizeObserver;
 });
 
@@ -114,6 +136,7 @@ afterEach(async () => {
   container?.remove();
   container = undefined;
   defaultMetrics = { scrollHeight: 0, clientHeight: 0, scrollTop: 0 };
+  pageOffset = 0;
   geometryByMessageId.clear();
   resizeCallbacks.clear();
   document.documentElement.removeAttribute("data-theme");
@@ -302,6 +325,125 @@ describe("MessageScroller compound", () => {
     expect(getViewport().scrollTop).toBe(420);
   });
 
+  test("jump/restore targets are independent of page layout (viewport is not an offsetParent)", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      return null;
+    }
+    pageOffset = 240;
+    geometryByMessageId.set("m2", { top: 420, height: 80 });
+    await render(
+      <MessageScrollerProvider>
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+            <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    // Real-browser layout: the viewport is statically positioned, so the
+    // item's offsetParent is a higher ancestor (here body) and offsetTop
+    // resolves in document space (page offset included).
+    const item = getItem("m2");
+    Object.defineProperty(item, "offsetTop", { configurable: true, get: () => 240 + 420 });
+    Object.defineProperty(item, "offsetParent", { configurable: true, get: () => document.body });
+    let result = false;
+    await act(async () => {
+      result = commands!.scrollToMessage("m2");
+    });
+    expect(result).toBe(true);
+    expect(getViewport().scrollTop).toBe(420 - 56);
+  });
+
+  test("a pending restore is cancelled by the first user scroll gesture", async () => {
+    const view = (withTarget: boolean) => (
+      <MessageScrollerProvider scrollAnchor="bottom" initialMessageId="target">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="older">older</MessageScrollerItem>
+            {withTarget ? <MessageScrollerItem messageId="target">target</MessageScrollerItem> : null}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+      </MessageScrollerProvider>
+    );
+    await render(view(false), { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
+    expect(getViewport().scrollTop).toBe(1000);
+    // Scrollbar-drag style gesture: a bare scroll event away from the anchor.
+    metrics().scrollTop = 400;
+    await scroll();
+    geometryByMessageId.set("target", { top: 300, height: 80 });
+    await act(async () => root!.render(view(true)));
+    expect(getViewport().scrollTop).toBe(400);
+  });
+
+  test("jumping to a mid-transcript message disengages follow; later commits do not yank to bottom", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    geometryByMessageId.set("m2", { top: 500, height: 80 });
+    const view = (
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+            <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>
+    );
+    await render(view, { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
+    expect(getViewport().scrollTop).toBe(1000);
+    expect(latestState!.following).toBe(true);
+    await act(async () => {
+      commands!.scrollToMessage("m2");
+    });
+    expect(getViewport().scrollTop).toBe(500 - 56);
+    expect(latestState!.following).toBe(false);
+    // A later React commit must not re-pin the viewport to the bottom.
+    await act(async () => root!.render(view));
+    expect(getViewport().scrollTop).toBe(500 - 56);
+  });
+
+  test("jumping to a message at the very end clamps to the max scroll and keeps following", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    geometryByMessageId.set("m2", { top: 880, height: 80 });
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+            <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    metrics().scrollTop = 300;
+    await scroll();
+    expect(latestState!.following).toBe(false);
+    await act(async () => {
+      commands!.scrollToMessage("m2");
+    });
+    expect(getViewport().scrollTop).toBe(800);
+    expect(latestState!.following).toBe(true);
+  });
+
   test("scrollToTop/scrollToBottom drive the viewport through commands", async () => {
     let commands: MessageScrollerCommands | undefined;
     function Probe() {
@@ -382,6 +524,33 @@ describe("MessageScroller compound", () => {
     }
   });
 
+  test("visibility treats an item filling the viewport as visible", async () => {
+    const intersectionObserver = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = undefined as unknown as typeof IntersectionObserver;
+    const visible: Record<string, boolean> = {};
+    function Probe() {
+      visible.big = useMessageVisibility("big");
+      return null;
+    }
+    geometryByMessageId.set("big", { top: 0, height: 2000 });
+    try {
+      await render(
+        <MessageScrollerProvider>
+          <MessageScrollerViewport>
+            <MessageScrollerContent>
+              <MessageScrollerItem messageId="big">big</MessageScrollerItem>
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <Probe />
+        </MessageScrollerProvider>,
+        { scrollHeight: 2000, clientHeight: 200, scrollTop: 100 },
+      );
+      expect(visible.big).toBe(true);
+    } finally {
+      globalThis.IntersectionObserver = intersectionObserver;
+    }
+  });
+
   test("MessageScrollerButton hides at the latest position and jumps on click", async () => {
     await render(
       <MessageScrollerProvider scrollAnchor="bottom">
@@ -406,7 +575,7 @@ describe("MessageScroller compound", () => {
   test("a message-targeted button hides while its message is visible", async () => {
     const intersectionObserver = globalThis.IntersectionObserver;
     globalThis.IntersectionObserver = undefined as unknown as typeof IntersectionObserver;
-    geometryByMessageId.set("m2", { top: 900, height: 100 });
+    geometryByMessageId.set("m2", { top: 700, height: 100 });
     try {
       await render(
         <MessageScrollerProvider>
@@ -423,7 +592,7 @@ describe("MessageScroller compound", () => {
       const button = container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]')!;
       expect(button).not.toBeNull();
       await act(async () => button.click());
-      expect(getViewport().scrollTop).toBe(900 - 56);
+      expect(getViewport().scrollTop).toBe(700 - 56);
       // The jump scrolls the message into view: the affordance hides itself.
       expect(container!.querySelector('[data-slot="message-scroller-button"]')).toBeNull();
     } finally {

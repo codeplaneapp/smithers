@@ -234,17 +234,15 @@ function MessageScrollerProviderImpl({
     [resolveBehavior],
   );
 
+  /**
+   * Item top in scroll-content coordinates. Rect math is positioning
+   * independent: the viewport is statically positioned, so it is NOT the
+   * item's offsetParent and an offsetTop walk would leak page-level offsets.
+   */
   const itemTopWithinViewport = useCallback((el: HTMLElement): number => {
     const viewport = viewportRef.current;
     if (!viewport) return 0;
-    // offsetTop is relative to the offsetParent; walk up until the viewport.
-    let top = 0;
-    let node: HTMLElement | null = el;
-    while (node && node !== viewport) {
-      top += node.offsetTop;
-      node = node.offsetParent as HTMLElement | null;
-    }
-    return top;
+    return el.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
   }, []);
 
   /* ---- visibility tracking ----------------------------------------------- */
@@ -280,6 +278,10 @@ function MessageScrollerProviderImpl({
     if (typeof IntersectionObserver === "undefined") recomputeVisibilityGeometric();
   }, [recomputeVisibilityGeometric]);
 
+  const maxScrollTop = useCallback((viewport: HTMLDivElement): number => {
+    return Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+  }, []);
+
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "auto") => {
       const viewport = viewportRef.current;
@@ -305,12 +307,13 @@ function MessageScrollerProviderImpl({
       restorePendingRef.current = false;
       ignoreScrollUntilBottomRef.current = false;
       scrollViewportTo(0, behavior);
-      const bottom = measure(viewport);
+      measure(viewport);
       remember(viewport);
       refreshVisibilityFallback();
-      if (anchoringRef.current) setFollowing(bottom);
+      // Follow survives only when the whole transcript fits the viewport.
+      if (anchoringRef.current) setFollowing(maxScrollTop(viewport) <= thresholdRef.current);
     },
-    [measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],
+    [maxScrollTop, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],
   );
 
   const scrollToMessage = useCallback(
@@ -321,15 +324,21 @@ function MessageScrollerProviderImpl({
       restorePendingRef.current = false;
       ignoreScrollUntilBottomRef.current = false;
       const peek = opts?.peek ?? true;
-      const top = itemTopWithinViewport(el) - (peek ? peekPxRef.current : 0);
-      scrollViewportTo(Math.max(top, 0), opts?.behavior ?? "auto");
-      const bottom = measure(viewport);
+      const maxTop = maxScrollTop(viewport);
+      const top = Math.min(
+        Math.max(itemTopWithinViewport(el) - (peek ? peekPxRef.current : 0), 0),
+        maxTop,
+      );
+      scrollViewportTo(top, opts?.behavior ?? "auto");
+      measure(viewport);
       remember(viewport);
       refreshVisibilityFallback();
-      if (anchoringRef.current) setFollowing(bottom);
+      // Derive follow from the deterministic target, not the pre-scroll position:
+      // a smooth scroll has not settled yet when this runs.
+      if (anchoringRef.current) setFollowing(maxTop - top <= thresholdRef.current);
       return true;
     },
-    [itemTopWithinViewport, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],
+    [itemTopWithinViewport, maxScrollTop, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],
   );
 
   const commandsRef = useRef<MessageScrollerCommands>({ scrollToBottom, scrollToTop, scrollToMessage });
@@ -422,6 +431,9 @@ function MessageScrollerProviderImpl({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const bottom = measure(viewport);
+    // A scroll that leaves the anchor pin while a restore is pending is a user
+    // gesture (scrollbar drags surface only as scroll events): cancel retrying.
+    if (restorePendingRef.current && !bottom) restorePendingRef.current = false;
     remember(viewport);
     if (typeof IntersectionObserver === "undefined") recomputeVisibilityGeometric();
     if (!anchoringRef.current) return;
@@ -513,10 +525,19 @@ function MessageScrollerProviderImpl({
         (entries) => {
           for (const entry of entries) {
             const id = (entry.target as HTMLElement).dataset.messageId;
-            if (id) setMessageVisible(id, entry.isIntersecting && entry.intersectionRatio >= 0.5);
+            if (!id) continue;
+            // Frozen rule: half-visible OR an oversize item filling the viewport
+            // (whose intersectionRatio can never reach the 0.5 threshold).
+            const rootHeight = entry.rootBounds?.height ?? 0;
+            const fillsViewport =
+              rootHeight > 0 && entry.intersectionRect.height >= rootHeight * 0.99;
+            setMessageVisible(
+              id,
+              entry.isIntersecting && (entry.intersectionRatio >= 0.5 || fillsViewport),
+            );
           }
         },
-        { root: viewportRef.current, threshold: 0.5 },
+        { root: viewportRef.current, threshold: [0, 0.5] },
       );
       observerRef.current = observer;
       for (const el of itemsRef.current.values()) observer.observe(el);
