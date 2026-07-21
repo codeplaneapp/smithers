@@ -1,6 +1,17 @@
 /** @jsxImportSource react */
-import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { cn } from "../cn";
+import { REASONING_TOOLS_CSS_ID, reasoningToolsCss } from "./reasoningToolsCss";
+import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { useInjectUiCss } from "../styles";
 
 export type ReasoningProps = Omit<ComponentProps<"div">, "children"> & {
@@ -10,8 +21,24 @@ export type ReasoningProps = Omit<ComponentProps<"div">, "children"> & {
   onOpenChange?: (open: boolean) => void;
   duration?: number;
   title?: string;
+  composed?: boolean;
   children?: ReactNode;
 };
+
+type ReasoningContextValue = {
+  open: boolean;
+  toggle: () => void;
+  bodyId: string;
+  triggerId: string;
+};
+
+const ReasoningContext = createContext<ReasoningContextValue | null>(null);
+
+function useReasoningContext(part: string): ReasoningContextValue {
+  const context = useContext(ReasoningContext);
+  if (!context) throw new Error(`${part} must be rendered inside <Reasoning composed>`);
+  return context;
+}
 
 function formatDuration(n: number): string {
   if (n < 60) return `${Math.round(n)}s`;
@@ -26,12 +53,16 @@ export function Reasoning({
   onOpenChange,
   duration,
   title = "Reasoning",
+  composed = false,
   className,
   children,
   ...props
 }: ReasoningProps) {
   useInjectUiCss();
-  const bodyId = `${useId()}-reasoning-body`;
+  useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
+  const baseId = useId();
+  const bodyId = `${baseId}-reasoning-body`;
+  const triggerId = `${baseId}-reasoning-trigger`;
   const isControlled = controlledOpen !== undefined;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(
     () => defaultOpen ?? streaming,
@@ -56,41 +87,140 @@ export function Reasoning({
   }
 
   return (
-    <div
-      data-slot="reasoning"
-      data-state={isOpen ? "open" : "closed"}
-      data-streaming={streaming ? "true" : "false"}
-      className={cn("sui-reasoning", className)}
+    <ReasoningContext.Provider value={{ open: isOpen, toggle, bodyId, triggerId }}>
+      <div
+        data-slot="reasoning"
+        data-state={isOpen ? "open" : "closed"}
+        data-streaming={streaming ? "true" : "false"}
+        className={cn("sui-reasoning", className)}
+        {...props}
+      >
+        {composed ? children : (
+          <>
+            <button
+              type="button"
+              data-slot="reasoning-trigger"
+              className="sui-reasoning-trigger"
+              aria-expanded={isOpen}
+              aria-controls={bodyId}
+              onClick={toggle}
+            >
+              <span className="sui-reasoning-chevron" aria-hidden="true">
+                ›
+              </span>
+              <span
+                className="sui-reasoning-title"
+                data-shimmer={streaming ? "true" : "false"}
+              >
+                {title}
+              </span>
+              {!streaming && duration != null ? (
+                <span data-slot="reasoning-duration" className="sui-reasoning-duration">
+                  Thought for {formatDuration(duration)}
+                </span>
+              ) : null}
+            </button>
+            {isOpen ? (
+              <div data-slot="reasoning-body" id={bodyId} className="sui-reasoning-body">
+                {children}
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </ReasoningContext.Provider>
+  );
+}
+
+export type ReasoningTriggerProps = ComponentProps<"button">;
+
+/** Disclosure trigger for a composed Reasoning. */
+export function ReasoningTrigger({
+  className,
+  children,
+  onClick,
+  ...props
+}: ReasoningTriggerProps) {
+  useInjectUiCss();
+  useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
+  const context = useReasoningContext("ReasoningTrigger");
+  return (
+    <button
+      type="button"
+      id={context.triggerId}
+      data-slot="reasoning-trigger"
+      className={cn("sui-reasoning-trigger", className)}
+      aria-expanded={context.open}
+      aria-controls={context.bodyId}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) context.toggle();
+      }}
       {...props}
     >
-      <button
-        type="button"
-        data-slot="reasoning-trigger"
-        className="sui-reasoning-trigger"
-        aria-expanded={isOpen}
-        aria-controls={bodyId}
-        onClick={toggle}
+      <span className="sui-reasoning-chevron" aria-hidden="true">
+        ›
+      </span>
+      {children}
+    </button>
+  );
+}
+
+export type ReasoningContentProps = ComponentProps<"div">;
+
+/** Content region for a composed Reasoning; renders only while open. */
+export function ReasoningContent({ className, ...props }: ReasoningContentProps) {
+  useInjectUiCss();
+  useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
+  const context = useReasoningContext("ReasoningContent");
+  if (!context.open) return null;
+  return (
+    <div
+      role="region"
+      aria-labelledby={context.triggerId}
+      id={context.bodyId}
+      data-slot="reasoning-content"
+      className={cn("sui-reasoning-body", className)}
+      {...props}
+    />
+  );
+}
+
+export type ReasoningSummaryProps = Omit<ComponentProps<"div">, "children"> & {
+  /**
+   * A provider-safe reasoning summary: text the provider/harness already
+   * disclosed in its output payload (visible-thinking transcripts, summary
+   * fields). Never raw private chain-of-thought, and never request it.
+   */
+  text: string;
+  streaming?: boolean;
+  label?: string;
+};
+
+/** Presentation of a provider-disclosed reasoning summary ('Thinking' label). */
+export function ReasoningSummary({
+  text,
+  streaming = false,
+  label = "Thinking",
+  className,
+  ...props
+}: ReasoningSummaryProps) {
+  useInjectUiCss();
+  useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
+  return (
+    <div
+      data-slot="reasoning-summary"
+      data-streaming={streaming ? "true" : "false"}
+      className={cn("sui-reasoning-summary", className)}
+      {...props}
+    >
+      <span
+        className="sui-reasoning-summary-label"
+        data-streaming={streaming ? "true" : "false"}
       >
-        <span className="sui-reasoning-chevron" aria-hidden="true">
-          ›
-        </span>
-        <span
-          className="sui-reasoning-title"
-          data-shimmer={streaming ? "true" : "false"}
-        >
-          {title}
-        </span>
-        {!streaming && duration != null ? (
-          <span data-slot="reasoning-duration" className="sui-reasoning-duration">
-            Thought for {formatDuration(duration)}
-          </span>
-        ) : null}
-      </button>
-      {isOpen ? (
-        <div data-slot="reasoning-body" id={bodyId} className="sui-reasoning-body">
-          {children}
-        </div>
-      ) : null}
+        {label}
+      </span>
+      <div className="sui-reasoning-summary-text">{text}</div>
     </div>
   );
 }

@@ -1,0 +1,84 @@
+[
+  {
+    "file": "src/agentic/Reasoning.tsx",
+    "exports": ["Reasoning", "ReasoningTrigger", "ReasoningContent", "ReasoningSummary"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/reasoning",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "immediate auto-collapse (upstream delays 1s)",
+      "composed opt-in keeps the legacy flat render as the default",
+      "ReasoningSummary presents provider-disclosed summaries only; no raw chain-of-thought channel"
+    ]
+  },
+  {
+    "file": "src/agentic/ChainOfThought.tsx",
+    "exports": ["ChainOfThought", "ChainOfThoughtStep", "chainOfThoughtStepStatus"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/chain-of-thought",
+    "ported": "partial-anatomy",
+    "omissions": ["per-step images/search-result chips"],
+    "divergences": [
+      "legacy steps-array mode kept alongside the composed ChainOfThoughtStep anatomy"
+    ]
+  },
+  {
+    "file": "src/agentic/ToolCall.tsx",
+    "exports": [
+      "ToolCall",
+      "ToolCallHeader",
+      "ToolCallContent",
+      "ToolCallInput",
+      "ToolCallOutput",
+      "ToolCallError",
+      "ToolCallApproval",
+      "toolCallStatus",
+      "TOOL_CALL_STATE_LABELS"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/tool",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "ToolCallContent corresponds to upstream ToolContent (naming divergence)",
+      "approvalSlot is a seam rather than built-in approval buttons",
+      "ToolCallApproval is a container; approval presentation is composed by the host",
+      "legacy model render kept alongside the compound anatomy"
+    ]
+  },
+  {
+    "file": "src/agentic/MessageResponse.tsx",
+    "exports": ["MessageResponse"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/message",
+    "ported": "partial-anatomy",
+    "omissions": ["Message/MessageContent wrappers", "avatar/actions anatomy"],
+    "divergences": []
+  },
+  {
+    "file": "src/agentic/AgentOutput.tsx",
+    "exports": ["AgentOutput"],
+    "collection": "agentic/ai-elements",
+    "registryItem": null,
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "smithers-original",
+      "AgentOutputModel.reasoningSummary carries provider-disclosed summaries; reasoning remains as a deprecated alias"
+    ]
+  },
+  {
+    "file": "src/agentic/CodeBlock.tsx",
+    "exports": ["CodeBlock", "CodeBlockHeader", "CodeBlockFilename", "CodeBlockGroup", "CodeBlockTabs"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/code-block",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "copy is a seam not a clipboard dependency",
+      "highlighter is a seam not bundled shiki",
+      "implementation lives in src/primitives/CodeBlock.tsx; this module is the public re-export"
+    ]
+  }
+]

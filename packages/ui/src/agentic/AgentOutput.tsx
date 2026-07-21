@@ -1,9 +1,11 @@
 /** @jsxImportSource react */
 import type { ComponentProps } from "react";
 import { cn } from "../cn";
+import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { useInjectUiCss } from "../styles";
 import { MessageResponse as Response } from "./MessageResponse";
-import { Reasoning } from "./Reasoning";
+import { Reasoning, ReasoningSummary } from "./Reasoning";
+import { REASONING_TOOLS_CSS_ID, reasoningToolsCss } from "./reasoningToolsCss";
 import { ToolCall, type ToolCallState } from "./ToolCall";
 
 export type AgentOutputToolCall = {
@@ -15,10 +17,17 @@ export type AgentOutputToolCall = {
   result?: unknown;
   resultText?: string;
   errorText?: string;
+  durationMs?: number;
 };
 
 export type AgentOutputModel = {
   response?: string;
+  /**
+   * Provider-safe reasoning summary: text the provider/harness already
+   * disclosed in its output payload. Never raw private chain-of-thought.
+   */
+  reasoningSummary?: string;
+  /** @deprecated Use reasoningSummary. Both are populated identically. */
   reasoning?: string;
   toolCalls: readonly AgentOutputToolCall[];
   streaming: boolean;
@@ -31,6 +40,8 @@ export type AgentOutputProps = Omit<ComponentProps<"div">, "children"> & {
 /** Props-driven composition for a parsed assistant response, reasoning, and tools. */
 export function AgentOutput({ model, className, ...props }: AgentOutputProps) {
   useInjectUiCss();
+  useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
+  const summary = model.reasoningSummary ?? model.reasoning;
   return (
     <div
       data-slot="agent-output"
@@ -38,12 +49,15 @@ export function AgentOutput({ model, className, ...props }: AgentOutputProps) {
       className={cn("sui-agent-output", className)}
       {...props}
     >
-      {model.reasoning ? (
+      {summary ? (
         <Reasoning
           streaming={model.streaming}
           defaultOpen={model.streaming ? undefined : !model.response}
         >
-          <Response content={model.reasoning} streaming={model.streaming && !model.response} />
+          <ReasoningSummary
+            text={summary}
+            streaming={model.streaming && !model.response}
+          />
         </Reasoning>
       ) : null}
       {model.toolCalls.length ? (
@@ -58,6 +72,7 @@ export function AgentOutput({ model, className, ...props }: AgentOutputProps) {
               result={call.result}
               resultText={call.resultText}
               errorText={call.errorText}
+              durationMs={call.durationMs}
             />
           ))}
         </div>

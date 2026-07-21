@@ -43,6 +43,12 @@ function textFromPart(value: unknown, acceptedTypes?: ReadonlySet<string>): stri
   if (typeof value === "string") return value.trim() ? value : undefined;
   if (!isRecord(value)) return undefined;
   const type = readString(value, ["type", "kind"]);
+  // Provider-redacted thinking is never rendered, and signature/redaction
+  // payloads are metadata about hidden reasoning -- drop them outright.
+  if (type && type.toLowerCase() === "redacted_thinking") return undefined;
+  if (value.signature !== undefined || value.redactedData !== undefined || value.redacted_data !== undefined) {
+    return undefined;
+  }
   if (acceptedTypes && type && !acceptedTypes.has(type.toLowerCase())) return undefined;
   return readString(value, ["text", "content", "markdown", "value"]);
 }
@@ -115,6 +121,14 @@ function normalizeToolState(value: unknown, call: UnknownRecord, streaming: bool
   return streaming ? "running" : "input-available";
 }
 
+function readNumber(record: UnknownRecord, keys: readonly string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
 function formatError(value: unknown): string {
   if (typeof value === "string") return value;
   if (value instanceof Error) return value.message;
@@ -145,6 +159,8 @@ function parseToolCall(
   const args = value.input ?? value.args ?? value.arguments ?? functionCall?.arguments;
   const result = value.result ?? value.output ?? matchedResult?.result ?? matchedResult?.output;
   const error = value.errorText ?? value.error_text ?? value.error ?? matchedResult?.error;
+  const durationMs = readNumber(value, ["durationMs", "duration_ms"])
+    ?? (matchedResult ? readNumber(matchedResult, ["durationMs", "duration_ms"]) : undefined);
   const state = normalizeToolState(value.state ?? value.status ?? matchedResult?.state ?? matchedResult?.status, {
     ...value,
     ...(result === undefined ? {} : { result }),
@@ -157,6 +173,7 @@ function parseToolCall(
     ...(typeof args === "string" ? { argsText: args } : args === undefined ? {} : { args }),
     ...(typeof result === "string" ? { resultText: result } : result === undefined ? {} : { result }),
     ...(error === undefined ? {} : { errorText: formatError(error) }),
+    ...(durationMs === undefined ? {} : { durationMs }),
   };
 }
 
@@ -248,7 +265,9 @@ function parseValue(
   if (!combinedResponse && !combinedReasoning && combinedCalls.length === 0) return null;
   return {
     ...(combinedResponse ? { response: combinedResponse } : {}),
-    ...(combinedReasoning ? { reasoning: combinedReasoning } : {}),
+    // Both fields carry the identical provider-disclosed summary; `reasoning`
+    // remains only as a deprecated alias.
+    ...(combinedReasoning ? { reasoningSummary: combinedReasoning, reasoning: combinedReasoning } : {}),
     toolCalls: combinedCalls,
     streaming: streaming || (nestedModel?.streaming ?? false),
   };
