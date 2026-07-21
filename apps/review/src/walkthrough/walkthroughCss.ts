@@ -308,11 +308,13 @@ footer kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); bac
 /**
  * Emitted after the Pierre stylesheets: unlayered restores for the resets
  * Pierre is known to apply globally (`pre, code` display/margin/padding and
- * the universal box-sizing rule), so page prose and code render identically
- * whether or not a Pierre diff is on the page. :where() keeps the guard's
- * specificity at the element level so page component rules still win.
+ * the universal box-sizing rule), plus an inherited color scheme so Pierre's
+ * system theme follows the walkthrough's resolved data-theme instead of the
+ * OS preference. :where() keeps the guard's specificity at the element level
+ * so page component rules still win.
  */
 export const walkthroughRestoreCss = `
+.pierre-diff { color-scheme: inherit; }
 *:not(:where(.pierre-diff, .pierre-diff *)), *:not(:where(.pierre-diff, .pierre-diff *))::before, *:not(:where(.pierre-diff, .pierre-diff *))::after { box-sizing: border-box; }
 code:not(:where(.pierre-diff *)), pre:not(:where(.pierre-diff *)) { display: revert; margin: revert; padding: revert; }
 code:not(:where(.pierre-diff *)) { display: inline; }

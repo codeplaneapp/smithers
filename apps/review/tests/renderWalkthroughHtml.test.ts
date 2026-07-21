@@ -107,6 +107,16 @@ describe("renderWalkthroughHtml", () => {
     for (const [, selector] of codeRules) expect(selector).toContain(":not(:where(.pierre-diff *))");
   });
 
+  test("lets the resolved root theme control Pierre's color scheme", async () => {
+    const html = await render();
+    const pierreSystemScheme = html.indexOf("color-scheme: light dark;");
+    const inheritedScheme = html.indexOf(".pierre-diff { color-scheme: inherit; }");
+
+    expect(pierreSystemScheme).toBeGreaterThan(-1);
+    expect(inheritedScheme).toBeGreaterThan(pierreSystemScheme);
+    expect(html).toContain(':root[data-theme="dark"] { color-scheme:dark;');
+  });
+
   test("escapes all dynamic chrome content", async () => {
     const html = await render();
     expect(html).toContain("Replaces removed with added &lt;script&gt;");
