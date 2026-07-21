@@ -47,6 +47,8 @@
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.6",
     "@smithers-orchestrator/driver": "workspace:*",
+    "@smithers-orchestrator/gateway-react": "workspace:*",
+    "@smithers-orchestrator/gateway-ui": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
     "@statelyai/inspect": "^0.7.2",
     "@types/mdx": "2.0.14",
