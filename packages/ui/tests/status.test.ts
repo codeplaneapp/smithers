@@ -40,9 +40,9 @@ describe("statusClass", () => {
 
 describe("status colors", () => {
   test("uses one token color per shared status class", () => {
-    expect(statusColors.ok).toBe("var(--success, #0f8f78)");
-    expect(statusColors.warn).toBe("var(--warning, #bf7100)");
-    expect(statusColors.bad).toBe("var(--danger, #e5484d)");
+    expect(statusColors.ok).toBe("var(--success, #087461)");
+    expect(statusColors.warn).toBe("var(--warning, #955600)");
+    expect(statusColors.bad).toBe("var(--danger, #c5343f)");
     expect(statusColors.muted).toBe("var(--text-muted, #52525b)");
     expect(statusColors.run).toBe("var(--brand, #6d56d8)");
     expect(statusColors.running).toBe(statusColors.run);
