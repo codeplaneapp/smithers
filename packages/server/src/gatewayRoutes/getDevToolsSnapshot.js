@@ -527,13 +527,22 @@ export function attachNodeStatesToDevToolsRoot(root, nodeRows) {
 }
 
 /**
+ * Upper bound for the task prompt carried on a snapshot node. Attempt metadata
+ * keeps the full text (see `smithers node detail`); the snapshot only needs
+ * enough for the inspector's Prompt panel, and frames stream to every
+ * subscribed client, so unbounded prompts are not allowed through.
+ */
+export const DEVTOOLS_TASK_PROMPT_MAX_CHARS = 4_000;
+
+/**
  * Attach the agent that ACTUALLY executed each task node (engine/model/agentId
  * from the latest attempt's persisted `metaJson` — the same metadata the
- * hijack candidates read, see ../hijackCandidates.js). Declared assignments
- * (`task.agentSummary`) come from the frame's task index instead; this covers
- * running/settled nodes and runs recorded before declared-agent capture.
- * Only the newest attempt per node is parsed — attempt metaJson can carry
- * whole conversations, so parsing every row would be wasteful.
+ * hijack candidates read, see ../hijackCandidates.js) plus the task's initial
+ * prompt. Declared assignments (`task.agentSummary`) come from the frame's
+ * task index instead; this covers running/settled nodes and runs recorded
+ * before declared-agent capture. Only the newest attempt per node is parsed —
+ * attempt metaJson can carry whole conversations, so parsing every row would
+ * be wasteful.
  *
  * @param {DevToolsNode} root
  * @param {Array<Record<string, unknown>>} attemptRows
@@ -558,41 +567,47 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
     if (latest.size === 0) {
         return;
     }
-    /** @type {Map<string, { agentId?: string; engine?: string; model?: string } | undefined>} */
+    /** @type {Map<string, { agentId?: string; engine?: string; model?: string; prompt?: string } | undefined>} */
     const parsedByNode = new Map();
     /**
    * @param {string} nodeId
-   * @returns {{ agentId?: string; engine?: string; model?: string } | undefined}
+   * @returns {{ agentId?: string; engine?: string; model?: string; prompt?: string } | undefined}
    */
-    const agentRanFor = (nodeId) => {
+    const attemptMetaFor = (nodeId) => {
         if (parsedByNode.has(nodeId)) {
             return parsedByNode.get(nodeId);
         }
         const row = latest.get(nodeId);
-        /** @type {{ agentId?: string; engine?: string; model?: string } | undefined} */
-        let ran;
+        /** @type {{ agentId?: string; engine?: string; model?: string; prompt?: string } | undefined} */
+        let meta;
         if (row && typeof row.metaJson === "string" && row.metaJson.length > 0) {
             try {
-                const meta = JSON.parse(row.metaJson);
-                if (asObject(meta)) {
-                    const engine = typeof meta.agentEngine === "string" && meta.agentEngine ? meta.agentEngine : undefined;
-                    const model = typeof meta.agentModel === "string" && meta.agentModel ? meta.agentModel : undefined;
-                    const agentId = typeof meta.agentId === "string" && meta.agentId ? meta.agentId : undefined;
-                    if (engine || model || agentId) {
-                        ran = {
+                const parsed = JSON.parse(row.metaJson);
+                if (asObject(parsed)) {
+                    const engine = typeof parsed.agentEngine === "string" && parsed.agentEngine ? parsed.agentEngine : undefined;
+                    const model = typeof parsed.agentModel === "string" && parsed.agentModel ? parsed.agentModel : undefined;
+                    const agentId = typeof parsed.agentId === "string" && parsed.agentId ? parsed.agentId : undefined;
+                    const prompt = typeof parsed.prompt === "string" && parsed.prompt
+                        ? parsed.prompt.length > DEVTOOLS_TASK_PROMPT_MAX_CHARS
+                            ? `${parsed.prompt.slice(0, DEVTOOLS_TASK_PROMPT_MAX_CHARS)}…`
+                            : parsed.prompt
+                        : undefined;
+                    if (engine || model || agentId || prompt) {
+                        meta = {
                             ...(agentId ? { agentId } : {}),
                             ...(engine ? { engine } : {}),
                             ...(model ? { model } : {}),
+                            ...(prompt ? { prompt } : {}),
                         };
                     }
                 }
             }
             catch {
-                ran = undefined;
+                meta = undefined;
             }
         }
-        parsedByNode.set(nodeId, ran);
-        return ran;
+        parsedByNode.set(nodeId, meta);
+        return meta;
     };
     /** @type {DevToolsNode[]} */
     const stack = [root];
@@ -602,9 +617,15 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
             continue;
         }
         if (node.task?.nodeId) {
-            const ran = agentRanFor(node.task.nodeId);
-            if (ran) {
-                node.task.agentRan = ran;
+            const meta = attemptMetaFor(node.task.nodeId);
+            if (meta) {
+                const { prompt, ...ran } = meta;
+                if (ran.agentId || ran.engine || ran.model) {
+                    node.task.agentRan = ran;
+                }
+                if (prompt) {
+                    node.task.prompt = prompt;
+                }
             }
         }
         for (const child of node.children) {

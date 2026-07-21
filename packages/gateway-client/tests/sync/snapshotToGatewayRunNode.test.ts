@@ -290,6 +290,37 @@ describe("snapshotToGatewayRunNode", () => {
     expect(snapshotToGatewayRunNode({})).toBeNull();
   });
 
+  test("passes the task's initial prompt through onto node.prompt", () => {
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "workflow",
+        children: [
+          {
+            id: 2,
+            name: "Freeze",
+            type: "task",
+            task: { nodeId: "freeze", kind: "agent", state: "finished", prompt: "Freeze scope for WAVAX." },
+            children: [],
+          },
+          {
+            // Queued node: no attempt yet, so no prompt.
+            id: 3,
+            name: "Queued",
+            type: "task",
+            task: { nodeId: "queued", kind: "agent" },
+            children: [],
+          },
+        ],
+      },
+      runState: { state: "running" },
+    });
+    const [freeze, queued] = tree?.children ?? [];
+    expect(freeze?.prompt).toBe("Freeze scope for WAVAX.");
+    expect(queued?.prompt).toBeUndefined();
+  });
+
   test("marks every node ok once the run has finished", () => {
     const done = snapshotToGatewayRunNode({
       root: { id: 1, name: "Workflow", type: "workflow", children: [{ id: 2, name: "Task", type: "task", task: { nodeId: "a", kind: "agent" }, children: [] }] },

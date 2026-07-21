@@ -36,6 +36,8 @@ export type DevToolsSnapshotNode = {
     attempt?: number;
     /** Attempt budget (declared retries + 1) when finite. */
     maxAttempts?: number;
+    /** The task's initial prompt (from the latest attempt's metadata). */
+    prompt?: string;
   };
   children?: DevToolsSnapshotNode[];
 };
@@ -314,6 +316,7 @@ function mapNode(
   const agent = nodeAgent(node);
   const attempt = node.task?.attempt;
   const maxAttempts = node.task?.maxAttempts;
+  const prompt = typeof node.task?.prompt === "string" && node.task.prompt ? node.task.prompt : undefined;
   const children = (node.children ?? []).map((child) =>
     mapNode(child, false, runStatus, blockedNodeId),
   );
@@ -332,6 +335,7 @@ function mapNode(
     ...(agent !== undefined ? { agent } : {}),
     ...(typeof attempt === "number" && Number.isFinite(attempt) ? { attempt } : {}),
     ...(typeof maxAttempts === "number" && Number.isFinite(maxAttempts) ? { maxAttempts } : {}),
+    ...(prompt !== undefined ? { prompt } : {}),
     children,
   };
 }

@@ -52,6 +52,11 @@ export type GatewayRunNode = {
   attempt?: number;
   /** Attempt budget (declared retries + 1) when finite. */
   maxAttempts?: number;
+  /**
+   * The task's initial prompt (from the latest attempt's metadata, bounded for
+   * display). Absent for queued nodes and tasks with no prompt.
+   */
+  prompt?: string;
   output?: string;
   toolCalls?: ReadonlyArray<Record<string, unknown>>;
   /** The parent row's `key` (see {@link key}) — NOT its logical `id`. */

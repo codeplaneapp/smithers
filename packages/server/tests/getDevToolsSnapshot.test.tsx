@@ -14,7 +14,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import type { DevToolsSnapshot } from "@smithers-orchestrator/protocol";
 import { Gateway } from "../src/gateway.js";
-import { getDevToolsSnapshotRoute } from "../src/gatewayRoutes/getDevToolsSnapshot.js";
+import { DEVTOOLS_TASK_PROMPT_MAX_CHARS, getDevToolsSnapshotRoute } from "../src/gatewayRoutes/getDevToolsSnapshot.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 
 function createAdapter() {
@@ -400,6 +400,114 @@ describe("getDevToolsSnapshotRoute", () => {
     });
     // A never-executed node has no acting agent.
     expect(byNodeId.get("queued")?.agentRan).toBeUndefined();
+    sqlite.close();
+  });
+
+  test("attaches the task's initial prompt from the latest attempt's metadata", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-attempt-prompts";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "attempt-prompts" },
+        children: [
+          { kind: "element", tag: "smithers:task", props: { id: "freeze::0" }, children: [] },
+          { kind: "element", tag: "smithers:task", props: { id: "quiet::0" }, children: [] },
+          { kind: "element", tag: "smithers:task", props: { id: "queued::0" }, children: [] },
+        ],
+      }),
+      xmlHash: "hash-attempt-prompts",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "attempt-prompts",
+    });
+    const attemptRow = (nodeId: string, attempt: number, metaJson: string | null) => ({
+      runId,
+      nodeId,
+      iteration: 0,
+      attempt,
+      state: "finished",
+      startedAtMs: now(),
+      finishedAtMs: now(),
+      heartbeatAtMs: null,
+      heartbeatDataJson: null,
+      errorJson: null,
+      jjPointer: null,
+      jjCwd: "/tmp",
+      cached: false,
+      metaJson,
+    });
+    // The LATEST attempt's prompt wins.
+    await adapter.insertAttempt(attemptRow("freeze", 1, JSON.stringify({ prompt: "stale prompt" })));
+    await adapter.insertAttempt(
+      attemptRow("freeze", 2, JSON.stringify({ prompt: "Freeze scope for WAVAX on Avalanche C-Chain." })),
+    );
+    // No prompt key (or a non-string one) attaches nothing.
+    await adapter.insertAttempt(attemptRow("quiet", 1, JSON.stringify({ agentEngine: "codex", prompt: null })));
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    const byNodeId = new Map(snapshot.root.children.map((child) => [child.task?.nodeId, child.task]));
+    expect(byNodeId.get("freeze")?.prompt).toBe("Freeze scope for WAVAX on Avalanche C-Chain.");
+    expect(byNodeId.get("quiet")?.prompt).toBeUndefined();
+    expect(byNodeId.get("queued")?.prompt).toBeUndefined();
+    sqlite.close();
+  });
+
+  test("bounds oversized attempt prompts carried on the snapshot", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-huge-prompt";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "huge-prompt" },
+        children: [{ kind: "element", tag: "smithers:task", props: { id: "big::0" }, children: [] }],
+      }),
+      xmlHash: "hash-huge-prompt",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "huge-prompt",
+    });
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "big",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: now(),
+      finishedAtMs: now(),
+      heartbeatAtMs: null,
+      heartbeatDataJson: null,
+      errorJson: null,
+      jjPointer: null,
+      jjCwd: "/tmp",
+      cached: false,
+      metaJson: JSON.stringify({ prompt: "x".repeat(10_000) }),
+    });
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    const prompt = snapshot.root.children[0]?.task?.prompt;
+    expect(prompt?.length).toBe(DEVTOOLS_TASK_PROMPT_MAX_CHARS + 1);
+    expect(prompt?.endsWith("…")).toBe(true);
     sqlite.close();
   });
 
