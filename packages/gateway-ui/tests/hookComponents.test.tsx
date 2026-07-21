@@ -378,7 +378,7 @@ describe("NodeOutputView", () => {
       status: "produced",
       row: {
         text: "Final **answer**",
-        reasoningText: "Inspect first",
+        reasoningSummary: "Inspect first",
         toolCalls: [{ toolName: "read", input: { path: "README.md" }, result: "ok" }],
       },
     });
@@ -397,7 +397,7 @@ describe("NodeOutputView", () => {
         output: {
           message: {
             content: [
-              { type: "reasoning", text: "Inspect first" },
+              { type: "reasoning", summary: [{ type: "summary_text", text: "Inspect first" }] },
               { type: "tool-call", toolName: "read", input: { path: "README.md" } },
               { type: "text", text: "Final **answer**" },
             ],

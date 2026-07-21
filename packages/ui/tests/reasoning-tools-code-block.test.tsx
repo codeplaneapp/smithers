@@ -90,6 +90,40 @@ describe("CodeBlockTabs", () => {
     });
     expect(changes).toEqual(["b"]);
   });
+
+  test("roving tabindex keeps only the active tab in the tab order", async () => {
+    await render(
+      <CodeBlockTabs
+        items={items.map(({ id, label }) => ({ id, label }))}
+        activeId="a"
+        onActiveIdChange={() => {}}
+      />,
+    );
+    const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    expect(tabs[0]!.tabIndex).toBe(0);
+    expect(tabs[1]!.tabIndex).toBe(-1);
+    const list = container!.querySelector('[role="tablist"]')!;
+    expect(list.getAttribute("aria-label")).toBe("Code blocks");
+  });
+
+  test("arrow navigation is computed from the focused tab, not activeId", async () => {
+    const changes: string[] = [];
+    await render(
+      <CodeBlockTabs
+        items={items.map(({ id, label }) => ({ id, label }))}
+        activeId="a"
+        onActiveIdChange={(id) => changes.push(id)}
+      />,
+    );
+    const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    // Focus the inactive tab: ArrowLeft from tab b must land on tab a, even
+    // though activeId is still "a" (delayed controlled update).
+    tabs[1]!.focus();
+    await act(async () => {
+      tabs[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+    });
+    expect(changes).toEqual(["a"]);
+  });
 });
 
 describe("CodeBlockGroup", () => {
@@ -122,6 +156,19 @@ describe("CodeBlockGroup", () => {
     await act(async () => tabs[1]!.click());
     expect(changes).toEqual(["b"]);
     expect(container!.textContent).toContain("const a = 1;");
+  });
+
+  test("wires tab-to-panel aria-controls and tabpanel labelling", async () => {
+    await render(<CodeBlockGroup items={items} />);
+    const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    const panel = container!.querySelector('[role="tabpanel"]')!;
+    expect(panel).not.toBeNull();
+    const activeTab = tabs[0]!;
+    expect(activeTab.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.getAttribute("aria-labelledby")).toBe(activeTab.id);
+    expect(activeTab.id).toBeTruthy();
+    // Inactive tab points at its own (currently unrendered) panel id.
+    expect(tabs[1]!.getAttribute("aria-controls")).toContain("-panel-b");
   });
 
   test("renders under the dark theme", () => {

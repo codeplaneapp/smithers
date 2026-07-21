@@ -20,6 +20,7 @@ export const reasoningToolsCss = `
 .sui-cot-step-icon { flex:none; display:inline-flex; align-items:center; color:${t.mutedForeground}; }
 
 .sui-toolcall-duration { flex:none; color:${t.mutedForeground}; font-size:11px; font-variant-numeric:tabular-nums; }
+.sui-toolcall-header .sui-toolcall-trigger { width:100%; }
 .sui-toolcall-section-title[data-shimmer='true'] { background:linear-gradient(90deg, ${t.mutedForeground} 35%, ${t.foreground} 50%, ${t.mutedForeground} 65%); background-size:200% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; animation:sui-shimmer-sweep 2s linear infinite; }
 .sui-toolcall-pre[data-partial='true'] { opacity:.72; }
 .sui-toolcall-part { min-width:0; }

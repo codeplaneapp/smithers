@@ -6,10 +6,65 @@ import { AgentOutput, parseAgentOutput } from "../src/index";
 afterEach(() => document.documentElement.removeAttribute("data-theme"));
 
 describe("reasoning summary safety boundary", () => {
-  test("populates reasoningSummary identically to the deprecated reasoning alias", () => {
-    const model = parseAgentOutput({ thinking: "Provider disclosed summary" });
+  test("explicit reasoningSummary fields populate the deprecated reasoning alias identically", () => {
+    const model = parseAgentOutput({ reasoningSummary: "Provider disclosed summary" });
     expect(model?.reasoningSummary).toBe("Provider disclosed summary");
     expect(model?.reasoning).toBe("Provider disclosed summary");
+    expect(parseAgentOutput({ reasoning_summary: "Snake summary" })?.reasoningSummary).toBe(
+      "Snake summary",
+    );
+  });
+
+  test("raw reasoning/thinking/thought transcripts are never surfaced as summaries", () => {
+    // These fields may contain raw private chain-of-thought; the parser must
+    // not assume they are provider-safe summaries.
+    const model = parseAgentOutput({
+      response: "done",
+      reasoning: "raw reasoning transcript",
+      thinking: "raw thinking transcript",
+      thought: "raw thought transcript",
+      reasoningText: "raw reasoningText transcript",
+      thinkingText: "raw thinkingText transcript",
+    });
+    expect(model?.reasoningSummary).toBeUndefined();
+    expect(model?.reasoning).toBeUndefined();
+
+    const partsModel = parseAgentOutput({
+      response: "done",
+      reasoning: [
+        { type: "reasoning", text: "raw reasoning part" },
+        { type: "thinking", text: "raw thinking part" },
+        { type: "thought", text: "raw thought part" },
+      ],
+    });
+    expect(partsModel?.reasoningSummary).toBeUndefined();
+    expect(partsModel?.reasoning).toBeUndefined();
+  });
+
+  test("summary-typed parts and nested summary arrays are extracted", () => {
+    expect(
+      parseAgentOutput({
+        reasoning: [
+          { type: "summary_text", text: "First summary" },
+          { type: "reasoning", summary: [{ type: "summary_text", text: "Second summary" }] },
+          { type: "reasoning", summary: "Third summary" },
+        ],
+      })?.reasoningSummary,
+    ).toBe("First summary\n\nSecond summary\n\nThird summary");
+  });
+
+  test("drops redacted_thinking parts and signature/redactedData fields", () => {
+    const model = parseAgentOutput({
+      reasoning: [
+        { type: "summary_text", text: "Visible summary" },
+        { type: "redacted_thinking", text: "must never render" },
+        { type: "summary_text", text: "signed blob", signature: "abc123" },
+        { type: "summary_text", text: "redacted blob", redactedData: "xyz" },
+        { type: "reasoning", summary: "signed summary", signature: "abc123" },
+      ],
+    });
+    expect(model?.reasoningSummary).toBe("Visible summary");
+    expect(model?.reasoning).toBe("Visible summary");
   });
 
   test("renderer prefers reasoningSummary over the deprecated alias", () => {
@@ -24,19 +79,7 @@ describe("reasoning summary safety boundary", () => {
       />,
     );
     expect(html).toContain('data-slot="reasoning-summary"');
-  });
-
-  test("drops redacted_thinking parts and signature/redactedData fields", () => {
-    const model = parseAgentOutput({
-      reasoning: [
-        { type: "thinking", text: "Visible summary" },
-        { type: "redacted_thinking", text: "must never render" },
-        { type: "thinking", text: "signed blob", signature: "abc123" },
-        { type: "thinking", text: "redacted blob", redactedData: "xyz" },
-      ],
-    });
-    expect(model?.reasoningSummary).toBe("Visible summary");
-    expect(model?.reasoning).toBe("Visible summary");
+    expect(html).toContain("Safe summary");
   });
 
   test("parses tool durationMs through to the render model", () => {
@@ -51,7 +94,7 @@ describe("reasoning summary safety boundary", () => {
   });
 
   test("AgentOutput renders the summary through ReasoningSummary anatomy when open", () => {
-    const model = parseAgentOutput({ reasoningText: "Consider the evidence" });
+    const model = parseAgentOutput({ reasoningSummary: "Consider the evidence" });
     const html = renderToStaticMarkup(<AgentOutput model={model!} />);
     expect(html).toContain('data-slot="reasoning"');
     expect(html).toContain('data-slot="reasoning-summary"');
@@ -61,7 +104,7 @@ describe("reasoning summary safety boundary", () => {
 
   test("renders under the dark theme", () => {
     document.documentElement.dataset.theme = "dark";
-    const model = parseAgentOutput({ thinking: "Dark summary" });
+    const model = parseAgentOutput({ reasoningSummary: "Dark summary" });
     const html = renderToStaticMarkup(<AgentOutput model={model!} />);
     expect(html).toContain('data-slot="reasoning-summary"');
   });

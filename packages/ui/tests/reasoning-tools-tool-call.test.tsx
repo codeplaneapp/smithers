@@ -48,7 +48,7 @@ describe("formatPartialJson", () => {
 });
 
 describe("ToolCall compound anatomy", () => {
-  test("header toggles the content region and carries name, state, and duration", async () => {
+  test("header is a div containing a trigger button that toggles the content region", async () => {
     await render(
       <ToolCall name="search" state="output-available" durationMs={1523}>
         <ToolCallHeader />
@@ -60,20 +60,54 @@ describe("ToolCall compound anatomy", () => {
     );
     const rootEl = container!.querySelector('[data-slot="tool-call"]')!;
     expect(rootEl.getAttribute("data-state")).toBe("closed");
-    const header = container!.querySelector<HTMLButtonElement>('[data-slot="tool-call-header"]')!;
-    expect(header.getAttribute("aria-expanded")).toBe("false");
+    const header = container!.querySelector('[data-slot="tool-call-header"]')!;
+    // Frozen Div contract: the header is a real div, not a button in disguise.
+    expect(header.tagName).toBe("DIV");
     expect(header.textContent).toContain("search");
     expect(header.textContent).toContain("Done");
     expect(header.textContent).toContain("1.5s");
+    const trigger = header.querySelector<HTMLButtonElement>('[data-slot="tool-call-trigger"]')!;
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(container!.querySelector('[data-slot="tool-call-content"]')).toBeNull();
 
-    await act(async () => header.click());
-    expect(header.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => trigger.click());
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     const content = container!.querySelector('[data-slot="tool-call-content"]')!;
     expect(content.getAttribute("role")).toBe("region");
-    expect(content.id).toBe(header.getAttribute("aria-controls"));
+    expect(content.id).toBe(trigger.getAttribute("aria-controls"));
     expect(container!.querySelector('[data-slot="tool-call-input"]')!.textContent).toContain('"query"');
     expect(container!.querySelector('[data-slot="tool-call-output"]')!.textContent).toContain('"hits"');
+  });
+
+  test("header div props compose: consumer onClick fires and disclosure still toggles", async () => {
+    const clicks: string[] = [];
+    await render(
+      <ToolCall name="search" state="running">
+        <ToolCallHeader className="custom-header" onClick={() => clicks.push("div")} />
+      </ToolCall>,
+    );
+    const header = container!.querySelector<HTMLDivElement>('[data-slot="tool-call-header"]')!;
+    expect(header.className).toContain("sui-toolcall-header");
+    expect(header.className).toContain("custom-header");
+    const trigger = header.querySelector<HTMLButtonElement>('[data-slot="tool-call-trigger"]')!;
+    await act(async () => trigger.click());
+    expect(clicks).toEqual(["div"]);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  test("input and output parts render as divs honoring their Div prop contracts", () => {
+    const html = renderToStaticMarkup(
+      <ToolCall name="search" state="output-available" defaultOpen>
+        <ToolCallHeader />
+        <ToolCallContent>
+          <ToolCallInput args={{ a: 1 }} data-contract="input-div" />
+          <ToolCallOutput result={{ b: 2 }} data-contract="output-div" />
+        </ToolCallContent>
+      </ToolCall>,
+    );
+    expect(html).toContain('data-contract="input-div"');
+    expect(html).toContain('data-contract="output-div"');
+    expect(html).not.toContain("<section");
   });
 
   test("hides duration for non-terminal states and while absent", () => {

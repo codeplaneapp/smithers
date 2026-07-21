@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "../cn";
 import { REASONING_TOOLS_CSS_ID, reasoningToolsCss } from "../agentic/reasoningToolsCss";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
@@ -200,13 +200,24 @@ export type CodeBlockTabsProps = Omit<ComponentProps<"div">, "children"> & {
   items: readonly { id: string; label: string }[];
   activeId: string;
   onActiveIdChange: (id: string) => void;
+  /**
+   * When provided (CodeBlockGroup passes its own), tabs render
+   * `id="{idPrefix}-tab-{item.id}"` and `aria-controls="{idPrefix}-panel-{item.id}"`
+   * so hosts can wire matching tabpanels. Standalone usage omits both.
+   */
+  idPrefix?: string;
 };
 
-/** Tab strip for switching between grouped code blocks. */
+/**
+ * Tab strip for switching between grouped code blocks. Roving tabindex keeps
+ * only the active tab in the tab order; arrow-key navigation is computed from
+ * the focused tab and selection follows focus (automatic activation).
+ */
 export function CodeBlockTabs({
   items,
   activeId,
   onActiveIdChange,
+  idPrefix,
   className,
   onKeyDown,
   ...props
@@ -220,7 +231,9 @@ export function CodeBlockTabs({
     if (event.defaultPrevented) return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     if (items.length === 0) return;
-    const index = Math.max(0, items.findIndex((item) => item.id === activeId));
+    const focusedIndex = tabRefs.current.findIndex((el) => el !== null && el === event.target);
+    const activeIndex = Math.max(0, items.findIndex((item) => item.id === activeId));
+    const index = focusedIndex >= 0 ? focusedIndex : activeIndex;
     const next =
       event.key === "ArrowRight"
         ? (index + 1) % items.length
@@ -233,6 +246,7 @@ export function CodeBlockTabs({
   return (
     <div
       role="tablist"
+      aria-label="Code blocks"
       data-slot="code-block-tabs"
       className={cn("sui-codeblock-tabs", className)}
       onKeyDown={handleKeyDown}
@@ -246,9 +260,12 @@ export function CodeBlockTabs({
           }}
           type="button"
           role="tab"
+          id={idPrefix ? `${idPrefix}-tab-${item.id}` : undefined}
+          aria-controls={idPrefix ? `${idPrefix}-panel-${item.id}` : undefined}
           data-slot="code-block-tab"
           className="sui-codeblock-tab"
           aria-selected={item.id === activeId}
+          tabIndex={item.id === activeId ? 0 : -1}
           onClick={() => onActiveIdChange(item.id)}
         >
           {item.label}
@@ -280,6 +297,7 @@ export function CodeBlockGroup({
 }: CodeBlockGroupProps) {
   useInjectUiCss();
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
+  const baseId = useId();
   const isControlled = controlledActiveId !== undefined;
   const [uncontrolledActiveId, setUncontrolledActiveId] = useState(
     () => defaultActiveId ?? items[0]?.id ?? "",
@@ -304,17 +322,24 @@ export function CodeBlockGroup({
             items={items.map(({ id, label }) => ({ id, label }))}
             activeId={active!.id}
             onActiveIdChange={setActive}
+            idPrefix={baseId}
           />
           {active!.filename !== undefined ? <CodeBlockFilename name={active!.filename} /> : null}
         </CodeBlockHeader>
       ) : null}
       {active ? (
-        <CodeBlock
-          code={active.code}
-          language={active.language}
-          showLineNumbers={showLineNumbers}
-          highlight={highlight}
-        />
+        <div
+          role="tabpanel"
+          id={`${baseId}-panel-${active.id}`}
+          aria-labelledby={`${baseId}-tab-${active.id}`}
+        >
+          <CodeBlock
+            code={active.code}
+            language={active.language}
+            showLineNumbers={showLineNumbers}
+            highlight={highlight}
+          />
+        </div>
       ) : null}
     </div>
   );

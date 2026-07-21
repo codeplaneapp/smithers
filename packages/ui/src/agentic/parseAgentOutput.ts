@@ -63,7 +63,7 @@ function joinParts(value: unknown, acceptedTypes?: ReadonlySet<string>): string 
 }
 
 const RESPONSE_PART_TYPES = new Set(["text", "output_text", "message", "assistant"]);
-const REASONING_PART_TYPES = new Set(["reasoning", "thinking", "thought"]);
+const REASONING_SUMMARY_PART_TYPES = new Set(["summary", "summary_text", "reasoning_summary"]);
 const TOOL_PART_TYPES = new Set(["tool-call", "tool_call", "tool-use", "tool_use"]);
 
 function contentParts(record: UnknownRecord): unknown {
@@ -82,20 +82,48 @@ function responseText(record: UnknownRecord): string | undefined {
   return joinParts(contentParts(record), RESPONSE_PART_TYPES);
 }
 
-function reasoningText(record: UnknownRecord): string | undefined {
-  const direct = readString(record, [
-    "reasoningText",
-    "reasoning_text",
-    "thinkingText",
-    "thinking_text",
-    "thinking",
-    "thought",
-  ]);
+/**
+ * Provider-safe reasoning summaries ONLY. Raw `reasoning`/`thinking`/`thought`
+ * fields and text parts may contain private chain-of-thought transcripts, so
+ * they are never surfaced. A summary is trusted only when the provider/harness
+ * explicitly labelled it as one: `reasoningSummary`/`reasoning_summary`
+ * fields, summary-typed parts, or nested `summary` payloads on reasoning items
+ * (e.g. OpenAI Responses API reasoning summary arrays). Redacted/signed parts
+ * are dropped outright.
+ */
+function summaryFromPart(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const type = readString(value, ["type", "kind"]);
+  if (type && type.toLowerCase() === "redacted_thinking") return undefined;
+  if (value.signature !== undefined || value.redactedData !== undefined || value.redacted_data !== undefined) {
+    return undefined;
+  }
+  const nested = value.summary;
+  if (typeof nested === "string") return nested.trim() ? nested : undefined;
+  if (Array.isArray(nested)) {
+    const texts = nested
+      .map((part) => summaryFromPart(part))
+      .filter((part): part is string => part !== undefined);
+    if (texts.length) return texts.join("\n\n");
+  }
+  if (type && REASONING_SUMMARY_PART_TYPES.has(type.toLowerCase())) {
+    return readString(value, ["text", "content", "value"]);
+  }
+  return undefined;
+}
+
+function reasoningSummaryText(record: UnknownRecord): string | undefined {
+  const direct = readString(record, ["reasoningSummary", "reasoning_summary"]);
   if (direct) return direct;
-  return joinParts(record.reasoning, REASONING_PART_TYPES) ??
-    joinParts(record.thinking, REASONING_PART_TYPES) ??
-    joinParts(record.thought, REASONING_PART_TYPES) ??
-    joinParts(contentParts(record), REASONING_PART_TYPES);
+  const content = contentParts(record);
+  const candidates: unknown[] = [
+    ...readArray(record, ["reasoning", "thinking", "thought"]),
+    ...(Array.isArray(content) ? content : []),
+  ];
+  const texts = candidates
+    .map((part) => summaryFromPart(part))
+    .filter((part): part is string => part !== undefined);
+  return texts.length ? texts.join("\n\n") : undefined;
 }
 
 function normalizeToolState(value: unknown, call: UnknownRecord, streaming: boolean): ToolCallState {
@@ -245,7 +273,7 @@ function parseValue(
       ? ["streaming", "running", "in-progress", "in_progress"].includes(status.toLowerCase())
       : inheritedStreaming);
   const response = responseText(value);
-  const reasoning = reasoningText(value);
+  const reasoningSummary = reasoningSummaryText(value);
   const calls = toolCalls(value, streaming);
 
   // Agent nodes often persist the provider result under an outer output/data
@@ -260,14 +288,14 @@ function parseValue(
   }
 
   const combinedResponse = response ?? nestedModel?.response;
-  const combinedReasoning = reasoning ?? nestedModel?.reasoning;
+  const combinedSummary = reasoningSummary ?? nestedModel?.reasoningSummary;
   const combinedCalls = mergeToolCalls(calls, nestedModel?.toolCalls ?? []);
-  if (!combinedResponse && !combinedReasoning && combinedCalls.length === 0) return null;
+  if (!combinedResponse && !combinedSummary && combinedCalls.length === 0) return null;
   return {
     ...(combinedResponse ? { response: combinedResponse } : {}),
     // Both fields carry the identical provider-disclosed summary; `reasoning`
     // remains only as a deprecated alias.
-    ...(combinedReasoning ? { reasoningSummary: combinedReasoning, reasoning: combinedReasoning } : {}),
+    ...(combinedSummary ? { reasoningSummary: combinedSummary, reasoning: combinedSummary } : {}),
     toolCalls: combinedCalls,
     streaming: streaming || (nestedModel?.streaming ?? false),
   };

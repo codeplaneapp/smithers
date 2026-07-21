@@ -23,8 +23,10 @@ export type AgentOutputToolCall = {
 export type AgentOutputModel = {
   response?: string;
   /**
-   * Provider-safe reasoning summary: text the provider/harness already
-   * disclosed in its output payload. Never raw private chain-of-thought.
+   * Provider-safe reasoning summary: text the provider/harness explicitly
+   * disclosed as a summary (reasoningSummary fields, summary-typed parts,
+   * nested summary arrays). Raw reasoning/thinking transcripts are dropped by
+   * the parser and never rendered. Never raw private chain-of-thought.
    */
   reasoningSummary?: string;
   /** @deprecated Use reasoningSummary. Both are populated identically. */

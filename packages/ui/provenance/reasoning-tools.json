@@ -65,7 +65,7 @@
     "omissions": [],
     "divergences": [
       "smithers-original",
-      "AgentOutputModel.reasoningSummary carries provider-disclosed summaries; reasoning remains as a deprecated alias"
+      "AgentOutputModel.reasoningSummary is populated ONLY from explicit reasoningSummary/reasoning_summary fields, summary-typed parts, and nested summary payloads on reasoning items; raw reasoning/thinking/thought transcripts and redacted/signed parts are dropped and never rendered; reasoning remains as a deprecated alias"
     ]
   },
   {

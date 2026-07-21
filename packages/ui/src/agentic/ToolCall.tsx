@@ -327,7 +327,10 @@ export function ToolCall(props: ToolCallProps) {
 
 export type ToolCallHeaderProps = ComponentProps<"div">;
 
-/** Compound-mode header: trigger button with name, status, and duration. */
+/**
+ * Compound-mode header row (a real div per the frozen Div contract) wrapping
+ * the disclosure trigger button with name, status, and duration.
+ */
 export function ToolCallHeader({ className, children, ...props }: ToolCallHeaderProps) {
   useToolCallInjected();
   const context = useToolCallContext("ToolCallHeader");
@@ -338,29 +341,34 @@ export function ToolCallHeader({ className, children, ...props }: ToolCallHeader
       </span>
     ) : null;
   return (
-    <button
-      type="button"
+    <div
       data-slot="tool-call-header"
-      className={cn("sui-toolcall-trigger", className)}
-      aria-expanded={context.open}
-      aria-controls={context.bodyId}
-      onClick={context.toggle}
-      {...(props as ComponentProps<"button">)}
+      className={cn("sui-toolcall-header", className)}
+      {...props}
     >
-      {children ?? (
-        <>
-          <span className="sui-toolcall-chevron" aria-hidden="true">
-            ›
-          </span>
-          <span className="sui-toolcall-name">{context.name}</span>
-          <StatusPill
-            status={toolCallStatus(context.state)}
-            label={TOOL_CALL_STATE_LABELS[context.state]}
-          />
-          {duration}
-        </>
-      )}
-    </button>
+      <button
+        type="button"
+        data-slot="tool-call-trigger"
+        className="sui-toolcall-trigger"
+        aria-expanded={context.open}
+        aria-controls={context.bodyId}
+        onClick={context.toggle}
+      >
+        {children ?? (
+          <>
+            <span className="sui-toolcall-chevron" aria-hidden="true">
+              ›
+            </span>
+            <span className="sui-toolcall-name">{context.name}</span>
+            <StatusPill
+              status={toolCallStatus(context.state)}
+              label={TOOL_CALL_STATE_LABELS[context.state]}
+            />
+            {duration}
+          </>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -421,7 +429,7 @@ export function ToolCallInput({
     );
   }
   return (
-    <section
+    <div
       data-slot="tool-call-input"
       className={cn("sui-toolcall-section", className)}
       {...props}
@@ -430,7 +438,7 @@ export function ToolCallInput({
         Input
       </div>
       {content}
-    </section>
+    </div>
   );
 }
 
@@ -527,7 +535,7 @@ export function ToolCallOutput({
     );
   }
   return (
-    <section
+    <div
       data-slot="tool-call-output"
       className={cn("sui-toolcall-section", className)}
       {...props}
@@ -536,7 +544,7 @@ export function ToolCallOutput({
         Output
       </div>
       {content}
-    </section>
+    </div>
   );
 }
 

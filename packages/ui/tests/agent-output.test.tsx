@@ -15,10 +15,10 @@ describe("parseAgentOutput", () => {
     expect(parseAgentOutput({ count: 2, ok: true })).toBeNull();
   });
 
-  test("normalizes reasoning and AI SDK tool calls/results into the render model", () => {
+  test("normalizes reasoning summaries and AI SDK tool calls/results into the render model", () => {
     const model = parseAgentOutput({
       text: "Found **two** matches.",
-      reasoningText: "I should search first.",
+      reasoningSummary: "I should search first.",
       toolCalls: [
         { toolCallId: "call-1", toolName: "search", input: { query: "smithers" } },
       ],
@@ -44,7 +44,7 @@ describe("parseAgentOutput", () => {
     });
   });
 
-  test("accepts snake-case, JSON-encoded calls, and thinking fields", () => {
+  test("accepts snake-case and JSON-encoded calls while dropping raw thinking fields", () => {
     const model = parseAgentOutput({
       output: "Working",
       thinking: "Check the files",
@@ -55,16 +55,19 @@ describe("parseAgentOutput", () => {
     });
 
     expect(model?.streaming).toBe(true);
-    expect(model?.reasoning).toBe("Check the files");
+    // Raw `thinking` fields may be private transcripts; they are never surfaced.
+    expect(model?.reasoning).toBeUndefined();
+    expect(model?.reasoningSummary).toBeUndefined();
     expect(model?.toolCalls[0]).toMatchObject({
       name: "read",
       state: "running",
       argsText: '{"path":"README.md"}',
     });
 
+    // Summary-typed parts are provider-disclosed summaries and ARE surfaced.
     expect(parseAgentOutput({
-      thinking: [{ type: "thinking", text: "Inspect the result" }],
-    })?.reasoning).toBe("Inspect the result");
+      reasoning_summary: "Inspect the result",
+    })?.reasoningSummary).toBe("Inspect the result");
   });
 
   test("unwraps nested agent results and reads message content parts", () => {
@@ -73,7 +76,10 @@ describe("parseAgentOutput", () => {
       output: {
         message: {
           content: [
-            { type: "reasoning", text: "Inspect the nested result" },
+            {
+              type: "reasoning",
+              summary: [{ type: "summary_text", text: "Inspect the nested result" }],
+            },
             {
               type: "tool-call",
               toolCallId: "call-nested",
@@ -100,11 +106,11 @@ describe("parseAgentOutput", () => {
     });
 
     expect(parseAgentOutput({
-      reasoning: "Outer reasoning",
+      reasoningSummary: "Outer reasoning",
       output: { text: "Nested response" },
     })).toMatchObject({
       response: "Nested response",
-      reasoning: "Outer reasoning",
+      reasoningSummary: "Outer reasoning",
     });
   });
 });
@@ -113,7 +119,7 @@ describe("AgentOutput", () => {
   test("composes Response, Reasoning, and ToolCall anatomy", () => {
     const model = parseAgentOutput({
       text: "Final **answer**",
-      reasoning: [{ type: "reasoning", text: "Consider the evidence" }],
+      reasoning: [{ type: "reasoning", summary: "Consider the evidence" }],
       toolCalls: [{ toolName: "inspect", input: { path: "a.ts" }, result: "ok" }],
     });
     expect(model).not.toBeNull();
