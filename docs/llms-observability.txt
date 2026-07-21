@@ -847,6 +847,15 @@ After `connect`, the gateway emits `tick` events every `heartbeatMs`. `launchRun
 | `browser.frame` | Browser viewer frames; delivered only to subscribed browser sessions |
 | `browser.activity` | Browser settled action journal entries |
 
+### Browser viewer
+
+The gateway serves a credential-free stationary viewer at
+`/browser/<sessionId>/viewer`. It is protected by the gateway's normal UI
+authentication and connects back to the same gateway WebSocket. Embed it with
+`theme=light` or `theme=dark`; `hostOrigin` accepts a validated origin and
+`embed=1` hides the toolbar for host-controlled embedding. Subscribe the socket
+to `browser:<sessionId>` to receive live screencast frames.
+
 For stateless callers, `POST /rpc` accepts the same body shape (`{ id, method, params }`) and returns the same `ResponseFrame`. Auth headers: `Authorization: Bearer <token>` or `x-smithers-key: <token>` (or trusted-proxy headers in trusted-proxy mode).
 
 ## GatewayOptions

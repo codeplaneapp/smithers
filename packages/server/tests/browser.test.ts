@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { createBrowserSessionRegistry } from "../src/browser.js";
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
+import { WebSocket } from "ws";
+import { Gateway } from "../src/gateway.js";
 
 const page = { url: () => "http://example.com/", title: async () => "Example", evaluate: async () => false, goto: async () => {}, goBack: async () => {}, goForward: async () => {}, reload: async () => {}, mouse: { click: async () => {}, wheel: async () => {} }, keyboard: { press: async () => {} }, getByRole: () => ({ click: async () => {}, fill: async () => {} }) };
 const playwright = { chromium: { launch: async () => ({ newContext: async () => ({ newPage: async () => page, route: async () => {}, close: async () => {} }), close: async () => {} }) } };
@@ -44,4 +46,38 @@ describe("browser session registry", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  test("real gateway websocket drives Chromium and gates screencast frames", async () => {
+    const fixture = createServer((_request, response) => response.end("<button data-testid='counter' onclick=\"document.body.dataset.count=(+(document.body.dataset.count||0)+1)\">Count</button><button>Count</button><input aria-label='Secret' type='password'>"));
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const port = (fixture.address() as { port: number }).port;
+    const gateway = new Gateway({ browser: createBrowserSessionRegistry({ playwright: { chromium: createRequire(new URL("../../../apps/cli/package.json", import.meta.url))("playwright").chromium } }) });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const address = server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    const frames: any[] = [];
+    const pending = new Map<string, (value: any) => void>();
+    socket.on("message", (raw) => { const frame = JSON.parse(String(raw)); if (frame.type === "event" && frame.event === "browser.frame") frames.push(frame.payload); if (frame.type === "res") pending.get(frame.id)?.(frame); });
+    const request = (method: string, params: any) => new Promise<any>((resolve) => { const id = `${method}-${Math.random()}`; pending.set(id, resolve); socket.send(JSON.stringify({ type: "req", id, method, params })); });
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    await request("connect", { minProtocol: 1, maxProtocol: 1, client: { id: "browser-e2e", version: "1", platform: "test" }, subscribe: [] });
+    const created = await request("createBrowserSession", { source: { kind: "dev-server", port, path: "/" } });
+    expect(created.ok).toBe(true);
+    const sessionId = created.payload.sessionId;
+    await request("connect", { minProtocol: 1, maxProtocol: 1, client: { id: "browser-e2e", version: "1", platform: "test" }, subscribe: [`browser:${sessionId}`] });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(frames.some((frame) => frame.sessionId === sessionId)).toBe(true);
+    const first = await request("browserAct", { sessionId, actionId: "counter", action: { kind: "click", locator: { testId: "counter" } } });
+    const duplicate = await request("browserAct", { sessionId, actionId: "counter", action: { kind: "click", locator: { testId: "counter" } } });
+    expect(duplicate.payload.revision).toBe(first.payload.revision);
+    await expect(new Promise((resolve, reject) => { const id = "stale"; pending.set(id, resolve); socket.send(JSON.stringify({ type: "req", id, method: "browserAct", params: { sessionId, actionId: "stale-action", expectedRevision: 0, action: { kind: "reload" } } })); })).resolves.toMatchObject({ ok: false, error: { code: "REVISION_CONFLICT" } });
+    await request("connect", { minProtocol: 1, maxProtocol: 1, client: { id: "browser-e2e", version: "1", platform: "test" }, subscribe: [] });
+    const count = frames.length;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(frames.length).toBe(count);
+    await request("closeBrowserSession", { sessionId });
+    socket.close();
+    await gateway.close();
+    await new Promise<void>((resolve) => fixture.close(() => resolve()));
+  }, 20_000);
 });

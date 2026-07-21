@@ -305,13 +305,20 @@ declare function createBrowserSessionRegistry(options?: {}): {
             testId: any;
             role?: undefined;
             name?: undefined;
+            css?: undefined;
         } | {
             role: any;
             name: any;
             testId?: undefined;
+            css?: undefined;
+        } | {
+            css: any;
+            testId?: undefined;
+            role?: undefined;
+            name?: undefined;
         };
-        role: any;
-        name: any;
+        role: string;
+        name: string;
         text: string;
         fingerprint: string;
         rect: any;
@@ -355,6 +362,7 @@ declare function createBrowserSessionRegistry(options?: {}): {
         };
     }[]>;
     subscribe: (kind: any, listener: any) => () => any;
+    setFrameSubscribers: (sessionId: any, count: any) => Promise<void>;
     get: (id: any) => any;
     getArtifact: (ref: any) => any;
     shutdown: () => Promise<void>;
@@ -933,13 +941,20 @@ declare class Gateway {
                 testId: any;
                 role?: undefined;
                 name?: undefined;
+                css?: undefined;
             } | {
                 role: any;
                 name: any;
                 testId?: undefined;
+                css?: undefined;
+            } | {
+                css: any;
+                testId?: undefined;
+                role?: undefined;
+                name?: undefined;
             };
-            role: any;
-            name: any;
+            role: string;
+            name: string;
             text: string;
             fingerprint: string;
             rect: any;
@@ -983,6 +998,7 @@ declare class Gateway {
             };
         }[]>;
         subscribe: (kind: any, listener: any) => () => any;
+        setFrameSubscribers: (sessionId: any, count: any) => Promise<void>;
         get: (id: any) => any;
         getArtifact: (ref: any) => any;
         shutdown: () => Promise<void>;
@@ -1891,7 +1907,8 @@ declare class Gateway {
    * @param {string} event
    * @param {unknown} [payload]
    */
-    broadcastEvent(event: string, payload?: unknown): void;
+    browserSubscriberCount(sessionId: any): number;
+    broadcastEvent(event: any, payload: any): void;
     buildSnapshot(): Promise<{
         runs: any[];
         approvals: {

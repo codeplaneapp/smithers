@@ -2699,6 +2699,16 @@ export class Gateway {
         const url = new URL(`http://${host}${req.url ?? "/"}`);
         const browserViewer = url.pathname.match(/^\/browser\/([^/]+)\/viewer$/);
         if (browserViewer) {
+            const uiAuthFailure = await authorizeGatewayUiRequest({
+                match: { config: { kind: "browser", config: {} } },
+                authMode: gatewayAuthMode(this.auth),
+                token: bearerTokenFromHeaders(req),
+                authenticate: (token) => this.authenticateRequest(req, token),
+            });
+            if (uiAuthFailure) {
+                sendJson(res, statusForRpcError(uiAuthFailure.code), responseError(randomUUID(), uiAuthFailure.code, uiAuthFailure.message, uiAuthFailure.details));
+                return true;
+            }
             try {
                 this.browser.get(decodeURIComponent(browserViewer[1]));
             }
@@ -2706,7 +2716,8 @@ export class Gateway {
                 sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Route not found" } });
                 return true;
             }
-            return sendText(res, 200, renderBrowserViewer(decodeURIComponent(browserViewer[1]), url.searchParams), "text/html; charset=utf-8");
+            sendText(res, 200, renderBrowserViewer(decodeURIComponent(browserViewer[1]), url.searchParams), "text/html; charset=utf-8");
+            return true;
         }
         const requestedWorkflowKey = workflowKeyFromUiPath(url.pathname);
         if (requestedWorkflowKey && !this.workflows.has(requestedWorkflowKey)) {
@@ -5962,12 +5973,16 @@ a { color: var(--brand); }</style>
         connection.scopes = [...authResult.scopes];
         connection.userId = authResult.userId ?? null;
         connection.tokenId = authResult.tokenId ?? null;
+        const previousBrowserSessions = connection.subscribedBrowserSessions ?? new Set();
         connection.subscribedRuns = Array.isArray(request.subscribe)
             ? new Set(request.subscribe.filter((value) => typeof value === "string"))
             : null;
         connection.subscribedBrowserSessions = new Set(Array.isArray(request.subscribe)
             ? request.subscribe.filter((value) => typeof value === "string" && value.startsWith("browser:")).map((value) => value.slice(8))
             : []);
+        for (const sessionId of new Set([...previousBrowserSessions, ...connection.subscribedBrowserSessions])) {
+            void this.browser.setFrameSubscribers?.(sessionId, this.browserSubscriberCount(sessionId));
+        }
         for (const sessionId of connection.subscribedBrowserSessions) {
             this.browser.setFrameSubscribers?.(sessionId, this.browserSubscriberCount(sessionId));
         }
