@@ -273,6 +273,18 @@ against your store.
 
 **Source** [`faithfulnessScorer.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/faithfulnessScorer.js) · [`schema.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/schema.js) · **Tests** [`builtins.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/builtins.test.js) · **See also** [`ScoreRow`](/reference/types#scorerow)
 
+### Workflow UI compliance
+
+`workflowUiComplianceScorer` grades a generated workflow UI bundle against the
+shared-component doctrine; it wraps the pure `gradeWorkflowUiSource(uiSource, options)`,
+which scans the bundle for hand-rolled status pills/tables/colors, missing
+`createGatewayReactRoot` mounting, unsupported imports, and (when the workflow
+has agent tasks, detected by `workflowHasAgentTasks(workflowSource)`) a missing
+live `NodeChatStream`. The `create-ui` workflow uses the same grade as its hard
+compliance gate, so a UI that fails here also fails authoring.
+
+**Source** [`workflowUiCompliance.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/workflowUiCompliance.js) · **Tests** [`workflow-ui-compliance.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/workflow-ui-compliance.test.js)
+
 ## Eval datasets and assertions
 
 The scorer package also owns the shared eval-case domain used by `smithers

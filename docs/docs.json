@@ -208,6 +208,8 @@
           "components/merge-queue",
           "components/worktree",
           "components/ui",
+          "components/code-block",
+          "components/message-response",
           "components/tui",
           "components/extract-prompt",
           {
