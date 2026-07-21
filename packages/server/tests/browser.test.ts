@@ -22,6 +22,27 @@ describe("browser session registry", () => {
     await registry.create({ source: { kind: "dev-server", port: 3000, path: "/" } });
     await expect(registry.create({ source: { kind: "url", url: "https://example.com" } })).rejects.toMatchObject({ code: "QUOTA_EXCEEDED" });
   });
+  test("coalesces a redirecting click into one journal entry and reaps idle sessions", async () => {
+    const server = createServer((request, response) => {
+      if (request.url === "/start") return void response.writeHead(302, { location: "/final" }).end();
+      response.end("<a href='/start'>Go</a>");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const require = createRequire(new URL("../../../apps/cli/package.json", import.meta.url));
+    const registry = createBrowserSessionRegistry({ limits: { idleTtlMs: 500, hardLifetimeMs: 5000 }, playwright: { chromium: require("playwright").chromium } });
+    try {
+      const session = await registry.create({ source: { kind: "dev-server", port, path: "/" } });
+      const result = await registry.act({ sessionId: session.sessionId, actionId: "redirect", action: { kind: "click", locator: { role: "link", name: "Go" } } });
+      expect(result.revision).toBe(1);
+      expect((await registry.context({ sessionId: session.sessionId, include: ["recent-actions"] })).recentActions).toHaveLength(1);
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      expect(await registry.list()).toHaveLength(0);
+    } finally {
+      await registry.shutdown();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
   test("drives a real headless Chromium page", async () => {
     const require = createRequire(new URL("../../../apps/cli/package.json", import.meta.url));
     const { chromium } = require("playwright");
@@ -48,10 +69,10 @@ describe("browser session registry", () => {
   });
 
   test("real gateway websocket drives Chromium and gates screencast frames", async () => {
-    const fixture = createServer((_request, response) => response.end("<button data-testid='counter' onclick=\"document.body.dataset.count=(+(document.body.dataset.count||0)+1)\">Count</button><button>Count</button><input aria-label='Secret' type='password'>"));
+    const fixture = createServer((_request, response) => response.end("<button data-testid='counter' onclick=\"document.body.dataset.count=(+(document.body.dataset.count||0)+1);document.querySelector('#value').textContent=document.body.dataset.count\">Count</button><button style='display:block;margin-top:20px'>Continue</button><input aria-label='Secret' type='password' oninput=\"console.log(this.value)\"><output id='value'>0</output>"));
     await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
     const port = (fixture.address() as { port: number }).port;
-    const gateway = new Gateway({ browser: createBrowserSessionRegistry({ playwright: { chromium: createRequire(new URL("../../../apps/cli/package.json", import.meta.url))("playwright").chromium } }) });
+    const gateway = new Gateway({ browser: createBrowserSessionRegistry({ limits: { maxConcurrent: 1 }, playwright: { chromium: createRequire(new URL("../../../apps/cli/package.json", import.meta.url))("playwright").chromium } }) });
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     const address = server.address() as { port: number };
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}`);
@@ -64,18 +85,37 @@ describe("browser session registry", () => {
     const created = await request("createBrowserSession", { source: { kind: "dev-server", port, path: "/" } });
     expect(created.ok).toBe(true);
     const sessionId = created.payload.sessionId;
+    const viewer = await fetch(`http://127.0.0.1:${address.port}/browser/${sessionId}/viewer?theme=dark&embed=1&hostOrigin=http%3A%2F%2Fexample.com`);
+    expect(viewer.status).toBe(200);
+    expect(await viewer.text()).toContain("Browser viewer");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(frames.some((frame) => frame.sessionId === sessionId)).toBe(false);
     await request("connect", { minProtocol: 1, maxProtocol: 1, client: { id: "browser-e2e", version: "1", platform: "test" }, subscribe: [`browser:${sessionId}`] });
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(frames.some((frame) => frame.sessionId === sessionId)).toBe(true);
     const first = await request("browserAct", { sessionId, actionId: "counter", action: { kind: "click", locator: { testId: "counter" } } });
     const duplicate = await request("browserAct", { sessionId, actionId: "counter", action: { kind: "click", locator: { testId: "counter" } } });
     expect(duplicate.payload.revision).toBe(first.payload.revision);
+    const afterDuplicate = await request("browserContext", { sessionId, include: ["visible-text"] });
+    expect(afterDuplicate.payload.visibleText).toContain("1");
+    const pickedByTestId = await request("browserPick", { sessionId, point: { x: 30, y: 10 } });
+    expect(pickedByTestId.payload.locator).toEqual({ testId: "counter" });
+    const pickedByRole = await request("browserPick", { sessionId, point: { x: 30, y: 50 } });
+    expect(pickedByRole.payload.locator).toEqual({ role: "button", name: "Continue" });
+    await request("browserAct", { sessionId, actionId: "password", action: { kind: "type", locator: { role: "textbox", name: "Secret" }, text: "s3cr3t" } });
+    const safeContext = await request("browserContext", { sessionId, include: ["console-summary", "network-summary", "recent-actions"] });
+    expect(JSON.stringify(safeContext.payload)).not.toContain("s3cr3t");
     await expect(new Promise((resolve, reject) => { const id = "stale"; pending.set(id, resolve); socket.send(JSON.stringify({ type: "req", id, method: "browserAct", params: { sessionId, actionId: "stale-action", expectedRevision: 0, action: { kind: "reload" } } })); })).resolves.toMatchObject({ ok: false, error: { code: "REVISION_CONFLICT" } });
     await request("connect", { minProtocol: 1, maxProtocol: 1, client: { id: "browser-e2e", version: "1", platform: "test" }, subscribe: [] });
     const count = frames.length;
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(frames.length).toBe(count);
     await request("closeBrowserSession", { sessionId });
+    expect((await request("createBrowserSession", { source: { kind: "url", url: "http://127.0.0.1:1" } })).error.code).toBe("SSRF_BLOCKED");
+    const second = await request("createBrowserSession", { source: { kind: "dev-server", port, path: "/" } });
+    expect(second.ok).toBe(true);
+    expect((await request("createBrowserSession", { source: { kind: "dev-server", port, path: "/" } })).error.code).toBe("QUOTA_EXCEEDED");
+    await request("closeBrowserSession", { sessionId: second.payload.sessionId });
     socket.close();
     await gateway.close();
     await new Promise<void>((resolve) => fixture.close(() => resolve()));

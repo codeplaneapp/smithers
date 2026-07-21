@@ -1393,7 +1393,7 @@ function eventRunId(payload) {
     return runId ?? null;
 }
 function eventBrowserSessionId(event, payload) {
-    if (event !== "browser.frame") return null;
+    if (event !== "browser.frame" && event !== "browser.activity") return null;
     return asString(asObject(payload)?.sessionId) ?? null;
 }
 /**
@@ -7674,7 +7674,7 @@ a { color: var(--brand); }</style>
             case "createBrowserSession":
                 return this.browserCall(frame, () => this.browser.create(validateBrowserRequest(frame.method, params)));
             case "browserAct":
-                return this.browserCall(frame, () => this.browser.act({ ...validateBrowserRequest(frame.method, params), actor: connection.role === "user" ? "user" : "agent" }));
+                return this.browserCall(frame, () => this.browser.act({ ...validateBrowserRequest(frame.method, params), actor: connection.role === "user" || connection.role === "operator" ? "user" : "agent" }));
             case "browserContext":
                 return this.browserCall(frame, () => this.browser.context(validateBrowserRequest(frame.method, params)));
             case "browserPick":

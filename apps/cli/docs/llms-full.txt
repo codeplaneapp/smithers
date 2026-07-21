@@ -13756,7 +13756,8 @@ It paints ephemeral `browser.frame` screencast events onto a canvas and sends
 pointer, keyboard, and toolbar input back through `browserAct`. The page has no
 credentials. Embed it through the authenticated proxy that serves the Gateway,
 and use `theme`, `hostOrigin`, and `embed` query parameters when the embedding
-consumer needs to control presentation or postMessage behavior.
+consumer needs to control presentation or receive viewer activity and revision
+messages through `postMessage`.
 
 ## Bun controllers and cron jobs
 

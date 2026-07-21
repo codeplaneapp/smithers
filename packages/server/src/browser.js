@@ -50,7 +50,7 @@ async function sourceUrl(source, resolveHost) {
 
 function redact(text) { return { redacted: true, length: text.length }; }
 function trim(value, max = MAX.text) { return String(value ?? "").slice(0, max); }
-function sourceCopy(source) { return source.kind === "url" ? { kind: "url", url: source.url } : { kind: "dev-server", port: source.port, path: source.path || "/" }; }
+function sourceCopy(source) { return source.kind === "url" ? { kind: "url", url: trim(source.url) } : { kind: "dev-server", port: source.port, path: trim(source.path || "/") }; }
 function sensitiveField(info) { return /password|passcode|otp|one[-_ ]?time|token|secret|credit|card|cvv|cvc|ssn/i.test(info); }
 function resolveLocator(page, locator) {
   if (locator?.testId) return page.getByTestId(locator.testId);
@@ -61,7 +61,7 @@ function resolveLocator(page, locator) {
 
 /** Create the gateway-local Playwright browser session registry. */
 export function createBrowserSessionRegistry(options = {}) {
-  const limits = { ...DEFAULTS, ...(options.limits || {}) };
+  const limits = { ...DEFAULTS, ...options.limits };
   const sessions = new Map();
   const artifacts = new Map();
   const listeners = { activity: new Set(), frame: new Set() };
@@ -75,8 +75,9 @@ export function createBrowserSessionRegistry(options = {}) {
   const startScreencast = async (session) => {
     if (session.cdp || session.screencastStarting || !session.frameSubscribers || !session.page) return;
     session.screencastStarting = true;
+    let cdp;
     try {
-      const cdp = await session.context.newCDPSession(session.page);
+      cdp = await session.context.newCDPSession(session.page);
       session.cdp = cdp;
       cdp.on("Page.screencastFrame", async (event) => {
         await cdp.send("Page.screencastFrameAck", { sessionId: event.sessionId }).catch(() => {});
@@ -88,21 +89,31 @@ export function createBrowserSessionRegistry(options = {}) {
       if (!session.frameSubscribers) { await stopScreencast(session); return; }
       await cdp.send("Page.startScreencast", { format: "jpeg", quality: 55, maxWidth: Math.min(session.viewport.width, 1280), maxHeight: Math.min(session.viewport.height, 720), everyNthFrame: 1 });
       if (!session.frameSubscribers) await stopScreencast(session);
-    } catch { session.cdp = null; } finally { session.screencastStarting = false; }
+    } catch { if (session.cdp === cdp) session.cdp = null; if (cdp?.detach) await cdp.detach().catch(() => {}); } finally { session.screencastStarting = false; }
   };
-  const pageInfo = async (page) => page ? { url: page.url(), title: await page.title().catch(() => ""), canGoBack: Boolean(await page.evaluate(() => history.length > 1).catch(() => false)), canGoForward: false } : null;
-  const snapshot = async (session) => ({ sessionId: session.sessionId, source: sourceCopy(session.source), status: session.status, revision: session.revision, page: await pageInfo(session.page), viewport: session.viewport, control: { owner: session.owner } });
+  const sanitize = (session, value, max = MAX.text) => {
+    if (typeof value === "string") {
+      let result = value;
+      for (const secret of session ? session.sensitiveValues : []) if (secret) result = result.split(secret).join("[REDACTED]");
+      return trim(result, max);
+    }
+    if (Array.isArray(value)) return value.slice(0, MAX.elements).map((item) => sanitize(session, item, max));
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitize(session, item, max)]));
+    return value;
+  };
+  const pageInfo = async (session) => session.page ? { url: sanitize(session, session.page.url()), title: sanitize(session, await session.page.title().catch(() => "")), canGoBack: Boolean(await session.page.evaluate(() => history.length > 1).catch(() => false)), canGoForward: false } : null;
+  const snapshot = async (session) => ({ sessionId: session.sessionId, source: sanitize(session, sourceCopy(session.source)), status: session.status, revision: session.revision, page: await pageInfo(session), viewport: session.viewport, control: { owner: session.owner } });
   const armTimer = (session) => { clearTimeout(session.timer); const remaining = Math.max(1, Math.min(limits.idleTtlMs - (Date.now() - session.lastUsed), limits.hardLifetimeMs - (Date.now() - session.createdAt))); session.timer = setTimeout(() => void reap(), remaining); session.timer.unref?.(); };
   const close = async (sessionId) => { const session = sessions.get(sessionId); if (!session) return { closed: true }; sessions.delete(sessionId); session.status = "closed"; clearTimeout(session.timer); await stopScreencast(session); await session.context.close().catch(() => {}); await session.browser.close().catch(() => {}); return { closed: true, sessionId }; };
   const reap = async () => { const now = Date.now(); for (const [ref, value] of artifacts) if (value.expiresAt <= now) artifacts.delete(ref); for (const session of [...sessions.values()]) { if (now - session.lastUsed >= limits.idleTtlMs || now - session.createdAt >= limits.hardLifetimeMs) await close(session.sessionId); else armTimer(session); } };
-  const settle = async (session, actionId, actor, action, result, failed = false) => {
+  const settle = async (session, actionId, actor, action, result) => {
     session.revision += 1; session.lastUsed = Date.now();
     const textSensitive = action.kind === "type" && session.sensitiveActions.has(actionId);
     const wireAction = action.kind === "type" && textSensitive ? { ...action, text: redact(action.text) } : action;
-    const entry = { actionId, actor: actor === "user" ? "user" : "agent", revision: session.revision, action: wireAction, result };
+    const entry = { actionId, actor: actor === "user" ? "user" : "agent", revision: session.revision, action: sanitize(session, wireAction), result: sanitize(session, result) };
     session.journal.push(entry);
     if (session.journal.length > MAX.journal) session.journal.shift();
-    const outcome = { revision: session.revision, page: await pageInfo(session.page), outcome: result };
+    const outcome = { revision: session.revision, page: await pageInfo(session), outcome: sanitize(session, result) };
     session.ledger.set(actionId, { value: outcome });
     emit("activity", { sessionId: session.sessionId, ...entry });
     return outcome;
@@ -113,15 +124,15 @@ export function createBrowserSessionRegistry(options = {}) {
     if (!Number.isInteger(viewport.width) || !Number.isInteger(viewport.height) || viewport.width < 1 || viewport.height < 1 || viewport.width > 3840 || viewport.height > 2160) throw new BrowserError("INVALID_REQUEST", "Viewport is outside the supported bounds.");
     let destination; let browser; let context;
     try { destination = await sourceUrl(source, options.resolveHost); browser = await getPlaywright().chromium.launch({ headless: true }); context = await browser.newContext({ viewport, acceptDownloads: false }); } finally { creating -= 1; }
-    const session = { sessionId: randomUUID(), source, status: "starting", revision: 0, viewport, owner: null, context, browser, page: null, createdAt: Date.now(), lastUsed: Date.now(), ledger: new Map(), journal: [], artifacts: new Map(), sensitiveActions: new Set(), queue: Promise.resolve(), policy: destination.policy, console: [], network: [], timer: null, cdp: null, frameSubscribers: 0, lastFrameAt: 0, screencastStarting: false, screencastTransition: Promise.resolve() };
+    const session = { sessionId: randomUUID(), source, status: "starting", revision: 0, viewport, owner: null, context, browser, page: null, createdAt: Date.now(), lastUsed: Date.now(), ledger: new Map(), journal: [], artifacts: new Map(), sensitiveActions: new Set(), sensitiveValues: new Set(), queue: Promise.resolve(), policy: destination.policy, console: [], network: [], timer: null, cdp: null, frameSubscribers: 0, lastFrameAt: 0, screencastStarting: false, screencastTransition: Promise.resolve() };
     sessions.set(session.sessionId, session);
     const validateRequest = async (route) => { try { await assertDestination(route.request().url(), session.policy); await route.continue(); } catch { await route.abort(); } };
     await context.route("**/*", validateRequest);
     session.page = await context.newPage();
     session.page.on?.("dialog", (dialog) => { session.dialog = dialog; });
     session.page.on?.("download", (download) => void download.cancel().catch(() => {}));
-    session.page.on?.("console", (message) => { session.console.push({ type: message.type(), text: trim(message.text(), 1000) }); if (session.console.length > MAX.console) session.console.shift(); });
-    session.page.on?.("request", (request) => { session.network.push({ method: request.method(), url: trim(request.url(), 2000) }); if (session.network.length > MAX.network) session.network.shift(); });
+    session.page.on?.("console", (message) => { session.console.push({ type: trim(message.type(), 80), text: sanitize(session, message.text(), 1000) }); if (session.console.length > MAX.console) session.console.shift(); });
+    session.page.on?.("request", (request) => { session.network.push({ method: trim(request.method(), 80), url: sanitize(session, request.url(), 2000) }); if (session.network.length > MAX.network) session.network.shift(); });
     context.on?.("page", (popup) => { if (popup !== session.page) void popup.close().catch(() => {}); });
     try { await session.page.goto(destination.url, { waitUntil: "domcontentloaded" }); session.status = "ready"; } catch { session.status = "failed"; }
     armTimer(session);
@@ -136,7 +147,7 @@ export function createBrowserSessionRegistry(options = {}) {
       if (action.kind === "navigate") await session.page.goto(await assertDestination(action.url, session.policy), { waitUntil: "domcontentloaded" });
       else if (action.kind === "back") await session.page.goBack(); else if (action.kind === "forward") await session.page.goForward(); else if (action.kind === "reload") await session.page.reload(); else if (action.kind === "stop") await session.page.evaluate(() => window.stop());
       else if (action.kind === "click") { if (!action.locator && !action.point) throw new BrowserError("INVALID_REQUEST", "click requires locator or point."); const beforeUrl = session.page.url(); if (action.locator) await resolveLocator(session.page, action.locator).click({ button: action.button, modifiers: action.modifiers }); else await session.page.mouse.click(action.point.x, action.point.y, { button: action.button, modifiers: action.modifiers }); const afterUrl = session.page.url(); result = afterUrl !== beforeUrl ? { ok: true, redirectedTo: trim(afterUrl, 2_000) } : { ok: true }; }
-      else if (action.kind === "type") { const locator = resolveLocator(session.page, action.locator); let info = ""; try { info = await locator.evaluate((element) => `${element.getAttribute("type") || ""} ${element.getAttribute("name") || ""} ${element.getAttribute("autocomplete") || ""}`); } catch {} if (sensitiveField(info)) session.sensitiveActions.add(params.actionId); if (action.replace === false) await locator.pressSequentially(action.text); else await locator.fill(action.text); result = { ok: true, ...(session.sensitiveActions.has(params.actionId) ? { redacted: true, length: action.text.length } : {}) }; }
+      else if (action.kind === "type") { const locator = resolveLocator(session.page, action.locator); let info = ""; try { info = await locator.evaluate((element) => `${element.getAttribute("type") || ""} ${element.getAttribute("name") || ""} ${element.getAttribute("autocomplete") || ""}`); } catch {} if (sensitiveField(info) || sensitiveField(`${action.locator?.role || ""} ${action.locator?.name || ""} ${action.locator?.testId || ""} ${action.locator?.css || ""}`)) session.sensitiveActions.add(params.actionId); if (session.sensitiveActions.has(params.actionId)) session.sensitiveValues.add(action.text); if (action.replace === false) await locator.pressSequentially(action.text); else await locator.fill(action.text); result = { ok: true, ...(session.sensitiveActions.has(params.actionId) ? { redacted: true, length: action.text.length } : {}) }; }
       else if (action.kind === "press") await session.page.keyboard.press([...(action.modifiers || []), action.key].join("+"));
       else if (action.kind === "scroll") await session.page.mouse.wheel(action.deltaX, action.deltaY);
       else if (action.kind === "dialog") { if (!session.dialog) throw new BrowserError("INVALID_REQUEST", "No dialog is pending."); if (action.decision === "accept") await session.dialog.accept(action.promptText); else await session.dialog.dismiss(); session.dialog = null; }
@@ -147,16 +158,16 @@ export function createBrowserSessionRegistry(options = {}) {
   const contextSlice = async ({ sessionId, sinceRevision, include = [] }) => { const session = get(sessionId); await session.queue.catch(() => {}); const capturedRevision = session.revision; const selected = include.length ? include.filter((value) => INCLUDE.has(value)).slice(0, INCLUDE.size) : ["visible-text", "accessibility", "interactive-elements", "screenshot", "recent-actions"]; const response = { fresh: true, snapshot: await snapshot(session), revision: capturedRevision, include: selected };
     if (sinceRevision !== undefined && sinceRevision > capturedRevision) { response.fresh = false; response.reason = "REVISION_AHEAD"; }
     if (selected.includes("visible-text")) { try { const text = await session.page.locator("body").innerText(); response.visibleText = trim(text); response.visibleTextTruncated = text.length > MAX.text; } catch { response.fresh = false; response.reason = "CAPTURE_FAILED"; } }
-    if (selected.includes("interactive-elements")) { try { const all = await session.page.locator("button,a,input,textarea,select,[role]").evaluateAll((els) => els.map((el) => ({ role: (el.getAttribute("role") || ({ A: "link", BUTTON: "button", INPUT: el.getAttribute("type") === "submit" ? "button" : "textbox", TEXTAREA: "textbox", SELECT: "combobox" }[el.tagName] || el.tagName.toLowerCase())).slice(0, 80), name: (el.getAttribute("aria-label") || el.textContent || el.getAttribute("placeholder") || "").trim().slice(0, 120) }))); response.interactiveElements = all.slice(0, MAX.elements); response.interactiveElementsTruncated = all.length > MAX.elements; } catch { response.fresh = false; response.reason = "CAPTURE_FAILED"; } }
+    if (selected.includes("interactive-elements")) { try { const all = await session.page.locator("button,a,input,textarea,select,[role]").evaluateAll((els) => els.map((el) => { const role = (el.getAttribute("role") || ({ A: "link", BUTTON: "button", INPUT: el.getAttribute("type") === "submit" ? "button" : "textbox", TEXTAREA: "textbox", SELECT: "combobox" }[el.tagName] || el.tagName.toLowerCase())).slice(0, 80); const name = (el.getAttribute("aria-label") || el.textContent || el.getAttribute("placeholder") || "").trim().slice(0, 120); const testId = el.getAttribute("data-testid")?.slice(0, 200); return { role, name, locator: testId ? { testId } : { role, name } }; })); response.interactiveElements = all.slice(0, MAX.elements); response.interactiveElementsTruncated = all.length > MAX.elements; } catch { response.fresh = false; response.reason = "CAPTURE_FAILED"; } }
     if (selected.includes("accessibility")) { try { response.accessibility = (await session.page.locator("body").ariaSnapshot?.())?.slice(0, MAX.text) ?? null; } catch { response.fresh = false; response.reason = "CAPTURE_FAILED"; } }
-    if (selected.includes("recent-actions")) response.recentActions = session.journal.slice(-20);
-    if (selected.includes("console-summary")) response.consoleSummary = session.console.slice(-MAX.console); if (selected.includes("network-summary")) response.networkSummary = session.network.slice(-MAX.network);
+    if (selected.includes("recent-actions")) response.recentActions = sanitize(session, session.journal.slice(-20));
+    if (selected.includes("console-summary")) response.consoleSummary = sanitize(session, session.console.slice(-MAX.console)); if (selected.includes("network-summary")) response.networkSummary = sanitize(session, session.network.slice(-MAX.network));
     if (selected.includes("screenshot")) { try { response.screenshot = await artifact(session, await session.page.screenshot({ type: "jpeg", quality: 60 })); } catch { response.fresh = false; response.reason = "CAPTURE_FAILED"; } }
     if (session.revision !== capturedRevision) { response.fresh = false; response.reason = "REVISION_CHANGED"; }
-    return response;
+    return sanitize(session, response);
   };
   const artifact = async (_session, bytes) => { if (!bytes) return null; const ref = `artifact_${randomUUID()}`; artifacts.set(ref, { bytes, expiresAt: Date.now() + limits.artifactRetentionMs }); return { ref, mediaType: "image/jpeg" }; };
-  const pick = async ({ sessionId, point }) => { const session = get(sessionId); const result = await session.page.evaluate(({ x, y }) => { const el = document.elementFromPoint(x, y); if (!el) return null; const rect = el.getBoundingClientRect(); const role = (el.getAttribute("role") || ({ A: "link", BUTTON: "button", INPUT: "textbox", TEXTAREA: "textbox", SELECT: "combobox" }[el.tagName] || el.tagName.toLowerCase())).slice(0, 80); const name = (el.getAttribute("aria-label") || el.textContent || el.getAttribute("placeholder") || "").trim().slice(0, 120); let css = el.id ? `#${CSS.escape(el.id)}` : el.tagName.toLowerCase(); if (!el.id) { let node = el; const parts = []; while (node && node.nodeType === 1 && parts.length < 5) { let part = node.tagName.toLowerCase(); if (node.parentElement) { const same = [...node.parentElement.children].filter((child) => child.tagName === node.tagName); if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`; } parts.unshift(part); node = node.parentElement; } css = parts.join(" > "); } return { role, name, text: (el.textContent || "").trim().slice(0, 500), rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, testId: el.getAttribute("data-testid")?.slice(0, 200), css: css.slice(0, 500) }; }, point); if (!result) throw new BrowserError("INVALID_REQUEST", "No element at point."); const testIdCount = result.testId ? await session.page.getByTestId(result.testId).count().catch(() => 0) : 0; const roleCount = await session.page.getByRole(result.role, { name: result.name, exact: true }).count().catch(() => 0); const cssCount = await session.page.locator(result.css).count().catch(() => 0); const locator = testIdCount === 1 ? { testId: result.testId } : roleCount === 1 ? { role: result.role, name: result.name } : { css: result.css }; const shot = await session.page.screenshot({ type: "jpeg", quality: 70, clip: result.rect }).catch(() => null); return { locator, role: trim(result.role, 80), name: trim(result.name, 120), text: trim(result.text, 500), fingerprint: `${result.role}:${result.name}:${result.rect.x}:${result.rect.y}`, rect: result.rect, viewport: session.viewport, screenshot: await artifact(session, shot) }; };
+  const pick = async ({ sessionId, point }) => { const session = get(sessionId); const result = await session.page.evaluate(({ x, y }) => { const el = document.elementFromPoint(x, y); if (!el) return null; const rect = el.getBoundingClientRect(); const role = (el.getAttribute("role") || ({ A: "link", BUTTON: "button", INPUT: "textbox", TEXTAREA: "textbox", SELECT: "combobox" }[el.tagName] || el.tagName.toLowerCase())).slice(0, 80); const name = (el.getAttribute("aria-label") || el.textContent || el.getAttribute("placeholder") || "").trim().slice(0, 120); let css = el.id ? `#${CSS.escape(el.id)}` : el.tagName.toLowerCase(); if (!el.id) { let node = el; const parts = []; while (node && node.nodeType === 1 && parts.length < 20) { let part = node.tagName.toLowerCase(); if (node.parentElement) { const same = [...node.parentElement.children].filter((child) => child.tagName === node.tagName); if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`; } parts.unshift(part); node = node.parentElement; } css = parts.join(" > "); } return { role, name, text: (el.textContent || "").trim().slice(0, 500), rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, testId: el.getAttribute("data-testid")?.slice(0, 200), css: css.slice(0, 500) }; }, point); if (!result) throw new BrowserError("INVALID_REQUEST", "No element at point."); const testIdCount = result.testId ? await session.page.getByTestId(result.testId).count().catch(() => 0) : 0; const roleCount = await session.page.getByRole(result.role, { name: result.name, exact: true }).count().catch(() => 0); const cssCount = await session.page.locator(result.css).count().catch(() => 0); if (testIdCount !== 1 && roleCount !== 1 && cssCount !== 1) throw new BrowserError("INVALID_REQUEST", "The element does not have a unique stable locator."); const locator = testIdCount === 1 ? { testId: result.testId } : roleCount === 1 ? { role: result.role, name: result.name } : { css: result.css }; const shot = await session.page.screenshot({ type: "jpeg", quality: 70, clip: result.rect }).catch(() => null); return { locator, role: trim(result.role, 80), name: trim(result.name, 120), text: trim(result.text, 500), fingerprint: `${result.role}:${result.name}:${result.rect.x}:${result.rect.y}`, rect: result.rect, viewport: session.viewport, screenshot: await artifact(session, shot) }; };
   timer = setInterval(() => void reap(), Math.min(limits.idleTtlMs, 60_000)); timer.unref?.();
   const setFrameSubscribers = async (sessionId, count) => { const session = sessions.get(sessionId); if (!session) return; session.screencastTransition = session.screencastTransition.then(async () => { session.frameSubscribers = Math.max(0, count); if (session.frameSubscribers > 0) await startScreencast(session); else await stopScreencast(session); }); await session.screencastTransition; };
   return { create, act, context: contextSlice, pick, close, list: async () => { await reap(); return Promise.all([...sessions.values()].map(snapshot)); }, subscribe: (kind, listener) => { listeners[kind]?.add(listener); return () => listeners[kind]?.delete(listener); }, setFrameSubscribers, get, getArtifact: (ref) => artifacts.get(ref)?.bytes ?? null, shutdown: async () => { clearInterval(timer); await Promise.all([...sessions.keys()].map(close)); }, BrowserError };
