@@ -74,10 +74,12 @@ function artifactContract(kind: VerifyKind): string {
       "Deliverable: put a COMPLETE, self-contained custom workflow UI bundle in `artifact` (artifactKind: ui-tsx). One file.",
       "Requirements:",
       "  • Start with the pragma: /** @jsxImportSource react */",
-      "  • Import the gateway hooks from 'smithers-orchestrator/gateway-react' (createGatewayReactRoot + the hooks you need: useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions, useGatewayRuns).",
-      "  • Read the run to scope to from `?runId` in location.search.",
-      "  • Mount with createGatewayReactRoot(<App />). Handle loading / empty / error states.",
-      "  • It must be valid TSX that transpiles. Do not invent hooks or props that don't exist.",
+      "  • Mount with createGatewayReactRoot(<App />) from 'smithers-orchestrator/gateway-react' and read the run to scope to from `?runId` in location.search. Handle loading / empty / error states.",
+      "  • Compose from the shipped component libraries BEFORE hand-rolling markup — a hand-rolled version of a shipped component is a wrong answer:",
+      "      - 'smithers-orchestrator/gateway-ui' run-shaped widgets (self-connecting): SimpleWorkflowDashboard, WorkflowUiShell, RunList, RunTree, RunEventLog, NodeOutputView, ApprovalPanel, LaunchButton, WorkflowPicker, ConnectionBadge, StatusPill",
+      "      - 'smithers-orchestrator/ui' primitives: Button, Card, Input, Tabs, Dialog, Table, KpiStat, EmptyState, ChatTranscript, ChatComposer, DiffHunks, StageStrip, FileTree, Markdown (plus MarkdownEditor via 'smithers-orchestrator/ui/adapters/markdown-editor', Terminal via 'smithers-orchestrator/ui/adapters/terminal')",
+      "      - 'smithers-orchestrator/gateway-react' hooks for bespoke panes the widgets don't cover: useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions, useGatewayRuns",
+      "  • It must be valid TSX that transpiles. Do not invent hooks, components, or props that don't exist.",
     ].join("\n");
   }
   if (kind === "ui-functional") {
