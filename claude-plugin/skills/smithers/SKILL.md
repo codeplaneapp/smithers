@@ -215,10 +215,16 @@ It is fed entirely by live gateway hooks. The rules:
 - **`smithers-orchestrator/gateway-ui` — run-shaped widgets.** Each one connects
   to the gateway by itself: `SimpleWorkflowDashboard` (a complete
   launch/watch/select dashboard in ONE component), `WorkflowUiShell` (the page
-  scaffold: house styles + topbar with `title`/`meta`/`actions`), `RunList`,
-  `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel` (approve/deny
-  buttons wired), `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`,
-  `StatusPill`, plus the `theme` tokens.
+  scaffold: house styles + topbar with `title`/`meta`/`actions`), `RunMeta`
+  (the `run-id · status · connection` header cluster for the shell's `meta`
+  slot), `NodeChatStream` (**live per-node agent chat** — stdout, tool calls,
+  reasoning, streamed into chat bubbles), `FleetTable` (selectable fan-out
+  ledger whose rows roll up live pipeline status from per-item `nodeIds`),
+  `NodeStageStrip` (pipeline chips bound to node statuses), `NodeOutputCard`,
+  `RunList`, `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel`
+  (approve/deny buttons wired), `LaunchButton`, `WorkflowPicker`,
+  `ConnectionBadge`, `StatusPill`, the `nodeStatusIndex`/`rollupNodeStatus`
+  status helpers, plus the `theme` tokens.
 - **`smithers-orchestrator/ui` — token-native primitives** for everything
   around those widgets: `Button`, `Badge`, `StatusPill`, `Card`/`CardHeader`/
   `CardTitle`/`CardContent`, `Input`, `Textarea`, `Label`, `Alert`, `Table`,
@@ -233,9 +239,22 @@ Default shapes, in order of preference:
 1. The workflow only needs launch + watch →
    `createGatewayReactRoot(<SimpleWorkflowDashboard workflow="<key>" />)` and
    you are done.
-2. The workflow has bespoke output → `WorkflowUiShell` + the gateway-ui widgets
-   for runs/tree/events/approvals + `smithers-orchestrator/ui` primitives for
-   the custom panes, fed by the hooks below.
+2. The workflow has bespoke output → `WorkflowUiShell` (with `meta={<RunMeta
+   runId={runId} />}`) + the gateway-ui widgets for runs/tree/events/approvals
+   + `smithers-orchestrator/ui` primitives for the custom panes, fed by the
+   hooks below.
+3. Fan-out/pipeline workflows → `FleetTable` for the item ledger,
+   `NodeStageStrip` for the top-level phases, and a detail pane per selected
+   item.
+
+**Live-feedback rule (non-negotiable): every agent node shown in a detail pane
+gets a `NodeChatStream`** (`runId`, `nodeId`, `title`, `subtitle` = agent ·
+model, `status` from `nodeStatusIndex`) so the human watches the agent's chat,
+tool calls, and reasoning in real time; deterministic nodes use
+`NodeOutputCard` instead. Hand-rolled status pills (`borderRadius: 999` +
+hex colors), raw `<table>` markup, and hand-built status-rank maps are
+rejected by the `create-ui` compliance gate (`gradeWorkflowUiSource` in
+`smithers-orchestrator/scorers`) — compose the components above instead.
 
 ## The hooks you actually have (from `smithers-orchestrator/gateway-react`)
 

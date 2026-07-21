@@ -190,11 +190,18 @@ test("create-ui: validates safe slugs and URL while preserving exact author cont
   expect(prompt(withExample, "author-and-verify")).toContain("runId=run-123");
   expect(prompt(frame, "author-and-verify")).not.toContain("A live example run exists");
 
-  const sim = simulate(await load("create-ui.tsx"), { input: { targetWorkflow: "hello", gatewayUrl: "http://127.0.0.1:7331", exampleRunId: "run-123" }, mocks: { "author-and-verify": authored }, workflowPath: pathToFileURL(join(workflows, "create-ui.tsx")).href });
+  // The design-system contract the compliance gate enforces must be in the prompt.
+  expect(prompt(frame, "author-and-verify")).toContain("NodeChatStream");
+  expect(prompt(frame, "author-and-verify")).toContain("WorkflowUiShell");
+  expect(prompt(frame, "author-and-verify")).toContain("BANNED");
+
+  // Happy path: the authored file passes compliance on the first loop iteration.
+  const compliant = { targetWorkflow: "hello", uiPath: ".smithers/ui/hello.tsx", passed: true, score: 1, violations: "[]" };
+  const sim = simulate(await load("create-ui.tsx"), { input: { targetWorkflow: "hello", gatewayUrl: "http://127.0.0.1:7331", exampleRunId: "run-123" }, mocks: { "author-and-verify": authored, "ui-compliance": compliant }, workflowPath: pathToFileURL(join(workflows, "create-ui.tsx")).href });
   await expect(sim.run()).resolves.toBeDefined();
-  expect(sim.executed).toEqual(["author-and-verify"]);
+  expect(sim.executed).toEqual(["author-and-verify", "ui-compliance"]);
   expectFinished(sim, sim.executed);
-  expect(sim.output).toEqual(authored);
+  expect(sim.output).toEqual(compliant);
   expect(sim.unusedMocks).toEqual([]);
 });
 

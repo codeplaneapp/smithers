@@ -10859,9 +10859,24 @@ tokens, never hex-plus-alpha.
 | `WorkflowPicker` | A select of the workflows registered on the Gateway. | `value`, `onChange`, `hasUiOnly` |
 | `ConnectionBadge` | A live Gateway connection indicator. | none |
 | `StatusPill` | A colored status badge for any run or node status string. | `status`, `label` |
+| `RunMeta` | The standard header meta cluster: `run-id · live status pill · connection badge`. Drop into `WorkflowUiShell`'s `meta` slot. | `runId`, `showConnection` |
+| `NodeChatStream` | **Live per-node agent chat**: folds the node's stdout/stderr chunks, tool calls, reasoning, and file-change actions from the run event stream into an auto-following chat transcript. One per agent node in a detail pane. | `runId`, `nodeId`, `title`, `subtitle`, `status`, `height` |
+| `NodeOutputCard` | A run-aware output card for one node with ok/fail/pending chrome and an unwrapped-row render prop. Use for deterministic nodes. | `runId`, `nodeId`, `title`, `summary`, `body`, `remountKey` |
+| `FleetTable` | A selectable fan-out ledger: one row per work item, live status pill rolled up from the item's pipeline `nodeIds`. | `runId`, `items`, `columns`, `selectedKey`, `onSelect` |
+| `NodeStageStrip` | A `StageStrip` bound to live node statuses: pipeline chips that track `queued → running → done/failed`. | `runId`, `stages` |
 
 `StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
-also exported for building your own rows that match the components.
+also exported for building your own rows that match the components, plus the
+node-status helpers `nodeStatusIndex(nodes)` (logical-id → merged status map
+over `useGatewayRunTree` rows) and `rollupNodeStatus(index, nodeIds)` (one
+pipeline's aggregate status) so UIs never hand-roll status rank maps, and the
+pure `buildNodeChatTranscript(frames, nodeId)` fold behind `NodeChatStream`.
+
+**Live-feedback rule:** every agent node a UI surfaces should get a
+`NodeChatStream` so humans can watch the agent work in real time; the
+`create-ui` workflow's deterministic compliance gate
+(`gradeWorkflowUiSource` from `smithers-orchestrator/scorers`) rejects
+generated UIs that hand-roll pills/tables/colors or omit live agent chat.
 
 For a workflow whose UI just needs launch-watch-approve, render
 `<SimpleWorkflowDashboard workflow="my-workflow" />` inside

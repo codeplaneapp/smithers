@@ -126,6 +126,13 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
       if (path === "/v1/api/runs" && request.method === "GET") {
         return ok(state.runs);
       }
+      // GET /v1/api/runs/:id (getRun)
+      const runMatch = path.match(/^\/v1\/api\/runs\/([^/]+)$/);
+      if (runMatch && request.method === "GET") {
+        const runId = decodeURIComponent(runMatch[1]!);
+        const run = state.runs.find((row) => row.runId === runId);
+        return run ? ok(run) : fail(404, "NOT_FOUND", `No run ${runId}`);
+      }
       // POST /v1/api/runs (launchRun)
       if (path === "/v1/api/runs" && request.method === "POST") {
         const body = (await request.json().catch(() => ({}))) as { workflow?: string; input?: unknown };

@@ -6,6 +6,29 @@ import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/ad
 import * as effect from 'effect';
 export { scorerDuration, scorersFailed, scorersFinished, scorersStarted } from '@smithers-orchestrator/observability/metrics';
 
+/** Options for `gradeWorkflowUiSource`. */
+type WorkflowUiComplianceOptions$2 = {
+    /**
+     * Force the live-chat rule on/off. When omitted it is derived from
+     * `workflowSource` (agent tasks present → required), defaulting to off.
+     */
+    requireNodeChat?: boolean;
+    /** The workflow module's source, used to detect agent tasks. */
+    workflowSource?: string;
+};
+/** One broken rule occurrence. */
+type WorkflowUiViolation$1 = {
+    rule: "imports" | "shell" | "mount" | "live-chat" | "hand-rolled-colors" | "hand-rolled-pills" | "hand-rolled-table";
+    detail: string;
+};
+/** The grader's result. */
+type WorkflowUiComplianceReport$2 = {
+    passed: boolean;
+    /** 1 minus the fraction of distinct rules broken. */
+    score: number;
+    violations: WorkflowUiViolation$1[];
+};
+
 /**
  * How a planning node's probe judgment was classified by
  * `pocJudgmentScorer`.
@@ -604,6 +627,57 @@ declare function estimateCostUsd(usage: {
     cacheWriteTokens?: number;
 }): number;
 
+/** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceOptions} WorkflowUiComplianceOptions */
+/** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceReport} WorkflowUiComplianceReport */
+/** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiViolation} WorkflowUiViolation */
+/**
+ * Static design-system compliance grader for generated workflow UIs
+ * (`.smithers/ui/<key>.tsx`). Encodes the authoring contract the create-ui
+ * agents keep drifting from: compose the shipped component libraries instead
+ * of hand-rolling markup, and always surface live agent feedback.
+ *
+ * Rules (each violation carries its rule id):
+ * - `imports`        — import only from react + `smithers-orchestrator/gateway-react`,
+ *                      `.../gateway-ui`, `.../ui` (plus relative modules).
+ * - `shell`          — page chrome comes from `WorkflowUiShell` (or
+ *                      `SimpleWorkflowDashboard` for the stock layout).
+ * - `mount`          — the file mounts via `createGatewayReactRoot`.
+ * - `live-chat`      — when the workflow has agent tasks (or
+ *                      `requireNodeChat` is set), the UI must render
+ *                      `NodeChatStream` so humans see the agents' live chat.
+ * - `hand-rolled-colors` — no raw hex color literals; tint through components
+ *                      and theme tokens so light/dark both work.
+ * - `hand-rolled-pills`  — no `borderRadius: 999` pill re-implementations;
+ *                      that's `StatusPill` / `Badge`.
+ * - `hand-rolled-table`  — no raw `<table>` markup; use `Table` / `FleetTable`.
+ *
+ * Pure and deterministic: feed it source text (no filesystem access) so it
+ * runs identically in unit tests, create-ui gate tasks, and `smithers eval`
+ * assertions.
+ *
+ * @param {string} uiSource The UI module's source text.
+ * @param {WorkflowUiComplianceOptions} [options]
+ * @returns {WorkflowUiComplianceReport}
+ */
+declare function gradeWorkflowUiSource(uiSource: string, options?: WorkflowUiComplianceOptions$1): WorkflowUiComplianceReport$1;
+/**
+ * Heuristic: does a workflow module run agent tasks? Agent tasks carry a
+ * `prompt` (or `agent`/`codexGoal`-style helper) while deterministic tasks use
+ * `computeFn`/`staticPayload` only.
+ *
+ * @param {string} workflowSource
+ * @returns {boolean}
+ */
+declare function workflowHasAgentTasks(workflowSource: string): boolean;
+/**
+ * Scorer wrapper: expects `output` to be the generated UI source text (string
+ * or `{ uiSource, workflowSource? }`), grades it with
+ * {@link gradeWorkflowUiSource}, and reports the violations as the reason.
+ */
+declare const workflowUiComplianceScorer: Scorer$e;
+type WorkflowUiComplianceOptions$1 = WorkflowUiComplianceOptions$2;
+type WorkflowUiComplianceReport$1 = WorkflowUiComplianceReport$2;
+
 /**
  * Extracts a delegation event log from a scorer input.
  *
@@ -894,6 +968,9 @@ type ModelPrice = ModelPrice$2;
 type PlanSolidityOptions = PlanSolidityOptions$2;
 type PocJudgmentClassification = PocJudgmentClassification$1;
 type PocJudgmentOptions = PocJudgmentOptions$2;
+type WorkflowUiComplianceOptions = WorkflowUiComplianceOptions$2;
+type WorkflowUiComplianceReport = WorkflowUiComplianceReport$2;
+type WorkflowUiViolation = WorkflowUiViolation$1;
 type SamplingConfig = SamplingConfig$1;
 type Scorer = Scorer$e;
 type ScorerBinding = ScorerBinding$1;
@@ -904,4 +981,4 @@ type ScorerInput = ScorerInput$2;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type EvalJudge, type EvalJudgeRunner, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, extractDelegationEvents, faithfulnessScorer, formatEvalError, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeEvalJudge, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type EvalJudge, type EvalJudgeRunner, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type WorkflowUiComplianceOptions, type WorkflowUiComplianceReport, type WorkflowUiViolation, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, extractDelegationEvents, faithfulnessScorer, formatEvalError, gradeWorkflowUiSource, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeEvalJudge, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore, workflowHasAgentTasks, workflowUiComplianceScorer };

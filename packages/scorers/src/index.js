@@ -21,6 +21,9 @@
 /** @typedef {import("./PlanSolidityOptions.js").PlanSolidityOptions} PlanSolidityOptions */
 /** @typedef {import("./PocJudgmentOptions.js").PocJudgmentClassification} PocJudgmentClassification */
 /** @typedef {import("./PocJudgmentOptions.js").PocJudgmentOptions} PocJudgmentOptions */
+/** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceOptions} WorkflowUiComplianceOptions */
+/** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceReport} WorkflowUiComplianceReport */
+/** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiViolation} WorkflowUiViolation */
 /** @typedef {import("./types.js").SamplingConfig} SamplingConfig */
 /** @typedef {import("./types.js").Scorer} Scorer */
 /** @typedef {import("./types.js").ScorerBinding} ScorerBinding */
@@ -47,6 +50,8 @@ export { planSolidityScorer } from "./planSolidityScorer.js";
 export { estimateAccuracyScorer } from "./estimateAccuracyScorer.js";
 export { tierFitScorer } from "./tierFitScorer.js";
 export { humanPollScorer } from "./humanPollScorer.js";
+// Workflow-UI authoring compliance (design-system usage + live agent chat)
+export { gradeWorkflowUiSource, workflowHasAgentTasks, workflowUiComplianceScorer, } from "./workflowUiCompliance.js";
 export { extractDelegationEvents, resolvePlanningNodes, } from "./delegationEvents.js";
 // Eval suites (issue #77): shared dataset parsing + case grading + the
 // scorer seam the `eval-suite-run` workflow attaches to every case task.

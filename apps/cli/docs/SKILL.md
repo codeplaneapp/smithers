@@ -212,6 +212,12 @@ no server, no build, no external assets. Not a Markdown file, not chat
 scrollback. Markdown is for READMEs and code-adjacent notes a developer edits;
 anything the user will *read, present, or forward* gets HTML.
 
+**Words like "plan" and "runbook" name documents here, not workflows.** When
+the user asks you to *write* a plan, runbook, or postmortem, they want a
+document to read — produce the HTML page. Reach for a workflow ("Smithers is
+your plan mode", the `<Runbook>` pattern) only when the user wants the machine
+to *execute* the steps, not when they want prose to read and share.
+
 - **Produce the page, don't describe it.** Write the file
   (`report.html`, `plan.html`, `architecture.html`, or under `artifacts/`) and
   hand the user the path (or open it). A chat message *about* the report is a
