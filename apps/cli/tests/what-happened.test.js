@@ -154,6 +154,16 @@ describe("buildWhatContext", () => {
         expect(facts.failedAttemptCount).toBe(1);
     });
 
+    test("node scope omits the Duration line when timing is unknown", async () => {
+        const adapter = makeAdapter({
+            attempts: [attemptRow({ startedAtMs: null, finishedAtMs: null })],
+        });
+        const { context } = await buildWhatContext(adapter, { runId: "run-what", nodeId: "greet" });
+        // Timing is on screen already; an "unknown" line only invites the
+        // narrator to remark on the gap.
+        expect(context).not.toContain("Duration:");
+    });
+
     test("throws RUN_NOT_FOUND for a missing run", async () => {
         const adapter = makeAdapter({ run: null });
         await expect(buildWhatContext(adapter, { runId: "nope" })).rejects.toMatchObject({ code: "RUN_NOT_FOUND" });
@@ -232,5 +242,24 @@ describe("renderWhatFallback", () => {
         expect(summary).toContain("Run run-1 (deploy) failed in 3m 2s; 4 steps recorded.");
         expect(summary).toContain("run error: SESSION_ERROR");
         expect(summary).toContain('step "push" failed: rejected');
+    });
+
+    test("node recap drops the timing clause when the duration is unknown", () => {
+        const summary = renderWhatFallback({
+            scope: "node",
+            runId: "run-1",
+            nodeId: "greet",
+            iteration: 0,
+            workflowName: "hello",
+            status: "finished",
+            duration: "unknown",
+            attemptCount: 1,
+            failedAttemptCount: 0,
+            toolCallCount: 0,
+            hasOutput: true,
+            error: null,
+        });
+        expect(summary).toContain('Node "greet" finished after 1 attempt.');
+        expect(summary).not.toContain("unknown");
     });
 });

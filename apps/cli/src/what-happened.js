@@ -18,6 +18,7 @@ const WHAT_SYSTEM_PROMPT = [
     "You are given the facts: status, timing, attempts, errors, outputs. You have no tools and must not ask for more; work only from what you are given, and never invent details.",
     "Reply with plain text only: no markdown symbols (#, *, `), no code fences, no ANSI codes.",
     "Shape: first line is one sentence stating the outcome (what ran and how it ended), then 2-6 short dashed bullets with the key things that happened — important results, retries, errors and their causes, notable outputs.",
+    "Report only what actually happened. Never remark on timing or durations (the UI shows those separately), never remark on missing/unreported/unknown fields, and never call out things that did not happen (e.g. 'no errors were reported'). Absent data is not interesting — omit it silently.",
     "Keep the whole reply under 120 words. If something failed, name the failing step and quote the decisive error message briefly.",
     "Output the reply directly with no preamble and nothing after it.",
 ].join("\n");
@@ -171,7 +172,9 @@ async function buildNodeContext(adapter, runId, nodeId, iteration) {
     lines.push(`Node: ${nodeId} (iteration ${detail.node.iteration}) in run ${runId} (workflow ${workflowName})`);
     if (detail.node.label) lines.push(`Label: ${detail.node.label}`);
     lines.push(`State: ${status}`);
-    lines.push(`Duration: ${duration}`);
+    // Timing is shown on screen separately; an unknown duration in the context
+    // only invites the narrator to remark on the gap.
+    if (detail.durationMs != null) lines.push(`Duration: ${duration}`);
     lines.push(`Attempts: ${attempts.length}${failedAttempts.length ? ` (${failedAttempts.length} failed)` : ""}`);
     for (const attempt of attempts) {
         const parts = [`Attempt ${attempt.attempt} ${attempt.state}`];
@@ -253,7 +256,8 @@ export async function buildWhatContext(adapter, params) {
  */
 export function renderWhatFallback(facts) {
     if (facts.scope === "node") {
-        const lines = [`Node "${facts.nodeId}" ${facts.status} after ${facts.attemptCount} attempt${facts.attemptCount === 1 ? "" : "s"} in ${facts.duration}.`];
+        const timing = facts.duration && facts.duration !== "unknown" ? ` in ${facts.duration}` : "";
+        const lines = [`Node "${facts.nodeId}" ${facts.status} after ${facts.attemptCount} attempt${facts.attemptCount === 1 ? "" : "s"}${timing}.`];
         if (facts.error) lines.push(`- error: ${facts.error}`);
         if (facts.toolCallCount > 0) lines.push(`- made ${facts.toolCallCount} tool call${facts.toolCallCount === 1 ? "" : "s"}`);
         if (facts.hasOutput) lines.push("- produced structured output");
