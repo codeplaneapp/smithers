@@ -3,6 +3,7 @@ import {
   Children,
   createContext,
   useContext,
+  useEffect,
   useState,
   type ComponentProps,
   type ReactElement,
@@ -55,9 +56,17 @@ export function MessageBranch({
 }: MessageBranchProps) {
   useBranchLaneCss();
   const [internalIndex, setInternalIndex] = useState(defaultIndex);
-  const current = index ?? internalIndex;
+  const maxIndex = Math.max(count - 1, 0);
+  // Clamp at read so children never see an out-of-range index when the branch
+  // count changes underneath an uncontrolled (or stale controlled) index.
+  const current = Math.min(Math.max(index ?? internalIndex, 0), maxIndex);
+  // Reconcile the uncontrolled state itself, silently: a count-driven clamp is
+  // not a user navigation, and a later count increase keeps the clamped spot.
+  useEffect(() => {
+    if (index === undefined && internalIndex !== current) setInternalIndex(current);
+  }, [index, internalIndex, current]);
   const setIndex = (next: number) => {
-    const clamped = Math.min(Math.max(next, 0), Math.max(count - 1, 0));
+    const clamped = Math.min(Math.max(next, 0), maxIndex);
     if (index === undefined) setInternalIndex(clamped);
     onIndexChange?.(clamped);
   };

@@ -4,6 +4,7 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import {
+  MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
@@ -616,5 +617,122 @@ describe("MessageScroller compound", () => {
     );
     const button = container!.querySelector<HTMLElement>('[data-slot="message-scroller-button"]')!;
     expect(getComputedStyle(button).color).toBe("#f4f4f5");
+  });
+
+  test("the flat MessageScroller composes inside an ambient provider instead of nesting one", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScroller>
+          <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+        </MessageScroller>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    // A single scroller frame, owned by the outer provider: pinned on mount.
+    expect(container!.querySelectorAll('[data-slot="message-scroller-viewport"]')).toHaveLength(1);
+    expect(getViewport().scrollTop).toBe(1000);
+    expect(latestState!.following).toBe(true);
+    // Commands and state come from the ambient provider, not a shadow inner one.
+    await act(async () => commands!.scrollToTop());
+    expect(getViewport().scrollTop).toBe(0);
+    expect(latestState!.following).toBe(false);
+    await act(async () => commands!.scrollToBottom());
+    expect(getViewport().scrollTop).toBe(1000);
+    expect(latestState!.following).toBe(true);
+  });
+
+  test("a smooth jump-to-latest re-targets the bottom when content grows mid-flight", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    expect(getViewport().scrollTop).toBe(1000);
+    metrics().scrollTop = 300;
+    await scroll();
+    expect(latestState!.following).toBe(false);
+    // A smooth scroll mid-animation: advanced partway, not yet settled.
+    const viewport = getViewport();
+    const originalScrollTo = viewport.scrollTo;
+    Object.defineProperty(viewport, "scrollTo", {
+      configurable: true,
+      value: ({ top }: { top: number }) => {
+        metrics().scrollTop = Math.min(top, 600);
+      },
+    });
+    await act(async () => commands!.scrollToBottom("smooth"));
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
+    expect(getViewport().scrollTop).toBe(600);
+    // Streaming growth mid-flight must not strand the jump: it re-targets the
+    // moving bottom and re-engages follow once it lands.
+    metrics().scrollHeight = 1600;
+    const content = container!.querySelector('[data-slot="message-scroller-content"]')!;
+    await act(async () => resizeCallbacks.get(content)!([], {} as ResizeObserver));
+    expect(getViewport().scrollTop).toBe(1600);
+    expect(latestState!.following).toBe(true);
+  });
+
+  test("a backward scrollbar drag mid-flight cancels the jump and stops re-targeting", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    metrics().scrollTop = 300;
+    await scroll();
+    expect(latestState!.following).toBe(false);
+    const viewport = getViewport();
+    const originalScrollTo = viewport.scrollTo;
+    Object.defineProperty(viewport, "scrollTo", {
+      configurable: true,
+      value: ({ top }: { top: number }) => {
+        metrics().scrollTop = Math.min(top, 600);
+      },
+    });
+    await act(async () => commands!.scrollToBottom("smooth"));
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
+    // Scrollbar drags surface only as scroll events: dragging upward mid-flight
+    // is a user interruption and cancels the programmatic jump.
+    metrics().scrollTop = 400;
+    await scroll();
+    metrics().scrollHeight = 1600;
+    const content = container!.querySelector('[data-slot="message-scroller-content"]')!;
+    await act(async () => resizeCallbacks.get(content)!([], {} as ResizeObserver));
+    expect(getViewport().scrollTop).toBe(400);
+    expect(latestState!.following).toBe(false);
   });
 });

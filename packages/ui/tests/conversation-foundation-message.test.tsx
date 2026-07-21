@@ -240,6 +240,37 @@ describe("MessageBranch", () => {
     expect(panels()[1]!.hidden).toBe(true);
   });
 
+  test("uncontrolled index is reconciled when the branch count shrinks", async () => {
+    const changes: number[] = [];
+    const view = (count: number) => (
+      <MessageBranch count={count} defaultIndex={2} onIndexChange={(index) => changes.push(index)}>
+        <MessageBranchContent>
+          <div>first</div>
+          <div>second</div>
+          <div>third</div>
+        </MessageBranchContent>
+        <MessageBranchPage />
+        <MessageBranchNext />
+      </MessageBranch>
+    );
+    await render(view(3));
+    const page = () => container!.querySelector('[data-slot="message-branch-page"]')!;
+    const branch = () => container!.querySelector('[data-slot="message-branch"]')!;
+    expect(page().textContent).toBe("3 of 3");
+    await act(async () => root!.render(view(1)));
+    expect(page().textContent).toBe("1 of 1");
+    expect(branch().getAttribute("data-branch-index")).toBe("0");
+    const panels = Array.from(
+      container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]'),
+    );
+    expect(panels[0]!.hidden).toBe(false);
+    // Reconciliation is silent: a count-driven clamp is not a user navigation.
+    expect(changes).toEqual([]);
+    // The reconciled state sticks when the count grows back.
+    await act(async () => root!.render(view(3)));
+    expect(page().textContent).toBe("1 of 3");
+  });
+
   test("uses accessible button labels", () => {
     const html = renderToStaticMarkup(
       <MessageBranch count={2}>

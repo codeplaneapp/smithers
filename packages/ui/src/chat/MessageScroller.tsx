@@ -430,6 +430,7 @@ function MessageScrollerProviderImpl({
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    const previousTop = snapshotRef.current.scrollTop;
     const bottom = measure(viewport);
     // A scroll that leaves the anchor pin while a restore is pending is a user
     // gesture (scrollbar drags surface only as scroll events): cancel retrying.
@@ -441,6 +442,12 @@ function MessageScrollerProviderImpl({
       if (bottom) {
         ignoreScrollUntilBottomRef.current = false;
         setFollowing(true);
+      } else if (viewport.scrollTop < previousTop) {
+        // The programmatic jump lost ground: the user grabbed the scrollbar
+        // mid-flight (wheel/touch/keys cancel via cancelProgrammaticScroll).
+        // Reconcile follow with the position instead of staying stuck.
+        ignoreScrollUntilBottomRef.current = false;
+        setFollowing(false);
       }
       return;
     }
@@ -508,8 +515,19 @@ function MessageScrollerProviderImpl({
     const content = viewport?.firstElementChild;
     if (!viewport || !content || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (anchoringRef.current && followingRef.current && !restorePendingRef.current) {
+      // An in-flight programmatic jump-to-latest keeps re-targeting the moving
+      // bottom, so streaming growth mid-flight cannot strand the jump.
+      const jumpingToLatest = ignoreScrollUntilBottomRef.current;
+      if (
+        anchoringRef.current &&
+        (followingRef.current || jumpingToLatest) &&
+        !restorePendingRef.current
+      ) {
         viewport.scrollTop = viewport.scrollHeight;
+        if (jumpingToLatest && measure(viewport)) {
+          ignoreScrollUntilBottomRef.current = false;
+          setFollowing(true);
+        }
       }
       measure(viewport);
       remember(viewport);
@@ -517,7 +535,7 @@ function MessageScrollerProviderImpl({
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [measure, remember, recomputeVisibilityGeometric]);
+  }, [measure, remember, recomputeVisibilityGeometric, setFollowing]);
 
   useEffect(() => {
     if (typeof IntersectionObserver !== "undefined") {
@@ -822,6 +840,12 @@ export const MessageScroller: ForwardRefExoticComponent<
   ref,
 ) {
   useScrollerLaneCss();
+  const ambient = useContext(ScrollerContext);
+  if (ambient) {
+    // Provider/Scroller composition: the ambient provider owns scroll state, so
+    // the frame consumes it instead of nesting a shadow provider.
+    return <FlatScrollerInner {...rest} streaming={streaming} handleRef={ref} />;
+  }
   return (
     <MessageScrollerProviderImpl
       scrollAnchor={stickToBottom ? "bottom" : "none"}
