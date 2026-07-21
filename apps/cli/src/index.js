@@ -6,7 +6,7 @@ import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from
 import { readBackendMarkerForCwd } from "./readBackendMarkerForCwd.js";
 import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
 import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
-import { resolve, dirname, basename, relative } from "node:path";
+import { resolve, dirname, basename, relative, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { Effect, Fiber } from "effect";
@@ -54,7 +54,12 @@ import { EVENT_CATEGORY_VALUES, eventTypesForCategory, normalizeEventCategory, }
 import { aggregateNodeDetailEffect, renderNodeDetailHuman, } from "./node-detail.js";
 import { diagnoseRunEffect, diagnosisCtaCommands, renderWhyDiagnosisHuman, } from "./why-diagnosis.js";
 import { buildRunStatusSummary, renderRunStatusHuman, runStatusCtaCommands, } from "./run-status.js";
-import { detectAvailableAgents } from "./agent-detection.js";
+import { detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
+import { buildOneshotWorkflow } from "./oneshot/buildOneshotWorkflow.js";
+import { loadOneshotConfig } from "./oneshot/loadOneshotConfig.js";
+import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
+import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
+import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
 import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
 import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
@@ -1685,6 +1690,21 @@ const interactiveRunOption = z
     .default(false)
     .describe("Pick a workflow and its inputs through interactive terminal prompts, then launch the full-screen TUI monitor for the run (TTY only)");
 const upRunOptions = upOptions.extend({ interactive: interactiveRunOption });
+const oneshotArgs = z.object({
+    goal: z.string().optional().describe("Goal to complete; required unless using --status or a preference setter"),
+});
+const oneshotOptions = z.object({
+    goalFile: z.string().optional().describe("Read a long goal from a file"),
+    model: z.string().optional().describe("Model slot or canonical model id"),
+    agent: z.enum(["codex", "kimi", "claude-code", "opencode"]).optional().describe("Force an agent engine"),
+    review: z.enum(["on", "off"]).optional().describe("Review preference for this run"),
+    setReview: z.enum(["on", "off"]).optional().describe("Persist the review preference"),
+    setTrivial: z.enum(["direct", "oneshot"]).optional().describe("Persist trivial-task routing"),
+    status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
+    cwd: z.string().default(".").describe("Working directory for the task"),
+    detach: z.boolean().default(true).describe("Run in the background; pass false for foreground"),
+    open: z.boolean().default(true).describe("Open the run UI after launch"),
+}).extend({ interactive: interactiveRunOption });
 const evalOptions = z.object({
     cases: z.string().describe("JSON or JSONL eval case file"),
     suite: z.string().optional().describe("Stable suite ID used in run IDs and report paths"),
@@ -4371,7 +4391,7 @@ const cronCli = Cli.create({
         }
     },
 })
-    .command("rm", {
+   .command("rm", {
     description: "Delete an existing cron schedule by ID.",
     args: z.object({ cronId: z.string().describe("Cron ID to delete") }),
     async run(c) {
@@ -5254,6 +5274,124 @@ const cli = Cli.create({
             }
         }
         return runInitCommand(c, fail);
+    },
+})
+    // =========================================================================
+    // smithers oneshot [goal]
+    // =========================================================================
+    .command("oneshot", {
+    description: "Run one well-scoped goal with a strong agent in the background, with optional review and a live UI.",
+    args: oneshotArgs,
+    options: oneshotOptions,
+    alias: { detach: "d" },
+    async run(c) {
+        const fail = makeFail(c);
+        const taskCwd = resolve(process.cwd(), c.options.cwd);
+        if (!existsSync(taskCwd)) return fail({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${taskCwd}`, exitCode: 4 });
+        if (!statSync(taskCwd).isDirectory()) return fail({ code: "PATH_NOT_DIRECTORY", message: `Path is not a directory: ${taskCwd}`, exitCode: 4 });
+        let config = loadOneshotConfig();
+        if (c.options.setReview) {
+            config = { ...config, review: c.options.setReview, announced: true };
+            saveOneshotConfig(config);
+        }
+        if (c.options.setTrivial) {
+            config = { ...config, trivial: c.options.setTrivial, announced: true };
+            saveOneshotConfig(config);
+        }
+        const detections = detectAvailableAgents(process.env, { cwd: taskCwd });
+        const relevant = detections.filter((item) => ["claude", "codex", "kimi", "opencode"].includes(item.id));
+        const usable = relevant.filter((item) => item.usable && !item.deprecated);
+        if (c.options.status) {
+            let chain = [];
+            try { chain = resolveOneshotChain(detections, { model: c.options.model, agent: c.options.agent }); } catch { }
+            return c.ok({
+                usableAgents: usable.map((item) => item.id),
+                chain,
+                preferences: { review: config.review, trivial: config.trivial },
+                announced: config.announced,
+            });
+        }
+        let goal = c.args.goal;
+        if (c.options.goalFile) {
+            try { goal = readFileSync(resolve(process.cwd(), c.options.goalFile), "utf8"); }
+            catch (error) { return fail({ code: "GOAL_FILE_READ_FAILED", message: error?.message ?? String(error), exitCode: 4 }); }
+        }
+        if (!goal?.trim()) {
+            if (c.options.setReview || c.options.setTrivial) return c.ok({ preferences: config });
+            return fail({ code: "ONESHOT_GOAL_REQUIRED", message: "Provide a goal or --goal-file, or use --status/--set-review/--set-trivial alone.", exitCode: 4 });
+        }
+        if (Buffer.byteLength(goal, "utf8") > 64 * 1024 && !c.options.goalFile) {
+            return fail({ code: "ONESHOT_GOAL_TOO_LARGE", message: "Goals above 64KB must be supplied with --goal-file.", exitCode: 4 });
+        }
+        if (usable.length === 0) return fail({ code: "NO_USABLE_AGENTS", message: formatNoUsableAgentsMessage(relevant), exitCode: 4 });
+        const review = (c.options.review ?? config.review ?? "off") === "on";
+        const localPack = resolvePackDirs(taskCwd).find((entry) => entry.scope === "local");
+        const overrideEntry = localPack ? join(localPack.packDir, "workflows", "oneshot.tsx") : undefined;
+        const hasOverride = Boolean(overrideEntry && existsSync(overrideEntry));
+        const effectiveRunId = process.env.SMITHERS_ONESHOT_RUN_ID ?? `oneshot-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+        if (c.options.detach) {
+            await reapDetachedRunLogs({ cwd: taskCwd });
+            const logFile = resolveDetachedRunLogFile(effectiveRunId, { cwd: taskCwd });
+            mkdirSync(dirname(logFile), { recursive: true });
+            const childArgs = [fileURLToPath(import.meta.url), "oneshot"];
+            if (c.options.goalFile) childArgs.push("--goal-file", resolve(process.cwd(), c.options.goalFile));
+            else childArgs.push(goal);
+            childArgs.push("--cwd", taskCwd, "--detach", "false", "--open", "false", "--review", review ? "on" : "off");
+            if (c.options.model) childArgs.push("--model", c.options.model);
+            if (c.options.agent) childArgs.push("--agent", c.options.agent);
+            const fd = openSync(logFile, "a");
+            const child = spawn("bun", childArgs, {
+                cwd: taskCwd,
+                detached: true,
+                stdio: ["ignore", fd, fd],
+                env: { ...process.env, SMITHERS_ONESHOT_RUN_ID: effectiveRunId, [DETACHED_RUN_LOG_FILE_ENV]: logFile },
+            });
+            closeSync(fd);
+            child.unref();
+            if (c.options.open) {
+                const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", effectiveRunId], { cwd: taskCwd, detached: true, stdio: "ignore", env: process.env });
+                opener.unref();
+            }
+            return c.ok({ runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" }, {
+                cta: [
+                    { command: `ui ${effectiveRunId}`, description: "Open the live oneshot UI" },
+                    { command: `chat ${effectiveRunId}`, description: "Read the agent transcript" },
+                    { command: `hijack ${effectiveRunId}`, description: "Take over the agent session" },
+                    { command: `pause ${effectiveRunId}`, description: "Pause the run" },
+                    { command: `cancel ${effectiveRunId}`, description: "Cancel the run" },
+                ],
+            });
+        }
+        if (hasOverride) {
+            if (c.options.interactive) {
+                return runTuiCommand({ ...c, options: { ...upOptions.parse({}), input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), interactive: true } }, fail, { preselect: { id: "oneshot", entryFile: overrideEntry } });
+            }
+            return executeUpCommand(c, overrideEntry, { ...upOptions.parse({}), runId: effectiveRunId, input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), root: taskCwd }, fail);
+        }
+        try {
+            const selected = await selectOneshotAgents(detections, { cwd: taskCwd, model: c.options.model, agent: c.options.agent });
+            const workflow = await buildOneshotWorkflow({ cwd: taskCwd, goal, agents: selected.agents, reviewAgents: selected.reviewAgents, review });
+            setupSqliteCleanup(workflow);
+            const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
+            delete process.env[DETACHED_RUN_LOG_FILE_ENV];
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                input: {}, runId: effectiveRunId, rootDir: taskCwd,
+                ...(detachedLogFile ? { config: { logFile: detachedLogFile } } : {}),
+                onProgress: buildProgressReporter(), signal: setupAbortSignal().signal,
+            }));
+            process.exitCode = formatStatusExitCode(result.status);
+            if (c.options.open && result.runId) openInBrowser(`http://127.0.0.1:7331/workflows/oneshot?runId=${encodeURIComponent(result.runId)}`);
+            return c.ok(summarizeRunResult(result), { cta: result.runId ? [
+                { command: `ui ${result.runId}`, description: "Open the oneshot UI" },
+                { command: `chat ${result.runId}`, description: "Read the agent transcript" },
+                { command: `hijack ${result.runId}`, description: "Take over the agent session" },
+                { command: `pause ${result.runId}`, description: "Pause the run" },
+                { command: `cancel ${result.runId}`, description: "Cancel the run" },
+            ] : undefined });
+        }
+        catch (error) {
+            return fail({ code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED", message: error?.message ?? String(error), exitCode: 1 });
+        }
     },
 })
     .command("add", {

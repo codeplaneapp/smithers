@@ -1,7 +1,5 @@
-import { resolve } from "node:path";
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { readBackendMarkerForCwd } from "./readBackendMarkerForCwd.js";
+import { openInlineWorkflowStore } from "./openInlineWorkflowStore.js";
 
 /** @typedef {"claude-code" | "codex" | "antigravity" | "pi" | "kimi" | "amp"} InlineChatEngine */
 
@@ -82,56 +80,14 @@ async function createChatAgent(engine, cwd) {
  * @returns {Promise<import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>>}
  */
 export async function buildInlineChatWorkflow({ engine, cwd, prompt, name = "chat" }) {
-    const [
-        { Database },
-        { drizzle },
-        { sqliteTable, text },
-        { Workflow, Task },
-        { zodToTable },
-        { syncZodTableSchema },
-        { camelToSnake },
-        { z: zod },
-    ] = await Promise.all([
-        import("bun:sqlite"),
-        import("drizzle-orm/bun-sqlite"),
-        import("drizzle-orm/sqlite-core"),
-        import("@smithers-orchestrator/components"),
-        import("@smithers-orchestrator/db/zodToTable"),
-        import("@smithers-orchestrator/db/zodToCreateTableSQL"),
-        import("@smithers-orchestrator/db/utils/camelToSnake"),
-        import("zod"),
+    const [{ Workflow, Task }, { z: zod }] = await Promise.all([
+        import("@smithers-orchestrator/components"), import("zod"),
     ]);
     const agent = await createChatAgent(engine, cwd);
     const chatSchema = zod.object({});
-    const inputTable = sqliteTable("input", {
-        runId: text("run_id").primaryKey(),
-        payload: text("payload", { mode: "json" }).$type(),
-    });
-    const chatTableName = camelToSnake(name);
-    const chatTable = zodToTable(chatTableName, chatSchema);
-    // Use the workspace store, not a stray ./smithers.db in whatever
-    // subdirectory chat was launched from: same anchor rule as createSmithers,
-    // same fail-loud guard for non-sqlite workspaces (this inline workflow is
-    // bun:sqlite-only).
-    const { findSmithersAnchorDir } = await import("smithers-orchestrator/findSmithersAnchorDir");
-    const anchorDir = findSmithersAnchorDir(cwd);
-    const workspaceBackend = readBackendMarkerForCwd(cwd);
-    if (workspaceBackend && workspaceBackend !== "sqlite") {
-        throw new SmithersError("BACKEND_MISMATCH", `This workspace's store is ${workspaceBackend}, but inline chat runs currently support only the sqlite backend. Run it in a sqlite workspace or migrate with \`smithers migrate --to sqlite\`.`, { backend: workspaceBackend });
-    }
-    const sqlite = new Database(resolve(anchorDir ?? cwd, "smithers.db"));
-    sqlite.run("PRAGMA journal_mode = WAL");
-    sqlite.run("PRAGMA busy_timeout = 30000");
-    sqlite.run("PRAGMA synchronous = NORMAL");
-    sqlite.run("PRAGMA locking_mode = NORMAL");
-    sqlite.run("PRAGMA foreign_keys = ON");
-    sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
-    syncZodTableSchema(sqlite, chatTableName, chatSchema);
-    const db = drizzle(sqlite, { schema: { input: inputTable, [name]: chatTable } });
-    const schemaRegistry = new Map([[name, { table: chatTable, zodSchema: chatSchema }]]);
-    const zodToKeyName = new Map([[chatSchema, name]]);
+    const store = await openInlineWorkflowStore(cwd, { [name]: chatSchema });
     return {
-        db,
+        ...store,
         build: () => React.createElement(Workflow, { name }, React.createElement(Task, {
             id: name,
             output: chatSchema,
@@ -139,7 +95,5 @@ export async function buildInlineChatWorkflow({ engine, cwd, prompt, name = "cha
             hijack: true,
         }, prompt)),
         opts: {},
-        schemaRegistry,
-        zodToKeyName,
     };
 }
