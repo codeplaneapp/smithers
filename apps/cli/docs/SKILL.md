@@ -46,12 +46,12 @@ commands for them to execute. When a run needs a human (an approval, an
 decision in conversation, and run the resolving command (`approve`, `deny`,
 `human answer`, `signal`) yourself.
 
-### ⚠️ Do it — don't describe it
+### ⚠️ Do it - don't describe it
 
 **This is the single most common failure, so read it.** When asked to "create a
 Smithers workflow" (or run, monitor, or fix one), the failure mode is to *narrate
-the steps* — print `smithers init`, paste the workflow `.tsx` as a code block, or
-write a numbered "here's how you'd do it" — instead of **actually doing it with
+the steps* - print `smithers init`, paste the workflow `.tsx` as a code block, or
+write a numbered "here's how you'd do it" - instead of **actually doing it with
 your tools right now.** Describing the work is not the work.
 
 Concretely, when a request maps to a Smithers action:
@@ -70,13 +70,13 @@ Two specific traps:
 1. **Don't stall in read-only plan mode.** Designing a workflow is fine, but a
    plan that only *describes* the workflow and never writes the file is a
    non-answer. Leave plan mode (or never enter it for a scaffold request) and
-   write the file. The workflow `.tsx` *is* the plan — make it real on disk.
+   write the file. The workflow `.tsx` *is* the plan - make it real on disk.
 2. **The `smithers` CLI is a real binary you invoke with Bash, not a tool you
    wait to be handed.** If a `smithers-*` tool isn't already loaded in your
    harness, just run the `smithers` command in a shell. Never let "I don't see a
    smithers tool" become "so I'll explain it instead."
 
-### ⚠️ Gateway is the control plane — never drive the database
+### ⚠️ Gateway is the control plane - never drive the database
 
 **This is a hard operator rule.** The workspace Gateway owns run discovery and
 control. Long-lived controllers, Bun cron jobs, health monitors, bots, and
@@ -207,14 +207,14 @@ before every workflow you build, and the rest of this skill assumes them.
 
 When the user asks for a **report**, a **plan**, an **architecture document**,
 or any other written deliverable meant to be read and shared, the deliverable
-is a **self-contained HTML page** — one `.html` file with its styles embedded,
+is a **self-contained HTML page** - one `.html` file with its styles embedded,
 no server, no build, no external assets. Not a Markdown file, not chat
 scrollback. Markdown is for READMEs and code-adjacent notes a developer edits;
 anything the user will *read, present, or forward* gets HTML.
 
 **Words like "plan" and "runbook" name documents here, not workflows.** When
 the user asks you to *write* a plan, runbook, or postmortem, they want a
-document to read — produce the HTML page. Reach for a workflow ("Smithers is
+document to read - produce the HTML page. Reach for a workflow ("Smithers is
 your plan mode", the `<Runbook>` pattern) only when the user wants the machine
 to *execute* the steps, not when they want prose to read and share.
 
@@ -227,7 +227,7 @@ to *execute* the steps, not when they want prose to read and share.
   (boxes and arrows beat ASCII art). Polished enough to forward without
   apology.
 - **Run reports too.** Summarizing what a run did? Source it from persisted
-  state (`smithers inspect`, `events`, `scores`), not memory, and render HTML —
+  state (`smithers inspect`, `events`, `scores`), not memory, and render HTML -
   the `report-maker` skill covers the run-slideshow variant.
 
 ## Reusable procedures belong in workflows
@@ -235,7 +235,7 @@ to *execute* the steps, not when they want prose to read and share.
 When you capture something reusable, capture it as a workflow. A simple one-off
 task can use `smithers oneshot`; it does not need a new workflow file.
 
-A skill is *static instructions* — prose an agent reads and then has to execute
+A skill is *static instructions* - prose an agent reads and then has to execute
 by hand, every time, with no memory that it ran, no retries, no gates, no typed
 result. A Smithers workflow is the strict superset: it is **executable**
 (it runs, it doesn't just describe), **durable** (every step persists and
@@ -265,7 +265,7 @@ new workflow for you.
 
 The reason teams iterate on skills is to make the agent better at a task: write
 it down, watch it fail, tighten the wording, repeat. **Apply that exact loop to
-workflows — except a workflow gives the loop real teeth instead of vibes:**
+workflows - except a workflow gives the loop real teeth instead of vibes:**
 
 - **Evals instead of eyeballing.** `smithers eval workflow.tsx --cases
   evals/suite.jsonl` runs the workflow over a regression suite and scores it, so
@@ -278,15 +278,15 @@ workflows — except a workflow gives the loop real teeth instead of vibes:**
   prompt artifact. That is "make the instructions better," done by machine,
   measured against cases.
 
-The same craft you'd put into a great skill — clear instructions, the right
-context, tested edge cases — goes into a great workflow. The difference is the
+The same craft you'd put into a great skill - clear instructions, the right
+context, tested edge cases - goes into a great workflow. The difference is the
 workflow is the artifact that runs *and* the artifact you measure, so the
 improvement compounds.
 
 ## 60 seconds to the aha
 
 From inside the user's project (Bun ≥ 1.3, plus a model key like
-`ANTHROPIC_API_KEY` in the env). Run these yourself with your shell tool — every
+`ANTHROPIC_API_KEY` in the env). Run these yourself with your shell tool - every
 bare `smithers …` below is identical to `bunx smithers-orchestrator …` if there
 is no global install, so prefer `bunx smithers-orchestrator …` when unsure:
 
@@ -302,7 +302,7 @@ smithers starters
 
 # 3. Author a brand-new workflow file, then make the graph render before running it
 smithers workflow create my-workflow      # writes .smithers/workflows/my-workflow.tsx
-smithers graph .smithers/workflows/my-workflow.tsx   # renders without executing — must exit 0
+smithers graph .smithers/workflows/my-workflow.tsx   # renders without executing - must exit 0
 
 # 4. Run one. This dispatches a real coding agent to do the work, durably.
 smithers workflow run create-workflow --prompt "Build a workflow for a /health endpoint"
@@ -869,20 +869,20 @@ The bundle is one file. Two shipping shapes:
 - **React (recommended).** Compose from the shipped component libraries; hand-rolled markup and CSS is the last resort. `smithers-orchestrator/gateway-ui` ships run-shaped widgets that each connect to the Gateway by themselves: `SimpleWorkflowDashboard` (a complete launch/watch dashboard in one component), `WorkflowUiShell` (the page scaffold with house styles), `RunList`, `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel`, `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `StatusPill`. `smithers-orchestrator/ui` ships the token-native primitives for everything around them (`Button`, `Card`, `Input`, `Tabs`, `Dialog`, `Table`, `StatusPill`, `EmptyState`, `KpiStat`, chat surfaces), correct in light and dark automatically. Under both sits `smithers-orchestrator/gateway-react`: one call to `createGatewayReactRoot(<App />)` reads the boot config, mounts a provider, and gives the tree live hooks for bespoke panes: `useGatewayRun`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayActions` (for `submitApproval`, `submitSignal`, `cancelRun`, `rewindRun`, etc.). The hooks are **stale-data-free by construction**: when `runId` (or any input) changes, the prior data clears synchronously and any late response from the old inputs is dropped. A custom UI that switches between runs never blinks the wrong data. It automatically manages subscriptions, pushed updates, metrics, and resilient reconnections.
 - **Vanilla.** `smithers-orchestrator/gateway-client`. One `SmithersGatewayClient` class with `getRun`, `getNodeOutput`, `getNodeDiff`, `submitApproval`, `submitSignal`, `cancelRun`, and a `streamRunEventsResilient` async generator that reconnects with backoff + jitter and resumes from the last per-run `seq`. This generator handles live pushed updates, metrics streaming, and subscriptions. Pick this when you want zero dependencies or already own your render layer.
 
-**Match the situation to the shipped component — never hand-roll these.** Each is the single shared implementation; reaching for it is the default, not an option:
+**Match the situation to the shipped component - never hand-roll these.** Each is the single shared implementation; reaching for it is the default, not an option:
 
 | The situation | The component |
 | --- | --- |
-| The user edits a node's markdown output (spec, doc, report) | `MarkdownEditor` + `MarkdownEditorStyles` from `smithers-orchestrator/ui/adapters/markdown-editor` — the shared WYSIWYG (Milkdown Crepe); the user edits the rendered document, **never raw markdown in a `<textarea>`** |
+| The user edits a node's markdown output (spec, doc, report) | `MarkdownEditor` + `MarkdownEditorStyles` from `smithers-orchestrator/ui/adapters/markdown-editor` - the shared WYSIWYG (Milkdown Crepe); the user edits the rendered document, **never raw markdown in a `<textarea>`** |
 | Rendering a `DiffBundle` for review | `DiffHunks` from `smithers-orchestrator/ui` (`@@`-grouped hunks, dual gutters, add/remove/context coloring, pagination built in) |
 | A conversational workflow (agent questions ↔ user replies) | `ChatTranscript` + `ChatComposer` from `smithers-orchestrator/ui` |
 | Headline counts on an overview | `KpiStat` |
 | Any run/node status badge | `StatusPill` (feed it `normalizeStatus`) |
 | A zero-data state ("no runs yet") | `EmptyState` |
-| Raw shell/test log output, live (ANSI, scrollback) | `Terminal` from `smithers-orchestrator/ui/adapters/terminal` — a real xterm surface, not a styled HTML list |
+| Raw shell/test log output, live (ANSI, scrollback) | `Terminal` from `smithers-orchestrator/ui/adapters/terminal` - a real xterm surface, not a styled HTML list |
 | Where a run sits in a fixed pipeline of stages | `StageStrip` |
 | Browsing the files a run changed | `FileTree` |
-| Charting data (counts per category, trends, magnitudes) | `ChartContainer` + `ChartTooltipContent`/`ChartLegendContent` + `chartConfig` from `smithers-orchestrator/ui/adapters/chart` (Recharts elements as children, series colors via the validated palette slots) — never `<canvas>`, chart.js, or hand-rolled SVG bars |
+| Charting data (counts per category, trends, magnitudes) | `ChartContainer` + `ChartTooltipContent`/`ChartLegendContent` + `chartConfig` from `smithers-orchestrator/ui/adapters/chart` (Recharts elements as children, series colors via the validated palette slots) - never `<canvas>`, chart.js, or hand-rolled SVG bars |
 
 The bundle reads `?runId=<id>` from `location.search` for the run to scope to, and optionally `__SMITHERS_GATEWAY_UI__` (a `GatewayUiBootConfig`) for the mount path, RPC path, WebSocket path, and free-form `props` you set at `gateway.register({ ui: { props } })`.
 
