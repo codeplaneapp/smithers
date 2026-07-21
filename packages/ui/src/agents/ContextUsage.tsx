@@ -85,6 +85,7 @@ export function ContextUsage({
   openOnHover = true,
   className,
   children,
+  onMouseLeave,
   ...props
 }: ContextUsageProps) {
   useInjectUiCss();
@@ -98,17 +99,26 @@ export function ContextUsage({
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverOpened = useRef(false);
 
+  function cancelHoverTimer() {
+    if (hoverTimer.current !== null) {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  }
+
   function setOpen(next: boolean) {
     if (!isControlled) setUncontrolledOpen(next);
     onOpenChange?.(next);
   }
 
   function toggle() {
+    cancelHoverTimer();
     hoverOpened.current = false;
     setOpen(!isOpen);
   }
 
   function close(restoreFocus: boolean) {
+    cancelHoverTimer();
     hoverOpened.current = false;
     setOpen(false);
     if (restoreFocus) triggerRef.current?.focus();
@@ -116,7 +126,7 @@ export function ContextUsage({
 
   function scheduleHoverOpen() {
     if (!openOnHover || isControlled || isOpen) return;
-    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current);
+    cancelHoverTimer();
     hoverTimer.current = setTimeout(() => {
       hoverTimer.current = null;
       hoverOpened.current = true;
@@ -126,10 +136,7 @@ export function ContextUsage({
   }
 
   function cancelHoverOpen(closeIfHoverOpened: boolean) {
-    if (hoverTimer.current !== null) {
-      clearTimeout(hoverTimer.current);
-      hoverTimer.current = null;
-    }
+    cancelHoverTimer();
     if (closeIfHoverOpened && hoverOpened.current && !isControlled) {
       hoverOpened.current = false;
       setUncontrolledOpen(false);
@@ -163,7 +170,10 @@ export function ContextUsage({
         data-slot="context-usage"
         data-state={isOpen ? "open" : "closed"}
         className={cn("sui-ctx", className)}
-        onMouseLeave={() => cancelHoverOpen(true)}
+        onMouseLeave={(event) => {
+          cancelHoverOpen(true);
+          onMouseLeave?.(event);
+        }}
         {...props}
         onKeyDown={onKeyDown}
       >
@@ -189,7 +199,15 @@ export function ContextUsage({
   );
 }
 
-export function ContextTrigger({ className, children, onClick, ...props }: ComponentProps<"button">) {
+export function ContextTrigger({
+  className,
+  children,
+  onClick,
+  onMouseEnter,
+  onFocus,
+  onBlur,
+  ...props
+}: ComponentProps<"button">) {
   useInjectUiCss();
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
   const ctx = useContextUsage("ContextTrigger");
@@ -213,9 +231,18 @@ export function ContextTrigger({ className, children, onClick, ...props }: Compo
         ctx.toggle();
         onClick?.(event);
       }}
-      onMouseEnter={ctx.scheduleHoverOpen}
-      onFocus={ctx.scheduleHoverOpen}
-      onBlur={() => ctx.cancelHoverOpen(false)}
+      onMouseEnter={(event) => {
+        ctx.scheduleHoverOpen();
+        onMouseEnter?.(event);
+      }}
+      onFocus={(event) => {
+        ctx.scheduleHoverOpen();
+        onFocus?.(event);
+      }}
+      onBlur={(event) => {
+        ctx.cancelHoverOpen(false);
+        onBlur?.(event);
+      }}
       {...props}
     >
       {children ?? <span className="sui-ctx-trigger-label">{label}</span>}

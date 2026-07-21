@@ -177,6 +177,62 @@ describe("ContextUsage", () => {
     expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
   });
 
+  test("click during a pending hover timer wins over hover close", async () => {
+    await render(<ContextUsage usage={{}} />);
+    const rootEl = container!.querySelector('[data-slot="context-usage"]')!;
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    await act(async () => trigger.click());
+    await act(async () => sleep(400));
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+    await act(async () => {
+      rootEl.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+    });
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+  });
+
+  test("trigger composes host mouse/focus handlers with internal ones", async () => {
+    const calls: string[] = [];
+    await render(
+      <ContextUsage usage={{}}>
+        <ContextTrigger
+          onMouseEnter={() => calls.push("enter")}
+          onFocus={() => calls.push("focus")}
+          onBlur={() => calls.push("blur")}
+        />
+        <ContextContent />
+      </ContextUsage>,
+    );
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      trigger.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      trigger.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    expect(calls).toEqual(["enter", "focus", "blur"]);
+    await act(async () => sleep(400));
+    expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+  });
+
+  test("root composes host onMouseLeave with hover-close behavior", async () => {
+    let leaves = 0;
+    await render(<ContextUsage usage={{}} onMouseLeave={() => leaves++} />);
+    const rootEl = container!.querySelector('[data-slot="context-usage"]')!;
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    await act(async () => sleep(400));
+    expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
+    await act(async () => {
+      rootEl.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+    });
+    expect(leaves).toBe(1);
+    expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
+  });
+
   test("compound children compose the parts", () => {
     const html = renderToStaticMarkup(
       <ContextUsage defaultOpen usage={{ inputTokens: 10, costUsd: 0.0042 }}>

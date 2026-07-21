@@ -1,12 +1,12 @@
 /** @jsxImportSource react */
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, MouseEvent, ReactNode } from "react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss } from "./agentsCss";
 import { AgentAvailabilityBadge, type AgentAvailability } from "./AgentDefinition";
 
-export type AgentCardProps = Omit<ComponentProps<"div">, "children" | "title" | "onSelect"> & {
+export type AgentCardProps = Omit<ComponentProps<"div">, "children" | "title" | "onSelect" | "onClick"> & {
   name: string;
   provider?: string;
   model?: string;
@@ -15,6 +15,7 @@ export type AgentCardProps = Omit<ComponentProps<"div">, "children" | "title" | 
   selected?: boolean;
   disabled?: boolean;
   onSelect?: () => void;
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
   children?: ReactNode;
 };
 
@@ -31,6 +32,7 @@ export function AgentCard({
   selected = false,
   disabled = false,
   onSelect,
+  onClick,
   className,
   children,
   ...props
@@ -63,7 +65,10 @@ export function AgentCard({
         data-selected={selected ? "true" : "false"}
         aria-pressed={selected}
         disabled={disabled}
-        onClick={onSelect}
+        onClick={(event) => {
+          onSelect();
+          onClick?.(event);
+        }}
         className={cn("sui-agentcard sui-agentcard-selectable", className)}
         {...(props as ComponentProps<"button">)}
       >
@@ -77,6 +82,7 @@ export function AgentCard({
       data-availability={availability}
       data-selected={selected ? "true" : "false"}
       aria-disabled={disabled || undefined}
+      onClick={onClick}
       className={cn("sui-agentcard", className)}
       {...props}
     >

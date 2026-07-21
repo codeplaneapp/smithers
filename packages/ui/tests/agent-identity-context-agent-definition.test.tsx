@@ -214,4 +214,23 @@ describe("AgentCard", () => {
     await act(async () => button.click());
     expect(selected).toBe(0);
   });
+
+  test("host onClick composes with onSelect instead of replacing it", async () => {
+    const calls: string[] = [];
+    await render(
+      <AgentCard name="coder" onSelect={() => calls.push("select")} onClick={() => calls.push("click")} />,
+    );
+    const button = container!.querySelector<HTMLButtonElement>('[data-slot="agent-card"]')!;
+    await act(async () => button.click());
+    expect(calls).toEqual(["select", "click"]);
+  });
+
+  test("non-selectable card still forwards host onClick", async () => {
+    let clicks = 0;
+    await render(<AgentCard name="coder" onClick={() => clicks++} />);
+    const card = container!.querySelector<HTMLElement>('[data-slot="agent-card"]')!;
+    expect(card.tagName).toBe("DIV");
+    await act(async () => card.click());
+    expect(clicks).toBe(1);
+  });
 });
