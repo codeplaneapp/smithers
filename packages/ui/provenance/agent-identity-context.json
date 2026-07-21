@@ -1,0 +1,82 @@
+[
+  {
+    "file": "src/agents/AgentDefinition.tsx",
+    "exports": [
+      "AgentDefinition",
+      "AgentHeader",
+      "AgentContent",
+      "AgentInstructions",
+      "AgentTools",
+      "AgentTool",
+      "AgentOutputSchema",
+      "AgentAvailabilityBadge"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/agent",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "Root renamed AgentDefinition (bare Agent collides with runtime SDK exports)",
+      "availability posture (available|unauthenticated|unavailable|unknown) is a Smithers addition"
+    ]
+  },
+  {
+    "file": "src/agents/AgentCard.tsx",
+    "exports": ["AgentCard"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/agent",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": ["Selectable card renders a real <button aria-pressed> when onSelect is provided"]
+  },
+  {
+    "file": "src/agents/ModelSelector.tsx",
+    "exports": [
+      "ModelSelector",
+      "ModelSelectorTrigger",
+      "ModelSelectorContent",
+      "ModelSelectorGroup",
+      "ModelSelectorItem"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/model-selector",
+    "ported": "partial-anatomy",
+    "omissions": ["cmdk command-palette input (deferred to a future adapters/* variant)"],
+    "divergences": [
+      "Composes the existing Radix Select primitives instead of cmdk (no new base dependency); keyboard model is Radix Select arrows + typeahead"
+    ]
+  },
+  {
+    "file": "src/agents/badges.tsx",
+    "exports": ["ModelBadge", "ProviderBadge"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/model-selector",
+    "ported": "partial-anatomy",
+    "omissions": ["Bundled provider logo assets"],
+    "divergences": ["Text-first badges with an icon slot only; no logo assets shipped in the base package"]
+  },
+  {
+    "file": "src/agents/ContextUsage.tsx",
+    "exports": [
+      "ContextUsage",
+      "ContextTrigger",
+      "ContextContent",
+      "ContextContentHeader",
+      "ContextContentBody",
+      "ContextContentFooter",
+      "ContextInputUsage",
+      "ContextOutputUsage",
+      "ContextReasoningUsage",
+      "ContextCacheUsage"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/context",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "Renamed ContextUsage (avoids React.Context confusion)",
+      "Keyboard contract added over upstream: real button trigger with aria-expanded/aria-controls, Escape closes and restores focus",
+      "No pricing database: costUsd arrives via props"
+    ]
+  }
+]
