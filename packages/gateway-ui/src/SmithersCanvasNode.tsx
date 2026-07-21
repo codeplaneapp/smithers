@@ -1,6 +1,10 @@
 /** @jsxImportSource react */
 import type { NodeProps } from "@xyflow/react";
-import { WorkflowNode, WorkflowNodeContent } from "@smithers-orchestrator/ui";
+// House rules reserve packages/ui/src/index.ts for the integration lane, so
+// the canvas anatomy is not on the @smithers-orchestrator/ui barrel yet. This
+// deep source import is the interim path; integration swaps it for the barrel
+// when it lands the lane's export block (integrationContract E).
+import { WorkflowNode, WorkflowNodeContent } from "../../ui/src/canvas/WorkflowCanvas";
 import { SmithersNodeHandles, type SmithersFlowNode } from "./WorkflowGraph";
 
 export { SmithersNodeHandles };

@@ -121,6 +121,15 @@ const SHADCN_DIRECTORIES = [
   "packages/ui/src/chat/shadcn",
   "packages/ui/src/primitives/shadcn",
 ];
+// The frozen agentic-ui program (freeze v2, integrationContract E) mandates
+// that the approvals-checkpoints and workflow-canvas lanes add exactly these
+// gateway-ui files; the blanket legacy-facade rule below predates the program
+// and would otherwise reject them outright.
+const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
+  "packages/gateway-ui/src/GatewayApprovals.tsx",
+  "packages/gateway-ui/src/GatewayCheckpointControls.tsx",
+  "packages/gateway-ui/src/SmithersCanvasNode.tsx",
+]);
 const SHADCN_PROVENANCE_SCHEMA = "https://json-schema.org/draft/2020-12/schema";
 const SHADCN_PROVENANCE_REGISTRIES = ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"];
 const SHADCN_PROVENANCE_COLLECTIONS = ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"];
@@ -906,7 +915,7 @@ function uiLayer(path) {
   const relativePath = path.slice(prefix.length);
   if (relativePath.startsWith("smithers/connected/")) return "connected";
   const layer = relativePath.split("/")[0];
-  return ["adapters", "agentic", "ai", "chat", "internal", "primitives", "smithers", "styles"].includes(layer)
+  return ["adapters", "agentic", "ai", "canvas", "chat", "internal", "primitives", "smithers", "styles"].includes(layer)
     ? layer
     : null;
 }
@@ -939,7 +948,7 @@ function resolveRelativeSource(file, specifier, files) {
 
 function disconnectedPropViolations(path, source) {
   const layer = uiLayer(path);
-  if (!["agentic", "ai", "chat", "primitives", "smithers"].includes(layer)) return [];
+  if (!["agentic", "ai", "canvas", "chat", "primitives", "smithers"].includes(layer)) return [];
   if (path.includes("/smithers/connected/") || posix.basename(path).startsWith("index.")) return [];
   if (!source.includes("<") || !/[.]tsx?$/.test(path)) return [];
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -1218,6 +1227,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         adapters: new Set(["adapters", "internal", "primitives", "styles"]),
         agentic: new Set(["agentic", "chat", "internal", "primitives", "styles"]),
         ai: new Set(["ai", "chat", "internal", "primitives", "styles"]),
+        canvas: new Set(["canvas", "internal", "primitives", "styles"]),
         chat: new Set(["chat", "internal", "primitives", "styles"]),
         connected: new Set(["connected", "gateway-react", "internal", "smithers", "styles"]),
         internal: new Set(["internal"]),
@@ -1276,8 +1286,9 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         violations.push(formatViolation("ui-layer-placement", `${path} is outside the target UI layers`));
       }
       if (
-        path.startsWith("packages/gateway-ui/src/") ||
-        (path.startsWith("packages/ui-styleguide/src/") && path !== "packages/ui-styleguide/src/standaloneThemeCss.ts")
+        (path.startsWith("packages/gateway-ui/src/") ||
+        (path.startsWith("packages/ui-styleguide/src/") && path !== "packages/ui-styleguide/src/standaloneThemeCss.ts")) &&
+        !SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path)
       ) {
         violations.push(formatViolation("compatibility-facade-file", `${path} is legacy facade implementation`));
       }

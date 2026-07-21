@@ -202,25 +202,3 @@ export {
   type HighlightLine,
   type HighlightedToken,
 } from "./agentic/CodeBlock";
-
-// lane:workflow-canvas exports (integration: keep)
-export {
-  WorkflowCanvas,
-  WorkflowNode,
-  WorkflowNodeHeader,
-  WorkflowNodeContent,
-  WorkflowNodeStatus,
-  WorkflowEdge,
-  WorkflowConnection,
-  WorkflowControls,
-  WorkflowPanel,
-  WorkflowToolbar,
-  WorkflowMinimap,
-  type WorkflowCanvasProps,
-  type WorkflowNodeProps,
-  type WorkflowNodeStatusProps,
-  type WorkflowEdgeProps,
-  type WorkflowConnectionProps,
-  type WorkflowControlsProps,
-  type WorkflowPanelProps,
-} from "./canvas/WorkflowCanvas";

@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import {
-  SMITHERS_UI_STYLE_ATTR,
   WorkflowCanvas,
   WorkflowConnection,
   WorkflowControls,
@@ -15,7 +15,7 @@ import {
   WorkflowNodeStatus,
   WorkflowPanel,
   WorkflowToolbar,
-} from "../src/index";
+} from "../src/canvas/WorkflowCanvas";
 import { WORKFLOW_CANVAS_CSS_ID } from "../src/canvas/canvasCss";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
