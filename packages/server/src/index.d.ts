@@ -2543,18 +2543,23 @@ declare function validateFromSeqInput(fromSeq: unknown): void;
 declare function attachNodeStatesToDevToolsRoot(root: DevToolsNode, nodeRows: Array<Record<string, unknown>>): void;
 /**
  * Attach the agent that ACTUALLY executed each task node (engine/model/agentId
- * from the latest attempt's persisted `metaJson` — the same metadata the
- * hijack candidates read, see ../hijackCandidates.js). Declared assignments
- * (`task.agentSummary`) come from the frame's task index instead; this covers
- * running/settled nodes and runs recorded before declared-agent capture.
- * Only the newest attempt per node is parsed — attempt metaJson can carry
- * whole conversations, so parsing every row would be wasteful.
+ * from the latest eligible attempt's persisted `metaJson` — the same metadata
+ * the hijack candidates read, see ../hijackCandidates.js) plus the task's
+ * initial prompt. Eligibility is scoped to attempts started at or before the
+ * requested frame and to the task's captured iteration, so historical frames
+ * do not display metadata from future retries or loop iterations. Declared
+ * assignments (`task.agentSummary`) come from the frame's task index instead;
+ * this covers running/settled nodes and runs recorded before declared-agent
+ * capture. Only the newest eligible attempt per node and iteration is parsed —
+ * attempt metaJson can carry whole conversations, so parsing every row would
+ * be wasteful.
  *
  * @param {DevToolsNode} root
  * @param {Array<Record<string, unknown>>} attemptRows
+ * @param {number} [frameCreatedAtMs]
  * @returns {void}
  */
-declare function attachAgentAttemptsToDevToolsRoot(root: DevToolsNode, attemptRows: Array<Record<string, unknown>>): void;
+declare function attachAgentAttemptsToDevToolsRoot(root: DevToolsNode, attemptRows: Array<Record<string, unknown>>, frameCreatedAtMs?: number): void;
 /**
  * @param {{
  *   adapter: SmithersDb;
@@ -2589,6 +2594,13 @@ declare class DevToolsRouteError extends Error {
     hint: string | undefined;
 }
 declare const DEVTOOLS_EMPTY_ROOT_ID: 0;
+/**
+ * Upper bound for the task prompt carried on a snapshot node. Attempt metadata
+ * keeps the full text (see `smithers node detail`); the snapshot only needs
+ * enough for the inspector's Prompt panel, and frames stream to every
+ * subscribed client, so unbounded prompts are not allowed through.
+ */
+declare const DEVTOOLS_TASK_PROMPT_MAX_CHARS: 4000;
 type DevToolsAgentRef = _smithers_orchestrator_protocol_devtools.DevToolsAgentRef;
 type DevToolsAgentSummary = _smithers_orchestrator_protocol_devtools.DevToolsAgentSummary;
 type SmithersDb$3 = _smithers_orchestrator_db_adapter.SmithersDb;
@@ -2909,4 +2921,4 @@ declare function scheduleRunCleanup(runRegistry: Map<string, RunRecord>, runId: 
  */
 declare function clearRunCleanupTimer(record: RunRecord | undefined): void;
 
-export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, createBrowserSessionRegistry, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TASK_PROMPT_MAX_CHARS, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, createBrowserSessionRegistry, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

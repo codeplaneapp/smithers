@@ -342,7 +342,7 @@ describe("getDevToolsSnapshotRoute", () => {
     await adapter.insertFrame({
       runId,
       frameNo: 0,
-      createdAtMs: now(),
+      createdAtMs: now() + 1_000,
       xmlJson: canonicalizeXml({
         kind: "element",
         tag: "smithers:workflow",
@@ -403,6 +403,62 @@ describe("getDevToolsSnapshotRoute", () => {
     sqlite.close();
   });
 
+  test("scopes attempt metadata to the requested frame and task iteration", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-historical-attempts";
+    await adapter.insertRun({ runId, workflowName: "wf", status: "running", createdAtMs: 50 });
+    const frameRow = (frameNo: number, createdAtMs: number, iteration: number) => ({
+      runId,
+      frameNo,
+      createdAtMs,
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "historical-attempts" },
+        children: [{ kind: "element", tag: "smithers:task", props: { id: `exec::${iteration}` }, children: [] }],
+      }),
+      xmlHash: `hash-${frameNo}`,
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: `frame-${frameNo}`,
+    });
+    await adapter.insertFrame(frameRow(0, 100, 0));
+    await adapter.insertFrame(frameRow(1, 200, 0));
+    await adapter.insertFrame(frameRow(2, 300, 1));
+    const attemptRow = (iteration: number, attempt: number, startedAtMs: number, agentModel: string) => ({
+      runId,
+      nodeId: "exec",
+      iteration,
+      attempt,
+      state: "finished",
+      startedAtMs,
+      finishedAtMs: startedAtMs + 10,
+      heartbeatAtMs: null,
+      heartbeatDataJson: null,
+      errorJson: null,
+      jjPointer: null,
+      jjCwd: "/tmp",
+      cached: false,
+      metaJson: JSON.stringify({ agentEngine: "codex", agentModel, prompt: agentModel }),
+    });
+    await adapter.insertAttempt(attemptRow(0, 1, 110, "iter0-first"));
+    await adapter.insertAttempt(attemptRow(0, 2, 150, "iter0-latest"));
+    await adapter.insertAttempt(attemptRow(1, 1, 250, "iter1-first"));
+    await adapter.insertAttempt(attemptRow(1, 2, 350, "iter1-future-retry"));
+
+    const taskFor = async (frameNo: number) => {
+      const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo });
+      return snapshot.root.children[0]?.task;
+    };
+    expect((await taskFor(0))?.agentRan).toBeUndefined();
+    expect((await taskFor(0))?.prompt).toBeUndefined();
+    expect((await taskFor(1))?.agentRan?.model).toBe("iter0-latest");
+    expect((await taskFor(1))?.prompt).toBe("iter0-latest");
+    expect((await taskFor(2))?.agentRan?.model).toBe("iter1-first");
+    expect((await taskFor(2))?.prompt).toBe("iter1-first");
+    sqlite.close();
+  });
+
   test("attaches the task's initial prompt from the latest attempt's metadata", async () => {
     const { adapter, sqlite } = createAdapter();
     const runId = "run-attempt-prompts";
@@ -415,7 +471,7 @@ describe("getDevToolsSnapshotRoute", () => {
     await adapter.insertFrame({
       runId,
       frameNo: 0,
-      createdAtMs: now(),
+      createdAtMs: now() + 1_000,
       xmlJson: canonicalizeXml({
         kind: "element",
         tag: "smithers:workflow",
@@ -475,7 +531,7 @@ describe("getDevToolsSnapshotRoute", () => {
     await adapter.insertFrame({
       runId,
       frameNo: 0,
-      createdAtMs: now(),
+      createdAtMs: now() + 1_000,
       xmlJson: canonicalizeXml({
         kind: "element",
         tag: "smithers:workflow",

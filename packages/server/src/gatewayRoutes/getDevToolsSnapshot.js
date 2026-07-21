@@ -536,19 +536,23 @@ export const DEVTOOLS_TASK_PROMPT_MAX_CHARS = 4_000;
 
 /**
  * Attach the agent that ACTUALLY executed each task node (engine/model/agentId
- * from the latest attempt's persisted `metaJson` — the same metadata the
- * hijack candidates read, see ../hijackCandidates.js) plus the task's initial
- * prompt. Declared assignments (`task.agentSummary`) come from the frame's
- * task index instead; this covers running/settled nodes and runs recorded
- * before declared-agent capture. Only the newest attempt per node is parsed —
+ * from the latest eligible attempt's persisted `metaJson` — the same metadata
+ * the hijack candidates read, see ../hijackCandidates.js) plus the task's
+ * initial prompt. Eligibility is scoped to attempts started at or before the
+ * requested frame and to the task's captured iteration, so historical frames
+ * do not display metadata from future retries or loop iterations. Declared
+ * assignments (`task.agentSummary`) come from the frame's task index instead;
+ * this covers running/settled nodes and runs recorded before declared-agent
+ * capture. Only the newest eligible attempt per node and iteration is parsed —
  * attempt metaJson can carry whole conversations, so parsing every row would
  * be wasteful.
  *
  * @param {DevToolsNode} root
  * @param {Array<Record<string, unknown>>} attemptRows
+ * @param {number} [frameCreatedAtMs]
  * @returns {void}
  */
-export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
+export function attachAgentAttemptsToDevToolsRoot(root, attemptRows, frameCreatedAtMs) {
     /** @type {Map<string, { iteration: number; attempt: number; metaJson: unknown }>} */
     const latest = new Map();
     for (const row of Array.isArray(attemptRows) ? attemptRows : []) {
@@ -557,11 +561,18 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
         }
         const iteration = typeof row.iteration === "number" && Number.isFinite(row.iteration) ? row.iteration : 0;
         const attempt = typeof row.attempt === "number" && Number.isFinite(row.attempt) ? row.attempt : 0;
-        const existing = latest.get(row.nodeId);
+        const startedAtMs = typeof row.startedAtMs === "number" && Number.isFinite(row.startedAtMs)
+            ? row.startedAtMs
+            : undefined;
+        if (typeof frameCreatedAtMs === "number" && Number.isFinite(frameCreatedAtMs) &&
+            startedAtMs !== undefined && startedAtMs > frameCreatedAtMs) {
+            continue;
+        }
+        const key = `${row.nodeId}\u0000${iteration}`;
+        const existing = latest.get(key);
         if (!existing ||
-            iteration > existing.iteration ||
-            (iteration === existing.iteration && attempt > existing.attempt)) {
-            latest.set(row.nodeId, { iteration, attempt, metaJson: row.metaJson });
+            attempt > existing.attempt) {
+            latest.set(key, { iteration, attempt, metaJson: row.metaJson });
         }
     }
     if (latest.size === 0) {
@@ -570,14 +581,16 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
     /** @type {Map<string, { agentId?: string; engine?: string; model?: string; prompt?: string } | undefined>} */
     const parsedByNode = new Map();
     /**
-   * @param {string} nodeId
-   * @returns {{ agentId?: string; engine?: string; model?: string; prompt?: string } | undefined}
+     * @param {string} nodeId
+     * @param {number | undefined} iteration
+     * @returns {{ agentId?: string; engine?: string; model?: string; prompt?: string } | undefined}
    */
-    const attemptMetaFor = (nodeId) => {
-        if (parsedByNode.has(nodeId)) {
-            return parsedByNode.get(nodeId);
+    const attemptMetaFor = (nodeId, iteration) => {
+        const key = `${nodeId}\u0000${iteration ?? 0}`;
+        if (parsedByNode.has(key)) {
+            return parsedByNode.get(key);
         }
-        const row = latest.get(nodeId);
+        const row = latest.get(key);
         /** @type {{ agentId?: string; engine?: string; model?: string; prompt?: string } | undefined} */
         let meta;
         if (row && typeof row.metaJson === "string" && row.metaJson.length > 0) {
@@ -606,7 +619,7 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
                 meta = undefined;
             }
         }
-        parsedByNode.set(nodeId, meta);
+        parsedByNode.set(key, meta);
         return meta;
     };
     /** @type {DevToolsNode[]} */
@@ -617,7 +630,7 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
             continue;
         }
         if (node.task?.nodeId) {
-            const meta = attemptMetaFor(node.task.nodeId);
+            const meta = attemptMetaFor(node.task.nodeId, node.task.iteration);
             if (meta) {
                 const { prompt, ...ran } = meta;
                 if (ran.agentId || ran.engine || ran.model) {
@@ -690,6 +703,10 @@ export async function getDevToolsSnapshotRoute(input) {
     const nodeRows = await Promise.resolve(input.adapter.listNodes(runId)).catch(() => []);
     attachNodeStatesToDevToolsRoot(snapshot.root, Array.isArray(nodeRows) ? nodeRows : []);
     const attemptRows = await Promise.resolve(input.adapter.listAttemptsForRun(runId)).catch(() => []);
-    attachAgentAttemptsToDevToolsRoot(snapshot.root, Array.isArray(attemptRows) ? attemptRows : []);
+    attachAgentAttemptsToDevToolsRoot(
+        snapshot.root,
+        Array.isArray(attemptRows) ? attemptRows : [],
+        typeof frame.createdAtMs === "number" ? frame.createdAtMs : undefined,
+    );
     return runState ? { ...snapshot, runState } : snapshot;
 }
