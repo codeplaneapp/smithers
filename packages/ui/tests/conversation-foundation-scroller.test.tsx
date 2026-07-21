@@ -735,4 +735,96 @@ describe("MessageScroller compound", () => {
     expect(getViewport().scrollTop).toBe(400);
     expect(latestState!.following).toBe(false);
   });
+
+  test("a smooth jump to a bottom-region message survives mid-flight events and growth", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    geometryByMessageId.set("m2", { top: 880, height: 80 });
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+            <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    metrics().scrollTop = 300;
+    await scroll();
+    expect(latestState!.following).toBe(false);
+    // A smooth scroll mid-animation: advanced partway, not yet settled.
+    const viewport = getViewport();
+    const originalScrollTo = viewport.scrollTo;
+    Object.defineProperty(viewport, "scrollTo", {
+      configurable: true,
+      value: ({ top }: { top: number }) => {
+        metrics().scrollTop = Math.min(top, 600);
+      },
+    });
+    // The target clamps to the max scroll: this jump is a jump-to-latest.
+    await act(async () => commands!.scrollToMessage("m2", { behavior: "smooth" }));
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
+    expect(getViewport().scrollTop).toBe(600);
+    // Mid-flight animation events must not strand follow: the jump is tracked
+    // until it lands, so growth re-targets the moving bottom.
+    metrics().scrollTop = 650;
+    await scroll();
+    metrics().scrollHeight = 1600;
+    const content = container!.querySelector('[data-slot="message-scroller-content"]')!;
+    await act(async () => resizeCallbacks.get(content)!([], {} as ResizeObserver));
+    expect(getViewport().scrollTop).toBe(1600);
+    expect(latestState!.following).toBe(true);
+  });
+
+  test("a backward scrollbar drag cancels a smooth jump to a bottom-region message", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    geometryByMessageId.set("m2", { top: 880, height: 80 });
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+            <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    metrics().scrollTop = 300;
+    await scroll();
+    const viewport = getViewport();
+    const originalScrollTo = viewport.scrollTo;
+    Object.defineProperty(viewport, "scrollTo", {
+      configurable: true,
+      value: ({ top }: { top: number }) => {
+        metrics().scrollTop = Math.min(top, 600);
+      },
+    });
+    await act(async () => commands!.scrollToMessage("m2", { behavior: "smooth" }));
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
+    // Dragging upward mid-flight is a user interruption: cancel the jump, stop
+    // re-targeting, and disengage follow.
+    metrics().scrollTop = 400;
+    await scroll();
+    metrics().scrollHeight = 1600;
+    const content = container!.querySelector('[data-slot="message-scroller-content"]')!;
+    await act(async () => resizeCallbacks.get(content)!([], {} as ResizeObserver));
+    expect(getViewport().scrollTop).toBe(400);
+    expect(latestState!.following).toBe(false);
+  });
 });

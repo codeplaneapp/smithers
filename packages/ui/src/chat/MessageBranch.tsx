@@ -56,26 +56,31 @@ export function MessageBranch({
 }: MessageBranchProps) {
   useBranchLaneCss();
   const [internalIndex, setInternalIndex] = useState(defaultIndex);
-  const maxIndex = Math.max(count - 1, 0);
-  // Clamp at read so children never see an out-of-range index when the branch
-  // count changes underneath an uncontrolled (or stale controlled) index.
-  const current = Math.min(Math.max(index ?? internalIndex, 0), maxIndex);
+  const safeCount = Number.isFinite(count) ? Math.max(Math.floor(count), 0) : 0;
+  const maxIndex = safeCount - 1;
+  // Zero branches means there is no active branch: index -1 renders "0 of 0"
+  // and hides every panel instead of pointing at a nonexistent first branch.
+  const current =
+    safeCount === 0 ? -1 : Math.min(Math.max(index ?? internalIndex, 0), maxIndex);
   // Reconcile the uncontrolled state itself, silently: a count-driven clamp is
   // not a user navigation, and a later count increase keeps the clamped spot.
+  // A transient empty state is exempt so the user's branch survives it.
   useEffect(() => {
-    if (index === undefined && internalIndex !== current) setInternalIndex(current);
-  }, [index, internalIndex, current]);
+    if (safeCount > 0 && index === undefined && internalIndex !== current) {
+      setInternalIndex(current);
+    }
+  }, [safeCount, index, internalIndex, current]);
   const setIndex = (next: number) => {
-    const clamped = Math.min(Math.max(next, 0), maxIndex);
+    const clamped = safeCount === 0 ? -1 : Math.min(Math.max(next, 0), maxIndex);
     if (index === undefined) setInternalIndex(clamped);
     onIndexChange?.(clamped);
   };
   return (
-    <MessageBranchContext.Provider value={{ count, index: current, setIndex }}>
+    <MessageBranchContext.Provider value={{ count: safeCount, index: current, setIndex }}>
       <div
         data-slot="message-branch"
         data-branch-index={current}
-        data-branch-count={count}
+        data-branch-count={safeCount}
         className={cn("sui-msg-branch", className)}
         {...props}
       >

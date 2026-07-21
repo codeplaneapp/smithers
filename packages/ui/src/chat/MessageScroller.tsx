@@ -322,20 +322,35 @@ function MessageScrollerProviderImpl({
       const el = itemsRef.current.get(messageId);
       if (!viewport || !el) return false;
       restorePendingRef.current = false;
-      ignoreScrollUntilBottomRef.current = false;
       const peek = opts?.peek ?? true;
       const maxTop = maxScrollTop(viewport);
       const top = Math.min(
         Math.max(itemTopWithinViewport(el) - (peek ? peekPxRef.current : 0), 0),
         maxTop,
       );
+      // A jump whose target clamps to the bottom region IS a jump-to-latest:
+      // track it like scrollToBottom so mid-flight scroll events cannot strand
+      // follow and streaming growth re-targets the moving bottom until landing.
+      const targetsBottom = anchoringRef.current && maxTop - top <= thresholdRef.current;
+      ignoreScrollUntilBottomRef.current = targetsBottom;
       scrollViewportTo(top, opts?.behavior ?? "auto");
-      measure(viewport);
+      const bottom = measure(viewport);
       remember(viewport);
       refreshVisibilityFallback();
-      // Derive follow from the deterministic target, not the pre-scroll position:
-      // a smooth scroll has not settled yet when this runs.
-      if (anchoringRef.current) setFollowing(maxTop - top <= thresholdRef.current);
+      if (anchoringRef.current) {
+        if (targetsBottom) {
+          // Derive follow from the deterministic target, not the pre-scroll
+          // position: a smooth scroll has not settled yet when this runs, so
+          // only a landed jump engages follow here; an in-flight one is
+          // reconciled by the tracked scroll/resize paths.
+          if (bottom) {
+            ignoreScrollUntilBottomRef.current = false;
+            setFollowing(true);
+          }
+        } else {
+          setFollowing(false);
+        }
+      }
       return true;
     },
     [itemTopWithinViewport, maxScrollTop, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],

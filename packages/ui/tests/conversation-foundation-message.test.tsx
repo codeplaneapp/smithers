@@ -281,6 +281,53 @@ describe("MessageBranch", () => {
     expect(html).toContain('aria-label="Previous response"');
     expect(html).toContain('aria-label="Next response"');
   });
+
+  test("a zero branch count renders no active branch instead of invalid state", async () => {
+    await render(
+      <MessageBranch count={0}>
+        <MessageBranchContent>
+          <div>first</div>
+        </MessageBranchContent>
+        <MessageBranchPrevious />
+        <MessageBranchPage />
+        <MessageBranchNext />
+      </MessageBranch>,
+    );
+    const branch = container!.querySelector('[data-slot="message-branch"]')!;
+    expect(branch.getAttribute("data-branch-count")).toBe("0");
+    expect(branch.getAttribute("data-branch-index")).toBe("-1");
+    expect(container!.querySelector('[data-slot="message-branch-page"]')!.textContent).toBe("0 of 0");
+    const panels = container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]');
+    for (const panel of panels) expect(panel.hidden).toBe(true);
+    expect(
+      container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-previous"]')!.disabled,
+    ).toBe(true);
+    expect(
+      container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-next"]')!.disabled,
+    ).toBe(true);
+  });
+
+  test("a transient zero count hides branches but preserves the uncontrolled index", async () => {
+    const view = (count: number) => (
+      <MessageBranch count={count} defaultIndex={1}>
+        <MessageBranchContent>
+          <div>first</div>
+          <div>second</div>
+        </MessageBranchContent>
+        <MessageBranchPage />
+      </MessageBranch>
+    );
+    await render(view(2));
+    const page = () => container!.querySelector('[data-slot="message-branch-page"]')!;
+    expect(page().textContent).toBe("2 of 2");
+    await act(async () => root!.render(view(0)));
+    expect(page().textContent).toBe("0 of 0");
+    const panels = container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]');
+    for (const panel of panels) expect(panel.hidden).toBe(true);
+    // The empty state is transient: the user's branch survives it.
+    await act(async () => root!.render(view(2)));
+    expect(page().textContent).toBe("2 of 2");
+  });
 });
 
 describe("Bubble compound", () => {
