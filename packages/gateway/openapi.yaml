@@ -16350,7 +16350,7 @@ paths:
     post:
       operationId: browserContext
       summary: browserContext
-      description: "Read bounded live browser perception slices."
+      description: "Read bounded live browser perception slices; screenshots are inline JPEGs and selections are a bounded metadata-only history."
       tags:
         - "Gateway RPC"
       security:
@@ -16577,6 +16577,89 @@ paths:
                         items:
                           type: string
                           description: "Slice name."
+                      screenshot:
+                        oneOf:
+                          -
+                            type: object
+                            properties:
+                              data:
+                                type: string
+                                description: "Base64-encoded JPEG bytes; at most 512 KiB decoded."
+                              mediaType:
+                                const: image/jpeg
+                            required:
+                              - data
+                              - mediaType
+                            additionalProperties: false
+                          -
+                            type: "null"
+                      selections:
+                        type: array
+                        description: "Bounded successful pick history."
+                        items:
+                          type: object
+                          properties:
+                            locator:
+                              type: object
+                              description: "Safe locator ladder."
+                              properties: {}
+                              required: []
+                              additionalProperties: true
+                            role:
+                              type: string
+                              description: "Element role."
+                            name:
+                              type: string
+                              description: "Element accessible name."
+                            text:
+                              type: string
+                              description: "Redacted and bounded visible text."
+                            fingerprint:
+                              type: string
+                              description: "Staleness fingerprint."
+                            rect:
+                              type: object
+                              properties:
+                                x:
+                                  type: number
+                                y:
+                                  type: number
+                                width:
+                                  type: number
+                                height:
+                                  type: number
+                              required:
+                                - x
+                                - y
+                                - width
+                                - height
+                              additionalProperties: false
+                            viewport:
+                              type: object
+                              properties:
+                                width:
+                                  type: integer
+                                  minimum: 1
+                                  description: "Viewport width."
+                                  maximum: 3840
+                                height:
+                                  type: integer
+                                  minimum: 1
+                                  description: "Viewport height."
+                                  maximum: 2160
+                              required:
+                                - width
+                                - height
+                              additionalProperties: false
+                          required:
+                            - locator
+                            - role
+                            - name
+                            - text
+                            - fingerprint
+                            - rect
+                            - viewport
+                          additionalProperties: false
                     required:
                       - fresh
                       - snapshot
@@ -16610,6 +16693,9 @@ paths:
                   revision: 0
                   include:
                     - visible-text
+                  screenshot:
+                    data: /9j/4AAQ
+                    mediaType: image/jpeg
         400:
           description: "The browser destination is not allowed."
           content:
@@ -16992,7 +17078,7 @@ paths:
     post:
       operationId: browserPick
       summary: browserPick
-      description: "Hit-test a live page and return a safe locator and clipped artifact."
+      description: "Hit-test a live page and return safe locator metadata with an inline JPEG (at most 512 KiB decoded)."
       tags:
         - "Gateway RPC"
       security:
@@ -17095,7 +17181,7 @@ paths:
                         description: "Element accessible name."
                       text:
                         type: string
-                        description: "Bounded visible text."
+                        description: "Redacted and bounded visible text."
                       fingerprint:
                         type: string
                         description: "Staleness fingerprint."
@@ -17138,14 +17224,13 @@ paths:
                           -
                             type: object
                             properties:
-                              ref:
+                              data:
                                 type: string
-                                description: "Artifact reference."
+                                description: "Base64-encoded JPEG bytes; at most 512 KiB decoded."
                               mediaType:
-                                type: string
-                                description: "Artifact media type."
+                                const: image/jpeg
                             required:
-                              - ref
+                              - data
                               - mediaType
                             additionalProperties: false
                           -
@@ -17182,7 +17267,7 @@ paths:
                     width: 1280
                     height: 720
                   screenshot:
-                    ref: artifact_1
+                    data: /9j/4AAQ
                     mediaType: image/jpeg
         400:
           description: "The browser destination is not allowed."

@@ -364,7 +364,6 @@ declare function createBrowserSessionRegistry(options?: {}): {
     subscribe: (kind: any, listener: any) => () => any;
     setFrameSubscribers: (sessionId: any, count: any) => Promise<void>;
     get: (id: any) => any;
-    getArtifact: (ref: any) => any;
     shutdown: () => Promise<void>;
     BrowserError: typeof BrowserError;
 };
@@ -1000,7 +999,6 @@ declare class Gateway {
         subscribe: (kind: any, listener: any) => () => any;
         setFrameSubscribers: (sessionId: any, count: any) => Promise<void>;
         get: (id: any) => any;
-        getArtifact: (ref: any) => any;
         shutdown: () => Promise<void>;
         BrowserError: {
             new (code: any, message: any, details: any): {

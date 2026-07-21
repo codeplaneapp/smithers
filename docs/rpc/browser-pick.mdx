@@ -12,6 +12,6 @@ apiVersion: v1
 - Transports: HTTP RPC, WebSocket RPC
 
 Request: `{ sessionId, point: { x, y } }`.
-Response: a safe locator ladder, bounded element identity, fingerprint, rectangle, viewport, and clipped screenshot artifact reference.
+Response: a safe locator ladder, bounded element identity, fingerprint, rectangle, viewport, and a clipped inline JPEG `{ data, mediaType: "image/jpeg" }`. The decoded screenshot is limited to 512 KiB; if it cannot satisfy that bound, `screenshot` is `null`. Picks are retained as sanitized metadata only, with a 20-entry per-session history exposed by `browserContext` when `selections` is requested.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `REVISION_CONFLICT`, `SSRF_BLOCKED`, `QUOTA_EXCEEDED`, and `Internal`.

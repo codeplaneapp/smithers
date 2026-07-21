@@ -13,6 +13,7 @@ const playwright = { chromium: { launch: async () => ({ newContext: async () => 
 describe("browser session registry", () => {
   test("deduplicates actions and fences stale revisions", async () => {
     const registry = createBrowserSessionRegistry({ playwright });
+    expect(registry.getArtifact).toBeUndefined();
     const session = await registry.create({ source: { kind: "url", url: "https://example.com" } });
     const first = await registry.act({ sessionId: session.sessionId, actionId: "a", action: { kind: "reload" } });
     expect((await registry.act({ sessionId: session.sessionId, actionId: "a", action: { kind: "reload" } })).revision).toBe(first.revision);
@@ -186,10 +187,22 @@ describe("browser session registry", () => {
       const pressJournal = (await registry.context({ sessionId: session.sessionId, include: ["recent-actions"] })).recentActions;
       expect(pressJournal.find((entry: any) => entry.actionId === "press-masked").action.key).toMatchObject({ redacted: true, length: 1 });
       expect(pressJournal.find((entry: any) => entry.actionId === "press-return").action.key).toBe("Enter");
+      expect(picked.screenshot?.data).toMatch(/^[A-Za-z0-9+/]+=*$/);
+      expect(Buffer.from(picked.screenshot.data, "base64").subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
       await registry.close(session.sessionId);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  test("rejects screenshots over the 512 KiB inline limit", async () => {
+    const oversizedPage = { ...page, screenshot: async () => Buffer.alloc(512 * 1024 + 1) };
+    const registry = createBrowserSessionRegistry({ playwright: { chromium: { launch: async () => ({ newContext: async () => ({ newPage: async () => oversizedPage, route: async () => {}, close: async () => {} }), close: async () => {} }) } } });
+    const session = await registry.create({ source: { kind: "url", url: "https://example.com" } });
+    const context = await registry.context({ sessionId: session.sessionId, include: ["screenshot"] });
+    expect(context.screenshot).toBeNull();
+    expect(context.reason).toBe("CAPTURE_FAILED");
+    await registry.close(session.sessionId);
   });
 
   test("real gateway websocket drives Chromium and gates screencast frames", async () => {
@@ -222,10 +235,19 @@ describe("browser session registry", () => {
     expect(duplicate.payload.revision).toBe(first.payload.revision);
     const afterDuplicate = await request("browserContext", { sessionId, include: ["visible-text"] });
     expect(afterDuplicate.payload.visibleText).toContain("1");
+    expect(afterDuplicate.payload.screenshot).toBeUndefined();
+    const captured = await request("browserContext", { sessionId, include: ["screenshot"] });
+    const capturedBytes = Buffer.from(captured.payload.screenshot.data, "base64");
+    expect(capturedBytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(captured.payload.screenshot.ref).toBeUndefined();
     const pickedByTestId = await request("browserPick", { sessionId, point: { x: 30, y: 10 } });
     expect(pickedByTestId.payload.locator).toEqual({ testId: "counter" });
     const pickedByRole = await request("browserPick", { sessionId, point: { x: 30, y: 50 } });
     expect(pickedByRole.payload.locator).toEqual({ role: "button", name: "Continue" });
+    for (let index = 0; index < 25; index += 1) await request("browserPick", { sessionId, point: { x: 30, y: 50 } });
+    const selections = await request("browserContext", { sessionId, include: ["selections"] });
+    expect(selections.payload.selections).toHaveLength(20);
+    expect(selections.payload.selections.every((selection: any) => selection.screenshot === undefined && JSON.stringify(selection).includes("s3cr3t") === false)).toBe(true);
     await request("browserAct", { sessionId, actionId: "password", action: { kind: "type", locator: { role: "textbox", name: "Secret" }, text: "s3cr3t" } });
     const safeContext = await request("browserContext", { sessionId, include: ["console-summary", "network-summary", "recent-actions"] });
     expect(JSON.stringify(safeContext.payload)).not.toContain("s3cr3t");

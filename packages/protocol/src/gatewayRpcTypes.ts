@@ -89,8 +89,10 @@ export type BrowserPickRequest = { sessionId: string; point: { x: number; y: num
 export type CloseBrowserSessionRequest = { sessionId: string };
 export type CreateBrowserSessionResponse = BrowserSnapshot;
 export type BrowserActResponse = { revision: number; page: BrowserSnapshot["page"]; outcome: unknown };
-export type BrowserContextResponse = { fresh: boolean; reason?: string; snapshot: BrowserSnapshot; revision: number; include: string[]; journal?: unknown[] };
-export type BrowserPickResponse = { locator: BrowserLocator; role: string; name: string; text: string; fingerprint: string; rect: { x: number; y: number; width: number; height: number }; viewport: BrowserSnapshot["viewport"]; screenshot: { ref: string; mediaType: string } | null };
+export type BrowserScreenshot = { data: string; mediaType: "image/jpeg" };
+export type BrowserSelection = { locator: BrowserLocator; role: string; name: string; text: string; fingerprint: string; rect: { x: number; y: number; width: number; height: number }; viewport: BrowserSnapshot["viewport"] };
+export type BrowserContextResponse = { fresh: boolean; reason?: string; snapshot: BrowserSnapshot; revision: number; include: string[]; visibleText?: string; visibleTextTruncated?: boolean; interactiveElements?: unknown[]; interactiveElementsTruncated?: boolean; accessibility?: string | null; recentActions?: unknown[]; selections?: BrowserSelection[]; consoleSummary?: unknown[]; networkSummary?: unknown[]; screenshot?: BrowserScreenshot | null };
+export type BrowserPickResponse = BrowserSelection & { screenshot: BrowserScreenshot | null };
 export type CloseBrowserSessionResponse = { closed: boolean; sessionId?: string };
 export type ListBrowserSessionsResponse = BrowserSnapshot[];
 
