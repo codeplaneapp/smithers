@@ -45,7 +45,7 @@ function isSmithersMirrorLaunch(input) {
 function emit(toolName) {
   const context =
     `Smithers reminder: you are about to use the native ${toolName} tool. ` +
-    "For long-running, multi-step, or background work, prefer a durable Smithers " +
+    "For a clear simple single-agent ask, prefer `smithers oneshot`; for long-running, multi-step, or background work, prefer a durable Smithers " +
     "workflow (`run_workflow` / `smithers run`) over ad-hoc orchestration, and give it " +
     "a live view by launching the plugin's smithers-run.mjs mirror through the Workflow " +
     "tool instead of a hand-written script. Smithers persists each step, resumes after " +

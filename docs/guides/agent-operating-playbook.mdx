@@ -102,9 +102,12 @@ and explain the code.
 | "Migrate this subsystem, but show me the plan first." | Run research and planning first, then pause on an approval gate. After approval, execute milestones in worktrees and merge only validated chunks. |
 | "Something went wrong in the run. What happened?" | Run `why`, inspect events and node output, summarize the blocker, propose options, and continue operating. Do not ask the human to debug from the terminal. |
 
-When the user gives a narrow one-shot request, Smithers may be unnecessary. But
-if the task has phases, risk, loops, approvals, third-party dependencies,
-parallel work, or a need to run while the human is away, use a workflow.
+Route a most-trivial edit that takes only a few turns directly. Route a clear,
+well-scoped single-agent task through `smithers oneshot`, which launches quickly
+in the background with a live chat and diff UI. Use a full workflow when the task
+has phases, risk, loops, approvals, third-party dependencies, parallel work, or a
+need to run while the human is away. Clarify ambiguous goals before launching
+either form.
 
 ## Context engineering
 
