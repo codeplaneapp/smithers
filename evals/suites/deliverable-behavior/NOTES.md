@@ -42,10 +42,21 @@ the auto-attached ui-quality judge grades polish.
 | `ui-element-terminal` | raw ANSI shell output, live | `Terminal` (`ui/adapters/terminal`) |
 | `ui-element-stage-strip` | position in a fixed stage pipeline | `StageStrip` |
 | `ui-element-file-tree` | changed paths as a collapsible tree | `FileTree` |
+| `ui-element-release-chart` | release-range totals + per-area commits, visually | `ChartContainer` (`ui/adapters/chart`), `KpiStat`; `<canvas>`/chart.js auto-fail |
+
+Group A also carries `release-notes-visual-report`: "explain the changes in the
+release from commit A to commit B, use visuals" must yield a self-contained
+HTML report whose judge gates COVERAGE (every area + every named fix from the
+context), GRAPHICS (two or more real charts whose mark geometry encodes the
+supplied numbers — icons/tables alone do not count), CHART HONESTY (no
+dual-axis, labels or a legend, values readable as text), and the
+self-contained-HTML shape.
 
 ## Model matrix reality (2026-07-20)
 
-Canonical cases run **haiku + sonnet** (44 cases). The wider matrix is blocked:
+Canonical cases run **haiku + sonnet** (48 cases; 44 at the 2026-07-20
+baseline, +4 release-notes-visual cases added 2026-07-21). The wider matrix is
+blocked:
 
 - **gemini** — the Gemini CLI is **sunset in Smithers** (preflight fails
   everywhere, not just locally). `evals/agents.ts` still lists it; other suites'
@@ -112,7 +123,7 @@ Canonical cases run **haiku + sonnet** (44 cases). The wider matrix is blocked:
 ## Running
 
 ```bash
-bun evals/harness/run-suite.ts deliverable-behavior                    # full suite (44)
+bun evals/harness/run-suite.ts deliverable-behavior                    # full suite (48)
 bun evals/harness/run-suite.ts deliverable-behavior --only-model haiku # one leg
 bun evals/harness/run-suite.ts deliverable-behavior --dry-run          # shape check
 ```
