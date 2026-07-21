@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { extname, join, posix, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -253,6 +254,28 @@ function walk(root, start, predicate = () => true) {
   return files.sort(compareText);
 }
 
+/**
+ * Runtime-generated pack artifacts are deliberately git-ignored (including via
+ * .git/info/exclude), so they are not part of the governed surface. Outside a
+ * git checkout (e.g. an exported archive) every file is kept.
+ */
+function gitIgnoredSet(root, paths) {
+  if (paths.length === 0) return new Set();
+  try {
+    const stdout = execFileSync("git", ["check-ignore", "--stdin", "-z"], {
+      cwd: root,
+      input: `${paths.join("\0")}\0`,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    return new Set(stdout.split("\0").filter(Boolean));
+  } catch (error) {
+    // git check-ignore exits 1 when nothing is ignored; treat any failure the same way.
+    const stdout = typeof error?.stdout === "string" ? error.stdout : "";
+    return new Set(stdout.split("\0").filter(Boolean));
+  }
+}
+
 function directWorkspaceDirectories(root, parent) {
   const absoluteParent = join(root, parent);
   if (!existsSync(absoluteParent)) return [];
@@ -279,22 +302,26 @@ function sourceFiles(root, kind) {
       ),
     ]);
   }
+  const packUiFiles = PACK_UI_DIRECTORIES.flatMap((directory) => walk(root, directory, isSourcePath));
+  const ignoredPackUiFiles = gitIgnoredSet(root, packUiFiles);
   return sorted(
     ["packages", "apps"].flatMap((parent) =>
       directWorkspaceDirectories(root, parent).flatMap((directory) =>
         walk(root, directory, isSourcePath),
       ),
-    ).concat(PACK_UI_DIRECTORIES.flatMap((directory) => walk(root, directory, isSourcePath))),
+    ).concat(packUiFiles.filter((path) => !ignoredPackUiFiles.has(path))),
   );
 }
 
 function styleFiles(root, kind) {
   const roots = kind === "multi" ? ["src", "packages"] : ["packages", "apps", ...PACK_UI_DIRECTORIES];
-  return sorted(
+  const files = sorted(
     roots.flatMap((directory) =>
       walk(root, directory, (path) => STYLE_EXTENSIONS.has(extname(path))),
     ),
   );
+  const ignoredPackUiFiles = gitIgnoredSet(root, files.filter(isPackUiPath));
+  return files.filter((path) => !ignoredPackUiFiles.has(path));
 }
 
 function isPackUiPath(path) {
