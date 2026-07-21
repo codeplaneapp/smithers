@@ -59,6 +59,8 @@ export const conversationFoundationCss = `
 
 .sui-msg-scroller-item { min-width:0; content-visibility:auto; contain-intrinsic-size:auto var(--sui-msg-intrinsic, 96px); }
 .sui-msg-scroller-button { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; min-width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; padding:0 10px; border:1px solid ${t.border}; border-radius:999px; background:${t.glassStrong}; color:${t.foreground}; font:inherit; font-size:12px; cursor:pointer; box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.06), 0 8px 24px rgb(${t.shadowRgb} / 0.10); }
+.sui-msg-scroller-button[data-target='start'] { bottom:auto; top:14px; }
+.sui-msg-scroller-button[data-active='false'] { display:none; }
 .sui-msg-scroller-button:hover { background:${t.secondary}; }
 .sui-msg-scroller-button:focus-visible { ${focusRing} }
 `;

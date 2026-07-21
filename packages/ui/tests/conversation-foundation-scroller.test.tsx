@@ -552,7 +552,7 @@ describe("MessageScroller compound", () => {
     }
   });
 
-  test("MessageScrollerButton hides at the latest position and jumps on click", async () => {
+  test("MessageScrollerButton stays rendered but inert at the latest position and jumps on click", async () => {
     await render(
       <MessageScrollerProvider scrollAnchor="bottom">
         <MessageScrollerViewport>
@@ -564,16 +564,47 @@ describe("MessageScroller compound", () => {
       </MessageScrollerProvider>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
-    expect(container!.querySelector('[data-slot="message-scroller-button"]')).toBeNull();
-    metrics().scrollTop = 200;
-    await scroll();
+    // Frozen contract: the button is a real element that goes inert (no focus
+    // stop, data-active=false) while there is nothing to scroll toward.
     const button = container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]')!;
     expect(button).not.toBeNull();
+    expect(button.getAttribute("data-active")).toBe("false");
+    expect(button.getAttribute("data-target")).toBe("end");
+    expect(button.hasAttribute("inert")).toBe(true);
+    expect(button.tabIndex).toBe(-1);
+    metrics().scrollTop = 200;
+    await scroll();
+    expect(button.getAttribute("data-active")).toBe("true");
+    expect(button.hasAttribute("inert")).toBe(false);
+    expect(button.tabIndex).toBe(0);
     await act(async () => button.click());
     expect(getViewport().scrollTop).toBe(1000);
+    expect(button.getAttribute("data-active")).toBe("false");
   });
 
-  test("a message-targeted button hides while its message is visible", async () => {
+  test("a start-targeted button is inert at the top and scrolls to the start", async () => {
+    await render(
+      <MessageScrollerProvider>
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton target="start" behavior="auto" />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 500 },
+    );
+    const button = container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]')!;
+    expect(button.getAttribute("data-target")).toBe("start");
+    expect(button.getAttribute("data-active")).toBe("true");
+    await act(async () => button.click());
+    expect(getViewport().scrollTop).toBe(0);
+    expect(button.getAttribute("data-active")).toBe("false");
+    expect(button.hasAttribute("inert")).toBe(true);
+    expect(button.tabIndex).toBe(-1);
+  });
+
+  test("a message-targeted button goes inert while its message is visible", async () => {
     const intersectionObserver = globalThis.IntersectionObserver;
     globalThis.IntersectionObserver = undefined as unknown as typeof IntersectionObserver;
     geometryByMessageId.set("m2", { top: 700, height: 100 });
@@ -591,11 +622,12 @@ describe("MessageScroller compound", () => {
         { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
       );
       const button = container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]')!;
-      expect(button).not.toBeNull();
+      expect(button.getAttribute("data-active")).toBe("true");
       await act(async () => button.click());
       expect(getViewport().scrollTop).toBe(700 - 56);
-      // The jump scrolls the message into view: the affordance hides itself.
-      expect(container!.querySelector('[data-slot="message-scroller-button"]')).toBeNull();
+      // The jump scrolls the message into view: the affordance goes inert.
+      expect(button.getAttribute("data-active")).toBe("false");
+      expect(button.hasAttribute("inert")).toBe(true);
     } finally {
       globalThis.IntersectionObserver = intersectionObserver;
     }
@@ -619,7 +651,113 @@ describe("MessageScroller compound", () => {
     expect(getComputedStyle(button).color).toBe("#f4f4f5");
   });
 
-  test("the flat MessageScroller composes inside an ambient provider instead of nesting one", async () => {
+  test("Provider/Scroller composition renders the required compound anatomy through the styled frame", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    geometryByMessageId.set("m1", { top: 0, height: 500 });
+    geometryByMessageId.set("m2", { top: 500, height: 500 });
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScroller>
+          <MessageScrollerViewport>
+            <MessageScrollerContent>
+              <MessageScrollerItem messageId="m1" scrollAnchor>
+                one
+              </MessageScrollerItem>
+              <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton behavior="auto" />
+        </MessageScroller>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    // The frame wraps the compound parts verbatim: a single viewport owned by
+    // the ambient provider, pinned on mount.
+    const frames = container!.querySelectorAll<HTMLElement>('[data-slot="message-scroller"]');
+    expect(frames).toHaveLength(1);
+    expect(container!.querySelectorAll('[data-slot="message-scroller-viewport"]')).toHaveLength(1);
+    const frame = frames[0]!;
+    expect(frame.contains(getViewport())).toBe(true);
+    expect(frame.querySelector('[data-slot="message-scroller-button"]')).not.toBeNull();
+    expect(getViewport().scrollTop).toBe(1000);
+    expect(frame.dataset.following).toBe("true");
+    expect(latestState!.following).toBe(true);
+    // The jump affordance lives in the frame and drives the ambient viewport.
+    const button = frame.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]')!;
+    expect(button.getAttribute("data-active")).toBe("false");
+    metrics().scrollTop = 300;
+    await scroll();
+    expect(latestState!.following).toBe(false);
+    expect(frame.dataset.following).toBe("false");
+    expect(button.getAttribute("data-active")).toBe("true");
+    await act(async () => button.click());
+    expect(getViewport().scrollTop).toBe(1000);
+    expect(latestState!.following).toBe(true);
+    // Ambient commands drive the same viewport through the compound parts.
+    await act(async () => {
+      commands!.scrollToMessage("m2", { peek: false });
+    });
+    expect(getViewport().scrollTop).toBe(500);
+    expect(latestState!.following).toBe(false);
+    await act(async () => commands!.scrollToBottom());
+    expect(getViewport().scrollTop).toBe(1000);
+    expect(latestState!.following).toBe(true);
+  });
+
+  test("root and viewport expose data-autoscrolling only while a programmatic jump runs", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      return null;
+    }
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScroller>
+          <MessageScrollerViewport>
+            <MessageScrollerContent>
+              <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+        </MessageScroller>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    const frame = container!.querySelector<HTMLElement>('[data-slot="message-scroller"]')!;
+    const viewport = getViewport();
+    expect(frame.hasAttribute("data-autoscrolling")).toBe(false);
+    expect(viewport.hasAttribute("data-autoscrolling")).toBe(false);
+    metrics().scrollTop = 300;
+    await scroll();
+    // A smooth scroll mid-animation: advanced partway, not yet settled.
+    const originalScrollTo = viewport.scrollTo;
+    Object.defineProperty(viewport, "scrollTo", {
+      configurable: true,
+      value: ({ top }: { top: number }) => {
+        metrics().scrollTop = Math.min(top, 600);
+      },
+    });
+    await act(async () => commands!.scrollToBottom("smooth"));
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
+    expect(viewport.getAttribute("data-autoscrolling")).toBe("true");
+    expect(frame.getAttribute("data-autoscrolling")).toBe("true");
+    // The jump settles: the attribute clears and follow reconciles.
+    await act(async () => viewport.dispatchEvent(new Event("scrollend")));
+    expect(viewport.hasAttribute("data-autoscrolling")).toBe(false);
+    expect(frame.hasAttribute("data-autoscrolling")).toBe(false);
+    // Landed jumps never raise the attribute at all.
+    await act(async () => commands!.scrollToBottom("auto"));
+    expect(viewport.hasAttribute("data-autoscrolling")).toBe(false);
+  });
+
+  test("a forward scrollbar drag that stops short reconciles on scrollend instead of hijacking growth", async () => {
     let commands: MessageScrollerCommands | undefined;
     let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
     function Probe() {
@@ -629,24 +767,226 @@ describe("MessageScroller compound", () => {
     }
     await render(
       <MessageScrollerProvider scrollAnchor="bottom">
-        <MessageScroller>
-          <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
-        </MessageScroller>
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
         <Probe />
       </MessageScrollerProvider>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
-    // A single scroller frame, owned by the outer provider: pinned on mount.
-    expect(container!.querySelectorAll('[data-slot="message-scroller-viewport"]')).toHaveLength(1);
-    expect(getViewport().scrollTop).toBe(1000);
-    expect(latestState!.following).toBe(true);
-    // Commands and state come from the ambient provider, not a shadow inner one.
-    await act(async () => commands!.scrollToTop());
-    expect(getViewport().scrollTop).toBe(0);
+    metrics().scrollTop = 300;
+    await scroll();
     expect(latestState!.following).toBe(false);
-    await act(async () => commands!.scrollToBottom());
-    expect(getViewport().scrollTop).toBe(1000);
+    const viewport = getViewport();
+    const originalScrollTo = viewport.scrollTo;
+    Object.defineProperty(viewport, "scrollTo", {
+      configurable: true,
+      value: ({ top }: { top: number }) => {
+        metrics().scrollTop = Math.min(top, 600);
+      },
+    });
+    await act(async () => commands!.scrollToBottom("smooth"));
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
+    // The reader takes the scrollbar and drags downward, but stops short of
+    // the bottom: forward scroll events cannot tell this from animation
+    // frames, so the jump stays tracked until the gesture ends.
+    metrics().scrollTop = 700;
+    await scroll();
+    await act(async () => viewport.dispatchEvent(new Event("scrollend")));
+    expect(latestState!.following).toBe(false);
+    // Growth after the interrupted jump must not yank the reader to the bottom.
+    metrics().scrollHeight = 1600;
+    const content = container!.querySelector('[data-slot="message-scroller-content"]')!;
+    await act(async () => resizeCallbacks.get(content)!([], {} as ResizeObserver));
+    expect(getViewport().scrollTop).toBe(700);
+    expect(latestState!.following).toBe(false);
+  });
+
+  test("scrollend that lands at the bottom re-engages follow", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    metrics().scrollTop = 300;
+    await scroll();
+    expect(latestState!.following).toBe(false);
+    const viewport = getViewport();
+    const originalScrollTo = viewport.scrollTo;
+    Object.defineProperty(viewport, "scrollTo", {
+      configurable: true,
+      value: () => {
+        /* smooth animation delivers no synchronous position */
+      },
+    });
+    await act(async () => commands!.scrollToBottom("smooth"));
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
+    expect(latestState!.following).toBe(false);
+    // The animation completes at the live edge; when the environment delivers
+    // only scrollend (no trailing scroll event), follow still reconciles.
+    metrics().scrollTop = 800;
+    await act(async () => viewport.dispatchEvent(new Event("scrollend")));
     expect(latestState!.following).toBe(true);
+  });
+
+  test("a newly appended scrollAnchor row anchors the turn near the top and lets follow take over once the reply fills the viewport", async () => {
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    geometryByMessageId.set("m1", { top: 0, height: 2000 });
+    const view = (withTurn: boolean) => (
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">history</MessageScrollerItem>
+            {withTurn ? (
+              <>
+                <MessageScrollerItem messageId="q" scrollAnchor>
+                  question
+                </MessageScrollerItem>
+                <MessageScrollerItem messageId="a">answer</MessageScrollerItem>
+              </>
+            ) : null}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>
+    );
+    await render(view(false), { scrollHeight: 2000, clientHeight: 200, scrollTop: 0 });
+    expect(getViewport().scrollTop).toBe(2000);
+    expect(latestState!.following).toBe(true);
+    // A new turn arrives: the question row starts where the content used to
+    // end, and the turn is tall enough to anchor above the bottom region.
+    metrics().scrollHeight = 2460;
+    geometryByMessageId.set("q", { top: 2000, height: 60 });
+    geometryByMessageId.set("a", { top: 2060, height: 400 });
+    await act(async () => root!.render(view(true)));
+    // Anchored near the top with the previous-item peek; follow releases.
+    expect(getViewport().scrollTop).toBe(2000 - 56);
+    expect(latestState!.following).toBe(false);
+    // A later React commit must not yank the anchored viewport to the bottom.
+    await act(async () => root!.render(view(true)));
+    expect(getViewport().scrollTop).toBe(2000 - 56);
+    // The reply keeps streaming past the viewport: follow takes over and later
+    // growth pins to the live edge again.
+    metrics().scrollHeight = 2600;
+    geometryByMessageId.set("a", { top: 2060, height: 540 });
+    const content = container!.querySelector('[data-slot="message-scroller-content"]')!;
+    await act(async () => resizeCallbacks.get(content)!([], {} as ResizeObserver));
+    expect(latestState!.following).toBe(true);
+    metrics().scrollHeight = 2800;
+    geometryByMessageId.set("a", { top: 2060, height: 740 });
+    await act(async () => resizeCallbacks.get(content)!([], {} as ResizeObserver));
+    expect(getViewport().scrollTop).toBe(2800);
+  });
+
+  test("a short appended scrollAnchor turn clamps to the live edge and keeps following", async () => {
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    function Probe() {
+      latestState = useMessageScrollerState();
+      return null;
+    }
+    geometryByMessageId.set("m1", { top: 0, height: 2000 });
+    const view = (withTurn: boolean) => (
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1">history</MessageScrollerItem>
+            {withTurn ? (
+              <>
+                <MessageScrollerItem messageId="q" scrollAnchor>
+                  question
+                </MessageScrollerItem>
+                <MessageScrollerItem messageId="a">answer</MessageScrollerItem>
+              </>
+            ) : null}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>
+    );
+    await render(view(false), { scrollHeight: 2000, clientHeight: 200, scrollTop: 0 });
+    // The new turn is too short to sit above the bottom region: the anchor
+    // falls back to the live edge, exactly like upstream's end fallback.
+    metrics().scrollHeight = 2100;
+    geometryByMessageId.set("q", { top: 2000, height: 60 });
+    geometryByMessageId.set("a", { top: 2060, height: 40 });
+    await act(async () => root!.render(view(true)));
+    expect(getViewport().scrollTop).toBe(2100);
+    expect(latestState!.following).toBe(true);
+  });
+
+  test("scrollAnchor rows present on the initial mount do not anchor turns", async () => {
+    geometryByMessageId.set("m1", { top: 0, height: 500 });
+    geometryByMessageId.set("m2", { top: 500, height: 500 });
+    await render(
+      <MessageScrollerProvider scrollAnchor="bottom">
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            <MessageScrollerItem messageId="m1" scrollAnchor>
+              one
+            </MessageScrollerItem>
+            <MessageScrollerItem messageId="m2" scrollAnchor>
+              two
+            </MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+      </MessageScrollerProvider>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+    // Mount pinning wins: no turn-anchor move for rows that were always there.
+    expect(getViewport().scrollTop).toBe(1000);
+  });
+
+  test("scrollToMessage queues a permalink jump until its row registers", async () => {
+    let commands: MessageScrollerCommands | undefined;
+    function Probe() {
+      commands = useMessageScroller();
+      return null;
+    }
+    const view = (withItems: boolean) => (
+      <MessageScrollerProvider>
+        <MessageScrollerViewport>
+          <MessageScrollerContent>
+            {withItems ? (
+              <>
+                <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+                <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+              </>
+            ) : null}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <Probe />
+      </MessageScrollerProvider>
+    );
+    await render(view(false), { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
+    // No rows mounted yet: the jump queues and reports true.
+    let result = false;
+    await act(async () => {
+      result = commands!.scrollToMessage("m2", { peek: false });
+    });
+    expect(result).toBe(true);
+    expect(getViewport().scrollTop).toBe(0);
+    geometryByMessageId.set("m2", { top: 420, height: 80 });
+    await act(async () => root!.render(view(true)));
+    expect(getViewport().scrollTop).toBe(420);
   });
 
   test("a smooth jump-to-latest re-targets the bottom when content grows mid-flight", async () => {

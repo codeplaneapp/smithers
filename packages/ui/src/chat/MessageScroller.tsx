@@ -58,10 +58,17 @@ export type MessageScrollerItemProps = ComponentProps<"div"> & {
   messageId: string;
   /** Placeholder height hint for content-visibility (default 96). */
   intrinsicSize?: number;
+  /**
+   * Marks this row as the start of a turn. When a new anchored row is
+   * appended, the viewport moves it near the top with a previous-item peek
+   * and holds while the reply streams into the room below; once the reply
+   * fills the viewport, follow-output takes over again.
+   */
+  scrollAnchor?: boolean;
 };
 
 export type MessageScrollerButtonProps = Omit<ComponentProps<"button">, "onClick"> & {
-  target?: "latest" | { messageId: string };
+  target?: "latest" | "start" | { messageId: string };
   behavior?: ScrollBehavior;
 };
 
@@ -93,14 +100,14 @@ type ScrollSnapshot = {
   scrollTop: number;
 };
 
-type ViewportState = { atTop: boolean; atBottom: boolean; following: boolean };
+type ViewportState = { atTop: boolean; atBottom: boolean; following: boolean; autoscrolling: boolean };
 
 type ScrollerContextValue = {
   commands: MessageScrollerCommands;
   isFollowing: () => boolean;
   registerViewport: (el: HTMLDivElement | null) => void;
   handleViewportScroll: () => void;
-  registerItem: (messageId: string, el: HTMLElement | null) => void;
+  registerItem: (messageId: string, el: HTMLElement | null, scrollAnchor?: boolean) => void;
   subscribeState: (listener: () => void) => () => void;
   getState: () => ViewportState;
   subscribeVisibility: (messageId: string, listener: () => void) => () => void;
@@ -137,11 +144,16 @@ function MessageScrollerProviderImpl({
 }: InternalProviderProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const itemsRef = useRef(new Map<string, HTMLElement>());
+  const anchorFlagsRef = useRef(new Map<string, boolean>());
   const mountedRef = useRef(false);
   const anchoringRef = useRef(scrollAnchor === "bottom");
   const followingRef = useRef(scrollAnchor === "bottom");
   const ignoreScrollUntilBottomRef = useRef(false);
   const restorePendingRef = useRef(initialMessageId !== undefined);
+  const turnAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const pendingAnchorIdRef = useRef<string | null>(null);
+  const ignoreNextScrollRef = useRef(false);
+  const queuedJumpRef = useRef<{ messageId: string; opts?: { behavior?: ScrollBehavior; peek?: boolean } } | null>(null);
   const snapshotRef = useRef<ScrollSnapshot>({ firstItemKey, scrollHeight: 0, scrollTop: 0 });
   const previousAnchorRef = useRef(scrollAnchor);
   const onFollowChangeRef = useRef(onFollowChange);
@@ -152,6 +164,7 @@ function MessageScrollerProviderImpl({
     atTop: true,
     atBottom: true,
     following: scrollAnchor === "bottom",
+    autoscrolling: false,
   });
   const stateListenersRef = useRef(new Set<() => void>());
   const visibleRef = useRef(new Set<string>());
@@ -169,13 +182,27 @@ function MessageScrollerProviderImpl({
     if (
       next.atTop === stateRef.current.atTop &&
       next.atBottom === stateRef.current.atBottom &&
-      next.following === stateRef.current.following
+      next.following === stateRef.current.following &&
+      next.autoscrolling === stateRef.current.autoscrolling
     ) {
       return;
     }
     stateRef.current = next;
     for (const listener of stateListenersRef.current) listener();
   }, []);
+
+  /**
+   * Tracks a programmatic jump-to-latest: while on, mid-flight scroll events
+   * cannot strand follow and the root/viewport expose data-autoscrolling.
+   */
+  const setJumpTracking = useCallback(
+    (on: boolean) => {
+      if (ignoreScrollUntilBottomRef.current === on) return;
+      ignoreScrollUntilBottomRef.current = on;
+      emitState({ autoscrolling: on });
+    },
+    [emitState],
+  );
 
   const measure = useCallback(
     (viewport: HTMLDivElement) => {
@@ -287,17 +314,19 @@ function MessageScrollerProviderImpl({
       const viewport = viewportRef.current;
       if (!viewport) return;
       restorePendingRef.current = false;
-      ignoreScrollUntilBottomRef.current = anchoringRef.current;
+      queuedJumpRef.current = null;
+      turnAnchorRef.current = null;
+      setJumpTracking(anchoringRef.current);
       scrollViewportTo(viewport.scrollHeight, behavior);
       const bottom = measure(viewport);
       remember(viewport);
       refreshVisibilityFallback();
       if (bottom && anchoringRef.current) {
-        ignoreScrollUntilBottomRef.current = false;
+        setJumpTracking(false);
         setFollowing(true);
       }
     },
-    [measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],
+    [measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing, setJumpTracking],
   );
 
   const scrollToTop = useCallback(
@@ -305,7 +334,9 @@ function MessageScrollerProviderImpl({
       const viewport = viewportRef.current;
       if (!viewport) return;
       restorePendingRef.current = false;
-      ignoreScrollUntilBottomRef.current = false;
+      queuedJumpRef.current = null;
+      turnAnchorRef.current = null;
+      setJumpTracking(false);
       scrollViewportTo(0, behavior);
       measure(viewport);
       remember(viewport);
@@ -313,15 +344,27 @@ function MessageScrollerProviderImpl({
       // Follow survives only when the whole transcript fits the viewport.
       if (anchoringRef.current) setFollowing(maxScrollTop(viewport) <= thresholdRef.current);
     },
-    [maxScrollTop, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],
+    [maxScrollTop, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing, setJumpTracking],
   );
 
   const scrollToMessage = useCallback(
     (messageId: string, opts?: { behavior?: ScrollBehavior; peek?: boolean }): boolean => {
       const viewport = viewportRef.current;
       const el = itemsRef.current.get(messageId);
-      if (!viewport || !el) return false;
+      if (!viewport) return false;
+      if (!el) {
+        // Permalink resolution can race the transcript mount: queue the jump
+        // while no rows exist yet. Once rows have mounted a missing id is a
+        // real miss and reports false instead of starting a guessed retry.
+        if (itemsRef.current.size === 0) {
+          queuedJumpRef.current = { messageId, opts };
+          return true;
+        }
+        return false;
+      }
       restorePendingRef.current = false;
+      queuedJumpRef.current = null;
+      turnAnchorRef.current = null;
       const peek = opts?.peek ?? true;
       const maxTop = maxScrollTop(viewport);
       const top = Math.min(
@@ -332,7 +375,7 @@ function MessageScrollerProviderImpl({
       // track it like scrollToBottom so mid-flight scroll events cannot strand
       // follow and streaming growth re-targets the moving bottom until landing.
       const targetsBottom = anchoringRef.current && maxTop - top <= thresholdRef.current;
-      ignoreScrollUntilBottomRef.current = targetsBottom;
+      setJumpTracking(targetsBottom);
       scrollViewportTo(top, opts?.behavior ?? "auto");
       const bottom = measure(viewport);
       remember(viewport);
@@ -342,9 +385,9 @@ function MessageScrollerProviderImpl({
           // Derive follow from the deterministic target, not the pre-scroll
           // position: a smooth scroll has not settled yet when this runs, so
           // only a landed jump engages follow here; an in-flight one is
-          // reconciled by the tracked scroll/resize paths.
+          // reconciled by the tracked scroll/resize/scrollend paths.
           if (bottom) {
-            ignoreScrollUntilBottomRef.current = false;
+            setJumpTracking(false);
             setFollowing(true);
           }
         } else {
@@ -353,7 +396,7 @@ function MessageScrollerProviderImpl({
       }
       return true;
     },
-    [itemTopWithinViewport, maxScrollTop, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing],
+    [itemTopWithinViewport, maxScrollTop, measure, remember, refreshVisibilityFallback, scrollViewportTo, setFollowing, setJumpTracking],
   );
 
   const commandsRef = useRef<MessageScrollerCommands>({ scrollToBottom, scrollToTop, scrollToMessage });
@@ -367,14 +410,50 @@ function MessageScrollerProviderImpl({
     const el = itemsRef.current.get(initialMessageId);
     if (!viewport || !el) return;
     restorePendingRef.current = false;
-    ignoreScrollUntilBottomRef.current = false;
+    setJumpTracking(false);
     viewport.scrollTop = Math.max(itemTopWithinViewport(el) - peekPxRef.current, 0);
     // A restored position is a deliberate mid-transcript anchor: stop following.
     setFollowing(false);
     measure(viewport);
     remember(viewport);
     refreshVisibilityFallback();
-  }, [initialMessageId, itemTopWithinViewport, measure, remember, refreshVisibilityFallback, setFollowing]);
+  }, [initialMessageId, itemTopWithinViewport, measure, remember, refreshVisibilityFallback, setFollowing, setJumpTracking]);
+
+  /**
+   * Turn anchoring: a newly appended scrollAnchor row moves near the top with
+   * a previous-item peek. When the target clamps into the bottom region the
+   * append is just the live edge, so it tracks like jump-to-latest instead.
+   * Otherwise follow releases and the position holds while the reply streams
+   * into the room below; growth past the viewport re-engages follow.
+   */
+  const anchorTurn = useCallback(
+    (el: HTMLElement, messageId: string) => {
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      const maxTop = maxScrollTop(viewport);
+      const target = Math.max(itemTopWithinViewport(el) - peekPxRef.current, 0);
+      const top = Math.min(target, maxTop);
+      const targetsBottom = anchoringRef.current && maxTop - top <= thresholdRef.current;
+      if (targetsBottom) {
+        setJumpTracking(true);
+        scrollViewportTo(viewport.scrollHeight, "auto");
+        if (measure(viewport)) {
+          setJumpTracking(false);
+          setFollowing(true);
+        }
+      } else {
+        // The anchor scroll fires a scroll event that must not read as a user
+        // gesture: suppress exactly one, then hold the turn position.
+        ignoreNextScrollRef.current = true;
+        turnAnchorRef.current = { id: messageId, top: target };
+        scrollViewportTo(top, "auto");
+        if (anchoringRef.current) setFollowing(false);
+        measure(viewport);
+      }
+      refreshVisibilityFallback();
+    },
+    [itemTopWithinViewport, maxScrollTop, measure, refreshVisibilityFallback, scrollViewportTo, setFollowing, setJumpTracking],
+  );
 
   const observeItem = useCallback(
     (messageId: string, el: HTMLElement | null) => {
@@ -392,30 +471,48 @@ function MessageScrollerProviderImpl({
   /* ---- registration ------------------------------------------------------- */
 
   const registerItem = useCallback(
-    (messageId: string, el: HTMLElement | null) => {
+    (messageId: string, el: HTMLElement | null, itemScrollAnchor?: boolean) => {
       if (el) {
+        const isNew = !itemsRef.current.has(messageId);
         itemsRef.current.set(messageId, el);
+        anchorFlagsRef.current.set(messageId, itemScrollAnchor === true);
         observeItem(messageId, el);
         tryRestore();
+        // A queued permalink jump runs as soon as its row registers.
+        if (queuedJumpRef.current?.messageId === messageId) {
+          const queued = queuedJumpRef.current;
+          queuedJumpRef.current = null;
+          scrollToMessage(messageId, queued.opts);
+        }
+        // A new anchored row appended after mount anchors the next turn; the
+        // per-commit layout effect performs the move once the DOM settles.
+        if (isNew && mountedRef.current && itemScrollAnchor) {
+          pendingAnchorIdRef.current = messageId;
+        }
         if (typeof IntersectionObserver === "undefined") recomputeVisibilityGeometric();
       } else {
         observeItem(messageId, null);
         itemsRef.current.delete(messageId);
+        anchorFlagsRef.current.delete(messageId);
+        if (turnAnchorRef.current?.id === messageId) turnAnchorRef.current = null;
+        if (pendingAnchorIdRef.current === messageId) pendingAnchorIdRef.current = null;
         setMessageVisible(messageId, false);
       }
     },
-    [observeItem, recomputeVisibilityGeometric, setMessageVisible, tryRestore],
+    [observeItem, recomputeVisibilityGeometric, scrollToMessage, setMessageVisible, tryRestore],
   );
 
   const cancelProgrammaticScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     restorePendingRef.current = false;
-    ignoreScrollUntilBottomRef.current = false;
+    queuedJumpRef.current = null;
+    turnAnchorRef.current = null;
+    setJumpTracking(false);
     const bottom = measure(viewport);
     remember(viewport);
     if (anchoringRef.current) setFollowing(bottom);
-  }, [measure, remember, setFollowing]);
+  }, [measure, remember, setFollowing, setJumpTracking]);
 
   const onViewportKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -424,6 +521,20 @@ function MessageScrollerProviderImpl({
     [cancelProgrammaticScroll],
   );
 
+  /**
+   * scrollend reconciles a tracked jump wherever it settled. Without it a
+   * scrollbar drag that stops short of the bottom leaves the jump tracked
+   * forever, and the next content growth would hijack the reader's position.
+   */
+  const onViewportScrollEnd = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !ignoreScrollUntilBottomRef.current) return;
+    setJumpTracking(false);
+    const bottom = measure(viewport);
+    remember(viewport);
+    if (anchoringRef.current) setFollowing(bottom);
+  }, [measure, remember, setFollowing, setJumpTracking]);
+
   const registerViewport = useCallback(
     (el: HTMLDivElement | null) => {
       const previous = viewportRef.current;
@@ -431,20 +542,31 @@ function MessageScrollerProviderImpl({
         previous.removeEventListener("wheel", cancelProgrammaticScroll);
         previous.removeEventListener("touchmove", cancelProgrammaticScroll);
         previous.removeEventListener("keydown", onViewportKeyDown);
+        previous.removeEventListener("scrollend", onViewportScrollEnd);
       }
       viewportRef.current = el;
       if (el) {
         el.addEventListener("wheel", cancelProgrammaticScroll, { passive: true });
         el.addEventListener("touchmove", cancelProgrammaticScroll, { passive: true });
         el.addEventListener("keydown", onViewportKeyDown);
+        el.addEventListener("scrollend", onViewportScrollEnd);
       }
     },
-    [cancelProgrammaticScroll, onViewportKeyDown],
+    [cancelProgrammaticScroll, onViewportKeyDown, onViewportScrollEnd],
   );
 
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    // The turn-anchor scroll is programmatic: swallow its single event so it
+    // is not read as a reader gesture that cancels the anchor.
+    if (ignoreNextScrollRef.current) {
+      ignoreNextScrollRef.current = false;
+      measure(viewport);
+      remember(viewport);
+      if (typeof IntersectionObserver === "undefined") recomputeVisibilityGeometric();
+      return;
+    }
     const previousTop = snapshotRef.current.scrollTop;
     const bottom = measure(viewport);
     // A scroll that leaves the anchor pin while a restore is pending is a user
@@ -455,19 +577,21 @@ function MessageScrollerProviderImpl({
     if (!anchoringRef.current) return;
     if (ignoreScrollUntilBottomRef.current) {
       if (bottom) {
-        ignoreScrollUntilBottomRef.current = false;
+        setJumpTracking(false);
         setFollowing(true);
       } else if (viewport.scrollTop < previousTop) {
         // The programmatic jump lost ground: the user grabbed the scrollbar
         // mid-flight (wheel/touch/keys cancel via cancelProgrammaticScroll).
         // Reconcile follow with the position instead of staying stuck.
-        ignoreScrollUntilBottomRef.current = false;
+        setJumpTracking(false);
         setFollowing(false);
       }
       return;
     }
+    // A real reader scroll releases the turn anchor; growth no longer holds.
+    turnAnchorRef.current = null;
     setFollowing(bottom);
-  }, [measure, remember, recomputeVisibilityGeometric, setFollowing]);
+  }, [measure, remember, recomputeVisibilityGeometric, setFollowing, setJumpTracking]);
 
   /* ---- mount + per-commit scroll maintenance ------------------------------ */
 
@@ -504,12 +628,29 @@ function MessageScrollerProviderImpl({
     previousAnchorRef.current = scrollAnchor;
 
     if (!anchoringRef.current) {
-      ignoreScrollUntilBottomRef.current = false;
+      setJumpTracking(false);
       setFollowing(false);
     } else if (anchorChanged) {
       const wasAtBottom =
         previous.scrollHeight - previous.scrollTop - viewport.clientHeight <= thresholdRef.current;
       if (wasAtBottom) setFollowing(true);
+    }
+
+    // A newly appended scrollAnchor row anchors its turn. Only rows starting
+    // at the previous content end qualify, so prepended history rows carrying
+    // scrollAnchor never yank the viewport.
+    const pendingAnchorId = pendingAnchorIdRef.current;
+    pendingAnchorIdRef.current = null;
+    if (pendingAnchorId && !restorePendingRef.current) {
+      const anchorEl = itemsRef.current.get(pendingAnchorId);
+      if (
+        anchorEl &&
+        itemTopWithinViewport(anchorEl) >= previous.scrollHeight - thresholdRef.current
+      ) {
+        anchorTurn(anchorEl, pendingAnchorId);
+        remember(viewport);
+        return;
+      }
     }
 
     const currentFirstKey = firstItemKeyRef.current ?? firstDomItemId();
@@ -540,8 +681,19 @@ function MessageScrollerProviderImpl({
       ) {
         viewport.scrollTop = viewport.scrollHeight;
         if (jumpingToLatest && measure(viewport)) {
-          ignoreScrollUntilBottomRef.current = false;
+          setJumpTracking(false);
           setFollowing(true);
+        }
+      } else if (turnAnchorRef.current && !restorePendingRef.current) {
+        // Turn anchored: the reply streams into the room below without moving
+        // the reader. Once it fills the viewport the reader is back at the
+        // live edge and follow-output takes over from the anchor.
+        const maxTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+        if (anchoringRef.current && maxTop > turnAnchorRef.current.top + thresholdRef.current) {
+          turnAnchorRef.current = null;
+          setFollowing(true);
+        } else if (viewport.scrollTop > maxTop) {
+          viewport.scrollTop = maxTop;
         }
       }
       measure(viewport);
@@ -550,7 +702,7 @@ function MessageScrollerProviderImpl({
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [measure, remember, recomputeVisibilityGeometric, setFollowing]);
+  }, [measure, remember, recomputeVisibilityGeometric, setFollowing, setJumpTracking]);
 
   useEffect(() => {
     if (typeof IntersectionObserver !== "undefined") {
@@ -637,7 +789,7 @@ export const MessageScrollerViewport: ForwardRefExoticComponent<
 ) {
   useScrollerLaneCss();
   const { registerViewport, handleViewportScroll } = useScrollerContext("MessageScrollerViewport");
-  const { atTop, atBottom } = useMessageScrollerState();
+  const { atTop, atBottom, autoscrolling } = useMessageScrollerState();
   const composedRef = useCallback(
     (el: HTMLDivElement | null) => {
       registerViewport(el);
@@ -653,6 +805,7 @@ export const MessageScrollerViewport: ForwardRefExoticComponent<
       className={cn("sui-msg-scroller-viewport", fade && "sui-scroll-fade", className)}
       data-fade-top={atTop ? "false" : "true"}
       data-fade-bottom={atBottom ? "false" : "true"}
+      data-autoscrolling={autoscrolling ? "true" : undefined}
       role="region"
       aria-label={ariaLabel ?? "Conversation messages"}
       tabIndex={0}
@@ -683,6 +836,7 @@ type ItemStyle = CSSProperties & { "--sui-msg-intrinsic"?: string };
 export function MessageScrollerItem({
   messageId,
   intrinsicSize = 96,
+  scrollAnchor = false,
   className,
   style,
   ...props
@@ -690,8 +844,8 @@ export function MessageScrollerItem({
   useScrollerLaneCss();
   const { registerItem } = useScrollerContext("MessageScrollerItem");
   const ref = useCallback(
-    (el: HTMLDivElement | null) => registerItem(messageId, el),
-    [registerItem, messageId],
+    (el: HTMLDivElement | null) => registerItem(messageId, el, scrollAnchor),
+    [registerItem, messageId, scrollAnchor],
   );
   const itemStyle: ItemStyle = { ...(style as ItemStyle), "--sui-msg-intrinsic": `${intrinsicSize}px` };
   return (
@@ -699,6 +853,7 @@ export function MessageScrollerItem({
       ref={ref}
       data-slot="message-scroller-item"
       data-message-id={messageId}
+      data-scroll-anchor={scrollAnchor ? "true" : undefined}
       className={cn("sui-msg-scroller-item", className)}
       style={itemStyle}
       {...props}
@@ -706,53 +861,106 @@ export function MessageScrollerItem({
   );
 }
 
-function MessageScrollerLatestButton({ behavior = "smooth", className, children, ...props }: MessageScrollerButtonProps) {
+type ScrollerButtonTarget = "latest" | "start" | { messageId: string };
+
+function targetKind(target: ScrollerButtonTarget): "end" | "start" | "message" {
+  if (target === "start") return "start";
+  if (target === "latest") return "end";
+  return "message";
+}
+
+type FrameButtonProps = MessageScrollerButtonProps & {
+  target: ScrollerButtonTarget;
+  /** Whether there is content to scroll toward in this button's direction. */
+  active: boolean;
+  label: string;
+  onJump: () => void;
+};
+
+/**
+ * Frozen button contract: a real button that stays rendered, going inert
+ * (no focus stop, data-active=false) while there is nothing to scroll toward.
+ */
+function MessageScrollerFrameButton({
+  target,
+  active,
+  label,
+  onJump,
+  behavior = "smooth",
+  className,
+  children,
+  ...props
+}: FrameButtonProps) {
   useScrollerLaneCss();
-  const { commands } = useScrollerContext("MessageScrollerButton");
-  const { atBottom } = useMessageScrollerState();
-  if (atBottom) return null;
   return (
     <button
       type="button"
       data-slot="message-scroller-button"
-      aria-label="Jump to latest"
+      data-target={targetKind(target)}
+      data-active={active ? "true" : "false"}
+      inert={!active}
+      tabIndex={active ? 0 : -1}
+      aria-label={label}
       className={cn("sui-msg-scroller-button", className)}
-      onClick={() => commands.scrollToBottom(behavior)}
+      onClick={onJump}
       {...props}
     >
-      {children ?? <span aria-hidden="true">↓</span>}
+      {children ?? (
+        <span aria-hidden="true">{targetKind(target) === "start" ? "↑" : "↓"}</span>
+      )}
     </button>
+  );
+}
+
+function MessageScrollerLatestButton(props: MessageScrollerButtonProps) {
+  const { commands } = useScrollerContext("MessageScrollerButton");
+  const { atBottom } = useMessageScrollerState();
+  return (
+    <MessageScrollerFrameButton
+      {...props}
+      target="latest"
+      active={!atBottom}
+      label="Jump to latest"
+      onJump={() => commands.scrollToBottom(props.behavior ?? "smooth")}
+    />
+  );
+}
+
+function MessageScrollerStartButton(props: MessageScrollerButtonProps) {
+  const { commands } = useScrollerContext("MessageScrollerButton");
+  const { atTop } = useMessageScrollerState();
+  return (
+    <MessageScrollerFrameButton
+      {...props}
+      target="start"
+      active={!atTop}
+      label="Jump to start"
+      onJump={() => commands.scrollToTop(props.behavior ?? "smooth")}
+    />
   );
 }
 
 function MessageScrollerTargetButton({
   target,
-  behavior = "smooth",
-  className,
-  children,
   ...props
 }: MessageScrollerButtonProps & { target: { messageId: string } }) {
-  useScrollerLaneCss();
   const { commands } = useScrollerContext("MessageScrollerButton");
   const visible = useMessageVisibility(target.messageId);
-  if (visible) return null;
   return (
-    <button
-      type="button"
-      data-slot="message-scroller-button"
-      aria-label="Jump to message"
-      className={cn("sui-msg-scroller-button", className)}
-      onClick={() => commands.scrollToMessage(target.messageId, { behavior, peek: true })}
+    <MessageScrollerFrameButton
       {...props}
-    >
-      {children ?? <span aria-hidden="true">↓</span>}
-    </button>
+      target={target}
+      active={!visible}
+      label="Jump to message"
+      onJump={() => commands.scrollToMessage(target.messageId, { behavior: props.behavior ?? "smooth", peek: true })}
+    />
   );
 }
 
-/** Jump affordance; renders null while already at the target region. */
+/** Jump affordance; inert while already at the target region. */
 export function MessageScrollerButton({ target = "latest", ...props }: MessageScrollerButtonProps) {
   if (target === "latest") return <MessageScrollerLatestButton {...props} />;
+  if (target === "start") return <MessageScrollerStartButton {...props} />;
   return <MessageScrollerTargetButton target={target} {...props} />;
 }
 
@@ -788,6 +996,50 @@ export function useMessageScrollerState(): ViewportState {
 
 type FlatInnerProps = MessageScrollerProps & { handleRef: Ref<MessageScrollerHandle> };
 
+function useScrollerHandle(handleRef: Ref<MessageScrollerHandle>): void {
+  const ctx = useScrollerContext("MessageScroller");
+  useImperativeHandle(
+    handleRef,
+    () => ({ scrollToBottom: ctx.commands.scrollToBottom, isFollowing: ctx.isFollowing }),
+    [ctx],
+  );
+}
+
+/**
+ * Styled frame for the Provider/Scroller composition: the ambient provider
+ * owns scroll state, so the frame renders the compound anatomy (Viewport,
+ * Content, Items, Button) verbatim instead of nesting a shadow provider.
+ */
+function AmbientScrollerFrame({
+  streaming = false,
+  className,
+  children,
+  handleRef,
+  // Provider/parts own these in the compound anatomy; accepted and ignored so
+  // the flat props type can be shared.
+  fade: _fade,
+  hideJumpToLatest: _hideJumpToLatest,
+  jumpToLatestLabel: _jumpToLatestLabel,
+  contentClassName: _contentClassName,
+  ...props
+}: FlatInnerProps) {
+  useScrollerLaneCss();
+  const { following, autoscrolling } = useMessageScrollerState();
+  useScrollerHandle(handleRef);
+  return (
+    <div
+      data-slot="message-scroller"
+      className={cn("sui-msg-scroller", className)}
+      data-following={following ? "true" : "false"}
+      data-streaming={streaming ? "true" : "false"}
+      data-autoscrolling={autoscrolling ? "true" : undefined}
+      {...(props as ComponentProps<"div">)}
+    >
+      {children}
+    </div>
+  );
+}
+
 function FlatScrollerInner({
   fade = true,
   hideJumpToLatest = false,
@@ -801,13 +1053,8 @@ function FlatScrollerInner({
 }: FlatInnerProps) {
   useScrollerLaneCss();
   const ctx = useScrollerContext("MessageScroller");
-  const { atBottom, following } = useMessageScrollerState();
-
-  useImperativeHandle(
-    handleRef,
-    () => ({ scrollToBottom: ctx.commands.scrollToBottom, isFollowing: ctx.isFollowing }),
-    [ctx],
-  );
+  const { atBottom, following, autoscrolling } = useMessageScrollerState();
+  useScrollerHandle(handleRef);
 
   return (
     <div
@@ -815,6 +1062,7 @@ function FlatScrollerInner({
       className={cn("sui-msg-scroller", className)}
       data-following={following ? "true" : "false"}
       data-streaming={streaming ? "true" : "false"}
+      data-autoscrolling={autoscrolling ? "true" : undefined}
       {...(props as ComponentProps<"div">)}
     >
       <MessageScrollerViewport fade={fade}>
@@ -857,9 +1105,10 @@ export const MessageScroller: ForwardRefExoticComponent<
   useScrollerLaneCss();
   const ambient = useContext(ScrollerContext);
   if (ambient) {
-    // Provider/Scroller composition: the ambient provider owns scroll state, so
-    // the frame consumes it instead of nesting a shadow provider.
-    return <FlatScrollerInner {...rest} streaming={streaming} handleRef={ref} />;
+    // Provider/Scroller composition: the ambient provider owns scroll state,
+    // so the styled frame renders the compound anatomy (Viewport, Content,
+    // Items, Button) as its children instead of nesting a shadow scroller.
+    return <AmbientScrollerFrame {...rest} streaming={streaming} handleRef={ref} />;
   }
   return (
     <MessageScrollerProviderImpl
