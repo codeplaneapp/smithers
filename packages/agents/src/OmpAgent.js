@@ -62,7 +62,7 @@ export class OmpAgent extends BaseCliAgent {
     else if (this.opts.autoApprove || this.opts.yolo) args.push("--auto-approve");
     if (this.extraArgs?.length) args.push(...this.extraArgs);
     if (mode === "rpc" && options?.files?.length) throw new Error("OMP RPC mode does not support file arguments");
-    if (prompt) args.push(prompt);
+    if (mode !== "rpc" && prompt) args.push(prompt);
     return args;
   }
   createOutputInterpreter() {

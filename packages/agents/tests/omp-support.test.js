@@ -26,6 +26,13 @@ describe("OmpAgent", () => {
     expect(args).not.toContain("--list-models");
   });
 
+  test("supports all documented thinking levels and never appends a CLI prompt in RPC mode", () => {
+    for (const thinking of ["max", "auto"]) {
+      const agent = new OmpAgent({ mode: "rpc", thinking });
+      expect(agent.buildArgs({ prompt: "rpc prompt", cwd: "/repo", options: {}, mode: "rpc" })).toEqual(["--mode", "rpc", "--cwd", "/repo", "--thinking", thinking]);
+    }
+  });
+
   test("interprets OMP JSON session, text, tool, and completion events", () => {
     const agent = new OmpAgent({ mode: "json" });
     const interpreter = agent.createOutputInterpreter();

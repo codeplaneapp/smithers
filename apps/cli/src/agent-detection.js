@@ -145,15 +145,15 @@ const DETECTORS = [
         id: "omp",
         displayName: "Oh My Pi",
         binary: "omp",
-        authSignals: (homeDir, env) => [join(homeDir, ".omp"), ...(env.OMP_API_KEY ? ["OMP_API_KEY"] : [])],
-        apiKeys: ["OMP_API_KEY"],
+        authSignals: (homeDir) => [join(homeDir, ".omp")],
+        apiKeys: [],
         availabilityProbe: (_homeDir, env) => {
             const status = runProbeCommand("omp", ["--version"], env);
             return status.status === 0 && /omp\//i.test(status.output)
                 ? passProbe("OMP CLI is installed and executable")
                 : failProbe(status.output || "OMP version probe failed");
         },
-        setupHint: "Install Oh My Pi and configure a provider in OMP, or set OMP_API_KEY.",
+        setupHint: "Install Oh My Pi and configure a provider in OMP.",
     },
     {
         id: "kimi",
