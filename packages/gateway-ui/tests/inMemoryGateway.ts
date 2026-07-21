@@ -37,6 +37,8 @@ export type InMemoryGateway = {
   };
   launches: Array<{ workflow: string; input: unknown }>;
   approvalsSubmitted: Array<Record<string, unknown>>;
+  /** Every rewindRun body the UI POSTed, in order. */
+  rewinds: Array<Record<string, unknown>>;
   /** Append rows to a run's event log after mount and notify SSE subscribers. */
   pushEvents(runId: string, rows: Array<Record<string, unknown>>): void;
   close(): Promise<void>;
@@ -142,6 +144,14 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
         const emitted = broadcast(["runs"]);
         return ok({ runId }, { seq: emitted });
       }
+      // POST /v1/api/runs/:id/rewind (rewindRun)
+      const rewindMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/rewind$/);
+      if (rewindMatch && request.method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+        gateway.rewinds.push(body);
+        const emitted = broadcast(["runs"]);
+        return ok({ runId: decodeURIComponent(rewindMatch[1]!), rewound: true }, { seq: emitted });
+      }
       // GET /v1/api/runs/:id/tree
       const treeMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/tree$/);
       if (treeMatch && request.method === "GET") {
@@ -204,6 +214,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     state,
     launches: [],
     approvalsSubmitted: [],
+    rewinds: [],
     pushEvents(runId, rows) {
       state.events[runId] = [...(state.events[runId] ?? []), ...rows];
       broadcast(["events"]);
