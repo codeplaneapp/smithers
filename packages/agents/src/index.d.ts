@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$d, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$e } from './index-C4oaZr4x.js';
+import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$d, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$e, g as AgentCliActionKind } from './index-CMtjCe6d.js';
 import * as zod from 'zod';
 import '@smithers-orchestrator/errors/SmithersError';
 import 'effect';
@@ -195,7 +195,7 @@ type ImageGenerationProvider$1 = {
     generateImage(request: ImageGenerationRequest$1): Promise<ImageGenerationResult$1> | ImageGenerationResult$1;
 };
 
-type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "hermes" | "kimi" | "opencode" | "openclaw" | "pi" | "pool" | "vibe";
+type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "hermes" | "kimi" | "opencode" | "openclaw" | "pi" | "omp" | "pool" | "vibe";
 
 type CliAgentSurfaceOptionMapping$1 = {
     option: string;
@@ -232,9 +232,9 @@ type AgentToolDescriptor$1 = {
     source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";
 };
 
-type AgentCapabilityRegistry$a = {
+type AgentCapabilityRegistry$b = {
     version: 1;
-    engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
+    engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
     runtimeTools: Record<string, AgentToolDescriptor$1>;
     mcp: {
         bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -257,16 +257,16 @@ type AgentCapabilityRegistry$a = {
  * @param {AgentCapabilityRegistry | null | undefined} registry
  * @returns {string}
  */
-declare function hashCapabilityRegistry(registry: AgentCapabilityRegistry$9 | null | undefined): string;
-type AgentCapabilityRegistry$9 = AgentCapabilityRegistry$a;
+declare function hashCapabilityRegistry(registry: AgentCapabilityRegistry$a | null | undefined): string;
+type AgentCapabilityRegistry$a = AgentCapabilityRegistry$b;
 
-type AgentCapabilityRegistry$8 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$9 = AgentCapabilityRegistry$b;
 
 type CliAgentCapabilityReportEntry$3 = {
     id: CliAgentCapabilityAdapterId$1;
     binary: string;
     fingerprint: string;
-    capabilities: AgentCapabilityRegistry$8;
+    capabilities: AgentCapabilityRegistry$9;
     surface: CliAgentSurfaceManifestEntry$2;
 };
 
@@ -512,7 +512,7 @@ type AgentLike$1 = {
     /** Available tools the agent can use */
     tools?: Record<string, unknown>;
     /** Optional structured capability registry for cache and diagnostics */
-    capabilities?: AgentCapabilityRegistry$8;
+    capabilities?: AgentCapabilityRegistry$9;
     /** True when the agent consumes outputSchema through a native structured-output API. */
     supportsNativeStructuredOutput?: boolean;
     /**
@@ -659,7 +659,7 @@ declare class AmpAgent extends BaseCliAgent {
     constructor(opts?: AmpAgentOptions);
     opts: AmpAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$7;
+    capabilities: AgentCapabilityRegistry$8;
     cliEngine: string;
     /**
    * @returns {CliOutputInterpreter}
@@ -679,7 +679,7 @@ declare class AmpAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$7 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$8 = AgentCapabilityRegistry$b;
 type CliOutputInterpreter$c = CliOutputInterpreter$d;
 type AmpAgentOptions = AmpAgentOptions$1;
 
@@ -767,7 +767,7 @@ declare class AntigravityAgent extends BaseCliAgent {
    */
     constructor(opts?: AntigravityAgentOptions);
     opts: AntigravityAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$a;
+    capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     /**
    * @returns {CliOutputInterpreter}
@@ -862,7 +862,7 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
    */
     constructor(opts?: ClaudeCodeAgentOptions);
     opts: ClaudeCodeAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$a;
+    capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     /**
    * @returns {CliOutputInterpreter}
@@ -943,7 +943,7 @@ declare class CodexAgent extends BaseCliAgent {
    */
     constructor(opts?: CodexAgentOptions);
     opts: CodexAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$a;
+    capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     supportsNativeStructuredOutput: boolean;
     /**
@@ -1016,7 +1016,7 @@ declare class GeminiAgent extends BaseCliAgent {
    */
     constructor(opts?: GeminiAgentOptions);
     opts: GeminiAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$a;
+    capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     /**
    * @returns {CliOutputInterpreter}
@@ -1028,20 +1028,13 @@ declare class GeminiAgent extends BaseCliAgent {
 type CliOutputInterpreter$8 = CliOutputInterpreter$d;
 type GeminiAgentOptions = GeminiAgentOptions$1;
 
-declare class OmpAgent extends BaseCliAgent {
-    opts: OmpAgentOptions;
-    capabilities: AgentCapabilityRegistry;
-    cliEngine: string;
-    constructor(opts?: OmpAgentOptions);
-    buildCommand(params: any): Promise<any>;
-}
 declare class PiAgent extends BaseCliAgent {
     /**
    * @param {PiAgentOptions} [opts]
    */
     constructor(opts?: PiAgentOptions$1);
     opts: PiAgentOptions$2;
-    capabilities: AgentCapabilityRegistry$a;
+    capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     issuedSessionRef: any;
     /**
@@ -1147,7 +1140,7 @@ declare class KimiAgent extends BaseCliAgent {
    */
     constructor(opts?: KimiAgentOptions);
     opts: KimiAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$a;
+    capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     issuedSessionId: any;
     /**
@@ -1199,7 +1192,7 @@ declare class ForgeAgent extends BaseCliAgent {
     constructor(opts?: ForgeAgentOptions);
     opts: ForgeAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$6;
+    capabilities: AgentCapabilityRegistry$7;
     cliEngine: string;
     issuedConversationId: any;
     /**
@@ -1220,7 +1213,7 @@ declare class ForgeAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$6 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$7 = AgentCapabilityRegistry$b;
 type CliOutputInterpreter$5 = CliOutputInterpreter$d;
 type ForgeAgentOptions = ForgeAgentOptions$1;
 
@@ -1247,7 +1240,7 @@ declare class OpenCodeAgent extends BaseCliAgent {
     /** @type {OpenCodeAgentOptions} */
     opts: OpenCodeAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$5;
+    capabilities: AgentCapabilityRegistry$6;
     /** @type {"opencode"} */
     cliEngine: "opencode";
     /**
@@ -1292,7 +1285,7 @@ declare class OpenCodeAgent extends BaseCliAgent {
         stdoutErrorPatterns: RegExp[];
     }>;
 }
-type AgentCapabilityRegistry$5 = AgentCapabilityRegistry$8;
+type AgentCapabilityRegistry$6 = AgentCapabilityRegistry$9;
 type OpenCodeAgentOptions$1 = OpenCodeAgentOptions$2;
 type CliOutputInterpreter$4 = CliOutputInterpreter$e;
 
@@ -1304,7 +1297,7 @@ declare class VibeAgent extends BaseCliAgent {
     /** @type {VibeAgentOptions} */
     opts: VibeAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$4;
+    capabilities: AgentCapabilityRegistry$5;
     /** @type {"vibe"} */
     cliEngine: "vibe";
     /** @type {string | undefined} */
@@ -1327,7 +1320,7 @@ declare class VibeAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$4 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$5 = AgentCapabilityRegistry$b;
 type CliOutputInterpreter$3 = CliOutputInterpreter$d;
 type VibeAgentOptions$1 = VibeAgentOptions$2;
 
@@ -1433,7 +1426,7 @@ declare function createElevenLabsTextToSpeechTool(options: ElevenLabsTextToSpeec
  *
  * @returns {AgentCapabilityRegistry}
  */
-declare function createHermesCliCapabilityRegistry(): AgentCapabilityRegistry$3;
+declare function createHermesCliCapabilityRegistry(): AgentCapabilityRegistry$4;
 /**
  * Hermes Agent (Nous Research) driven through its `hermes` CLI.
  *
@@ -1450,7 +1443,7 @@ declare class HermesCliAgent extends BaseCliAgent {
     constructor(opts?: HermesCliAgentOptions$1);
     opts: HermesCliAgentOptions$2;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$3;
+    capabilities: AgentCapabilityRegistry$4;
     cliEngine: string;
     /**
      * @returns {CliOutputInterpreter}
@@ -1470,7 +1463,7 @@ declare class HermesCliAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$3 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$4 = AgentCapabilityRegistry$b;
 type CliOutputInterpreter$2 = CliOutputInterpreter$d;
 type HermesCliAgentOptions$1 = HermesCliAgentOptions$2;
 
@@ -1482,7 +1475,7 @@ type HermesCliAgentOptions$1 = HermesCliAgentOptions$2;
  *
  * @returns {AgentCapabilityRegistry}
  */
-declare function createOpenClawCapabilityRegistry(): AgentCapabilityRegistry$2;
+declare function createOpenClawCapabilityRegistry(): AgentCapabilityRegistry$3;
 /**
  * OpenClaw driven through its gateway-backed `openclaw agent` CLI.
  *
@@ -1501,7 +1494,7 @@ declare class OpenClawAgent extends BaseCliAgent {
     constructor(opts?: OpenClawAgentOptions$1);
     opts: OpenClawAgentOptions$2;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$2;
+    capabilities: AgentCapabilityRegistry$3;
     cliEngine: string;
     /** @type {string | undefined} */
     issuedSessionId: string | undefined;
@@ -1523,7 +1516,7 @@ declare class OpenClawAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$2 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$3 = AgentCapabilityRegistry$b;
 type CliOutputInterpreter$1 = CliOutputInterpreter$d;
 type OpenClawAgentOptions$1 = OpenClawAgentOptions$2;
 
@@ -1534,7 +1527,7 @@ type OpenClawAgentOptions$1 = OpenClawAgentOptions$2;
  * @param {PoolAgentOptions} [_opts]
  * @returns {AgentCapabilityRegistry}
  */
-declare function createPoolCapabilityRegistry(_opts?: PoolAgentOptions$1): AgentCapabilityRegistry$1;
+declare function createPoolCapabilityRegistry(_opts?: PoolAgentOptions$1): AgentCapabilityRegistry$2;
 /**
  * Poolside's `pool` agent (Agent Context Protocol / ACP), driven through its CLI.
  *
@@ -1557,7 +1550,7 @@ declare class PoolAgent extends BaseCliAgent {
     /** @type {PoolAgentOptions} */
     opts: PoolAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$1;
+    capabilities: AgentCapabilityRegistry$2;
     /** @type {"pool"} */
     cliEngine: "pool";
     /**
@@ -1582,9 +1575,125 @@ declare class PoolAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$1 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$2 = AgentCapabilityRegistry$b;
 type CliOutputInterpreter = CliOutputInterpreter$d;
 type PoolAgentOptions$1 = PoolAgentOptions$2;
+
+type OmpAgentOptions$1 = BaseCliAgentOptions & {
+    provider?: string;
+    model?: string;
+    apiKey?: string;
+    systemPrompt?: string;
+    appendSystemPrompt?: string;
+    mode?: "text" | "json" | "rpc";
+    print?: boolean;
+    continueSession?: boolean;
+    resume?: string;
+    sessionDir?: string;
+    noSession?: boolean;
+    tools?: string[];
+    noTools?: boolean;
+    extensions?: string[];
+    noExtensions?: boolean;
+    skills?: string[];
+    noSkills?: boolean;
+    thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+    hideThinking?: boolean;
+    printThoughts?: boolean;
+    hooks?: string[];
+    maxTime?: number | string;
+    autoApprove?: boolean;
+    approvalMode?: string;
+};
+
+/** @typedef {import("./OmpAgentOptions.ts").OmpAgentOptions} OmpAgentOptions */
+/** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
+/** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @param {OmpAgentOptions} [opts] @returns {AgentCapabilityRegistry} */
+declare function createOmpCapabilityRegistry(opts?: OmpAgentOptions): AgentCapabilityRegistry$1;
+declare class OmpAgent extends BaseCliAgent {
+    constructor(opts?: {});
+    /** @type {OmpAgentOptions} */ opts: OmpAgentOptions;
+    /** @type {AgentCapabilityRegistry} */ capabilities: AgentCapabilityRegistry$1;
+    cliEngine: string;
+    issuedSessionId: any;
+    resolveMode(options: any): "text" | "json" | "rpc";
+    buildArgs({ prompt, cwd, options, mode }: {
+        prompt: any;
+        cwd: any;
+        options: any;
+        mode: any;
+    }): any[];
+    createOutputInterpreter(): {
+        onStdoutLine: (line: any) => ({
+            type: string;
+            engine: string;
+            phase: string;
+            entryType: string;
+            action: {
+                id: string;
+                kind: string;
+                title: string;
+            };
+            message: any;
+            ok?: undefined;
+            answer?: undefined;
+            error?: undefined;
+            resume?: undefined;
+        } | {
+            type: string;
+            engine: string;
+            phase: string;
+            entryType: string;
+            action: {
+                id: string;
+                kind: AgentCliActionKind;
+                title: string;
+            };
+            message: string;
+            ok: boolean;
+            answer?: undefined;
+            error?: undefined;
+            resume?: undefined;
+        } | {
+            type: string;
+            engine: string;
+            ok: boolean;
+            answer: string | undefined;
+            error: any;
+            resume: any;
+            phase?: undefined;
+            entryType?: undefined;
+            action?: undefined;
+            message?: undefined;
+        })[];
+        onExit: (result: any) => {
+            type: string;
+            engine: string;
+            ok: boolean;
+            answer: string | undefined;
+            error: any;
+            resume: any;
+        }[];
+    };
+    buildCommand({ prompt, cwd, options }: {
+        prompt: any;
+        cwd: any;
+        options: any;
+    }): Promise<{
+        command: string;
+        args: any[];
+        outputFormat: "text" | "json";
+    }>;
+    generate(options?: {}): Promise<any>;
+    diagnosticHints(): {
+        provider: string | undefined;
+        model: string | undefined;
+        apiKey: string | undefined;
+    };
+}
+type OmpAgentOptions = OmpAgentOptions$1;
+type AgentCapabilityRegistry$1 = AgentCapabilityRegistry$b;
 
 /**
  * @returns {CliAgentCapabilityReportEntry[]}
@@ -1711,7 +1820,7 @@ declare function createSerperSearchProvider(options: {
 }): GroundedWebSearchProvider;
 type GroundedWebSearchProvider = GroundedWebSearchProvider$5;
 
-type AgentCapabilityRegistry = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry = AgentCapabilityRegistry$b;
 type AgentGenerateOptions = AgentGenerateOptions$3;
 type AgentLike = AgentLike$1;
 type AgentToolDescriptor = AgentToolDescriptor$1;
@@ -1721,7 +1830,6 @@ type HermesAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = HermesAgentO
 type HermesCliAgentOptions = HermesCliAgentOptions$2;
 type OpenClawAgentOptions = OpenClawAgentOptions$2;
 type PiAgentOptions = PiAgentOptions$2;
-type OmpAgentOptions = import("./OmpAgentOptions.ts").OmpAgentOptions;
 type PiExtensionUiRequest = PiExtensionUiRequest$1;
 type PiExtensionUiResponse = PiExtensionUiResponse$1;
 type OpenCodeAgentOptions = OpenCodeAgentOptions$2;
@@ -1758,4 +1866,4 @@ type TranscriptionProvider = TranscriptionProvider$1;
 type TranscriptionToolInput = TranscriptionToolInput$1;
 type TranscriptionToolResult = TranscriptionToolResult$1;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OmpAgent, type OmpAgentOptions, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
