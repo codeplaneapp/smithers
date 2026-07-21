@@ -2,6 +2,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useId,
   useRef,
   useState,
@@ -39,6 +40,18 @@ function formatCost(usd: number): string {
 export function contextUsagePercent(usage: TokenUsageModel): number | undefined {
   if (usage.usedTokens === undefined || usage.maxTokens === undefined || usage.maxTokens <= 0) return undefined;
   return Math.min(100, Math.round((usage.usedTokens / usage.maxTokens) * 100));
+}
+
+/** Human/screen-reader summary of the usage model, used as the default trigger name. */
+export function contextUsageSummary(usage: TokenUsageModel): string {
+  const percent = contextUsagePercent(usage);
+  if (percent !== undefined) {
+    return `Context usage: ${formatCount(usage.usedTokens!)} of ${formatCount(usage.maxTokens!)} tokens (${percent}%)`;
+  }
+  if (usage.usedTokens !== undefined) {
+    return `Context usage: ${formatCount(usage.usedTokens)} tokens used`;
+  }
+  return "Context usage: unknown";
 }
 
 type ContextUsageContextValue = {
@@ -105,6 +118,8 @@ export function ContextUsage({
       hoverTimer.current = null;
     }
   }
+
+  useEffect(() => cancelHoverTimer, []);
 
   function setOpen(next: boolean) {
     if (!isControlled) setUncontrolledOpen(next);
@@ -227,6 +242,7 @@ export function ContextTrigger({
       className={cn("sui-ctx-trigger", className)}
       aria-expanded={ctx.open}
       aria-controls={ctx.contentId}
+      aria-label={children === undefined ? contextUsageSummary(ctx.usage) : undefined}
       onClick={(event) => {
         ctx.toggle();
         onClick?.(event);

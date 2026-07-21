@@ -16,6 +16,7 @@ import {
   ContextTrigger,
   ContextUsage,
   contextUsagePercent,
+  contextUsageSummary,
 } from "../src/agents/ContextUsage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -50,6 +51,19 @@ describe("contextUsagePercent", () => {
     expect(contextUsagePercent({ maxTokens: 200 })).toBeUndefined();
     expect(contextUsagePercent({})).toBeUndefined();
     expect(contextUsagePercent({ usedTokens: 10, maxTokens: 0 })).toBeUndefined();
+  });
+});
+
+describe("contextUsageSummary", () => {
+  test("summarizes used+max with the derived percentage", () => {
+    expect(contextUsageSummary({ usedTokens: 8000, maxTokens: 32000 })).toBe(
+      "Context usage: 8.0K of 32.0K tokens (25%)",
+    );
+  });
+
+  test("summarizes used-only and empty models", () => {
+    expect(contextUsageSummary({ usedTokens: 12000 })).toBe("Context usage: 12.0K tokens used");
+    expect(contextUsageSummary({})).toBe("Context usage: unknown");
   });
 });
 
@@ -104,6 +118,39 @@ describe("ContextUsage", () => {
     document.documentElement.dataset.theme = "dark";
     const html = renderToStaticMarkup(<ContextUsage defaultOpen usage={{ usedTokens: 1, maxTokens: 4 }} />);
     expect(html).toContain('data-slot="context-content"');
+  });
+
+  test("default trigger exposes the usage summary as its accessible name", () => {
+    const html = renderToStaticMarkup(<ContextUsage usage={{ usedTokens: 8000, maxTokens: 32000 }} />);
+    expect(html).toContain('aria-label="Context usage: 8.0K of 32.0K tokens (25%)"');
+    const usedOnly = renderToStaticMarkup(<ContextUsage usage={{ usedTokens: 12000 }} />);
+    expect(usedOnly).toContain('aria-label="Context usage: 12.0K tokens used"');
+    const empty = renderToStaticMarkup(<ContextUsage usage={{}} />);
+    expect(empty).toContain('aria-label="Context usage: unknown"');
+  });
+
+  test("a custom aria-label on the trigger wins over the summary", () => {
+    const html = renderToStaticMarkup(
+      <ContextUsage usage={{ usedTokens: 8000, maxTokens: 32000 }}>
+        <ContextTrigger aria-label="My usage" />
+        <ContextContent />
+      </ContextUsage>,
+    );
+    expect(html).toContain('aria-label="My usage"');
+    expect(html).not.toContain("Context usage: 8.0K");
+  });
+
+  test("pending hover timer is cleared on unmount and never fires", async () => {
+    const changes: boolean[] = [];
+    await render(<ContextUsage usage={{}} onOpenChange={(open) => changes.push(open)} />);
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="context-trigger"]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    await act(async () => root!.unmount());
+    root = undefined;
+    await act(async () => sleep(400));
+    expect(changes).toEqual([]);
   });
 
   test("click toggles and reports onOpenChange", async () => {
