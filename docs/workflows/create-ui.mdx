@@ -12,6 +12,13 @@ The workflow deliberately does not edit the target workflow. Adding a `<UI>` nod
 would change its resume hash; the Gateway discovers the new file by convention and
 picks it up without a restart.
 
+Creation is a hard gate: the author must report the exact target and path with
+`verified: true`, the static design-system compliance scan must pass, and the
+workflow page plus compiled `__smithers_ui/client.js` bundle must independently
+return HTTP 200. Failed checks are sent back to the author. The loop allows three
+rounds; if it still has violations, the run fails with `RALPH_MAX_REACHED` instead
+of shipping the last attempt.
+
 ```bash
 bunx smithers-orchestrator workflow run create-ui --input '{
   "targetWorkflow": "release-train",

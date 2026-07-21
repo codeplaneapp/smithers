@@ -10878,6 +10878,10 @@ pure `buildNodeChatTranscript(frames, nodeId)` fold behind `NodeChatStream`.
 `create-ui` workflow's deterministic compliance gate
 (`gradeWorkflowUiSource` from `smithers-orchestrator/scorers`) rejects
 generated UIs that hand-roll pills/tables/colors or omit live agent chat.
+The gate also requires the author's verified result and independently checks
+that both `/workflows/<key>` and `/workflows/<key>/__smithers_ui/client.js`
+return HTTP 200. It retries authoring for at most three rounds and fails with
+`RALPH_MAX_REACHED` when violations persist.
 
 For a workflow whose UI just needs launch-watch-approve, render
 `<SimpleWorkflowDashboard workflow="my-workflow" />` inside

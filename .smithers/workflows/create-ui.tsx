@@ -86,22 +86,62 @@ function prompt(target: string, gatewayUrl: string, exampleRunId: string, feedba
   ].filter(Boolean).join("\n");
 }
 
-function gradeUi(target: string): z.infer<typeof complianceSchema> {
+type UiAuthorResult = z.infer<typeof resultSchema> | undefined;
+const gatewayRequestTimeoutMs = 10_000;
+
+export async function verifyGatewayUi(target: string, gatewayUrl: string): Promise<Array<{ rule: string; detail: string }>> {
+  const baseUrl = gatewayUrl.replace(/\/$/, "");
+  const routes = [
+    { rule: "gateway-workflow", url: `${baseUrl}/workflows/${target}` },
+    { rule: "gateway-bundle", url: `${baseUrl}/workflows/${target}/__smithers_ui/client.js` },
+  ];
+  const results = await Promise.all(routes.map(async ({ rule, url }) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), gatewayRequestTimeoutMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (response.status === 200) return null;
+      const body = (await response.text()).replace(/\s+/g, " ").slice(0, 240);
+      return { rule, detail: `${url} returned HTTP ${response.status}${body ? `: ${body}` : "."}` };
+    } catch (error) {
+      return { rule, detail: `${url} could not be requested: ${String(error)}` };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }));
+  return results.filter((result): result is { rule: string; detail: string } => result !== null);
+}
+
+export async function gradeUi(target: string, gatewayUrl: string, cuResult?: UiAuthorResult): Promise<z.infer<typeof complianceSchema>> {
   const uiPath = `.smithers/ui/${target}.tsx`;
-  if (!existsSync(uiPath)) {
-    return { targetWorkflow: target, uiPath, passed: false, score: 0, violations: JSON.stringify([{ rule: "mount", detail: `${uiPath} was not written.` }]) };
+  const violations: Array<{ rule: string; detail: string }> = [];
+  const expectedPath = `.smithers/ui/${target}.tsx`;
+  if (!cuResult || cuResult.targetWorkflow !== target) {
+    violations.push({ rule: "author-target", detail: `Author result targetWorkflow must be exactly ${target}.` });
   }
-  const uiSource = readFileSync(uiPath, "utf8");
-  const workflowPath = [`.smithers/workflows/${target}.tsx`, `.smithers/workflows/${target}.mdx`].find(existsSync);
-  const report = gradeWorkflowUiSource(uiSource, {
-    ...(workflowPath ? { workflowSource: readFileSync(workflowPath, "utf8") } : {}),
-  });
+  if (!cuResult || cuResult.uiPath !== expectedPath) {
+    violations.push({ rule: "author-path", detail: `Author result uiPath must be exactly ${expectedPath}.` });
+  }
+  if (cuResult?.verified !== true) {
+    violations.push({ rule: "author-verified", detail: "Author result verified must be true after both Gateway routes return HTTP 200." });
+  }
+  if (!existsSync(uiPath)) {
+    violations.push({ rule: "mount", detail: `${uiPath} was not written.` });
+  } else {
+    const uiSource = readFileSync(uiPath, "utf8");
+    const workflowPath = [`.smithers/workflows/${target}.tsx`, `.smithers/workflows/${target}.mdx`].find(existsSync);
+    const report = gradeWorkflowUiSource(uiSource, {
+      ...(workflowPath ? { workflowSource: readFileSync(workflowPath, "utf8") } : {}),
+    });
+    violations.push(...report.violations);
+  }
+  violations.push(...await verifyGatewayUi(target, gatewayUrl));
   return {
     targetWorkflow: target,
     uiPath,
-    passed: report.passed,
-    score: report.score,
-    violations: JSON.stringify(report.violations),
+    passed: violations.length === 0,
+    score: violations.length === 0 ? 1 : 0,
+    violations: JSON.stringify(violations),
   };
 }
 
@@ -112,6 +152,7 @@ export default smithers((ctx) => {
   const exampleRunId = String(raw.exampleRunId ?? "").trim();
 
   const compliance = ctx.latest(outputs.cuCompliance, "ui-compliance");
+  const cuResult = ctx.latest(outputs.cuResult, "author-and-verify");
   const passed = compliance?.passed === true;
   const feedback = compliance && !passed
     ? "PREVIOUS COMPLIANCE VIOLATIONS (fix every one):\n" + String(compliance.violations)
@@ -119,14 +160,14 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="create-ui">
-      <Loop id="author-loop" until={passed} maxIterations={3} onMaxReached="return-last">
+      <Loop id="author-loop" until={passed} maxIterations={3} onMaxReached="fail">
         <Sequence>
           <Task id="author-and-verify" output={outputs.cuResult} agent={agents.smart}
             retries={1} timeoutMs={30 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
             {prompt(target, gatewayUrl, exampleRunId, feedback)}
           </Task>
-          <Task id="ui-compliance" output={outputs.cuCompliance} retries={0}>
-            {() => gradeUi(target)}
+          <Task id="ui-compliance" output={outputs.cuCompliance} retries={0} needs={{ cuResult: "author-and-verify" }}>
+            {() => gradeUi(target, gatewayUrl, cuResult)}
           </Task>
         </Sequence>
       </Loop>
