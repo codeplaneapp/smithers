@@ -10888,16 +10888,18 @@ tokens, never hex-plus-alpha.
 | `FleetTable` | A selectable fan-out ledger: one row per work item, live status pill rolled up from the item's pipeline `nodeIds`. | `runId`, `items`, `columns`, `selectedKey`, `onSelect` |
 | `NodeStageStrip` | A `StageStrip` bound to live node statuses: pipeline chips that track `queued → running → done/failed`. | `runId`, `stages` |
 | `GatewayApprovalList` | The pending approval queue rendered with the agentic `ApprovalCard` anatomy (risk, resources, reviewer note), resolved through `submitApproval`. | `filter`, `note`, `empty`, `onResolved` |
-| `GatewayApprovalConfirmation` | One pending approval row as the `Confirmation` lifecycle anatomy with approve/deny actions. | `row`, `note`, `onResolved` |
-| `GatewayCheckpointControls` | Durability checkpoint actions (restore, fork, replay, rewind, return-to-live) bound to the run's real Gateway action RPCs. | `runId`, `checkpoint` |
-| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. | ReactFlow `NodeProps` |
+| `GatewayApprovalConfirmation` | One pending approval row as the `Confirmation` lifecycle anatomy with approve/deny actions, resolved through `submitApproval`. | `approval`, `note`, `onResolved` |
+| `GatewayCheckpointControls` | Durability checkpoint list. Only `rewind` is bound natively (to the Gateway's `rewindRun` RPC); restore/fork/replay/return-to-live render only when the host supplies `onAction`. | `runId`, `checkpoints`, `currentFrameNo`, `onAction`, `onRewound` |
+| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. | `@xyflow/react` `NodeProps` |
 
 `StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
 also exported for building your own rows that match the components, plus the
 node-status helpers `nodeStatusIndex(nodes)` (logical-id → merged status map
 over `useGatewayRunTree` rows) and `rollupNodeStatus(index, nodeIds)` (one
 pipeline's aggregate status) so UIs never hand-roll status rank maps, and the
-pure `buildNodeChatTranscript(frames, nodeId)` fold behind `NodeChatStream`.
+pure `buildNodeChatTranscript(frames, nodeId)` fold behind `NodeChatStream`,
+and `gatewayApprovalKey(row)` (the canonical `runId:nodeId:iteration` id for a
+pending approval row, used to key `GatewayApprovalConfirmation` instances).
 
 **Live-feedback rule:** every agent node a UI surfaces should get a
 `NodeChatStream` so humans can watch the agent work in real time; the

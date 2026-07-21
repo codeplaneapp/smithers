@@ -143,6 +143,34 @@ test("checkpoint fork, replay, and rewind require confirmation", async ({ page }
   expectNoPageErrors(pageErrors);
 });
 
+test("agent task disclosure reveals task items with file chips", async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  const group = page.getByTestId("agent-task-group");
+  await expect(group).toHaveAttribute("role", "list");
+  const trigger = page.getByRole("button", { name: "Toggle merge lane barrels" });
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("task-item")).toContainText("Compose lane CSS");
+  await expect(page.getByTestId("task-item")).toContainText("packages/ui/src/uiCss.ts");
+  await expect(group.getByText("shadcn-provenance.json")).toBeVisible();
+  await trigger.click();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("task-item")).toHaveCount(0);
+  const pending = page.getByRole("button", { name: "Toggle regenerate docs bundles" });
+  await expect(pending).toHaveAttribute("aria-expanded", "false");
+  await pending.click();
+  await expect(group.getByText("pnpm docs:llms")).toBeVisible();
+  expectNoPageErrors(pageErrors);
+});
+
+test("chat transcript is a busy live log while pending", async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  const transcript = page.getByTestId("chat-transcript");
+  await expect(transcript).toHaveAttribute("role", "log");
+  await expect(transcript).toHaveAttribute("aria-busy", "true");
+  await expect(transcript.getByText("Recap the integration.")).toBeVisible();
+  expectNoPageErrors(pageErrors);
+});
+
 test("structured node output renders response and tool calls", async ({ page }) => {
   const pageErrors = trackPageErrors(page);
   const demo = page.getByTestId("node-output-demo");
@@ -192,8 +220,8 @@ test("reduced motion is composed last and honored", async ({ page }) => {
 
 test("screen-reader names and live regions are present", async ({ page }) => {
   const pageErrors = trackPageErrors(page);
-  await expect(page.getByRole("region", { name: "Conversation messages" })).toBeVisible();
-  await expect(page.getByRole("log")).toBeVisible();
+  await expect(page.getByTestId("transcript-viewport")).toBeVisible();
+  await expect(page.getByTestId("transcript-log")).toBeVisible();
   await expect(page.getByRole("group", { name: "Checkpoint actions" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Toggle theme" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

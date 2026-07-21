@@ -16,6 +16,10 @@ import {
   AgentSandboxContent,
   AgentSandboxHeader,
   AgentSandboxStatus,
+  AgentTask,
+  AgentTaskContent,
+  AgentTaskGroup,
+  AgentTaskTrigger,
   AgentTool,
   AgentTools,
   ApprovalCard,
@@ -40,6 +44,7 @@ import {
   ChainOfThought,
   ChainOfThoughtStep,
   ChangeSummary,
+  ChatTranscript,
   Checkpoint,
   CheckpointActions,
   CheckpointIcon,
@@ -146,6 +151,8 @@ import {
   StackTrace,
   Suggestion,
   SuggestionGroup,
+  TaskItem,
+  TaskItemFile,
   TestResults,
   ToolCall,
   ToolCallContent,
@@ -470,6 +477,17 @@ export function GalleryCanvas() {
         <ConversationCheckpoint label="Checkpoint before rewrite" />
         <Marker>Streaming</Marker>
         <Shimmer style={{ width: 120, height: 12 }} />
+        <ChatTranscript
+          data-testid="chat-transcript"
+          pending
+          pendingLabel="Assistant is composing"
+          empty="No messages yet"
+          style={{ height: 160, border: "1px solid #8884", borderRadius: 8 }}
+        >
+          <Message role="user">
+            <MessageContent>Recap the integration.</MessageContent>
+          </Message>
+        </ChatTranscript>
       </Section>
 
       <Section id="composer" title="Prompt and attachments">
@@ -556,6 +574,29 @@ export function GalleryCanvas() {
             <ActivityItem kind="message" title="run started" timestampMs={1_700_000_000_000} />
           </ActivityGroup>
         </ActivityTimeline>
+        <AgentTaskGroup data-testid="agent-task-group">
+          <AgentTask title="Merge lane barrels" status="running" defaultOpen>
+            <AgentTaskTrigger aria-label="Toggle merge lane barrels" />
+            <AgentTaskContent>
+              <TaskItem
+                data-testid="task-item"
+                label="Compose lane CSS"
+                status="complete"
+                files={["packages/ui/src/uiCss.ts"]}
+                elapsedSeconds={95}
+              />
+              <TaskItem label="Aggregate provenance" status="running" elapsedSeconds={12}>
+                <TaskItemFile name="shadcn-provenance.json" />
+              </TaskItem>
+            </AgentTaskContent>
+          </AgentTask>
+          <AgentTask title="Regenerate docs bundles" status="pending">
+            <AgentTaskTrigger aria-label="Toggle regenerate docs bundles" />
+            <AgentTaskContent>
+              <TaskItem label="pnpm docs:llms" status="pending" />
+            </AgentTaskContent>
+          </AgentTask>
+        </AgentTaskGroup>
       </Section>
 
       <Section id="approvals" title="Approvals and checkpoints">
