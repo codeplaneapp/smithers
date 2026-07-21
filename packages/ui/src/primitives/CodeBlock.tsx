@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useId, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "../cn";
 import { REASONING_TOOLS_CSS_ID, reasoningToolsCss } from "../agentic/reasoningToolsCss";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
@@ -200,30 +200,34 @@ export type CodeBlockTabsProps = Omit<ComponentProps<"div">, "children"> & {
   items: readonly { id: string; label: string }[];
   activeId: string;
   onActiveIdChange: (id: string) => void;
-  /**
-   * When provided (CodeBlockGroup passes its own), tabs render
-   * `id="{idPrefix}-tab-{item.id}"` and `aria-controls="{idPrefix}-panel-{item.id}"`
-   * so hosts can wire matching tabpanels. Standalone usage omits both.
-   */
-  idPrefix?: string;
 };
+
+/**
+ * Internal wiring between CodeBlockGroup and its CodeBlockTabs: the group owns
+ * the id prefix so every tab's aria-controls resolves to a real tabpanel the
+ * group renders. Not part of the public props surface.
+ */
+const CodeBlockTabsIdContext = createContext<string | null>(null);
 
 /**
  * Tab strip for switching between grouped code blocks. Roving tabindex keeps
  * only the active tab in the tab order; arrow-key navigation is computed from
- * the focused tab and selection follows focus (automatic activation).
+ * the focused tab and selection follows focus (automatic activation). Inside a
+ * CodeBlockGroup each tab is wired to the group's tabpanels via
+ * id/aria-controls; standalone usage renders a labelled tablist only and
+ * leaves any tab/panel relationship to the host.
  */
 export function CodeBlockTabs({
   items,
   activeId,
   onActiveIdChange,
-  idPrefix,
   className,
   onKeyDown,
   ...props
 }: CodeBlockTabsProps) {
   useInjectUiCss();
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
+  const idPrefix = useContext(CodeBlockTabsIdContext);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -316,31 +320,34 @@ export function CodeBlockGroup({
       className={cn("sui-codeblock-group", className)}
       {...props}
     >
-      {items.length ? (
-        <CodeBlockHeader className="sui-codeblock-group-header">
-          <CodeBlockTabs
-            items={items.map(({ id, label }) => ({ id, label }))}
-            activeId={active!.id}
-            onActiveIdChange={setActive}
-            idPrefix={baseId}
-          />
-          {active!.filename !== undefined ? <CodeBlockFilename name={active!.filename} /> : null}
-        </CodeBlockHeader>
-      ) : null}
-      {active ? (
-        <div
-          role="tabpanel"
-          id={`${baseId}-panel-${active.id}`}
-          aria-labelledby={`${baseId}-tab-${active.id}`}
-        >
-          <CodeBlock
-            code={active.code}
-            language={active.language}
-            showLineNumbers={showLineNumbers}
-            highlight={highlight}
-          />
-        </div>
-      ) : null}
+      <CodeBlockTabsIdContext.Provider value={baseId}>
+        {items.length ? (
+          <CodeBlockHeader className="sui-codeblock-group-header">
+            <CodeBlockTabs
+              items={items.map(({ id, label }) => ({ id, label }))}
+              activeId={active!.id}
+              onActiveIdChange={setActive}
+            />
+            {active!.filename !== undefined ? <CodeBlockFilename name={active!.filename} /> : null}
+          </CodeBlockHeader>
+        ) : null}
+        {items.map((item) => (
+          <div
+            key={item.id}
+            role="tabpanel"
+            id={`${baseId}-panel-${item.id}`}
+            aria-labelledby={`${baseId}-tab-${item.id}`}
+            hidden={item.id !== active?.id}
+          >
+            <CodeBlock
+              code={item.code}
+              language={item.language}
+              showLineNumbers={showLineNumbers}
+              highlight={highlight}
+            />
+          </div>
+        ))}
+      </CodeBlockTabsIdContext.Provider>
     </div>
   );
 }

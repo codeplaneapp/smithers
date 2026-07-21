@@ -45,7 +45,7 @@ function formatDuration(n: number): string {
   return `${Math.floor(n / 60)}m ${String(Math.round(n % 60)).padStart(2, "0")}s`;
 }
 
-/** Collapsible, streaming-aware extended reasoning content. */
+/** Collapsible, streaming-aware container for provider-safe reasoning summaries. */
 export function Reasoning({
   streaming = false,
   open: controlledOpen,
@@ -188,16 +188,22 @@ export function ReasoningContent({ className, ...props }: ReasoningContentProps)
 
 export type ReasoningSummaryProps = Omit<ComponentProps<"div">, "children"> & {
   /**
-   * A provider-safe reasoning summary: text the provider/harness already
-   * disclosed in its output payload (visible-thinking transcripts, summary
-   * fields). Never raw private chain-of-thought, and never request it.
+   * A provider-safe reasoning SUMMARY: text the provider/harness explicitly
+   * labelled as a summary in its output payload (e.g. `reasoningSummary`
+   * fields, summary-typed parts). Summaries only — never a thinking or
+   * reasoning transcript, visible or otherwise. This API does not accept,
+   * request, or assume access to raw private chain-of-thought.
    */
   text: string;
   streaming?: boolean;
   label?: string;
 };
 
-/** Presentation of a provider-disclosed reasoning summary ('Thinking' label). */
+/**
+ * Presentation of a provider-disclosed reasoning summary under a 'Thinking'
+ * label. Renders provider-safe summaries only; raw private chain-of-thought is
+ * never available to this component and must never be disclosed through it.
+ */
 export function ReasoningSummary({
   text,
   streaming = false,

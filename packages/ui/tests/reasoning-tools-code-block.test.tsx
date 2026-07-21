@@ -127,23 +127,31 @@ describe("CodeBlockTabs", () => {
 });
 
 describe("CodeBlockGroup", () => {
-  test("renders the active item with tabs and filename", () => {
+  test("renders tabs, filename, and one visible panel per item", () => {
     const html = renderToStaticMarkup(<CodeBlockGroup items={items} />);
     expect(html).toContain('data-slot="code-block-group"');
     expect(html).toContain('role="tablist"');
     expect(html).toContain("sui-codeblock-filename");
     expect(html).toContain("const a = 1;");
-    expect(html).not.toContain("const b = 2;");
+    // Inactive items render as hidden tabpanels so tab aria-controls resolve.
+    expect(html).toContain("const b = 2;");
+    expect(html.match(/role="tabpanel"/g)!.length).toBe(2);
+    expect(html).toContain("hidden");
   });
 
-  test("defaultActiveId seeds the uncontrolled selection and tab clicks swap code", async () => {
+  test("defaultActiveId seeds the uncontrolled selection and tab clicks swap panels", async () => {
     await render(<CodeBlockGroup items={items} defaultActiveId="b" />);
-    expect(container!.textContent).toContain("const b = 2;");
+    const visiblePanel = () =>
+      container!.querySelector('[role="tabpanel"]:not([hidden])')!;
+    expect(visiblePanel().textContent).toContain("const b = 2;");
     const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     expect(tabs[1]!.getAttribute("aria-selected")).toBe("true");
 
     await act(async () => tabs[0]!.click());
-    expect(container!.textContent).toContain("const a = 1;");
+    expect(visiblePanel().textContent).toContain("const a = 1;");
+    expect(container!.querySelector('[role="tabpanel"][hidden]')!.textContent).toContain(
+      "const b = 2;",
+    );
     expect(tabs[0]!.getAttribute("aria-selected")).toBe("true");
   });
 
@@ -155,20 +163,40 @@ describe("CodeBlockGroup", () => {
     const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     await act(async () => tabs[1]!.click());
     expect(changes).toEqual(["b"]);
-    expect(container!.textContent).toContain("const a = 1;");
+    expect(
+      container!.querySelector('[role="tabpanel"]:not([hidden])')!.textContent,
+    ).toContain("const a = 1;");
   });
 
-  test("wires tab-to-panel aria-controls and tabpanel labelling", async () => {
+  test("every tab's aria-controls resolves to a rendered tabpanel", async () => {
     await render(<CodeBlockGroup items={items} />);
     const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-    const panel = container!.querySelector('[role="tabpanel"]')!;
-    expect(panel).not.toBeNull();
-    const activeTab = tabs[0]!;
-    expect(activeTab.getAttribute("aria-controls")).toBe(panel.id);
-    expect(panel.getAttribute("aria-labelledby")).toBe(activeTab.id);
-    expect(activeTab.id).toBeTruthy();
-    // Inactive tab points at its own (currently unrendered) panel id.
-    expect(tabs[1]!.getAttribute("aria-controls")).toContain("-panel-b");
+    const panels = container!.querySelectorAll('[role="tabpanel"]');
+    expect(panels.length).toBe(2);
+    for (const tab of tabs) {
+      const panelId = tab.getAttribute("aria-controls");
+      expect(panelId).toBeTruthy();
+      const panel = container!.querySelector(`[role="tabpanel"]#${CSS.escape(panelId!)}`);
+      expect(panel).not.toBeNull();
+      expect(panel!.getAttribute("aria-labelledby")).toBe(tab.id);
+      expect(tab.id).toBeTruthy();
+    }
+    // The active panel is visible; inactive panels are hidden but present.
+    expect(container!.querySelectorAll('[role="tabpanel"][hidden]').length).toBe(1);
+  });
+
+  test("standalone CodeBlockTabs renders no dangling aria-controls", async () => {
+    await render(
+      <CodeBlockTabs
+        items={items.map(({ id, label }) => ({ id, label }))}
+        activeId="a"
+        onActiveIdChange={() => {}}
+      />,
+    );
+    const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    for (const tab of tabs) {
+      expect(tab.getAttribute("aria-controls")).toBeNull();
+    }
   });
 
   test("renders under the dark theme", () => {
