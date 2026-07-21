@@ -1,0 +1,39 @@
+[
+  {
+    "file": "src/canvas/WorkflowCanvas.tsx",
+    "exports": [
+      "WorkflowCanvas",
+      "WorkflowNode",
+      "WorkflowNodeHeader",
+      "WorkflowNodeContent",
+      "WorkflowNodeStatus",
+      "WorkflowEdge",
+      "WorkflowConnection",
+      "WorkflowControls",
+      "WorkflowPanel",
+      "WorkflowToolbar",
+      "WorkflowMinimap"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/canvas",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "React Flow renderer bindings (renderer-neutral by design; the ReactFlow layer lives in @smithers-orchestrator/gateway-ui)",
+      "Upstream Canvas wired to the AI SDK data model"
+    ],
+    "divergences": [
+      "Renderer-neutral presentational anatomy: @xyflow/react never enters the base barrel",
+      "WorkflowEdge and WorkflowConnection are legend/inline representations; edge geometry stays the renderer's job",
+      "WorkflowCanvas is role=group, not role=application: the base layer ships no application-mode keyboard contract"
+    ]
+  },
+  {
+    "file": "src/canvas/canvasCss.ts",
+    "exports": ["canvasCss", "WORKFLOW_CANVAS_CSS_ID"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/canvas",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": ["Lane CSS fragment self-injected via useInjectLaneCss until integration composes it into smithersUiCss"]
+  }
+]

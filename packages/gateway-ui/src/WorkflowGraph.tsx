@@ -16,6 +16,7 @@ import {
   type Edge,
   type Node,
   type NodeProps,
+  type NodeTypes,
 } from "@xyflow/react";
 import dagre from "dagre";
 import { resolveTheme, subscribeTheme, theme, type ResolvedTheme } from "./theme";
@@ -138,6 +139,21 @@ const OUTPUT_STYLE: CSSProperties = {
 };
 
 /**
+ * The exact handle pair every `smithersTask` node renderer must render:
+ * a target handle on the left and a source handle on the right (no ids).
+ * Custom renderers passed via {@link WorkflowGraphProps.nodeTypes} MUST render
+ * `<SmithersNodeHandles />` inside the node root or their edges detach.
+ */
+export function SmithersNodeHandles() {
+  return (
+    <>
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
+    </>
+  );
+}
+
+/**
  * The presentational card for one workflow node: a kind kicker (with an optional
  * status dot), the node title, and its latest output line. Rendered by ReactFlow
  * as the `smithersTask` node type, so it is wrapped in target/source handles.
@@ -145,7 +161,7 @@ const OUTPUT_STYLE: CSSProperties = {
 export function SmithersTaskNode({ data }: NodeProps<SmithersFlowNode>) {
   return (
     <div className="smithers-node" data-kind={data.kind} data-status={data.status} style={cardStyle(data.kind, data.status)}>
-      <Handle type="target" position={Position.Left} />
+      <SmithersNodeHandles />
       <div className="node-kicker" style={KICKER_STYLE}>
         {data.status ? (
           <span
@@ -165,12 +181,11 @@ export function SmithersTaskNode({ data }: NodeProps<SmithersFlowNode>) {
           {data.output}
         </div>
       ) : null}
-      <Handle type="source" position={Position.Right} />
     </div>
   );
 }
 
-const nodeTypes = { smithersTask: memo(SmithersTaskNode) };
+const defaultNodeTypes: NodeTypes = { smithersTask: memo(SmithersTaskNode) };
 const FIT_VIEW_OPTIONS = { padding: 0.18 };
 const PRO_OPTIONS = { hideAttribution: true };
 
@@ -230,10 +245,23 @@ export type WorkflowGraphProps = {
   spec: WorkflowSpecNode[];
   className?: string;
   style?: CSSProperties;
+  /**
+   * Extra/override ReactFlow node renderers, merged over the default as
+   * `{ smithersTask: memo(SmithersTaskNode), ...nodeTypes }`. Passing the
+   * required `smithersTask` key (the type every {@link workflowToFlow} node
+   * emits) replaces the default card — e.g. `SmithersCanvasNode`, which
+   * composes the @smithers-orchestrator/ui canvas anatomy. Any custom
+   * renderer MUST render {@link SmithersNodeHandles} or its edges detach.
+   */
+  nodeTypes?: NodeTypes;
 };
 
-function WorkflowGraphImpl({ spec, className, style }: WorkflowGraphProps) {
+function WorkflowGraphImpl({ spec, className, style, nodeTypes: nodeTypesProp }: WorkflowGraphProps) {
   const { nodes, edges } = useMemo(() => workflowToFlow(spec), [spec]);
+  const nodeTypes = useMemo<NodeTypes>(
+    () => (nodeTypesProp ? { ...defaultNodeTypes, ...nodeTypesProp } : defaultNodeTypes),
+    [nodeTypesProp],
+  );
   const colorMode = useSyncExternalStore<ResolvedTheme>(subscribeTheme, resolveTheme, () => "light");
   return (
     <div
