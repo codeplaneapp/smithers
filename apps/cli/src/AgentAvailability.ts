@@ -1,7 +1,7 @@
 import type { AgentAvailabilityStatus } from "./AgentAvailabilityStatus.ts";
 
 export type AgentAvailability = {
-    id: "claude" | "codex" | "openrouter" | "antigravity" | "pi" | "opencode" | "openclaw" | "pool" | "kimi" | "amp" | "vibe" | "hermes";
+    id: "claude" | "codex" | "openrouter" | "antigravity" | "pi" | "omp" | "opencode" | "openclaw" | "pool" | "kimi" | "amp" | "vibe" | "hermes";
     displayName: string;
     binary: string;
     deprecated?: boolean;

@@ -9,6 +9,7 @@ import { createKimiCapabilityRegistry } from "../KimiAgent.js";
 import { createOpenClawCapabilityRegistry } from "../OpenClawAgent.js";
 import { createOpenCodeCapabilityRegistry } from "../OpenCodeAgent.js";
 import { createPiCapabilityRegistry } from "../PiAgent.js";
+import { createOmpCapabilityRegistry } from "../OmpAgent.js";
 import { createPoolCapabilityRegistry } from "../PoolAgent.js";
 import { createVibeCapabilityRegistry } from "../VibeAgent.js";
 import { getCliAgentSurfaceManifestEntry } from "../cli-surface/index.js";
@@ -65,6 +66,7 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
         binary: "pi",
         buildRegistry: () => createPiCapabilityRegistry(),
     },
+    { id: "omp", binary: "omp", buildRegistry: () => createOmpCapabilityRegistry() },
     {
         id: "pool",
         binary: "pool",

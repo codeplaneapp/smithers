@@ -142,6 +142,20 @@ const DETECTORS = [
         setupHint: "Install and authenticate the `pi` CLI.",
     },
     {
+        id: "omp",
+        displayName: "Oh My Pi",
+        binary: "omp",
+        authSignals: (homeDir, env) => [join(homeDir, ".omp"), ...(env.OMP_API_KEY ? ["OMP_API_KEY"] : [])],
+        apiKeys: ["OMP_API_KEY"],
+        availabilityProbe: (_homeDir, env) => {
+            const status = runProbeCommand("omp", ["--version"], env);
+            return status.status === 0 && /omp\//i.test(status.output)
+                ? passProbe("OMP CLI is installed and executable")
+                : failProbe(status.output || "OMP version probe failed");
+        },
+        setupHint: "Install Oh My Pi and configure a provider in OMP, or set OMP_API_KEY.",
+    },
+    {
         id: "kimi",
         displayName: "Kimi",
         binary: "kimi",
@@ -385,6 +399,10 @@ const CONSTRUCTORS = {
     pi: {
         importName: "PiAgent",
         expr: `new SmithersPiAgent({ provider: "openai", model: "${SOTA_SLOTS.codex}" })`,
+    },
+    omp: {
+        importName: "OmpAgent",
+        expr: `new SmithersOmpAgent({ model: "${SOTA_SLOTS.codex}" })`,
     },
     kimi: {
         importName: "KimiAgent",

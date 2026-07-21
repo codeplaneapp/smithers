@@ -264,6 +264,7 @@ describe("smithers agents capabilities", () => {
             "opencode",
             "openclaw",
             "pi",
+            "omp",
             "pool",
             "vibe",
         ]);

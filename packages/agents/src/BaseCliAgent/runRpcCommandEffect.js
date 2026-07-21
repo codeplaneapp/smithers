@@ -246,6 +246,7 @@ export function runRpcCommandEffect(command, args, options) {
             const event = parsed;
             void Promise.resolve(onJsonEvent?.(event)).catch(() => undefined);
             const type = event.type;
+            if (command === "omp" && type === "ready") sendPrompt();
             if (type === "response" && event.command === "prompt" && event.success === false) {
                 const errorMessage = typeof event.error === "string" ? event.error : "PI RPC prompt failed";
                 promptResponseError = errorMessage;
@@ -272,7 +273,7 @@ export function runRpcCommandEffect(command, args, options) {
             if (event.usage) {
                 extractedUsage = event.usage;
             }
-            if (type === "turn_end") {
+            if (type === "turn_end" || type === "agent_end" || type === "prompt_result") {
                 const message = event.message;
                 if (message?.role === "assistant") {
                     finalMessage = event.message ?? finalMessage;
@@ -371,11 +372,24 @@ export function runRpcCommandEffect(command, args, options) {
             finalize(text ?? "", finalMessage ?? text ?? "");
         });
         const promptPayload = { id: randomUUID(), type: "prompt", message: prompt };
+        const statePayload = { id: randomUUID(), type: "get_state" };
+        let ompStarted = command === "omp";
+        const sendPrompt = () => {
+            if (!child.stdin || !ompStarted) return;
+            child.stdin.write(`${JSON.stringify(statePayload)}\n`, () => { });
+            child.stdin.write(`${JSON.stringify(promptPayload)}\n`, () => { });
+            ompStarted = false;
+        };
         if (!child.stdin) {
             handleError(makeAgentCliError("Child process stdin is not available; cannot send prompt payload."));
             return;
         }
-        child.stdin.write(`${JSON.stringify(promptPayload)}\n`, () => { });
+        if (command === "omp") {
+            // OMP v17 emits a ready record before accepting commands.
+            // The line handler below sends the correlated state/prompt pair.
+        } else {
+            child.stdin.write(`${JSON.stringify(promptPayload)}\n`, () => { });
+        }
         return Effect.sync(() => {
             try {
                 rl.close();

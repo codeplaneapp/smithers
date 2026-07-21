@@ -9,5 +9,6 @@ export type CliAgentCapabilityAdapterId =
   | "opencode"
   | "openclaw"
   | "pi"
+  | "omp"
   | "pool"
   | "vibe";
