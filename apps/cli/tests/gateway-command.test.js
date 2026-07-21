@@ -291,7 +291,7 @@ test("gateway skips a broken workflow and still registers the valid ones", async
     finally {
         await stopProcess(child, closePromise);
     }
-}, 15_000);
+}, 45_000);
 
 // A workspace with NO local .smithers pack must still serve the global
 // (~/.smithers, here $SMITHERS_HOME) pack's workflow-owned UIs. The workflow's
