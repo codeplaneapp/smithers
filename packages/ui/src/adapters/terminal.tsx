@@ -3,6 +3,7 @@ import { useEffect, useInsertionEffect, useRef, type ComponentProps } from "reac
 import type { IDisposable, ITheme, Terminal as XTerminal } from "@xterm/xterm";
 import { cn } from "../cn";
 import { useResolvedTheme } from "../internal/useResolvedTheme";
+import { observeReducedMotion, prefersReducedMotion } from "../styles";
 import { tokens as t } from "../tokens";
 import { xtermBaseCss } from "./xtermCss";
 
@@ -112,14 +113,6 @@ export type TerminalProps = Omit<ComponentProps<"div">, "onResize"> & {
 const DEFAULT_FONT_FAMILY =
   "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
-const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia(REDUCED_MOTION_QUERY).matches;
-}
-
 /** Inject the xterm base sheet + surface chrome once per document (browser only). */
 function injectTerminalStyles(): void {
   if (typeof document === "undefined") return;
@@ -206,6 +199,7 @@ export function Terminal({
     let resizeObserver: ResizeObserver | null = null;
     let dataDisposable: IDisposable | null = null;
     let streamTeardown: (() => void) | void;
+    let motionTeardown: (() => void) | null = null;
 
     async function mount() {
       const [{ Terminal: XtermTerminal }, { FitAddon }] = await Promise.all([
@@ -232,6 +226,10 @@ export function Terminal({
         scrollback,
       });
       terminalRef.current = term;
+      const blinkTerm = term;
+      motionTeardown = observeReducedMotion((reduced) => {
+        blinkTerm.options.cursorBlink = cursorBlink && !reduced;
+      });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.open(host);
@@ -271,6 +269,7 @@ export function Terminal({
       // unconditionally, whatever stage setup reached.
       ac.abort();
       if (typeof streamTeardown === "function") streamTeardown();
+      motionTeardown?.();
       resizeObserver?.disconnect();
       dataDisposable?.dispose();
       if (terminalRef.current === term) terminalRef.current = null;

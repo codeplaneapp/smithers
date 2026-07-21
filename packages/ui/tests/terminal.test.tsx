@@ -158,6 +158,46 @@ describe("<Terminal> headless rendering", () => {
     const ready = await waitFor(() => term);
     expect(ready.options.cursorBlink).toBe(false);
   });
+
+  test("follows reduced-motion preference changes while mounted", async () => {
+    const listeners = new Set<(event: { matches: boolean }) => void>();
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener(_type: string, listener: (event: { matches: boolean }) => void) {
+        listeners.add(listener);
+      },
+      removeEventListener(_type: string, listener: (event: { matches: boolean }) => void) {
+        listeners.delete(listener);
+      },
+      dispatchEvent() { return true; },
+    })) as typeof window.matchMedia;
+    let term: XTerminal | null = null;
+    await render(<Terminal cursorBlink onReady={(next) => (term = next)} />);
+    const ready = await waitFor(() => term);
+    expect(ready.options.cursorBlink).toBe(true);
+    expect(listeners.size).toBeGreaterThan(0);
+
+    await act(async () => {
+      for (const listener of listeners) listener({ matches: true });
+      await Promise.resolve();
+    });
+    expect(ready.options.cursorBlink).toBe(false);
+
+    await act(async () => {
+      for (const listener of listeners) listener({ matches: false });
+      await Promise.resolve();
+    });
+    expect(ready.options.cursorBlink).toBe(true);
+
+    const mounted = root!;
+    await act(async () => mounted.unmount());
+    root = undefined;
+    expect(listeners.size).toBe(0);
+  });
 });
 
 describe("<Terminal> store independence", () => {
