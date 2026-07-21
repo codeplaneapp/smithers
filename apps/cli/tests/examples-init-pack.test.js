@@ -42,6 +42,13 @@ test("the archive documents a workflow-specific copy and graph command for every
   }
 });
 
+test("the review example uses the shared tinted primary button", () => {
+  const source = readFileSync(resolve(ROOT, "examples/ui/review.tsx"), "utf8");
+  expect(source).toContain('import { Button } from "smithers-orchestrator/ui";');
+  expect(source).not.toContain('className="button primary"');
+  expect(source.match(/<Button[^>]+data-testid="review-launch(?:-empty)?"/g)).toHaveLength(2);
+});
+
 /**
  * A temp repo with a REAL symlink to this checkout's examples/ tree (not a
  * copy — the transitive closure asserted above lives at examples/agents,

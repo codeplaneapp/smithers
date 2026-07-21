@@ -9,6 +9,7 @@ import {
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { Button } from "smithers-orchestrator/ui";
 
 const WORKFLOW_KEY = "review";
 const MAX_REVIEWERS = 6;
@@ -143,7 +144,6 @@ const styles = [
   ".prompt { flex:1; max-width:420px; height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); }",
   ".button { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); cursor:pointer; font-weight:500; }",
   ".button:hover { background:var(--card); }",
-  ".button.primary { background:var(--primary); color:#fff; border-color:var(--primary); }",
   ".button.danger { color:var(--err); }",
   ".button:disabled { opacity:0.4; cursor:not-allowed; }",
   ".main { display:grid; grid-template-columns:1fr 280px; flex:1; overflow:hidden; }",
@@ -321,7 +321,7 @@ function App() {
           {activeRun && !runTerminal ? (
             <button className="button danger" data-testid="review-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
           ) : null}
-          <button className="button primary" data-testid="review-launch" onClick={() => void launch()} disabled={busy}>Launch Review</button>
+          <Button data-testid="review-launch" onClick={() => void launch()} disabled={busy}>Launch Review</Button>
         </div>
       </header>
 
@@ -432,9 +432,9 @@ function App() {
                 synthesized by a moderator into one verdict. Each panelist reports an approve/deny verdict,
                 written feedback, and issues by severity; the verdict above reflects the moderator's synthesis.
               </div>
-              <button className="button primary" data-testid="review-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <Button data-testid="review-launch-empty" onClick={() => void launch()} disabled={busy}>
                 Launch Review
-              </button>
+              </Button>
             </div>
           )}
         </div>
