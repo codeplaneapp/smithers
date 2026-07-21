@@ -6,9 +6,11 @@ const source = readFileSync(join(import.meta.dir, "../ui/review.tsx"), "utf8");
 
 describe("review UI composition", () => {
   test("uses the shared UI and gateway surfaces without bespoke styles", () => {
-    for (const component of ["SmithersUiStyles", "Button", "Card", "Badge", "StatusPill", "Tabs", "SectionHeader", "EmptyState", "RunTree", "RunEventLog", "NodeOutputView"]) {
+    for (const component of ["WorkflowUiShell", "SmithersUiStyles", "Button", "Card", "Badge", "StatusPill", "Tabs", "SectionHeader", "EmptyState", "RunTree", "RunEventLog", "NodeOutputView"]) {
       expect(source).toContain(component);
     }
+    expect(source).toContain("<WorkflowUiShell");
+    expect(source).not.toContain("<main");
     expect(source).not.toContain("<style");
     expect(source).not.toContain("style={{");
     expect(source).not.toMatch(/#[0-9a-fA-F]{3,8}/);
@@ -22,6 +24,6 @@ describe("review UI composition", () => {
       "smithers-orchestrator/gateway-ui",
       "smithers-orchestrator/ui",
     ]);
-    expect(source).toContain('aria-label="Review workflow dashboard"');
+    expect(source).toContain('testId="review-ui"');
   });
 });

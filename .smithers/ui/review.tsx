@@ -8,7 +8,7 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
-import { NodeOutputView, RunEventLog, RunTree } from "smithers-orchestrator/gateway-ui";
+import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
 import {
   Badge,
   Button,
@@ -280,15 +280,19 @@ export function ReviewApp() {
     }
   }
 
-  return <main aria-label="Review workflow dashboard" data-testid="review-ui">
-    <SmithersUiStyles />
-    <SectionHeader title="Review" eyebrow={activeRunId ? shortRunId(activeRunId) : "No run"} actions={<>
+  return <WorkflowUiShell
+    title="Review"
+    meta={activeRunId ? shortRunId(activeRunId) : "No run"}
+    actions={<>
       {activeRun ? <StatusPill data-testid="review-status" status={activeRun.status ?? "idle"} /> : null}
       <Input data-testid="review-prompt" value={prompt} onChange={(e) => setPrompt(e.currentTarget.value)} placeholder="What should be reviewed?" />
       <Button variant="outline" data-testid="review-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</Button>
       {activeRun && !runTerminal ? <Button variant="destructive" data-testid="review-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</Button> : null}
       <Button data-testid="review-launch" onClick={() => void launch()} disabled={busy}>Launch Review</Button>
-    </>} />
+    </>}
+    testId="review-ui"
+  >
+    <SmithersUiStyles />
     {hasContent ? <>
       <Card data-testid="review-verdict"><CardHeader><CardTitle>{verdictState === "pending" ? "Awaiting synthesized verdict" : verdictState === "missing" ? "No synthesized verdict — the moderator produced none" : verdictApproved ? "Approved — synthesized verdict" : "Blocked — synthesized verdict"}</CardTitle><StatusPill status={verdictState === "approved" ? "finished" : verdictState === "blocked" || verdictState === "missing" ? "failed" : "waiting"} /></CardHeader><CardContent><CardDescription>{approvedCount} of {reviews.length} panelists approved{verdictState === "pending" ? " · awaiting moderator synthesis" : verdictState === "missing" ? " · moderator produced no verdict" : " · moderator synthesized"}</CardDescription>{synthesis?.feedback ? <p data-testid="review-synthesis-feedback">{synthesis.feedback}</p> : null}{SEVERITIES.map((s) => <Badge key={s} variant={s === "critical" ? "destructive" : s === "major" || s === "minor" ? "warning" : "muted"}>{s} {sevCounts[s]}</Badge>)}</CardContent></Card>
       <SectionHeader title={`Panelists (${reviews.length})`} />
@@ -298,7 +302,7 @@ export function ReviewApp() {
     </> : <EmptyState data-testid="review-empty" title={activeRunId ? "Waiting for the review panel…" : "No review runs yet."} description="Launch a review to have code changes examined by panelists and synthesized by a moderator." action={<Button data-testid="review-launch-empty" onClick={() => void launch()} disabled={busy}>Launch Review</Button>} />}
     <SectionHeader title="Run activity" eyebrow={`${eventCount} events${nodeQueries.some((q) => q.loading) || moderator.loading ? " · refreshing…" : ""}`} />
     <Tabs defaultValue="runs"><TabsList><TabsTrigger value="runs" count={reviewRuns.length}>Recent reviews</TabsTrigger><TabsTrigger value="tree">Run tree</TabsTrigger><TabsTrigger value="events" count={eventCount}>Events</TabsTrigger></TabsList><TabsContent value="runs">{reviewRuns.map((r) => <Button key={r.runId} variant={r.runId === activeRunId ? "default" : "ghost"} data-testid={`review-run-${r.runId}`} onClick={() => setSelectedRunId(r.runId)}>{shortRunId(r.runId)} <StatusPill status={r.status} />{r.runId === activeRunId && reviews.length > 0 ? `${approvedCount}/${reviews.length} approved` : ""}</Button>)}{reviewRuns.length === 0 ? <EmptyState title="No runs yet." /> : null}</TabsContent><TabsContent value="tree"><RunTree runId={activeRunId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} /><NodeOutputView runId={activeRunId} nodeId={selectedNodeId} /></TabsContent><TabsContent value="events"><RunEventLog runId={activeRunId} /></TabsContent></Tabs>
-  </main>;
+  </WorkflowUiShell>;
 }
 
 // Guard the mount so this module can be imported by unit tests (which exercise

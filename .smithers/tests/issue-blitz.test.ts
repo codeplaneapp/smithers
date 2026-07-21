@@ -71,6 +71,9 @@ describe("issue-blitz safety contract", () => {
     expect(uiSource).toContain('iteration={iteration.get("commit-all") ?? 0}');
     expect(uiSource).toContain("iteration={selectedNodeId ? iteration.get(selectedNodeId) : undefined}");
     expect(uiSource).toContain("SmithersUiStyles");
+    expect(uiSource).toContain("WorkflowUiShell");
+    expect(uiSource).toContain("<WorkflowUiShell");
+    expect(uiSource).not.toContain("<main");
     expect(uiSource).toContain('typeof document !== "undefined" && document.getElementById("root")');
     expect(uiSource).not.toContain("<style");
     expect(uiSource).not.toContain("style={{");
@@ -83,7 +86,7 @@ describe("issue-blitz safety contract", () => {
       "smithers-orchestrator/ui",
       "../lib/buildIssueBlitzNodeState",
     ]);
-    expect(uiSource).toContain('aria-label="Issue Blitz workflow dashboard"');
+    expect(uiSource).toContain('testId="issue-blitz-ui"');
   });
 
   test("renders isolated lanes, exact-head gates, approval, and publication in causal order", async () => {

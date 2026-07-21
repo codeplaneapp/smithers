@@ -6,12 +6,13 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
 } from "smithers-orchestrator/gateway-react";
-import { NodeOutputView, RunEventLog, RunTree } from "smithers-orchestrator/gateway-ui";
+import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
 import {
   Badge,
   Button,
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
   EmptyState,
@@ -87,12 +88,14 @@ export function IssueBlitzApp() {
     ["review (fable)", st("fable-review")], ["human approval", st("approve-push")], ["exact-SHA push", st("push")],
   ];
 
-  return <main aria-label="Issue Blitz workflow dashboard" data-testid="issue-blitz-ui">
+  return <WorkflowUiShell
+    title="⚡ Issue Blitz"
+    meta={runId?.slice(0, 8) ?? "--"}
+    actions={<><StatusPill data-testid="issue-blitz-run-status" status={runStatus} /><Button variant="destructive" onClick={() => runId && cancelRun({ runId })}>Cancel run</Button></>}
+    testId="issue-blitz-ui"
+  >
     <SmithersUiStyles />
-    <SectionHeader title="⚡ Issue Blitz" eyebrow={runId?.slice(0, 8) ?? "--"} actions={<><StatusPill data-testid="issue-blitz-run-status" status={runStatus} /><Button variant="destructive" onClick={() => runId && cancelRun({ runId })}>Cancel run</Button></>}>
-      {doneItems}/{ITEMS.length} isolated lanes settled · exact candidate review → serial integration → sandboxed gate → human-approved exact-SHA push
-    </SectionHeader>
-    <Card><CardHeader><CardTitle>Delivery stages</CardTitle></CardHeader><CardContent>{stages.map(([label, state]) => <StatusPill key={label} status={statusForNode(state)} label={label} />)}<StatusPill data-testid="issue-blitz-isolated-status" status={isolatedStatus} label={`isolated worktrees ×${ITEMS.length}`} /></CardContent></Card>
+    <Card><CardHeader><CardTitle>Delivery stages</CardTitle></CardHeader><CardContent><CardDescription>{doneItems}/{ITEMS.length} isolated lanes settled · exact candidate review → serial integration → sandboxed gate → human-approved exact-SHA push</CardDescription>{stages.map(([label, state]) => <StatusPill key={label} status={statusForNode(state)} label={label} />)}<StatusPill data-testid="issue-blitz-isolated-status" status={isolatedStatus} label={`isolated worktrees ×${ITEMS.length}`} /></CardContent></Card>
     <SectionHeader title="Isolated lanes" />
     <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Issues</TableHead><TableHead>Implementer</TableHead><TableHead>Plan</TableHead><TableHead>Implement</TableHead><TableHead>Snapshot</TableHead><TableHead>Exact review</TableHead><TableHead>Ready</TableHead><TableHead>Iter</TableHead></TableRow></TableHeader><TableBody>{ITEMS.map((item) => <TableRow key={item.key}><TableCell><strong>{item.key}</strong><br />{item.title}</TableCell><TableCell>{item.issues.map((number) => `#${number}`).join(" ")}</TableCell><TableCell><Badge variant={item.kind === "hard" ? "warning" : "default"}>{item.kind === "hard" ? "terra" : "luna"}</Badge></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:plan`))} label="plan" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:implement`))} label="impl" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:candidate`))} label="sha" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:review`))} label="review" /></TableCell><TableCell><StatusPill status={statusForNode(st(`${item.key}:ready`))} label="ready" /></TableCell><TableCell>{(iteration.get(`${item.key}:implement`) ?? 0) + 1}</TableCell></TableRow>)}</TableBody></Table>
     {terminal("commit-all") ? <SummaryCard title="Serialized integration" runId={runId} nodeId="commit-all" iteration={iteration.get("commit-all") ?? 0} state={st("commit-all")} /> : null}
@@ -101,7 +104,7 @@ export function IssueBlitzApp() {
     {terminal("approve-push") ? <SummaryCard title="Human publication decision" runId={runId} nodeId="approve-push" iteration={iteration.get("approve-push") ?? 0} state={st("approve-push")} /> : null}
     {terminal("push") ? <SummaryCard title="Exact-SHA publication" runId={runId} nodeId="push" iteration={iteration.get("push") ?? 0} state={st("push")} /> : null}
     <Tabs defaultValue="tree"><TabsList><TabsTrigger value="tree">Run tree</TabsTrigger><TabsTrigger value="events" count={(events ?? []).length}>Events</TabsTrigger></TabsList><TabsContent value="tree"><RunTree runId={runId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} /><NodeOutputView runId={runId} nodeId={selectedNodeId} iteration={selectedNodeId ? iteration.get(selectedNodeId) : undefined} /></TabsContent><TabsContent value="events">{runId ? <RunEventLog runId={runId} /> : <EmptyState title="Select a run." />}</TabsContent></Tabs>
-  </main>;
+  </WorkflowUiShell>;
 }
 
 // Keep this module importable by fixture and parser tests. The gateway-served
