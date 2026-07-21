@@ -1907,9 +1907,12 @@ and explain the code.
 | "Migrate this subsystem, but show me the plan first." | Run research and planning first, then pause on an approval gate. After approval, execute milestones in worktrees and merge only validated chunks. |
 | "Something went wrong in the run. What happened?" | Run `why`, inspect events and node output, summarize the blocker, propose options, and continue operating. Do not ask the human to debug from the terminal. |
 
-When the user gives a narrow one-shot request, Smithers may be unnecessary. But
-if the task has phases, risk, loops, approvals, third-party dependencies,
-parallel work, or a need to run while the human is away, use a workflow.
+Route a most-trivial edit that takes only a few turns directly. Route a clear,
+well-scoped single-agent task through `smithers oneshot`, which launches quickly
+in the background with a live chat and diff UI. Use a full workflow when the task
+has phases, risk, loops, approvals, third-party dependencies, parallel work, or a
+need to run while the human is away. Clarify ambiguous goals before launching
+either form.
 
 ## Context engineering
 
@@ -2433,7 +2436,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[101]:
+commands[102]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -2706,6 +2709,22 @@ commands[101]:
     flags[2]{name,short,type,default,desc}:
       agent,,enum,,claude-code|codex|antigravity|pi|kimi|amp
       cwd,,string,.,Working directory for the chat session
+  - name: oneshot
+    purpose: Run one well-scoped goal with a strong agent in the background, with optional review and a live UI
+    args[1]{name,type,required,desc}:
+      goal,string,false,Goal to complete; required unless using --status or a preference setter
+    flags[11]{name,short,type,default,desc}:
+      goal-file,,string,,Read a long goal from a file
+      model,,string,auto,Model slot or canonical model id
+      agent,,enum,,codex|kimi|claude-code|opencode
+      review,,enum,stored,Review preference for this run (on|off)
+      set-review,,enum,,Persist the review preference (on|off)
+      set-trivial,,enum,,Persist trivial-task routing (direct|oneshot)
+      status,,boolean,false,Print usable agents model chain and stored preferences as JSON
+      cwd,,string,.,Working directory for the task
+      detach,d,boolean,true,Run in the background; --detach false runs in the foreground
+      interactive,,boolean,false,Open the full-screen TUI monitor
+      open,,boolean,true,Open the run UI after launch
   - name: hijack
     purpose: Hand off the latest resumable agent session or Smithers-managed conversation
     args[1]{name,type,required,desc}:

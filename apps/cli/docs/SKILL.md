@@ -230,10 +230,10 @@ to *execute* the steps, not when they want prose to read and share.
   state (`smithers inspect`, `events`, `scores`), not memory, and render HTML —
   the `report-maker` skill covers the run-slideshow variant.
 
-## A workflow is a superset of a skill — author a workflow, not a skill
+## Reusable procedures belong in workflows
 
-**Default to Smithers, and when you capture something reusable, capture it as a
-workflow.** This is the single biggest leverage decision you make.
+When you capture something reusable, capture it as a workflow. A simple one-off
+task can use `smithers oneshot`; it does not need a new workflow file.
 
 A skill is *static instructions* — prose an agent reads and then has to execute
 by hand, every time, with no memory that it ran, no retries, no gates, no typed
@@ -244,13 +244,11 @@ resumes after a crash), **typed** (Zod-validated outputs instead of hope),
 workflows and components), and **optimizable** (see below). Everything a skill
 can say, a workflow can say *and then do*.
 
-So the rule:
+Use these rules:
 
-- **Almost always create a workflow. Almost never create a skill.** Anything you
-  would write down as "here's how we do X" is better captured as a workflow that
-  actually *does* X. This holds even when the thing is small, simple, or
-  one-task — a three-line `<Workflow>` with a single `<Task>` still beats a skill,
-  because it is runnable, durable, and improvable from day one.
+- **Simple one-off task means oneshot.** A clear goal that one agent can finish
+  in one context window belongs in `smithers oneshot`, with no workflow file to
+  author.
 - **Reusable ⇒ workflow.** If you'd reach for a skill because the procedure
   recurs, that recurrence is the strongest possible reason to make it a workflow:
   one source of truth you can run, version, eval, and optimize, instead of
@@ -638,18 +636,70 @@ smithers human cancel <request-id>                     # refuse, and the agent m
 
 ## When to use Smithers vs. just answering
 
-Default to Smithers. The bar for *not* using it is high, not the other way around.
+Use the lightest route that preserves the needed durability.
 
-- **Use it** — almost always — when order matters across steps, you need crash
-  recovery, a human must approve mid-run, different steps need different
-  models/tools, you need to loop until something is true, or the work is
-  **reusable** (anything you'd otherwise write down as a skill). Also when the
-  user wants the work to keep going while they're away. When in doubt, run a
-  workflow: even a small one is durable, typed, and improvable, and costs almost
-  nothing to author with `create-workflow`.
-- **Skip it** only for a genuine single prompt → single response, or a quick
-  one-off edit you can finish in this turn and will never repeat. The moment it
-  has a second step, or you'd want to do it again, it's a workflow.
+- Handle the most-trivial one-off edits directly by default.
+- Use `smithers oneshot` for clear, well-scoped work one strong agent can finish
+  in one context window.
+- Use a full workflow when order, retries, approvals, loops, multiple agents, or
+  reuse matter.
+
+## Simple tasks: smithers oneshot
+
+`smithers oneshot` is a built-in minimal workflow for one agent and one goal. It
+launches in the background without authoring a workflow file and provides a live
+UI with chat, diff, hijack, pause, and cancel controls.
+
+Route work in three tiers:
+
+1. For the most-trivial ask, such as one typo, rename, or small edit that takes
+   fewer than about 10 agent turns, do it directly. If the stored trivial
+   preference is `oneshot`, launch oneshot with `--model opus` or `--model terra`,
+   never sol.
+2. For a clear single-agent ask that fits in roughly 100k tokens but is more than
+   a tiny edit, run `smithers oneshot`. Prefer codex sol, then kimi, then claude
+   fable or opus. Opus or terra is fine for the easy end of this tier.
+3. For multi-stage, approval-gated, long-horizon, or reusable work, build and run
+   a real Smithers workflow.
+
+If the goal or acceptance criteria are ambiguous, ask clarifying questions before
+launching anything. Infer the tier from the prompt, but honor these explicit
+overrides: "oneshot" forces oneshot, "oneshot with review" adds `--review on`,
+and "oneshot without review" adds `--review off`.
+
+Call `smithers oneshot --status` before first use. If it reports no usable agent
+among claude, codex, kimi, and opencode, do not offer or attempt oneshot. Use the
+normal direct or workflow route instead.
+
+When `announced` is false, tell the user:
+
+> Smithers has a new feature: `smithers oneshot`. Smithers workflows are a
+> powerful way to get work done, but a lot of tasks can be done more simply.
+> Oneshot is a built-in minimal workflow that quickly and efficiently one-shots
+> an ask with a single strong agent, in the background, with a live UI for chat,
+> diff, hijack, and pause. There is nothing to author, so launching is fast. I
+> will infer complexity from each prompt, but you can always say "oneshot",
+> "oneshot with review", or "oneshot without review". To customize it, create
+> `.smithers/workflows/oneshot.tsx`; Smithers will run yours instead.
+
+Ask both preferences and state the recommendations:
+
+1. Should oneshot add one review-and-polish round, which is higher quality but
+   slower, or only implement? Recommend review on.
+2. For the most-trivial asks, should you do them directly or still launch
+   oneshot? Recommend direct.
+
+Save both answers with `smithers oneshot --set-review <on|off>` and `smithers
+oneshot --set-trivial <direct|oneshot>`. Tell the user the choices live in the
+global Smithers config and can change anytime.
+
+A workspace can override the built-in workflow with
+`.smithers/workflows/oneshot.tsx`. The CLI passes goal, review, and model input
+fields to that workflow and uses `.smithers/ui/oneshot.tsx` when present.
+
+Keep the orchestrator context lean. Do not read the worker's full diff or logs.
+Check progress with one `smithers chat <runId>` call, or the
+`get_chat_transcript` MCP tool, and give the user the run UI URL.
 
 ## Examples: copy one and edit it
 
