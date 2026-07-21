@@ -5,6 +5,15 @@ import { oneshotCodexPaused } from "./oneshotCodexPaused.js";
 const SLOTS = Object.freeze({ sol: SOTA_SLOTS.codexSol, terra: SOTA_SLOTS.codexTerra, luna: SOTA_SLOTS.codex, kimi: SOTA_SLOTS.kimi, fable: SOTA_SLOTS.fable, opus: SOTA_SLOTS.opus, sonnet: SOTA_SLOTS.sonnet });
 const ALLOWED = ["claude", "codex", "kimi", "opencode"];
 
+/** @param {string} model @param {Set<string>} usable */
+function engineForCanonicalModel(model, usable) {
+    if (model.startsWith("gpt-") || model.startsWith("o1") || model.startsWith("o3") || model.startsWith("o4")) return "codex";
+    if (model.startsWith("kimi-")) return "kimi";
+    if (model.startsWith("anthropic/")) return "opencode";
+    if (model.startsWith("claude-")) return usable.has("claude") ? "claude" : "opencode";
+    return undefined;
+}
+
 /**
  * @param {import("../AgentAvailability.ts").AgentAvailability[]} detections
  * @param {{ model?: string; agent?: string; env?: NodeJS.ProcessEnv }} [options]
@@ -20,6 +29,8 @@ export function resolveOneshotChain(detections, options = {}) {
         if ([SOTA_SLOTS.codexSol, SOTA_SLOTS.codexTerra, SOTA_SLOTS.codex].includes(requestedModel)) requestedEngine = "codex";
         else if (requestedModel === SOTA_SLOTS.kimi) requestedEngine = "kimi";
         else if ([SOTA_SLOTS.fable, SOTA_SLOTS.opus, SOTA_SLOTS.sonnet].includes(requestedModel)) requestedEngine = usable.has("claude") ? "claude" : "opencode";
+        else requestedEngine = engineForCanonicalModel(requestedModel, usable);
+        if (!requestedEngine) throw new SmithersError("CLI_MODEL_UNSUPPORTED", `Cannot infer an agent engine for model "${requestedModel}". Pass --agent with this canonical model id.`);
     }
     if (requestedEngine && !usable.has(requestedEngine)) throw new SmithersError("NO_USABLE_AGENTS", `Requested oneshot agent "${options.agent ?? requestedEngine}" is unavailable.`);
     const claudeEngine = usable.has("claude") ? "claude" : usable.has("opencode") ? "opencode" : null;

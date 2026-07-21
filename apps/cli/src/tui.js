@@ -13,7 +13,6 @@ import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { formatStreamText } from "./tui-format.js";
 import { fuzzySelect } from "./fuzzy-select.js";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { cliWorkspace } from "./cliWorkspace.js";
 import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
@@ -1838,6 +1837,7 @@ export function resolveInteractiveAnnotations(options) {
  * @param {{ ok: (...args: any[]) => any; error?: (...args: any[]) => any; options?: Record<string, any> }} c
  * @param {(opts: { code: string; message: string; exitCode?: number; [key: string]: unknown }) => any} fail
  * @param {{
+ *   cwd?: string;
  *   preselect?: { entryFile: string; id?: string; displayName?: string; description?: string };
  *   suppliedInput?: Record<string, unknown>;
  *   buildDetachedArgs?: (input: { indexPath: string; workflow: { entryFile: string }; runId: string; inputs: Record<string, unknown>; options: Record<string, unknown> }) => string[];
@@ -1845,6 +1845,7 @@ export function resolveInteractiveAnnotations(options) {
  * }} [opts]
  */
 export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok({ ran: false, reason: opts.code }), opts = {}) {
+    const launchCwd = opts.cwd ?? process.cwd();
     intro(`${pc.bgCyan(pc.black(" smithers "))} ${pc.dim("interactive")}`);
 
     // Option-compatibility audit: reject `up` options that are meaningless with
@@ -1879,7 +1880,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     // the run-row wait — the launcher would then declare the OLD run "started"
     // and monitor it. Mirrors `up`'s own RUN_EXISTS guard (index.js).
     const explicitRunId = (c.options && typeof c.options.runId === "string" && c.options.runId) || undefined;
-    if (explicitRunId && (await workspaceRunExists(explicitRunId, { cwd: process.cwd(), backend }))) {
+    if (explicitRunId && (await workspaceRunExists(explicitRunId, { cwd: launchCwd, backend }))) {
         return fail({
             code: "RUN_EXISTS",
             message:
@@ -1891,7 +1892,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
 
     let workflow = opts.preselect ?? null;
     if (!workflow) {
-        const workflows = discoverWorkflows().filter((w) => !w.system);
+        const workflows = discoverWorkflows(launchCwd).filter((w) => !w.system);
         if (workflows.length === 0) {
             log.warn("No workflows found. Run `smithers init` to install the workflow pack.");
             return c.ok({ ran: false, reason: "no-workflows" });
@@ -1962,8 +1963,8 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     // Resolve the same managed/default or explicit override path as `up -d`,
     // then hand the exact absolute file to the child for run-config recording.
     const logDir = c.options && typeof c.options.logDir === "string" ? c.options.logDir : undefined;
-    await reapDetachedRunLogs({ cwd: cliWorkspace.cwd() });
-    const logFile = resolveDetachedRunLogFile(runId, { logDir, cwd: cliWorkspace.cwd() });
+    await reapDetachedRunLogs({ cwd: launchCwd });
+    const logFile = resolveDetachedRunLogFile(runId, { logDir, cwd: launchCwd });
     mkdirSync(dirname(logFile), { recursive: true });
     let child;
     // Taken just before spawn: the run row the child inserts can only carry a
@@ -1981,6 +1982,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
                 ? opts.buildDetachedArgs({ indexPath, workflow, runId, inputs, options: childOptions })
                 : buildDetachedUpArgs(indexPath, workflow.entryFile, runId, inputs, childOptions);
             child = spawn("bun", upArgs, {
+                cwd: launchCwd,
                 detached: true,
                 stdio: ["ignore", fd, fd],
                 env: { ...process.env, ...opts.childEnv?.({ runId, logFile }), [DETACHED_RUN_LOG_FILE_ENV]: logFile },
@@ -2010,7 +2012,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     let db;
     try {
         try {
-            const dbResult = await waitForOpenDbOrChild(process.cwd(), { timeoutMs: 20_000, intervalMs: 150, backend }, childFailure);
+            const dbResult = await waitForOpenDbOrChild(launchCwd, { timeoutMs: 20_000, intervalMs: 150, backend }, childFailure);
             if (dbResult.error) {
                 throw dbResult.error;
             }
@@ -2142,7 +2144,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
                 runId,
                 workflowId: workflow.id,
                 entryFile: workflow.entryFile,
-                uiExists: customUiExists(workflow.id),
+                uiExists: workflow.id === "oneshot" || customUiExists(workflow.id, launchCwd),
             })) {
                 log.message(pc.dim("  ") + line);
             }

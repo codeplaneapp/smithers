@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildOneshotWorkflow } from "../src/oneshot/buildOneshotWorkflow.js";
+import { buildOneshotChildArgs } from "../src/oneshot/buildOneshotChildArgs.js";
 import { loadOneshotConfig } from "../src/oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "../src/oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "../src/oneshot/resolveOneshotChain.js";
+import { rewriteOneshotBooleanValues } from "../src/oneshot/rewriteOneshotBooleanValues.js";
 import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
@@ -53,6 +55,39 @@ describe("oneshot model chain", () => {
         expect(resolveOneshotChain(all, { model: "terra", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "codex", model: "gpt-5.6-terra" });
         expect(resolveOneshotChain(all, { model: "opus", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "claude", model: "claude-opus-4-8" });
     });
+    test("maps canonical model ids or requires an explicit engine", () => {
+        expect(resolveOneshotChain(all, { model: "gpt-future-codex", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "codex", model: "gpt-future-codex" });
+        expect(resolveOneshotChain(all, { model: "claude-future", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "claude", model: "claude-future" });
+        expect(() => resolveOneshotChain(all, { model: "future-model", env: { SMITHERS_CODEX_PAUSED: "0" } })).toThrow("Pass --agent");
+        expect(resolveOneshotChain(all, { model: "future-model", agent: "kimi", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "kimi", model: "future-model" });
+    });
+});
+
+test("detached child re-invokes oneshot and forwards launch flags", () => {
+    const cliPath = join("root", "cli", "index.js");
+    const workspace = join("root", "workspace");
+    const goalFile = join(workspace, "goal.txt");
+    expect(buildOneshotChildArgs({
+        cliPath,
+        goal: "focused goal",
+        goalFile,
+        cwd: workspace,
+        review: "on",
+        model: "terra",
+        agent: "codex",
+        open: true,
+    })).toEqual([
+        cliPath, "oneshot", "--goal-file", goalFile,
+        "--cwd", workspace, "--detach", "false", "--open", "true",
+        "--review", "on", "--model", "terra", "--agent", "codex",
+    ]);
+});
+
+test("oneshot accepts explicit boolean values for default-true flags", () => {
+    expect(rewriteOneshotBooleanValues(["oneshot", "goal", "--detach", "false", "--open=true"]))
+        .toEqual(["oneshot", "goal", "--no-detach", "--open"]);
+    expect(rewriteOneshotBooleanValues(["oneshot", "goal", "-d", "false", "--open", "false"]))
+        .toEqual(["oneshot", "goal", "--no-detach", "--no-open"]);
 });
 
 describe("oneshot workflow", () => {
@@ -88,3 +123,36 @@ test("oneshot UI bundles for the browser", async () => {
     expect(body).toContain("Oneshot");
     expect(body.length).toBeGreaterThan(1000);
 }, 60_000);
+
+test("workspace override receives goal, review, and model input", () => {
+    const cwd = temp("smithers-oneshot-override-");
+    const workflowDir = join(cwd, ".smithers", "workflows");
+    const binDir = join(cwd, "bin");
+    mkdirSync(workflowDir, { recursive: true });
+    mkdirSync(binDir, { recursive: true });
+    const fakeCodex = join(binDir, process.platform === "win32" ? "codex.cmd" : "codex");
+    writeFileSync(fakeCodex, process.platform === "win32" ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
+    chmodSync(fakeCodex, 0o755);
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ type: "module", dependencies: { "smithers-orchestrator": "workspace:*", zod: "*" } }));
+    const receipt = join(cwd, "override-input.json");
+    writeFileSync(join(workflowDir, "oneshot.tsx"), `/** @jsxImportSource smithers-orchestrator */
+import { createSmithers } from "${pathToFileURL(join(repoRoot, "packages/smithers/src/index.js")).href}";
+import { z } from "${pathToFileURL(join(repoRoot, "node_modules/zod/index.js")).href}";
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: z.object({ goal: z.string(), review: z.enum(["on", "off"]), model: z.string() }),
+  receipt: z.object({ ok: z.boolean() }),
+});
+export default smithers((ctx) => <Workflow name="custom-oneshot"><Task id="record" output={outputs.receipt}>{async () => {
+  await Bun.write(${JSON.stringify(receipt)}, JSON.stringify(ctx.input));
+  return { ok: true };
+}}</Task></Workflow>);
+`);
+    const result = spawnSync(process.execPath, ["run", cliEntry, "oneshot", "use the override", "--detach", "false", "--open", "false", "--review", "on", "--model", "terra", "--format", "json"], {
+        cwd,
+        env: { ...process.env, SMITHERS_HOME: join(cwd, "home"), SMITHERS_NO_SKILL_REFRESH: "1", OPENAI_API_KEY: "test", PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` },
+        encoding: "utf8",
+    });
+    if (result.status !== 0) throw new Error(`override run exited ${result.status}\nstdout=${result.stdout}\nstderr=${result.stderr}`);
+    if (!existsSync(receipt)) throw new Error(`override produced no receipt\nstdout=${result.stdout}\nstderr=${result.stderr}`);
+    expect(JSON.parse(readFileSync(receipt, "utf8"))).toEqual({ goal: "use the override", review: "on", model: "terra" });
+}, 30_000);

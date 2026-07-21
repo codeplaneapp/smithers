@@ -56,9 +56,11 @@ import { diagnoseRunEffect, diagnosisCtaCommands, renderWhyDiagnosisHuman, } fro
 import { buildRunStatusSummary, renderRunStatusHuman, runStatusCtaCommands, } from "./run-status.js";
 import { detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
 import { buildOneshotWorkflow } from "./oneshot/buildOneshotWorkflow.js";
+import { buildOneshotChildArgs } from "./oneshot/buildOneshotChildArgs.js";
 import { loadOneshotConfig } from "./oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
+import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
 import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
 import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
 import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
@@ -5227,6 +5229,31 @@ const CLI_DESCRIPTION = "Durable AI workflow orchestrator. Run, monitor, and man
     "--json is accepted on every command as shorthand for `--format json`; after events, timeline, tree, diff, output, rewind, snapshots, and restore it is command-scoped and emits that command's raw JSON payload instead.";
 const ONESHOT_UI_ENTRY = fileURLToPath(new URL("./oneshot/oneshot-ui.tsx", import.meta.url));
 
+/** @param {string} runId @param {string} cwd */
+function openOneshotUi(runId, cwd) {
+    const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", runId, "--workflow", "oneshot"], {
+        cwd,
+        detached: true,
+        stdio: "ignore",
+        env: process.env,
+    });
+    opener.unref();
+}
+
+/** @param {string} runId */
+function oneshotCta(runId) {
+    return {
+        description: "Operate the oneshot run:",
+        commands: [
+            { command: `ui ${runId}`, description: "Open the live oneshot UI" },
+            { command: `chat ${runId}`, description: "Read the agent transcript" },
+            { command: `hijack ${runId}`, description: "Take over the agent session" },
+            { command: `pause ${runId}`, description: "Pause the run" },
+            { command: `cancel ${runId}`, description: "Cancel the run" },
+        ],
+    };
+}
+
 /** @param {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} discovered */
 function workflowGatewayRegistration(discovered) {
     if (discovered.id !== "oneshot") return { system: discovered.system, entryFile: discovered.entryFile };
@@ -5318,7 +5345,12 @@ const cli = Cli.create({
         const usable = relevant.filter((item) => item.usable && !item.deprecated);
         if (c.options.status) {
             let chain = [];
-            try { chain = resolveOneshotChain(detections, { model: c.options.model, agent: c.options.agent }); } catch { }
+            try { chain = resolveOneshotChain(detections, { model: c.options.model, agent: c.options.agent }); }
+            catch (error) {
+                if (c.options.model || c.options.agent) {
+                    return fail({ code: error instanceof SmithersError ? error.code : "ONESHOT_MODEL_FAILED", message: error?.message ?? String(error), exitCode: 4 });
+                }
+            }
             return c.ok({
                 usableAgents: usable.map((item) => item.id),
                 chain,
@@ -5348,19 +5380,21 @@ const cli = Cli.create({
             if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
                 return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY).", exitCode: 4 });
             }
-            if (hasOverride) {
-                return runTuiCommand({ ...c, options: { ...upOptions.parse({}), input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), interactive: true } }, fail, { preselect: { id: "oneshot", entryFile: overrideEntry } });
-            }
-            const selectedArgs = [];
-            if (c.options.goalFile) selectedArgs.push("--goal-file", resolve(process.cwd(), c.options.goalFile));
-            else selectedArgs.push(goal);
-            selectedArgs.push("--cwd", taskCwd, "--detach", "false", "--open", "false", "--review", review ? "on" : "off");
-            if (c.options.model) selectedArgs.push("--model", c.options.model);
-            if (c.options.agent) selectedArgs.push("--agent", c.options.agent);
+            const goalFile = c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined;
             return runTuiCommand({ ...c, options: { ...upOptions.parse({}), interactive: true } }, fail, {
-                preselect: { id: "oneshot", displayName: "Oneshot", description: goal, entryFile: ONESHOT_UI_ENTRY },
+                cwd: taskCwd,
+                preselect: { id: "oneshot", displayName: "Oneshot", description: goal, entryFile: hasOverride ? overrideEntry : ONESHOT_UI_ENTRY },
                 suppliedInput: {},
-                buildDetachedArgs: ({ indexPath }) => [indexPath, "oneshot", ...selectedArgs],
+                buildDetachedArgs: ({ indexPath }) => buildOneshotChildArgs({
+                    cliPath: indexPath,
+                    goal,
+                    goalFile,
+                    cwd: taskCwd,
+                    review: review ? "on" : "off",
+                    model: c.options.model,
+                    agent: c.options.agent,
+                    open: false,
+                }),
                 childEnv: ({ runId }) => ({ SMITHERS_ONESHOT_RUN_ID: runId }),
             });
         }
@@ -5368,12 +5402,16 @@ const cli = Cli.create({
             await reapDetachedRunLogs({ cwd: taskCwd });
             const logFile = resolveDetachedRunLogFile(effectiveRunId, { cwd: taskCwd });
             mkdirSync(dirname(logFile), { recursive: true });
-            const childArgs = [fileURLToPath(import.meta.url), "oneshot"];
-            if (c.options.goalFile) childArgs.push("--goal-file", resolve(process.cwd(), c.options.goalFile));
-            else childArgs.push(goal);
-            childArgs.push("--cwd", taskCwd, "--detach", "false", "--open", "false", "--review", review ? "on" : "off");
-            if (c.options.model) childArgs.push("--model", c.options.model);
-            if (c.options.agent) childArgs.push("--agent", c.options.agent);
+            const childArgs = buildOneshotChildArgs({
+                cliPath: fileURLToPath(import.meta.url),
+                goal,
+                goalFile: c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined,
+                cwd: taskCwd,
+                review: review ? "on" : "off",
+                model: c.options.model,
+                agent: c.options.agent,
+                open: c.options.open,
+            });
             const fd = openSync(logFile, "a");
             const child = spawn("bun", childArgs, {
                 cwd: taskCwd,
@@ -5383,46 +5421,35 @@ const cli = Cli.create({
             });
             closeSync(fd);
             child.unref();
-            if (c.options.open) {
-                const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", effectiveRunId, "--workflow", "oneshot"], { cwd: taskCwd, detached: true, stdio: "ignore", env: process.env });
-                opener.unref();
-            }
             return c.ok({ runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" }, {
-                cta: [
-                    { command: `ui ${effectiveRunId}`, description: "Open the live oneshot UI" },
-                    { command: `chat ${effectiveRunId}`, description: "Read the agent transcript" },
-                    { command: `hijack ${effectiveRunId}`, description: "Take over the agent session" },
-                    { command: `pause ${effectiveRunId}`, description: "Pause the run" },
-                    { command: `cancel ${effectiveRunId}`, description: "Cancel the run" },
-                ],
+                cta: oneshotCta(effectiveRunId),
             });
         }
         if (hasOverride) {
-            return executeUpCommand(c, overrideEntry, { ...upOptions.parse({}), runId: effectiveRunId, input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), root: taskCwd }, fail);
+            if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
+            const overrideContext = {
+                ...c,
+                ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId) }),
+            };
+            return executeUpCommand(overrideContext, overrideEntry, { ...upOptions.parse({}), runId: effectiveRunId, input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), root: taskCwd }, fail);
         }
         try {
             const selected = await selectOneshotAgents(detections, { cwd: taskCwd, model: c.options.model, agent: c.options.agent });
             const workflow = await buildOneshotWorkflow({ cwd: taskCwd, goal, agents: selected.agents, reviewAgents: selected.reviewAgents, review });
             setupSqliteCleanup(workflow);
+            if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
             const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
             delete process.env[DETACHED_RUN_LOG_FILE_ENV];
             const result = await Effect.runPromise(runWorkflow(workflow, {
                 input: {}, runId: effectiveRunId, rootDir: taskCwd,
-                ...(detachedLogFile ? { config: { logFile: detachedLogFile } } : {}),
+                config: {
+                    ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
+                    oneshot: { chain: selected.chain, review },
+                },
                 onProgress: buildProgressReporter(), signal: setupAbortSignal().signal,
             }));
             process.exitCode = formatStatusExitCode(result.status);
-            if (c.options.open && result.runId) {
-                const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", result.runId, "--workflow", "oneshot"], { cwd: taskCwd, detached: true, stdio: "ignore", env: process.env });
-                opener.unref();
-            }
-            return c.ok(summarizeRunResult(result), { cta: result.runId ? [
-                { command: `ui ${result.runId}`, description: "Open the oneshot UI" },
-                { command: `chat ${result.runId}`, description: "Read the agent transcript" },
-                { command: `hijack ${result.runId}`, description: "Take over the agent session" },
-                { command: `pause ${result.runId}`, description: "Pause the run" },
-                { command: `cancel ${result.runId}`, description: "Cancel the run" },
-            ] : undefined });
+            return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
         }
         catch (error) {
             return fail({ code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED", message: error?.message ?? String(error), exitCode: 1 });
@@ -9548,6 +9575,7 @@ async function main() {
     argv = rewriteEventsJsonFlagArgv(argv);
     argv = rewriteDevtoolsJsonFlagArgv(argv);
     argv = rewriteTimelineJsonFlagArgv(argv);
+    argv = rewriteOneshotBooleanValues(argv);
     if (await runRawJsonTimelineCommandIfMatched(argv)) {
         return;
     }
