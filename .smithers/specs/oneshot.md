@@ -37,11 +37,14 @@ smithers oneshot "<goal>" [flags]
   canonical model id. Default: auto chain (below).
 - `--agent <engine>`: force an engine (`codex | kimi | claude-code | opencode`).
 - `--review <on|off>`: override the stored review preference for this run.
-- `--set-review <on|off>`: persist the preference to global config (also sets
+- `--set-review <on|off>`: persist the review preference to global config (also
+  sets `announced: true`). Usable with or without a goal.
+- `--set-trivial <direct|oneshot>`: persist the trivial-ask preference (also sets
   `announced: true`). Usable with or without a goal.
 - `--status`: print JSON: usable agents among {claude, codex, kimi, opencode},
-  the resolved model chain, the stored review preference (or null), and
-  `announced`. This is what an orchestrating agent calls before first use.
+  the resolved model chain, the stored preferences (`review`, `trivial`, null when
+  unset), and `announced`. This is what an orchestrating agent calls before
+  first use.
 - `--cwd <dir>` (default `.`), like chat-create.
 - `-d/--detach` default TRUE. Oneshot's story is "fast, but still happens in the
   background". `--detach false` runs foreground. The detach path spawns
@@ -63,24 +66,42 @@ Availability gate: `smithers oneshot` is unavailable when none of the four CLIs
 reusing `formatNoUsableAgentsMessage` (:803). Other engines (antigravity, pi, amp)
 do not count for the gate.
 
+User override: if `.smithers/workflows/oneshot.tsx` exists in the workspace,
+`smithers oneshot` runs THAT workflow instead of the built-in one (resolved the
+same way `smithers workflow run oneshot` would), passing
+`{ goal, review, model }` as input and keeping the same flags, detach behavior,
+and UI open. The built-in in-memory workflow is only the default. The onboarding
+announcement mentions this override. A user override also brings its own UI
+resolution (`.smithers/ui/oneshot.tsx` by convention); the built-in UI is the
+fallback when the override lacks one.
+
 ### Orchestrating-agent behavior (skill contract)
 
-For a simple ask (one agent could finish it in under ~100k tokens of context with a
-single goal):
+Three routing tiers, inferred from the prompt:
+
+- Most trivial (a single change, doable in under ~10 agent turns: a typo, one
+  small edit, a rename): by default the orchestrating agent does it DIRECTLY
+  itself. No oneshot, no workflow, no delegation overhead. This default is a
+  stored preference (`trivial`); if the user prefers `oneshot` for these, launch
+  oneshot with a weaker model (opus or terra), never sol.
+- Simple (one agent could finish it in under ~100k tokens of context with a
+  single goal, but more than a most-trivial edit): route to `smithers oneshot`,
+  not a workflow. Model preference: codex sol if usable, else kimi, else claude
+  fable or opus. For the easy end of this band a weaker model (opus or terra)
+  is fine.
+- Complex (multi-stage, approval-gated, long-horizon, reusable): a real Smithers
+  workflow, exactly as today. Oneshot is for the simple end only.
+
+Rules on top of the tiers:
 
 1. If the goal or its acceptance criteria are ambiguous, ask the user clarifying
    questions FIRST. Do not launch anything until the goal is crisp.
-2. Route to `smithers oneshot`, not a workflow. Model preference: codex sol if
-   usable, else kimi, else claude fable or opus. For trivial asks (typo fixes,
-   one-liners) use a weaker model: opus or terra.
-3. Infer complexity from the prompt by default, but honor explicit user overrides:
-   "oneshot" forces oneshot routing, "oneshot with review" forces `--review on`,
-   "oneshot without review" forces `--review off` for that run.
-4. If `--status` reports no usable agent among the four, do not offer or attempt
+2. Infer complexity from the prompt by default, but honor explicit user
+   overrides: "oneshot" forces oneshot routing, "oneshot with review" forces
+   `--review on`, "oneshot without review" forces `--review off` for that run.
+3. If `--status` reports no usable agent among the four, do not offer or attempt
    oneshot; fall back to normal routing.
-5. Complex, multi-stage, approval-gated, or long-horizon work still gets a real
-   workflow. Oneshot is for the simple end only.
-6. Context hygiene: never read the oneshot task's diff or logs into your own
+4. Context hygiene: never read the oneshot task's diff or logs into your own
    window wholesale. Check progress with one call to `smithers chat <runId>`
    (or `get_chat_transcript`), and report the run UI URL to the user.
 
@@ -94,11 +115,20 @@ the agent tells the user about the feature, in substance:
 > diff of the changes, hijack, pause). There is nothing to author, so launching
 > is fast. I will infer the complexity of each ask from the prompt, but you can
 > always say "oneshot", "oneshot with review", or "oneshot without review"
-> explicitly. Do you want oneshot runs to just implement, or add a round of
-> review after implementing (higher quality, slower)? I will save your choice in
-> the global smithers config; you can change it anytime.
+> explicitly. If you ever want to customize what oneshot does, create
+> `.smithers/workflows/oneshot.tsx` and smithers will run yours instead of the
+> built-in.
 
-The agent then persists the answer with `--set-review on|off` and proceeds.
+and asks two preference questions, each with a stated recommendation:
+
+1. Should oneshot runs add a round of review after implementing (higher quality,
+   slower), or just implement? Recommended: add the review round.
+2. For the most trivial asks (a single change I could do in a few turns), should
+   I just do them directly myself, or still launch oneshot? Recommended: do them
+   directly.
+
+Both answers are saved in the global smithers config (via `--set-review` and
+`--set-trivial`) and the agent says they can be changed anytime.
 
 ## Workflow construction (file-less)
 
@@ -180,17 +210,26 @@ New file `~/.smithers/config.json` resolved via `accountsRoot(env)`
 There is no general global config today; this introduces it.
 
 ```json
-{ "version": 1, "oneshot": { "review": "on" | "off", "announced": true } }
+{
+  "version": 1,
+  "oneshot": {
+    "review": "on" | "off",
+    "trivial": "direct" | "oneshot",
+    "announced": true
+  }
+}
 ```
 
 - Helpers in `apps/cli/src/oneshot/`: `oneshotConfigPath.js`, `loadOneshotConfig.js`,
   `saveOneshotConfig.js` (one export per file, filename matches export). Load wraps
-  parse failures into the default (`{ review: null, announced: false }`); save is
-  atomic tmp+rename mode 0600 like writeAccounts
-  (packages/accounts/src/writeAccounts.js:26). Unknown top-level keys are preserved
-  on write so future sections can share the file.
-- Default when unset: review off (implement-only; oneshot's pitch is speed).
-- `--set-review` writes `review` and `announced: true`.
+  parse failures into the default
+  (`{ review: null, trivial: null, announced: false }`); save is atomic tmp+rename
+  mode 0600 like writeAccounts (packages/accounts/src/writeAccounts.js:26). Unknown
+  top-level keys are preserved on write so future sections can share the file.
+- CLI fallbacks when unset: review off (the CLI's job is speed; the agent flow
+  normally asks and persists the recommended "on" before first launch), trivial
+  direct (matches the recommendation; trivial routing is agent-side anyway).
+- `--set-review` and `--set-trivial` each write their key and `announced: true`.
 
 ## Run UI
 
@@ -234,9 +273,11 @@ Docs-driven: land these with (actually before, in commit order) the code.
      Smithers vs. just answering" (:639-652): simple single-agent asks route to
      `smithers oneshot`; the high bar is for multi-step/durable/reusable work.
    - New section "Simple tasks: smithers oneshot" carrying the full agent contract
-     from this spec (clarify-first, model preference, availability gate, first-run
-     announcement + preference flow, explicit override phrases, background + UI,
-     context hygiene via single-call transcript reads).
+     from this spec (three routing tiers incl. direct handling of most-trivial
+     asks, clarify-first, model preference, availability gate, first-run
+     announcement + both preference questions with recommendations, explicit
+     override phrases, the `.smithers/workflows/oneshot.tsx` user override,
+     background + UI, context hygiene via single-call transcript reads).
 2. `docs/cli/overview.mdx`: bump `commands[101]` to `commands[102]`, add the
    oneshot catalog entry (name, purpose, args, flags) in the chat-create format
    (:401-405). check-docs gates the count and the coverage test boots --help.
@@ -260,6 +301,8 @@ evals/harness/run-all.ts; no registration):
 - `cases.jsonl`, modeled on orchestration-behavior (judge rubrics, judgeModel opus,
   assert `verdict[0].passed`) and guidance-interactive (contains cases). Candidate
   models use the eval keys (haiku, sonnet, kimi, gemini). Cases:
+  The suite covers all three routes: oneshot for simple asks, NO smithers at all
+  for the most trivial asks, and a real workflow for complex asks.
   1. Ambiguous simple ask ("make the settings page better"): PASS only if the
      agent asks clarifying questions about goal/acceptance criteria before
      launching anything; FAIL if it launches oneshot or builds a workflow first.
@@ -267,18 +310,24 @@ evals/harness/run-all.ts; no registration):
      `smithers oneshot` (not create-workflow, not a hand-authored workflow) and
      names the preference order codex sol first, kimi second, claude fable/opus
      otherwise.
-  3. Trivial ask (typo fix): PASS only if oneshot with a weaker model (opus or
-     terra), not sol.
-  4. Complex multi-stage ask (migration with approvals): PASS only if a real
+  3. Most trivial ask (typo fix, single small edit), trivial preference unset or
+     `direct`: PASS only if the agent does the edit DIRECTLY itself, launching
+     neither oneshot nor any workflow; FAIL if it reaches for smithers at all.
+  4. Most trivial ask with stored preference `trivial: "oneshot"`: PASS only if
+     oneshot with a weaker model (opus or terra), not sol.
+  5. Complex multi-stage ask (migration with approvals): PASS only if a real
      workflow, NOT oneshot (guards the other direction).
-  5. Context states no usable agent CLI among claude/codex/kimi/opencode: PASS
+  6. Context states no usable agent CLI among claude/codex/kimi/opencode: PASS
      only if the agent does not offer or attempt oneshot.
-  6. Context states oneshot never announced (`announced: false`): PASS only if
-     the agent announces the feature, asks implement-only vs review preference,
-     says it is saved in global smithers config and changeable anytime.
-  7. User says "oneshot without review": PASS only if the agent passes
+  7. Context states oneshot never announced (`announced: false`): PASS only if
+     the agent announces the feature, asks BOTH preference questions (review
+     round, recommended on; trivial asks direct vs oneshot, recommended direct),
+     says the choices are saved in global smithers config and changeable
+     anytime, and mentions `.smithers/workflows/oneshot.tsx` as the override
+     point.
+  8. User says "oneshot without review": PASS only if the agent passes
      `--review off` and does not re-infer.
-  8. Contains case: the emitted command line contains `smithers oneshot` and a
+  9. Contains case: the emitted command line contains `smithers oneshot` and a
      `--model` value from the allowed set; mustNot contain `make-workflow` /
      `workflow run create-workflow`.
 - `NOTES.md`: behavior table, RED before the SKILL.md change and GREEN after
