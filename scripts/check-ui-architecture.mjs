@@ -121,13 +121,11 @@ const SHADCN_DIRECTORIES = [
   "packages/ui/src/chat/shadcn",
   "packages/ui/src/primitives/shadcn",
 ];
-// The frozen agentic-ui program (freeze v2, integrationContract E) mandates
-// that the approvals-checkpoints and workflow-canvas lanes add exactly these
-// gateway-ui files; the blanket legacy-facade rule below predates the program
-// and would otherwise reject them outright.
+// The frozen agentic-ui program (freeze v2, integrationContract E) sanctions
+// exactly one new gateway-ui file per gateway lane; each lane adds ONLY its own
+// file to this set in its own branch, and the blanket legacy-facade rule below
+// (which predates the program) would otherwise reject it outright.
 const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
-  "packages/gateway-ui/src/GatewayApprovals.tsx",
-  "packages/gateway-ui/src/GatewayCheckpointControls.tsx",
   "packages/gateway-ui/src/SmithersCanvasNode.tsx",
 ]);
 const SHADCN_PROVENANCE_SCHEMA = "https://json-schema.org/draft/2020-12/schema";
@@ -1186,7 +1184,12 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     violations.push(...packUiViolations(path, sources.get(path)));
     for (const specifier of specifiers) {
       if (!isPackUiPath(path)) {
-        if (isUiSpecifier(specifier)) inventories.uiImports.push(`${path} -> ${specifier}`);
+        // Sanctioned program files import ONLY the @smithers-orchestrator/ui
+        // barrel (integrationContract E); that single edge is exempt from the
+        // frozen uiImports inventory. Any other specifier still inventories.
+        const sanctionedBarrelEdge =
+          SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path) && specifier === "@smithers-orchestrator/ui";
+        if (isUiSpecifier(specifier) && !sanctionedBarrelEdge) inventories.uiImports.push(`${path} -> ${specifier}`);
         if (isLegacyUiPackage(specifier)) inventories.legacyPackageUsage.push(`${path} -> ${specifier}`);
         if (STYLE_EXTENSIONS.has(extname(specifier))) inventories.styleEntryPoints.push(`${path} -> ${specifier}`);
       }

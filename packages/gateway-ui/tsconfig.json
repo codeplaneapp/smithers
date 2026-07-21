@@ -20,10 +20,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "allowImportingTsExtensions": true,
-    "rootDir": "../.."
+    "rootDir": "src"
   },
-  // rootDir is the repo root: SmithersCanvasNode deep-imports the packages/ui
-  // canvas anatomy source until the integration lane lands the barrel export
-  // (a src-local rootDir trips TS6059 on that interim path).
   "include": ["src/**/*"]
 }

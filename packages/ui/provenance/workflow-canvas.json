@@ -18,12 +18,18 @@
     "registryItem": "https://elements.ai-sdk.dev/components/canvas",
     "ported": "partial-anatomy",
     "omissions": [
-      "React Flow renderer bindings (renderer-neutral by design; the ReactFlow layer lives in @smithers-orchestrator/gateway-ui)",
-      "Upstream Canvas wired to the AI SDK data model"
+      "NodeTitle, NodeDescription, NodeFooter (upstream Node card sub-parts; our title is a WorkflowNode header prop and description/footer slots are plain children)",
+      "Edge.Temporary and Edge.Animated (upstream edge renderer components; edge geometry is the ReactFlow layer's job)",
+      "Upstream Connection as a ReactFlow connectionLineComponent (pending-connection drag geometry is the renderer's job)",
+      "Upstream Canvas ReactFlow wrapper itself (pre-configured pan/zoom/selection/delete/fitView behaviors bound to the AI SDK data model)"
     ],
     "divergences": [
-      "Renderer-neutral presentational anatomy: @xyflow/react never enters the base barrel",
-      "WorkflowEdge and WorkflowConnection are legend/inline representations; edge geometry stays the renderer's job",
+      "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; the ReactFlow renderer lives in @smithers-orchestrator/gateway-ui",
+      "WorkflowEdge and WorkflowConnection are legend/inline representations (from -> to, pending-connection validity) rather than ReactFlow edge/connection-line renderers",
+      "WorkflowNodeStatus is a smithers addition (shared StatusPill) with no upstream equivalent",
+      "WorkflowMinimap is a labelled seam frame with no upstream component; upstream parks ReactFlow's MiniMap as a Canvas child",
+      "WorkflowToolbar is plain canvas chrome; upstream Toolbar wraps ReactFlow's per-node NodeToolbar",
+      "WorkflowControls renders buttons only from caller-provided callbacks; upstream Controls binds the ReactFlow viewport API directly",
       "WorkflowCanvas is role=group, not role=application: the base layer ships no application-mode keyboard contract"
     ]
   },

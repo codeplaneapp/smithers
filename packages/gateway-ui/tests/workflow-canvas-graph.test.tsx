@@ -99,19 +99,35 @@ describe("WorkflowGraph nodeTypes seam", () => {
     expect(nodes.map((node) => node.type)).toEqual(["smithersTask", "smithersTask"]);
   });
 
-  test("mounts with a custom smithersTask renderer merged over the default", () => {
+  test("a custom smithersTask renderer replaces the default card in the painted markup", () => {
     const html = renderToStaticMarkup(
       createElement(WorkflowGraph, {
         spec: SPEC,
         nodeTypes: { smithersTask: memo(SmithersCanvasNode) },
       }),
     );
-    expect(html).toContain("react-flow");
-    expect(html.length).toBeGreaterThan(0);
+    // ReactFlow SSRs node content: the override must actually paint, and the
+    // default SmithersTaskNode card must be gone (replacement, not stacking).
+    expect(html).toContain('data-slot="workflow-node"');
+    expect(html).toContain("Build it");
+    expect(html).not.toContain("node-kicker");
   });
 
-  test("mounts unchanged with no nodeTypes prop", () => {
+  test("unrelated nodeTypes entries merge over the default without replacing it", () => {
+    const Other = memo(() => createElement("div", { "data-slot": "other-node" }));
+    const html = renderToStaticMarkup(
+      createElement(WorkflowGraph, { spec: SPEC, nodeTypes: { other: Other } }),
+    );
+    // No spec node emits type "other", so the default smithersTask card stays.
+    expect(html).toContain("node-kicker");
+    expect(html).not.toContain('data-slot="workflow-node"');
+    expect(html).not.toContain('data-slot="other-node"');
+  });
+
+  test("mounts unchanged with no nodeTypes prop, painting the default card", () => {
     const html = renderToStaticMarkup(createElement(WorkflowGraph, { spec: SPEC }));
     expect(html).toContain("react-flow");
+    expect(html).toContain("node-kicker");
+    expect(html).not.toContain('data-slot="workflow-node"');
   });
 });
