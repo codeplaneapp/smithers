@@ -94,7 +94,6 @@ export class OmpAgent extends BaseCliAgent {
   }
   async buildCommand({ prompt, cwd, options }) {
     const mode = this.resolveMode(options);
-    if (mode === "rpc") throw new Error("OMP RPC mode uses the custom RPC transport");
     return { command: "omp", args: this.buildArgs({ prompt, cwd, options, mode }), outputFormat: mode };
   }
   async generate(options = {}) {
