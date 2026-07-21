@@ -127,6 +127,7 @@ function topGlobalDropEntry(): GlobalDropEntry | undefined {
 }
 
 function handleDocumentDragOver(event: Event) {
+  if (event.defaultPrevented) return;
   const top = topGlobalDropEntry();
   if (!top) return;
   event.preventDefault();
@@ -134,6 +135,7 @@ function handleDocumentDragOver(event: Event) {
 }
 
 function handleDocumentDrop(event: Event) {
+  if (event.defaultPrevented) return;
   const top = topGlobalDropEntry();
   if (!top) return;
   event.preventDefault();
@@ -299,7 +301,9 @@ export function PromptInput({
         accepted.push(item);
       }
       if (accepted.length === 0) return;
-      setAttachmentsRef.current([...attachmentsRef.current, ...accepted]);
+      const next = [...attachmentsRef.current, ...accepted];
+      attachmentsRef.current = next;
+      setAttachmentsRef.current(next);
       setAnnouncement(
         `${accepted.length === 1 ? accepted[0]!.name : `${accepted.length} files`} attached`,
       );
@@ -318,13 +322,16 @@ export function PromptInput({
         URL.revokeObjectURL(objectUrl);
         objectUrlsRef.current.delete(id);
       }
-      setAttachmentsRef.current(attachmentsRef.current.filter((item) => item.id !== id));
+      const next = attachmentsRef.current.filter((item) => item.id !== id);
+      attachmentsRef.current = next;
+      setAttachmentsRef.current(next);
       if (target) setAnnouncement(`${target.name} removed`);
     },
     [],
   );
 
   const clearAttachments = useCallback(() => {
+    attachmentsRef.current = [];
     setAttachmentsRef.current([]);
   }, []);
 

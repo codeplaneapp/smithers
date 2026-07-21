@@ -404,6 +404,45 @@ describe("PromptInput", () => {
     expect(hook.attachments.map((item) => item.name)).toEqual(["dropped.txt"]);
   });
 
+  test("two synchronous add() calls in one tick keep both batches", async () => {
+    let hook!: ReturnType<typeof usePromptInputAttachments>;
+    function Harness() {
+      hook = usePromptInputAttachments();
+      return <PromptInputTextarea />;
+    }
+    await render(
+      <PromptInput onSubmit={() => {}}>
+        <Harness />
+      </PromptInput>,
+    );
+    await act(async () => {
+      hook.add([makeFile("first.txt", { type: "text/plain" })]);
+      hook.add([makeFile("second.txt", { type: "text/plain" })]);
+    });
+    expect(hook.attachments.map((item) => item.name)).toEqual(["first.txt", "second.txt"]);
+  });
+
+  test("drop on the form with globalDrop enabled intakes files exactly once", async () => {
+    let hook!: ReturnType<typeof usePromptInputAttachments>;
+    function Harness() {
+      hook = usePromptInputAttachments();
+      return <PromptInputTextarea />;
+    }
+    await render(
+      <PromptInput globalDrop onSubmit={() => {}}>
+        <Harness />
+      </PromptInput>,
+    );
+    const form = container!.querySelector("form")!;
+    const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+    Object.assign(dropEvent, { dataTransfer: { files: [makeFile("once.txt", { type: "text/plain" })] } });
+    await act(async () => {
+      form.dispatchEvent(dropEvent);
+    });
+    expect(hook.attachments.map((item) => item.name)).toEqual(["once.txt"]);
+    expect(new Set(hook.attachments.map((item) => item.id)).size).toBe(hook.attachments.length);
+  });
+
   test("paste with files adds attachments", async () => {
     let hook!: ReturnType<typeof usePromptInputAttachments>;
     function Harness() {
