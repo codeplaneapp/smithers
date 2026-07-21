@@ -6,7 +6,7 @@
  * `smithers monitor`). Purely an observer: it launches nothing, everything on
  * screen is live gateway state. Domain logic lives in ./monitorModel.ts.
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -1114,6 +1114,7 @@ type TreeNode = TreeNodeLike & {
   agent?: unknown;
   attempt?: number;
   maxAttempts?: number;
+  prompt?: unknown;
   toolCalls?: unknown;
   children?: TreeNode[] | null;
 };
@@ -2313,14 +2314,13 @@ function NodeDiffSection({
   const combined = patches.map((patch) => patch.diff).join("\n");
   const rollup = sumDiffSummaries(patches.map((patch) => diffSummaryOf(patch.diff)));
   return (
-    <>
-      <h3 className="mon-kicker">Diff</h3>
+    <InspectorSection title="Diff">
       <CollapsedDiff
         patch={combined}
         summaryText={formatDiffSummary({ ...rollup, files: patches.length })}
         testId="monitor-node-diff"
       />
-    </>
+    </InspectorSection>
   );
 }
 
@@ -2371,6 +2371,59 @@ function OutputFields({ row }: { row: unknown }) {
 const TERMINAL_NODE_TONES = new Set(["ok", "failed", "cancelled"]);
 
 /**
+ * One collapsible inspector section. Uncontrolled `<details>` (React writes
+ * `open` once and the prop never changes, so it never fights the user's
+ * toggle) with the open state mirrored into React only to unmount closed
+ * bodies — a collapsed Transcript stops polling, a collapsed Diff unmounts
+ * its tokenized view. State lives at the panel level, so collapse choices
+ * survive switching between nodes.
+ */
+function InspectorSection({
+  title,
+  testId,
+  defaultOpen = true,
+  actions,
+  children,
+}: {
+  title: string;
+  testId?: string;
+  defaultOpen?: boolean;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <details
+      className="mon-section"
+      data-testid={testId}
+      open={defaultOpen}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="mon-kicker mon-section-summary">
+        <span className="mon-diff-caret" aria-hidden>
+          ▸
+        </span>
+        <span className="mon-section-title">{title}</span>
+        {actions ? (
+          <span
+            className="mon-section-actions"
+            onClick={(event) => {
+              // Buttons share the summary row; their clicks must not toggle
+              // the section.
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            {actions}
+          </span>
+        ) : null}
+      </summary>
+      {open ? <div className="mon-section-body">{children}</div> : null}
+    </details>
+  );
+}
+
+/**
  * The AI "what happened" recap at the top of the inspector. The gateway's
  * whatHappened RPC narrates with the host-configured cheap agent and falls
  * back to a deterministic fact summary, so this renders something for every
@@ -2381,8 +2434,7 @@ function NodeWhatHappened({ runId, nodeId, iteration, status }: { runId: string;
   const summary = useGatewayRpc("whatHappened", { runId, nodeId, iteration }, { enabled });
   if (!enabled || summary.error) return null;
   return (
-    <div className="mon-what" data-testid="monitor-what-happened">
-      <h3 className="mon-kicker">What happened</h3>
+    <InspectorSection title="What happened" testId="monitor-what-happened">
       {summary.data ? (
         <>
           <div className="mon-what-summary">{summary.data.summary}</div>
@@ -2395,7 +2447,7 @@ function NodeWhatHappened({ runId, nodeId, iteration, status }: { runId: string;
       ) : (
         <div className="mon-empty mon-dim">Summarizing what happened…</div>
       )}
-    </div>
+    </InspectorSection>
   );
 }
 
@@ -2653,10 +2705,24 @@ function NodeInspector({
 }) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
+  // The first output fetch often lands while the node is still running
+  // ("pending"); without a refetch when the lifecycle advances the panel
+  // would keep claiming "No output recorded" after the row was written.
+  const outputRefreshKey = `${String(node.status ?? "")}:${asNumber(node.attempt) ?? 0}`;
+  const prevOutputRefreshKey = useRef(outputRefreshKey);
+  useEffect(() => {
+    if (prevOutputRefreshKey.current !== outputRefreshKey) {
+      prevOutputRefreshKey.current = outputRefreshKey;
+      void output.refetch();
+    }
+  }, [outputRefreshKey, output.refetch]);
   const row = rowOf(output.data);
   const failure = nodeErrorOf(output.data);
   const isLive = !TERMINAL_NODE_TONES.has(String(node.status ?? ""));
   const toolCalls = asArray(node.toolCalls).filter(isRecord);
+  // The task's initial prompt, carried on the snapshot from the latest
+  // attempt's metadata (queued nodes have no attempt yet, so no section).
+  const promptText = asString(node.prompt);
   // Structured agent metadata (declared assignment + what actually ran) when
   // the snapshot carries it; legacy rows may still hold a plain string.
   const agentInfo = isRecord(node.agent) ? node.agent : undefined;
@@ -2779,61 +2845,67 @@ function NodeInspector({
       <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
       <NodeWhatHappened runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} status={node.status} />
       <NodeScoreChips nodeId={nodeId} scores={scores} />
-      <dl className="mon-meta-grid">
-        <dt>id</dt>
-        <dd className="mon-mono">{nodeId}</dd>
-        <dt>kind</dt>
-        <dd>{node.kind ?? "—"}</dd>
-        {agentName ? (
-          <>
-            <dt>agent</dt>
-            <dd>{agentName}</dd>
-          </>
-        ) : null}
-        {declaredLine && declaredLine !== agentName ? (
-          <>
-            <dt>engine</dt>
-            <dd className="mon-mono" data-testid="monitor-agent-engine">
-              {declaredLine}
-            </dd>
-          </>
-        ) : null}
-        {ranOnLine && ranOnLine !== declaredLine ? (
-          <>
-            <dt>ran on</dt>
-            <dd className="mon-mono" data-testid="monitor-agent-ran-on">
-              {ranOnLine}
-            </dd>
-          </>
-        ) : null}
-        {agentChain.length > 1 ? (
-          <>
-            <dt>failover</dt>
-            <dd className="mon-mono" data-testid="monitor-agent-chain">
-              {agentChain.join(" → ")}
-            </dd>
-          </>
-        ) : null}
-        {typeof nodeAttempt === "number" && nodeAttempt > 0 ? (
-          <>
-            <dt>attempt</dt>
-            <dd className="mon-mono" data-testid="monitor-agent-attempt">
-              {typeof nodeMaxAttempts === "number" && nodeMaxAttempts > 0
-                ? `${nodeAttempt} of ${nodeMaxAttempts}`
-                : nodeAttempt}
-            </dd>
-          </>
-        ) : null}
-        {typeof node.iteration === "number" ? (
-          <>
-            <dt>iteration</dt>
-            <dd className="mon-mono">{node.iteration}</dd>
-          </>
-        ) : null}
-      </dl>
+      <InspectorSection title="Details" testId="monitor-node-details">
+        <dl className="mon-meta-grid">
+          <dt>id</dt>
+          <dd className="mon-mono">{nodeId}</dd>
+          <dt>kind</dt>
+          <dd>{node.kind ?? "—"}</dd>
+          {agentName ? (
+            <>
+              <dt>agent</dt>
+              <dd>{agentName}</dd>
+            </>
+          ) : null}
+          {declaredLine && declaredLine !== agentName ? (
+            <>
+              <dt>engine</dt>
+              <dd className="mon-mono" data-testid="monitor-agent-engine">
+                {declaredLine}
+              </dd>
+            </>
+          ) : null}
+          {ranOnLine && ranOnLine !== declaredLine ? (
+            <>
+              <dt>ran on</dt>
+              <dd className="mon-mono" data-testid="monitor-agent-ran-on">
+                {ranOnLine}
+              </dd>
+            </>
+          ) : null}
+          {agentChain.length > 1 ? (
+            <>
+              <dt>failover</dt>
+              <dd className="mon-mono" data-testid="monitor-agent-chain">
+                {agentChain.join(" → ")}
+              </dd>
+            </>
+          ) : null}
+          {typeof nodeAttempt === "number" && nodeAttempt > 0 ? (
+            <>
+              <dt>attempt</dt>
+              <dd className="mon-mono" data-testid="monitor-agent-attempt">
+                {typeof nodeMaxAttempts === "number" && nodeMaxAttempts > 0
+                  ? `${nodeAttempt} of ${nodeMaxAttempts}`
+                  : nodeAttempt}
+              </dd>
+            </>
+          ) : null}
+          {typeof node.iteration === "number" ? (
+            <>
+              <dt>iteration</dt>
+              <dd className="mon-mono">{node.iteration}</dd>
+            </>
+          ) : null}
+        </dl>
+      </InspectorSection>
+      {promptText ? (
+        <InspectorSection title="Prompt" testId="monitor-node-prompt">
+          <pre className="mon-output mon-prompt">{promptText}</pre>
+        </InspectorSection>
+      ) : null}
       {toolCalls.length > 0 ? (
-        <>
-          <h3 className="mon-kicker">Tool calls</h3>
+        <InspectorSection title={`Tool calls (${toolCalls.length})`} testId="monitor-node-toolcalls">
           <div className="mon-toolcalls">
             {toolCalls.map((call, index) => (
               <div className="mon-toolcall" key={index}>
@@ -2842,22 +2914,20 @@ function NodeInspector({
               </div>
             ))}
           </div>
-        </>
+        </InspectorSection>
       ) : null}
       {failure && !isContainer ? (
-        <>
-          <h3 className="mon-kicker">Failure</h3>
+        <InspectorSection title="Failure" testId="monitor-node-failure">
           <div className="mon-banner tone-failed">
             {[failure.name, failure.code].filter(Boolean).join(" · ")}
             {typeof failure.attempt === "number" ? ` · attempt ${failure.attempt}` : ""}
             {failure.agent ? ` · ${failure.agent}` : ""}
           </div>
           <pre className="mon-output mon-failure">{failure.message}</pre>
-        </>
+        </InspectorSection>
       ) : null}
       {isContainer ? (
-        <>
-          <h3 className="mon-kicker">Children</h3>
+        <InspectorSection title="Children" testId="monitor-node-children">
           {childCounts.length > 0 ? (
             <div className="mon-child-rollup" data-testid="monitor-child-rollup">
               {childCounts.map(([status, count]) => (
@@ -2873,45 +2943,54 @@ function NodeInspector({
             {String(node.kind ?? "container")} nodes group other nodes — select a task inside for its transcript and
             output.
           </div>
-        </>
+        </InspectorSection>
       ) : (
         <>
-          <div className="mon-kicker-row">
-            <h3 className="mon-kicker">{isLive ? "Live output" : "Transcript"}</h3>
-            {hijackAction && candidate ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mon-hijack-inline"
-                data-testid="monitor-hijack-inline"
-                title={
-                  hijackAction.kind === "hijack"
-                    ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
-                    : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
-                }
-                onClick={() => setShowHijack(true)}
-              >
-                ⌁ {hijackAction.kind === "hijack" ? "Hijack terminal" : "Reopen terminal"}
-              </Button>
-            ) : null}
-          </div>
-          <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
-          <h3 className="mon-kicker">Output</h3>
-          {row ? (
-            <OutputFields row={row} />
-          ) : output.loading ? (
-            <div className="mon-empty mon-dim">
-              <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…</span>
-            </div>
-          ) : (
-            <div className="mon-empty mon-dim">
-              {failure
-                ? "The node failed before producing output."
-                : isLive
-                  ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node finishes</span>
-                  : "No output recorded for this node."}
-            </div>
-          )}
+          <InspectorSection
+            title={isLive ? "Live output" : "Transcript"}
+            testId="monitor-node-transcript"
+            actions={
+              hijackAction && candidate ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mon-hijack-inline"
+                  data-testid="monitor-hijack-inline"
+                  title={
+                    hijackAction.kind === "hijack"
+                      ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
+                      : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
+                  }
+                  onClick={() => setShowHijack(true)}
+                >
+                  ⌁ {hijackAction.kind === "hijack" ? "Hijack terminal" : "Reopen terminal"}
+                </Button>
+              ) : undefined
+            }
+          >
+            <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
+          </InspectorSection>
+          <InspectorSection title="Output" testId="monitor-node-output">
+            {row ? (
+              <OutputFields row={row} />
+            ) : output.loading ? (
+              <div className="mon-empty mon-dim">
+                <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…</span>
+              </div>
+            ) : output.error ? (
+              <div className="mon-empty mon-dim" data-testid="monitor-output-error">
+                Couldn't load output: {output.error.message}
+              </div>
+            ) : (
+              <div className="mon-empty mon-dim">
+                {failure
+                  ? "The node failed before producing output."
+                  : isLive
+                    ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node finishes</span>
+                    : "No output recorded for this node."}
+              </div>
+            )}
+          </InspectorSection>
           <NodeDiffSection runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} enabled={!isLive} />
         </>
       )}
@@ -3158,7 +3237,11 @@ function RunDetail({
 
 function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
-  const [selectedNode, setSelectedNode] = useState<TreeNode | undefined>(undefined);
+  // Selection is a KEY, not the node object: rows in the tree collection are
+  // replaced as frames land, so a captured node would freeze the inspector at
+  // click time (status/prompt/attempt stuck "running" forever). Deriving the
+  // node from the live tree keeps every panel current.
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | undefined>(undefined);
   const [filterText, setFilterText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [workflowFilter, setWorkflowFilter] = useState("all");
@@ -3174,6 +3257,19 @@ function App() {
   const [runsPage, setRunsPage] = useState(1);
   const selectedRun = allRuns.find((run) => run.runId === selectedRunId);
   const scores = useRunScores(selectedRunId, !isTerminalStatus(selectedRun?.status));
+  const selectedTree = useGatewayRunTree(selectedRunId);
+  const selectedNode = useMemo(() => {
+    if (!selectedNodeKey) return undefined;
+    // Find in the REBUILT tree (not the flat collection rows) so the inspector
+    // keeps `children` — container detection and the child rollup need them.
+    const stack: TreeNode[] = selectedTree.root ? [selectedTree.root as TreeNode] : [];
+    while (stack.length > 0) {
+      const candidate = stack.pop()!;
+      if (treeNodeKey(candidate) === selectedNodeKey) return candidate;
+      for (const child of (candidate.children ?? []) as TreeNode[]) stack.push(child);
+    }
+    return undefined;
+  }, [selectedNodeKey, selectedTree.root]);
 
   // Resolve ?runId=&nodeId= once, when runs first arrive. An unknown id still
   // selects (RunDetail renders an honest "Run not found" state).
@@ -3190,13 +3286,13 @@ function App() {
 
   const selectRun = (runId: string | undefined) => {
     setSelectedRunId(runId);
-    setSelectedNode(undefined);
+    setSelectedNodeKey(undefined);
     // Picking a run means "show me the run" — leave the metrics view.
     setShowMetrics(false);
     emitSelection(runId, undefined);
   };
   const selectNode = (node: TreeNode | undefined) => {
-    setSelectedNode(node);
+    setSelectedNodeKey(node ? treeNodeKey(node) : undefined);
     emitSelection(selectedRunId, node ? (node.id ?? treeNodeKey(node)) : undefined);
   };
 
@@ -3535,6 +3631,16 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-what-summary { white-space: pre-wrap; font-size: var(--fs-3); line-height: var(--lh-body); background: var(--brand-soft); border-radius: var(--r-1); padding: var(--sp-2) var(--sp-3); }
 .mon-what-source { font-size: var(--fs-1); margin-top: var(--sp-1); }
 .mon-inspector h3.mon-kicker { margin: var(--sp-4) 0 var(--sp-2); }
+.mon-section { margin: var(--sp-4) 0 0; }
+.mon-section-summary { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; list-style: none; user-select: none; border-radius: var(--r-1); }
+.mon-section-summary::-webkit-details-marker { display: none; }
+.mon-section-summary:hover .mon-section-title { color: var(--text); }
+.mon-section-summary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.mon-section[open] > .mon-section-summary .mon-diff-caret { transform: rotate(90deg); }
+.mon-section-title { transition: color 120ms ease; }
+.mon-section-actions { margin-left: auto; }
+.mon-section-body { margin-top: var(--sp-2); }
+.mon-prompt { max-height: 30vh; }
 .mon-meta-grid { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-1) var(--sp-3); align-items: baseline; margin: 0 0 var(--sp-4); }
 .mon-meta-grid dt { color: var(--muted); font-size: var(--fs-1); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 .mon-meta-grid dd { margin: 0; overflow-wrap: anywhere; }
