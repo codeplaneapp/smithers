@@ -266,4 +266,92 @@ describe("browser session registry", () => {
     await gateway.close();
     await new Promise<void>((resolve) => fixture.close(() => resolve()));
   }, 20_000);
+
+  test("browser viewer retries actions, paints newest frames, and reconnects in Chromium", async () => {
+    const fixture = createServer((_request, response) => response.end("<button>Continue</button><output id='value'>0</output>"));
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const port = (fixture.address() as { port: number }).port;
+    const require = createRequire(new URL("../../../apps/cli/package.json", import.meta.url));
+    const gateway = new Gateway({ browser: createBrowserSessionRegistry({ playwright: { chromium: require("playwright").chromium } }) });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const gatewayPort = (server.address() as { port: number }).port;
+    const control = new WebSocket(`ws://127.0.0.1:${gatewayPort}`);
+    const pending = new Map<string, (value: any) => void>();
+    control.on("message", (raw) => { const frame = JSON.parse(String(raw)); if (frame.type === "res") pending.get(frame.id)?.(frame); });
+    const request = (method: string, params: any) => new Promise<any>((resolve) => { const id = `${method}-${Math.random()}`; pending.set(id, resolve); control.send(JSON.stringify({ type: "req", id, method, params })); });
+    await new Promise<void>((resolve) => control.once("open", () => resolve()));
+    await request("connect", { minProtocol: 1, maxProtocol: 1, client: { id: "viewer-test", version: "1", platform: "test" }, subscribe: [] });
+    const created = await request("createBrowserSession", { source: { kind: "dev-server", port, path: "/" } });
+    const sessionId = created.payload.sessionId;
+    const waitForViewerActions = async (count: number) => {
+      const started = Date.now();
+      while (Date.now() - started < 5_000) {
+        const context = await request("browserContext", { sessionId, include: ["recent-actions"] });
+        if (context.payload.recentActions.filter((entry: any) => entry.actionId.startsWith("viewer-") && entry.action.kind === "reload").length >= count) return context;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error(`Timed out waiting for ${count} viewer actions`);
+    };
+    const viewer = await require("playwright").chromium.launch();
+    const page = await viewer.newPage();
+    await page.addInitScript(() => {
+      window.__viewerImages = [];
+      window.__viewerPaints = [];
+      const NativeImage = window.Image;
+      window.Image = class ControlledImage extends NativeImage {
+        set src(value) { this._viewerSrc = value; window.__viewerImages.push(this); }
+        get src() { return this._viewerSrc || ""; }
+      };
+      const NativeWebSocket = window.WebSocket;
+      window.__viewerSockets = [];
+      window.WebSocket = class TrackedWebSocket extends NativeWebSocket {
+        constructor(...args) { super(...args); this._viewerIndex = window.__viewerSockets.length; window.__viewerSockets.push(this); }
+        send(value) { (window.__viewerSends ||= []).push({ index: this._viewerIndex, value }); return super.send(value); }
+      };
+      const originalGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+        if (kind === "2d") return { drawImage: (image) => window.__viewerPaints.push(image._viewerSrc) };
+        return originalGetContext.call(this, kind, ...args);
+      };
+    });
+    try {
+      await page.goto(`http://127.0.0.1:${gatewayPort}/browser/${sessionId}/viewer`);
+      await page.waitForFunction(() => window.__viewerSends?.some(({ value }) => JSON.parse(value).method === "browserContext"));
+      const before = await request("browserContext", { sessionId, include: ["recent-actions"] });
+      await request("browserAct", { sessionId, actionId: "outside-viewer", action: { kind: "reload" } });
+      await page.evaluate(() => { revision = 0; document.querySelector("[data-action=reload]").click(); });
+      const afterViewerRetry = await waitForViewerActions(1);
+      expect(afterViewerRetry.payload.recentActions.filter((entry: any) => entry.actionId.startsWith("viewer-") && entry.action.kind === "reload")).toHaveLength(1);
+      const after = await request("browserContext", { sessionId, include: ["recent-actions"] });
+      const viewerReloads = after.payload.recentActions.filter((entry: any) => entry.actionId.startsWith("viewer-") && entry.action.kind === "reload");
+      expect(after.payload.recentActions.length).toBeGreaterThan(before.payload.recentActions.length);
+      expect(viewerReloads).toHaveLength(1);
+
+      const paintCount = await page.evaluate(() => {
+        const start = window.__viewerImages.length;
+        window.draw({ seq: 900, viewport: { width: 90, height: 90 }, jpegBase64: "old" });
+        window.draw({ seq: 901, viewport: { width: 91, height: 91 }, jpegBase64: "new" });
+        const images = window.__viewerImages.slice(start);
+        images[1].onload();
+        images[0].onload();
+        return { count: window.__viewerPaints.length, newest: window.__viewerPaints.at(-1) };
+      });
+      expect(paintCount.count).toBeGreaterThan(0);
+      expect(paintCount.newest).toContain("new");
+
+      const socketsBefore = await page.evaluate(() => window.__viewerSockets.length);
+      await page.evaluate(() => window.__viewerSockets.at(-1).close());
+      await page.waitForFunction((count) => window.__viewerSockets.length > count, socketsBefore);
+      await page.waitForFunction((index) => window.__viewerSends.some(({ index: socketIndex, value }) => socketIndex === index && JSON.parse(value).method === "connect"), socketsBefore);
+      await page.locator("[data-action=reload]").click();
+      const afterReconnect = await waitForViewerActions(2);
+      expect(afterReconnect.payload.recentActions.filter((entry: any) => entry.actionId.startsWith("viewer-") && entry.action.kind === "reload")).toHaveLength(2);
+    } finally {
+      await viewer.close();
+      await request("closeBrowserSession", { sessionId });
+      control.close();
+      await gateway.close();
+      await new Promise<void>((resolve) => fixture.close(() => resolve()));
+    }
+  }, 30_000);
 });
