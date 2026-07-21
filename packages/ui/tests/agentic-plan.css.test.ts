@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { agenticPlanCss } from "../src/uiCss";
+import { reducedMotionCss } from "@smithers-orchestrator/ui-styleguide";
+import { agenticPlanCss, smithersUiCss } from "../src/uiCss";
 
 describe("agentic plan css", () => {
   test("carries the exact screen-reader utility", () => {
@@ -8,10 +9,10 @@ describe("agentic plan css", () => {
     );
   });
 
-  test("pins shimmer animation and reduced-motion fallback", () => {
+  test("pins shimmer animation and delegates reduced motion to the shared policy", () => {
     expect(agenticPlanCss).toContain("@keyframes sui-plan-shimmer-sweep");
-    expect(agenticPlanCss).toContain("@media (prefers-reduced-motion: reduce)");
     expect(agenticPlanCss).toContain(".sui-plan-title[data-shimmer='true']");
-    expect(agenticPlanCss).toContain("animation:none; background:none;");
+    expect(agenticPlanCss).not.toContain("@media (prefers-reduced-motion: reduce)");
+    expect(smithersUiCss).toContain(reducedMotionCss);
   });
 });

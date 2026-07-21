@@ -51,6 +51,9 @@ export {
   smithersUiCss,
   standaloneThemeCss,
   SMITHERS_UI_STYLE_ATTR,
+  REDUCED_MOTION_MEDIA_QUERY,
+  prefersReducedMotion,
+  observeReducedMotion,
   type SmithersUiStylesProps,
 } from "./styles";
 

@@ -24,6 +24,8 @@ import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orches
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 import {
   Button,
+  observeReducedMotion,
+  prefersReducedMotion,
   SmithersUiStyles,
   Table,
   TableBody,
@@ -2466,6 +2468,7 @@ function HijackTerminal({
     let resizeObserver: ResizeObserver | null = null;
     let dataDisposable: IDisposable | null = null;
     let ws: WebSocket | null = null;
+    let stopObservingMotion: (() => void) | undefined;
     const encoder = new TextEncoder();
 
     async function connect() {
@@ -2488,13 +2491,16 @@ function HijackTerminal({
         },
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
         fontSize: 13,
-        cursorBlink: true,
+        cursorBlink: !prefersReducedMotion(),
       });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.open(host);
       fitAddon.fit();
       const boundTerm = term;
+      stopObservingMotion = observeReducedMotion((reduced) => {
+        boundTerm.options.cursorBlink = !reduced;
+      });
       const socket = new WebSocket(ptyHijackUrl(location.origin, runId, nodeId, { cols: boundTerm.cols, rows: boundTerm.rows }));
       ws = socket;
       socket.binaryType = "arraybuffer";
@@ -2554,6 +2560,7 @@ function HijackTerminal({
 
     return () => {
       ac.abort();
+      stopObservingMotion?.();
       resizeObserver?.disconnect();
       dataDisposable?.dispose();
       try {
@@ -3632,10 +3639,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 @keyframes mon-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes mon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) {
-  .mon-dot-pulse, .mon-panel, .mon-banner, .mon-inspector, .mon-inbox { animation: none; }
-  * { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
-}
 `;
 
 if (typeof document !== "undefined" && monitorMode.theme) {

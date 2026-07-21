@@ -65,8 +65,8 @@ describe("Shimmer and scroll fade CSS", () => {
     expect(chatScrollerCss).not.toContain(".sui-shimmer { background:");
   });
 
-  test("ships reduced-motion, shimmer, attachment, and edge-fade recipes", () => {
-    expect(chatScrollerCss).toContain("@media (prefers-reduced-motion: reduce)");
+  test("ships shimmer, attachment, and edge-fade recipes without a local motion policy", () => {
+    expect(chatScrollerCss).not.toContain("@media (prefers-reduced-motion: reduce)");
     expect(chatScrollerCss).toContain("@keyframes sui-shimmer-sweep");
     expect(chatScrollerCss).toContain("@keyframes sui-attachment-indeterminate");
     expect(chatScrollerCss).toContain(".sui-scroll-fade[data-fade-top='true'][data-fade-bottom='true']");

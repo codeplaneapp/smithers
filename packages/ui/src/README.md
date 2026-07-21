@@ -15,7 +15,7 @@ How the pieces fit, infrastructure first:
 - `status.ts` — shared status vocabulary: `normalizeStatus`, `statusClass`,
   `formatStatus`, `isTerminalRunStatus`.
 - `uiCss.ts` — the whole stylesheet as one JS string; per-component blocks
-  composed into `smithersUiCss`.
+  composed into `smithersUiCss`, followed by one shared reduced-motion guard.
 - `styles.tsx` — `SmithersUiStyles` render path plus the `useInjectUiCss`
   browser fallback, deduped via `SMITHERS_UI_STYLE_ATTR`.
 - One file per component (`button`, `badge`, `card`, `dialog`, `select`, ...)
@@ -64,3 +64,6 @@ Gotchas (all enforced by `../tests/css-contract.test.ts`):
 - Every component calls `useInjectUiCss()`, so a consumer who forgets
   `<SmithersUiStyles/>` still renders styled; standalone (non-gateway) hosts
   pass `withTheme` to `SmithersUiStyles` to also get the theme token block.
+- Imperative widgets that CSS cannot stop (such as xterm cursor blinking) use
+  `prefersReducedMotion()` / `observeReducedMotion()` from the shared style
+  seam instead of declaring another media-query policy.

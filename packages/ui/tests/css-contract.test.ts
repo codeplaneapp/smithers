@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { reducedMotionCss, workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
 import { agentOutputCss, smithersUiCss } from "../src/uiCss";
 import { tokens } from "../src/tokens";
 
@@ -114,5 +114,21 @@ describe("css contract", () => {
     expect(agentOutputCss).toContain(".sui-agent-output {");
     expect(agentOutputCss).toContain(".sui-agent-output-tools {");
     expect(smithersUiCss).toContain(agentOutputCss);
+  });
+
+  test("composes one document-wide reduced-motion policy after every component block", () => {
+    expect(smithersUiCss.endsWith(reducedMotionCss)).toBe(true);
+    expect(smithersUiCss.match(/@media \(prefers-reduced-motion: reduce\)/g)).toHaveLength(1);
+    expect(reducedMotionCss).toContain("*, *::before, *::after");
+    expect(reducedMotionCss).toContain("animation-duration:0.001ms !important");
+    expect(reducedMotionCss).toContain("transition-duration:0.001ms !important");
+    expect(smithersUiCss.indexOf(".sui-spinner")).toBeLessThan(smithersUiCss.indexOf(reducedMotionCss));
+    expect(smithersUiCss.indexOf(".sui-skeleton")).toBeLessThan(smithersUiCss.indexOf(reducedMotionCss));
+  });
+
+  test("uses the documented compact type step without a 12.5px half-step", () => {
+    expect(tokens.fontSizeCompact).toBe("var(--fs-2, 12px)");
+    expect(smithersUiCss).toContain("font-size:var(--fs-2, 12px)");
+    expect(smithersUiCss).not.toContain("12.5px");
   });
 });

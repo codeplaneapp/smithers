@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { standaloneThemeCss } from "../src";
+import { reducedMotionCss, standaloneThemeCss } from "../src";
 
 describe("standaloneThemeCss", () => {
   test("ships both dark-mode strategies and keeps color values in token declarations", () => {
@@ -24,5 +24,13 @@ describe("standaloneThemeCss", () => {
     expect(css).toContain(`pre${guard} {`);
     expect(css).toContain(`pre${guard} code${guard} {`);
     expect(css).not.toMatch(/(?:^|})\s*(?:code|pre|pre code)\s*\{/);
+  });
+
+  test("includes the documented type scale and the shared motion policy", () => {
+    const css = standaloneThemeCss();
+    expect(css).toContain("--fs-1:11px; --fs-2:12px; --fs-3:13px; --fs-4:15px");
+    expect(css).toContain("--fs-5:17px; --fs-6:20px; --fs-7:24px");
+    expect(css.endsWith(reducedMotionCss)).toBe(true);
+    expect(css.match(/@media \(prefers-reduced-motion: reduce\)/g)).toHaveLength(1);
   });
 });

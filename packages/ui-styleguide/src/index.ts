@@ -1,3 +1,5 @@
+import { reducedMotionCss } from "./standaloneThemeCss";
+
 const lightTokens = [
   "color-scheme:light",
   "font-family:var(--font-sans)",
@@ -210,6 +212,7 @@ export const workflowUiThemeCss = [
   ".livelog-detail { color:var(--code-text); min-width:0; }",
   "* { scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--text-muted) 35%,transparent) transparent; }",
   "@media (max-width: 760px) { .top,.topbar { align-items:flex-start; flex-direction:column; padding:10px 12px; } .toolbar,.actions { width:100%; justify-content:flex-start; } .button,.primary,.secondary { min-width:0; } }",
+  reducedMotionCss,
 ].join("\n");
 
 export const workflowUiLayoutCss = [
@@ -232,4 +235,4 @@ export const workflowUiLayoutCss = [
 ].join("\n");
 
 export const workflowUiStyles = [workflowUiThemeCss, workflowUiLayoutCss].join("\n");
-export { standaloneThemeCss } from "./standaloneThemeCss";
+export { reducedMotionCss, standaloneThemeCss } from "./standaloneThemeCss";

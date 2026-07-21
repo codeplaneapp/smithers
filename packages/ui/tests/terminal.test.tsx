@@ -16,6 +16,7 @@ import { Terminal, type TerminalWriter } from "../src/adapters/terminal";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const STYLE_ATTR = "data-smithers-ui-terminal";
+const originalMatchMedia = window.matchMedia;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -29,6 +30,7 @@ afterEach(async () => {
   container?.remove();
   container = undefined;
   document.querySelectorAll(`style[${STYLE_ATTR}]`).forEach((el) => el.remove());
+  window.matchMedia = originalMatchMedia;
 });
 
 async function render(element: ReactElement): Promise<void> {
@@ -120,6 +122,30 @@ describe("<Terminal> headless rendering", () => {
     const style = document.querySelector(`style[${STYLE_ATTR}]`);
     expect(style?.textContent).toContain(".xterm");
     expect(style?.textContent).toContain(".sui-terminal");
+  });
+
+  test("disables cursor blinking for reduced motion and follows preference changes", async () => {
+    let changeListener: ((event: MediaQueryListEvent) => void) | undefined;
+    window.matchMedia = (() => ({
+      matches: true,
+      media: "(prefers-reduced-motion: reduce)",
+      onchange: null,
+      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
+        changeListener = listener as (event: MediaQueryListEvent) => void;
+      },
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => true,
+    })) as typeof window.matchMedia;
+
+    let term: XTerminal | null = null;
+    await render(<Terminal onReady={(ready) => (term = ready)} />);
+    const ready = await waitFor(() => term);
+    expect(ready.options.cursorBlink).toBe(false);
+
+    changeListener?.({ matches: false } as MediaQueryListEvent);
+    expect(ready.options.cursorBlink).toBe(true);
   });
 });
 

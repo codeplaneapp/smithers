@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { agenticReasoningCss } from "../src/uiCss";
+import { reducedMotionCss } from "@smithers-orchestrator/ui-styleguide";
+import { agenticReasoningCss, smithersUiCss } from "../src/uiCss";
 
 describe("agentic reasoning CSS", () => {
-  test("pins shimmer motion and reduced-motion fallback", () => {
+  test("pins shimmer motion under the shared reduced-motion policy", () => {
     expect(agenticReasoningCss).toContain("@keyframes sui-shimmer-sweep");
-    expect(agenticReasoningCss).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(agenticReasoningCss).toContain("animation:none");
+    expect(agenticReasoningCss).not.toContain("@media (prefers-reduced-motion: reduce)");
+    expect(smithersUiCss).toContain(reducedMotionCss);
   });
 
   test("carries the lane-local screen-reader utility", () => {

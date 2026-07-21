@@ -13,6 +13,26 @@ export { standaloneThemeCss };
  * once per document no matter how many components render.
  */
 export const SMITHERS_UI_STYLE_ATTR = "data-smithers-ui";
+export const REDUCED_MOTION_MEDIA_QUERY = "(prefers-reduced-motion: reduce)";
+
+/** Browser motion preference for imperative behavior CSS cannot control. */
+export function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(REDUCED_MOTION_MEDIA_QUERY).matches
+  );
+}
+
+/** Keep canvas/widget motion synchronized when the OS preference changes. */
+export function observeReducedMotion(listener: (reduced: boolean) => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const media = window.matchMedia(REDUCED_MOTION_MEDIA_QUERY);
+  if (typeof media.addEventListener !== "function") return () => {};
+  const handleChange = (event: MediaQueryListEvent) => listener(event.matches);
+  media.addEventListener("change", handleChange);
+  return () => media.removeEventListener("change", handleChange);
+}
 
 export type SmithersUiStylesProps = {
   /**

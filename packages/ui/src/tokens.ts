@@ -97,6 +97,8 @@ export const tokens = {
   radiusControl: "var(--r-1, 6px)",
   /** Shared control height (buttons, inputs, selects, triggers). */
   controlHeight: "var(--ctl-h, 32px)",
+  /** Compact UI copy: the documented 12px type-scale step. */
+  fontSizeCompact: "var(--fs-2, 12px)",
   fontSans:
     'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   fontMono:

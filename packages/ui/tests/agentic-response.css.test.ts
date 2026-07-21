@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
-import { agenticResponseCss } from "../src/uiCss";
+import { reducedMotionCss, workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { agenticResponseCss, smithersUiCss } from "../src/uiCss";
 
 describe("agentic response CSS", () => {
-  test("ships caret animation with a reduced-motion fallback", () => {
+  test("ships caret animation under the shared reduced-motion policy", () => {
     expect(agenticResponseCss).toContain("@keyframes sui-caret-blink");
-    expect(agenticResponseCss).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(agenticResponseCss).toContain(".sui-response-caret { animation:none; opacity:.6; }");
+    expect(agenticResponseCss).not.toContain("@media (prefers-reduced-motion: reduce)");
+    expect(smithersUiCss).toContain(reducedMotionCss);
   });
 
   test("styles code through the house code tokens and pins wrapping anatomy", () => {

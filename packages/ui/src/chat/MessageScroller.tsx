@@ -13,7 +13,7 @@ import {
   type RefAttributes,
 } from "react";
 import { cn } from "../cn";
-import { useInjectUiCss } from "../styles";
+import { prefersReducedMotion, useInjectUiCss } from "../styles";
 
 export type MessageScrollerHandle = {
   scrollToBottom: (behavior?: ScrollBehavior) => void;
@@ -38,14 +38,6 @@ type ScrollSnapshot = {
   scrollHeight: number;
   scrollTop: number;
 };
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
 
 /** Anchored conversation viewport with streaming follow and prepend compensation. */
 export const MessageScroller: ForwardRefExoticComponent<

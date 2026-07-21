@@ -65,11 +65,13 @@ Paste this `:root` block at the top of your `<style>` (it carries the canonical 
   /* Geometry (theme-invariant): spacing scale, type scale, radii, and the one
      control height every button/chip/input/select shares. Reach for these
      instead of bare pixel values so spacing rhythm stays even everywhere. */
-  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px;
   --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 15px;
+  --fs-5: 17px; --fs-6: 20px; --fs-7: 24px;
   --lh-tight: 1.35; --lh-body: 1.5;
-  --r-1: 6px; --r-2: 9px; --r-3: 12px; --r-full: 999px;
-  --ctl-h: 28px;
+  --r-1: 6px; --r-2: 10px; --r-3: 12px; --r-4: 16px; --r-full: 999px;
+  --ctl-h: 32px; --ctl-h-sm: 26px; --ctl-h-lg: 38px;
 
   color: var(--text);
   background: var(--bg);
@@ -203,18 +205,11 @@ Animation is fast and earns its place; nothing bounces for decoration.
 - **Entrances are subtle:** opacity from 0 with an 8px `translateY`, or a directional `translateX` of about 18px for forward/back view transitions. Small distances, fast.
 - **Use a real FLIP morph for "this became that."** When a composing card turns into a running toast, measure both rects (`getBoundingClientRect`), drive a CSS-variable transform, and let one keyframe interpolate. Do not cross-fade two elements; morph the one.
 - **Spinners and pulses are tokenized too:** a brand-bordered ring for in-progress, a `--brand` dot with a `0 0 0 4px color-mix(...)` halo for "live".
-- **Always honor reduced motion.** Close your `<style>` with the safety net so a reduced-motion user gets an instant UI:
-
-  ```css
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: 0.001ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.001ms !important;
-      scroll-behavior: auto !important;
-    }
-  }
-  ```
+- **Reduced motion is centralized.** `WorkflowUiStyles`, `SmithersUiStyles`,
+  and `standaloneThemeCss()` already ship the same document-wide safety net,
+  so component CSS must not add its own media-query guard. Imperative canvas
+  widgets use `prefersReducedMotion()` and `observeReducedMotion()` from
+  `smithers-orchestrator/ui`.
 
 ### Layout: a readable measure and calm chrome
 
@@ -297,11 +292,11 @@ createGatewayReactRoot(<App />);
 - [ ] Colors, tints, and shadow alphas come from tokens or `color-mix`, never raw hex inline.
 - [ ] Light and dark both look right (the token block handles both; spot-check by toggling `data-theme`).
 - [ ] Type is Inter, antialiased, with heavy weights on labels and tight tracking on headings.
-- [ ] Radii come from the 6/8/14-20/pill ladder; nothing arbitrary.
+- [ ] Radii come from the 6/10/12/16/pill scale; nothing arbitrary.
 - [ ] Elevated surfaces are glass with a two-layer, `--shadow-rgb`-tinted shadow.
 - [ ] Primary action is the inverse surface; brand is reserved for focus and progress.
 - [ ] Every interactive control has a visible `:focus-visible` (or `:focus-within`) treatment.
-- [ ] Motion is 120 to 260ms, `both` fill, and there is a `prefers-reduced-motion` safety net.
+- [ ] Motion is 120 to 260ms with `both` fill; the shared reduced-motion safety net is present.
 - [ ] Run state maps to brand/success/danger the same way it does in every other UI.
 
 ## Reference

@@ -2,6 +2,7 @@
 import { useEffect, useInsertionEffect, useRef, type ComponentProps } from "react";
 import type { IDisposable, ITheme, Terminal as XTerminal } from "@xterm/xterm";
 import { cn } from "../cn";
+import { observeReducedMotion, prefersReducedMotion, useInjectUiCss } from "../styles";
 import { tokens as t } from "../tokens";
 import { xtermBaseCss } from "./xtermCss";
 
@@ -147,6 +148,7 @@ export function Terminal({
   style,
   ...rest
 }: TerminalProps) {
+  useInjectUiCss();
   useInsertionEffect(injectTerminalStyles, []);
 
   // Latest-value refs keep the mount effect stable (it only re-runs on config
@@ -180,6 +182,7 @@ export function Terminal({
     let resizeObserver: ResizeObserver | null = null;
     let dataDisposable: IDisposable | null = null;
     let streamTeardown: (() => void) | void;
+    let stopObservingMotion: (() => void) | undefined;
 
     async function mount() {
       const [{ Terminal: XtermTerminal }, { FitAddon }] = await Promise.all([
@@ -197,7 +200,7 @@ export function Terminal({
         theme: palette,
         fontFamily,
         fontSize,
-        cursorBlink,
+        cursorBlink: cursorBlink && !prefersReducedMotion(),
         convertEol: true,
         disableStdin: readOnly,
         scrollback,
@@ -209,6 +212,9 @@ export function Terminal({
       if (ac.signal.aborted) return;
 
       const boundTerm = term;
+      stopObservingMotion = observeReducedMotion((reduced) => {
+        boundTerm.options.cursorBlink = cursorBlink && !reduced;
+      });
       const write: TerminalWriter = (data) => boundTerm.write(data);
 
       const initialLines = linesRef.current;
@@ -241,6 +247,7 @@ export function Terminal({
       // unconditionally, whatever stage setup reached.
       ac.abort();
       if (typeof streamTeardown === "function") streamTeardown();
+      stopObservingMotion?.();
       resizeObserver?.disconnect();
       dataDisposable?.dispose();
       term?.dispose();
