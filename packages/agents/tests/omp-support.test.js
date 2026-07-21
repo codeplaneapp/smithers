@@ -33,6 +33,19 @@ describe("OmpAgent", () => {
     }
   });
 
+  test("exposes the RPC command spec required by Smithers preflight", async () => {
+    const agent = new OmpAgent({ mode: "rpc", noSession: true, noTools: true });
+    await expect(agent.buildCommand({
+      prompt: "",
+      cwd: "/repo",
+      options: {},
+    })).resolves.toEqual({
+      command: "omp",
+      args: ["--mode", "rpc", "--cwd", "/repo", "--no-session", "--no-tools"],
+      outputFormat: "rpc",
+    });
+  });
+
   test("interprets OMP JSON session, text, tool, and completion events", () => {
     const agent = new OmpAgent({ mode: "json" });
     const interpreter = agent.createOutputInterpreter();
