@@ -96,6 +96,44 @@ describe("browser session registry", () => {
     const registry = createBrowserSessionRegistry({ playwright, resolveHost: async () => [{ address: "93.184.216.34", family: 4 }, { address: "127.0.0.1", family: 4 }] });
     await expect(registry.create({ source: { kind: "url", url: "http://mixed.example/" } })).rejects.toMatchObject({ code: "SSRF_BLOCKED" });
   });
+  test("does not consume quota for invalid viewports", async () => {
+    const registry = createBrowserSessionRegistry({ playwright, limits: { maxConcurrent: 1 } });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(registry.create({ source: { kind: "dev-server", port: 3000 }, viewport: { width: 0, height: 720 } })).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    }
+    const session = await registry.create({ source: { kind: "dev-server", port: 3000 } });
+    expect(session.status).toBe("ready");
+    await registry.close(session.sessionId);
+  });
+
+  test.each([
+    ["newContext", "browser"],
+    ["newPage", "context"],
+  ])("cleans up when Playwright %s fails", async (failure, expectedClose) => {
+    const closes = { browser: 0, context: 0 };
+    let shouldFail = true;
+    const browser = {
+      newContext: async () => {
+        if (shouldFail && failure === "newContext") { shouldFail = false; throw new Error("newContext failed"); }
+        return {
+          newPage: async () => { if (shouldFail && failure === "newPage") { shouldFail = false; throw new Error("newPage failed"); } return page; },
+          close: async () => { closes.context += 1; },
+        };
+      },
+      close: async () => { closes.browser += 1; },
+    };
+    const failingPlaywright = { chromium: { launch: async () => browser } };
+    const registry = createBrowserSessionRegistry({ playwright: failingPlaywright, limits: { maxConcurrent: 1 } });
+
+    await expect(registry.create({ source: { kind: "dev-server", port: 3000 } })).rejects.toMatchObject({ message: `${failure} failed` });
+    expect(closes.browser).toBe(1);
+    expect(closes.context).toBe(expectedClose === "context" ? 1 : 0);
+    expect(await registry.list()).toHaveLength(0);
+
+    const valid = await registry.create({ source: { kind: "dev-server", port: 3000 } });
+    expect(valid.status).toBe("ready");
+    await registry.close(valid.sessionId);
+  });
   test("coalesces a redirecting click into one journal entry and reaps idle sessions", async () => {
     const server = createServer((request, response) => {
       if (request.url === "/start") return void response.writeHead(302, { location: "/final" }).end();

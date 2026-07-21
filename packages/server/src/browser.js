@@ -167,28 +167,36 @@ export function createBrowserSessionRegistry(options = {}) {
     return outcome;
   };
   const create = async ({ source, viewport = { width: 1280, height: 720 } }) => {
+    if (!Number.isInteger(viewport.width) || !Number.isInteger(viewport.height) || viewport.width < 1 || viewport.height < 1 || viewport.width > 3840 || viewport.height > 2160) throw new BrowserError("INVALID_REQUEST", "Viewport is outside the supported bounds.");
     await reap(); if (sessions.size + creating >= limits.maxConcurrent) throw new BrowserError("QUOTA_EXCEEDED", "Browser session quota reached.");
     creating += 1;
-    if (!Number.isInteger(viewport.width) || !Number.isInteger(viewport.height) || viewport.width < 1 || viewport.height < 1 || viewport.width > 3840 || viewport.height > 2160) throw new BrowserError("INVALID_REQUEST", "Viewport is outside the supported bounds.");
-    let destination; let browser; let context; let proxy;
+    const sessionId = randomUUID();
+    let destination; let browser; let context; let proxy; let session;
     try {
       destination = await sourceUrl(source, options.resolveHost);
       proxy = createDestinationProxy(destination.policy, options.resolveHost, destination.destination, options.connect, options.request);
       const proxyPort = await proxy.listen();
       browser = await getPlaywright().chromium.launch({ headless: true, proxy: { server: `http://127.0.0.1:${proxyPort}`, bypass: "" } });
       context = await browser.newContext({ viewport, acceptDownloads: false });
-    } catch (error) { await context?.close().catch(() => {}); await browser?.close().catch(() => {}); await proxy?.close().catch(() => {}); throw error; } finally { creating -= 1; }
-    const session = { sessionId: randomUUID(), source, status: "starting", revision: 0, viewport, owner: null, context, browser, page: null, proxy, createdAt: Date.now(), lastUsed: Date.now(), ledger: new Map(), journal: [], artifacts: new Map(), sensitiveActions: new Set(), sensitiveValues: new Set(), queue: Promise.resolve(), policy: destination.policy, console: [], network: [], timer: null, cdp: null, frameSubscribers: 0, lastFrameAt: 0, screencastStarting: false, screencastTransition: Promise.resolve() };
-    sessions.set(session.sessionId, session);
-    session.page = await context.newPage();
-    session.page.on?.("dialog", (dialog) => { session.dialog = dialog; });
-    session.page.on?.("download", (download) => void download.cancel().catch(() => {}));
-    session.page.on?.("console", (message) => { session.console.push({ type: trim(message.type(), 80), text: sanitize(session, message.text(), 1000) }); if (session.console.length > MAX.console) session.console.shift(); });
-    session.page.on?.("request", (request) => { session.network.push({ method: trim(request.method(), 80), url: sanitize(session, request.url(), 2000) }); if (session.network.length > MAX.network) session.network.shift(); });
-    context.on?.("page", (popup) => { if (popup !== session.page) void popup.close().catch(() => {}); });
-    try { await session.page.goto(destination.destination.url, { waitUntil: "domcontentloaded" }); session.status = "ready"; } catch { session.status = "failed"; }
-    armTimer(session);
-    return snapshot(session);
+      session = { sessionId, source, status: "starting", revision: 0, viewport, owner: null, context, browser, page: null, proxy, createdAt: Date.now(), lastUsed: Date.now(), ledger: new Map(), journal: [], artifacts: new Map(), sensitiveActions: new Set(), sensitiveValues: new Set(), queue: Promise.resolve(), policy: destination.policy, console: [], network: [], timer: null, cdp: null, frameSubscribers: 0, lastFrameAt: 0, screencastStarting: false, screencastTransition: Promise.resolve() };
+      session.page = await context.newPage();
+      session.page.on?.("dialog", (dialog) => { session.dialog = dialog; });
+      session.page.on?.("download", (download) => void download.cancel().catch(() => {}));
+      session.page.on?.("console", (message) => { session.console.push({ type: trim(message.type(), 80), text: sanitize(session, message.text(), 1000) }); if (session.console.length > MAX.console) session.console.shift(); });
+      session.page.on?.("request", (request) => { session.network.push({ method: trim(request.method(), 80), url: sanitize(session, request.url(), 2000) }); if (session.network.length > MAX.network) session.network.shift(); });
+      context.on?.("page", (popup) => { if (popup !== session.page) void popup.close().catch(() => {}); });
+      try { await session.page.goto(destination.destination.url, { waitUntil: "domcontentloaded" }); session.status = "ready"; } catch { session.status = "failed"; }
+      armTimer(session);
+      sessions.set(sessionId, session);
+      return snapshot(session);
+    } catch (error) {
+      sessions.delete(sessionId);
+      if (session?.timer) clearTimeout(session.timer);
+      try { await context?.close(); } catch {}
+      try { await browser?.close(); } catch {}
+      try { await proxy?.close(); } catch {}
+      throw error;
+    } finally { creating -= 1; }
   };
   const get = (id) => { const session = sessions.get(id); if (!session || session.status === "closed") throw new BrowserError("InvalidRequest", "Browser session not found."); if (Date.now() - session.createdAt >= limits.hardLifetimeMs) { void close(id); throw new BrowserError("InvalidRequest", "Browser session lifetime expired."); } session.lastUsed = Date.now(); armTimer(session); return session; };
   const act = async (params) => { const session = get(params.sessionId); const prior = session.ledger.get(params.actionId); if (prior) return prior.value; const run = session.queue.catch(() => {}).then(async () => { const queuedPrior = session.ledger.get(params.actionId); if (queuedPrior) return queuedPrior.value;
