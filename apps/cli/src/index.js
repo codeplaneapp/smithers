@@ -3465,7 +3465,7 @@ async function runGatewayCommand(options) {
         for (const { discovered } of loadedWorkflows) {
             gateway.register(discovered.id, readOnlyWorkflow, {
                 system: discovered.system,
-                ui: true,
+                ui: discovered.id === "oneshot" ? { entry: ONESHOT_UI_ENTRY, title: "Oneshot" } : true,
             });
             workflows.push(discovered.id);
         }
@@ -3481,7 +3481,7 @@ async function runGatewayCommand(options) {
                 ensureSmithersTables(workflow.db);
                 setupSqliteCleanup(workflow);
                 backendCleanups.push(() => closeWorkflowBackend(workflow));
-                gateway.register(discovered.id, workflow, { system: discovered.system, entryFile: discovered.entryFile });
+                gateway.register(discovered.id, workflow, workflowGatewayRegistration(discovered));
                 workflows.push(discovered.id);
             }
             catch (error) {
@@ -3492,6 +3492,12 @@ async function runGatewayCommand(options) {
     if (workflows.length === 0) {
         gateway.register("workspace", workspaceWorkflow);
         workflows.push("workspace");
+    }
+    if (!gateway.workflows.has("oneshot")) {
+        gateway.register("oneshot", workspaceWorkflow, {
+            ui: { entry: ONESHOT_UI_ENTRY, title: "Oneshot" },
+        });
+        workflows.push("oneshot");
     }
     // The `evals` gateway extension (issue #77): every CLI-booted gateway
     // serves it, backed by the workspace's own DB and its real discovered-
@@ -3515,7 +3521,7 @@ async function runGatewayCommand(options) {
             try {
                 gateway.register(discovered.id, readOnlyWorkflow, {
                     system: discovered.system,
-                    ui: true,
+                    ui: discovered.id === "oneshot" ? { entry: ONESHOT_UI_ENTRY, title: "Oneshot" } : true,
                 });
                 workflows.push(discovered.id);
                 workflowIndex.set(discovered.id, discovered);
@@ -3536,10 +3542,7 @@ async function runGatewayCommand(options) {
         try {
             ensureSmithersTables(workflow.db);
             setupSqliteCleanup(workflow);
-            gateway.register(discovered.id, workflow, {
-                system: discovered.system,
-                entryFile: discovered.entryFile,
-            });
+            gateway.register(discovered.id, workflow, workflowGatewayRegistration(discovered));
             backendCleanups.push(() => closeWorkflowBackend(workflow));
             workflows.push(discovered.id);
             workflowIndex.set(discovered.id, discovered);
@@ -5222,6 +5225,18 @@ function makeFail(c) {
 // top-level group description, mirroring what `smithers skills add` passes).
 const CLI_DESCRIPTION = "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions. " +
     "--json is accepted on every command as shorthand for `--format json`; after events, timeline, tree, diff, output, rewind, snapshots, and restore it is command-scoped and emits that command's raw JSON payload instead.";
+const ONESHOT_UI_ENTRY = fileURLToPath(new URL("./oneshot/oneshot-ui.tsx", import.meta.url));
+
+/** @param {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} discovered */
+function workflowGatewayRegistration(discovered) {
+    if (discovered.id !== "oneshot") return { system: discovered.system, entryFile: discovered.entryFile };
+    const conventionUi = discovered.packDir ? join(discovered.packDir, "ui", "oneshot.tsx") : undefined;
+    return {
+        system: discovered.system,
+        entryFile: discovered.entryFile,
+        ui: { entry: conventionUi && existsSync(conventionUi) ? conventionUi : ONESHOT_UI_ENTRY, title: "Oneshot" },
+    };
+}
 const cli = Cli.create({
     name: "smithers",
     // The trailing --json note belongs in the Global Options block, but that
