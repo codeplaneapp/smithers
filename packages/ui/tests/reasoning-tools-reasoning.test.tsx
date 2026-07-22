@@ -78,6 +78,39 @@ describe("Reasoning composed anatomy", () => {
   });
 });
 
+describe("Reasoning streaming announcements", () => {
+  test("a labelled polite live region announces streaming transitions", async () => {
+    function Harness({ streaming }: { streaming: boolean }) {
+      return <Reasoning streaming={streaming}>Summary text</Reasoning>;
+    }
+    await render(<Harness streaming={false} />);
+    const live = () => container!.querySelector('[data-slot="reasoning-live"]')!;
+    expect(live().getAttribute("role")).toBe("status");
+    expect(live().getAttribute("aria-live")).toBe("polite");
+    expect(live().getAttribute("aria-label")).toBe("Reasoning status");
+    expect(live().className).toContain("sui-sr-only");
+    expect(live().textContent).toBe("");
+
+    await act(async () => root!.render(<Harness streaming={true} />));
+    expect(live().textContent).toBe("Reasoning in progress");
+
+    await act(async () => root!.render(<Harness streaming={false} />));
+    expect(live().textContent).toBe("Reasoning complete");
+  });
+
+  test("composed mode renders the same live region", () => {
+    const html = renderToStaticMarkup(
+      <Reasoning composed title="Thinking">
+        <ReasoningTrigger>Thinking</ReasoningTrigger>
+        <ReasoningContent>Visible</ReasoningContent>
+      </Reasoning>,
+    );
+    expect(html).toContain('data-slot="reasoning-live"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('aria-label="Thinking status"');
+  });
+});
+
 describe("ReasoningSummary", () => {
   test("renders the default Thinking label over provider-disclosed summary text", () => {
     const html = renderToStaticMarkup(<ReasoningSummary text="Searched the docs, then answered" />);

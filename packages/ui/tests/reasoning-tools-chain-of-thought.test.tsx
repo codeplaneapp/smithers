@@ -70,6 +70,8 @@ describe("ChainOfThought compound mode", () => {
     const detail = step.querySelector(".sui-cot-step-detail")!;
     expect(detail.getAttribute("role")).toBe("region");
     expect(detail.id).toBe(trigger.getAttribute("aria-controls"));
+    expect(trigger.id).toBeTruthy();
+    expect(detail.getAttribute("aria-labelledby")).toBe(trigger.id);
     expect(detail.textContent).toContain("Edited 3 files");
   });
 
@@ -105,5 +107,30 @@ describe("ChainOfThought compound mode", () => {
     );
     expect(html).toContain("Legacy");
     expect(html).toContain('data-slot="chain-of-thought-step"');
+  });
+});
+
+describe("ChainOfThought streaming announcements", () => {
+  test("a labelled polite live region announces streaming transitions", async () => {
+    function Harness({ streaming }: { streaming: boolean }) {
+      return (
+        <ChainOfThought streaming={streaming} title="Chain of thought">
+          <ChainOfThoughtStep label="Step" status="active" />
+        </ChainOfThought>
+      );
+    }
+    await render(<Harness streaming={false} />);
+    const live = () => container!.querySelector('[data-slot="chain-of-thought-live"]')!;
+    expect(live().getAttribute("role")).toBe("status");
+    expect(live().getAttribute("aria-live")).toBe("polite");
+    expect(live().getAttribute("aria-label")).toBe("Chain of thought status");
+    expect(live().className).toContain("sui-sr-only");
+    expect(live().textContent).toBe("");
+
+    await act(async () => root!.render(<Harness streaming={true} />));
+    expect(live().textContent).toBe("Chain of thought in progress");
+
+    await act(async () => root!.render(<Harness streaming={false} />));
+    expect(live().textContent).toBe("Chain of thought complete");
   });
 });

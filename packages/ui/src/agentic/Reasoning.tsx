@@ -45,6 +45,25 @@ function formatDuration(n: number): string {
   return `${Math.floor(n / 60)}m ${String(Math.round(n % 60)).padStart(2, "0")}s`;
 }
 
+/**
+ * Labelled polite live region announcing streaming state transitions. Kept
+ * visually hidden (sui-sr-only), so the presentation carries no motion and is
+ * reduced-motion safe by construction.
+ */
+function ReasoningLiveRegion({ title, announcement }: { title: string; announcement: string }) {
+  return (
+    <span
+      data-slot="reasoning-live"
+      className="sui-sr-only"
+      role="status"
+      aria-live="polite"
+      aria-label={`${title} status`}
+    >
+      {announcement}
+    </span>
+  );
+}
+
 /** Collapsible, streaming-aware container for provider-safe reasoning summaries. */
 export function Reasoning({
   streaming = false,
@@ -70,14 +89,18 @@ export function Reasoning({
   const previousStreaming = useRef(streaming);
   const userToggled = useRef(false);
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
+  const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     const previous = previousStreaming.current;
     previousStreaming.current = streaming;
+    if (previous !== streaming) {
+      setAnnouncement(streaming ? `${title} in progress` : `${title} complete`);
+    }
     if (previous === streaming || isControlled || userToggled.current) return;
     setUncontrolledOpen(streaming);
     onOpenChange?.(streaming);
-  }, [isControlled, onOpenChange, streaming]);
+  }, [isControlled, onOpenChange, streaming, title]);
 
   function toggle() {
     const next = !isOpen;
@@ -95,6 +118,7 @@ export function Reasoning({
         className={cn("sui-reasoning", className)}
         {...props}
       >
+        <ReasoningLiveRegion title={title} announcement={announcement} />
         {composed ? children : (
           <>
             <button

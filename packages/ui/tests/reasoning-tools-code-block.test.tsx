@@ -199,6 +199,34 @@ describe("CodeBlockGroup", () => {
     }
   });
 
+  test("opaque caller item ids never leak into id/aria-controls attributes", async () => {
+    const hostile = [
+      { id: 'weird "quoted" id', label: "one.ts", code: "const one = 1;" },
+      { id: "spaces and <brackets>", label: "two.ts", code: "const two = 2;" },
+    ] as const;
+    await render(<CodeBlockGroup items={hostile} />);
+    const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    const panels = container!.querySelectorAll('[role="tabpanel"]');
+    expect(tabs.length).toBe(2);
+    expect(panels.length).toBe(2);
+    for (const el of [...tabs, ...panels]) {
+      for (const attr of ["id", "aria-controls", "aria-labelledby"]) {
+        const value = el.getAttribute(attr);
+        if (value === null) continue;
+        expect(value).not.toMatch(/[\s"'<>]/);
+        expect(value).not.toContain("weird");
+        expect(value).not.toContain("spaces");
+      }
+    }
+    for (const tab of tabs) {
+      const panel = container!.querySelector(
+        `[role="tabpanel"]#${CSS.escape(tab.getAttribute("aria-controls")!)}`,
+      );
+      expect(panel).not.toBeNull();
+      expect(panel!.getAttribute("aria-labelledby")).toBe(tab.id);
+    }
+  });
+
   test("renders under the dark theme", () => {
     document.documentElement.dataset.theme = "dark";
     const html = renderToStaticMarkup(<CodeBlockGroup items={items} />);

@@ -43,6 +43,25 @@ export function chainOfThoughtStepStatus(
   return "pending";
 }
 
+/**
+ * Labelled polite live region announcing streaming state transitions. Kept
+ * visually hidden (sui-sr-only), so the presentation carries no motion and is
+ * reduced-motion safe by construction.
+ */
+function ChainOfThoughtLiveRegion({ title, announcement }: { title: string; announcement: string }) {
+  return (
+    <span
+      data-slot="chain-of-thought-live"
+      className="sui-sr-only"
+      role="status"
+      aria-live="polite"
+      aria-label={`${title} status`}
+    >
+      {announcement}
+    </span>
+  );
+}
+
 /** Ordered, streaming-aware reasoning steps. */
 export function ChainOfThought({
   streaming = false,
@@ -65,14 +84,18 @@ export function ChainOfThought({
   const previousStreaming = useRef(streaming);
   const userToggled = useRef(false);
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
+  const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     const previous = previousStreaming.current;
     previousStreaming.current = streaming;
+    if (previous !== streaming) {
+      setAnnouncement(streaming ? `${title} in progress` : `${title} complete`);
+    }
     if (previous === streaming || isControlled || userToggled.current) return;
     setUncontrolledOpen(streaming);
     onOpenChange?.(streaming);
-  }, [isControlled, onOpenChange, streaming]);
+  }, [isControlled, onOpenChange, streaming, title]);
 
   function toggle() {
     const next = !isOpen;
@@ -89,6 +112,7 @@ export function ChainOfThought({
       className={cn("sui-cot", className)}
       {...props}
     >
+      <ChainOfThoughtLiveRegion title={title} announcement={announcement} />
       <button
         type="button"
         data-slot="chain-of-thought-trigger"
@@ -158,7 +182,9 @@ export function ChainOfThoughtStep({
 }: ChainOfThoughtStepProps) {
   useInjectUiCss();
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
-  const detailId = `${useId()}-cot-step-detail`;
+  const baseId = useId();
+  const detailId = `${baseId}-cot-step-detail`;
+  const triggerId = `${baseId}-cot-step-trigger`;
   const isControlled = controlledOpen !== undefined;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
@@ -190,6 +216,7 @@ export function ChainOfThoughtStep({
       {hasDetail ? (
         <button
           type="button"
+          id={triggerId}
           className="sui-cot-step-trigger"
           aria-expanded={isOpen}
           aria-controls={detailId}
@@ -205,7 +232,12 @@ export function ChainOfThoughtStep({
         </>
       )}
       {hasDetail && isOpen ? (
-        <div role="region" id={detailId} className="sui-cot-step-detail">
+        <div
+          role="region"
+          id={detailId}
+          aria-labelledby={triggerId}
+          className="sui-cot-step-detail"
+        >
           {children}
         </div>
       ) : null}

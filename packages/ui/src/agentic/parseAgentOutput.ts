@@ -64,6 +64,12 @@ function joinParts(value: unknown, acceptedTypes?: ReadonlySet<string>): string 
 
 const RESPONSE_PART_TYPES = new Set(["text", "output_text", "message", "assistant"]);
 const REASONING_SUMMARY_PART_TYPES = new Set(["summary", "summary_text", "reasoning_summary"]);
+const REASONING_CONTAINER_PART_TYPES = new Set([
+  "reasoning",
+  "thinking",
+  "thought",
+  ...REASONING_SUMMARY_PART_TYPES,
+]);
 const TOOL_PART_TYPES = new Set(["tool-call", "tool_call", "tool-use", "tool_use"]);
 
 function contentParts(record: UnknownRecord): unknown {
@@ -98,6 +104,11 @@ function summaryFromPart(value: unknown): string | undefined {
   if (value.signature !== undefined || value.redactedData !== undefined || value.redacted_data !== undefined) {
     return undefined;
   }
+  // A `summary` field only names reasoning text when it rides on a recognized
+  // reasoning content part. Unrelated part kinds (tool calls, text, images,
+  // ...) and untyped generic content parts use `summary` for their own
+  // metadata and are never reasoning text.
+  if (!type || !REASONING_CONTAINER_PART_TYPES.has(type.toLowerCase())) return undefined;
   const nested = value.summary;
   if (typeof nested === "string") return nested.trim() ? nested : undefined;
   if (Array.isArray(nested)) {
@@ -106,7 +117,7 @@ function summaryFromPart(value: unknown): string | undefined {
       .filter((part): part is string => part !== undefined);
     if (texts.length) return texts.join("\n\n");
   }
-  if (type && REASONING_SUMMARY_PART_TYPES.has(type.toLowerCase())) {
+  if (REASONING_SUMMARY_PART_TYPES.has(type.toLowerCase())) {
     return readString(value, ["text", "content", "value"]);
   }
   return undefined;

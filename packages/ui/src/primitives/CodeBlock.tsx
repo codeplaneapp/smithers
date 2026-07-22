@@ -205,7 +205,10 @@ export type CodeBlockTabsProps = Omit<ComponentProps<"div">, "children"> & {
 /**
  * Internal wiring between CodeBlockGroup and its CodeBlockTabs: the group owns
  * the id prefix so every tab's aria-controls resolves to a real tabpanel the
- * group renders. Not part of the public props surface.
+ * group renders. DOM ids are derived from the item INDEX, never from the
+ * caller's opaque item id, so id/aria-controls/aria-labelledby stay valid no
+ * matter what characters an item id contains. Not part of the public props
+ * surface.
  */
 const CodeBlockTabsIdContext = createContext<string | null>(null);
 
@@ -264,8 +267,8 @@ export function CodeBlockTabs({
           }}
           type="button"
           role="tab"
-          id={idPrefix ? `${idPrefix}-tab-${item.id}` : undefined}
-          aria-controls={idPrefix ? `${idPrefix}-panel-${item.id}` : undefined}
+          id={idPrefix ? `${idPrefix}-tab-${index}` : undefined}
+          aria-controls={idPrefix ? `${idPrefix}-panel-${index}` : undefined}
           data-slot="code-block-tab"
           className="sui-codeblock-tab"
           aria-selected={item.id === activeId}
@@ -331,12 +334,12 @@ export function CodeBlockGroup({
             {active!.filename !== undefined ? <CodeBlockFilename name={active!.filename} /> : null}
           </CodeBlockHeader>
         ) : null}
-        {items.map((item) => (
+        {items.map((item, index) => (
           <div
             key={item.id}
             role="tabpanel"
-            id={`${baseId}-panel-${item.id}`}
-            aria-labelledby={`${baseId}-tab-${item.id}`}
+            id={`${baseId}-panel-${index}`}
+            aria-labelledby={`${baseId}-tab-${index}`}
             hidden={item.id !== active?.id}
           >
             <CodeBlock

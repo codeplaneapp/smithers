@@ -53,6 +53,40 @@ describe("reasoning summary safety boundary", () => {
     ).toBe("First summary\n\nSecond summary\n\nThird summary");
   });
 
+  test("a summary field on unrelated part kinds is never reasoning text", () => {
+    const model = parseAgentOutput({
+      response: "done",
+      content: [
+        { type: "text", text: "answer", summary: "a tl;dr of the answer" },
+        { type: "tool-call", name: "search", summary: "what the tool did" },
+        { type: "image", summary: "alt-text-ish summary" },
+      ],
+      reasoning: [
+        { type: "tool_result", summary: "tool metadata, not reasoning" },
+        { type: "reasoning", summary: "Real reasoning summary" },
+      ],
+    });
+    expect(model?.reasoningSummary).toBe("Real reasoning summary");
+    expect(model?.reasoning).toBe("Real reasoning summary");
+  });
+
+  test("a summary field on an untyped generic content part is never reasoning text", () => {
+    const model = parseAgentOutput({
+      response: "done",
+      content: [
+        { summary: "untyped content-part metadata" },
+        { text: "untyped text part", summary: "still not reasoning" },
+      ],
+      reasoning: [
+        { summary: "untyped reasoning-array entry" },
+        { summary: [{ text: "untyped nested summary part" }] },
+        { type: "reasoning", summary: "Real reasoning summary" },
+      ],
+    });
+    expect(model?.reasoningSummary).toBe("Real reasoning summary");
+    expect(model?.reasoning).toBe("Real reasoning summary");
+  });
+
   test("drops redacted_thinking parts and signature/redactedData fields", () => {
     const model = parseAgentOutput({
       reasoning: [
