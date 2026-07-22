@@ -107,7 +107,9 @@ describe("devops automation gap hardening", () => {
             command: hangCommand,
             timedOut: true,
         });
-    }, 10_000);
+        // Not 10s: cold-start node plus the kill grace can exceed that budget
+        // on loaded CI runners; the 60s hang this guards against stays far out.
+    }, 30_000);
 
     test("CheckSuite command check keeps the real exit code when stdout exceeds the capture limit", async () => {
         const largeCommand = `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(17 * 1024 * 1024) + 'tail-marker')"`;

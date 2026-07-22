@@ -11,8 +11,15 @@ const EMBEDDINGS_IMAGE = process.env.HINDSIGHT_DOCKER_EMBEDDINGS_IMAGE
     ?? "oven/bun:1.3.13";
 const POSTGRES_IMAGE = process.env.HINDSIGHT_DOCKER_POSTGRES_IMAGE
     ?? "pgvector/pgvector:0.8.1-pg16";
-const docker = Bun.spawnSync(["docker", "info"], { stdout: "ignore", stderr: "ignore" });
-const dockerAvailable = docker.exitCode === 0;
+// Require a LINUX container daemon, not just a docker CLI: Windows CI runners
+// pass `docker info` in Windows-containers mode but cannot run these linux
+// images (network create dies with "could not find plugin bridge").
+const docker = Bun.spawnSync(["docker", "info", "--format", "{{.OSType}}"], {
+    stdout: "pipe",
+    stderr: "ignore",
+});
+const dockerAvailable = docker.exitCode === 0
+    && new TextDecoder().decode(docker.stdout).trim() === "linux";
 const suffix = crypto.randomUUID().slice(0, 12);
 const networkName = `smithers-hindsight-test-${suffix}`;
 const embeddingsName = `smithers-hindsight-embeddings-${suffix}`;

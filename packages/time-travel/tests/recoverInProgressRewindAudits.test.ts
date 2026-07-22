@@ -147,7 +147,10 @@ describe("recoverInProgressRewindAudits", () => {
       secondSqlite.close();
       firstSqlite.close();
     }
-  });
+    // Not the 5s default: the two-connection file-db dance runs 2-5s on loaded
+    // Windows runners and this test tripped the ceiling while its siblings sat
+    // just under it.
+  }, 20_000);
 
   test("recovers cutoff-old audits with expired or absent leases", async () => {
     const { firstSqlite, secondSqlite, first, second } = setupFileDb();
