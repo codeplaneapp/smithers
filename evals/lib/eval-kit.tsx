@@ -11,9 +11,67 @@ import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { EVAL_DB_PATH } from "./paths.js";
 import { resolveCandidate, resolveJudge } from "./model-matrix.js";
-import { candidateReport, type CandidateReport, evalVerdict, qualityScore } from "./report-schema.js";
+import { candidateReport, type CandidateReport, evalVerdict, type EvalVerdict, qualityScore } from "./report-schema.js";
 import { docsGapScorer, frictionScorer, oneShotScorer, schemaAdherenceScorer } from "./scorers.js";
 import { computeVerdict, normalizeVerify, type VerifyKind } from "./verify.js";
+
+/** Node ids of the three judge panelists (the fan-out). The aggregator keeps the
+ * node id "verify" so a case's `verdict[…]{passed}` assertion still reads it. */
+const JUDGE_IDS = ["judge-1", "judge-2", "judge-3"] as const;
+type JudgeId = (typeof JUDGE_IDS)[number];
+
+/** Defensively coerce a persisted `vote` row back into an EvalVerdict. Output
+ * rows can round-trip a json column (`checks`) as a JSON string and a boolean as
+ * 0/1, so parse/coerce rather than trust the shape. */
+function coerceVote(raw: Record<string, unknown>): EvalVerdict {
+  const parseMaybe = (v: unknown): unknown => {
+    if (typeof v !== "string") return v;
+    try {
+      return JSON.parse(v);
+    } catch {
+      return v;
+    }
+  };
+  const checksRaw = parseMaybe(raw.checks);
+  const checks = Array.isArray(checksRaw)
+    ? checksRaw.map((c) => {
+        const o = (c ?? {}) as Record<string, unknown>;
+        return { name: String(o.name ?? ""), passed: Boolean(o.passed), detail: String(o.detail ?? "") };
+      })
+    : [];
+  const scoreNum = typeof raw.score === "number" ? raw.score : Number(raw.score);
+  return {
+    passed: Boolean(raw.passed),
+    score: Number.isFinite(scoreNum) ? scoreNum : 0,
+    reason: typeof raw.reason === "string" ? raw.reason : "",
+    method: "judge",
+    checks,
+  };
+}
+
+/** Aggregate the surviving panel votes into the single "verify" verdict.
+ * `passed` requires a STRICT majority of the votes that landed (tie → failed),
+ * so 2-of-3 (or 2-of-2 when one panelist failed under continueOnFail) passes and
+ * 1-of-2 does not. `score` is the mean; `checks` concatenates every panelist's
+ * rubric checks, namespaced by panelist id. */
+function aggregatePanel(votes: ReadonlyArray<{ id: string; vote: EvalVerdict }>): EvalVerdict {
+  const n = votes.length;
+  const passedCount = votes.filter((v) => v.vote.passed).length;
+  const majority = Math.floor(n / 2) + 1;
+  const passed = n > 0 && passedCount >= majority;
+  const score = n > 0 ? votes.reduce((s, v) => s + (Number.isFinite(v.vote.score) ? v.vote.score : 0), 0) / n : 0;
+  const checks = votes.flatMap((v) =>
+    (v.vote.checks ?? []).map((c) => ({ name: `${v.id}:${c.name}`, passed: c.passed, detail: c.detail })),
+  );
+  const tally = votes.map((v) => `${v.id}=${v.vote.passed ? "pass" : "fail"}`).join(", ");
+  return {
+    passed,
+    score,
+    reason: `judge panel: ${passedCount}/${n} passed (majority ${majority}); ${tally}`,
+    method: "judge-panel",
+    checks,
+  };
+}
 
 const verifyShape = z.object({
   kind: z.enum(["contains", "equals", "graph", "sql", "query", "build", "ui-functional", "judge"]).default("contains"),
@@ -131,7 +189,12 @@ function judgePrompt(task: string, report: { artifact?: string; summary?: string
     "",
     `CANDIDATE ARTIFACT:\n${report.artifact ?? "(none)"}`,
     "",
-    "Decide: did it satisfy the task? Set `passed` (the hard gate), `score` (0-1 correctness), a short `reason`, set `method` to \"judge\", and list per-criterion `checks`.",
+    "Grade against the rubric, filling EVERY field:",
+    "  • `checks`: one entry per rubric criterion (or, with no rubric, per distinct requirement in the TASK) — each a short `name`, its `passed` boolean, and a `detail`. Do NOT return an empty `checks` array; grade each criterion explicitly, never just a holistic pass/fail.",
+    "  • `passed`: the hard gate — true only if the artifact genuinely satisfies the task (typically when the critical checks pass).",
+    "  • `score`: 0-1 overall correctness.",
+    "  • `reason`: one or two sentences.",
+    '  • `method`: set to "judge".',
   ]
     .filter(Boolean)
     .join("\n");
@@ -170,11 +233,17 @@ export type FluencyEvalOptions = {
 /** Build a fluency-eval workflow. Returned value is the default export of a
  * suite's `eval.tsx`, run by `smithers eval`/`smithers up`. */
 export function createFluencyEval(opts: FluencyEvalOptions) {
-  const { Workflow, Task, Sequence, smithers, outputs } = createSmithers(
+  const { Workflow, Task, Sequence, Parallel, smithers, outputs } = createSmithers(
     {
       input: inputSchema,
       candidate: candidateReport,
       verdict: evalVerdict,
+      // Each judge panelist writes its own verdict-shaped row here; the aggregator
+      // reads them and writes the single `verdict` row. A dedicated table keeps
+      // `output.verdict` (the case assertion target) to exactly the aggregate —
+      // reusing the same evalVerdict schema is fine, prepareOutputSchemas clones
+      // duplicate schema objects into distinct per-key table refs.
+      vote: evalVerdict,
       quality: qualityScore,
     },
     { dbPath: EVAL_DB_PATH },
@@ -212,6 +281,17 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
         ? { renderedText: verdict.renderedText, features: verdict.features, passed: verdict.passed }
         : undefined;
 
+    // Judge kind only: read whichever panel votes have landed. Reads are
+    // nodeId-scoped via outputMaybe and defensively coerced (JSON-string checks,
+    // 0/1 booleans). Gates the aggregator's conditional mount below.
+    const panelVotes =
+      verify.kind === "judge"
+        ? JUDGE_IDS.map((id) => {
+            const raw = ctx.outputMaybe("vote", { nodeId: id }) as Record<string, unknown> | undefined;
+            return raw ? { id, vote: coerceVote(raw) } : null;
+          }).filter((v): v is { id: JudgeId; vote: EvalVerdict } => v !== null)
+        : [];
+
     return (
       <Workflow name={`fluency-${opts.suite}`}>
         <Sequence>
@@ -227,13 +307,28 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
             {candidatePrompt(task, context, verify.kind)}
           </Task>
 
-          {/* 2 — Independent verification → the hard `passed` the case asserts on. */}
+          {/* 2a — Independent verification → the hard `passed` the case asserts on.
+              Judge kind fans out to a 3-panelist vote (majority-of-3 is stable
+              run-to-run where single-shot judging flips); every other kind is a
+              zero-model deterministic compute. */}
           {report
             ? verify.kind === "judge"
               ? (
-                <Task id="verify" output={outputs.verdict} agent={judge} retries={1}>
-                  {judgePrompt(task, report, verify.rubric)}
-                </Task>
+                <Parallel>
+                  {JUDGE_IDS.map((id) => (
+                    <Task
+                      key={id}
+                      id={id}
+                      output={outputs.vote}
+                      agent={judge}
+                      retries={1}
+                      continueOnFail
+                      heartbeatTimeoutMs={300_000}
+                    >
+                      {judgePrompt(task, report, verify.rubric)}
+                    </Task>
+                  ))}
+                </Parallel>
               )
               : (
                 <Task id="verify" output={outputs.verdict}>
@@ -241,6 +336,17 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
                 </Task>
               )
             : null}
+
+          {/* 2b — Judge-panel fan-in. Node id stays "verify" so the case's
+              `verdict{passed}` assertion reads this aggregate, not any single
+              vote. Sequenced after the Parallel, so votes are settled; the ≥2
+              quorum guard means a sub-quorum panel produces no verdict and the
+              case fails honestly rather than on a lone survivor. */}
+          {report && verify.kind === "judge" && panelVotes.length >= 2 ? (
+            <Task id="verify" output={outputs.verdict}>
+              {async () => aggregatePanel(panelVotes)}
+            </Task>
+          ) : null}
 
           {/* 3 — UI (build) cases: a first-class AI quality score. A judge Task
               (not a fire-and-forget scorer) so the score reliably persists;
