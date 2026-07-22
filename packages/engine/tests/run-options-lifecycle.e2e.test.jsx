@@ -174,6 +174,52 @@ describe("runWorkflow reserved input.runId column", () => {
 });
 
 describe("runWorkflow config persistence", () => {
+    test("persists normalized startedBy, reserves config.startedBy, and preserves it on resume", async () => {
+        const { workflow, adapter, cleanup } = buildRuntime();
+        try {
+            const runId = "started-by-lifecycle";
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId,
+                startedBy: { harness: " codex ", sessionId: " thread-1 ", prompt: "launch context" },
+                config: { startedBy: { harness: "forbidden" } },
+            }));
+            expect(result.status).toBe("finished");
+            let config = JSON.parse((await Effect.runPromise(adapter.getRun(runId)))?.configJson ?? "{}");
+            expect(config.startedBy).toEqual({ harness: "codex", sessionId: "thread-1", prompt: "launch context" });
+
+            await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId,
+                resume: true,
+                force: true,
+                startedBy: { harness: "claude-code", sessionId: "new-session" },
+            }));
+            config = JSON.parse((await Effect.runPromise(adapter.getRun(runId)))?.configJson ?? "{}");
+            expect(config.startedBy).toEqual({ harness: "codex", sessionId: "thread-1", prompt: "launch context" });
+        } finally {
+            cleanup();
+        }
+    }, TIMEOUT_MS);
+
+    test("omits startedBy when absent and visibly clips its explicit prompt", async () => {
+        const { workflow, adapter, cleanup } = buildRuntime();
+        try {
+            const absent = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "started-by-absent" }));
+            expect(JSON.parse((await Effect.runPromise(adapter.getRun(absent.runId)))?.configJson ?? "{}").startedBy).toBeUndefined();
+            const clipped = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId: "started-by-clipped",
+                startedBy: { prompt: "😀".repeat(8_193) },
+            }));
+            const prompt = JSON.parse((await Effect.runPromise(adapter.getRun(clipped.runId)))?.configJson ?? "{}").startedBy.prompt;
+            expect(Array.from(prompt)).toHaveLength(8_192);
+            expect(prompt.endsWith("…")).toBe(true);
+        } finally {
+            cleanup();
+        }
+    }, TIMEOUT_MS);
+
     test("cliAgentToolsDefault persists into the run configJson", async () => {
         const { workflow, adapter, cleanup } = buildRuntime();
         try {

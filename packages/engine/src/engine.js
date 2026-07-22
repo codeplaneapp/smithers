@@ -2,6 +2,7 @@ import { makeWorkflowSession, } from "@smithers-orchestrator/scheduler";
 import { ReactWorkflowDriver } from "@smithers-orchestrator/react-reconciler/driver";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
 import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { normalizeRunStartedBy } from "@smithers-orchestrator/driver";
 import { resolveWorktreePath } from "@smithers-orchestrator/graph";
 import { createNodeRuntime } from "./node-runtime.js";
 import { coerceOutputRowForSnapshot, loadInput, loadOutputs, loadRunOutputRowsEffect, OUTPUT_PROVENANCE_SEQ } from "@smithers-orchestrator/db/snapshot";
@@ -2727,6 +2728,7 @@ function validateRunOptions(opts) {
     assertOptionalStringMaxLength("runId", opts.runId, RUN_WORKFLOW_RUN_ID_MAX_LENGTH);
     assertOptionalStringMaxLength("workflowPath", opts.workflowPath, RUN_WORKFLOW_WORKFLOW_PATH_MAX_LENGTH);
     assertInputObject(opts.input);
+    normalizeRunStartedBy(opts.startedBy);
     assertJsonPayloadWithinBounds("input", opts.input, {
         maxArrayLength: RUN_WORKFLOW_INPUT_MAX_ARRAY_LENGTH,
         maxBytes: RUN_WORKFLOW_INPUT_MAX_BYTES,
@@ -7855,6 +7857,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
             workflowName: existingRun?.workflowName ?? "workflow",
         });
         const existingConfig = parseRunConfigJson(existingRun?.configJson);
+        const { startedBy: _existingStartedBy, ...existingConfigWithoutStartedBy } = existingConfig;
+        const { startedBy: _requestedConfigStartedBy, ...requestedConfig } = opts.config ?? {};
+        // Attribution belongs to the original launch. A resume retains a
+        // normalized stored value and never backfills or overwrites it.
+        const startedBy = existingRun
+            ? normalizeRunStartedBy(_existingStartedBy)
+            : normalizeRunStartedBy(opts.startedBy);
         // An explicit --max-concurrency pin must survive resume: no resume path
         // (supervisor auto-resume, gateway resume, manual `up --resume`)
         // re-sends the flag, so restore the persisted pin before the run
@@ -7885,8 +7894,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
         const runAuth = opts.auth ?? parseRunAuthContext(existingConfig.auth);
         const effectiveAlertPolicy = workflowRef.opts.alertPolicy ?? existingConfig.alertPolicy ?? undefined;
         const runConfig = buildDurabilityConfig({
-            ...existingConfig,
-            ...opts.config,
+            ...existingConfigWithoutStartedBy,
+            ...requestedConfig,
             maxConcurrency,
             ...(opts.maxConcurrency !== undefined || pinnedMaxConcurrency !== null
                 ? { maxConcurrencyPinned: true }
@@ -7900,6 +7909,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 : {}),
             ...(runAuth ? { auth: runAuth } : {}),
             ...(effectiveAlertPolicy ? { alertPolicy: effectiveAlertPolicy } : {}),
+            ...(startedBy ? { startedBy } : {}),
         }, runMetadata);
         const runConfigJson = JSON.stringify(runConfig);
         const workflowVersioning = createWorkflowVersioningRuntime({
@@ -8443,10 +8453,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
  */
 export function runWorkflow(workflow, opts) {
     const runId = opts.runId ?? crypto.randomUUID();
+    const startedBy = normalizeRunStartedBy(opts.startedBy);
+    const { startedBy: _rawStartedBy, ...runOptions } = opts;
     return withSmithersSpan(smithersSpanNames.run, Effect.tryPromise({
         try: () => runWorkflowAsync(workflow, {
-            ...opts,
+            ...runOptions,
             runId,
+            ...(startedBy ? { startedBy } : {}),
         }),
         catch: (cause) => toSmithersError(cause, "run workflow"),
     }), {
