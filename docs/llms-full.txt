@@ -3641,6 +3641,7 @@ export default smithers((ctx) => (
 ## Notes
 
 - Direct children run sequentially; `<Sequence>` is only needed inside other control-flow components.
+- **Input `.default()`s are never applied.** Neither runtime nor `bunx smithers-orchestrator graph` runs `inputSchema.parse()`, so `z.array(...).default([])` still yields `undefined` when the field is absent and `ctx.input.items.map(...)` crashes the render. Always coalesce at the read site: `const items = ctx.input.items ?? [];`.
 - **Two ways to get `<Workflow>`, both equivalent.** Import it directly (`import { Workflow } from "smithers-orchestrator"`) or destructure it from `createSmithers(...)`; both render the identical node, since the factory's `Workflow` is a thin pass-through injecting no schema or context, unlike `Task`/`Approval`/`Sandbox`/`Signal`, which the factory wires to the run's context and your output schemas. **Convention: destructure `Workflow` from `createSmithers`** alongside `Task`, `smithers`, and `outputs`, so a workflow's components all come from one place, as the example above and ~95% of `examples/` do. A direct top-level import (also fine for `Sequence`, `Branch`, `Loop`, `Parallel`, and other pure structural components) suits tiny single-file workflows.
 - Custom Drizzle tables require `runId`, `nodeId`, and `iteration` columns with a composite primary key `(run_id, node_id, iteration)`. Tasks outside a `<Loop>` write `iteration = 0`.
 
