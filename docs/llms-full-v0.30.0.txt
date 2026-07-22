@@ -9943,6 +9943,8 @@ type CreateSmithersOptions = {
   alertPolicy?: SmithersAlertPolicy;
   dbPath?: string;
   journalMode?: string;
+  /** Maximum connections in the shared PostgreSQL pool for one normalized URL; defaults to 10. */
+  postgresPoolMax?: number;
 };
 
 type CreateSmithersPostgresOptions =
@@ -16506,6 +16508,12 @@ JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unl
 Runs started through the gateway expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`. `<Approval>` may further restrict decisions with `allowedScopes` and `allowedUsers`, which the gateway enforces before accepting `submitApproval`.
 
 `headersTimeout` and `requestTimeout` are applied to the underlying Node HTTP server when `gateway.listen()` starts. Keep both below the corresponding reverse-proxy idle/read timeouts so slow clients are closed by Smithers first.
+
+## PostgreSQL pool sharing
+
+A Gateway process that registers several workflows against one normalized PostgreSQL URL shares one process-local `pg.Pool`; registrations do not retain one PostgreSQL client each. The pool admits at most 10 connections by default. Set `SMITHERS_POSTGRES_POOL_MAX` to a positive integer before Gateway startup, or pass `postgresPoolMax` to `openSmithersBackend` / `createSmithersPostgres` for embedded hosts. All registrations using one normalized URL must use the same bound; a conflicting bound rejects instead of allocating another pool.
+
+Each backend opening holds one reference. Closing a workflow backend releases its reference, and the final release closes the shared pool. Transactions pin one pool client from `BEGIN` through `COMMIT` or `ROLLBACK`; ordinary queries return to the bounded pool. SQLite, PGlite, and custom caller-provided PostgreSQL connections retain their existing connection behavior. Smithers scopes BIGINT parsing to its own pool/client configuration and does not mutate node-postgres' process-global type parsers.
 
 ## Notes
 

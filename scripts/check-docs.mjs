@@ -1564,13 +1564,18 @@ function checkCreateSmithersPostgresDocsMatchFactory() {
     [PRODUCTION_HARDENING_GUIDE, readFileSync(PRODUCTION_HARDENING_GUIDE, "utf8")],
   ]);
   const required = [
-    [SMITHERS_CREATE_SOURCE, "const client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });"],
+    [SMITHERS_CREATE_SOURCE, "const pool = await acquireSharedPostgresPool({"],
+    [SMITHERS_CREATE_SOURCE, "max: opts?.postgresPoolMax,"],
+    [SMITHERS_CREATE_SOURCE, "client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });"],
     [SMITHERS_CREATE_SOURCE, "close: async () => {"],
     [SMITHERS_FACADE_DECLARATIONS, "connection?: object;"],
+    [SMITHERS_FACADE_DECLARATIONS, "postgresPoolMax?: number;"],
     [SMITHERS_FACADE_DECLARATIONS, "close: () => Promise<void>;"],
     [TYPES_REFERENCE, '{ provider?: "postgres"; connectionString?: string; connection?: object }'],
+    [TYPES_REFERENCE, "postgresPoolMax?: number;"],
     [TYPES_REFERENCE, "Promise<CreateSmithersApi<Schemas> & { close: () => Promise<void> }>;"],
     [PRODUCTION_HARDENING_GUIDE, 'pass a node-postgres connection config with `{ provider: "postgres", connection }`'],
+    [PRODUCTION_HARDENING_GUIDE, "SMITHERS_POSTGRES_POOL_MAX"],
     [PRODUCTION_HARDENING_GUIDE, 'run an in-process PGlite with `{ provider: "pglite", dataDir }`'],
     [PRODUCTION_HARDENING_GUIDE, "returns the same `createSmithers` API plus a `close()` teardown"],
   ];

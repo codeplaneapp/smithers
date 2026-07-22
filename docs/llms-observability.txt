@@ -1008,6 +1008,12 @@ Runs started through the gateway expose `ctx.auth = { triggeredBy, role, scopes,
 
 `headersTimeout` and `requestTimeout` are applied to the underlying Node HTTP server when `gateway.listen()` starts. Keep both below the corresponding reverse-proxy idle/read timeouts so slow clients are closed by Smithers first.
 
+## PostgreSQL pool sharing
+
+A Gateway process that registers several workflows against one normalized PostgreSQL URL shares one process-local `pg.Pool`; registrations do not retain one PostgreSQL client each. The pool admits at most 10 connections by default. Set `SMITHERS_POSTGRES_POOL_MAX` to a positive integer before Gateway startup, or pass `postgresPoolMax` to `openSmithersBackend` / `createSmithersPostgres` for embedded hosts. All registrations using one normalized URL must use the same bound; a conflicting bound rejects instead of allocating another pool.
+
+Each backend opening holds one reference. Closing a workflow backend releases its reference, and the final release closes the shared pool. Transactions pin one pool client from `BEGIN` through `COMMIT` or `ROLLBACK`; ordinary queries return to the bounded pool. SQLite, PGlite, and custom caller-provided PostgreSQL connections retain their existing connection behavior. Smithers scopes BIGINT parsing to its own pool/client configuration and does not mutate node-postgres' process-global type parsers.
+
 ## Notes
 
 - Identity: `GET /health`, the `health` RPC, and the WS hello carry `identity: { workspaceRoot, backend, version, pid, startedAtMs }`. Clients (the CLI's `ui`/`gateway status` among them) verify `workspaceRoot` against the workspace they resolved locally instead of trusting whichever process owns the port.
