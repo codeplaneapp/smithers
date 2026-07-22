@@ -27,6 +27,7 @@ import { pickTargetCheckpoint, runRestoreOnce } from "../restore.js";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { subscribeClaudeSessionRun } from "../claude-mirror/subscribeClaudeSessionRun.js";
+import { resolveCliStartedBy } from "../runStartedBy.js";
 /** @typedef {import("./SemanticToolCallResult.ts").SemanticToolCallResult} SemanticToolCallResult */
 /** @typedef {import("./SemanticToolContext.ts").SemanticToolContext} SemanticToolContext */
 /** @typedef {import("@smithers-orchestrator/db/adapter").RunRow} RunRow */
@@ -291,6 +292,11 @@ const runWorkflowInputSchema = z.object({
     maxOutputBytes: z.number().int().min(1).optional(),
     toolTimeoutMs: z.number().int().min(1).optional(),
     hot: z.boolean().default(false),
+    startedBy: z.object({
+        harness: z.string().optional().describe("Self-reported harness identifier (trimmed; at most 64 Unicode code points)."),
+        sessionId: z.string().optional().describe("Self-reported harness session identifier (trimmed; at most 256 Unicode code points)."),
+        prompt: z.string().optional().describe("Explicit launch context only. Persisted and visible to run readers; never use workflow input or a transcript here. Values beyond 8,192 Unicode code points are visibly clipped."),
+    }).strict().optional(),
 }).superRefine((value, ctx) => {
     if (value.resume && !value.runId) {
         ctx.addIssue({
@@ -1068,7 +1074,7 @@ export function createSemanticToolDefinitions(options = {}) {
         },
         {
             name: "run_workflow",
-            description: "Start a discovered workflow directly through the engine. Defaults to background launch; set waitForTerminal=true to block until completion.",
+            description: "Start a discovered workflow directly through the engine. Defaults to background launch; set waitForTerminal=true to block until completion. Optional startedBy attribution is durable; omitted harness/session are best-effort inferred from this short-lived MCP process. startedBy.prompt is stored only when explicitly supplied.",
             inputSchema: runWorkflowInputSchema,
             outputSchema: resultSchema(runWorkflowDataSchema),
             annotations: { readOnlyHint: false, openWorldHint: true },
@@ -1080,6 +1086,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     : null;
                 const workflowInput = input.input ??
                     (typeof input.prompt === "string" ? { prompt: input.prompt } : {});
+                const startedBy = resolveCliStartedBy(input.startedBy ?? {});
                 // A background run has no UI for the user; hand the agent guidance
                 // to offer them a way to watch it (cron report, live UI, or HTML page).
                 const monitorWorkflowId = workflowIdFromPath(summary.entryFile) || input.workflowId;
@@ -1110,6 +1117,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     maxOutputBytes: input.maxOutputBytes,
                     toolTimeoutMs: input.toolTimeoutMs,
                     hot: input.hot,
+                    startedBy,
                     // Deliberately NOT forwarding extra?.signal: the MCP caller's
                     // abort (client crash, timeout, disconnect) must never cancel
                     // a durable run. waitForTerminal races the wait against the

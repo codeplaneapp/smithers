@@ -22,7 +22,6 @@ import {
   scoresForNode,
   scoresSummary,
   scoreTone,
-  tokenUsageEventsOf,
   usageShareRows,
   usageWindowRows,
   autoExpandKeys,
@@ -73,6 +72,7 @@ import {
   splitHeartbeatEvents,
   splitPatchText,
   statusOptions,
+  startedByOf,
   sumDiffSummaries,
   taskProgressOf,
   timeAgo,
@@ -81,6 +81,7 @@ import {
   waitTone,
   workflowOptions,
 } from "../src/monitor-ui/monitorModel.ts";
+import { predictRunUsage } from "../src/monitor-ui/usagePrediction.ts";
 
 describe("embedded monitor bootstrap", () => {
   test("parses embed selection, validated origin, and explicit theme", () => {
@@ -239,6 +240,17 @@ describe("connection states", () => {
 });
 
 describe("run grouping", () => {
+  test("reads compact attribution defensively and searches harness/session without exposing prompts", () => {
+    expect(startedByOf({
+      configJson: JSON.stringify({ startedBy: { harness: " codex ", sessionId: " thread-1 ", detected: true, prompt: "private" } }),
+    })).toEqual({ harness: "codex", sessionId: "thread-1", detected: true });
+    expect(startedByOf({ configJson: "not json" })).toBeUndefined();
+    expect(filterRuns([
+      { runId: "run-a", status: "running", startedBy: { harness: "codex", sessionId: "thread-1" } },
+      { runId: "run-b", status: "running" },
+    ], { status: "all", workflow: "all", text: "thread-1" }).map((run) => run.runId)).toEqual(["run-a"]);
+  });
+
   test("groups waiting runs under needs-attention, first in order", () => {
     const groups = groupRuns([
       { runId: "a", status: "finished", createdAtMs: 1 },
@@ -1667,56 +1679,6 @@ describe("ops strip readers", () => {
 });
 
 describe("token usage frame folding", () => {
-  test("tokenUsageEventsOf keeps TokenUsageReported payloads with their timestamps", () => {
-    const events = tokenUsageEventsOf([
-      {
-        type: "event",
-        event: "TokenUsageReported",
-        seq: 7,
-        payload: {
-          nodeId: "build",
-          iteration: 1,
-          attempt: 2,
-          model: "model-a",
-          agent: "codex",
-          inputTokens: 10,
-          outputTokens: 5,
-          cacheReadTokens: 3,
-          cacheWriteTokens: 2,
-          reasoningTokens: 1,
-          timestampMs: 123_000,
-        },
-        timestampMs: 999_000,
-      },
-      { type: "event", event: "NodeFinished", seq: 8, payload: { nodeId: "build" } },
-      { type: "event", event: "TokenUsageReported", seq: 9, payload: { outputTokens: 4 } },
-      { type: "event", event: "TokenUsageReported", seq: 10, payload: "junk" },
-      {
-        type: "event",
-        event: "TokenUsageReported",
-        seq: 11,
-        payload: { node_id: "snake", outputTokens: 6 },
-        timestampMs: 456_000,
-      },
-    ]);
-    expect(events).toEqual([
-      {
-        nodeId: "build",
-        iteration: 1,
-        attempt: 2,
-        model: "model-a",
-        agent: "codex",
-        inputTokens: 10,
-        outputTokens: 5,
-        cacheReadTokens: 3,
-        cacheWriteTokens: 2,
-        reasoningTokens: 1,
-        timestampMs: 123_000,
-      },
-      { nodeId: "snake", outputTokens: 6, timestampMs: 456_000 },
-    ]);
-  });
-
   test("nodeTimingsOf maps state rows onto the prediction timing view", () => {
     expect(
       nodeTimingsOf([
@@ -1790,6 +1752,37 @@ describe("run usage chip shaping", () => {
     expect(runUsageChipOf(base, { live: false }).eta).toBeUndefined();
     expect(runUsageChipOf({ ...base, etaLowMs: 0, etaHighMs: 0 }, { live: true }).eta).toBeUndefined();
   });
+
+  test("gates every estimate — in-flight, total range, ETA — behind liveness", () => {
+    const chip = runUsageChipOf(base, { live: false });
+    expect(chip.spent).toBe("184k tok");
+    expect(chip.inFlight).toBeUndefined();
+    expect(chip.total).toBeUndefined();
+    expect(chip.eta).toBeUndefined();
+    expect(chip.title).toBe("spent 184k tokens (measured) · estimate — some history");
+  });
+
+  test("a settled run with an orphaned started-never-finished row shows only the measured total", () => {
+    // The node-state row claims "running" forever (the engine died mid-attempt
+    // and the run settled), but a settled run must render exactly `184k tok`.
+    const prediction = predictRunUsage({
+      events: [{ nodeId: "work", inputTokens: 180_000, outputTokens: 4_000 }],
+      timings: [{ nodeId: "work", startedAtMs: 1_000, status: "running" }],
+      tree: { id: "work", kind: "task", status: "running" },
+      nowMs: 61_000,
+      live: false,
+    });
+    expect(prediction.inFlightTokens).toBeUndefined();
+    expect(prediction.predictedTotalLow).toBe(184_000);
+    expect(prediction.predictedTotalHigh).toBe(184_000);
+    const chip = runUsageChipOf(prediction, { live: false });
+    expect(chip.spent).toBe("184k tok");
+    expect(chip.inFlight).toBeUndefined();
+    expect(chip.total).toBeUndefined();
+    expect(chip.eta).toBeUndefined();
+    expect(chip.title).not.toContain("running");
+    expect(chip.title).not.toContain("total ~");
+  });
 });
 
 describe("rate-limit window rows", () => {
@@ -1856,6 +1849,24 @@ describe("rate-limit window rows", () => {
     expect(rows[1]).toMatchObject({ text: "—", tone: "idle" });
     expect(rows[1]!.remainingFraction).toBeUndefined();
     expect(rows[2]).toMatchObject({ text: "—", tone: "idle" });
+  });
+
+  test("clamps negative remaining at zero in the label", () => {
+    const rows = usageWindowRows([
+      {
+        accountLabel: "over",
+        windows: [
+          { id: "derived", label: "derived", unit: "count", limit: 100, used: 150 },
+          { id: "reported", label: "reported", unit: "count", limit: 100, remaining: -50 },
+          { id: "nolimit", label: "nolimit", unit: "count", used: 5, remaining: -5 },
+        ],
+      },
+    ]);
+    expect(rows[0]).toMatchObject({ text: "0/100 left", tone: "failed" });
+    expect(rows[0]!.remainingFraction).toBe(0);
+    expect(rows[1]).toMatchObject({ text: "0/100 left", tone: "failed" });
+    expect(rows[1]!.remainingFraction).toBe(0);
+    expect(rows[2]).toMatchObject({ text: "0 left" });
   });
 
   test("failed probes keep one dim unavailable row; source none stays silent", () => {

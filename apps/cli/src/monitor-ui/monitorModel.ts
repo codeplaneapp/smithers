@@ -15,7 +15,6 @@ import {
   formatTokens,
   type NodeTiming,
   type RunUsagePrediction,
-  type TokenUsageEvent,
 } from "./usagePrediction.ts";
 
 export { normalizeStatus };
@@ -557,7 +556,33 @@ export type RunRow = {
   finishedAtMs?: number;
   /** Node-state summary; getRun attaches it, plain listRuns rows omit it. */
   summary?: unknown;
+  /** Compact launch provenance projected by Gateway (prompt intentionally omitted here). */
+  startedBy?: { harness?: string; sessionId?: string; detected?: true };
 };
+
+/** Read the Gateway projection first, then tolerate older rows carrying only configJson. */
+export function startedByOf(row: { startedBy?: unknown; configJson?: unknown; config_json?: unknown }): { harness?: string; sessionId?: string; detected?: true } | undefined {
+  const source = row as Record<string, unknown>;
+  let value = source.startedBy;
+  if (!isRecord(value)) {
+    const rawConfig = pick(source, "configJson", "config_json");
+    try {
+      const config = typeof rawConfig === "string" ? JSON.parse(rawConfig) : rawConfig;
+      value = isRecord(config) ? config.startedBy : undefined;
+    } catch {
+      value = undefined;
+    }
+  }
+  if (!isRecord(value)) return undefined;
+  const harness = asString(value.harness)?.trim() || undefined;
+  const sessionId = asString(value.sessionId)?.trim() || undefined;
+  if (!harness && !sessionId) return undefined;
+  return {
+    ...(harness ? { harness } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(value.detected === true ? { detected: true } : {}),
+  };
+}
 
 export type RunGroup = "attention" | "active" | "completed" | "failed" | "cancelled";
 
@@ -634,12 +659,15 @@ export type RunFilter = { text: string; status: string; workflow: string };
 export function filterRuns(runs: readonly RunRow[], filter: RunFilter): RunRow[] {
   const text = filter.text.trim().toLowerCase();
   return runs.filter((run) => {
+    const startedBy = run.startedBy ?? startedByOf(run);
     if (filter.status !== "all" && labelForStatus(run.status) !== filter.status) return false;
     if (filter.workflow !== "all" && (run.workflowKey ?? "unknown") !== filter.workflow) return false;
     if (
       text &&
       !run.runId.toLowerCase().includes(text) &&
-      !(run.workflowKey ?? "").toLowerCase().includes(text)
+      !(run.workflowKey ?? "").toLowerCase().includes(text) &&
+      !(startedBy?.harness ?? "").toLowerCase().includes(text) &&
+      !(startedBy?.sessionId ?? "").toLowerCase().includes(text)
     ) {
       return false;
     }
@@ -1316,43 +1344,6 @@ export function formatDurationMs(durationMs: number | undefined): string {
 // estimates everywhere.
 // ---------------------------------------------------------------------------
 
-/** Extract token-usage events from raw run-event frames (payload fields ride top-level). */
-export function tokenUsageEventsOf(
-  frames: readonly { event?: string; payload?: unknown; timestampMs?: number }[],
-): TokenUsageEvent[] {
-  const events: TokenUsageEvent[] = [];
-  for (const frame of frames) {
-    if (asString(frame.event) !== "TokenUsageReported" || !isRecord(frame.payload)) continue;
-    const payload = frame.payload;
-    const nodeId = asString(pick(payload, "nodeId", "node_id"));
-    if (!nodeId) continue;
-    const iteration = asNumber(payload.iteration);
-    const attempt = asNumber(payload.attempt);
-    const model = asString(payload.model);
-    const agent = asString(payload.agent);
-    const inputTokens = asNumber(payload.inputTokens);
-    const outputTokens = asNumber(payload.outputTokens);
-    const cacheReadTokens = asNumber(payload.cacheReadTokens);
-    const cacheWriteTokens = asNumber(payload.cacheWriteTokens);
-    const reasoningTokens = asNumber(payload.reasoningTokens);
-    const timestampMs = asNumber(payload.timestampMs) ?? frame.timestampMs;
-    events.push({
-      nodeId,
-      ...(iteration !== undefined ? { iteration } : {}),
-      ...(attempt !== undefined ? { attempt } : {}),
-      ...(model !== undefined ? { model } : {}),
-      ...(agent !== undefined ? { agent } : {}),
-      ...(inputTokens !== undefined ? { inputTokens } : {}),
-      ...(outputTokens !== undefined ? { outputTokens } : {}),
-      ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
-      ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
-      ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
-      ...(timestampMs !== undefined ? { timestampMs } : {}),
-    });
-  }
-  return events;
-}
-
 /** Node-state rows → the prediction module's timing view (`lastAttempt` is the row's attempt identity). */
 export function nodeTimingsOf(rows: readonly NodeStateRow[] | null | undefined): NodeTiming[] {
   return (rows ?? []).map((row) => ({
@@ -1403,8 +1394,10 @@ export type RunUsageChipView = {
 /**
  * Shape a run prediction for the header chip. Spent is always shown solid;
  * the total range appears only when it brackets MORE than the measured spend
- * (a settled run's range equals its spend and would read as noise), and ETA
- * only for live runs with a known window.
+ * (a settled run's range equals its spend and would read as noise). EVERY
+ * estimate — in-flight, total range, and ETA — is gated on `live`, so a
+ * settled run renders exactly its measured total even if the prediction
+ * still carries stale estimate fields.
  */
 export function runUsageChipOf(
   prediction: RunUsagePrediction,
@@ -1412,11 +1405,11 @@ export function runUsageChipOf(
 ): RunUsageChipView {
   const spent = `${formatTokens(prediction.spentTokens)} tok`;
   const inFlight =
-    prediction.inFlightTokens !== undefined && prediction.inFlightTokens >= 1
+    options.live && prediction.inFlightTokens !== undefined && prediction.inFlightTokens >= 1
       ? `+~${formatTokens(prediction.inFlightTokens)} running`
       : undefined;
   const total =
-    prediction.predictedTotalHigh > prediction.spentTokens
+    options.live && prediction.predictedTotalHigh > prediction.spentTokens
       ? `~${formatTokenRange(prediction.predictedTotalLow, prediction.predictedTotalHigh)} total`
       : undefined;
   const etaMs =
@@ -1431,7 +1424,7 @@ export function runUsageChipOf(
         ? "estimate — some history"
         : "estimate — strong history";
   const titleParts = [`spent ${formatTokens(prediction.spentTokens)} tokens (measured)`];
-  if (prediction.inFlightTokens !== undefined && prediction.inFlightTokens >= 1) {
+  if (inFlight !== undefined && prediction.inFlightTokens !== undefined) {
     titleParts.push(`in-flight ~${formatTokens(prediction.inFlightTokens)} (estimate)`);
   }
   if (total) {
@@ -1519,9 +1512,12 @@ export function usageWindowRows(reports: readonly UsageReportLike[]): UsageWindo
       let remainingFraction: number | undefined;
       let text = "—";
       if (window.unit === "count") {
-        const remaining =
+        const reported =
           window.remaining ??
           (window.limit !== undefined && window.used !== undefined ? window.limit - window.used : undefined);
+        // Providers can report used > limit once a window overflows; the bar
+        // clamps below, and the label must never read "-50/100 left".
+        const remaining = reported !== undefined ? Math.max(0, reported) : undefined;
         if (remaining !== undefined && window.limit !== undefined && window.limit > 0) {
           remainingFraction = Math.max(0, Math.min(1, remaining / window.limit));
           text = `${formatTokens(remaining)}/${formatTokens(window.limit)} left`;

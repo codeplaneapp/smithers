@@ -89,10 +89,14 @@ test("detached child re-invokes oneshot and forwards launch flags", () => {
         model: "terra",
         agent: "codex",
         open: true,
+        startedByHarness: "codex",
+        startedBySession: "thread-1",
+        startedByPrompt: "launch context",
     })).toEqual([
         cliPath, "oneshot", "--goal-file", goalFile,
         "--cwd", workspace, "--detach", "false", "--open", "true",
         "--review", "on", "--model", "terra", "--agent", "codex",
+        "--started-by-harness", "codex", "--started-by-session", "thread-1", "--started-by-prompt", "launch context",
     ]);
 });
 

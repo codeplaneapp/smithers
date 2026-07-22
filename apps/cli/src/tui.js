@@ -1700,6 +1700,9 @@ export function buildDetachedUpArgs(indexPath, entryFile, runId, inputs, options
     // `-` would make it read empty stdin and fail. Defense-in-depth: never forward
     // a bare `-` even if a caller bypassed the parent validation.
     if (o.annotations && o.annotations !== "-") args.push("--annotations", String(o.annotations));
+    if (o.startedByHarness) args.push("--started-by-harness", String(o.startedByHarness));
+    if (o.startedBySession) args.push("--started-by-session", String(o.startedBySession));
+    if (o.startedByPrompt !== undefined) args.push("--started-by-prompt", String(o.startedByPrompt));
     if (o.backend) args.push("--backend", String(o.backend));
     // `--no-post-failure` opts OUT of the default-on post-failure autopsy. The
     // detached child re-parses its own argv with the default (true), so dropping
@@ -1722,7 +1725,7 @@ export function buildDetachedUpArgs(indexPath, entryFile, runId, inputs, options
  *   FORWARD to the detached child (buildDetachedUpArgs): `--run-id`, `--root`,
  *     `--backend`, `--max-concurrency`, `--log`/`--no-log`, `--log-dir`,
  *     `--allow-network`, `--max-output-bytes`, `--tool-timeout-ms`, `--hot`,
- *     `--post-failure`/`--no-post-failure`.
+ *     `--post-failure`/`--no-post-failure`, and `--started-by-*`.
  *   RESOLVE in the parent, never forwarded raw: `--input`/`--prompt` (parsed into
  *     the prompted inputs object; the `-` stdin sentinel is treated as no input),
  *     `--annotations` (validated by resolveInteractiveAnnotations; `-` rejected

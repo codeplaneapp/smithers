@@ -127,6 +127,9 @@ describe("tui helpers", () => {
             hot: true,
             annotations: '{"env":"ci"}',
             backend: "pglite",
+            startedByHarness: "codex",
+            startedBySession: "thread-1",
+            startedByPrompt: "launch context",
         });
         expect(args).toEqual([
             "/cli/index.js",
@@ -149,6 +152,12 @@ describe("tui helpers", () => {
             "--hot",
             "--annotations",
             '{"env":"ci"}',
+            "--started-by-harness",
+            "codex",
+            "--started-by-session",
+            "thread-1",
+            "--started-by-prompt",
+            "launch context",
             "--backend",
             "pglite",
         ]);

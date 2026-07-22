@@ -8,6 +8,9 @@
  *   model?: string;
  *   agent?: string;
  *   open: boolean;
+ *   startedByHarness?: string;
+ *   startedBySession?: string;
+ *   startedByPrompt?: string;
  * }} options
  */
 export function buildOneshotChildArgs(options) {
@@ -22,5 +25,8 @@ export function buildOneshotChildArgs(options) {
     );
     if (options.model) args.push("--model", options.model);
     if (options.agent) args.push("--agent", options.agent);
+    if (options.startedByHarness) args.push("--started-by-harness", options.startedByHarness);
+    if (options.startedBySession) args.push("--started-by-session", options.startedBySession);
+    if (options.startedByPrompt !== undefined) args.push("--started-by-prompt", options.startedByPrompt);
     return args;
 }

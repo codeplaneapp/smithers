@@ -22,7 +22,8 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
 import { parseStateKey } from "@smithers-orchestrator/scheduler/parseStateKey";
-import { SmithersCtx } from "@smithers-orchestrator/driver";
+import { normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
+import { resolveCliStartedBy } from "./runStartedBy.js";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { runFork, runPromise, runSync } from "./smithersRuntime.js";
 import { trackEvent } from "@smithers-orchestrator/observability/metrics";
@@ -1240,6 +1241,7 @@ async function buildPsRows(adapter, limit, status) {
             ? await listWaitingTimers(adapter, run.runId)
             : [];
         const nextTimer = waitingTimers[0];
+        const startedBy = compactStartedByFromConfigJson(run.configJson);
         const view = await computeRunStateFromRow(adapter, run);
         // Surface pending approval gates so `ps --json` consumers (the OpenClaw /
         // Claude plugins' before-prompt context) can relay gate node ids without
@@ -1302,9 +1304,25 @@ async function buildPsRows(adapter, limit, status) {
                 ? { resetAtMs: view.blocked.resetAtMs }
                 : {}),
             ...(pendingApprovals.length ? { pendingApprovals } : {}),
+            ...(startedBy ? { startedBy } : {}),
         });
     }
     return rows;
+}
+
+/** @param {unknown} configJson */
+function compactStartedByFromConfigJson(configJson) {
+    try {
+        const config = typeof configJson === "string" ? JSON.parse(configJson) : configJson;
+        const startedBy = normalizeRunStartedBy(config?.startedBy);
+        if (!startedBy)
+            return undefined;
+        const { prompt: _prompt, ...compact } = startedBy;
+        return Object.keys(compact).length ? compact : undefined;
+    }
+    catch {
+        return undefined;
+    }
 }
 /**
  * @param {PsRow[]} rows
@@ -1558,6 +1576,15 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
                 ? { activeDescendantRunId }
                 : {}),
             ...(error ? { error } : {}),
+            ...(config ? (() => {
+                try {
+                    const startedBy = normalizeRunStartedBy(config.startedBy);
+                    return startedBy ? { startedBy } : {};
+                }
+                catch {
+                    return {};
+                }
+            })() : {}),
         },
         ...(runState ? { runState } : {}),
         ...(failedChildKeys.length > 0
@@ -1698,6 +1725,9 @@ const upOptions = z.object({
     postFailure: z.boolean().default(true).describe("Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)"),
     verbose: z.boolean().default(false).describe("Show engine info logs (run lifecycle, agent sessions) on interactive runs; the default keeps progress lines + warnings only. Non-TTY/structured output always gets full logs."),
     report: z.boolean().default(true).describe("On an interactive run, narrate the result with a cheap/fast agent and open an HTML summary in the browser when it finishes (disable with --no-report or SMITHERS_NO_REPORT=1)."),
+    startedByHarness: z.string().optional().describe("Launch harness attribution (durably stored; environment may fill this when omitted)"),
+    startedBySession: z.string().optional().describe("Launch harness session attribution (durably stored; environment may fill this when omitted)"),
+    startedByPrompt: z.string().optional().describe("Explicit launch-context attribution (durably stored; never inferred from workflow input)"),
 });
 // Launch the interactive picker + live status card instead of a one-shot run.
 // Shared by `up` and `workflow run`; deliberately NOT folded into `upOptions`
@@ -1721,6 +1751,9 @@ const oneshotOptions = z.object({
     cwd: z.string().default(".").describe("Working directory for the task"),
     detach: z.boolean().default(true).describe("Run in the background; pass false for foreground"),
     open: z.boolean().default(true).describe("Open the run UI after launch"),
+    startedByHarness: z.string().optional().describe("Launch harness attribution (durably stored; environment may fill this when omitted)"),
+    startedBySession: z.string().optional().describe("Launch harness session attribution (durably stored; environment may fill this when omitted)"),
+    startedByPrompt: z.string().optional().describe("Explicit launch-context attribution (durably stored; never inferred from the goal)"),
 }).extend({ interactive: interactiveRunOption });
 const evalOptions = z.object({
     cases: z.string().describe("JSON or JSONL eval case file"),
@@ -1818,6 +1851,9 @@ const chatOptions = z.object({
 const chatCreateOptions = z.object({
     agent: z.enum(INLINE_CHAT_ENGINES).describe("CLI agent engine to launch"),
     cwd: z.string().optional().describe("Working directory for the chat session (default: current directory)"),
+    startedByHarness: z.string().optional().describe("Launch harness attribution (durably stored; environment may fill this when omitted)"),
+    startedBySession: z.string().optional().describe("Launch harness session attribution (durably stored; environment may fill this when omitted)"),
+    startedByPrompt: z.string().optional().describe("Explicit launch-context attribution (durably stored; never inferred from chat input)"),
 });
 const inspectArgs = z.object({
     runId: z.string().describe("Run ID to inspect"),
@@ -2430,6 +2466,12 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 childArgs.push("--input", options.input === "-" ? JSON.stringify(input) : options.input);
             if (options.annotations)
                 childArgs.push("--annotations", options.annotations === "-" ? JSON.stringify(annotations ?? {}) : options.annotations);
+            if (options.startedByHarness)
+                childArgs.push("--started-by-harness", options.startedByHarness);
+            if (options.startedBySession)
+                childArgs.push("--started-by-session", options.startedBySession);
+            if (options.startedByPrompt !== undefined)
+                childArgs.push("--started-by-prompt", options.startedByPrompt);
             if (options.maxConcurrency)
                 childArgs.push("--max-concurrency", String(options.maxConcurrency));
             if (options.root)
@@ -2571,6 +2613,21 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             ], `${monitoring.text}\n\nOperate the run:`);
             return c.ok({ runId: effectiveRunId, logFile, pid: child.pid, ...(supervisorPid ? { supervisorPid } : {}), monitoring }, {
                 cta: backgroundCta,
+            });
+        }
+        let startedBy;
+        try {
+            startedBy = resolveCliStartedBy({
+                harness: options.startedByHarness,
+                sessionId: options.startedBySession,
+                prompt: options.startedByPrompt,
+            });
+        }
+        catch (error) {
+            return fail({
+                code: "INVALID_STARTED_BY",
+                message: error?.message ?? String(error),
+                exitCode: 4,
             });
         }
         if (options.hot) {
@@ -2841,6 +2898,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 toolTimeoutMs: options.toolTimeoutMs,
                 hot: options.hot,
                 annotations,
+                startedBy,
                 onProgress,
                 signal: abort.signal,
             }));
@@ -2885,6 +2943,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             toolTimeoutMs: options.toolTimeoutMs,
             hot: options.hot,
             annotations,
+            startedBy,
             onProgress,
             signal: abort.signal,
         }));
@@ -5526,7 +5585,13 @@ const cli = Cli.create({
                 return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY).", exitCode: 4 });
             }
             const goalFile = c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined;
-            return runTuiCommand({ ...c, options: { ...upOptions.parse({}), interactive: true } }, fail, {
+            return runTuiCommand({ ...c, options: {
+                ...upOptions.parse({}),
+                interactive: true,
+                startedByHarness: c.options.startedByHarness,
+                startedBySession: c.options.startedBySession,
+                startedByPrompt: c.options.startedByPrompt,
+            } }, fail, {
                 cwd: taskCwd,
                 preselect: { id: "oneshot", displayName: "Oneshot", description: goal, entryFile: hasOverride ? overrideEntry : ONESHOT_UI_ENTRY },
                 suppliedInput: {},
@@ -5539,6 +5604,9 @@ const cli = Cli.create({
                     model: c.options.model,
                     agent: c.options.agent,
                     open: false,
+                    startedByHarness: c.options.startedByHarness,
+                    startedBySession: c.options.startedBySession,
+                    startedByPrompt: c.options.startedByPrompt,
                 }),
                 childEnv: ({ runId }) => ({ SMITHERS_ONESHOT_RUN_ID: runId }),
             });
@@ -5556,6 +5624,9 @@ const cli = Cli.create({
                 model: c.options.model,
                 agent: c.options.agent,
                 open: c.options.open,
+                startedByHarness: c.options.startedByHarness,
+                startedBySession: c.options.startedBySession,
+                startedByPrompt: c.options.startedByPrompt,
             });
             const fd = openSync(logFile, "a");
             const child = spawn("bun", childArgs, {
@@ -5576,7 +5647,15 @@ const cli = Cli.create({
                 ...c,
                 ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId) }),
             };
-            return executeUpCommand(overrideContext, overrideEntry, { ...upOptions.parse({}), runId: effectiveRunId, input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }), root: taskCwd }, fail);
+            return executeUpCommand(overrideContext, overrideEntry, {
+                ...upOptions.parse({}),
+                runId: effectiveRunId,
+                input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }),
+                root: taskCwd,
+                startedByHarness: c.options.startedByHarness,
+                startedBySession: c.options.startedBySession,
+                startedByPrompt: c.options.startedByPrompt,
+            }, fail);
         }
         try {
             const selected = await selectOneshotAgents(detections, { cwd: taskCwd, model: c.options.model, agent: c.options.agent });
@@ -5585,6 +5664,11 @@ const cli = Cli.create({
             if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
             const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
             delete process.env[DETACHED_RUN_LOG_FILE_ENV];
+            const startedBy = resolveCliStartedBy({
+                harness: c.options.startedByHarness,
+                sessionId: c.options.startedBySession,
+                prompt: c.options.startedByPrompt,
+            });
             const statusUpdater = startOneshotStatusUpdater({ db: workflow.db, runId: effectiveRunId, goal, cwd: taskCwd });
             try {
                 const result = await Effect.runPromise(runWorkflow(workflow, {
@@ -5593,6 +5677,7 @@ const cli = Cli.create({
                         ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
                         oneshot: { chain: selected.chain, review, goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal },
                     },
+                    startedBy,
                     onProgress: buildProgressReporter(), signal: setupAbortSignal().signal,
                 }));
                 process.exitCode = formatStatusExitCode(result.status);
@@ -6738,9 +6823,15 @@ const cli = Cli.create({
         try {
             const workflow = await buildInlineChatWorkflow({ engine: c.options.agent, cwd: chatCwd, prompt: CHAT_CREATE_PROMPT });
             setupSqliteCleanup(workflow);
+            const startedBy = resolveCliStartedBy({
+                harness: c.options.startedByHarness,
+                sessionId: c.options.startedBySession,
+                prompt: c.options.startedByPrompt,
+            });
             const result = await Effect.runPromise(runWorkflow(workflow, {
                 input: {},
                 rootDir: chatCwd,
+                startedBy,
             }));
             const adapter = new SmithersDb(workflow.db);
             const candidate = result.runId

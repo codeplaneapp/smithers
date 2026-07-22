@@ -22,6 +22,8 @@ export const toolSpecs = [
         prompt: { type: "string", description: "Plain-English prompt passed to the workflow." },
         input: { type: "object", description: "Structured JSON input passed as --input." },
         detach: { type: "boolean", description: "Run in the background. Defaults to true." },
+        started_by_session: { type: "string", description: "Optional OpenClaw session attribution, stored durably." },
+        started_by_prompt: { type: "string", description: "Optional explicit launch-context attribution, stored durably; never inferred from workflow prompt." },
       },
       required: ["workflow"],
     },
@@ -43,6 +45,13 @@ export const toolSpecs = [
         if (hasInput) args.push("--input", JSON.stringify(params.input));
       }
       if (params.detach !== false) args.push("--detach");
+      args.push("--started-by-harness", "openclaw");
+      if (typeof params.started_by_session === "string" && params.started_by_session.trim()) {
+        args.push("--started-by-session", params.started_by_session);
+      }
+      if (typeof params.started_by_prompt === "string") {
+        args.push("--started-by-prompt", params.started_by_prompt);
+      }
       return args;
     },
   },

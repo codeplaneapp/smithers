@@ -215,6 +215,7 @@ export function parseFrameDependsOn(xmlJson) {
  * @property {RunStatusBottleneckEntry[]} bottleneck
  * @property {number} bottleneckOmitted count of gating nodes beyond the listed few
  * @property {{ parkedCount: number; parkedNodeIds: string[]; resetAtMs: number | null } | null} quota
+ * @property {{ harness?: string; sessionId?: string; detected?: true } | undefined} [startedBy]
  * @property {number | null} startedAtMs
  * @property {number | null} finishedAtMs
  * @property {number} generatedAtMs
@@ -248,6 +249,7 @@ export function summarizeRunStatus(params) {
     const status = run.status === "continued" && run.finishedAtMs == null
         ? "running"
         : String(run.status ?? "unknown");
+    const startedBy = compactStartedBy(run.configJson);
 
     const counts = {
         finished: 0,
@@ -553,9 +555,31 @@ export function summarizeRunStatus(params) {
                 resetAtMs: quotaResetAtMs,
             }
             : null,
+        ...(startedBy ? { startedBy } : {}),
         startedAtMs: parseNumber(run.startedAtMs),
         finishedAtMs: parseNumber(run.finishedAtMs),
         generatedAtMs: nowMs,
+    };
+}
+
+/** @param {unknown} configJson */
+function compactStartedBy(configJson) {
+    let config;
+    try {
+        config = typeof configJson === "string" ? JSON.parse(configJson) : configJson;
+    }
+    catch {
+        return undefined;
+    }
+    const value = config?.startedBy;
+    if (!isRecord(value)) return undefined;
+    const harness = typeof value.harness === "string" && value.harness.trim() ? value.harness.trim() : undefined;
+    const sessionId = typeof value.sessionId === "string" && value.sessionId.trim() ? value.sessionId.trim() : undefined;
+    if (!harness && !sessionId) return undefined;
+    return {
+        ...(harness ? { harness } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(value.detected === true ? { detected: true } : {}),
     };
 }
 
@@ -602,6 +626,9 @@ export function renderRunStatusHuman(summary) {
         ? formatElapsedCompact(summary.startedAtMs, summary.finishedAtMs ?? summary.generatedAtMs)
         : null;
     lines.push(`${label("Run")}${summary.runId} · ${summary.workflow} · ${summary.status}${elapsed ? ` · ${elapsed}` : ""}`);
+    if (summary.startedBy?.harness || summary.startedBy?.sessionId) {
+        lines.push(`${label("Started")}${summary.startedBy.harness ?? "unknown"}${summary.startedBy.sessionId ? ` · ${summary.startedBy.sessionId}` : ""}`);
+    }
     const c = summary.counts;
     const waiting = c.waitingApproval + c.waitingEvent + c.waitingTimer;
     const nodeParts = [

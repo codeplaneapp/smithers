@@ -115,6 +115,7 @@ import {
   scoreRowsOf,
   scoresForNode,
   scoresSummary,
+  startedByOf,
   scoreTone,
   selectionSinkFor,
   shortRunId,
@@ -515,11 +516,15 @@ function RunListRow({
 }) {
   const tone = toneForStatus(run.status);
   const live = tone === "running" || tone === "waiting";
+  const startedBy = startedByOf(run);
+  const startedLabel = startedBy?.harness
+    ? ` · ${startedBy.harness}${startedBy.sessionId ? ` · ${startedBy.sessionId}` : ""}`
+    : startedBy?.sessionId ? ` · ${startedBy.sessionId}` : "";
   return (
     <RunRailRow
       runId={run.runId}
-      name={run.workflowKey ?? "unknown"}
-      title={run.workflowKey ?? "unknown workflow"}
+      name={`${run.workflowKey ?? "unknown"}${startedBy?.harness ? ` · ${startedBy.harness}` : ""}`}
+      title={`${run.workflowKey ?? "unknown workflow"}${startedLabel}${startedBy?.detected ? " · auto-detected" : ""}`}
       shortId={shortRunId(run.runId)}
       tone={tone}
       pulse={tone === "running"}
@@ -1939,6 +1944,8 @@ function ExecutionPanel({
   autoSelectNodeId,
   onAutoSelected,
   usageEvents,
+  usageLoading,
+  usageFailed,
   nodeStates,
   treeQuery,
 }: {
@@ -1948,8 +1955,12 @@ function ExecutionPanel({
   onSelectNode: (node: TreeNode | undefined) => void;
   autoSelectNodeId?: string;
   onAutoSelected?: () => void;
-  /** Run-level token-usage events (folded from the shared event subscription in RunDetail). */
+  /** Run-level token-usage events from the gateway's full-run usage scan (lifted to RunDetail). */
   usageEvents: readonly TokenUsageEvent[];
+  /** Initial usage fetch still in flight (no data yet); background refetches keep showing data. */
+  usageLoading?: boolean;
+  /** The usage query failed before any data landed. */
+  usageFailed?: boolean;
   /** Per-attempt node timing rows, lifted to RunDetail so the header chip shares the poll. */
   nodeStates: { rows: NodeStateRow[] | null; failed: boolean };
   /** Live tree query, lifted to RunDetail so header/chip/panel share one subscription. */
@@ -2174,7 +2185,7 @@ function ExecutionPanel({
         </div>
       ) : null}
       {showUsage ? (
-        <UsagePanel usageEvents={usageEvents} />
+        <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
       ) : showTimeline ? (
         <TimelinePanel
           nodeStates={nodeStates}
@@ -2273,7 +2284,17 @@ function UsageShareBars({ rows }: { rows: readonly UsageShareRow[] }) {
   );
 }
 
-function UsagePanel({ usageEvents }: { usageEvents: readonly TokenUsageEvent[] }) {
+function UsagePanel({
+  usageEvents,
+  usageLoading,
+  usageFailed,
+}: {
+  usageEvents: readonly TokenUsageEvent[];
+  /** Initial full-scan fetch still in flight (no data yet) — not background refetches. */
+  usageLoading?: boolean;
+  /** The full-scan query failed before any data landed. */
+  usageFailed?: boolean;
+}) {
   const reportsQuery = useGatewayUsageReports();
   const reports = (reportsQuery.data ?? []) as UsageReportLike[];
   const windowRows = useMemo(() => usageWindowRows(reports), [reports]);
@@ -2286,9 +2307,9 @@ function UsagePanel({ usageEvents }: { usageEvents: readonly TokenUsageEvent[] }
     <div className="mon-usage-panel" data-testid="monitor-usage-panel">
       <section className="mon-usage-section">
         <h3 className="mon-kicker">Rate limits</h3>
-        {reportsQuery.error ? (
+        {reportsQuery.data === undefined && reportsQuery.error ? (
           <div className="mon-dim">Could not load account usage: {reportsQuery.error.message}</div>
-        ) : reportsQuery.loading ? (
+        ) : reportsQuery.data === undefined ? (
           <div className="mon-dim">Loading account usage…</div>
         ) : windowRows.length === 0 ? (
           <div className="mon-dim">No rate-limit windows reported for the registered accounts.</div>
@@ -2315,7 +2336,11 @@ function UsagePanel({ usageEvents }: { usageEvents: readonly TokenUsageEvent[] }
       </section>
       <section className="mon-usage-section">
         <h3 className="mon-kicker">Burn — tokens/min</h3>
-        {fold.eventCount === 0 ? (
+        {usageLoading ? (
+          <div className="mon-dim">Loading token usage…</div>
+        ) : usageFailed ? (
+          <div className="mon-dim">Token usage is unavailable right now.</div>
+        ) : fold.eventCount === 0 ? (
           <div className="mon-dim">No token usage reported for this run yet.</div>
         ) : (
           <BurnSparkline buckets={buckets} />
@@ -2346,8 +2371,9 @@ const FOLLOW_THRESHOLD_PX = 80;
 
 type EventView = "notable" | "activity" | "all";
 
-/** The shared run-event subscription, lifted to RunDetail so the log, the header
- * token chip, and the usage views all read one buffer. */
+/** The shared run-event subscription, lifted to RunDetail so the log reads one
+ * buffer. Token-usage totals come from useGatewayRunTokenUsage (full durable
+ * scan), not this ring. */
 type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
 
 function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
@@ -3760,6 +3786,10 @@ function RunDetail({
   const runTokenUsage = useGatewayRunTokenUsage(runId, { refreshMs: usageLive ? 5_000 : undefined });
   const nodeStates = useNodeStates(runId, usageLive);
   const usageEvents = useMemo(() => runTokenUsage.data?.events ?? [], [runTokenUsage.data]);
+  // Only the FIRST fetch gates render — background refetches keep showing the
+  // retained data, so live polls never blank the chip, labels, or Usage panel.
+  const usageLoading = runTokenUsage.data === undefined && runTokenUsage.loading;
+  const usageFailed = runTokenUsage.data === undefined && runTokenUsage.error !== undefined;
   const usageTimings = useMemo(() => nodeTimingsOf(nodeStates.rows), [nodeStates.rows]);
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
@@ -3824,6 +3854,7 @@ function RunDetail({
   const taskProgress = taskProgressOf(detailTree.nodes ?? []);
   const progress = taskProgress ?? runProgress(run.summary);
   const runError = runErrorOf(run);
+  const startedBy = startedByOf(run);
 
   const act = async (kind: "cancel" | "resume" | "pause") => {
     setBusyAction(kind);
@@ -3867,6 +3898,15 @@ function RunDetail({
           <StatusTag status={status} />
           {unhealthy ? <StatusTag status={healthState} label={healthState} /> : null}
           <span className="mon-detail-workflow">{workflowKey}</span>
+          {startedBy ? (
+            <span
+              className="mon-dim mon-mono"
+              title={`Started by ${startedBy.harness ?? "unknown"}${startedBy.sessionId ? ` · ${startedBy.sessionId}` : ""}${startedBy.detected ? " · auto-detected" : ""}`}
+              aria-label={`Started by ${startedBy.harness ?? "unknown"}${startedBy.sessionId ? ` ${startedBy.sessionId}` : ""}${startedBy.detected ? ", auto-detected" : ""}`}
+            >
+              Started by {startedBy.harness ?? startedBy.sessionId}
+            </span>
+          ) : null}
           <span className="mon-dim">
             <Elapsed startMs={startedAtMs} endMs={finishedAtMs} />
           </span>
@@ -3883,12 +3923,14 @@ function RunDetail({
             </span>
           </div>
         ) : null}
-        <RunUsageChip
-          events={usageEvents}
-          timings={usageTimings}
-          tree={detailTree.root as unknown as PredictionTreeNode | null}
-          live={usageLive}
-        />
+        {usageLoading || usageFailed ? null : (
+          <RunUsageChip
+            events={usageEvents}
+            timings={usageTimings}
+            tree={detailTree.root as unknown as PredictionTreeNode | null}
+            live={usageLive}
+          />
+        )}
         <div className="mon-detail-actions">
           {customUiUrl ? (
             <Button
@@ -3973,6 +4015,8 @@ function RunDetail({
         autoSelectNodeId={autoSelectNodeId}
         onAutoSelected={onAutoSelected}
         usageEvents={usageEvents}
+        usageLoading={usageLoading}
+        usageFailed={usageFailed}
         nodeStates={nodeStates}
         treeQuery={detailTree}
       />
