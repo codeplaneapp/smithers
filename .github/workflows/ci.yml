@@ -150,6 +150,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # packages/server's browser-session tests drive a real headless Chromium;
+      # the runner image's browser cache rarely matches the pinned playwright
+      # version, so install it explicitly.
+      - name: Install Playwright Chromium (Linux)
+        if: runner.os == 'Linux' && matrix.shard != 0
+        run: pnpm -C packages/server exec playwright install chromium
+
       - name: Check Bun lockfile
         if: runner.os == 'Linux' && matrix.shard == 0
         run: bun install --frozen-lockfile --offline --lockfile-only
@@ -255,6 +262,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - run: pnpm install --frozen-lockfile
+
+      # Same real-Chromium dependency as the `test` job (browser-session tests).
+      - name: Install Playwright Chromium
+        run: pnpm -C packages/server exec playwright install chromium
 
       - name: Coverage report
         run: pnpm coverage

@@ -386,30 +386,33 @@ describe("auth header edge cases (gateway HTTP)", () => {
         expect(json.error.code).toBe("UNAUTHORIZED");
     });
 
-    test("header values with CRLF are rejected by fetch (header-injection prevention)", async () => {
-        await startTokenGateway();
-        // Fetch rejects asynchronously, so asserting on the promise is what
-        // proves the malformed value never reaches the gateway.
-        await expect(fetch(`http://127.0.0.1:${port}/rpc`, {
+    // Bun 1.4+ rejects malformed header values inside fetch itself; older Bun
+    // sends them. Either way the invariant these tests pin is that a mangled
+    // credential can never authenticate: the fetch throws, or the gateway 401s.
+    async function expectRejectedOrUnauthorized(headers) {
+        const outcome = await fetch(`http://127.0.0.1:${port}/rpc`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: "Bearer secret\r\nX-Injected: yes",
-            },
+            headers: { "Content-Type": "application/json", ...headers },
             body: "{}",
-        })).rejects.toThrow(/invalid value|invalid header/i);
+        }).then(
+            (res) => ({ kind: "response", status: res.status }),
+            (cause) => ({ kind: "rejected", message: String(cause) }),
+        );
+        if (outcome.kind === "rejected") {
+            expect(outcome.message).toMatch(/invalid value|invalid header/i);
+        } else {
+            expect(outcome.status).toBe(401);
+        }
+    }
+
+    test("header values with CRLF never authenticate (header-injection prevention)", async () => {
+        await startTokenGateway();
+        await expectRejectedOrUnauthorized({ Authorization: "Bearer secret\r\nX-Injected: yes" });
     });
 
-    test("x-smithers-key with embedded null byte is rejected by fetch", async () => {
+    test("x-smithers-key with embedded null byte never authenticates", async () => {
         await startTokenGateway();
-        await expect(fetch(`http://127.0.0.1:${port}/rpc`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-smithers-key": "secret-token\u0000extra",
-            },
-            body: "{}",
-        })).rejects.toThrow(/invalid value|invalid header/i);
+        await expectRejectedOrUnauthorized({ "x-smithers-key": "secret-token\u0000extra" });
     });
 });
 
