@@ -237,17 +237,7 @@ declare function createBrowserSessionRegistry(options?: {}): {
         } | undefined;
     }) => Promise<{
         sessionId: any;
-        source: {
-            kind: string;
-            url: any;
-            port?: undefined;
-            path?: undefined;
-        } | {
-            kind: string;
-            port: any;
-            path: any;
-            url?: undefined;
-        };
+        source: any;
         status: any;
         revision: any;
         page: {
@@ -266,68 +256,11 @@ declare function createBrowserSessionRegistry(options?: {}): {
         sessionId: any;
         sinceRevision: any;
         include?: never[] | undefined;
-    }) => Promise<{
-        fresh: boolean;
-        snapshot: {
-            sessionId: any;
-            source: {
-                kind: string;
-                url: any;
-                port?: undefined;
-                path?: undefined;
-            } | {
-                kind: string;
-                port: any;
-                path: any;
-                url?: undefined;
-            };
-            status: any;
-            revision: any;
-            page: {
-                url: any;
-                title: any;
-                canGoBack: boolean;
-                canGoForward: boolean;
-            } | null;
-            viewport: any;
-            control: {
-                owner: any;
-            };
-        };
-        revision: any;
-        include: any[];
-    }>;
+    }) => Promise<any>;
     pick: ({ sessionId, point }: {
         sessionId: any;
         point: any;
-    }) => Promise<{
-        locator: {
-            testId: any;
-            role?: undefined;
-            name?: undefined;
-            css?: undefined;
-        } | {
-            role: any;
-            name: any;
-            testId?: undefined;
-            css?: undefined;
-        } | {
-            css: any;
-            testId?: undefined;
-            role?: undefined;
-            name?: undefined;
-        };
-        role: string;
-        name: string;
-        text: string;
-        fingerprint: string;
-        rect: any;
-        viewport: any;
-        screenshot: {
-            ref: string;
-            mediaType: string;
-        } | null;
-    }>;
+    }) => Promise<any>;
     close: (sessionId: any) => Promise<{
         closed: boolean;
         sessionId?: undefined;
@@ -337,17 +270,7 @@ declare function createBrowserSessionRegistry(options?: {}): {
     }>;
     list: () => Promise<{
         sessionId: any;
-        source: {
-            kind: string;
-            url: any;
-            port?: undefined;
-            path?: undefined;
-        } | {
-            kind: string;
-            port: any;
-            path: any;
-            url?: undefined;
-        };
+        source: any;
         status: any;
         revision: any;
         page: {
@@ -811,7 +734,7 @@ declare function assertGatewayInputDepthWithinBounds(value: unknown, maxDepth?: 
 /**
  * @param {string | undefined} code
  */
-declare function statusForRpcError(code: string | undefined): 500 | 401 | 403 | 404 | 400 | 409 | 429 | 413 | 501;
+declare function statusForRpcError(code: string | undefined): 401 | 403 | 404 | 400 | 409 | 429 | 413 | 501 | 500;
 declare const GATEWAY_RPC_MAX_PAYLOAD_BYTES: 1048576;
 declare const GATEWAY_RPC_MAX_DEPTH: 32;
 declare const GATEWAY_RPC_MAX_ARRAY_LENGTH: 256;
@@ -872,17 +795,7 @@ declare class Gateway {
             } | undefined;
         }) => Promise<{
             sessionId: any;
-            source: {
-                kind: string;
-                url: any;
-                port?: undefined;
-                path?: undefined;
-            } | {
-                kind: string;
-                port: any;
-                path: any;
-                url?: undefined;
-            };
+            source: any;
             status: any;
             revision: any;
             page: {
@@ -901,68 +814,11 @@ declare class Gateway {
             sessionId: any;
             sinceRevision: any;
             include?: never[] | undefined;
-        }) => Promise<{
-            fresh: boolean;
-            snapshot: {
-                sessionId: any;
-                source: {
-                    kind: string;
-                    url: any;
-                    port?: undefined;
-                    path?: undefined;
-                } | {
-                    kind: string;
-                    port: any;
-                    path: any;
-                    url?: undefined;
-                };
-                status: any;
-                revision: any;
-                page: {
-                    url: any;
-                    title: any;
-                    canGoBack: boolean;
-                    canGoForward: boolean;
-                } | null;
-                viewport: any;
-                control: {
-                    owner: any;
-                };
-            };
-            revision: any;
-            include: any[];
-        }>;
+        }) => Promise<any>;
         pick: ({ sessionId, point }: {
             sessionId: any;
             point: any;
-        }) => Promise<{
-            locator: {
-                testId: any;
-                role?: undefined;
-                name?: undefined;
-                css?: undefined;
-            } | {
-                role: any;
-                name: any;
-                testId?: undefined;
-                css?: undefined;
-            } | {
-                css: any;
-                testId?: undefined;
-                role?: undefined;
-                name?: undefined;
-            };
-            role: string;
-            name: string;
-            text: string;
-            fingerprint: string;
-            rect: any;
-            viewport: any;
-            screenshot: {
-                ref: string;
-                mediaType: string;
-            } | null;
-        }>;
+        }) => Promise<any>;
         close: (sessionId: any) => Promise<{
             closed: boolean;
             sessionId?: undefined;
@@ -972,17 +828,7 @@ declare class Gateway {
         }>;
         list: () => Promise<{
             sessionId: any;
-            source: {
-                kind: string;
-                url: any;
-                port?: undefined;
-                path?: undefined;
-            } | {
-                kind: string;
-                port: any;
-                path: any;
-                url?: undefined;
-            };
+            source: any;
             status: any;
             revision: any;
             page: {
@@ -1959,8 +1805,9 @@ declare class Gateway {
     /**
    * @param {string} [status]
    * @param {string} [workflow]
+   * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
    */
-    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string): Promise<any[]>;
+    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number): Promise<any[]>;
     /**
    * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
    * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly

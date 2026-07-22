@@ -223,6 +223,8 @@ export type ListRunsRequest = {
   filter?: {
     status?: string;
     limit?: number;
+    /** Rows to skip after the newest-first sort — server-side pagination with `limit`. */
+    offset?: number;
     workflow?: string;
   };
 };

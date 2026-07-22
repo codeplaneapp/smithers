@@ -109,23 +109,6 @@ type BrowserActResponse$1 = {
     page: BrowserSnapshot$1["page"];
     outcome: unknown;
 };
-type BrowserContextResponse$1 = {
-    fresh: boolean;
-    reason?: string;
-    snapshot: BrowserSnapshot$1;
-    revision: number;
-    include: string[];
-    visibleText?: string;
-    visibleTextTruncated?: boolean;
-    interactiveElements?: unknown[];
-    interactiveElementsTruncated?: boolean;
-    accessibility?: string | null;
-    recentActions?: unknown[];
-    selections?: BrowserSelection$1[];
-    consoleSummary?: unknown[];
-    networkSummary?: unknown[];
-    screenshot?: BrowserScreenshot$1 | null;
-};
 type BrowserScreenshot$1 = {
     data: string;
     mediaType: "image/jpeg";
@@ -144,23 +127,25 @@ type BrowserSelection$1 = {
     };
     viewport: BrowserSnapshot$1["viewport"];
 };
+type BrowserContextResponse$1 = {
+    fresh: boolean;
+    reason?: string;
+    snapshot: BrowserSnapshot$1;
+    revision: number;
+    include: string[];
+    visibleText?: string;
+    visibleTextTruncated?: boolean;
+    interactiveElements?: unknown[];
+    interactiveElementsTruncated?: boolean;
+    accessibility?: string | null;
+    recentActions?: unknown[];
+    selections?: BrowserSelection$1[];
+    consoleSummary?: unknown[];
+    networkSummary?: unknown[];
+    screenshot?: BrowserScreenshot$1 | null;
+};
 type BrowserPickResponse$1 = BrowserSelection$1 & {
-    locator: BrowserLocator$1;
-    role: string;
-    name: string;
-    text: string;
-    fingerprint: string;
-    rect: {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    };
-    viewport: BrowserSnapshot$1["viewport"];
-    screenshot: {
-        data: string;
-        mediaType: "image/jpeg";
-    } | null;
+    screenshot: BrowserScreenshot$1 | null;
 };
 type CloseBrowserSessionResponse$1 = {
     closed: boolean;
@@ -274,6 +259,8 @@ type ListRunsRequest$1 = {
     filter?: {
         status?: string;
         limit?: number;
+        /** Rows to skip after the newest-first sort — server-side pagination with `limit`. */
+        offset?: number;
         workflow?: string;
     };
 };
@@ -646,9 +633,9 @@ type BrowserPickRequest = BrowserPickRequest$1;
 type CloseBrowserSessionRequest = CloseBrowserSessionRequest$1;
 type CreateBrowserSessionResponse = CreateBrowserSessionResponse$1;
 type BrowserActResponse = BrowserActResponse$1;
+type BrowserContextResponse = BrowserContextResponse$1;
 type BrowserScreenshot = BrowserScreenshot$1;
 type BrowserSelection = BrowserSelection$1;
-type BrowserContextResponse = BrowserContextResponse$1;
 type BrowserPickResponse = BrowserPickResponse$1;
 type CloseBrowserSessionResponse = CloseBrowserSessionResponse$1;
 type ListBrowserSessionsResponse = ListBrowserSessionsResponse$1;

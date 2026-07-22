@@ -4182,6 +4182,10 @@ paths:
                           type: integer
                           minimum: 1
                           description: "Maximum number of runs."
+                        offset:
+                          type: integer
+                          minimum: 0
+                          description: "Rows to skip after the newest-first sort (server-side pagination)."
                         workflow:
                           type: string
                           description: "Optional workflow key filter."

@@ -83,6 +83,8 @@
 /** @typedef {import("./gatewayRpcTypes.ts").CreateBrowserSessionResponse} CreateBrowserSessionResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").BrowserActResponse} BrowserActResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").BrowserContextResponse} BrowserContextResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserScreenshot} BrowserScreenshot */
+/** @typedef {import("./gatewayRpcTypes.ts").BrowserSelection} BrowserSelection */
 /** @typedef {import("./gatewayRpcTypes.ts").BrowserPickResponse} BrowserPickResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").CloseBrowserSessionResponse} CloseBrowserSessionResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").ListBrowserSessionsResponse} ListBrowserSessionsResponse */

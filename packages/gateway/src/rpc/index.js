@@ -471,7 +471,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
     maturity: "stable",
     transport: "http+websocket",
     requiredScope: "run:read",
-    requestSchema: objectSchema({ filter: objectSchema({ status: stringSchema("Optional run status filter."), limit: integerSchema("Maximum number of runs.", 1), workflow: stringSchema("Optional workflow key filter.") }) }),
+    requestSchema: objectSchema({ filter: objectSchema({ status: stringSchema("Optional run status filter."), limit: integerSchema("Maximum number of runs.", 1), offset: integerSchema("Rows to skip after the newest-first sort (server-side pagination).", 0), workflow: stringSchema("Optional workflow key filter.") }) }),
     responseSchema: arraySchema(runSummary, "Run summaries."),
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
     exampleRequest: { filter: { status: "finished", limit: 20, workflow: "deploy" } },

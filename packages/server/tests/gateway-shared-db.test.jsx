@@ -105,6 +105,25 @@ describe("gateway — many workflows sharing one DB", () => {
     );
     expect(response.ok).toBe(true);
     expect(response.payload.map((run) => run.runId)).toEqual(["run-beta"]);
+
+    // Server-side pagination: offset skips rows after the newest-first sort,
+    // so limit+offset walk the same order the un-paged call returns.
+    const newestFirst = await gateway.listRunsAcrossWorkflows(50);
+    const paged = await gateway.listRunsAcrossWorkflows(1, undefined, undefined, 1);
+    expect(paged.map((run) => run.runId)).toEqual([newestFirst[1].runId]);
+    const offsetResponse = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "runs-offset", method: "listRuns", params: { filter: { limit: 2, offset: 1 } } },
+    );
+    expect(offsetResponse.ok).toBe(true);
+    expect(offsetResponse.payload.map((run) => run.runId)).toEqual(
+      newestFirst.slice(1, 3).map((run) => run.runId),
+    );
+    const badOffset = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "runs-bad-offset", method: "listRuns", params: { filter: { limit: 2, offset: -1 } } },
+    );
+    expect(badOffset.ok).toBe(false);
   });
 
   test("resolveRun attributes a run to its true workflow, not the first adapter", async () => {

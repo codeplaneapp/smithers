@@ -6775,8 +6775,9 @@ a { color: var(--brand); }</style>
     /**
    * @param {string} [status]
    * @param {string} [workflow]
+   * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
    */
-    async listRunsAcrossWorkflows(limit = 50, status, workflow) {
+    async listRunsAcrossWorkflows(limit = 50, status, workflow, offset = 0) {
         const registeredKeys = new Set(this.workflows.keys());
         const seenAdapters = new Set();
         const byRunId = new Map();
@@ -6788,7 +6789,9 @@ a { color: var(--brand); }</style>
                 continue;
             }
             seenAdapters.add(adapter);
-            const rows = await adapter.listRuns(limit, status, workflow);
+            // Each adapter's query is newest-first LIMIT; overfetch by the offset
+            // so the merged window still contains the page being asked for.
+            const rows = await adapter.listRuns(limit + offset, status, workflow);
             for (const row of rows) {
                 if (byRunId.has(row.runId)) {
                     continue;
@@ -6805,7 +6808,7 @@ a { color: var(--brand); }</style>
         }
         const results = [...byRunId.values()];
         results.sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
-        return results.slice(0, limit);
+        return results.slice(offset, offset + limit);
     }
     /**
    * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
@@ -7689,7 +7692,14 @@ a { color: var(--brand); }</style>
                 const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit") ?? 50;
                 const status = asString(params.status) ?? asString(filter.status);
                 const workflow = asString(params.workflow) ?? asString(filter.workflow);
-                return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status, workflow));
+                // offset pages the newest-first result server-side; 0 is valid
+                // (asOptionalPositiveInt rejects it), so parse non-negative here.
+                const offsetRaw = params.offset ?? filter.offset;
+                const offset = offsetRaw === undefined || offsetRaw === null ? 0 : Math.floor(Number(offsetRaw));
+                if (!Number.isFinite(offset) || offset < 0) {
+                    return responseError(frame.id, "INVALID_REQUEST", "offset must be a non-negative integer");
+                }
+                return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status, workflow, offset));
             }
             case "getSchemaSignature": {
                 const firstEntry = this.workflows.values().next().value;
