@@ -1617,7 +1617,13 @@ declare class OmpAgent extends BaseCliAgent {
     /** @type {AgentCapabilityRegistry} */ capabilities: AgentCapabilityRegistry$1;
     cliEngine: string;
     issuedSessionId: any;
-    resolveMode(options: any): "text" | "json" | "rpc";
+    /** @param {{ onEvent?: unknown } | undefined} options @returns {"text" | "json" | "rpc"} */
+    resolveMode(options: {
+        onEvent?: unknown;
+    } | undefined): "text" | "json" | "rpc";
+    resolveCredentialEnv(): {
+        [x: string]: string;
+    } | undefined;
     buildArgs({ prompt, cwd, options, mode }: {
         prompt: any;
         cwd: any;
@@ -1676,14 +1682,16 @@ declare class OmpAgent extends BaseCliAgent {
             resume: any;
         }[];
     };
+    /** @returns {Promise<{ command: string; args: string[]; env?: Record<string, string>; outputFormat: "text" | "json" | "rpc"; }>} */
     buildCommand({ prompt, cwd, options }: {
         prompt: any;
         cwd: any;
         options: any;
     }): Promise<{
         command: string;
-        args: any[];
-        outputFormat: "text" | "json";
+        args: string[];
+        env?: Record<string, string>;
+        outputFormat: "text" | "json" | "rpc";
     }>;
     generate(options?: {}): Promise<any>;
     diagnosticHints(): {

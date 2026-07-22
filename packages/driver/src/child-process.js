@@ -15,6 +15,43 @@ const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 // under Bun so active CLI agents are not killed before their output reaches JS.
 const BUN_IDLE_FLOOR_MS = 5000;
 const BUN_IDLE_FLOOR_MIN_CONFIGURED_MS = 1000;
+const SENSITIVE_FLAG = /(?:^|[-_])(api[-_]?key|token|secret|password)(?:$|[-_=])/i;
+
+/** @param {unknown} cause @returns {unknown} */
+function sanitizeSpawnCause(cause) {
+    if (!(cause instanceof Error))
+        return cause;
+    const safe = new Error(cause.message);
+    safe.name = cause.name;
+    if (cause.stack)
+        safe.stack = cause.stack;
+    for (const key of Object.keys(cause)) {
+        if (key !== "spawnargs")
+            safe[key] = cause[key];
+    }
+    return safe;
+}
+
+/** @param {string[]} args @returns {string[]} */
+export function sanitizeCliArgs(args) {
+    const sanitized = [];
+    for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index];
+        const equals = arg.indexOf("=");
+        const flag = equals >= 0 ? arg.slice(0, equals) : arg;
+        if (SENSITIVE_FLAG.test(flag)) {
+            sanitized.push(equals >= 0 ? `${flag}=[REDACTED]` : arg);
+            if (equals < 0 && index + 1 < args.length) {
+                sanitized.push("[REDACTED]");
+                index += 1;
+            }
+        }
+        else {
+            sanitized.push(arg);
+        }
+    }
+    return sanitized;
+}
 
 /**
  * @param {string} text
@@ -105,16 +142,17 @@ export function killChildTree(child, detached) {
  */
 export function spawnCaptureEffect(command, args, options) {
     const { cwd, env, input, signal, timeoutMs, idleTimeoutMs, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES, truncateKeep = "head", detached = false, onStdout, onStderr, onProcess, } = options;
+    const safeArgs = sanitizeCliArgs(args);
     const errorDetails = {
         command,
-        args,
+        args: safeArgs,
         cwd,
         timeoutMs,
         idleTimeoutMs,
     };
     const logAnnotations = {
         command,
-        args: args.join(" "),
+        args: safeArgs.join(" "),
         cwd,
         timeoutMs: timeoutMs ?? null,
         idleTimeoutMs: idleTimeoutMs ?? null,
@@ -259,7 +297,7 @@ export function spawnCaptureEffect(command, args, options) {
                 clearTimeout(idleTimer);
             if (!settled) {
                 settled = true;
-                const smithersError = toSmithersError(error, `spawn ${command}`, {
+                const smithersError = toSmithersError(sanitizeSpawnCause(error), `spawn ${command}`, {
                     code: "PROCESS_SPAWN_FAILED",
                     details: errorDetails,
                 });

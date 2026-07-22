@@ -8,6 +8,7 @@ import { logDebug, logWarning } from "@smithers-orchestrator/observability/loggi
 import { toolOutputTruncatedTotal } from "@smithers-orchestrator/observability/metrics";
 import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
 import { truncateToBytes } from "./truncateToBytes.js";
+import { sanitizeCliArgs, sanitizeCliErrorCause } from "./sanitizeCliArgs.js";
 /** @typedef {import("./PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
 
 /** @typedef {import("./PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
@@ -61,10 +62,11 @@ function createInactivityTimer(timeoutMs, onTimeout) {
  */
 export function runRpcCommandEffect(command, args, options) {
     const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStdout, onStderr, onProcess, onJsonEvent, onExtensionUiRequest, spawnFn = spawn, } = options;
+    const safeArgs = sanitizeCliArgs(args);
     const span = `agent:${command}:rpc`;
     const logAnnotations = {
         agentCommand: command,
-        agentArgs: args.join(" "),
+        agentArgs: safeArgs.join(" "),
         cwd,
         rpc: true,
         timeoutMs: timeoutMs ?? null,
@@ -106,7 +108,7 @@ export function runRpcCommandEffect(command, args, options) {
     * @param {unknown} [cause]
     */
         const makeAgentCliError = (message, details, cause) => new SmithersError("AGENT_CLI_ERROR", message, {
-            agentArgs: args,
+            agentArgs: safeArgs,
             agentCommand: command,
             cwd,
             ...details,
@@ -288,9 +290,9 @@ export function runRpcCommandEffect(command, args, options) {
             }
             const localPromptCompletion = type === "response" && event.command === "prompt" && event.success === true && event.data?.agentInvoked === false;
             if (type === "turn_end" || type === "agent_end" || type === "prompt_result" || localPromptCompletion) {
-                const message = event.message ?? (Array.isArray(event.messages) ? event.messages.find((value) => value?.role === "assistant") : undefined);
+                const message = event.message ?? (Array.isArray(event.messages) ? event.messages.findLast((value) => value?.role === "assistant") : undefined);
                 if (message?.role === "assistant") {
-                    finalMessage = event.message ?? finalMessage;
+                    finalMessage = message;
                     if (message.usage)
                         extractedUsage = message.usage;
                     if (message.stopReason === "error" || message.stopReason === "aborted") {
@@ -362,10 +364,10 @@ export function runRpcCommandEffect(command, args, options) {
         child.on("error", (err) => {
             inactivity.clear();
             totalTimeout.clear();
-            handleError(toSmithersError(err, undefined, {
+            handleError(toSmithersError(sanitizeCliErrorCause(err), undefined, {
                 code: "AGENT_CLI_ERROR",
                 details: {
-                    agentArgs: args,
+                    agentArgs: safeArgs,
                     agentCommand: command,
                     cwd,
                 },

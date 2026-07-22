@@ -15,7 +15,7 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
     packageExport: "OmpAgent",
     defaultOutputFormat: "text",
     docsUrls: ["https://github.com/can1357/oh-my-pi/blob/main/docs/sdk.md", "https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md"],
-    emittedFlags: ["--print", "--mode", "--model", "--provider", "--api-key", "--system-prompt", "--append-system-prompt", "--cwd", "--continue", "--resume", "--session-dir", "--no-session", "--tools", "--no-tools", "--extension", "--no-extensions", "--skills", "--no-skills", "--thinking", "--hide-thinking", "--print-thoughts", "--hook", "--max-time", "--auto-approve", "--approval-mode"],
+    emittedFlags: ["--print", "--mode", "--model", "--provider", "--system-prompt", "--append-system-prompt", "--cwd", "--continue", "--resume", "--session-dir", "--no-session", "--tools", "--no-tools", "--extension", "--no-extensions", "--skills", "--no-skills", "--thinking", "--hide-thinking", "--print-thoughts", "--hook", "--max-time", "--auto-approve", "--approval-mode"],
     supportedFlags: ["--print", "--mode", "--model", "--provider", "--api-key", "--system-prompt", "--append-system-prompt", "--cwd", "--continue", "--resume", "--session-dir", "--no-session", "--tools", "--no-tools", "--extension", "--no-extensions", "--skills", "--no-skills", "--thinking", "--hide-thinking", "--print-thoughts", "--hook", "--max-time", "--auto-approve", "--approval-mode"],
     unsupportedFlags: [
       { flag: "--session", replacement: "--resume", reason: "OMP v17.0.5 uses valued --resume; --session is not public." },
@@ -24,7 +24,7 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
       { flag: "--prompt-template", reason: "Not exposed by OMP v17.0.5." },
       { flag: "--theme", reason: "Not exposed by OMP v17.0.5." },
     ],
-    optionMappings: [{ option: "apiKey", flag: "--api-key" }, { option: "resumeSession", flag: "--resume" }],
+    optionMappings: [{ option: "apiKey", env: "provider-specific OMP API-key environment variable" }, { option: "resumeSession", flag: "--resume" }],
     resume: { kind: "flag", emitted: ["--continue", "--resume"], notes: "--resume takes precedence over --continue; --continue selects the recent session." },
   },
   {

@@ -304,9 +304,16 @@ describe("spawnCaptureEffect — external kill / spawn errors", () => {
   });
 
   test("non-existent command surfaces PROCESS_SPAWN_FAILED", async () => {
-    await expect(
-      run("/nonexistent/binary-does-not-exist", [], {}),
-    ).rejects.toMatchObject({ code: "PROCESS_SPAWN_FAILED" });
+    try {
+      await run("/nonexistent/binary-does-not-exist", ["--api-key", "opaque-driver-canary"], {});
+      throw new Error("expected spawn failure");
+    } catch (error) {
+      const serialized = JSON.stringify(error);
+      expect(error.code).toBe("PROCESS_SPAWN_FAILED");
+      expect(serialized).toContain("[REDACTED]");
+      expect(serialized).not.toContain("opaque-driver-canary");
+      expect(serialized).not.toContain("spawnargs");
+    }
   });
 });
 

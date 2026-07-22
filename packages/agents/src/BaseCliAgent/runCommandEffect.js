@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
+import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 /**
  * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; }} RunCommandOptions
  */
@@ -28,7 +29,7 @@ export function runCommandEffect(command, args, options) {
         onProcess,
     }).pipe(Effect.annotateLogs({
         agentCommand: command,
-        agentArgs: args.join(" "),
+        agentArgs: sanitizeCliArgs(args).join(" "),
         cwd,
     }), Effect.withLogSpan(`agent:${command}`));
 }

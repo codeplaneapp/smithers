@@ -1,6 +1,7 @@
 import { Effect } from "effect";
-import { BaseCliAgent, asString, extractPrompt, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName } from "./BaseCliAgent/index.js";
+import { BaseCliAgent, asString, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
+import { resolveOmpProviderEnv } from "./ompProviderEnv.js";
 
 /** @typedef {import("./OmpAgentOptions.ts").OmpAgentOptions} OmpAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
@@ -29,7 +30,15 @@ export class OmpAgent extends BaseCliAgent {
     this.opts = opts;
     this.capabilities = createOmpCapabilityRegistry(opts);
   }
+  /** @param {{ onEvent?: unknown } | undefined} options @returns {"text" | "json" | "rpc"} */
   resolveMode(options) { return this.opts.mode ?? (options?.onEvent ? "json" : "text"); }
+  resolveCredentialEnv() {
+    if (!this.opts.apiKey) return undefined;
+    const envName = resolveOmpProviderEnv(this.opts.provider, this.opts.model ?? this.model);
+    if (!envName) throw new Error("OMP apiKey requires a documented provider or model environment mapping");
+    // Keep this overlay authoritative over inherited and account-provided env.
+    return { ...(this.env ?? {}), [envName]: this.opts.apiKey };
+  }
   buildArgs({ prompt, cwd, options, mode }) {
     const args = [];
     const { systemFromMessages } = extractPrompt(options);
@@ -39,7 +48,6 @@ export class OmpAgent extends BaseCliAgent {
     if (mode !== "text") args.push("--mode", mode);
     pushFlag(args, "--model", this.opts.model ?? this.model);
     pushFlag(args, "--provider", this.opts.provider);
-    pushFlag(args, "--api-key", this.opts.apiKey);
     pushFlag(args, "--system-prompt", this.opts.systemPrompt ?? this.systemPrompt);
     pushFlag(args, "--append-system-prompt", [this.opts.appendSystemPrompt, systemFromMessages].filter(Boolean).join("\n\n") || undefined);
     pushFlag(args, "--cwd", this.opts.cwd ?? cwd);
@@ -68,7 +76,7 @@ export class OmpAgent extends BaseCliAgent {
   createOutputInterpreter() {
     let answer = ""; let started = false; let completed = false;
     const eventsFor = (payload) => {
-      if (!payload || typeof payload !== "object") return [];
+      if (!payload || typeof payload !== "object" || completed) return [];
       const events = [];
       const start = () => { if (!started) { started = true; events.push({ type: "started", engine: "omp", title: "OMP", resume: this.issuedSessionId }); } };
       start();
@@ -84,24 +92,28 @@ export class OmpAgent extends BaseCliAgent {
       if (payload.type === "agent_end" || payload.type === "prompt_result") {
         completed = true;
         const messages = Array.isArray(payload.messages) ? payload.messages : [payload.message];
-        const assistant = messages.find((message) => message?.role === "assistant");
+        const assistant = messages.findLast((message) => message?.role === "assistant");
         const failed = assistant?.stopReason === "error" || assistant?.stopReason === "aborted";
+        const terminalAnswer = assistant ? extractTextFromJsonValue(assistant) : undefined;
+        if (terminalAnswer) answer = terminalAnswer;
         events.push({ type: "completed", engine: "omp", ok: !failed, answer: answer || undefined, error: failed ? (assistant.errorMessage || `Request ${assistant.stopReason}`) : undefined, resume: this.issuedSessionId });
       }
       return events;
     };
     return { onStdoutLine: (line) => { try { return eventsFor(JSON.parse(line)); } catch { return []; } }, onExit: (result) => completed ? [] : [{ type: "completed", engine: "omp", ok: (result.exitCode ?? 0) === 0, answer: answer || undefined, error: (result.exitCode ?? 0) === 0 ? undefined : result.stderr?.trim() || `omp exited with code ${result.exitCode}`, resume: this.issuedSessionId }] };
   }
+  /** @returns {Promise<{ command: string; args: string[]; env?: Record<string, string>; outputFormat: "text" | "json" | "rpc"; }>} */
   async buildCommand({ prompt, cwd, options }) {
     const mode = this.resolveMode(options);
-    return { command: "omp", args: this.buildArgs({ prompt, cwd, options, mode }), outputFormat: mode };
+    const env = this.resolveCredentialEnv();
+    return { command: "omp", args: this.buildArgs({ prompt, cwd, options, mode }), ...(env ? { env } : {}), outputFormat: mode };
   }
   async generate(options = {}) {
     if (this.resolveMode(options) !== "rpc") return super.generate(options);
     if (options.files?.length) throw new Error("OMP RPC mode does not support file arguments");
     const { prompt } = extractPrompt(options);
     const cwd = this.cwd ?? options.rootDir ?? process.cwd();
-    const env = { ...process.env, ...this.env };
+    const env = { ...process.env, ...this.env, ...this.resolveCredentialEnv() };
     const timeouts = resolveTimeouts(options.timeout, { totalMs: this.timeoutMs, idleMs: this.idleTimeoutMs });
     const interpreter = this.createOutputInterpreter();
     const program = Effect.gen(this, function* () {

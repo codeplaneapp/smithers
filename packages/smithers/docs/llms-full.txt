@@ -17914,9 +17914,9 @@ const omp = new OmpAgent({
 });
 ```
 
-Smithers emits only flags verified by `omp --help`: `--print`, `--mode`, model/provider/API-key and system-prompt options, `--cwd`, session controls, tools, extensions, plural comma-separated `--skills`, thinking (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `auto`), hooks, `--max-time`, and approval controls. A valued `--resume` takes precedence over `continueSession`; `--continue` selects OMP's recent session. In RPC mode, prompts are sent over stdin and file arguments are rejected.
+Smithers emits only flags verified by `omp --help`: `--print`, `--mode`, model/provider and system-prompt options, `--cwd`, session controls, tools, extensions, plural comma-separated `--skills`, thinking (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `auto`), hooks, `--max-time`, and approval controls. Credentials are delivered through the provider's documented environment variable (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`), never as `--api-key`; an explicit key fails closed when no safe provider/model mapping is known. A valued `--resume` takes precedence over `continueSession`; `--continue` selects OMP's recent session. In RPC mode, prompts are sent over stdin and file arguments are rejected.
 
-JSON print mode emits a session header followed by agent-session events such as text deltas, tool execution lifecycle events, and `agent_end`. RPC mode begins with `ready`, negotiates `get_state`, then sends a correlated `prompt`; it has no print-mode session header and completes on `agent_end` or documented local-only prompt completion. Pi-only flags such as `--session`, `--list-models`, singular `--skill`, `--prompt-template`, and `--theme` are not emitted.
+JSON print mode emits a session header followed by agent-session events such as text deltas, tool execution lifecycle events, and `agent_end`; terminal assistant messages are authoritative when present, including delta-free completions. RPC mode begins with `ready`, negotiates `get_state`, then sends a correlated `prompt`; it has no print-mode session header and completes on `agent_end` or documented local-only prompt completion. Pi-only flags such as `--session`, `--list-models`, singular `--skill`, `--prompt-template`, and `--theme` are not emitted.
 
 ## Codex CLI Agent
 

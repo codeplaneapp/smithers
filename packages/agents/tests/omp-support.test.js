@@ -4,8 +4,14 @@ import { PassThrough } from "node:stream";
 import { Effect } from "effect";
 import { OmpAgent } from "../src/OmpAgent.js";
 import { runRpcCommandEffect } from "../src/BaseCliAgent/runRpcCommandEffect.js";
+import { sanitizeCliArgs } from "../src/BaseCliAgent/sanitizeCliArgs.js";
 
 describe("OmpAgent", () => {
+  test("redacts split and equals-form sensitive arguments", () => {
+    const safe = sanitizeCliArgs(["--api-key", "opaque-secret", "--api-key=another-secret", "--model", "m"]);
+    expect(safe).toEqual(["--api-key", "[REDACTED]", "--api-key=[REDACTED]", "--model", "m"]);
+    expect(safe.join(" ")).not.toContain("secret");
+  });
   test("constructs only OMP v17 flags and values resume over continue", () => {
     const agent = new OmpAgent({
       mode: "json", model: "m", provider: "p", apiKey: "k", systemPrompt: "s",
@@ -16,7 +22,7 @@ describe("OmpAgent", () => {
     });
     const args = agent.buildArgs({ prompt: "hello", cwd: "/repo", options: {}, mode: "json" });
     expect(args).toEqual([
-      "--print", "--mode", "json", "--model", "m", "--provider", "p", "--api-key", "k",
+      "--print", "--mode", "json", "--model", "m", "--provider", "p",
       "--system-prompt", "s", "--cwd", "/repo", "--resume", "session-id", "--session-dir", "/sessions",
       "--tools", "read,edit", "--extension", "ext.js", "--skills", "skill-a,skill-b", "--thinking", "high",
       "--hide-thinking", "--print-thoughts", "--hook", "hook.js", "--max-time", "30", "--auto-approve", "hello",
@@ -24,6 +30,33 @@ describe("OmpAgent", () => {
     expect(args).not.toContain("--session");
     expect(args).not.toContain("--skill");
     expect(args).not.toContain("--list-models");
+  });
+
+  test("delivers an explicit provider key through env without mutating options or argv", async () => {
+    const opts = { mode: "json", provider: "openai", model: "gpt-5.2", apiKey: "omp-secret", env: { OPENAI_API_KEY: "inherited" } };
+    const agent = new OmpAgent(opts);
+    const command = await agent.buildCommand({ prompt: "hello", cwd: "/repo", options: {} });
+    expect(command.args).not.toContain("--api-key");
+    expect(command.args.join(" ")).not.toContain("omp-secret");
+    expect(command.env).toEqual({ OPENAI_API_KEY: "omp-secret" });
+    expect(opts).toEqual({ mode: "json", provider: "openai", model: "gpt-5.2", apiKey: "omp-secret", env: { OPENAI_API_KEY: "inherited" } });
+  });
+
+  test("routes an explicit provider before model-family aliases", async () => {
+    await expect(new OmpAgent({ provider: "openrouter", model: "anthropic/claude-opus-4.6", apiKey: "secret" }).buildCommand({ prompt: "", cwd: "/repo", options: {} })).resolves.toMatchObject({ env: { OPENROUTER_API_KEY: "secret" } });
+    await expect(new OmpAgent({ provider: "google", model: "gpt-5", apiKey: "secret" }).buildCommand({ prompt: "", cwd: "/repo", options: {} })).resolves.toMatchObject({ env: { GEMINI_API_KEY: "secret" } });
+  });
+
+  test("supports documented OMP provider credential environments and explicit precedence", async () => {
+    for (const [provider, envName] of [["fireworks", "FIREWORKS_API_KEY"], ["together", "TOGETHER_API_KEY"], ["huggingface", "HF_TOKEN"], ["nvidia", "NVIDIA_API_KEY"], ["litellm", "LITELLM_API_KEY"], ["qianfan", "QIANFAN_API_KEY"]]) {
+      const command = await new OmpAgent({ provider, apiKey: "explicit-key", env: { [envName]: "stored-key" } }).buildCommand({ prompt: "", cwd: "/repo", options: {} });
+      expect(command.env?.[envName]).toBe("explicit-key");
+    }
+  });
+
+  test("fails closed for an explicit key without a safe provider mapping", async () => {
+    const agent = new OmpAgent({ provider: "unknown-provider", apiKey: "omp-secret" });
+    await expect(agent.buildCommand({ prompt: "hello", cwd: "/repo", options: {} })).rejects.toThrow("documented provider");
   });
 
   test("supports all documented thinking levels and never appends a CLI prompt in RPC mode", () => {
@@ -60,7 +93,24 @@ describe("OmpAgent", () => {
     expect(events.at(-1)).toMatchObject({ ok: true, answer: "OK", resume: "s1" });
   });
 
-  test("completes documented RPC agent_end without an assistant message and captures get_state session", async () => {
+  test("uses a terminal-only assistant message as the authoritative JSON answer once", () => {
+    const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
+    const terminal = JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "terminal answer", stopReason: "stop" }] });
+    expect(interpreter.onStdoutLine(terminal).at(-1)).toMatchObject({ type: "completed", ok: true, answer: "terminal answer" });
+    expect(interpreter.onStdoutLine(terminal)).toEqual([]);
+  });
+
+  test("selects the last assistant message from a terminal JSON event", () => {
+    const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
+    const event = interpreter.onStdoutLine(JSON.stringify({ type: "agent_end", messages: [
+      { role: "assistant", content: "intermediate", stopReason: "tool_use" },
+      { role: "tool", content: "result" },
+      { role: "assistant", content: "final answer", stopReason: "stop" },
+    ] }));
+    expect(event.at(-1)).toMatchObject({ type: "completed", answer: "final answer" });
+  });
+
+  test("completes a zero-delta RPC agent_end with the last assistant answer", async () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const stdin = new PassThrough();
@@ -83,8 +133,11 @@ describe("OmpAgent", () => {
         }
         if (command.type === "prompt") {
           stdout.write(JSON.stringify({ type: "response", command: "prompt", id: command.id, success: true, data: { agentInvoked: true } }) + "\n");
-          stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "hello" } }) + "\n");
-          stdout.write(JSON.stringify({ type: "agent_end", messages: [] }) + "\n");
+          stdout.write(JSON.stringify({ type: "agent_end", messages: [
+            { role: "assistant", content: "intermediate", stopReason: "tool_use" },
+            { role: "tool", content: "done" },
+            { role: "assistant", content: "terminal rpc answer", stopReason: "stop" },
+          ] }) + "\n");
         }
       }
     });
@@ -92,8 +145,37 @@ describe("OmpAgent", () => {
     const result = await Effect.runPromise(runRpcCommandEffect("omp", [], {
       cwd: process.cwd(), env: process.env, prompt: "say hello", spawnFn: () => child,
     }));
-    expect(result.text).toBe("hello");
+    expect(result.text).toBe("terminal rpc answer");
+    expect(result.output).toMatchObject({ content: "terminal rpc answer" });
     expect(commands.map((command) => command.type)).toEqual(["get_state", "prompt"]);
+  });
+
+  test("redacts sensitive RPC args in persisted failure details", async () => {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), { stdout, stderr, stdin: new PassThrough(), pid: undefined, exitCode: null, unref() {} });
+    const pending = Effect.runPromise(runRpcCommandEffect("omp", ["--api-key", "opaque-canary", "--token=another-canary"], {
+      cwd: process.cwd(), env: process.env, prompt: "fail", spawnFn: () => child,
+    }));
+    queueMicrotask(() => child.emit("error", new Error("spawn failed")));
+    try { await pending; } catch (error) {
+      expect(JSON.stringify(error)).toContain("[REDACTED]");
+      expect(JSON.stringify(error)).not.toContain("opaque-canary");
+      expect(JSON.stringify(error)).not.toContain("another-canary");
+    }
+  });
+
+  test("redacts real spawn error spawnargs", async () => {
+    try {
+      await Effect.runPromise(runRpcCommandEffect("definitely-not-an-omp-command", ["--api-key", "opaque-spawn-canary"], {
+        cwd: process.cwd(), env: process.env, prompt: "fail",
+      }));
+    } catch (error) {
+      const serialized = JSON.stringify(error);
+      expect(serialized).toContain("[REDACTED]");
+      expect(serialized).not.toContain("opaque-spawn-canary");
+      expect(serialized).not.toContain("spawnargs");
+    }
   });
 
   test("sends the documented RPC abort command before forced cleanup", async () => {

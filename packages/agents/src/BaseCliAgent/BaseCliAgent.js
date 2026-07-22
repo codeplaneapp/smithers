@@ -15,6 +15,7 @@ import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
 import { createAgentStdoutTextEmitter } from "./createAgentStdoutTextEmitter.js";
 import { buildGenerateResult } from "./buildGenerateResult.js";
 import { runCommandEffect } from "./runCommandEffect.js";
+import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 import { taskContextEnv } from "./taskContextEnv.js";
 
 const QUOTA_PATTERNS = [
@@ -977,7 +978,7 @@ export class BaseCliAgent {
                 agentEngine: metricTags.engine,
                 agentModel: metricTags.model ?? "unknown",
                 agentCommand: commandSpec.command,
-                agentArgs: commandSpec.args.join(" "),
+                agentArgs: sanitizeCliArgs(commandSpec.args).join(" "),
                 outputFormat: outputFormat ?? "text",
             };
             const commandEnv = commandSpec.env
