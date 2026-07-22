@@ -394,11 +394,13 @@ describe("GatewayCheckpointControls", () => {
       failPaths: new Set(["/v1/api/runs/run-1/rewind"]),
     });
     const rewound: number[] = [];
+    const errors: Error[] = [];
     const harness = await mount(
       gateway,
       createElement(GatewayCheckpointControls, {
         runId: "run-1",
         checkpoints,
+        onError: (error: Error) => errors.push(error),
         onRewound: (frameNo) => rewound.push(frameNo),
       }),
     );
@@ -414,6 +416,9 @@ describe("GatewayCheckpointControls", () => {
     expect(alert.textContent).toContain("Rewind failed");
     // No fake success: nothing was rewound, nothing reported, actions recover.
     expect(rewound).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect(errors[0]!.message).toContain("Forced failure for /v1/api/runs/run-1/rewind");
     expect(gateway.rewinds).toHaveLength(0);
     expect(rows[0]!.querySelector<HTMLButtonElement>("[data-action='rewind']")!.disabled).toBe(false);
     expect(rows[1]!.querySelector<HTMLButtonElement>("[data-action='rewind']")!.disabled).toBe(false);
@@ -423,24 +428,96 @@ describe("GatewayCheckpointControls", () => {
 
   test("a rejected host onAction surfaces a role=alert failure instead of an unhandled rejection", async () => {
     gateway = startInMemoryGateway({ runs: [{ runId: "run-1", status: "running" }] });
+    const errors: Error[] = [];
+    let attempts = 0;
     const harness = await mount(
       gateway,
       createElement(GatewayCheckpointControls, {
         runId: "run-1",
         checkpoints,
-        onAction: () => Promise.reject(new Error("host fork failed")),
+        onError: (error: Error) => errors.push(error),
+        onAction: () => {
+          attempts += 1;
+          return attempts === 1 ? Promise.reject("host fork failed") : Promise.resolve();
+        },
       }),
     );
-    await act(async () => click(harness.container.querySelector("[data-action='fork']")));
-    await waitFor(
-      harness,
-      () => harness.container.querySelector("[data-slot='checkpoint-error']") !== null,
-      "failure note renders",
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await act(async () => click(harness.container.querySelector("[data-action='fork']")));
+      await waitFor(
+        harness,
+        () => harness.container.querySelector("[data-slot='checkpoint-error']") !== null,
+        "failure note renders",
+      );
+      const alert = harness.container.querySelector("[data-slot='checkpoint-error']")!;
+      expect(alert.getAttribute("role")).toBe("alert");
+      expect(alert.textContent).toContain("Fork failed: host fork failed");
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toBeInstanceOf(Error);
+      expect(errors[0]!.message).toBe("host fork failed");
+      expect(harness.container.querySelector<HTMLButtonElement>("[data-action='fork']")!.disabled).toBe(false);
+      await harness.flush(25);
+      expect(unhandled).toHaveLength(0);
+      await act(async () => click(harness.container.querySelector("[data-action='fork']")));
+      await waitFor(harness, () => attempts === 2, "host action retry");
+      expect(harness.container.querySelector("[data-slot='checkpoint-error']")).toBeNull();
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  test("shows the latest failure when different actions fail on the same checkpoint", async () => {
+    gateway = startInMemoryGateway({ runs: [{ runId: "run-1", status: "running" }] });
+    let attempts = 0;
+    const harness = await mount(
+      gateway,
+      createElement(GatewayCheckpointControls, {
+        runId: "run-1",
+        checkpoints,
+        onAction: (kind) => {
+          attempts += 1;
+          return kind === "restore" ? Promise.resolve() : Promise.reject(new Error(`${kind} failed`));
+        },
+      }),
     );
-    const alert = harness.container.querySelector("[data-slot='checkpoint-error']")!;
-    expect(alert.getAttribute("role")).toBe("alert");
-    expect(alert.textContent).toContain("Fork failed: host fork failed");
-    expect(harness.container.querySelector<HTMLButtonElement>("[data-action='fork']")!.disabled).toBe(false);
+    const row = harness.container.querySelector("[data-checkpoint-id='cp-1']")!;
+
+    await act(async () => click(row.querySelector("[data-action='fork']")));
+    await waitFor(harness, () => row.querySelector("[data-slot='checkpoint-error']") !== null, "fork failure renders");
+    expect(row.querySelector("[data-slot='checkpoint-error']")!.textContent).toContain("Fork failed: fork failed");
+
+    await act(async () => click(row.querySelector("[data-action='restore']")));
+    await waitFor(harness, () => attempts === 2, "restore success settles");
+    expect(row.querySelector("[data-slot='checkpoint-error']")).toBeNull();
+
+    await act(async () => click(row.querySelector("[data-action='replay']")));
+    await waitFor(harness, () => attempts === 3, "replay failure settles");
+    expect(row.querySelector("[data-slot='checkpoint-error']")!.textContent).toContain("Replay failed: replay failed");
+    expect(row.querySelector("[data-slot='checkpoint-error']")!.textContent).not.toContain("Fork failed");
+  });
+
+  test("renders prototype-named checkpoint IDs without treating inherited members as failures", async () => {
+    gateway = startInMemoryGateway({ runs: [{ runId: "run-1", status: "running" }] });
+    const checkpoint = { id: "toString", label: "Prototype-named checkpoint", frameNo: 1 };
+    const harness = await mount(
+      gateway,
+      createElement(GatewayCheckpointControls, {
+        runId: "run-1",
+        checkpoints: [checkpoint],
+        onAction: () => Promise.reject(new Error("prototype action failed")),
+      }),
+    );
+    const row = harness.container.querySelector("[data-checkpoint-id='toString']")!;
+    expect(row.querySelector("[data-slot='checkpoint-error']")).toBeNull();
+
+    await act(async () => click(row.querySelector("[data-action='fork']")));
+    await waitFor(harness, () => row.querySelector("[data-slot='checkpoint-error']") !== null, "failure note renders");
+    expect(row.querySelector("[data-slot='checkpoint-error']")!.textContent).toContain(
+      "Fork failed: prototype action failed",
+    );
   });
 
   test("a throwing onRewound observer never converts a successful rewind into a row failure", async () => {

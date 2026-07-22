@@ -28,6 +28,8 @@ export type GatewayCheckpointControlsProps = {
     kind: Exclude<CheckpointActionKind, "rewind">,
     checkpoint: CheckpointModel,
   ) => void | Promise<void>;
+  /** Called with a normalized Error if rewindRun or onAction rejects. */
+  onError?: (error: Error) => void;
   /** Called after a native rewindRun resolves. */
   onRewound?: (frameNo: number) => void;
   className?: string;
@@ -48,28 +50,42 @@ export function GatewayCheckpointControls({
   checkpoints,
   currentFrameNo,
   onAction,
+  onError,
   onRewound,
   className,
 }: GatewayCheckpointControlsProps) {
   const actions = useGatewayActions();
   const [busy, setBusy] = useState<{ id: string; kind: CheckpointActionKind } | null>(null);
-  const [failure, setFailure] = useState<{ id: string; kind: CheckpointActionKind; message: string } | null>(null);
+  const [failures, setFailures] = useState<Map<string, { id: string; kind: CheckpointActionKind; message: string }>>(
+    () => new Map(),
+  );
 
   function failAction(kind: CheckpointActionKind, checkpoint: CheckpointModel, cause: unknown) {
-    setFailure({
-      id: checkpoint.id,
-      kind,
-      message: cause instanceof Error ? cause.message : String(cause),
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    setFailures((current) => {
+      const next = new Map(current);
+      next.set(checkpoint.id, { id: checkpoint.id, kind, message: error.message });
+      return next;
     });
+    try {
+      onError?.(error);
+    } catch {
+      // Error observers must not turn a handled action failure into a rejection.
+    }
   }
 
-  // Never lets a rejection escape: every failure path lands in `failure`,
-  // which renders a role="alert" note on the affected row.
+  // Never lets a rejection escape: every failure path lands in the latest
+  // checkpoint entry in `failures`, which renders a role="alert" note.
   async function handleAction(kind: CheckpointActionKind, checkpoint: CheckpointModel) {
     if (busy !== null) return;
     if (kind === "rewind") {
       if (checkpoint.frameNo === undefined) return;
-      setFailure(null);
+      setFailures((current) => {
+        if (!current.has(checkpoint.id)) return current;
+        const next = new Map(current);
+        next.delete(checkpoint.id);
+        return next;
+      });
       setBusy({ id: checkpoint.id, kind });
       try {
         await actions.rewindRun({ runId, frameNo: checkpoint.frameNo, confirm: true });
@@ -89,7 +105,12 @@ export function GatewayCheckpointControls({
       return;
     }
     if (onAction === undefined) return;
-    setFailure(null);
+    setFailures((current) => {
+      if (!current.has(checkpoint.id)) return current;
+      const next = new Map(current);
+      next.delete(checkpoint.id);
+      return next;
+    });
     setBusy({ id: checkpoint.id, kind });
     try {
       await onAction(kind, checkpoint);
@@ -107,7 +128,7 @@ export function GatewayCheckpointControls({
     <div className={className}>
       {checkpoints.map((checkpoint) => {
         const rowBusy = busy?.id === checkpoint.id ? busy.kind : null;
-        const rowFailure = failure?.id === checkpoint.id ? failure : null;
+        const rowFailure = failures.get(checkpoint.id) ?? null;
         const rowDisabled: readonly CheckpointActionKind[] | undefined =
           busy !== null && rowBusy === null
             ? renderedActions
