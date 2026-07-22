@@ -30,40 +30,45 @@ export const theme = {
   danger: "var(--danger, #c5343f)",
   dangerSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #c5343f) 10%, var(--surface, #ffffff)))",
   dangerBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #c5343f) 40%, transparent))",
-  warning: "var(--warning, #955600)",
-  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #955600) 12%, var(--surface, #ffffff)))",
-  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #955600) 40%, transparent))",
-  info: "var(--info, #2f6fde)",
-  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #2f6fde) 10%, var(--surface, #ffffff)))",
-  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #2f6fde) 40%, transparent))",
+  warning: "var(--warning, #916000)",
+  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #916000) 12%, var(--surface, #ffffff)))",
+  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #916000) 40%, transparent))",
+  info: "var(--info, #2a63c9)",
+  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #2a63c9) 10%, var(--surface, #ffffff)))",
+  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #2a63c9) 40%, transparent))",
   neutralSoft: "var(--hover-subtle, rgba(24,24,27,0.04))",
   neutralBorder: "var(--border, rgba(24,24,27,0.08))",
   ring: "var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))",
   ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))",
   radius: "var(--r-2, 10px)",
+  // The canonical house stacks, routed through the styleguide custom
+  // properties (identical fallbacks in ui-styleguide and @smithers-orchestrator/ui
+  // tokens -- keep all three in sync).
   fontMono:
-    'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+    "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
   fontSans:
-    'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+    "var(--font-sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",
 } as const;
 
 export const GATEWAY_UI_STYLE_ATTR = "data-smithers-gateway-ui";
 
 /** Class rules for states inline styles cannot express (focus/hover/tone). */
 export const gatewayUiCss = `
-.gw-node-row { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:6px 8px 6px calc(8px + var(--gw-node-depth, 0) * 16px); border:1px solid transparent; border-left-width:2px; background:transparent; color:${theme.text}; cursor:pointer; text-align:left; font-family:${theme.fontSans}; font-size:13px; }
+.gw-node-row { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:6px 8px 6px calc(8px + var(--gw-node-depth, 0) * 16px); border:1px solid transparent; border-left-width:2px; background:transparent; color:${theme.text}; cursor:pointer; text-align:left; font-family:${theme.fontSans}; font-size:13px; transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
 .gw-node-row[data-interactive='false'] { cursor:default; }
 .gw-node-row:hover { background:${theme.panelAlt}; }
 .gw-node-row[data-active='true'] { border-left-color:${theme.accent}; background:${theme.accentSoft}; }
-.gw-run-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; border-radius:${theme.radius}; border:1px solid ${theme.border}; background:${theme.panel}; color:${theme.text}; cursor:pointer; text-align:left; }
+.gw-run-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; border-radius:${theme.radius}; border:1px solid ${theme.border}; background:${theme.panel}; color:${theme.text}; cursor:pointer; text-align:left; transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
 .gw-run-row:hover { background:${theme.panelAlt}; }
+.gw-run-row:active,.gw-node-row:active { background:color-mix(in srgb, ${theme.text} 6%, ${theme.panelAlt}); }
 .gw-run-row[data-active='true'] { border-color:${theme.accentBorder}; background:${theme.accentSoft}; }
-.gw-approval-button { padding:6px 14px; border-radius:6px; border:1px solid var(--gw-tone-border); background:var(--gw-tone-soft); color:var(--gw-tone); font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+.gw-approval-button { padding:6px 14px; border-radius:6px; border:1px solid var(--gw-tone-border); background:var(--gw-tone-soft); color:var(--gw-tone); font:inherit; font-size:13px; font-weight:650; cursor:pointer; transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
+.gw-approval-button:active:not(:disabled) { background:color-mix(in srgb, var(--gw-tone) 18%, ${theme.panel}); }
 .gw-approval-button-success { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; --gw-tone-border:${theme.successBorder}; }
 .gw-approval-button-danger { --gw-tone:${theme.danger}; --gw-tone-soft:${theme.dangerSoft}; --gw-tone-border:${theme.dangerBorder}; }
 .gw-approval-button:disabled { cursor:not-allowed; opacity:.6; }
 .gw-node-row:focus-visible,.gw-run-row:focus-visible,.gw-approval-button:focus-visible { outline:none; border-color:${theme.ringBorder}; box-shadow:0 0 0 3px ${theme.ring}; }
-.gw-status-pill { --gw-tone:${theme.textDim}; --gw-tone-soft:${theme.neutralSoft}; --gw-tone-border:${theme.neutralBorder}; display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; border:1px solid var(--gw-tone-border); background:var(--gw-tone-soft); color:var(--gw-tone); font-size:12px; font-weight:600; }
+.gw-status-pill { --gw-tone:${theme.textDim}; --gw-tone-soft:${theme.neutralSoft}; --gw-tone-border:${theme.neutralBorder}; display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; border:1px solid var(--gw-tone-border); background:var(--gw-tone-soft); color:var(--gw-tone); font-size:12px; font-weight:650; }
 .gw-status-pill.run { --gw-tone:${theme.accent}; --gw-tone-soft:${theme.accentSoft}; --gw-tone-border:${theme.accentBorder}; }
 .gw-status-pill.ok { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; --gw-tone-border:${theme.successBorder}; }
 .gw-status-pill.warn { --gw-tone:${theme.warning}; --gw-tone-soft:${theme.warningSoft}; --gw-tone-border:${theme.warningBorder}; }
@@ -72,7 +77,7 @@ export const gatewayUiCss = `
 .gw-node-output-card { --gw-tone:${theme.textDim}; --gw-tone-soft:${theme.neutralSoft}; }
 .gw-node-output-card[data-status='produced'] { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; }
 .gw-node-output-card[data-status='failed'] { --gw-tone:${theme.danger}; --gw-tone-soft:${theme.dangerSoft}; }
-.gw-node-output-glyph { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:999px; flex-shrink:0; font-size:12px; font-weight:700; color:var(--gw-tone); background:var(--gw-tone-soft); }
+.gw-node-output-glyph { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:999px; flex-shrink:0; font-size:12px; font-weight:650; color:var(--gw-tone); background:var(--gw-tone-soft); }
 .gw-event-log { display:flex; flex-direction:column; min-width:0; min-height:0; background:${theme.bg}; border:1px solid ${theme.border}; border-radius:${theme.radius}; color:${theme.text}; overflow:hidden; }
 .gw-event-log-toolbar { display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid ${theme.border}; }
 .gw-event-log-toolbar-spacer { flex:1; }
