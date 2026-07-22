@@ -3,4 +3,5 @@ export type GatewayRunSummaryRow = Record<string, unknown> & {
   workflowKey?: string;
   status?: string;
   createdAtMs?: number;
+  startedBy?: import("@smithers-orchestrator/protocol/gateway-rpc").RunStartedBy;
 };

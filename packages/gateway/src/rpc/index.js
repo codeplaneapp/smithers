@@ -330,11 +330,17 @@ export const GATEWAY_RPC_DEFINITIONS = [
         allowNetwork: booleanSchema("Allow network access for workflow tools."),
         maxOutputBytes: integerSchema("Maximum captured output bytes per tool/process.", 1),
         toolTimeoutMs: integerSchema("Maximum wall-clock time per tool call in milliseconds.", 1),
+        startedBy: objectSchema({
+          harness: { type: "string", maxLength: 64, description: "Self-reported launch harness; surrounding whitespace is trimmed." },
+          sessionId: { type: "string", maxLength: 256, description: "Self-reported harness session; surrounding whitespace is trimmed." },
+          prompt: { type: "string", description: "Explicit launch context, stored durably and visibly clipped to 8,192 Unicode code points. Never inferred from workflow input." },
+          detected: { type: "boolean", const: true, description: "Present only when harness or session attribution was auto-detected." },
+        }, [], "Optional self-reported launch provenance, distinct from authenticated identity."),
       }, [], "Launch options."),
     }, ["workflow"]),
     responseSchema: objectSchema({ runId, workflow }, ["runId", "workflow"]),
     errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "Internal"],
-    exampleRequest: { workflow: "deploy", input: { sha: "abc123" }, options: { runId: "deploy-abc123", allowNetwork: true } },
+    exampleRequest: { workflow: "deploy", input: { sha: "abc123" }, options: { runId: "deploy-abc123", allowNetwork: true, startedBy: { harness: "codex", sessionId: "thread_123" } } },
     exampleResponse: { runId: "deploy-abc123", workflow: "deploy" },
   },
   {

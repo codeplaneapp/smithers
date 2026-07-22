@@ -100,6 +100,16 @@ describe("generate-openapi helpers", () => {
     expect(Object.keys(doc.paths).length).toBeGreaterThan(GATEWAY_RPC_DEFINITIONS.length);
   });
 
+  test("REST launch uses the launchRun request and response schemas, including startedBy", () => {
+    const doc = buildOpenApiDocument();
+    const post = (doc.paths["/v1/api/runs"] as any).post;
+    const request = post.requestBody.content["application/json"].schema;
+    expect(request).toBe(getGatewayRpcDefinition("launchRun")?.requestSchema);
+    expect(request.properties.options.properties.startedBy.properties.sessionId.maxLength).toBe(256);
+    expect(post.responses["200"].content["application/json"].schema.properties.data)
+      .toBe(getGatewayRpcDefinition("launchRun")?.responseSchema);
+  });
+
   test("score REST aliases publish exact parameters and RPC response schemas", () => {
     const doc = buildOpenApiDocument();
     const compare = (doc.paths["/v1/api/scores/compare"] as any).get;

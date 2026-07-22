@@ -146,6 +146,14 @@ describe("Gateway v1 contract", () => {
     const launch = await postRpc(port, "launchRun", "operator-token", {
       workflow: "basic",
       input: { value: 5 },
+      options: {
+        startedBy: {
+          harness: " codex ",
+          sessionId: " thread-1 ",
+          prompt: "😀".repeat(8_193),
+          detected: true,
+        },
+      },
     });
     expect(launch.status).toBe(200);
     expect(launch.headers.get("x-smithers-api-version")).toBe("v1");
@@ -168,6 +176,21 @@ describe("Gateway v1 contract", () => {
     }
     expect(run?.workflowKey).toBe("basic");
     expect(run?.status).toBe("finished");
+    expect(run?.startedBy).toMatchObject({
+      harness: "codex",
+      sessionId: "thread-1",
+      detected: true,
+    });
+    expect(Array.from(run?.startedBy?.prompt ?? "")).toHaveLength(8_192);
+    expect(run?.startedBy?.prompt?.endsWith("…")).toBe(true);
+
+    const invalidAttribution = await postRpc(port, "launchRun", "operator-token", {
+      workflow: "basic",
+      input: { value: 5 },
+      options: { startedBy: { harness: 1 } },
+    });
+    expect(invalidAttribution.status).toBe(400);
+    expect((await invalidAttribution.json()).error.code).toBe("INVALID_REQUEST");
   });
 
   test("returns scoped Forbidden errors and expired-token refresh hints", async () => {

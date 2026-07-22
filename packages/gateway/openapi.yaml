@@ -79,6 +79,27 @@ paths:
                           type: integer
                           minimum: 1
                           description: "Maximum wall-clock time per tool call in milliseconds."
+                        startedBy:
+                          type: object
+                          description: "Optional self-reported launch provenance, distinct from authenticated identity."
+                          properties:
+                            harness:
+                              type: string
+                              maxLength: 64
+                              description: "Self-reported launch harness; surrounding whitespace is trimmed."
+                            sessionId:
+                              type: string
+                              maxLength: 256
+                              description: "Self-reported harness session; surrounding whitespace is trimmed."
+                            prompt:
+                              type: string
+                              description: "Explicit launch context, stored durably and visibly clipped to 8,192 Unicode code points. Never inferred from workflow input."
+                            detected:
+                              type: boolean
+                              const: true
+                              description: "Present only when harness or session attribution was auto-detected."
+                          required: []
+                          additionalProperties: false
                       required: []
                       additionalProperties: false
                   required:
@@ -94,6 +115,9 @@ paths:
                 options:
                   runId: deploy-abc123
                   allowNetwork: true
+                  startedBy:
+                    harness: codex
+                    sessionId: thread_123
       responses:
         200:
           description: "Launch Run response."
@@ -19664,7 +19688,17 @@ paths:
                     const: true
                   data:
                     type: object
-                    additionalProperties: true
+                    properties:
+                      runId:
+                        type: string
+                        description: "Stable run identifier."
+                      workflow:
+                        type: string
+                        description: "Registered Gateway workflow key."
+                    required:
+                      - runId
+                      - workflow
+                    additionalProperties: false
                   txid:
                     type: string
                     pattern: "^\\d+$"
@@ -19882,7 +19916,67 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                workflow:
+                  type: string
+                  description: "Registered Gateway workflow key."
+                input:
+                  type: object
+                  description: "Workflow input."
+                  properties: {}
+                  required: []
+                  additionalProperties: true
+                options:
+                  type: object
+                  description: "Launch options."
+                  properties:
+                    runId:
+                      type: string
+                      description: "Optional caller-supplied run id."
+                    idempotencyKey:
+                      type: string
+                      description: "Optional caller idempotency key."
+                    maxConcurrency:
+                      type: integer
+                      minimum: 1
+                      description: "Maximum parallel workflow tasks."
+                    allowNetwork:
+                      type: boolean
+                      description: "Allow network access for workflow tools."
+                    maxOutputBytes:
+                      type: integer
+                      minimum: 1
+                      description: "Maximum captured output bytes per tool/process."
+                    toolTimeoutMs:
+                      type: integer
+                      minimum: 1
+                      description: "Maximum wall-clock time per tool call in milliseconds."
+                    startedBy:
+                      type: object
+                      description: "Optional self-reported launch provenance, distinct from authenticated identity."
+                      properties:
+                        harness:
+                          type: string
+                          maxLength: 64
+                          description: "Self-reported launch harness; surrounding whitespace is trimmed."
+                        sessionId:
+                          type: string
+                          maxLength: 256
+                          description: "Self-reported harness session; surrounding whitespace is trimmed."
+                        prompt:
+                          type: string
+                          description: "Explicit launch context, stored durably and visibly clipped to 8,192 Unicode code points. Never inferred from workflow input."
+                        detected:
+                          type: boolean
+                          const: true
+                          description: "Present only when harness or session attribution was auto-detected."
+                      required: []
+                      additionalProperties: false
+                  required: []
+                  additionalProperties: false
+              required:
+                - workflow
+              additionalProperties: false
   /v1/api/runs/{runId}:
     get:
       operationId: apiGetRun

@@ -7,4 +7,5 @@ export type GatewayRunRow = Record<string, unknown> & {
   finishedAtMs?: number;
   summary?: unknown;
   runState?: unknown;
+  startedBy?: import("@smithers-orchestrator/protocol/gateway-rpc").RunStartedBy;
 };

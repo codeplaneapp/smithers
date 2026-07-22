@@ -233,7 +233,11 @@ describe("createSmithersDataClient api requests", () => {
     // delivers the matching seq.
     const { client, calls } = capturingClient({ ok: true, data: { runId: "r1" }, txid: "77" });
 
-    const launched = await client.api.launchRun({ workflow: "value", input: { v: 1 } } as never);
+    const launched = await client.api.launchRun({
+      workflow: "value",
+      input: { v: 1 },
+      options: { startedBy: { harness: "codex", sessionId: "thread-1", prompt: "explicit only" } },
+    } as never);
     expect(launched).toMatchObject({ data: { runId: "r1" }, txid: "77" });
 
     await client.api.resumeRun({ runId: "r1" } as never);
@@ -252,7 +256,11 @@ describe("createSmithersDataClient api requests", () => {
 
     const find = (method: string, path: string) =>
       calls.find((call) => call.method === method && urlOf(call).pathname === path)!;
-    expect(find("POST", "/v1/api/runs").body).toEqual({ workflow: "value", input: { v: 1 } });
+    expect(find("POST", "/v1/api/runs").body).toEqual({
+      workflow: "value",
+      input: { v: 1 },
+      options: { startedBy: { harness: "codex", sessionId: "thread-1", prompt: "explicit only" } },
+    });
     expect(find("POST", "/v1/api/runs/r1/resume")).toBeDefined();
     expect(find("POST", "/v1/api/runs/r1/cancel")).toBeDefined();
     expect(find("POST", "/v1/api/runs/r1/hijack")).toBeDefined();

@@ -5,15 +5,21 @@ import type {
   GatewayRpcMethod,
   GatewayTicketRow,
   LaunchRunRequest,
+  RunStartedBy,
   ListApprovalsResponse,
   ListTicketsResponse,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { RunStartedBy as DriverRunStartedBy } from "@smithers-orchestrator/driver";
 
 const method: GatewayRpcMethod = "launchRun";
 const request: LaunchRunRequest = {
   workflow: "deploy",
   input: { environment: "staging" },
+  options: { startedBy: { harness: "codex", sessionId: "thread-1", detected: true } },
 };
+const protocolStartedBy: RunStartedBy = { harness: "codex", sessionId: "thread-1" };
+const driverStartedBy: DriverRunStartedBy = protocolStartedBy;
+const protocolRoundTrip: RunStartedBy = driverStartedBy;
 const approval: GatewayApprovalSummary = {
   runId: "run-1",
   nodeId: "approve",
@@ -44,4 +50,4 @@ const response: GatewayResponseFrame<ListApprovalsResponse> = {
 };
 const tickets: ListTicketsResponse = [ticket];
 
-void [method, request, event, response, tickets];
+void [method, request, protocolStartedBy, driverStartedBy, protocolRoundTrip, event, response, tickets];

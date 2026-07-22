@@ -86,10 +86,11 @@ const listScoresForRunsRpc = requireRpcDefinition("listScoresForRuns");
 const getScoreDetailRpc = requireRpcDefinition("getScoreDetail");
 const listUsageReportsRpc = requireRpcDefinition("listUsageReports");
 const listRunTokenUsageRpc = requireRpcDefinition("listRunTokenUsage");
+const launchRunRpc = requireRpcDefinition("launchRun");
 
 const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
   { method: "get", path: "/v1/api/runs", operationId: "apiListRuns", summary: "List runs.", rpcMethod: "listRuns", requiredScope: scopeForRpc("listRuns"), responseSchema: { type: "array", items: objectSchema } },
-  { method: "post", path: "/v1/api/runs", operationId: "apiLaunchRun", summary: "Launch a run.", rpcMethod: "launchRun", requiredScope: scopeForRpc("launchRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "post", path: "/v1/api/runs", operationId: "apiLaunchRun", summary: "Launch a run.", rpcMethod: "launchRun", requiredScope: scopeForRpc("launchRun"), requestSchema: launchRunRpc.requestSchema, responseSchema: launchRunRpc.responseSchema, mutation: true },
   { method: "get", path: "/v1/api/runs/{runId}", operationId: "apiGetRun", summary: "Read one run.", rpcMethod: "getRun", requiredScope: scopeForRpc("getRun"), responseSchema: objectSchema },
   {
     method: "get",

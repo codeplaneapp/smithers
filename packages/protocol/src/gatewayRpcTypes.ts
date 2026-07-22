@@ -98,6 +98,19 @@ export type BrowserPickResponse = BrowserSelection & { screenshot: BrowserScreen
 export type CloseBrowserSessionResponse = { closed: boolean; sessionId?: string };
 export type ListBrowserSessionsResponse = BrowserSnapshot[];
 
+/**
+ * Self-reported launch provenance, distinct from authenticated identity.
+ * `harness` and `sessionId` are trimmed and limited to 64 and 256 Unicode
+ * code points. `prompt` is explicit-only and is visibly clipped at 8,192 code
+ * points. `detected` may only be literal `true` when identity was inferred.
+ */
+export type RunStartedBy = {
+  harness?: string;
+  sessionId?: string;
+  prompt?: string;
+  detected?: true;
+};
+
 export type LaunchRunRequest = {
   workflow: string;
   input?: Record<string, unknown>;
@@ -108,6 +121,7 @@ export type LaunchRunRequest = {
     allowNetwork?: boolean;
     maxOutputBytes?: number;
     toolTimeoutMs?: number;
+    startedBy?: RunStartedBy;
   };
 };
 

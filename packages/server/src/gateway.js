@@ -56,7 +56,7 @@ import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
 import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
 import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
-import { SmithersCtx } from "@smithers-orchestrator/driver";
+import { normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
 import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 import { createBrowserSessionRegistry } from "./browser.js";
 import { validateBrowserRequest } from "./gatewayRoutes/browser.js";
@@ -543,6 +543,38 @@ function asObject(value) {
         return null;
     }
     return value;
+}
+
+/**
+ * Public RPC/REST requests reject unknown attribution keys before the shared
+ * normalizer applies code-point limits and prompt clipping.
+ * @param {unknown} value
+ */
+function parseGatewayStartedBy(value) {
+    const startedBy = asObject(value);
+    if (!startedBy) {
+        throw new SmithersError("INVALID_REQUEST", "options.startedBy must be an object");
+    }
+    const allowed = new Set(["harness", "sessionId", "prompt", "detected"]);
+    for (const key of Object.keys(startedBy)) {
+        if (!allowed.has(key)) {
+            throw new SmithersError("INVALID_REQUEST", `options.startedBy.${key} is not allowed`);
+        }
+    }
+    for (const key of ["harness", "sessionId", "prompt"]) {
+        if (startedBy[key] !== undefined && typeof startedBy[key] !== "string") {
+            throw new SmithersError("INVALID_REQUEST", `options.startedBy.${key} must be a string`);
+        }
+    }
+    if (startedBy.detected !== undefined && startedBy.detected !== true) {
+        throw new SmithersError("INVALID_REQUEST", "options.startedBy.detected must be true when present");
+    }
+    try {
+        return normalizeRunStartedBy(startedBy);
+    }
+    catch (error) {
+        throw new SmithersError("INVALID_REQUEST", error?.message ?? String(error));
+    }
 }
 /**
  * @param {unknown} value
@@ -5539,7 +5571,7 @@ a { color: var(--brand); }</style>
    * @param {Record<string, unknown>} input
    * @param {RunStartAuthContext} auth
    * @param {string} [runId]
-   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number }} [options]
+   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy }} [options]
    */
     async startRun(workflowKey, input, auth, runId = crypto.randomUUID(), options) {
         const entry = this.workflows.get(workflowKey);
@@ -5607,6 +5639,7 @@ a { color: var(--brand); }</style>
             allowNetwork: options?.allowNetwork,
             maxOutputBytes: options?.maxOutputBytes,
             toolTimeoutMs: options?.toolTimeoutMs,
+            startedBy: options?.startedBy,
             signal: abort.signal,
             onProgress: (event) => this.handleSmithersEvent(event),
             cliAgentToolsDefault: this.defaults?.cliAgentTools,
@@ -7897,12 +7930,22 @@ a { color: var(--brand); }</style>
                     throw error;
                 }
                 const options = asObject(params.options) ?? {};
+                let startedBy;
+                if (options.startedBy !== undefined) {
+                    try {
+                        startedBy = parseGatewayStartedBy(options.startedBy);
+                    }
+                    catch (error) {
+                        return responseError(frame.id, "INVALID_REQUEST", error?.message ?? String(error));
+                    }
+                }
                 const runOptions = {
                     resume: false,
                     maxConcurrency: asNumber(options.maxConcurrency),
                     allowNetwork: asBoolean(options.allowNetwork),
                     maxOutputBytes: asNumber(options.maxOutputBytes),
                     toolTimeoutMs: asNumber(options.toolTimeoutMs),
+                    ...(startedBy ? { startedBy } : {}),
                 };
                 return responseOk(frame.id, await this.startRun(workflowKey, input, {
                     triggeredBy: connection.userId ?? "gateway",

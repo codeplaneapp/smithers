@@ -192,6 +192,16 @@ describe("Gateway RPC contract", () => {
     expect(gatewayRequest).toEqual({ workflow: "deploy" });
   });
 
+  test("launchRun publishes closed startedBy attribution with documented bounds", () => {
+    const launch = getGatewayRpcDefinition("launchRun");
+    const startedBy = launch?.requestSchema.properties?.options?.properties?.startedBy;
+    expect(startedBy).toMatchObject({ type: "object", additionalProperties: false });
+    expect(startedBy?.properties?.harness).toMatchObject({ type: "string", maxLength: 64 });
+    expect(startedBy?.properties?.sessionId).toMatchObject({ type: "string", maxLength: 256 });
+    expect(startedBy?.properties?.detected).toMatchObject({ const: true });
+    expect(validateAgainstSchema({ workflow: "deploy", options: { startedBy: { harness: "codex", unknown: true } } }, launch!.requestSchema)).not.toEqual([]);
+  });
+
   test("getRun accepts null timestamps before a run starts or finishes", () => {
     const getRun = getGatewayRpcDefinition("getRun");
     if (!getRun) throw new Error("getRun RPC definition is missing");

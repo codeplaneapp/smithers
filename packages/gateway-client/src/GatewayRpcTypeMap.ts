@@ -38,6 +38,7 @@ import type {
   RewindRunRequest,
   ResumeRunRequest,
   ResumeRunResponse,
+  RunStartedBy,
   StreamDevToolsRequest,
   StreamRunEventsRequest,
   StreamRunEventsResponse,
@@ -64,6 +65,7 @@ import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
 import type { UsageReport, UsageWindow } from "@smithers-orchestrator/usage";
 
 export type { UsageReport, UsageWindow } from "@smithers-orchestrator/usage";
+export type { RunStartedBy } from "@smithers-orchestrator/protocol/gateway-rpc";
 
 export type ListUsageReportsRequest = { fresh?: boolean };
 
