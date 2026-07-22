@@ -8,6 +8,11 @@ import {
   AgentSandboxContent,
   AgentSandboxHeader,
   AgentSandboxStatus,
+  Sandbox,
+  SandboxActions,
+  SandboxContent,
+  SandboxHeader,
+  SandboxStatus,
   sandboxStateToStatus,
   type SandboxState,
 } from "../src/sandbox/AgentSandbox";
@@ -156,5 +161,48 @@ describe("AgentSandbox", () => {
     expect(pill.getAttribute("data-status")).toBe("paused");
     expect(pill.getAttribute("data-sandbox-state")).toBe("suspended");
     expect(pill.textContent).toContain("Suspended");
+  });
+
+  test("ships the frozen Sandbox compound API names as the same implementations", async () => {
+    expect(Sandbox).toBe(AgentSandbox);
+    expect(SandboxHeader).toBe(AgentSandboxHeader);
+    expect(SandboxStatus).toBe(AgentSandboxStatus);
+    expect(SandboxActions).toBe(AgentSandboxActions);
+    expect(SandboxContent).toBe(AgentSandboxContent);
+    await render(
+      <Sandbox state="ready" workspace="/tmp/ws">
+        <SandboxHeader>
+          <SandboxStatus state="ready" />
+        </SandboxHeader>
+        <SandboxContent>
+          <pre>frozen anatomy works</pre>
+        </SandboxContent>
+      </Sandbox>,
+    );
+    expect(container!.querySelector('[data-slot="agent-sandbox-content"]')?.textContent).toBe("frozen anatomy works");
+  });
+
+  test("announces lifecycle changes through a polite live region without announcing mount", async () => {
+    let setState!: (state: SandboxState) => void;
+    function Harness() {
+      const [state, setSandboxState] = useState<SandboxState>("provisioning");
+      setState = setSandboxState;
+      return <AgentSandbox state={state} />;
+    }
+    await render(<Harness />);
+    const live = container!.querySelector('[data-slot="agent-sandbox-live"]')!;
+    expect(live.getAttribute("role")).toBe("status");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.className).toContain("sui-sr-only");
+    expect(live.textContent).toBe("");
+
+    await act(async () => setState("ready"));
+    expect(live.textContent).toBe("Sandbox ready");
+
+    await act(async () => setState("failed"));
+    expect(live.textContent).toBe("Sandbox failed");
+
+    await act(async () => setState("destroyed"));
+    expect(live.textContent).toBe("Sandbox destroyed");
   });
 });

@@ -35,15 +35,91 @@ function isHttpUrl(text: string): boolean {
   }
 }
 
+const CONTROL_CHARS = /[\t\r\n]/g;
+
+/**
+ * Root-relative means "exactly one leading `/` followed by a path
+ * character" — not a second `/` or `\`. Browsers collapse backslashes to
+ * forward slashes when parsing special-scheme (http/https) URLs, so a value
+ * like "/\evil.com" or "/\\evil.com" is a network-path reference that
+ * resolves to `//evil.com` — a DIFFERENT origin — not a same-origin path.
+ */
+function isRootRelativeSameOriginPath(trimmed: string): boolean {
+  if (trimmed[0] !== "/") return false;
+  const second = trimmed[1];
+  return second !== "/" && second !== "\\";
+}
+
+/**
+ * A preview src may only be an absolute http(s) URL or a root-relative
+ * same-origin path. Anything else (javascript:, data:, blob:, file:,
+ * protocol-relative, backslash network-path tricks, blank) is refused so the
+ * sandbox boundary cannot be bypassed through the frame source. Returns the
+ * SANITIZED src so the exact string that was validated is the string that
+ * gets rendered — never the raw caller input.
+ */
+function sanitizePreviewSrc(src: string | undefined): string | null {
+  if (src === undefined) return null;
+  // Browsers strip ASCII tab/CR/LF from a URL before parsing it, so
+  // "/\t/evil.com" reaches the parser as "//evil.com" even though its literal
+  // second character isn't a separator. Strip the same way before
+  // classifying so that trick can't slip past the check below.
+  const trimmed = src.replace(CONTROL_CHARS, "").trim();
+  if (trimmed === "") return null;
+  if (isRootRelativeSameOriginPath(trimmed)) return trimmed;
+  return isHttpUrl(trimmed) ? trimmed : null;
+}
+
+const KNOWN_SANDBOX_TOKENS: ReadonlySet<string> = new Set<WebPreviewSandboxToken>([
+  "allow-scripts",
+  "allow-forms",
+  "allow-popups",
+  "allow-downloads",
+  "allow-same-origin",
+]);
+
+/**
+ * Sandbox tokens are only meaningful to browsers as case-insensitive,
+ * whitespace-trimmed keywords, so comparing raw array entries with `===`
+ * can miss a forbidden token in disguise: wrong case ("ALLOW-SAME-ORIGIN"),
+ * stray whitespace (" allow-same-origin"), or a duplicate. Normalize each
+ * entry by trimming and lowercasing, then accept it only when the WHOLE
+ * entry is an exact known keyword. Anything else — an unknown token or a
+ * malformed entry with several tokens packed behind an escaped separator
+ * such as a tab or semicolon ("allow-same-origin;drop-table") — is rejected
+ * wholesale: a malformed entry must never be salvaged into an active iframe
+ * capability, and unknown tokens fail closed.
+ */
+function normalizeSandboxTokens(tokens: readonly string[]): WebPreviewSandboxToken[] {
+  const seen = new Set<WebPreviewSandboxToken>();
+  const ordered: WebPreviewSandboxToken[] = [];
+  for (const raw of tokens) {
+    if (typeof raw !== "string") continue;
+    const candidate = raw.trim().toLowerCase();
+    if (!KNOWN_SANDBOX_TOKENS.has(candidate as WebPreviewSandboxToken)) {
+      if (candidate !== "") {
+        console.warn(`WebPreviewContent: rejecting malformed sandbox token entry ${JSON.stringify(raw)}; only exact known tokens are granted.`);
+      }
+      continue;
+    }
+    const token = candidate as WebPreviewSandboxToken;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    ordered.push(token);
+  }
+  return ordered;
+}
+
 /** The hard rule: allow-same-origin + allow-scripts never render together. */
 function resolveSandboxTokens(tokens: readonly WebPreviewSandboxToken[]): readonly WebPreviewSandboxToken[] {
-  if (tokens.includes("allow-same-origin") && tokens.includes("allow-scripts")) {
+  const normalized = normalizeSandboxTokens(tokens);
+  if (normalized.includes("allow-same-origin") && normalized.includes("allow-scripts")) {
     console.warn(
       "WebPreviewContent: dropping the allow-same-origin sandbox token because it is combined with allow-scripts; the pair would let the framed page remove its own sandbox.",
     );
-    return tokens.filter((token) => token !== "allow-same-origin");
+    return normalized.filter((token) => token !== "allow-same-origin");
   }
-  return tokens;
+  return normalized;
 }
 
 type WebPreviewContextValue = {
@@ -54,13 +130,18 @@ type WebPreviewContextValue = {
 
 const WebPreviewContext = createContext<WebPreviewContextValue | null>(null);
 
-const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [tabindex]";
+/**
+ * Roving tabindex applies ONLY to the toolbar's own buttons. The address
+ * input and any consumer-supplied children keep their natural tab order —
+ * stomping their tabIndex would strand them from keyboard users.
+ */
+const ROVING_BUTTONS = ".sui-webpreview-toolbar-button";
 
 function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
-    const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const items = Array.from(root.querySelectorAll<HTMLElement>(ROVING_BUTTONS));
     items.forEach((el, index) => {
       el.tabIndex = index === 0 ? 0 : -1;
     });
@@ -70,7 +151,7 @@ function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     const root = ref.current;
     if (!root) return;
-    const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const items = Array.from(root.querySelectorAll<HTMLElement>(ROVING_BUTTONS));
     if (items.length === 0) return;
     const current = items.indexOf(document.activeElement as HTMLElement);
     if (current === -1) return;
@@ -113,6 +194,26 @@ export function WebPreview({
   const isControlled = controlledUrl !== undefined;
   const url = isControlled ? controlledUrl : uncontrolledUrl;
 
+  // Preview lifecycle (navigation + loading transitions) is announced through
+  // a persistent visually-hidden live region so screen-reader users hear what
+  // sighted users see in the frame. Mounting is not announced.
+  const [announcement, setAnnouncement] = useState("");
+  const previousLifecycle = useRef<{ url: string | undefined; loading: boolean }>({ url, loading });
+  useEffect(() => {
+    const previous = previousLifecycle.current;
+    if (previous.url === url && previous.loading === loading) return;
+    previousLifecycle.current = { url, loading };
+    if (loading) {
+      setAnnouncement("Loading preview");
+    } else if (previous.loading) {
+      setAnnouncement("Preview loaded");
+    } else if (url !== undefined && url !== "") {
+      setAnnouncement(`Preview address ${url}`);
+    } else {
+      setAnnouncement("Preview cleared");
+    }
+  }, [url, loading]);
+
   function commitUrl(next: string): boolean {
     if (!isHttpUrl(next)) return false;
     if (!isControlled) setUncontrolledUrl(next);
@@ -127,6 +228,9 @@ export function WebPreview({
       className={cn("sui-webpreview", className)}
       {...props}
     >
+      <span data-slot="web-preview-live" role="status" aria-live="polite" className="sui-sr-only">
+        {announcement}
+      </span>
       <WebPreviewContext.Provider value={{ url, commitUrl, loading }}>
         {children ?? (
           <>
@@ -229,6 +333,9 @@ export function WebPreviewAddress({
 
   useEffect(() => {
     setDraft(ctx?.url ?? "");
+    // A URL committed elsewhere (controlled `url` prop, another address bar)
+    // makes any stale validation error on the old draft a lie — clear it.
+    setError(null);
   }, [ctx?.url]);
 
   function commit() {
@@ -282,9 +389,9 @@ export function WebPreviewContent({
   useInjectUiCss();
   useInjectLaneCss(SANDBOX_CSS_ID, sandboxCss);
   const ctx = useContext(WebPreviewContext);
-  const effectiveSrc = src ?? ctx?.url;
+  const safeSrc = sanitizePreviewSrc(src ?? ctx?.url);
   const loading = ctx?.loading ?? false;
-  if (effectiveSrc === undefined || effectiveSrc === "") {
+  if (safeSrc === null) {
     return (
       <div data-slot="web-preview-content" className={cn("sui-webpreview-content", className)}>
         <EmptyState title="No preview available" />
@@ -293,14 +400,22 @@ export function WebPreviewContent({
   }
   const sandboxTokens = resolveSandboxTokens(sandboxAllow);
   return (
-    <div data-slot="web-preview-content" data-loading={loading ? "true" : "false"} className="sui-webpreview-content">
+    <div
+      data-slot="web-preview-content"
+      data-loading={loading ? "true" : "false"}
+      aria-busy={loading ? true : undefined}
+      className="sui-webpreview-content"
+    >
       {loading ? <Skeleton data-slot="web-preview-loading" className="sui-webpreview-loading" /> : null}
       <iframe
+        {...props}
+        // Security-critical attributes come AFTER the spread: the prop types
+        // omit src/sandbox, but that is compile-time only — a runtime caller
+        // passing them through must never override the hardened values.
         title={title}
-        src={effectiveSrc}
+        src={safeSrc}
         sandbox={sandboxTokens.join(" ")}
         className={cn("sui-webpreview-frame", className)}
-        {...props}
       />
     </div>
   );

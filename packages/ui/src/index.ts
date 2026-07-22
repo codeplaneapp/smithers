@@ -588,10 +588,18 @@ export {
   AgentSandboxStatus,
   AgentSandboxActions,
   AgentSandboxContent,
+  Sandbox,
+  SandboxHeader,
+  SandboxStatus,
+  SandboxActions,
+  SandboxContent,
   sandboxStateToStatus,
   type AgentSandboxProps,
   type AgentSandboxStatusProps,
   type AgentSandboxActionsProps,
+  type SandboxProps,
+  type SandboxStatusProps,
+  type SandboxActionsProps,
   type SandboxState,
 } from "./sandbox/AgentSandbox";
 export {

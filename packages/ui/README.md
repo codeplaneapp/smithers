@@ -40,7 +40,7 @@ import { SmithersUiStyles, Button, StatusPill } from "smithers-orchestrator/ui";
 - Coding artifacts: `Artifact`, `Snippet`, `PackageInfo`, `SchemaDisplay`,
   `StackTrace`, `TestResults`, `Commit`, `ChangeSummary`,
   `EnvironmentVariables`, `SecretField`.
-- Sandbox previews: `AgentSandbox`, `WebPreview`, `JSXPreview`.
+- Sandbox previews: `Sandbox`/`SandboxHeader`/`SandboxStatus`/`SandboxActions`/`SandboxContent` (also exported as `AgentSandbox*` for back-compat), `WebPreview`, `JSXPreview`.
 - Workflow canvas: `WorkflowCanvas` node/edge/controls/panel/toolbar/minimap
   anatomy.
 

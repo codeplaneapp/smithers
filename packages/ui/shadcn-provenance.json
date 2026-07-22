@@ -872,6 +872,11 @@
         "AgentSandboxStatus",
         "AgentSandboxActions",
         "AgentSandboxContent",
+        "Sandbox",
+        "SandboxHeader",
+        "SandboxStatus",
+        "SandboxActions",
+        "SandboxContent",
         "sandboxStateToStatus"
       ],
       "collection": "agentic/ai-elements",
@@ -881,8 +886,9 @@
         "sandbox terminal/output streaming anatomy"
       ],
       "divergences": [
-        "renamed Sandbox to AgentSandbox (bare Sandbox collides with the smithers-orchestrator workflow export)",
-        "non-ready states render an honest EmptyState instead of placeholder output"
+        "frozen compound names (Sandbox/SandboxHeader/SandboxStatus/SandboxActions/SandboxContent) ship as aliases; AgentSandbox-prefixed names kept for back-compat (bare Sandbox collides with the smithers-orchestrator workflow export in shared scope)",
+        "non-ready states render an honest EmptyState instead of placeholder output",
+        "lifecycle state changes are announced via an aria-live=polite visually-hidden region"
       ]
     },
     {

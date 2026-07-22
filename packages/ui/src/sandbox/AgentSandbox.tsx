@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { createContext, useContext, useId, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "../cn";
 import { EmptyState } from "../empty-state";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
@@ -82,6 +82,18 @@ export function AgentSandbox({
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
 
+  // Lifecycle changes are announced through a persistent visually-hidden live
+  // region so screen-reader users hear provisioning/ready/disconnected/
+  // suspended/failed/destroyed transitions they cannot see. Mounting is not
+  // announced — only genuine state changes are.
+  const [announcement, setAnnouncement] = useState("");
+  const previousState = useRef(state);
+  useEffect(() => {
+    if (previousState.current === state) return;
+    previousState.current = state;
+    setAnnouncement(`Sandbox ${state}`);
+  }, [state]);
+
   function toggle() {
     const next = !open;
     if (!isControlled) setUncontrolledOpen(next);
@@ -97,6 +109,9 @@ export function AgentSandbox({
       {...props}
     >
       <AgentSandboxContext.Provider value={{ state, workspace, repository, open, triggerId, contentId }}>
+        <span data-slot="agent-sandbox-live" role="status" aria-live="polite" className="sui-sr-only">
+          {announcement}
+        </span>
         <button
           type="button"
           id={triggerId}
@@ -217,3 +232,19 @@ export function AgentSandboxContent({ className, children, ...props }: Component
     </div>
   );
 }
+
+/**
+ * The frozen compound API names from the upstream ai-elements anatomy. The
+ * AgentSandbox-prefixed names stay exported for back-compat, but the frozen
+ * names are the canonical surface.
+ */
+export {
+  AgentSandbox as Sandbox,
+  AgentSandboxHeader as SandboxHeader,
+  AgentSandboxStatus as SandboxStatus,
+  AgentSandboxActions as SandboxActions,
+  AgentSandboxContent as SandboxContent,
+};
+export type SandboxProps = AgentSandboxProps;
+export type SandboxStatusProps = AgentSandboxStatusProps;
+export type SandboxActionsProps = AgentSandboxActionsProps;

@@ -7,6 +7,7 @@ import {
   WebPreviewAddress,
   WebPreviewContent,
   WebPreviewToolbar,
+  type WebPreviewSandboxToken,
 } from "../src/sandbox/WebPreview";
 import { SANDBOX_CSS_ID } from "../src/sandbox/sandboxCss";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/styles";
@@ -182,6 +183,216 @@ describe("WebPreview", () => {
   test("sandbox attribute is always rendered, even with an empty token list", async () => {
     await render(<WebPreviewContent src="https://example.com" sandboxAllow={[]} />);
     expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("");
+  });
+
+  test("drops a mismatched-case allow-same-origin token combined with allow-scripts", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tokens = ["ALLOW-SCRIPTS", "Allow-Same-Origin"] as unknown as WebPreviewSandboxToken[];
+      await render(<WebPreviewContent src="https://example.com" sandboxAllow={tokens} />);
+      expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("drops a whitespace-padded allow-same-origin token combined with allow-scripts", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tokens = [" allow-scripts ", "\tallow-same-origin\n"] as unknown as WebPreviewSandboxToken[];
+      await render(<WebPreviewContent src="https://example.com" sandboxAllow={tokens} />);
+      expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("drops duplicate allow-scripts/allow-same-origin entries without duplicating the surviving token", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tokens = [
+        "allow-scripts",
+        "allow-scripts",
+        "allow-same-origin",
+        "allow-same-origin",
+      ] as unknown as WebPreviewSandboxToken[];
+      await render(<WebPreviewContent src="https://example.com" sandboxAllow={tokens} />);
+      expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("rejects an escaped-separator entry (tab) packed with two tokens wholesale — no salvage", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tokens = ["allow-scripts\tallow-same-origin"] as unknown as WebPreviewSandboxToken[];
+      await render(<WebPreviewContent src="https://example.com" sandboxAllow={tokens} />);
+      expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("");
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a malformed entry is never salvaged into an active iframe capability (semicolon-packed same-origin)", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tokens = ["allow-scripts", "allow-same-origin;drop-table"] as unknown as WebPreviewSandboxToken[];
+      await render(<WebPreviewContent src="https://example.com" sandboxAllow={tokens} />);
+      expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("unknown tokens fail closed and are dropped with a warning", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tokens = ["allow-scripts", "allow-top-navigation-by-user-activation"] as unknown as WebPreviewSandboxToken[];
+      await render(<WebPreviewContent src="https://example.com" sandboxAllow={tokens} />);
+      expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("renders a plain root-relative src as a same-origin path", async () => {
+    await render(<WebPreviewContent src="/dashboard" />);
+    expect(container!.querySelector("iframe")?.getAttribute("src")).toBe("/dashboard");
+  });
+
+  test("refuses a single-backslash network-path src (/\\evil.com) as same-origin", async () => {
+    const src = "/\\evil.com";
+    expect(src).toBe("/" + String.fromCharCode(92) + "evil.com");
+    await render(<WebPreviewContent src={src} />);
+    expect(container!.querySelector("iframe")).toBeNull();
+    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain("No preview available");
+  });
+
+  test("refuses a double-backslash network-path src (/\\\\evil.com) as same-origin", async () => {
+    const src = "/\\\\evil.com";
+    expect(src).toBe("/" + String.fromCharCode(92) + String.fromCharCode(92) + "evil.com");
+    await render(<WebPreviewContent src={src} />);
+    expect(container!.querySelector("iframe")).toBeNull();
+    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain("No preview available");
+  });
+
+  test("refuses a protocol-relative src (//evil.com) as same-origin", async () => {
+    await render(<WebPreviewContent src="//evil.com" />);
+    expect(container!.querySelector("iframe")).toBeNull();
+  });
+
+  test("refuses a non-http(s) scheme passed directly as src", async () => {
+    await render(<WebPreviewContent src="javascript:alert(1)" />);
+    expect(container!.querySelector("iframe")).toBeNull();
+  });
+
+  test("runtime callers cannot override the hardened sandbox through spread props", async () => {
+    const smuggled = {
+      sandbox: "allow-scripts allow-same-origin",
+    } as unknown as Record<string, string>;
+    await render(
+      <WebPreviewContent src="https://example.com" sandboxAllow={["allow-scripts"]} {...smuggled} />,
+    );
+    const frame = container!.querySelector("iframe")!;
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("src")).toBe("https://example.com");
+  });
+
+  test("renders the sanitized src, not the raw caller input", async () => {
+    await render(<WebPreviewContent src={"  https://example.com/path\t" as string} />);
+    expect(container!.querySelector("iframe")?.getAttribute("src")).toBe("https://example.com/path");
+  });
+
+  test("roving tabindex never strands the address input or consumer children from the tab order", async () => {
+    await render(
+      <WebPreview url="https://example.com">
+        <WebPreviewToolbar onBack={() => {}} onForward={() => {}}>
+          <WebPreviewAddress />
+          <button type="button" data-slot="web-preview-custom">
+            Custom
+          </button>
+        </WebPreviewToolbar>
+        <WebPreviewContent />
+      </WebPreview>,
+    );
+    const back = container!.querySelector<HTMLButtonElement>('[data-slot="web-preview-back"]')!;
+    const forward = container!.querySelector<HTMLButtonElement>('[data-slot="web-preview-forward"]')!;
+    expect(back.tabIndex).toBe(0);
+    expect(forward.tabIndex).toBe(-1);
+    const input = container!.querySelector<HTMLInputElement>('[data-slot="web-preview-address"] input')!;
+    expect(input.tabIndex).toBe(0);
+    const custom = container!.querySelector<HTMLButtonElement>('[data-slot="web-preview-custom"]')!;
+    expect(custom.tabIndex).toBe(0);
+    await act(async () => {
+      back.focus();
+      back.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(forward);
+    expect(input.tabIndex).toBe(0);
+  });
+
+  test("content region announces busy while loading so the covered frame is honest to screen readers", async () => {
+    await render(<WebPreview url="https://example.com" loading />);
+    const content = container!.querySelector('[data-slot="web-preview-content"]')!;
+    expect(content.getAttribute("aria-busy")).toBe("true");
+    expect(content.getAttribute("data-loading")).toBe("true");
+  });
+
+  test("content region is not busy once loading clears", async () => {
+    await render(<WebPreview url="https://example.com" />);
+    const content = container!.querySelector('[data-slot="web-preview-content"]')!;
+    expect(content.getAttribute("aria-busy")).toBeNull();
+    expect(content.getAttribute("data-loading")).toBe("false");
+  });
+
+  test("a controlled url change clears a stale validation error", async () => {
+    let setUrl!: (url: string) => void;
+    function Harness() {
+      const [url, setControlledUrl] = useState("https://example.com");
+      setUrl = setControlledUrl;
+      return <WebPreview url={url} />;
+    }
+    await render(<Harness />);
+    const input = container!.querySelector<HTMLInputElement>('[data-slot="web-preview-address"] input')!;
+    await typeAndEnter(input, "not a url");
+    expect(container!.querySelector('[data-slot="web-preview-address-error"]')).not.toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+
+    await act(async () => setUrl("https://other.example.com"));
+    expect(container!.querySelector('[data-slot="web-preview-address-error"]')).toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    expect(input.value).toBe("https://other.example.com");
+  });
+
+  test("announces preview lifecycle changes through a polite live region", async () => {
+    let setProps!: (next: { url: string; loading: boolean }) => void;
+    function Harness() {
+      const [props, setState] = useState({ url: "https://example.com", loading: false });
+      setProps = setState;
+      return <WebPreview url={props.url} loading={props.loading} />;
+    }
+    await render(<Harness />);
+    const live = container!.querySelector('[data-slot="web-preview-live"]')!;
+    expect(live.getAttribute("role")).toBe("status");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.className).toContain("sui-sr-only");
+    expect(live.textContent).toBe("");
+
+    await act(async () => setProps({ url: "https://example.com", loading: true }));
+    expect(live.textContent).toBe("Loading preview");
+
+    await act(async () => setProps({ url: "https://example.com", loading: false }));
+    expect(live.textContent).toBe("Preview loaded");
+
+    await act(async () => setProps({ url: "https://other.example.com", loading: false }));
+    expect(live.textContent).toBe("Preview address https://other.example.com");
   });
 
   test("renders under the dark theme with the lane stylesheet injected", async () => {
