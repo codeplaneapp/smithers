@@ -274,3 +274,32 @@ describe("workflowUiComplianceScorer", () => {
         expect(result.score).toBe(0);
     });
 });
+
+describe("JSX lexing", () => {
+    test("a quoted JSX attribute before a self-closing tag does not swallow the mount as a regex", () => {
+        const source = [
+            'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+            'import { WorkflowUiShell } from "smithers-orchestrator/gateway-ui";',
+            'function App() { return <WorkflowUiShell title="Fixture" />; }',
+            "createGatewayReactRoot(<App />);",
+            "",
+        ].join("\n");
+        const report = gradeWorkflowUiSource(source);
+        expect(report.violations.filter((violation) => violation.rule === "mount")).toEqual([]);
+        expect(report.violations.filter((violation) => violation.rule === "shell")).toEqual([]);
+    });
+
+    test("division and real regex literals still mask correctly", () => {
+        const source = [
+            'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+            'import { WorkflowUiShell } from "smithers-orchestrator/gateway-ui";',
+            "const ratio = 1 / 2;",
+            "const pattern = /createGatewayReactRoot\\(/g;",
+            "void pattern; void ratio;",
+            'createGatewayReactRoot(<WorkflowUiShell title="x" />);',
+            "",
+        ].join("\n");
+        const report = gradeWorkflowUiSource(source);
+        expect(report.violations.filter((violation) => violation.rule === "mount")).toEqual([]);
+    });
+});

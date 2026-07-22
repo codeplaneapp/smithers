@@ -380,6 +380,7 @@ function maskStringsAndComments(source) {
     let state = "code";
     let regexClass = false;
     let escaped = false;
+    let quote = "\"";
     for (let index = 0; index < source.length; index += 1) {
         const char = source[index];
         const next = source[index + 1];
@@ -390,32 +391,36 @@ function maskStringsAndComments(source) {
             result += char === "\n" ? "\n" : " ";
             if (char === "*" && next === "/") { result += " "; index += 1; state = "code"; }
         } else if (state === "regex") {
-            result += char === "\n" ? "\n" : " ";
-            if (escaped) escaped = false;
-            else if (char === "\\") escaped = true;
-            else if (char === "[") regexClass = true;
-            else if (char === "]") regexClass = false;
-            else if (char === "/" && !regexClass) state = "code";
+            if (escaped) { escaped = false; result += " "; }
+            else if (char === "\\") { escaped = true; result += " "; }
+            else if (char === "[") { regexClass = true; result += " "; }
+            else if (char === "]") { regexClass = false; result += " "; }
+            else if (char === "/" && !regexClass) { result += "/"; state = "code"; }
+            else result += char === "\n" ? "\n" : " ";
         } else if (state === "string" || state === "template") {
-            result += char === "\n" ? "\n" : " ";
-            if (escaped) escaped = false;
-            else if (char === "\\") escaped = true;
-            else if ((state === "string" && (char === "\"" || char === "'")) || (state === "template" && char === "`")) state = "code";
+            // Keep the closing delimiter in the mask: a later `/` must see the
+            // quote (an expression end), not whatever preceded the literal, or
+            // it gets mis-lexed as a regex start (e.g. after `title="x"` in JSX).
+            if (escaped) { escaped = false; result += " "; }
+            else if (char === "\\") { escaped = true; result += " "; }
+            else if ((state === "string" && char === quote) || (state === "template" && char === "`")) { result += char; state = "code"; }
+            else result += char === "\n" ? "\n" : " ";
         } else if (char === "/" && next === "*") {
             result += "  "; index += 1; state = "block";
         } else if (char === "/" && next === "/") {
             result += "  "; index += 1; state = "line";
         } else if (char === "\"" || char === "'") {
-            result += " ";
+            result += char;
+            quote = char;
             state = "string";
         } else if (char === "`") {
-            result += " ";
+            result += char;
             state = "template";
-        } else if (char === "/" && isRegexStart(result)) {
+        } else if (char === "/" && next !== ">" && isRegexStart(result)) {
             state = "regex";
             regexClass = false;
             escaped = false;
-            result += " ";
+            result += "/";
         } else result += char;
     }
     return result;
