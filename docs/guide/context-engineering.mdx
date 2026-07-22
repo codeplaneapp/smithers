@@ -30,8 +30,11 @@ Hand off a real piece of work, and the agent does this for you:
   definition of done) and puts the gates in before the code: checked, not hoped for.
 - **Stays in the smart zone.** Keeps each step's context small and focused, research
   and planning done up front, so the model spends its attention on the work.
-- **Tests end to end.** Doesn't call a feature finished until a real test proves it,
-  building one slice all the way through before starting the next.
+- **Tests end to end.** Doesn't call a feature finished until a real test proves it.
+  Work is broken into vertical slices: scaffold the layers (frontend, API, database)
+  first, then build each feature all the way through before starting the next, so
+  every step has something real to test and a feature's context stays in one
+  window.
 - **Delegates the ends and the middle.** Strong models plan and review at the two
   ends; cheaper models handle the routine middle, quality where it matters without
   paying top rates for everything.

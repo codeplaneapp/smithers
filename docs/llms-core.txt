@@ -1518,10 +1518,30 @@ agent that can't run the whole path can't tell whether it's done. Unit tests sti
 earn their place (TDD works well on small, self-contained snippets), but the e2e
 test is what closes the loop.
 
-A direct consequence: build in **vertical slices**, one feature working end to end,
-then the next, since a horizontal slice (a whole service layer for every feature at
-once) has nothing to validate until the very end, exactly when you want validation
-to have been happening all along.
+A direct consequence: break the work into vertical slices, covered next.
+
+## Break up tasks into vertical slices
+
+When you decompose a system into tasks, cut it like this: boilerplate horizontally,
+features vertically. Early tasks scaffold each level of the stack, the frontend
+shell, the API skeleton, the database schema and migrations, because boilerplate is
+uniform, low-risk, and parallelizes cleanly. Every task after that should be a
+feature implemented end to end through all the levels, never a layer implemented
+across all the features.
+
+Two reasons the vertical cut wins for agents:
+
+- **Backpressure is easier to implement.** A vertical slice terminates in behavior
+  a real e2e test can prove, so the gate writes itself: the checkout flow either
+  completes or it doesn't. A horizontal slice (a whole service layer for every
+  feature at once) has nothing real to validate until the final layer lands,
+  exactly when you want validation to have been happening all along.
+- **Context stays colocated.** One feature's frontend, API handler, and schema
+  decisions live together in a single context window, so the agent holds the whole
+  path it is building. Split a feature across layer tasks and its context scatters
+  across windows: each task re-derives the others' contracts from scratch, and the
+  drift between them surfaces only at integration, the most expensive place to
+  find it.
 
 ## Attention is finite; delegate the periphery
 
