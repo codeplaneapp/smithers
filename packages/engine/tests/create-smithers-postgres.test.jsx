@@ -144,7 +144,11 @@ describe("createSmithers (postgres)", () => {
                     </Workflow>
                 );
             });
-            const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId,
+                startedBy: { harness: "codex", sessionId: "thread-1", prompt: "launch context" },
+            }));
             expect(result.status).toBe("finished");
             const adapter = new SmithersDb(api.db);
             const ancestry = await adapter.listRunAncestry(result.runId, 100);
@@ -152,7 +156,18 @@ describe("createSmithers (postgres)", () => {
             const latestRunId = ancestry[0].runId;
             const previousRunId = ancestry[1].runId;
             const previousRun = await adapter.getRun(previousRunId);
+            const latestRun = await adapter.getRun(latestRunId);
             expect(previousRun?.status).toBe("continued");
+            expect(JSON.parse(previousRun?.configJson ?? "{}").startedBy).toEqual({
+                harness: "codex",
+                sessionId: "thread-1",
+                prompt: "launch context",
+            });
+            expect(JSON.parse(latestRun?.configJson ?? "{}").startedBy).toEqual({
+                harness: "codex",
+                sessionId: "thread-1",
+                prompt: "launch context",
+            });
             const resultRows = await readRows(api, api.tables.result, latestRunId);
             expect(resultRows).toHaveLength(1);
             expect(resultRows[0].cursor).toBe("abc");

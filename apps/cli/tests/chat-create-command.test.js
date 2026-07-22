@@ -71,6 +71,12 @@ test("chat create starts an auto-hijacked run and returns JSON metadata", async 
             "codex",
             "--cwd",
             "workspace",
+            "--started-by-harness",
+            "explicit-harness",
+            "--started-by-session",
+            "explicit-session",
+            "--started-by-prompt",
+            "explicit launch context",
         ], {
             cwd: repo.dir,
             format: "json",
@@ -106,6 +112,11 @@ test("chat create starts an auto-hijacked run and returns JSON metadata", async 
                 runId: result.json.runId,
                 workflowName: "chat",
                 status: "cancelled",
+            });
+            expect(JSON.parse(run.configJson).startedBy).toEqual({
+                harness: "explicit-harness",
+                sessionId: "explicit-session",
+                prompt: "explicit launch context",
             });
             const attempts = await adapter.listAttempts(result.json.runId, "chat", 0);
             expect(attempts).toHaveLength(1);

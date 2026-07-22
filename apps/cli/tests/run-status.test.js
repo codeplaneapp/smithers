@@ -79,7 +79,11 @@ describe("summarizeRunStatus verdicts (real sqlite rows)", () => {
     test("running-healthy: in-progress work plus recent finishes, with a codex/claude model mix", async () => {
         const { sqlite, adapter } = createMemoryDb();
         try {
-            await seedRun(adapter, "r1");
+            await seedRun(adapter, "r1", {
+                configJson: JSON.stringify({
+                    startedBy: { harness: "codex", sessionId: "thread-1", prompt: "private launch context", detected: true },
+                }),
+            });
             // 3 finished: two inside the 10m window, one old (outside).
             await seedNode(adapter, "r1", "plan", "finished", NOW - 40 * MIN);
             await seedNode(adapter, "r1", "impl-1", "finished", NOW - 4 * MIN);
@@ -121,6 +125,7 @@ describe("summarizeRunStatus verdicts (real sqlite rows)", () => {
                 { nodeId: "impl-3", iteration: 0, state: "in-progress", detail: "running 6m 0s" },
             ]);
             expect(summary.quota).toBeNull();
+            expect(summary.startedBy).toEqual({ harness: "codex", sessionId: "thread-1", detected: true });
 
             const human = renderRunStatusHuman(summary);
             const lines = human.split("\n");
@@ -130,6 +135,8 @@ describe("summarizeRunStatus verdicts (real sqlite rows)", () => {
             expect(human).toContain("claude/claude-sonnet-5 x1");
             expect(human).toContain("2 finished in last 10m");
             expect(human).toContain("impl-3");
+            expect(human).toContain("Started  codex · thread-1");
+            expect(human).not.toContain("private launch context");
         }
         finally {
             sqlite.close();

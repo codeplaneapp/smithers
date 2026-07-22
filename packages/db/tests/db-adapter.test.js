@@ -144,6 +144,15 @@ describe("SmithersDb adapter", () => {
         expect(run.runId).toBe("r1");
         expect(run.status).toBe("running");
     });
+    test("preserves startedBy inside configJson through SQLite get and list", async () => {
+        const { adapter } = createTestDb();
+        const configJson = JSON.stringify({
+            startedBy: { harness: "codex", sessionId: "thread-1", prompt: "explicit context", detected: true },
+        });
+        await adapter.insertRun(runRow("r-started-by", "running", { configJson }));
+        expect((await adapter.getRun("r-started-by"))?.configJson).toBe(configJson);
+        expect((await adapter.listRuns()).find((run) => run.runId === "r-started-by")?.configJson).toBe(configJson);
+    });
     test("updateRun changes status", async () => {
         const { adapter } = createTestDb();
         await adapter.insertRun(runRow("r1"));
