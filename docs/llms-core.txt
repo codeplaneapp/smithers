@@ -451,7 +451,7 @@ export default smithers((ctx) => (
 
 `createSmithers` registers Zod schemas as durable output relations the runtime manages. `outputs.greeting` is the typed reference for the `greeting` schema; using it as the `output` prop catches typos at compile time (`outputs.greting` is a type error).
 
-The `input` key is special: its schema types `ctx.input`, so `ctx.input.name` is a checked `string`, not `unknown`; every other key, like `greeting` here, is an output table. Omitting `input` leaves `ctx.input` untyped, forcing a defensive guard on each field (`ctx.input?.name ?? "world"`). Input fields arrive as supplied with no Zod defaults applied: coalesce any field you don't require.
+The `input` key is special: its schema types `ctx.input`, so `ctx.input.name` is a checked `string`, not `unknown`; every other key, like `greeting` here, is an output table. Omitting `input` leaves `ctx.input` untyped, forcing a defensive guard on each field (`ctx.input?.name ?? "world"`). Fresh runs and graph previews parse input through this schema, so Zod defaults and transforms are available in `ctx.input`. Continue to coalesce fields declared optional or nullable.
 
 This Task has no `agent`, just a literal value. Run it.
 
@@ -3727,7 +3727,7 @@ export default smithers((ctx) => (
 ## Notes
 
 - Direct children run sequentially; `<Sequence>` is only needed inside other control-flow components.
-- **Input `.default()`s are never applied.** Neither runtime nor `bunx smithers-orchestrator graph` runs `inputSchema.parse()`, so `z.array(...).default([])` still yields `undefined` when the field is absent and `ctx.input.items.map(...)` crashes the render. Always coalesce at the read site: `const items = ctx.input.items ?? [];`.
+- **Input schemas run before workflow rendering.** Fresh runs and `bunx smithers-orchestrator graph` apply Zod defaults and transforms before the workflow reads `ctx.input`. Explicit caller values take precedence over `.default()` values. Coalesce only fields declared optional or nullable.
 - **Two ways to get `<Workflow>`, both equivalent.** Import it directly (`import { Workflow } from "smithers-orchestrator"`) or destructure it from `createSmithers(...)`; both render the identical node, since the factory's `Workflow` is a thin pass-through injecting no schema or context, unlike `Task`/`Approval`/`Sandbox`/`Signal`, which the factory wires to the run's context and your output schemas. **Convention: destructure `Workflow` from `createSmithers`** alongside `Task`, `smithers`, and `outputs`, so a workflow's components all come from one place, as the example above and ~95% of `examples/` do. A direct top-level import (also fine for `Sequence`, `Branch`, `Loop`, `Parallel`, and other pure structural components) suits tiny single-file workflows.
 - Custom Drizzle tables require `runId`, `nodeId`, and `iteration` columns with a composite primary key `(run_id, node_id, iteration)`. Tasks outside a `<Loop>` write `iteration = 0`.
 
@@ -7056,8 +7056,7 @@ const terra = new CodexAgent({ model: "gpt-5.6-terra" });
 const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
 
 export default smithers((ctx) => {
-  // Static graph rendering does not apply input-schema defaults, so repeat the
-  // prompt default before Trellis validates it at render time.
+  // The schema default is applied before runtime and static graph rendering.
   const prompt = ctx.input.prompt?.trim() || "Build the requested result and prove it works.";
 
   return (
@@ -8005,13 +8004,12 @@ their default.
 
 `input` is a reserved schema key on `createSmithers(...)` that controls the
 TypeScript type of `ctx.input`; every other key is an output schema and becomes
-a typed output ref under `outputs.<key>`. Fresh runs validate the input row
-against the generated input table before insert, but Smithers does **not** call
-`inputSchema.parse()` or write Zod defaults back into `ctx.input`. Treat
-required Zod fields as the authored TypeScript contract; for fields a CLI/UI
-caller may omit, use `.optional()` / `.nullable()` and coalesce inside the
-workflow (`ctx.input.dryRun ?? false`), or add an early compute task with
-stricter Zod parsing.
+a typed output ref under `outputs.<key>`. Fresh runs and graph previews parse
+input through this schema before rendering, so Zod defaults and transforms are
+available in `ctx.input`. The parsed fresh-run input is persisted; previews do
+not persist or mutate input. Treat required Zod fields as the authored
+TypeScript contract. For fields intentionally declared `.optional()` or
+`.nullable()`, coalesce inside the workflow (`ctx.input.dryRun ?? false`).
 
 Prefer `output={outputs.someKey}` on tasks, approvals, sandboxes, and subflows:
 the `outputs` object holds the exact Zod schema objects passed to
@@ -12696,7 +12694,7 @@ main `smithers-orchestrator` entry point for those surfaces.
 
 > Render a workflow tree to a GraphSnapshot without executing.
 
-Use `renderFrame` to preview the task graph (CI validation, graph-inspection UIs, dry-run checks) without executing or persisting anything. `runId` and `iteration` are arbitrary strings used only for snapshot identity.
+Use `renderFrame` to preview the task graph (CI validation, graph-inspection UIs, dry-run checks) without executing or persisting anything. It parses `ctx.input` through the workflow input schema first, applying defaults and transforms to a derived context without mutating the supplied context. `runId` and `iteration` are arbitrary strings used only for snapshot identity.
 
 ```ts
 import { renderFrame } from "smithers-orchestrator";
