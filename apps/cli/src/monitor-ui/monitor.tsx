@@ -346,6 +346,62 @@ function writeUrlSelection(runId: string | undefined, nodeId: string | undefined
   history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}`);
 }
 
+type MonitorKeyboardState = {
+  selectedRunId: string | undefined;
+  selectedNodeKey: string | undefined;
+  sortedTableRuns: RunRow[];
+  railOrderRuns: RunRow[];
+  cursorRunId: string | undefined;
+  selectNode: (node: TreeNode | undefined) => void;
+  selectRun: (runId: string | undefined) => void;
+};
+
+export function createMonitorKeydownHandler(
+  keyState: { current: MonitorKeyboardState },
+  setCursorRunId: (runId: string | undefined) => void,
+  setRunsPage: (page: number) => void,
+): (event: KeyboardEvent) => void {
+  return (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (document.querySelector(".mon-modal-backdrop")) return;
+    const state = keyState.current;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const typing = target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
+    if (event.key === "Escape") {
+      if (typing) {
+        target?.blur();
+        return;
+      }
+      if (state.selectedNodeKey) state.selectNode(undefined);
+      else if (state.selectedRunId) state.selectRun(undefined);
+      return;
+    }
+    if (typing) return;
+    if (event.key === "/") {
+      event.preventDefault();
+      document.querySelector<HTMLInputElement>(".mon-topbar input")?.focus();
+      return;
+    }
+    if (event.key === "j" || event.key === "k") {
+      const delta = event.key === "j" ? 1 : -1;
+      if (state.selectedRunId) {
+        const index = state.railOrderRuns.findIndex((run) => run.runId === state.selectedRunId);
+        const next = state.railOrderRuns[index + delta];
+        if (index >= 0 && next) state.selectRun(next.runId);
+        return;
+      }
+      const list = state.sortedTableRuns;
+      if (list.length === 0) return;
+      const index = list.findIndex((run) => run.runId === state.cursorRunId);
+      const nextIndex = index < 0 ? (delta > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, index + delta));
+      setCursorRunId(list[nextIndex]!.runId);
+      setRunsPage(Math.floor(nextIndex / RUNS_PAGE_SIZE) + 1);
+      return;
+    }
+    if (event.key === "Enter" && !state.selectedRunId && state.cursorRunId) state.selectRun(state.cursorRunId);
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Approvals inbox (all pending gates across every run).
 // ---------------------------------------------------------------------------
@@ -4155,57 +4211,19 @@ function App() {
   const railOrderRuns = useMemo(() => groupRuns(visibleRuns).flatMap((group) => group.runs), [visibleRuns]);
   // The handler registers once and reads the latest snapshot from a ref —
   // re-registering a window listener per keystroke-relevant render churns.
-  const keyState = useRef({ selectedRunId, selectedNodeKey, sortedTableRuns, railOrderRuns, cursorRunId });
-  keyState.current = { selectedRunId, selectedNodeKey, sortedTableRuns, railOrderRuns, cursorRunId };
+  const keyState = useRef({
+    selectedRunId,
+    selectedNodeKey,
+    sortedTableRuns,
+    railOrderRuns,
+    cursorRunId,
+    selectNode,
+    selectRun,
+  });
+  keyState.current = { selectedRunId, selectedNodeKey, sortedTableRuns, railOrderRuns, cursorRunId, selectNode, selectRun };
   useEffect(() => {
     if (monitorMode.embed) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      // Modals own their own keys — don't act out from under a terminal/dialog.
-      if (document.querySelector(".mon-modal-backdrop")) return;
-      const state = keyState.current;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const typing =
-        target !== null &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
-      if (event.key === "Escape") {
-        if (typing) {
-          target?.blur();
-          return;
-        }
-        if (state.selectedNodeKey) selectNode(undefined);
-        else if (state.selectedRunId) selectRun(undefined);
-        return;
-      }
-      if (typing) return;
-      if (event.key === "/") {
-        event.preventDefault();
-        document.querySelector<HTMLInputElement>(".mon-topbar input")?.focus();
-        return;
-      }
-      if (event.key === "j" || event.key === "k") {
-        const delta = event.key === "j" ? 1 : -1;
-        if (state.selectedRunId) {
-          // Run detail: step to the neighbouring run in the rail's order.
-          const index = state.railOrderRuns.findIndex((run) => run.runId === state.selectedRunId);
-          const next = state.railOrderRuns[index + delta];
-          if (index >= 0 && next) selectRun(next.runId);
-          return;
-        }
-        // Overview: move the cursor through the FULL sorted list; pagination
-        // follows the cursor so it never walks off the visible page.
-        const list = state.sortedTableRuns;
-        if (list.length === 0) return;
-        const index = list.findIndex((run) => run.runId === state.cursorRunId);
-        const nextIndex = index < 0 ? (delta > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, index + delta));
-        setCursorRunId(list[nextIndex]!.runId);
-        setRunsPage(Math.floor(nextIndex / RUNS_PAGE_SIZE) + 1);
-        return;
-      }
-      if (event.key === "Enter") {
-        if (!state.selectedRunId && state.cursorRunId) selectRun(state.cursorRunId);
-      }
-    };
+    const onKeyDown = createMonitorKeydownHandler(keyState, setCursorRunId, setRunsPage);
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps

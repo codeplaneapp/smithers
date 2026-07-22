@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 // unrelated network-using tests in the same process stay on the real stack.
 const nativeFetch = globalThis.fetch;
 const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
-GlobalRegistrator.register();
+GlobalRegistrator.register({ url: "http://localhost/monitor" });
 globalThis.fetch = nativeFetch;
 
 const { act } = await import("react");
@@ -32,7 +32,7 @@ const { workflowUiThemeCss } = await import("smithers-orchestrator/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } = await import(
   "../src/monitor-ui/monitorShell.tsx"
 );
-const { monitorCss, RunProgressCell, RunsRail, RunsTable, StatCard, StatusTag } = await import(
+const { createMonitorKeydownHandler, monitorCss, RunProgressCell, RunsRail, RunsTable, StatCard, StatusTag } = await import(
   "../src/monitor-ui/monitor.tsx"
 );
 const monitorSource = readFileSync(new URL("../src/monitor-ui/monitor.tsx", import.meta.url), "utf8");
@@ -143,6 +143,55 @@ describe("shared control styling contract", () => {
       ".sui-row-button[data-active='true']",
     ]) {
       expect(smithersUiCss).toContain(rule);
+    }
+  });
+});
+
+describe("monitor global keyboard selection", () => {
+  test("Escape uses post-mount selection callbacks and preserves the run URL", async () => {
+    window.history.replaceState(null, "", "/monitor?runId=run-42&nodeId=node-7");
+    expect(window.location.search).toBe("?runId=run-42&nodeId=node-7");
+    const selection = { runId: "run-42", nodeId: "node-7" };
+    const selectNode = (node: { id: string } | undefined) => {
+      keyState.current.selectedNodeKey = node?.id;
+      selection.nodeId = node?.id ?? "";
+      const params = new URLSearchParams(location.search);
+      if (node) params.set("nodeId", node.id);
+      else params.delete("nodeId");
+      window.history.replaceState(null, "", `/monitor?${params}`);
+    };
+    const selectRun = (runId: string | undefined) => {
+      keyState.current.selectedRunId = runId;
+      selection.runId = runId ?? "";
+      const params = new URLSearchParams(location.search);
+      if (runId) params.set("runId", runId);
+      else params.delete("runId");
+      window.history.replaceState(null, "", `/monitor${params.toString() ? `?${params}` : ""}`);
+    };
+    const keyState = {
+      current: {
+        selectedRunId: undefined,
+        selectedNodeKey: undefined,
+        sortedTableRuns: [],
+        railOrderRuns: [],
+        cursorRunId: undefined,
+        selectNode: () => {},
+        selectRun: () => {},
+      },
+    } as any;
+    const onKeyDown = createMonitorKeydownHandler(keyState, () => {}, () => {});
+    window.addEventListener("keydown", onKeyDown);
+    try {
+      keyState.current = { ...keyState.current, selectedRunId: "run-42", selectedNodeKey: "node-7", selectNode, selectRun };
+      await keydown(document.body, "Escape");
+      expect(location.search).toBe("?runId=run-42");
+      expect(selection).toEqual({ runId: "run-42", nodeId: "" });
+
+      await keydown(document.body, "Escape");
+      expect(location.search).toBe("");
+      expect(selection).toEqual({ runId: "", nodeId: "" });
+    } finally {
+      window.removeEventListener("keydown", onKeyDown);
     }
   });
 });
