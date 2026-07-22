@@ -276,6 +276,10 @@ const listWorkflowsInputSchema = z.object({
 const listWorkflowsDataSchema = z.object({
     workflows: z.array(workflowSummarySchema),
 });
+const boundedCodePointString = (max, field) => z.string().refine(
+    (value) => Array.from(value).length <= max,
+    `${field} must be at most ${max} Unicode code points`,
+);
 const runWorkflowInputSchema = z.object({
     workflowId: z.string().describe("Discovered workflow ID from .smithers/workflows"),
     input: z.record(z.string(), z.unknown()).optional(),
@@ -293,8 +297,8 @@ const runWorkflowInputSchema = z.object({
     toolTimeoutMs: z.number().int().min(1).optional(),
     hot: z.boolean().default(false),
     startedBy: z.object({
-        harness: z.string().optional().describe("Self-reported harness identifier (trimmed; at most 64 Unicode code points)."),
-        sessionId: z.string().optional().describe("Self-reported harness session identifier (trimmed; at most 256 Unicode code points)."),
+        harness: boundedCodePointString(64, "startedBy.harness").optional().describe("Self-reported harness identifier (trimmed; at most 64 Unicode code points)."),
+        sessionId: boundedCodePointString(256, "startedBy.sessionId").optional().describe("Self-reported harness session identifier (trimmed; at most 256 Unicode code points)."),
         prompt: z.string().optional().describe("Explicit launch context only. Persisted and visible to run readers; never use workflow input or a transcript here. Values beyond 8,192 Unicode code points are visibly clipped."),
     }).strict().optional(),
 }).superRefine((value, ctx) => {

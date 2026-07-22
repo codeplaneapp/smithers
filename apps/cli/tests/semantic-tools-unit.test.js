@@ -740,6 +740,14 @@ describe("semantic tool definitions", () => {
         expect(harness.tools.get("ask_human").inputSchema.safeParse({ prompt: "Proceed?", pollSeconds: 0.249 }).success).toBe(false);
         expect(harness.tools.get("run_workflow").inputSchema.safeParse({ workflowId: "demo", maxConcurrency: 0 }).success).toBe(false);
         expect(harness.tools.get("run_workflow").inputSchema.safeParse({ workflowId: "demo", waitForStartMs: -1 }).success).toBe(false);
+        const runWorkflowSchema = harness.tools.get("run_workflow").inputSchema;
+        expect(runWorkflowSchema.safeParse({ workflowId: "demo", startedBy: { harness: "codex", sessionId: "thread-1", prompt: "explicit only" } }).success).toBe(true);
+        expect(runWorkflowSchema.safeParse({ workflowId: "demo", startedBy: { harness: "😀".repeat(65) } }).success).toBe(false);
+        expect(runWorkflowSchema.safeParse({ workflowId: "demo", startedBy: { sessionId: "😀".repeat(257) } }).success).toBe(false);
+        // Oversized prompts remain valid at ingress so the shared normalizer can
+        // persist the deterministic visible ellipsis instead of rejecting them.
+        expect(runWorkflowSchema.safeParse({ workflowId: "demo", startedBy: { prompt: "😀".repeat(8_193) } }).success).toBe(true);
+        expect(runWorkflowSchema.safeParse({ workflowId: "demo", startedBy: { harness: "codex", unknown: true } }).success).toBe(false);
 
         const watched = await harness.call("watch_run", {
             runId: "terminal-run",
