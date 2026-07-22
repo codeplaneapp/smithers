@@ -3548,6 +3548,14 @@ async function runGatewayCommand(options) {
     let port;
     let url;
     let idleTimeoutMs = 0;
+    /** @type {Array<{ id: string; entryFile: string; system?: boolean }>} */
+    let discoveredWorkflows = [];
+    let workflowsLoaded = 0;
+    let workflowsTotal = 0;
+    /** @type {(workflowKey: string) => Promise<void>} */
+    let loadWorkflowByKey = async () => { };
+    /** @type {Promise<unknown> | null} */
+    let backgroundWorkflowLoad = null;
     try {
         // Singleton: one gateway owns a workspace. A healthy incumbent
         // (verified by pid + /health workspace identity, not just "something
@@ -3563,6 +3571,8 @@ async function runGatewayCommand(options) {
     if (!manifestFallback) {
         process.chdir(workspace);
     }
+    discoveredWorkflows = discoverWorkflows(workspace);
+    workflowsTotal = discoveredWorkflows.length;
     if (options.backend) {
         process.env.SMITHERS_BACKEND = options.backend;
     }
@@ -3604,6 +3614,8 @@ async function runGatewayCommand(options) {
         heartbeatMs: 15_000,
         workspaceRoot: workspace,
         workflowRegistryRefresh: (workflowKey) => refreshWorkflowRegistry(workflowKey),
+        workflowRegistryStatus: () => ({ workflowsLoaded, workflowsTotal }),
+        workflowRegistryReady: () => backgroundWorkflowLoad ?? Promise.resolve(),
         identity: { backend: identityBackend, version: readPackageVersion() },
         idleTimeoutMs,
         // The monitor's "what happened" panel: narrate a run/node with the
@@ -3637,17 +3649,8 @@ async function runGatewayCommand(options) {
     ensureSmithersTables(workspaceWorkflow.db);
     setupSqliteCleanup(workspaceWorkflow);
     backendCleanups.push(() => workspaceApi.close?.());
-    // Load every workflow module up front, concurrently. Each `loadWorkflow`
-    // does a dynamic `import()` of the workflow's `.tsx`, and that import is the
-    // single biggest chunk of gateway cold-start once a workspace has dozens of
-    // packs — awaiting them one at a time serializes the transpile+evaluate of
-    // ~90 modules. `Promise.all` overlaps that work (module evaluation is still
-    // single-threaded, but bun's transpile and the filesystem reads pipeline),
-    // shaving a few hundred ms off boot. Registration below stays a sequential
-    // loop so DB writes and gateway state mutate in a stable, discovery order,
-    // and a broken workflow is still skipped instead of failing the whole boot.
-    const discoveredWorkflows = discoverWorkflows(workspace);
-    let loadedWorkflows;
+    /** @type {Map<string, Promise<void>>} */
+    const workflowLoaders = new Map();
     let readOnlyWorkflow;
     if (manifestFallback) {
         // A read-only gateway must not import workspace workflow modules while
@@ -3663,43 +3666,26 @@ async function runGatewayCommand(options) {
             }
             return React.createElement(workspaceApi.Workflow, { name: "workspace" });
         });
-        loadedWorkflows = discoveredWorkflows.map((discovered) => ({
-            discovered,
-            workflow: readOnlyWorkflow,
-            loadError: null,
-        }));
-        for (const { discovered } of loadedWorkflows) {
+        for (const discovered of discoveredWorkflows) {
             gateway.register(discovered.id, readOnlyWorkflow, {
                 system: discovered.system,
                 ui: discovered.id === "oneshot" ? { entry: ONESHOT_UI_ENTRY, title: "Oneshot" } : true,
             });
             workflows.push(discovered.id);
         }
+        workflowsLoaded = workflowsTotal;
     }
-    else {
-        loadedWorkflows = await Promise.all(discoveredWorkflows.map((discovered) => loadWorkflow(discovered.entryFile).then((workflow) => ({ discovered, workflow, loadError: /** @type {unknown} */ (null) }), (loadError) => ({ discovered, workflow: /** @type {any} */ (null), loadError }))));
-        for (const { discovered, workflow, loadError } of loadedWorkflows) {
-            if (loadError || !workflow) {
-                process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${(/** @type {any} */ (loadError))?.message ?? String(loadError)}\n`);
-                continue;
-            }
-            try {
-                ensureSmithersTables(workflow.db);
-                setupSqliteCleanup(workflow);
-                backendCleanups.push(() => closeWorkflowBackend(workflow));
-                gateway.register(discovered.id, workflow, workflowGatewayRegistration(discovered));
-                workflows.push(discovered.id);
-            }
-            catch (error) {
-                process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
-            }
+    // Register the cheap built-ins before listen so the Gateway can serve
+    // control-plane requests while workspace modules are still evaluating.
+    if (!gateway.workflows.has("workspace") && !discoveredWorkflows.some((discovered) => discovered.id === "workspace")) {
+        gateway.register("workspace", workspaceWorkflow);
+        if (discoveredWorkflows.length === 0) {
+            workflows.push("workspace");
         }
     }
-    if (workflows.length === 0) {
-        gateway.register("workspace", workspaceWorkflow);
-        workflows.push("workspace");
-    }
-    if (!gateway.workflows.has("oneshot")) {
+    // A discovered oneshot is an intentional workspace override. Do not let
+    // the built-in shell claim the key before its module can load.
+    if (!gateway.workflows.has("oneshot") && !discoveredWorkflows.some((discovered) => discovered.id === "oneshot")) {
         gateway.register("oneshot", workspaceWorkflow, {
             ui: { entry: ONESHOT_UI_ENTRY, title: "Oneshot" },
         });
@@ -3709,53 +3695,53 @@ async function runGatewayCommand(options) {
     // serves it, backed by the workspace's own DB and its real discovered-
     // workflow index (so `ext.evals.saveSuite` can validate a target
     // workflowKey against what this gateway actually serves).
-    const workflowIndex = new Map(loadedWorkflows
-        .filter(({ loadError, workflow }) => !loadError && workflow)
-        .map(({ discovered }) => [discovered.id, discovered]));
-    refreshWorkflowRegistry = async (workflowKey) => {
-        if (gateway.workflows.has(workflowKey)) {
-            return;
-        }
-        const discovered = discoverWorkflows(workspace).find((candidate) => candidate.id === workflowKey);
-        if (!discovered) {
-            return;
-        }
-        if (manifestFallback) {
-            if (!readOnlyWorkflow) {
-                return;
-            }
-            try {
-                gateway.register(discovered.id, readOnlyWorkflow, {
-                    system: discovered.system,
-                    ui: discovered.id === "oneshot" ? { entry: ONESHOT_UI_ENTRY, title: "Oneshot" } : true,
-                });
-                workflows.push(discovered.id);
-                workflowIndex.set(discovered.id, discovered);
-            }
-            catch (error) {
-                process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
-            }
-            return;
-        }
-        let workflow;
-        try {
-            workflow = await loadWorkflow(discovered.entryFile);
-        }
-        catch (error) {
-            process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+    const workflowIndex = new Map(discoveredWorkflows.map((discovered) => [discovered.id, discovered]));
+    /** @param {import("./workflows.js").DiscoveredWorkflow} discovered */
+    const loadAndRegisterWorkflow = async (discovered) => {
+        if (gateway.workflows.has(discovered.id)) {
             return;
         }
         try {
+            const workflow = await loadWorkflow(discovered.entryFile);
             ensureSmithersTables(workflow.db);
             setupSqliteCleanup(workflow);
-            gateway.register(discovered.id, workflow, workflowGatewayRegistration(discovered));
             backendCleanups.push(() => closeWorkflowBackend(workflow));
+            gateway.register(discovered.id, workflow, workflowGatewayRegistration(discovered));
             workflows.push(discovered.id);
             workflowIndex.set(discovered.id, discovered);
         }
         catch (error) {
-            await closeWorkflowBackend(workflow).catch(() => { });
             process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+        }
+        finally {
+            workflowsLoaded += 1;
+        }
+    };
+    loadWorkflowByKey = (workflowKey) => {
+        if (gateway.workflows.has(workflowKey)) {
+            return Promise.resolve();
+        }
+        let loader = workflowLoaders.get(workflowKey);
+        if (!loader) {
+            const discovered = discoveredWorkflows.find((candidate) => candidate.id === workflowKey);
+            loader = discovered ? loadAndRegisterWorkflow(discovered) : Promise.resolve();
+            workflowLoaders.set(workflowKey, loader);
+        }
+        return loader;
+    };
+    refreshWorkflowRegistry = async (workflowKey) => {
+        if (manifestFallback) {
+            return;
+        }
+        await loadWorkflowByKey(workflowKey);
+        if (!gateway.workflows.has(workflowKey)) {
+            // A miss may be a newly-created workflow; rescan once before the
+            // Gateway returns its definitive NOT_FOUND response.
+            const discovered = discoverWorkflows(workspace).find((candidate) => candidate.id === workflowKey);
+            if (discovered) {
+                await loadAndRegisterWorkflow(discovered);
+            }
+            return;
         }
     };
     gateway.extend("evals", createEvalsExtension({
@@ -3810,10 +3796,16 @@ async function runGatewayCommand(options) {
         throw error;
     }
     releaseStartLock();
+    if (!manifestFallback) {
+        // Liveness is published before any workspace workflow module import.
+        // Keep one promise per key so background initialization and an early
+        // workflow-specific request always share the same evaluation.
+        backgroundWorkflowLoad = Promise.all(discoveredWorkflows.map((discovered) => loadWorkflowByKey(discovered.id)));
+    }
     process.stderr.write(`[smithers] Gateway listening on ${url}\n`);
     process.stderr.write(`[smithers] Workspace: ${workspace}\n`);
     process.stderr.write(`[smithers] Database: ${dbPath}\n`);
-    process.stderr.write(`[smithers] Registered workflows: ${workflows.join(", ")}\n`);
+    process.stderr.write(`[smithers] Workflow loading: ${workflowsLoaded}/${workflowsTotal}\n`);
     process.stderr.write(`[smithers] Runtime state: ${runtimeStateFile}\n`);
     if (auth && !explicitToken && authToken) {
         process.stderr.write(`[smithers] Minted bearer token: ${authToken}\n`);
@@ -3821,8 +3813,16 @@ async function runGatewayCommand(options) {
     process.stderr.write(auth
         ? `[smithers] Auth: token required (Authorization: Bearer <token>)\n`
         : `[smithers] Auth: NONE — bound to loopback ${options.host}; do not expose this port\n`);
+    void backgroundWorkflowLoad?.then(() => {
+        const discoveredIds = new Set(discoveredWorkflows.map((discovered) => discovered.id));
+        const displayWorkflows = [
+            ...workflows.filter((workflow) => discoveredIds.has(workflow)),
+            ...workflows.filter((workflow) => !discoveredIds.has(workflow)),
+        ];
+        process.stderr.write(`[smithers] Registered workflows: ${displayWorkflows.join(", ")}\n`);
+    });
     await new Promise((resolvePromise) => {
-        const shutdown = () => {
+        const shutdown = async () => {
             // Backstop: if gateway/backend close hangs, force-exit after 5s so a
             // hard `kill -9` is never required. unref() so a clean close isn't held
             // open by the timer.
@@ -3838,6 +3838,9 @@ async function runGatewayCommand(options) {
             catch {
                 // Discovery cleans a stale state file up on the next probe.
             }
+            await backgroundWorkflowLoad?.catch((error) => {
+                process.stderr.write(`[smithers] Workflow loading shutdown error: ${error?.message ?? String(error)}\n`);
+            });
             gateway.close()
                 .catch((error) => {
                 process.stderr.write(`[smithers] Gateway shutdown error: ${error?.message ?? String(error)}\n`);

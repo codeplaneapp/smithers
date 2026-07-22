@@ -356,6 +356,13 @@ type GatewayOptions$1 = {
      * discovery and module-loading rules.
      */
     workflowRegistryRefresh?: (workflowKey: string) => void | Promise<void>;
+    /** Current workflow discovery/loading progress, advertised additively by health. */
+    workflowRegistryStatus?: () => {
+        workflowsLoaded?: number;
+        workflowsTotal?: number;
+    };
+    /** Resolves when the host has finished loading the discovered workflow registry. */
+    workflowRegistryReady?: () => void | Promise<void>;
     /**
      * Identity advertised on `GET /health`, the `health` RPC, and the WS hello
      * (together with `workspaceRoot`, the process pid, and the listen time).
@@ -871,6 +878,7 @@ declare class Gateway {
      * @type {((workflowKey: string) => void | Promise<void>) | null}
      */
     workflowRegistryRefresh: ((workflowKey: string) => void | Promise<void>) | null;
+    workflowRegistryReady: (() => void | Promise<void>) | null;
     /** @type {Map<string, Promise<void>>} */
     workflowRegistryRefreshes: Map<string, Promise<void>>;
     /** @type {{ reports: UsageReport[], cachedAtMs: number } | null} */

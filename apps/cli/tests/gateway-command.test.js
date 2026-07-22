@@ -25,6 +25,10 @@ function makeStateDirEnv() {
 async function startGateway(repo, env, extraArgs = []) {
     const gateway = spawnGateway(repo, env, extraArgs);
     await waitFor(() => gateway.stderr().includes("Runtime state:"), 20_000);
+    const state = readGatewayRuntimeState(repo.dir, { ...process.env, ...env });
+    expect(state?.url).toBeTruthy();
+    const health = await fetch(`${state.url}/health`, { signal: AbortSignal.timeout(5_000) }).then((response) => response.json());
+    expect(health.ok).toBe(true);
     return gateway;
 }
 
@@ -254,6 +258,136 @@ test("gateway starts for an initialized workspace with no existing DB and listRu
     expect(stdout).toBe("");
 }, 15_000);
 
+test("gateway is live while a workflow import is blocked and waits for an early launch", async () => {
+    const repo = createTempRepo();
+    const releaseFile = repo.path(".smithers/release-workflow");
+    repo.write(".smithers/workflows/blocked.tsx", [
+        'import { existsSync } from "node:fs";',
+        'while (!existsSync(' + JSON.stringify(releaseFile) + ')) await new Promise((resolve) => setTimeout(resolve, 10));',
+        '/** @jsxImportSource smithers-orchestrator */',
+        'import { createSmithers } from "smithers-orchestrator";',
+        'const { Workflow, Task, smithers } = createSmithers({});',
+        'export default smithers(() => <Workflow name="blocked"><Task id="done">{{ ok: true }}</Task></Workflow>);',
+        '',
+    ].join("\n"));
+    const { env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    const gateway = spawnGateway(repo, env, ["--port", String(port)]);
+    try {
+        await waitFor(() => gateway.stderr().includes("Runtime state:"), 20_000);
+        const healthBefore = await fetch(`http://127.0.0.1:${port}/health`).then((response) => response.json());
+        expect(healthBefore.ok).toBe(true);
+        expect(healthBefore.workflowsLoaded).toBeLessThan(healthBefore.workflowsTotal);
+
+        const statusBefore = runSmithers(["gateway", "status"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+        expect(statusBefore.exitCode).toBe(0);
+        const statusFields = Object.keys(statusBefore.json).sort();
+        expect(statusBefore.json).toMatchObject({ running: true, port });
+
+        const workflowList = fetch(`http://127.0.0.1:${port}/workflows`);
+        const rpcWorkflowList = fetch(`http://127.0.0.1:${port}/v1/rpc/listWorkflows`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id: "workflow-list", method: "listWorkflows", params: {} }),
+        });
+        const aggregateUnresolved = await Promise.race([
+            Promise.all([workflowList, rpcWorkflowList]).then(() => false),
+            new Promise((resolve) => setTimeout(() => resolve(true), 100)),
+        ]);
+        expect(aggregateUnresolved).toBe(true);
+
+        const launch = fetch(`http://127.0.0.1:${port}/v1/rpc/launchRun`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id: "blocked-launch", method: "launchRun", params: { workflow: "blocked", input: {} } }),
+        });
+        const unresolved = await Promise.race([launch.then(() => false), new Promise((resolve) => setTimeout(() => resolve(true), 100))]);
+        expect(unresolved).toBe(true);
+
+        writeFileSync(releaseFile, "released\n");
+        const launchBody = await (await launch).json();
+        expect(launchBody.ok).toBe(true);
+        const [workflowListResponse, rpcWorkflowListResponse] = await Promise.all([workflowList, rpcWorkflowList]);
+        expect((await workflowListResponse.json()).workflows.map((workflow) => workflow.key)).toContain("blocked");
+        expect((await rpcWorkflowListResponse.json()).payload.map((workflow) => workflow.key)).toContain("blocked");
+        const healthAfter = await waitFor(async () => {
+            const health = await fetch(`http://127.0.0.1:${port}/health`).then((response) => response.json());
+            return health.workflowsLoaded === health.workflowsTotal ? health : null;
+        }, 20_000);
+        expect(healthAfter.workflowsTotal).toBe(1);
+        const statusAfter = runSmithers(["gateway", "status"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+        expect(Object.keys(statusAfter.json).sort()).toEqual(statusFields);
+    }
+    finally {
+        await stopProcess(gateway.child, gateway.closePromise);
+    }
+}, 60_000);
+
+test("a discovered workspace workflow overrides the built-in fallback", async () => {
+    const repo = createTempRepo();
+    const releaseFile = repo.path(".smithers/release-workspace");
+    repo.write(".smithers/workflows/workspace.tsx", [
+        'import { existsSync } from "node:fs";',
+        'while (!existsSync(' + JSON.stringify(releaseFile) + ')) await new Promise((resolve) => setTimeout(resolve, 10));',
+        '/** @jsxImportSource smithers-orchestrator */',
+        'import { createSmithers } from "smithers-orchestrator";',
+        'const { Workflow, Task, smithers } = createSmithers({});',
+        'export default smithers(() => <Workflow name="Workspace override"><UI entry="../ui/workspace.tsx" title="Workspace override" /><Task id="done">{{ ok: true }}</Task></Workflow>);',
+        '',
+    ].join("\n"));
+    repo.write(".smithers/ui/workspace.tsx", [
+        'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+        'createGatewayReactRoot(<main>Workspace override</main>);',
+        '',
+    ].join("\n"));
+    const { env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    const gateway = spawnGateway(repo, env, ["--port", String(port)]);
+    try {
+        await waitFor(() => gateway.stderr().includes("Runtime state:"), 20_000);
+        const list = fetch(`http://127.0.0.1:${port}/v1/rpc/listWorkflows`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id: "workspace-list", method: "listWorkflows", params: {} }),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(gateway.stderr()).not.toContain("Registered workflows: workspace");
+        writeFileSync(releaseFile, "released\n");
+        const body = await (await list).json();
+        const workspace = body.payload.find((workflow) => workflow.key === "workspace");
+        expect(workspace?.uiPath).toBe("/workflows/workspace");
+        const ui = await fetch(`http://127.0.0.1:${port}/workflows/workspace`);
+        expect(ui.status).toBe(200);
+    }
+    finally {
+        await stopProcess(gateway.child, gateway.closePromise);
+    }
+}, 60_000);
+
+test("a discovered oneshot workflow overrides the built-in fallback", async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/oneshot.tsx");
+    const { env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    const gateway = await startGateway(repo, env, ["--port", String(port)]);
+    try {
+        await waitFor(() => gateway.stderr().includes("Registered workflows:"));
+        const response = await fetch(`http://127.0.0.1:${port}/v1/rpc/listWorkflows`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({}),
+        });
+        const body = await response.json();
+        const oneshot = body.payload.find((workflow) => workflow.key === "oneshot");
+        expect(oneshot).toBeDefined();
+        const health = await fetch(`http://127.0.0.1:${port}/health`).then((result) => result.json());
+        expect(health.workflowsLoaded).toBe(health.workflowsTotal);
+    }
+    finally {
+        await stopProcess(gateway.child, gateway.closePromise);
+    }
+}, 45_000);
+
 test("gateway skips a broken workflow and still registers the valid ones", async () => {
     const repo = createTempRepo();
     writeTestWorkflow(repo, ".smithers/workflows/aaa.tsx");
@@ -426,6 +560,7 @@ for (const backend of ["sqlite", "pglite"]) {
         expect(state?.backend).toBe(backend);
         expect(state?.token).toBeNull();
         expect(gateway.stderr()).toContain("Runtime state:");
+        await waitFor(() => gateway.stderr().includes("Registered workflows:"));
         expect(gateway.stderr()).toContain(`Registered workflows: ${backend === "sqlite" ? "basic" : "workspace"}`);
 
         // /health advertises the workspace identity clients verify against.
@@ -880,3 +1015,30 @@ test("gateway registers the evals extension (ext.evals.listSuites/saveSuite/list
         await stopProcess(gateway.child, gateway.closePromise);
     }
 }, 75_000);
+
+test("eval suites accept a workflow added after gateway startup", async () => {
+    const repo = createTempRepo();
+    const { env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    const gateway = await startGateway(repo, env, ["--port", String(port)]);
+    try {
+        writeTestWorkflow(repo, ".smithers/workflows/hot-added.tsx");
+        const launch = await fetch(`http://127.0.0.1:${port}/v1/rpc/launchRun`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id: "hot-added-launch", method: "launchRun", params: { workflow: "hot-added", input: {} } }),
+        });
+        expect((await launch.json()).ok).toBe(true);
+        const save = await fetch(`http://127.0.0.1:${port}/v1/rpc/ext.evals.saveSuite`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "hot", workflowKey: "hot-added", datasetText: '[{"id":"case-1","input":{}}]' }),
+        });
+        const body = await save.json();
+        expect(body.ok).toBe(true);
+        expect(body.payload.suiteId).toBeString();
+    }
+    finally {
+        await stopProcess(gateway.child, gateway.closePromise);
+    }
+}, 45_000);

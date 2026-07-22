@@ -282,6 +282,17 @@ rpc[41]{method,params,returns,scope,transport}:
 
 `health` remains available as a utility RPC and `GET /health` is available without auth. The legacy method names are still accepted for compatibility (`runs.create`, `runs.get`, `runs.list`, `runs.cancel`, `runs.rerun`, `runs.diff`, `frames.list`, `frames.get`, `attempts.list`, `attempts.get`, `workflows.list`, `approvals.list`, `approvals.decide`, `signals.send`, `cron.list`, `cron.add`, `cron.remove`, `cron.trigger`, `jumpToFrame`, `devtools.jumpToFrame`, `devtools.getNodeOutput`, `devtools.getNodeDiff`), but new clients should use the v1 names above.
 
+### Liveness and workflow readiness
+
+The Gateway binds and publishes its health endpoint before importing the
+workspace workflow pack. During this period `GET /health` and the `health` RPC
+remain live and include additive `workflowsLoaded` and `workflowsTotal` counts.
+Workflow-specific requests, including `launchRun`, wait for the requested
+workflow's registration; a definitive `NOT_FOUND` is returned only after the
+load/refresh completes. `smithers gateway status --format json` keeps its
+existing result fields and does not require workflow readiness. This startup
+behavior addresses [GitHub issue #1362](https://github.com/smithersai/smithers/issues/1362).
+
 ### Scopes
 
 ```toon
@@ -563,6 +574,10 @@ type GatewayOptions = {
   heartbeatMs?: number;              // default 15_000
   auth?: GatewayAuthConfig;
   workspaceRoot?: string;            // anchors disk-backed reads and the advertised identity
+  workflowRegistryStatus?: () => {   // additive readiness fields on health
+    workflowsLoaded?: number;
+    workflowsTotal?: number;
+  };
   identity?: {                       // advertised on GET /health, the health RPC, and the WS hello
     backend?: string;                // sqlite | pglite | postgres
     version?: string;                // serving package version

@@ -2379,6 +2379,8 @@ export class Gateway {
      * @type {((workflowKey: string) => void | Promise<void>) | null}
      */
     workflowRegistryRefresh = null;
+    workflowRegistryStatus = null;
+    workflowRegistryReady = null;
     /** @type {Map<string, Promise<void>>} */
     workflowRegistryRefreshes = new Map();
     /** @type {{ reports: UsageReport[], cachedAtMs: number } | null} */
@@ -2563,6 +2565,12 @@ export class Gateway {
         this.workflowRegistryRefresh = typeof options.workflowRegistryRefresh === "function"
             ? options.workflowRegistryRefresh
             : null;
+        this.workflowRegistryStatus = typeof options.workflowRegistryStatus === "function"
+            ? options.workflowRegistryStatus
+            : null;
+        this.workflowRegistryReady = typeof options.workflowRegistryReady === "function"
+            ? options.workflowRegistryReady
+            : null;
         this.identity = options.identity ?? null;
         this.browser = options.browser ?? createBrowserSessionRegistry();
         this.browser.subscribe("activity", (payload) => this.broadcastEvent("browser.activity", payload));
@@ -2581,6 +2589,23 @@ export class Gateway {
             pid: process.pid,
             startedAtMs: this.startedAtMs,
         };
+    }
+    workflowRegistryProgress() {
+        const status = this.workflowRegistryStatus?.() ?? {};
+        const total = Math.max(0, Math.floor(Number(status.workflowsTotal) || 0));
+        const loaded = Math.min(total, Math.max(0, Math.floor(Number(status.workflowsLoaded) || 0)));
+        return { workflowsLoaded: loaded, workflowsTotal: total };
+    }
+    /** Wait for a host-owned registry load before returning aggregate data. */
+    async awaitWorkflowRegistryReady() {
+        if (!this.workflowRegistryReady) {
+            return;
+        }
+        const { workflowsLoaded, workflowsTotal } = this.workflowRegistryProgress();
+        if (workflowsLoaded >= workflowsTotal) {
+            return;
+        }
+        await this.workflowRegistryReady();
     }
     /**
      * Give the host one chance to register an unknown workflow. Concurrent
@@ -4494,6 +4519,9 @@ a { color: var(--brand); }</style>
         emitGatewayEffect(incrementMetric(gatewayWebhooksReceivedTotal, {
             workflow: workflowKey,
         }));
+        if (!this.workflows.has(workflowKey)) {
+            await this.refreshWorkflowRegistryOnMiss(workflowKey);
+        }
         const entry = this.workflows.get(workflowKey);
         if (!entry) {
             return reject(404, "NOT_FOUND", `Unknown workflow: ${workflowKey}`, "workflow_not_found");
@@ -4626,6 +4654,7 @@ a { color: var(--brand); }</style>
             system: Boolean(options?.system),
             entryFile: options?.entryFile,
         });
+        void this.queueApiInvalidation(["workflows"]);
         // Startup recovery: any audit row left in `in_progress` from a prior
         // crash is flipped to `partial` and the associated run is flagged as
         // `needs_attention`. Runs asynchronously; failures are logged and
@@ -4837,12 +4866,14 @@ a { color: var(--brand); }</style>
                     features: this.features,
                     stateVersion: this.stateVersion,
                     identity: this.buildIdentity(),
+                    ...this.workflowRegistryProgress(),
                 });
             }
             if ((req.method ?? "GET") === "GET" && (req.url ?? "/") === "/metrics") {
                 return sendText(res, 200, renderPrometheusMetrics(), prometheusContentType);
             }
             if ((req.method ?? "GET") === "GET" && (req.url ?? "/") === "/workflows") {
+                await this.awaitWorkflowRegistryReady();
                 return sendJson(res, 200, {
                     workflows: this.listWorkflowSummaries(undefined),
                 });
@@ -7865,6 +7896,7 @@ a { color: var(--brand); }</style>
                     stateVersion: this.stateVersion,
                     uptimeMs: nowMs() - this.startedAtMs,
                     identity: this.buildIdentity(),
+                    ...this.workflowRegistryProgress(),
                 });
             case "createBrowserSession":
                 return this.browserCall(frame, () => this.browser.create(validateBrowserRequest(frame.method, rawParams)));
@@ -7880,6 +7912,7 @@ a { color: var(--brand); }</style>
                 return this.browserCall(frame, () => { validateBrowserRequest(frame.method, rawParams); return this.browser.list(); });
             case "runs.list":
             case "listRuns": {
+                await this.awaitWorkflowRegistryReady();
                 const filter = asObject(params.filter) ?? {};
                 const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit") ?? 50;
                 const status = asString(params.status) ?? asString(filter.status);
@@ -7907,6 +7940,7 @@ a { color: var(--brand); }</style>
             }
             case "workflows.list":
             case "listWorkflows": {
+                await this.awaitWorkflowRegistryReady();
                 const filter = asObject(params.filter) ?? {};
                 const hasUi = asBoolean(params.hasUi) ?? asBoolean(filter.hasUi);
                 const includeSystem = asBoolean(params.includeSystem) ?? asBoolean(filter.includeSystem);
@@ -7917,6 +7951,9 @@ a { color: var(--brand); }</style>
                 const workflowKey = asString(params.workflow);
                 if (!workflowKey) {
                     return responseError(frame.id, "INVALID_REQUEST", "workflow is required");
+                }
+                if (!this.workflows.has(workflowKey)) {
+                    await this.refreshWorkflowRegistryOnMiss(workflowKey);
                 }
                 if (!this.workflows.has(workflowKey)) {
                     return responseError(frame.id, "NOT_FOUND", `Unknown workflow: ${workflowKey}`);
@@ -8909,6 +8946,9 @@ a { color: var(--brand); }</style>
                 const pattern = asString(params.pattern);
                 if (!workflowKey || !pattern) {
                     return responseError(frame.id, "INVALID_REQUEST", "workflow and pattern are required");
+                }
+                if (!this.workflows.has(workflowKey)) {
+                    await this.refreshWorkflowRegistryOnMiss(workflowKey);
                 }
                 const entry = this.workflows.get(workflowKey);
                 if (!entry) {
