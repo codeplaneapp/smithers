@@ -168,16 +168,27 @@ async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) 
         }
         let spawnError = null;
         let timedOut = false;
+        /** @param {NodeJS.Signals} signal */
+        const killTree = (signal) => {
+            // shell:true wraps the command: on Windows child.kill only hits
+            // the cmd.exe wrapper while the real process keeps the inherited
+            // pipes open, so `close` never fires. taskkill fells the tree.
+            if (process.platform === "win32" && typeof child.pid === "number") {
+                spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+                return;
+            }
+            child.kill(signal);
+        };
         const timer = timeoutMs > 0
             ? setTimeout(() => {
                 timedOut = true;
-                child.kill("SIGTERM");
-                const hardKill = setTimeout(() => child.kill("SIGKILL"), 5_000);
+                killTree("SIGTERM");
+                const hardKill = setTimeout(() => killTree("SIGKILL"), 5_000);
                 hardKill.unref?.();
             }, timeoutMs)
             : null;
         timer?.unref?.();
-        const onAbort = () => child.kill("SIGTERM");
+        const onAbort = () => killTree("SIGTERM");
         runtime?.signal?.addEventListener?.("abort", onAbort, { once: true });
         child.stdout?.on("data", (chunk) => stdout.append(chunk));
         child.stderr?.on("data", (chunk) => stderr.append(chunk));
