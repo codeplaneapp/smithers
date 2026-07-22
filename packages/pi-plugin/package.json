@@ -39,6 +39,11 @@
   "files": [
     "src/"
   ],
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
+  },
   "scripts": {
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
