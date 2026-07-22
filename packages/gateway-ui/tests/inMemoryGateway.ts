@@ -26,6 +26,8 @@ export type SeedState = {
   streamStatus?: number;
   /** When true, POST /v1/api/approvals/:id (submitApproval) always fails. */
   failApprovalSubmit?: boolean;
+  /** When true, submitApproval hangs until releaseApprovalSubmits() is called. */
+  deferApprovalSubmit?: boolean;
 };
 
 export type InMemoryGateway = {
@@ -34,6 +36,7 @@ export type InMemoryGateway = {
   state: Required<Omit<SeedState, "failPaths" | "streamStatus">> & {
     failPaths: Set<string>;
     streamStatus: number;
+    approvalSubmitWaiters: Array<() => void>;
   };
   launches: Array<{ workflow: string; input: unknown }>;
   approvalsSubmitted: Array<Record<string, unknown>>;
@@ -41,6 +44,8 @@ export type InMemoryGateway = {
   rewinds: Array<Record<string, unknown>>;
   /** Append rows to a run's event log after mount and notify SSE subscribers. */
   pushEvents(runId: string, rows: Array<Record<string, unknown>>): void;
+  /** Resolve every held submitApproval and stop deferring new ones. */
+  releaseApprovalSubmits(): void;
   close(): Promise<void>;
 };
 
@@ -64,6 +69,8 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     failPaths: seed.failPaths ?? new Set<string>(),
     streamStatus: seed.streamStatus ?? 200,
     failApprovalSubmit: seed.failApprovalSubmit ?? false,
+    deferApprovalSubmit: seed.deferApprovalSubmit ?? false,
+    approvalSubmitWaiters: [] as Array<() => void>,
   };
 
   const controllers = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -189,6 +196,9 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
         if (state.failApprovalSubmit) {
           return fail(500, "BOOM", "Forced failure for approval submit");
         }
+        if (state.deferApprovalSubmit) {
+          await new Promise<void>((resolve) => state.approvalSubmitWaiters.push(resolve));
+        }
         const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
         gateway.approvalsSubmitted.push(body);
         state.approvals = state.approvals.filter(
@@ -218,6 +228,10 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     pushEvents(runId, rows) {
       state.events[runId] = [...(state.events[runId] ?? []), ...rows];
       broadcast(["events"]);
+    },
+    releaseApprovalSubmits() {
+      state.deferApprovalSubmit = false;
+      for (const release of state.approvalSubmitWaiters.splice(0)) release();
     },
     async close() {
       for (const controller of controllers) {

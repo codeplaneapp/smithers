@@ -9,6 +9,7 @@ import {
   ApprovalRisk,
 } from "../src/approvals/ApprovalCard";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/styles";
+import { safeHref } from "../src/agentic/safeHref";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -145,6 +146,55 @@ describe("ApprovalResources", () => {
     );
     expect(container!.querySelector(".sui-approval-resource-kind")!.textContent).toBe("file");
     expect(container!.querySelectorAll("a")).toHaveLength(0);
+  });
+
+  test("control-character smuggled schemes never become links", async () => {
+    await render(
+      <ApprovalResources
+        resources={[
+          { id: "nl", label: "newline", href: "java\nscript:alert(1)" },
+          { id: "tab", label: "tab", href: "java\tscript:alert(1)" },
+          { id: "cr", label: "cr", href: "java\rscript:alert(1)" },
+          { id: "lead", label: "leading control", href: "\x01javascript:alert(1)" },
+          { id: "del", label: "del", href: "java\x7Fscript:alert(1)" },
+          { id: "ok", label: "fine", href: "https://example.com/spec" },
+        ]}
+      />,
+    );
+    const links = container!.querySelectorAll<HTMLAnchorElement>(".sui-approval-resource a");
+    expect(links).toHaveLength(1);
+    expect(links[0]!.href).toContain("https://example.com/spec");
+    expect(container!.textContent).toContain("newline");
+    expect(container!.textContent).toContain("leading control");
+  });
+});
+
+describe("safeHref", () => {
+  test("allows http/https/mailto and scheme-less links", () => {
+    expect(safeHref("https://example.com/x")).toBe("https://example.com/x");
+    expect(safeHref("http://example.com")).toBe("http://example.com");
+    expect(safeHref("mailto:a@b.c")).toBe("mailto:a@b.c");
+    expect(safeHref("/relative/path")).toBe("/relative/path");
+    expect(safeHref("#anchor")).toBe("#anchor");
+  });
+
+  test("rejects non-navigable schemes", () => {
+    expect(safeHref("javascript:alert(1)")).toBeUndefined();
+    expect(safeHref("data:text/html;base64,x")).toBeUndefined();
+    expect(safeHref("vbscript:x")).toBeUndefined();
+    expect(safeHref("file:///etc/passwd")).toBeUndefined();
+  });
+
+  test("rejects control characters that browser URL parsing would strip", () => {
+    // WHATWG URL removes \t \n \r anywhere and trims leading C0 controls, so
+    // each of these would normalize onto javascript: if passed through.
+    expect(safeHref("java\nscript:alert(1)")).toBeUndefined();
+    expect(safeHref("java\tscript:alert(1)")).toBeUndefined();
+    expect(safeHref("java\rscript:alert(1)")).toBeUndefined();
+    expect(safeHref("\x01javascript:alert(1)")).toBeUndefined();
+    expect(safeHref("javascrip\x7Ft:alert(1)")).toBeUndefined();
+    expect(safeHref("java\x1Fscript:alert(1)")).toBeUndefined();
+    expect(safeHref("https://example.com/a\x0Bb")).toBeUndefined();
   });
 });
 

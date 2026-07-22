@@ -70,6 +70,7 @@ export function Checkpoint({ checkpoint, current = false, children, className, .
         data-slot="checkpoint"
         data-checkpoint-id={checkpoint.id}
         data-current={current ? "true" : "false"}
+        aria-current={current ? "true" : undefined}
         className={cn("sui-checkpoint", className)}
         {...props}
       >

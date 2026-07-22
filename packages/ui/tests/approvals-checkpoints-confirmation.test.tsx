@@ -10,6 +10,7 @@ import {
   ConfirmationRejected,
   ConfirmationRequest,
   ConfirmationTitle,
+  approvalStateLabel,
   approvalStateToStatus,
   type ApprovalState,
 } from "../src/approvals/Confirmation";
@@ -34,9 +35,11 @@ afterEach(async () => {
 });
 
 async function render(element: ReactElement): Promise<void> {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
+  if (!root) {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  }
   const current = root;
   await act(async () => current.render(element));
 }
@@ -70,6 +73,33 @@ describe("approvalStateToStatus", () => {
   });
 });
 
+describe("approvalStateLabel", () => {
+  test("is distinct for all nine approval states", () => {
+    const states: readonly ApprovalState[] = [
+      "synchronizing",
+      "requested",
+      "approving",
+      "denying",
+      "approved",
+      "denied",
+      "expired",
+      "unavailable",
+      "failed-submission",
+    ];
+    const labels = states.map(approvalStateLabel);
+    expect(new Set(labels).size).toBe(states.length);
+    expect(approvalStateLabel("synchronizing")).toBe("Synchronizing approval");
+    expect(approvalStateLabel("requested")).toBe("Waiting for approval");
+    expect(approvalStateLabel("approving")).toBe("Approving");
+    expect(approvalStateLabel("denying")).toBe("Denying");
+    expect(approvalStateLabel("approved")).toBe("Approved");
+    expect(approvalStateLabel("denied")).toBe("Denied");
+    expect(approvalStateLabel("expired")).toBe("Approval expired");
+    expect(approvalStateLabel("unavailable")).toBe("Approval unavailable");
+    expect(approvalStateLabel("failed-submission")).toBe("Approval submission failed");
+  });
+});
+
 describe("Confirmation", () => {
   test("requested shows request and actions, hides resolutions", async () => {
     await render(fullConfirmation("requested"));
@@ -90,16 +120,22 @@ describe("Confirmation", () => {
     },
   );
 
-  test("approving/denying disable both actions", async () => {
-    await render(
-      <Confirmation state="approving">
-        <ConfirmationActions>
+  test.each(["approving", "denying"] as const)(
+    "%s disables its actions and the busy guard cannot be overridden",
+    async (state) => {
+      await render(
+        <Confirmation state={state}>
           <ConfirmationAction decision="approve" />
-          <ConfirmationAction decision="deny" />
-        </ConfirmationActions>
-      </Confirmation>,
-    );
-    // Actions are hidden while busy; the requested-state buttons must be disabled instead.
+          <ConfirmationAction decision="deny" disabled={false} />
+        </Confirmation>,
+      );
+      const buttons = container!.querySelectorAll<HTMLButtonElement>("[data-slot='confirmation-action']");
+      expect(buttons).toHaveLength(2);
+      buttons.forEach((button) => expect(button.disabled).toBe(true));
+    },
+  );
+
+  test("requested leaves explicitly-enabled actions enabled", async () => {
     await render(fullConfirmation("requested"));
     const buttons = container!.querySelectorAll<HTMLButtonElement>("[data-slot='confirmation-action']");
     expect(buttons).toHaveLength(2);
@@ -125,6 +161,22 @@ describe("Confirmation", () => {
     buttons.forEach((button) => expect(button.disabled).toBe(false));
   });
 
+  test("failed-submission shows visible failure feedback, not color only", async () => {
+    await render(fullConfirmation("failed-submission"));
+    const note = container!.querySelector("[data-slot='confirmation-note']");
+    expect(note).not.toBeNull();
+    expect(note!.textContent).toContain("Submission failed");
+    expect(note!.className).toContain("sui-confirm-failure");
+  });
+
+  test.each(["synchronizing", "requested", "approving", "denying", "approved", "denied"] as const)(
+    "%s renders no failure note",
+    async (state) => {
+      await render(fullConfirmation(state));
+      expect(container!.querySelector(".sui-confirm-failure")).toBeNull();
+    },
+  );
+
   test.each(["expired", "unavailable"] as const)("%s renders a muted note and no actions", async (state) => {
     await render(fullConfirmation(state));
     expect(container!.querySelector("[data-slot='confirmation-note']")).not.toBeNull();
@@ -137,6 +189,27 @@ describe("Confirmation", () => {
     const live = container!.querySelector("[aria-live='polite']");
     expect(live).not.toBeNull();
     expect(live!.textContent).toBe("Waiting for approval");
+  });
+
+  test("the live region follows every state transition with a distinct label", async () => {
+    await render(fullConfirmation("requested"));
+    const live = () => container!.querySelector("[aria-live='polite']")!.textContent;
+    const transitions: ReadonlyArray<[ApprovalState, string]> = [
+      ["requested", "Waiting for approval"],
+      ["approving", "Approving"],
+      ["approved", "Approved"],
+      ["requested", "Waiting for approval"],
+      ["denying", "Denying"],
+      ["denied", "Denied"],
+      ["failed-submission", "Approval submission failed"],
+      ["expired", "Approval expired"],
+      ["unavailable", "Approval unavailable"],
+      ["synchronizing", "Synchronizing approval"],
+    ];
+    for (const [state, label] of transitions) {
+      await render(fullConfirmation(state));
+      expect(live()).toBe(label);
+    }
   });
 
   test("ConfirmationAction fires onDecide with its decision", async () => {

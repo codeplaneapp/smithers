@@ -415,6 +415,7 @@ export {
   ConfirmationActions,
   ConfirmationAction,
   approvalStateToStatus,
+  approvalStateLabel,
   type ConfirmationProps,
   type ConfirmationActionProps,
   type ApprovalState,

@@ -9,7 +9,8 @@
       "ConfirmationRejected",
       "ConfirmationActions",
       "ConfirmationAction",
-      "approvalStateToStatus"
+      "approvalStateToStatus",
+      "approvalStateLabel"
     ],
     "collection": "agentic/ai-elements",
     "registryItem": "https://elements.ai-sdk.dev/components/confirmation",

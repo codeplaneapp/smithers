@@ -22,6 +22,7 @@ export const approvalsCss = `
 .sui-confirm-accepted { min-width:0; display:flex; align-items:center; gap:6px; color:${t.success}; font-weight:650; }
 .sui-confirm-rejected { min-width:0; display:flex; align-items:center; gap:6px; color:${t.destructive}; font-weight:650; }
 .sui-confirm-note { min-width:0; color:${t.mutedForeground}; font-size:12px; }
+.sui-confirm-failure { color:${t.destructive}; }
 .sui-confirm-actions { display:flex; align-items:center; gap:8px; min-width:0; }
 .sui-confirm-action:focus-visible { ${focusRing} }
 
@@ -47,7 +48,7 @@ export const approvalsCss = `
 .sui-approval-note-input:focus-visible { ${focusRing} }
 .sui-approval-note-input[readonly] { background:${t.surface2}; color:${t.mutedForeground}; }
 
-.sui-checkpoint { min-width:0; display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; font-size:13px; }
+.sui-checkpoint { min-width:0; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:6px 10px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; font-size:13px; }
 .sui-checkpoint[data-current='true'] { border-color:${t.primaryBorder}; background:${t.primarySoft}; }
 .sui-checkpoint-icon { flex:none; display:inline-flex; align-items:center; color:${t.mutedForeground}; }
 .sui-checkpoint[data-current='true'] .sui-checkpoint-icon { color:${t.primary}; }
@@ -56,4 +57,5 @@ export const approvalsCss = `
 .sui-checkpoint-trigger:focus-visible { ${focusRing} }
 .sui-checkpoint-actions { flex:none; display:flex; align-items:center; gap:4px; }
 .sui-checkpoint-action:focus-visible { ${focusRing} }
+.sui-checkpoint-error { flex-basis:100%; min-width:0; color:${t.destructive}; font-size:12px; }
 `;

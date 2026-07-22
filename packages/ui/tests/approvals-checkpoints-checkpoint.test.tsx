@@ -56,9 +56,18 @@ describe("Checkpoint", () => {
     expect(container!.querySelector("time")!.getAttribute("dateTime")).toBe("2026-01-02T03:04:05.000Z");
   });
 
-  test("current marks the live position", async () => {
-    await render(<Checkpoint checkpoint={model} current />);
-    expect(container!.querySelector("[data-slot='checkpoint']")!.getAttribute("data-current")).toBe("true");
+  test("current marks the live position for sighted and screen-reader users", async () => {
+    await render(
+      <>
+        <Checkpoint checkpoint={model} current />
+        <Checkpoint checkpoint={{ id: "cp-2", label: "Earlier" }} />
+      </>,
+    );
+    const rows = container!.querySelectorAll("[data-slot='checkpoint']");
+    expect(rows[0]!.getAttribute("data-current")).toBe("true");
+    expect(rows[0]!.getAttribute("aria-current")).toBe("true");
+    expect(rows[1]!.getAttribute("data-current")).toBe("false");
+    expect(rows[1]!.getAttribute("aria-current")).toBeNull();
   });
 
   test("falls back to the id when no label is set", async () => {

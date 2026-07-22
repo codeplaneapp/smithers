@@ -33,8 +33,12 @@ export type GatewayApprovalConfirmationProps = {
  * A Gateway-connected Confirmation for one pending approval row. Submits
  * exactly `submitApproval({ runId, nodeId, iteration, approved, decision:
  * { approved, note? }, note? })`; requested → approving|denying in flight →
- * approved|denied on resolve, failed-submission (retryable) on reject, and
- * expired when the row leaves the approvals collection while unresolved.
+ * approved|denied on resolve, failed-submission (retryable) on reject,
+ * expired when the row leaves the approvals collection while unresolved, and
+ * unavailable (recovering to requested) while the approvals read fails. A
+ * change of approval identity (runId:nodeId:iteration) without a remount
+ * resets the card to requested, and the settle of an in-flight submission
+ * for the previous identity never touches the current gate's state.
  */
 export function GatewayApprovalConfirmation({
   approval,
@@ -43,26 +47,56 @@ export function GatewayApprovalConfirmation({
   className,
 }: GatewayApprovalConfirmationProps) {
   const actions = useGatewayActions();
-  const { data, loading } = useGatewayApprovals({ filter: { runId: approval.runId } });
+  const { data, loading, error } = useGatewayApprovals({ filter: { runId: approval.runId } });
   const [state, setState] = useState<ApprovalState>("requested");
   const [noteValue, setNoteValue] = useState("");
   const inFlight = useRef(false);
   const key = gatewayApprovalKey(approval);
 
+  // Identity transition: a host may swap the approval prop without remounting
+  // (the list keys rows, a direct caller may not). A stale approved/denied or
+  // in-flight state must never bleed onto a different gate — reset to
+  // requested and let the collection effect re-derive expiry/availability.
+  const keyRef = useRef(key);
+  useEffect(() => {
+    if (keyRef.current === key) return;
+    keyRef.current = key;
+    inFlight.current = false;
+    setState("requested");
+    setNoteValue("");
+  }, [key]);
+
   // The row leaving the collection before we resolved it means someone else
   // (or a timeout) closed the gate: expire instead of hanging on "requested".
+  // A failed collection read is NOT a disappearance — data drains to [] on
+  // error, which would falsely expire a still-pending gate, so surface it as
+  // unavailable and recover to requested once the read succeeds again.
   useEffect(() => {
     if (loading || inFlight.current) return;
-    if (state !== "requested" && state !== "failed-submission") return;
+    if (error) {
+      if (state === "requested" || state === "failed-submission") setState("unavailable");
+      return;
+    }
     const rows = data ?? [];
-    if (!rows.some((row) => gatewayApprovalKey(row) === key)) setState("expired");
-  }, [data, loading, state, key]);
+    const present = rows.some((row) => gatewayApprovalKey(row) === key);
+    if (state === "unavailable") {
+      if (present) setState("requested");
+      return;
+    }
+    if (state !== "requested" && state !== "failed-submission") return;
+    if (!present) setState("expired");
+  }, [data, loading, error, state, key]);
 
   async function decide(approved: boolean) {
     if (inFlight.current) return;
     inFlight.current = true;
+    const submittedKey = key;
     setState(approved ? "approving" : "denying");
     const trimmed = noteValue.trim();
+    // If the approval identity changes while this submission is in flight,
+    // the settle below belongs to the PREVIOUS gate: it must never write
+    // state for the current one.
+    const isCurrentIdentity = () => keyRef.current === submittedKey;
     try {
       await actions.submitApproval({
         runId: approval.runId,
@@ -72,10 +106,16 @@ export function GatewayApprovalConfirmation({
         decision: { approved, ...(note && trimmed !== "" ? { note: trimmed } : {}) },
         ...(note && trimmed !== "" ? { note: trimmed } : {}),
       });
-      setState(approved ? "approved" : "denied");
-      onResolved?.(key, approved);
+      // A consumer observer throwing must not convert a successful
+      // submission into a failure state.
+      try {
+        onResolved?.(submittedKey, approved);
+      } catch {
+        /* observer fault — the submission already succeeded */
+      }
+      if (isCurrentIdentity()) setState(approved ? "approved" : "denied");
     } catch {
-      setState("failed-submission");
+      if (isCurrentIdentity()) setState("failed-submission");
     } finally {
       inFlight.current = false;
     }

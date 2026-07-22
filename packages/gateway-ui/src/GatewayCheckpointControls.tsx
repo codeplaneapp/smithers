@@ -38,7 +38,10 @@ export type GatewayCheckpointControlsProps = {
  * (the gateway surface exposes only `rewindRun({ runId, frameNo, confirm:
  * true })`); rewind is disabled for checkpoints without a frameNo. Every other
  * action kind is forwarded to the host's `onAction` and renders only when that
- * prop is provided.
+ * prop is provided. A rejected rewindRun or host onAction never escapes as an
+ * unhandled rejection: the row shows a role="alert" failure note and every
+ * action re-enables once the attempt settles. A throwing onRewound observer
+ * never converts a successful rewind into a row failure.
  */
 export function GatewayCheckpointControls({
   runId,
@@ -50,24 +53,48 @@ export function GatewayCheckpointControls({
 }: GatewayCheckpointControlsProps) {
   const actions = useGatewayActions();
   const [busy, setBusy] = useState<{ id: string; kind: CheckpointActionKind } | null>(null);
+  const [failure, setFailure] = useState<{ id: string; kind: CheckpointActionKind; message: string } | null>(null);
 
+  function failAction(kind: CheckpointActionKind, checkpoint: CheckpointModel, cause: unknown) {
+    setFailure({
+      id: checkpoint.id,
+      kind,
+      message: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+
+  // Never lets a rejection escape: every failure path lands in `failure`,
+  // which renders a role="alert" note on the affected row.
   async function handleAction(kind: CheckpointActionKind, checkpoint: CheckpointModel) {
     if (busy !== null) return;
     if (kind === "rewind") {
       if (checkpoint.frameNo === undefined) return;
+      setFailure(null);
       setBusy({ id: checkpoint.id, kind });
       try {
         await actions.rewindRun({ runId, frameNo: checkpoint.frameNo, confirm: true });
-        onRewound?.(checkpoint.frameNo);
+      } catch (cause) {
+        failAction(kind, checkpoint, cause);
+        return;
       } finally {
         setBusy(null);
+      }
+      // Observer isolation: a consumer onRewound throwing must not surface
+      // as a row failure — the rewind already succeeded.
+      try {
+        onRewound?.(checkpoint.frameNo);
+      } catch {
+        /* observer fault — the rewind already succeeded */
       }
       return;
     }
     if (onAction === undefined) return;
+    setFailure(null);
     setBusy({ id: checkpoint.id, kind });
     try {
       await onAction(kind, checkpoint);
+    } catch (cause) {
+      failAction(kind, checkpoint, cause);
     } finally {
       setBusy(null);
     }
@@ -80,6 +107,7 @@ export function GatewayCheckpointControls({
     <div className={className}>
       {checkpoints.map((checkpoint) => {
         const rowBusy = busy?.id === checkpoint.id ? busy.kind : null;
+        const rowFailure = failure?.id === checkpoint.id ? failure : null;
         const rowDisabled: readonly CheckpointActionKind[] | undefined =
           busy !== null && rowBusy === null
             ? renderedActions
@@ -101,6 +129,12 @@ export function GatewayCheckpointControls({
               disabled={rowDisabled}
               onAction={(kind) => void handleAction(kind, checkpoint)}
             />
+            {rowFailure !== null ? (
+              <div data-slot="checkpoint-error" role="alert" className="sui-checkpoint-error">
+                {rowFailure.kind[0]!.toUpperCase()}
+                {rowFailure.kind.slice(1)} failed: {rowFailure.message}
+              </div>
+            ) : null}
           </Checkpoint>
         );
       })}
