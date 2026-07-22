@@ -47,7 +47,10 @@ const SCHEMA_STATEMENTS = [
 export type CeoIntelDb = Database;
 
 export function openDb(dbPath: string): { db: CeoIntelDb; schemaCreated: boolean } {
-  mkdirSync(dirname(dbPath), { recursive: true });
+  // Guarded: bun on Windows throws EEXIST for a recursive mkdir of an
+  // existing "." (the dirname of a bare relative filename).
+  const dbDir = dirname(dbPath);
+  if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
   const isNew = !existsSync(dbPath);
   const db = new Database(dbPath, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");

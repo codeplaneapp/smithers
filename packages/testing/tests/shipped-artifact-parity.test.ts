@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { sep } from "node:path";
 import * as source from "../src/index.ts";
 
 /**
@@ -19,7 +20,7 @@ const shipped = (await import(shippedPath)) as typeof source;
 
 describe("published artifact parity", () => {
   test("the package export resolves to the committed src/index.js artifact, not the TypeScript source", () => {
-    expect(shippedPath.endsWith("/packages/testing/src/index.js")).toBe(true);
+    expect(shippedPath.split(sep).join("/").endsWith("/packages/testing/src/index.js")).toBe(true);
     // If the resolver had rewritten the export to index.ts, both namespaces
     // would be the SAME module instance; distinctness proves the committed
     // JavaScript genuinely loaded alongside the source.
