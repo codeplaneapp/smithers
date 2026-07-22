@@ -186,8 +186,10 @@ jobs:
       - name: Run workspace package tests (Linux shard)
         if: runner.os == 'Linux' && matrix.shard != 0
         # Same weighted balancer as Windows, nothing excluded. The generous
-        # per-package timeout covers the real-backend migrate and e2e suites.
-        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 20
+        # per-package timeout covers the real-backend migrate and e2e suites
+        # (apps/cli's detached-oneshot engines push it past 20 on a loaded
+        # runner).
+        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 30
 
       - name: Run docs-driven-development suite
         if: runner.os == 'Linux' && matrix.shard == 0

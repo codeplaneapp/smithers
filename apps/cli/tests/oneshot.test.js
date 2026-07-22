@@ -353,7 +353,7 @@ export default smithers((ctx) => <Workflow name="custom-oneshot"><Task id="recor
 `);
     const result = spawnSync(process.execPath, ["run", cliEntry, "oneshot", "use the override", "--detach", "false", "--open", "false", "--review", "on", "--model", "terra", "--format", "json"], {
         cwd,
-        env: { ...process.env, SMITHERS_HOME: join(cwd, "home"), SMITHERS_NO_SKILL_REFRESH: "1", OPENAI_API_KEY: "test", PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` },
+        env: { ...process.env, SMITHERS_HOME: join(cwd, "home"), SMITHERS_NO_SKILL_REFRESH: "1", OPENAI_API_KEY: "sk-oneshot-override-fixture", PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` },
         encoding: "utf8",
     });
     if (result.status !== 0) throw new Error(`override run exited ${result.status}\nstdout=${result.stdout}\nstderr=${result.stderr}`);
