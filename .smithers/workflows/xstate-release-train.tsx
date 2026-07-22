@@ -66,7 +66,7 @@ function ReleaseTrain() {
 					onDeny="continue"
 					request={{
 						title: "Approve the release narrative",
-						description: "Review the research before drafting the launch thread.",
+						summary: "Review the research before drafting the launch thread.",
 					}}
 				/>
 			) : null}

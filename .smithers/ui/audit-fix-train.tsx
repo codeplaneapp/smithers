@@ -4,10 +4,9 @@ import {
   createGatewayReactRoot,
   useGatewayNodeOutput,
   useGatewayRun,
-  useGatewayRunEvents,
 } from "smithers-orchestrator/gateway-react";
-import { RunEventLog, RunTree, WorkflowUiShell, WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
-import { Card, EmptyState, StatusPill, Tabs } from "smithers-orchestrator/ui";
+import { RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { Card, EmptyState, StatusPill, Tabs, TabsContent, TabsList, TabsTrigger } from "smithers-orchestrator/ui";
 
 const WORKFLOW_KEY = "audit-fix-train";
 
@@ -69,9 +68,9 @@ function severityTone(severity: string): "danger" | "warning" | "neutral" {
 function LaneCard({ runId, finding, index }: { runId?: string; finding: Finding; index: number }) {
   const base = `f${finding.priority || index + 1}-${slugify(finding.title)}`;
   // Node ids are `<workItemId>:<stage>` (the workflow suffixes the stage), not `<stage>:<workItemId>`.
-  const implOut = useGatewayNodeOutput(runId, `${base}:implement`);
-  const reviewOut = useGatewayNodeOutput(runId, `${base}:review`);
-  const mergeOut = useGatewayNodeOutput(runId, `${base}:merge`);
+  const implOut = useGatewayNodeOutput({ runId, nodeId: `${base}:implement` });
+  const reviewOut = useGatewayNodeOutput({ runId, nodeId: `${base}:review` });
+  const mergeOut = useGatewayNodeOutput({ runId, nodeId: `${base}:merge` });
 
   const impl = isRecord(implOut.data) ? implOut.data : undefined;
   const review = isRecord(reviewOut.data) ? reviewOut.data : undefined;
@@ -116,49 +115,57 @@ function LaneCard({ runId, finding, index }: { runId?: string; finding: Finding;
 function App() {
   const runId = runIdFromUrl();
   const run = useGatewayRun(runId);
-  const events = useGatewayRunEvents(runId);
   const findings = useMemo(() => findingsFromRun(run.data), [run.data]);
-  const pushOut = useGatewayNodeOutput(runId, "push");
+  const pushOut = useGatewayNodeOutput({ runId, nodeId: "push" });
   const push = isRecord(pushOut.data) ? pushOut.data : undefined;
 
-  const landedCount = findings.length;
+  const runStatus = isRecord(run.data) ? asString(run.data.status) : "";
 
   return (
     <WorkflowUiShell
       title="Audit Fix Train"
-      subtitle={`${WORKFLOW_KEY} · ${runId ?? "no run"}`}
-      status={isRecord(run.data) ? asString(run.data.status) : undefined}
+      meta={
+        <>
+          <span className="pill">{`${WORKFLOW_KEY} · ${runId ?? "no run"}`}</span>
+          {runStatus ? <StatusPill status={runStatus} /> : null}
+        </>
+      }
     >
-      <WorkflowUiStyles />
-      <Tabs
-        tabs={[
-          {
-            id: "lanes",
-            label: `Fix lanes (${landedCount})`,
-            content:
-              findings.length === 0 ? (
-                <EmptyState title="No findings yet" description="Waiting for the run input to load." />
-              ) : (
-                <div style={{ display: "grid", gap: 12 }}>
-                  {findings.map((f, i) => (
-                    <LaneCard key={`${f.priority}-${f.title}`} runId={runId} finding={f} index={i} />
-                  ))}
-                  {push ? (
-                    <Card>
-                      <strong>Push stage</strong>
-                      <div style={{ fontSize: 13, marginTop: 4 }}>
-                        {asString(push.status)} · main green: {asBool(push.mainGreen) ? "yes" : "no"} ·{" "}
-                        {asString(push.summary)}
-                      </div>
-                    </Card>
-                  ) : null}
-                </div>
-              ),
-          },
-          { id: "tree", label: "Run tree", content: <RunTree runId={runId} /> },
-          { id: "events", label: "Events", content: <RunEventLog runId={runId} events={events.data} /> },
-        ]}
-      />
+      <Tabs defaultValue="lanes">
+        <TabsList>
+          <TabsTrigger value="lanes" count={findings.length}>
+            Fix lanes
+          </TabsTrigger>
+          <TabsTrigger value="tree">Run tree</TabsTrigger>
+          <TabsTrigger value="events">Events</TabsTrigger>
+        </TabsList>
+        <TabsContent value="lanes">
+          {findings.length === 0 ? (
+            <EmptyState title="No findings yet" description="Waiting for the run input to load." />
+          ) : (
+            <div style={{ display: "grid", gap: 12 }}>
+              {findings.map((f, i) => (
+                <LaneCard key={`${f.priority}-${f.title}`} runId={runId} finding={f} index={i} />
+              ))}
+              {push ? (
+                <Card>
+                  <strong>Push stage</strong>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>
+                    {asString(push.status)} · main green: {asBool(push.mainGreen) ? "yes" : "no"} ·{" "}
+                    {asString(push.summary)}
+                  </div>
+                </Card>
+              ) : null}
+            </div>
+          )}
+        </TabsContent>
+        <TabsContent value="tree">
+          <RunTree runId={runId} />
+        </TabsContent>
+        <TabsContent value="events">
+          <RunEventLog runId={runId} />
+        </TabsContent>
+      </Tabs>
     </WorkflowUiShell>
   );
 }

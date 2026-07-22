@@ -201,7 +201,7 @@ export function deriveMemoryLifecycle(
 				digest: digestForTask(facts, runId, nodeId),
 			};
 		})
-		.filter((row): row is LifecycleRow => row !== undefined);
+		.filter((row) => row !== undefined);
 }
 
 function ConfigTable({ config }: { config?: MemoryConfig }) {

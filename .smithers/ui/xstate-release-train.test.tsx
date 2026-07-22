@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ReactFlowProvider } from "@xyflow/react";
-import { SmithersTaskNode } from "smithers-orchestrator/gateway-ui";
+import { ReactFlowProvider, type NodeProps } from "@xyflow/react";
+import { SmithersTaskNode, type SmithersFlowNode } from "smithers-orchestrator/gateway-ui";
 import { releaseTrainGraphSpec } from "./xstate-release-train";
 
 describe("XState release train UI", () => {
@@ -27,9 +27,13 @@ describe("XState release train UI", () => {
 
 	test("renders the active state node", () => {
 		const active = spec.find((node) => node.id === "drafting")!;
+		// SmithersTaskNode only reads `data`; the rest of NodeProps is irrelevant here.
+		const nodeProps = {
+			data: { label: active.label, kind: active.kind, output: active.output ?? "", status: active.status },
+		} as unknown as NodeProps<SmithersFlowNode>;
 		const html = renderToStaticMarkup(
 			<ReactFlowProvider>
-				<SmithersTaskNode data={{ label: active.label, kind: active.kind, output: active.output ?? "", status: active.status }} />
+				<SmithersTaskNode {...nodeProps} />
 			</ReactFlowProvider>,
 		);
 		expect(html).toContain("drafting");

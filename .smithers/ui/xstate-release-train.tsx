@@ -139,7 +139,10 @@ export function ReleaseTrainApp({ runId = runIdFromUrl() }: { runId?: string } =
 	const status = typeof run.data === "object" && run.data !== null && "status" in run.data ? String(run.data.status) : undefined;
 
 	return (
-		<WorkflowUiShell title="XState Release Train" subtitle={`${runId ?? "preview"} · pure durable-row fold`} status={status}>
+		<WorkflowUiShell
+			title="XState Release Train"
+			meta={`${runId ?? "preview"} · pure durable-row fold${status ? ` · ${status}` : ""}`}
+		>
 			<WorkflowUiStyles />
 			<SmithersUiStyles />
 			<div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 360px", gap: 16, alignItems: "start" }}>

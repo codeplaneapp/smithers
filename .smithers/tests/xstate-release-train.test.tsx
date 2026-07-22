@@ -5,8 +5,9 @@ import workflow from "../workflows/xstate-release-train";
 import { RELEASE_TRAIN_OUTPUTS, releaseTrainMachine } from "../components/releaseTrainMachine";
 
 type Row = { nodeId: string; iteration: number; seq: number; payload?: unknown; [key: string]: unknown };
+type SignalRow = { payload: unknown; signalName: string; seq: number; correlationId?: string; receivedAtMs: number };
 
-const ctx = (outputs: Record<string, Row[]>, signals: unknown[] = []) => ({
+const ctx = (outputs: Record<string, Row[]>, signals: SignalRow[] = []) => ({
 	runId: "xstate-test",
 	outputRows: (output: unknown, options?: { nodeId?: string }) =>
 		(outputs[String(output)] ?? [])
@@ -28,7 +29,7 @@ const research: Row[] = [{ nodeId: "research", iteration: 0, seq: 1 }];
 const approved: Row[] = [{ nodeId: "approval", iteration: 0, seq: 2, approved: true }];
 const drafted: Row[] = [{ nodeId: "draft-r0", iteration: 0, seq: 3 }];
 
-const fold = (outputs: Record<string, Row[]>, signals: unknown[] = [], id = "xstate-test") =>
+const fold = (outputs: Record<string, Row[]>, signals: SignalRow[] = [], id = "xstate-test") =>
 	computeMachineState(ctx(outputs, signals), releaseTrainMachine, { id, input: {}, events: sources });
 
 describe("xstate release train", () => {
