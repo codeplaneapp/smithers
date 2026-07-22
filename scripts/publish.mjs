@@ -163,7 +163,13 @@ run("pnpm check:llms");
 
 if (!SKIP_BUILD) {
   log("build", "pnpm -r build");
-  run("pnpm -r build");
+  // apps/cli's dts rollup needs more heap than Node's default worker limit or
+  // tsup dies with ERR_WORKER_OUT_OF_MEMORY.
+  execSync("pnpm -r build", {
+    stdio: "inherit",
+    cwd: root,
+    env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
+  });
 
   // The build regenerates committed declaration files (each package's
   // src/*.d.ts via `tsup --dts-only`). If the build changes a tracked file,

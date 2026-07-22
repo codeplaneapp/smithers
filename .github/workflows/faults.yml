@@ -29,6 +29,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # apps/cli's dts rollup needs more heap than the runner's default worker
+      # limit or tsup dies with ERR_WORKER_OUT_OF_MEMORY.
       - run: pnpm -r build
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
 
       - run: pnpm --filter @smithers-orchestrator/e2e test:faults
