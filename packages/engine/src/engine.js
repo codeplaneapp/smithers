@@ -3083,6 +3083,32 @@ function parseAttemptErrorCode(errorJson) {
     }
 }
 /**
+ * Normalize token usage carried by provider failures. Access stays inside the
+ * failure-path telemetry guard because exotic error objects may expose
+ * throwing getters.
+ * @param {unknown} value
+ * @returns {{ inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | null}
+ */
+function extractTokenUsage(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    const container = /** @type {any} */ (value);
+    const usage = container.usage ?? container.result?.usage ?? container.totalUsage;
+    if (!usage || typeof usage !== "object")
+        return null;
+    const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
+    const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
+    if (!(inputTokens > 0 || outputTokens > 0))
+        return null;
+    return {
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens ?? usage.cacheReadTokens ?? undefined,
+        cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? usage.cacheWriteTokens ?? undefined,
+        reasoningTokens: usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? undefined,
+    };
+}
+/**
  * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
  */
 function isRetryableTaskFailure(attempt) {
@@ -5168,6 +5194,32 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     const effectiveError = supportsNativeStructuredOutput && desc.outputSchema && isStructuredOutputParseFailure(error)
                         ? makeStructuredOutputCompatibilityError(desc, error, errorDetails)
                         : error;
+                    // Token telemetry is best-effort on the failure path. Keep
+                    // extraction itself inside the guard: a provider error may
+                    // be an exotic object with throwing usage/result getters.
+                    try {
+                        const failedUsage = extractTokenUsage(error);
+                        if (failedUsage) {
+                            const partialResult = /** @type {any} */ (error)?.result;
+                            const reportedModelId = (typeof partialResult?.response?.modelId === "string" && partialResult.response.modelId.length > 0
+                                ? partialResult.response.modelId
+                                : undefined) ??
+                                (typeof effectiveAgent.model === "string" ? effectiveAgent.model : undefined) ??
+                                "unknown";
+                            void eventBus.emitEventQueued({
+                                type: "TokenUsageReported",
+                                runId,
+                                nodeId: desc.nodeId,
+                                iteration: desc.iteration,
+                                attempt: attemptNo,
+                                model: reportedModelId,
+                                agent: (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ?? effectiveAgent.constructor?.name ?? "unknown",
+                                ...failedUsage,
+                                timestampMs: nowMs(),
+                            }).catch(() => { });
+                        }
+                    }
+                    catch { /* token telemetry must not mask the original provider error */ }
                     if (traceCollector) {
                         traceCollector.observeError(effectiveError);
                         try { await traceCollector.flush(); }

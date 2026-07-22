@@ -5,6 +5,7 @@ import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 const schemas = { a: z.object({ v: z.number() }) };
 
@@ -80,6 +81,93 @@ describe("TokenUsageReported model attribution", () => {
                 expect(e.model).toBe("gpt-5.4-codex");
                 expect(e.model).not.toBe(uuidId);
             }
+        }
+        finally {
+            cleanup();
+        }
+    });
+
+    test("emits usage carried by a failed attempt's partial result", async () => {
+        const { smithers, outputs, dbPath, cleanup } = createTestSmithers(schemas);
+        try {
+            const agent = {
+                id: "failed-agent",
+                model: "fallback-model",
+                tools: {},
+                async generate() {
+                    const error = /** @type {any} */ (new SmithersError("AGENT_CONFIG_INVALID", "provider failed after reporting usage", {
+                        failureRetryable: false,
+                    }));
+                    error.result = {
+                        usage: {
+                            promptTokens: 17,
+                            completionTokens: 4,
+                            inputTokenDetails: { cacheReadTokens: 8, cacheWriteTokens: 2 },
+                            outputTokenDetails: { reasoningTokens: 3 },
+                        },
+                        response: { modelId: "failed-response-model" },
+                    };
+                    throw error;
+                },
+            };
+            const workflow = smithers(() => (<Workflow name="token-usage-failed-attempt">
+        <Task id="t" output={outputs.a} agent={agent} retries={3}>
+          fail after provider usage
+        </Task>
+      </Workflow>));
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("failed");
+            const events = readTokenUsageEvents(dbPath);
+            expect(events).toHaveLength(1);
+            expect(events[0]).toMatchObject({
+                runId: result.runId,
+                nodeId: "t",
+                iteration: 0,
+                attempt: 1,
+                model: "failed-response-model",
+                agent: "failed-agent",
+                inputTokens: 17,
+                outputTokens: 4,
+                cacheReadTokens: 8,
+                cacheWriteTokens: 2,
+                reasoningTokens: 3,
+            });
+        }
+        finally {
+            cleanup();
+        }
+    });
+
+    test("a throwing usage getter never replaces the provider error", async () => {
+        const { smithers, outputs, dbPath, cleanup } = createTestSmithers(schemas);
+        try {
+            const agent = {
+                id: "exotic-error-agent",
+                tools: {},
+                async generate() {
+                    const error = new SmithersError("AGENT_CONFIG_INVALID", "original provider failure", {
+                        failureRetryable: false,
+                    });
+                    Object.defineProperty(error, "usage", {
+                        get() { throw new Error("telemetry getter exploded"); },
+                    });
+                    throw error;
+                },
+            };
+            const workflow = smithers(() => (<Workflow name="token-usage-throwing-getter">
+        <Task id="t" output={outputs.a} agent={agent}>
+          fail with exotic error
+        </Task>
+      </Workflow>));
+
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("failed");
+            expect(result.error?.cause).toMatchObject({
+                code: "AGENT_CONFIG_INVALID",
+                message: expect.stringContaining("original provider failure"),
+            });
+            expect(JSON.stringify(result.error)).not.toContain("telemetry getter exploded");
+            expect(readTokenUsageEvents(dbPath)).toEqual([]);
         }
         finally {
             cleanup();
