@@ -50,6 +50,8 @@ the run-wide and group caps compose.
 143 SIGTERM
 ```
 
+A detached launch (`up --detach`, `workflow run --detach`, detached `--resume`) can fail before any run exists: a workflow-file parse/import/graph error exits non-zero with a `file:line:col` error, and an engine that dies before the run is admitted exits non-zero with the child's log tail. Tooling that parses `--detach` output should treat a missing run ID plus non-zero exit as "no run was created".
+
 ## Output envelope and next-step CTAs
 
 On a TTY the CLI prints human-formatted text. When output is piped or captured (any non-TTY consumer, such as an AI agent), each command instead emits a single TOON envelope: the command's `data`, plus a "Next steps" `cta` block that suggests follow-up commands. The `cta` renders as a TOON table:
@@ -173,7 +175,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
     flags[37]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -226,7 +228,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
     flags[36]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -809,7 +811,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
     flags[37]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -1002,7 +1004,7 @@ commands[102]:
 
 ## Operational notes
 
-- **Detached mode** (`up --detach`): redirects stdout/stderr to a log file, prints `runId`/`pid`/`logFile`, and exits.
+- **Detached mode** (`up --detach`): preflight-renders the workflow graph before spawning anything (a parse, import, or graph error prints `file:line:col` on stderr and exits non-zero with no run created), then redirects stdout/stderr to a log file, waits up to 10s for proof the run was admitted, prints `runId`/`pid`/`logFile`, and exits. A child that dies before admission prints its log tail and exits non-zero instead of a success run ID. The same preflight and admission gate covers `workflow run --detach` and detached `--resume`.
 - **Serve mode** (`up --serve`): starts the HTTP app and keeps the process alive until interrupted. Add `--supervise` to run stale-run recovery in the same process.
 - **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal.
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.

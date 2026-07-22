@@ -2206,6 +2206,83 @@ Before closing:
 
 ---
 
+## Oneshot
+
+> Run one well-scoped goal with a single strong agent in the background, with optional review and a live dashboard. No workflow file to author.
+
+`smithers oneshot` is the built-in minimal workflow: one agent, one goal, no
+authoring. It launches in the background by default and serves a live
+dashboard with chat, diff, hijack, pause, and cancel controls.
+
+```bash
+bunx smithers-orchestrator oneshot "add a loading spinner to the login button"
+bunx smithers-orchestrator oneshot --goal-file TICKET.md
+```
+
+## When to use it
+
+Route work in three tiers:
+
+1. **Trivial asks** (a typo, a rename, an edit under about 10 agent turns): do
+   them directly. If the stored trivial preference is `oneshot`, launch oneshot
+   with `--model opus` or `--model terra`.
+2. **Clear single-agent asks** that fit one context window: `smithers oneshot`.
+3. **Multi-stage, approval-gated, long-horizon, or reusable work**: build and
+   run a real workflow.
+
+Explicit overrides win over inference: "oneshot" forces oneshot, "oneshot with
+review" adds `--review on`, "oneshot without review" adds `--review off`.
+Ambiguous goals deserve a clarifying question before anything launches.
+
+## Agents and models
+
+Oneshot picks the first usable agent from its chain (codex, then kimi, then
+claude-code, then opencode) unless `--agent` pins one. The kimi seat runs Kimi
+K3 (`kimi-code/k3`, 1M-token context). `--model` accepts a slot (`sol`,
+`terra`, `luna`, `kimi`, `fable`, `opus`, `sonnet`) or a canonical model id;
+the default `auto` follows the seat's registry slot, with review on Sol at
+high reasoning effort.
+
+Run `bunx smithers-orchestrator oneshot --status` before first use. It prints
+the usable agents, the resolved model chain, and the stored preferences as
+JSON; when no usable agent is detected, oneshot is unavailable and work should
+go through the direct or workflow route instead.
+
+## Review and trivial preferences
+
+Two stored preferences shape routing, kept in the global Smithers config:
+
+- **Review** (`--set-review on|off`): add one review-and-polish round after the
+  implement pass. Higher quality, slower. Recommended on.
+- **Trivial** (`--set-trivial direct|oneshot`): whether the most-trivial asks
+  run directly or still launch oneshot. Recommended direct.
+
+`--review on|off` overrides the stored review preference for one run.
+
+## The live dashboard
+
+The oneshot UI shows the run as it happens:
+
+- **Goal and status cards** with the execution metadata (agent, model, chain).
+- **A live status narrator**: a cheap sidecar agent watches the implement and
+  review agents' recorded output and posts one-line "what is it doing"
+  updates into a pulsing status card, so a stuck run is obvious without
+  reading the raw transcript.
+- Chat, diff, hijack, pause, and cancel controls.
+
+On an interactive TTY, `--interactive` opens the full-screen TUI monitor
+instead of the detached default. `--detach false` runs in the foreground.
+
+## Overriding the built-in workflow
+
+A workspace can replace the built-in pipeline with
+`.smithers/workflows/oneshot.tsx`; the CLI passes `goal`, `review`, and
+`model` input fields to it, and uses `.smithers/ui/oneshot.tsx` as the
+dashboard when present. See Custom workflow UIs.
+
+
+---
+
 ## JSX API
 
 > Author workflows as JSX trees. Smithers renders the tree, dispatches ready tasks, persists outputs, and re-renders. Branching and parallelism are plain JSX conditionals.
@@ -2349,6 +2426,8 @@ the run-wide and group caps compose.
 143 SIGTERM
 ```
 
+A detached launch (`up --detach`, `workflow run --detach`, detached `--resume`) can fail before any run exists: a workflow-file parse/import/graph error exits non-zero with a `file:line:col` error, and an engine that dies before the run is admitted exits non-zero with the child's log tail. Tooling that parses `--detach` output should treat a missing run ID plus non-zero exit as "no run was created".
+
 ## Output envelope and next-step CTAs
 
 On a TTY the CLI prints human-formatted text. When output is piped or captured (any non-TTY consumer, such as an AI agent), each command instead emits a single TOON envelope: the command's `data`, plus a "Next steps" `cta` block that suggests follow-up commands. The `cta` renders as a TOON table:
@@ -2472,7 +2551,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
     flags[37]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -2525,7 +2604,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
     flags[36]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -3108,7 +3187,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
     flags[37]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -3301,7 +3380,7 @@ commands[102]:
 
 ## Operational notes
 
-- **Detached mode** (`up --detach`): redirects stdout/stderr to a log file, prints `runId`/`pid`/`logFile`, and exits.
+- **Detached mode** (`up --detach`): preflight-renders the workflow graph before spawning anything (a parse, import, or graph error prints `file:line:col` on stderr and exits non-zero with no run created), then redirects stdout/stderr to a log file, waits up to 10s for proof the run was admitted, prints `runId`/`pid`/`logFile`, and exits. A child that dies before admission prints its log tail and exits non-zero instead of a success run ID. The same preflight and admission gate covers `workflow run --detach` and detached `--resume`.
 - **Serve mode** (`up --serve`): starts the HTTP app and keeps the process alive until interrupted. Add `--supervise` to run stale-run recovery in the same process.
 - **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal.
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
@@ -3842,7 +3921,7 @@ Every agent task produces a reusable session snapshot; use `fork` to start a new
 import { CodexAgent } from "smithers-orchestrator";
 
 const planner = new CodexAgent({ model: "gpt-5.6-sol" });
-const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
 
 const PLAN = "plan" as const;
 const IMPLEMENT = "implement" as const;
@@ -3869,7 +3948,7 @@ const VERIFY = "verify" as const;
 import { CodexAgent } from "smithers-orchestrator";
 
 const researcher = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
-const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
 
 <Task id="investigate" agent={researcher} output={outputs.investigation}>
   Understand the bug and identify possible fixes.
@@ -7369,10 +7448,12 @@ import { OpenAIAgent } from "smithers-orchestrator";
 const researcher  = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" });
 const validator   = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } });
 const reviewer    = new OpenAIAgent({ model: "gpt-5.6-sol", instructions: "...", tools: { read, grep } });
-const implementer = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "...", tools: { read, write, edit, bash } });
+const implementer = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, write, edit, bash } });
 ```
 
-Match the tool surface to the role.
+Match the tool surface to the role. Luna carries only trivial, black-and-white
+work (quick research, mechanical transforms); substantial implementation starts
+on Terra, and the hardest or most ambiguous changes escalate to Sol.
 
 ## Side-effect tools with idempotency
 
@@ -10919,7 +11000,8 @@ tokens, never hex-plus-alpha.
 | `GatewayApprovalList` | The pending approval queue rendered with the agentic `ApprovalCard` anatomy (risk, resources, reviewer note), resolved through `submitApproval`. | `filter`, `note`, `empty`, `onResolved` |
 | `GatewayApprovalConfirmation` | One pending approval row as the `Confirmation` lifecycle anatomy with approve/deny actions, resolved through `submitApproval`. | `approval`, `note`, `onResolved` |
 | `GatewayCheckpointControls` | Durability checkpoint list. Only `rewind` is bound natively (to the Gateway's `rewindRun` RPC); restore/fork/replay/return-to-live render only when the host supplies `onAction`. | `runId`, `checkpoints`, `currentFrameNo`, `onAction`, `onRewound` |
-| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. | `@xyflow/react` `NodeProps` |
+| `WorkflowGraph` | A workflow DAG rendered as an interactive canvas: lays a `WorkflowSpecNode[]` (`id`, `label`, `kind`, `dependsOn?`, `output?`, `status?`) out left-to-right with dagre and renders each node as a `SmithersTaskNode` card (kind kicker, status dot, latest output line). `workflowToFlow(spec)` is exported separately for pure layout without mounting ReactFlow, and `workflowGraphCss` carries the node/edge styles. | `spec`, `nodeTypes`, `className`, `style` |
+| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. Any custom `nodeTypes` renderer must render `SmithersNodeHandles` (target handle left, source handle right) or its edges detach. | `@xyflow/react` `NodeProps` |
 
 `StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
 also exported for building your own rows that match the components, plus the
@@ -12932,11 +13014,16 @@ The command resolves the workspace's singleton gateway like `bunx smithers-orche
 
 ## What you see
 
-- **Workspace operations view**: a paginated, searchable, filterable all-runs page grouped by run state, with an operations summary, scheduled crons, and a Metrics view.
+The overview is organized around triage: what needs you first, what is running now, and the operational numbers last.
+
+- **"Needs you" band**: pending approvals, human-parked runs, and failures from the last 24 hours, first on the page. Each section is row-capped and the rest collapses to "+N more". Approvals decide in place (arm, then confirm), both in the inbox rows and in the health strip's inline gates.
+- **"Active now" band**: one rich row per live run, sorted by triage priority.
+- **Ops footer and Debug fold**: throughput and count stats sit in a demoted footer with a Metrics link, and frames plus the raw XML tree tuck behind a Debug chip until you ask for them.
+- **Keyboard kit**: `/` focuses search, `j`/`k` move the cursor, `Enter` opens the cursor row, `Esc` backs out one level.
 - **Run health and controls**: always-on health diagnosis with one-click recovery where available, plus Pause, Resume, Cancel, approvals, and run-level Scores.
-- **Execution history**: the live expandable tree or XML view, a chronological Timeline, and a frame scrubber for earlier committed states.
-- **Node investigation**: live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal to hijack or reopen supported agent sessions.
-- **Events and navigation**: a filterable live event log with follow mode, shareable `?runId=`/`&nodeId=` deep links, and `?embed=1` for the embeddable run surface.
+- **Execution history**: the live expandable tree or XML view with per-node durations, a chronological Timeline, and a frame scrubber for earlier committed states.
+- **Node investigation**: a collapsible inspector where every section (Details, Prompt, Tool calls, Transcript, Output, Diff) unmounts when closed, so a closed Transcript stops polling in the background. The Prompt section shows the task's initial prompt. Also live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal to hijack or reopen supported agent sessions.
+- **Events and navigation**: a filterable live event log with timestamps and follow mode, shareable `?runId=`/`&nodeId=` deep links, and `?embed=1` for the embeddable run surface.
 - **Connection truth**: Live, Connecting, Offline, and Unauthorized states, each with recovery guidance.
 
 ## How it relates to the other surfaces
@@ -13741,6 +13828,80 @@ sanitized URL, with an event whose default action is already prevented.
 
 ---
 
+## CodeBlock
+
+> Render token-themed code with copy, wrapping, line numbers, and a highlighter seam.
+
+`CodeBlock`, the base fenced-code surface from `smithers-orchestrator/ui`, uses
+the shared `--code-bg` and `--code-text` theme tokens and ships no
+syntax-highlighting dependency.
+
+```tsx
+import { CodeBlock } from "smithers-orchestrator/ui";
+
+<CodeBlock
+  code={source}
+  language="typescript"
+  showLineNumbers
+  onCopyCode={(code) => copyThroughYourHost(code)}
+  highlight={(code, language) => tokenAdapter(code, language)}
+/>
+```
+
+The copy button uses `onCopyCode` when provided, else falls back to
+`navigator.clipboard`, and hides when neither is available. A highlighter
+returns readonly `{ text, color? }` token lines; returning `null` or throwing
+renders escaped plain text.
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `code` | `string` | required | Source text to render and copy. |
+| `language` | `string` | none | Optional language label and adapter input. |
+| `showLineNumbers` | `boolean` | `false` | Adds an `aria-hidden` line-number gutter. |
+| `wrap`, `defaultWrap`, `onWrapChange` | controlled trio | `false` | Controls line wrapping. |
+| `showCopy` | `boolean` | `true` | Shows the copy affordance when a copy path exists. |
+| `onCopyCode` | `(code: string) => void` | clipboard fallback | Host-owned copy seam. |
+| `copiedDurationMs` | `number` | `2000` | How long the copied state remains visible. |
+| `highlight` | `CodeBlockHighlighter` | none | Converts source into colored token lines. |
+
+---
+
+## MessageResponse
+
+> Render assistant Markdown safely while content is still streaming.
+
+`MessageResponse` (`smithers-orchestrator/ui`) renders assistant Markdown via
+the dependency-free `Markdown` primitive, keeping incomplete fences and
+inline markers stable across stream chunks, and shows an `aria-hidden` caret
+while `streaming` is true.
+
+```tsx
+import { MessageResponse } from "smithers-orchestrator/ui";
+
+<MessageResponse
+  content={assistantText}
+  streaming={isStreaming}
+  onLinkClick={(href) => navigate(href)}
+/>
+```
+
+`onLinkClick` receives only sanitized `http`, `https`, `mailto`, or
+scheme-less hrefs, once default navigation is prevented; other schemes never
+reach it. The caret stops blinking under reduced-motion preferences.
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `content` | `string` | required | Markdown source, including incomplete streaming chunks. |
+| `streaming` | `boolean` | `false` | Shows the subtle streaming caret. |
+| `onLinkClick` | `MarkdownLinkClick` | none | Handles sanitized link navigation. |
+| native div props | `React.ComponentProps<"div">` | none | Applied to the response root, except `children`. |
+
+---
+
 ## Chart
 
 > Recharts-backed chart primitives with the validated smithers series palette, tooltip, and legend.
@@ -14077,14 +14238,17 @@ function useGatewayRun(
 Live, bounded run-event buffer (resilient stream with `afterSeq` resume).
 Heartbeats are surfaced separately and never enter `events`; the array is capped
 to `maxEvents`, most-recent wins. Returns its own shape, not `GatewayAsyncState`.
+Frames reconstructed from persisted rows carry an optional `timestampMs` (epoch
+millis from the stored row) so log UIs can render when an event happened without
+a second lookup; those frames surface `stateVersion: 0`.
 
 ```ts
 function useGatewayRunEvents(
   runId: string | undefined,
   options?: { afterSeq?: number; maxEvents?: number },
 ): {
-  events: GatewayEventFrame[];
-  lastHeartbeat: GatewayEventFrame | undefined;
+  events: Array<GatewayEventFrame & { timestampMs?: number }>;
+  lastHeartbeat: (GatewayEventFrame & { timestampMs?: number }) | undefined;
   error: Error | undefined;
   streaming: boolean;
 };
@@ -14098,10 +14262,11 @@ function useGatewayRunEvents(
   Cap on the retained event buffer.
 </ParamField>
 
-<ResponseField name="events" type="GatewayEventFrame[]">
-  Ordered, capped run events (heartbeats excluded).
+<ResponseField name="events" type="Array<GatewayEventFrame & { timestampMs?: number }>">
+  Ordered, capped run events (heartbeats excluded). `timestampMs` is set on
+  frames reconstructed from persisted rows.
 </ResponseField>
-<ResponseField name="lastHeartbeat" type="GatewayEventFrame | undefined">
+<ResponseField name="lastHeartbeat" type="(GatewayEventFrame & { timestampMs?: number }) | undefined">
   The most recent heartbeat frame, surfaced apart from `events`.
 </ResponseField>
 <ResponseField name="error" type="Error | undefined">
@@ -14750,6 +14915,18 @@ Custom controls suppress the UA ring; give focus back explicitly, and make it fe
   ```
 
 - **Discrete controls** (buttons, links, pills) get a crisp `:focus-visible` ring: `outline: 2px solid var(--brand); outline-offset: 2px;`. Keyboard users must always see where they are.
+
+### Pressed means a step darker, never a transform
+
+Every clickable control gives `:active` feedback by deepening its background with a `color-mix` tint, not by scaling, translating, or adding shadows. Derive the pressed wash from the same tokens as the idle state so it stays correct in both themes and never invents a new hex:
+
+```css
+.button:active:not(:disabled)         { background: color-mix(in srgb, var(--text) 6%, var(--hover)); }
+.button.primary:active:not(:disabled) { background: color-mix(in srgb, var(--brand) 22%, var(--surface)); }
+.button.danger:active:not(:disabled)  { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); }
+```
+
+The shared components ship this recipe already (`:active:not(:disabled)` on every button variant); hand-rolled controls must match it.
 
 ### Motion: short, purposeful, and named
 
@@ -15694,7 +15871,10 @@ Gateway client exports:
 Browser sessions expose a stationary viewer at `/browser/<sessionId>/viewer`.
 It paints ephemeral `browser.frame` screencast events onto a canvas and sends
 pointer, keyboard, and toolbar input back through `browserAct`. The page has no
-credentials. Embed it through the authenticated proxy that serves the Gateway,
+credentials, and keystrokes aimed at sensitive fields (password and other
+masked inputs) are redacted before they reach the settled action journal or the
+`browser.activity` broadcast: full `type` actions and single `press` keypresses
+alike. Embed it through the authenticated proxy that serves the Gateway,
 and use `theme`, `hostOrigin`, and `embed` query parameters when the embedding
 consumer needs to control presentation or receive viewer activity and revision
 messages through `postMessage`.
@@ -15817,34 +15997,48 @@ bounds memory per stream.
 Stateless RPC POSTs go to `POST /v1/rpc/<method>` with the method's params as the JSON request body. Over WebSocket the same methods use `{ id, method, params }` frames. The legacy `POST /rpc` route takes the full `{ id, method, params }` envelope in the body.
 
 ```toon
-rpc[27]{method,params,returns,scope,transport}:
+rpc[41]{method,params,returns,scope,transport}:
   launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket
   resumeRun,runId/options.force?,{runId/status},run:write,http+websocket
   cancelRun,runId,{runId/status:cancelling},run:write,http+websocket
+  pauseRun,runId,{runId/status:pausing},run:write,http+websocket
   hijackRun,runId/options?,{runId/status:hijack-ready/sessionId},run:admin,http+websocket
   rewindRun,runId/frameNo/confirm:true,JumpResult,run:admin,http+websocket
   submitApproval,runId/nodeId/iteration?/decision,{runId/nodeId/iteration/approved},approval:submit,http+websocket
   submitSignal,runId/correlationKey/payload?/signalName?,Delivery metadata,signal:submit,http+websocket
   getRun,runId,Run record + optional runState,run:read,http+websocket
-  listRuns,filter.status?/filter.limit?/filter.workflow?,Run summaries,run:read,http+websocket
+  listRuns,filter.status?/filter.limit?/filter.offset?/filter.workflow?,Run summaries,run:read,http+websocket
+  getSchemaSignature,,{schemaVersion/signature/components},run:read,http+websocket
   listWorkflows,filter.hasUi?,Workflow summaries,run:read,http+websocket
   listApprovals,filter.runId?/filter.workflow?/filter.limit?,Pending approvals,run:read,http+websocket
+  listDocs,filter.kind?/filter.includeDeleted?/filter.updatedAfterMs?/filter.limit?,GatewayDocRow[],run:read,http+websocket
   streamRunEvents,runId/afterSeq?,{streamId/runId/afterSeq/currentSeq},run:read,websocket
   streamDevTools,runId/afterSeq?/fromSeq?,{streamId/runId/fromSeq/afterSeq} + devtools.event frames,observability:read,websocket
   getDevToolsSnapshot,runId/frameNo?,DevTools snapshot payload,observability:read,http+websocket
   getNodeOutput,runId/nodeId/iteration?,NodeOutputResponse,run:read,http+websocket
   getNodeDiff,runId/nodeId/iteration?,Node diff response,run:read,http+websocket
+  getRunDiff,runId,DiffBundle or oversized marker,run:read,http+websocket
+  whatHappened,runId/nodeId?/iteration?,Narrated recap payload,run:read,http+websocket
   cronList,filter.workflow?,Cron rows,cron:read,http+websocket
   cronCreate,workflow/pattern/cronId?/enabled?,Created cron row,cron:write,http+websocket
   cronDelete,cronId,{cronId/removed},cron:write,http+websocket
   cronRun,cronId? or workflow/input?,{runId/workflow},cron:write,http+websocket
   listAccounts,,Registered agent accounts (api keys redacted),account:read,http+websocket
   listMemoryFacts,namespace?,Memory facts,memory:read,http+websocket
+  listPrompts,,Prompt[],prompt:read,http+websocket
   listScores,runId/nodeId?,Scorer results,score:read,http+websocket
+  listScoresForRuns,runIds/nodeId?/scorerId?/scorerName?/source?/order?/offset?/limit?,Scorer results across runs,score:read,http+websocket
+  getScoreDetail,runId/scoreId,Score detail,score:read,http+websocket
   listTickets,kind?,Work docs,ticket:read,http+websocket
   createTicket,path/content/kind?/status?,Created doc row,ticket:write,http+websocket
   updateTicket,path/content?/status?,Updated doc row,ticket:write,http+websocket
   deleteTicket,path,{path/deleted},ticket:write,http+websocket
+  createBrowserSession,source:url or dev-server/viewport?,BrowserSnapshot,run:write,http+websocket
+  browserAct,sessionId/actionId/expectedRevision?/action,Browser action outcome,run:write,http+websocket
+  browserContext,sessionId/sinceRevision?/include?,Bounded perception slices,run:read,http+websocket
+  browserPick,sessionId/point{x/y},Locator metadata + inline JPEG,run:read,http+websocket
+  closeBrowserSession,sessionId,{closed/sessionId},run:write,http+websocket
+  listBrowserSessions,,Live BrowserSnapshot[],run:read,http+websocket
 ```
 
 `health` remains available as a utility RPC and `GET /health` is available without auth. The legacy method names are still accepted for compatibility (`runs.create`, `runs.get`, `runs.list`, `runs.cancel`, `runs.rerun`, `runs.diff`, `frames.list`, `frames.get`, `attempts.list`, `attempts.get`, `workflows.list`, `approvals.list`, `approvals.decide`, `signals.send`, `cron.list`, `cron.add`, `cron.remove`, `cron.trigger`, `jumpToFrame`, `devtools.jumpToFrame`, `devtools.getNodeOutput`, `devtools.getNodeDiff`), but new clients should use the v1 names above.
@@ -16036,7 +16230,7 @@ type DevToolsNode = {
   type: "workflow" | "task" | "sequence" | "parallel" | /* …see protocol */;
   name: string;
   props: Record<string, unknown>;
-  task?: { nodeId: string; kind: "agent" | "compute" | "static"; /* … */ };
+  task?: { nodeId: string; kind: "agent" | "compute" | "static"; prompt?: string /* the task's initial prompt; absent for queued nodes */ };
   children: DevToolsNode[];
   depth: number;
 };
@@ -17507,12 +17701,13 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[13]{class,cli,modelDefault,hijack,notes}:
+agents[14]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
   GeminiAgent,gemini,CLI default,legacy session id,Deprecated legacy Gemini CLI wrapper
   PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
+  OmpAgent,omp,CLI default,not yet,Oh My Pi OMP harness (text/json/rpc modes)
   KimiAgent,kimi,CLI default,native session id,Moonshot Kimi CLI (auto-isolates KIMI_SHARE_DIR)
   ForgeAgent,forge,CLI default,conversation id,Forge CLI (300+ models)
   HermesCliAgent,hermes,CLI default,session id,Nous Research Hermes Agent CLI (hermes -z headless)
@@ -17523,7 +17718,7 @@ agents[13]{class,cli,modelDefault,hijack,notes}:
   PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
+CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -17567,7 +17762,7 @@ import { OmpAgent } from "smithers-orchestrator";
 
 const omp = new OmpAgent({
   provider: "openai",
-  model: "gpt-5.2",
+  model: "gpt-5.6-terra",
   mode: "json",
   cwd: process.cwd(),
   autoApprove: true,
@@ -18081,7 +18276,7 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
+On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, OpenClaw, and OMP stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
 
 ## Notes
 
@@ -20765,7 +20960,9 @@ for (const frame of events) {
 
 Use `frame.event === "NodeStarted" | "NodeFinished" | "NodeFailed"` to build a
 per-node status view, keyed by `frame.payload.nodeId`. The table below lists
-each variant's fields; in a UI those live under `frame.payload`.
+each variant's fields; in a UI those live under `frame.payload`. Frames
+reconstructed from persisted rows also carry an optional `timestampMs` (epoch
+millis from the stored row) and surface `stateVersion: 0`.
 </Warning>
 
 | Event | Top-level fields |

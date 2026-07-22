@@ -261,14 +261,17 @@ function useGatewayRun(
 Live, bounded run-event buffer (resilient stream with `afterSeq` resume).
 Heartbeats are surfaced separately and never enter `events`; the array is capped
 to `maxEvents`, most-recent wins. Returns its own shape, not `GatewayAsyncState`.
+Frames reconstructed from persisted rows carry an optional `timestampMs` (epoch
+millis from the stored row) so log UIs can render when an event happened without
+a second lookup; those frames surface `stateVersion: 0`.
 
 ```ts
 function useGatewayRunEvents(
   runId: string | undefined,
   options?: { afterSeq?: number; maxEvents?: number },
 ): {
-  events: GatewayEventFrame[];
-  lastHeartbeat: GatewayEventFrame | undefined;
+  events: Array<GatewayEventFrame & { timestampMs?: number }>;
+  lastHeartbeat: (GatewayEventFrame & { timestampMs?: number }) | undefined;
   error: Error | undefined;
   streaming: boolean;
 };
@@ -282,10 +285,11 @@ function useGatewayRunEvents(
   Cap on the retained event buffer.
 </ParamField>
 
-<ResponseField name="events" type="GatewayEventFrame[]">
-  Ordered, capped run events (heartbeats excluded).
+<ResponseField name="events" type="Array<GatewayEventFrame & { timestampMs?: number }>">
+  Ordered, capped run events (heartbeats excluded). `timestampMs` is set on
+  frames reconstructed from persisted rows.
 </ResponseField>
-<ResponseField name="lastHeartbeat" type="GatewayEventFrame | undefined">
+<ResponseField name="lastHeartbeat" type="(GatewayEventFrame & { timestampMs?: number }) | undefined">
   The most recent heartbeat frame, surfaced apart from `events`.
 </ResponseField>
 <ResponseField name="error" type="Error | undefined">

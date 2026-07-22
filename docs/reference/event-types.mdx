@@ -62,7 +62,9 @@ for (const frame of events) {
 
 Use `frame.event === "NodeStarted" | "NodeFinished" | "NodeFailed"` to build a
 per-node status view, keyed by `frame.payload.nodeId`. The table below lists
-each variant's fields; in a UI those live under `frame.payload`.
+each variant's fields; in a UI those live under `frame.payload`. Frames
+reconstructed from persisted rows also carry an optional `timestampMs` (epoch
+millis from the stored row) and surface `stateVersion: 0`.
 </Warning>
 
 | Event | Top-level fields |

@@ -3544,7 +3544,7 @@ function checkSdkAgentDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "nativeStructuredOutput?: boolean; // default false"],
     [RECIPES_DOC, 'new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" })'],
     [RECIPES_DOC, 'new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } })'],
-    [RECIPES_DOC, 'new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "...", tools: { read, write, edit, bash } })'],
+    [RECIPES_DOC, 'new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, write, edit, bash } })'],
   ];
   const forbidden = [
     [SDK_AGENTS_INTEGRATION, "Provider-backed AI SDK agent wrappers for Anthropic and OpenAI"],
@@ -3582,7 +3582,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
   ]);
   const required = [
     [BASE_CLI_AGENT_SOURCE, "this.model = opts.model;"],
-    [CLI_AGENTS_INTEGRATION, "agents[13]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[14]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,CLI default,native thread id"],
     [CLI_AGENTS_INTEGRATION, "PiAgent,pi,CLI default,native session id"],
@@ -3594,6 +3594,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENTS_INTEGRATION, "VibeAgent,vibe,CLI default,headless session id"],
     [CLI_AGENTS_INTEGRATION, "OpenCodeAgent,opencode,CLI default,not yet"],
     [CLI_AGENTS_INTEGRATION, "OpenClawAgent,openclaw,CLI default,session id"],
+    [CLI_AGENTS_INTEGRATION, "OmpAgent,omp,CLI default,not yet"],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "vibe"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "openclaw"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "pool"'],
@@ -3603,6 +3604,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
   ];
   const forbidden = [
     [CLI_AGENTS_INTEGRATION, "agents[12]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[13]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "agents[13]{class,cli,defaultModel,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,claude-sonnet-4-20250514,"],
     [CLI_AGENTS_INTEGRATION, "HermesCliAgent,hermes,hermes-4,"],
@@ -3653,7 +3655,7 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_AGENTS_INTEGRATION, "| `KimiAgent` | `kimi --session` |"],
     [CLI_AGENTS_INTEGRATION, "| `ForgeAgent` | `forge --conversation-id` |"],
     [CLI_AGENTS_INTEGRATION, "| `AmpAgent` | `amp threads continue` |"],
-    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet"],
+    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet"],
   ];
   const forbidden = [
     [CLI_AGENTS_INTEGRATION, "| `GeminiAgent` | `gemini --resume` |"],

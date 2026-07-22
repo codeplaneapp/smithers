@@ -91,7 +91,10 @@ Gateway client exports:
 Browser sessions expose a stationary viewer at `/browser/<sessionId>/viewer`.
 It paints ephemeral `browser.frame` screencast events onto a canvas and sends
 pointer, keyboard, and toolbar input back through `browserAct`. The page has no
-credentials. Embed it through the authenticated proxy that serves the Gateway,
+credentials, and keystrokes aimed at sensitive fields (password and other
+masked inputs) are redacted before they reach the settled action journal or the
+`browser.activity` broadcast: full `type` actions and single `press` keypresses
+alike. Embed it through the authenticated proxy that serves the Gateway,
 and use `theme`, `hostOrigin`, and `embed` query parameters when the embedding
 consumer needs to control presentation or receive viewer activity and revision
 messages through `postMessage`.
@@ -214,34 +217,48 @@ bounds memory per stream.
 Stateless RPC POSTs go to `POST /v1/rpc/<method>` with the method's params as the JSON request body. Over WebSocket the same methods use `{ id, method, params }` frames. The legacy `POST /rpc` route takes the full `{ id, method, params }` envelope in the body.
 
 ```toon
-rpc[27]{method,params,returns,scope,transport}:
+rpc[41]{method,params,returns,scope,transport}:
   launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket
   resumeRun,runId/options.force?,{runId/status},run:write,http+websocket
   cancelRun,runId,{runId/status:cancelling},run:write,http+websocket
+  pauseRun,runId,{runId/status:pausing},run:write,http+websocket
   hijackRun,runId/options?,{runId/status:hijack-ready/sessionId},run:admin,http+websocket
   rewindRun,runId/frameNo/confirm:true,JumpResult,run:admin,http+websocket
   submitApproval,runId/nodeId/iteration?/decision,{runId/nodeId/iteration/approved},approval:submit,http+websocket
   submitSignal,runId/correlationKey/payload?/signalName?,Delivery metadata,signal:submit,http+websocket
   getRun,runId,Run record + optional runState,run:read,http+websocket
-  listRuns,filter.status?/filter.limit?/filter.workflow?,Run summaries,run:read,http+websocket
+  listRuns,filter.status?/filter.limit?/filter.offset?/filter.workflow?,Run summaries,run:read,http+websocket
+  getSchemaSignature,,{schemaVersion/signature/components},run:read,http+websocket
   listWorkflows,filter.hasUi?,Workflow summaries,run:read,http+websocket
   listApprovals,filter.runId?/filter.workflow?/filter.limit?,Pending approvals,run:read,http+websocket
+  listDocs,filter.kind?/filter.includeDeleted?/filter.updatedAfterMs?/filter.limit?,GatewayDocRow[],run:read,http+websocket
   streamRunEvents,runId/afterSeq?,{streamId/runId/afterSeq/currentSeq},run:read,websocket
   streamDevTools,runId/afterSeq?/fromSeq?,{streamId/runId/fromSeq/afterSeq} + devtools.event frames,observability:read,websocket
   getDevToolsSnapshot,runId/frameNo?,DevTools snapshot payload,observability:read,http+websocket
   getNodeOutput,runId/nodeId/iteration?,NodeOutputResponse,run:read,http+websocket
   getNodeDiff,runId/nodeId/iteration?,Node diff response,run:read,http+websocket
+  getRunDiff,runId,DiffBundle or oversized marker,run:read,http+websocket
+  whatHappened,runId/nodeId?/iteration?,Narrated recap payload,run:read,http+websocket
   cronList,filter.workflow?,Cron rows,cron:read,http+websocket
   cronCreate,workflow/pattern/cronId?/enabled?,Created cron row,cron:write,http+websocket
   cronDelete,cronId,{cronId/removed},cron:write,http+websocket
   cronRun,cronId? or workflow/input?,{runId/workflow},cron:write,http+websocket
   listAccounts,,Registered agent accounts (api keys redacted),account:read,http+websocket
   listMemoryFacts,namespace?,Memory facts,memory:read,http+websocket
+  listPrompts,,Prompt[],prompt:read,http+websocket
   listScores,runId/nodeId?,Scorer results,score:read,http+websocket
+  listScoresForRuns,runIds/nodeId?/scorerId?/scorerName?/source?/order?/offset?/limit?,Scorer results across runs,score:read,http+websocket
+  getScoreDetail,runId/scoreId,Score detail,score:read,http+websocket
   listTickets,kind?,Work docs,ticket:read,http+websocket
   createTicket,path/content/kind?/status?,Created doc row,ticket:write,http+websocket
   updateTicket,path/content?/status?,Updated doc row,ticket:write,http+websocket
   deleteTicket,path,{path/deleted},ticket:write,http+websocket
+  createBrowserSession,source:url or dev-server/viewport?,BrowserSnapshot,run:write,http+websocket
+  browserAct,sessionId/actionId/expectedRevision?/action,Browser action outcome,run:write,http+websocket
+  browserContext,sessionId/sinceRevision?/include?,Bounded perception slices,run:read,http+websocket
+  browserPick,sessionId/point{x/y},Locator metadata + inline JPEG,run:read,http+websocket
+  closeBrowserSession,sessionId,{closed/sessionId},run:write,http+websocket
+  listBrowserSessions,,Live BrowserSnapshot[],run:read,http+websocket
 ```
 
 `health` remains available as a utility RPC and `GET /health` is available without auth. The legacy method names are still accepted for compatibility (`runs.create`, `runs.get`, `runs.list`, `runs.cancel`, `runs.rerun`, `runs.diff`, `frames.list`, `frames.get`, `attempts.list`, `attempts.get`, `workflows.list`, `approvals.list`, `approvals.decide`, `signals.send`, `cron.list`, `cron.add`, `cron.remove`, `cron.trigger`, `jumpToFrame`, `devtools.jumpToFrame`, `devtools.getNodeOutput`, `devtools.getNodeDiff`), but new clients should use the v1 names above.
@@ -433,7 +450,7 @@ type DevToolsNode = {
   type: "workflow" | "task" | "sequence" | "parallel" | /* …see protocol */;
   name: string;
   props: Record<string, unknown>;
-  task?: { nodeId: string; kind: "agent" | "compute" | "static"; /* … */ };
+  task?: { nodeId: string; kind: "agent" | "compute" | "static"; prompt?: string /* the task's initial prompt; absent for queued nodes */ };
   children: DevToolsNode[];
   depth: number;
 };

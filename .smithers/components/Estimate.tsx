@@ -59,7 +59,7 @@ export type WorkflowEstimate = z.infer<typeof workflowEstimateSchema>;
  */
 export function priceEstimate(
   forecast: EstimateForecast | null | undefined,
-  defaultModel = "gpt-5.6-luna",
+  defaultModel = "gpt-5.6-terra",
 ): WorkflowEstimate {
   const perTask = (forecast?.perTask ?? []).map((task) => {
     const iterations = Math.max(1, Math.round(Number(task.iterations) || 1));
@@ -124,7 +124,7 @@ export function Estimate({
   input,
   workflowKey,
   estimator = defaultEstimator,
-  defaultModel = "gpt-5.6-luna",
+  defaultModel = "gpt-5.6-terra",
   forecast = null,
 }: EstimateProps) {
   const inputText = JSON.stringify(input ?? null, null, 2);

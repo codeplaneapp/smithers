@@ -1,0 +1,81 @@
+---
+title: Oneshot
+description: Run one well-scoped goal with a single strong agent in the background, with optional review and a live dashboard. No workflow file to author.
+---
+
+`smithers oneshot` is the built-in minimal workflow: one agent, one goal, no
+authoring. It launches in the background by default and serves a live
+dashboard with chat, diff, hijack, pause, and cancel controls.
+
+```bash
+bunx smithers-orchestrator oneshot "add a loading spinner to the login button"
+bunx smithers-orchestrator oneshot --goal-file TICKET.md
+bunx smithers-orchestrator oneshot "fix the flaky retry test" --review on
+bunx smithers-orchestrator oneshot --status        # usable agents, model chain, preferences
+```
+
+## When to use it
+
+Route work in three tiers:
+
+1. **Trivial asks** (a typo, a rename, an edit under about 10 agent turns): do
+   them directly. If the stored trivial preference is `oneshot`, launch oneshot
+   with `--model opus` or `--model terra`.
+2. **Clear single-agent asks** that fit one context window: `smithers oneshot`.
+3. **Multi-stage, approval-gated, long-horizon, or reusable work**: build and
+   run a real [workflow](/cli/quickstart).
+
+Explicit overrides win over inference: "oneshot" forces oneshot, "oneshot with
+review" adds `--review on`, "oneshot without review" adds `--review off`.
+Ambiguous goals deserve a clarifying question before anything launches.
+
+## Agents and models
+
+Oneshot picks the first usable agent from its chain (codex, then kimi, then
+claude-code, then opencode) unless `--agent` pins one. The kimi seat runs Kimi
+K3 (`kimi-code/k3`, 1M-token context). `--model` accepts a slot (`sol`,
+`terra`, `luna`, `kimi`, `fable`, `opus`, `sonnet`) or a canonical model id;
+the default `auto` follows the seat's registry slot, with review on Sol at
+high reasoning effort.
+
+Run `bunx smithers-orchestrator oneshot --status` before first use. It prints
+the usable agents, the resolved model chain, and the stored preferences as
+JSON; when no usable agent is detected, oneshot is unavailable and work should
+go through the direct or workflow route instead.
+
+## Review and trivial preferences
+
+Two stored preferences shape routing, kept in the global Smithers config:
+
+- **Review** (`--set-review on|off`): add one review-and-polish round after the
+  implement pass. Higher quality, slower. Recommended on.
+- **Trivial** (`--set-trivial direct|oneshot`): whether the most-trivial asks
+  run directly or still launch oneshot. Recommended direct.
+
+`--review on|off` overrides the stored review preference for one run.
+
+## The live dashboard
+
+The oneshot UI shows the run as it happens:
+
+- **Goal and status cards** with the execution metadata (agent, model, chain).
+- **A live status narrator**: a cheap sidecar agent watches the implement and
+  review agents' recorded output and posts one-line "what is it doing"
+  updates into a pulsing status card, so a stuck run is obvious without
+  reading the raw transcript.
+- Chat, diff, hijack, pause, and cancel controls.
+
+On an interactive TTY, `--interactive` opens the full-screen TUI monitor
+instead of the detached default. `--detach false` runs in the foreground.
+
+## Overriding the built-in workflow
+
+A workspace can replace the built-in pipeline with
+`.smithers/workflows/oneshot.tsx`; the CLI passes `goal`, `review`, and
+`model` input fields to it, and uses `.smithers/ui/oneshot.tsx` as the
+dashboard when present. See [Custom workflow UIs](/guides/custom-workflow-ui).
+
+## See also
+
+- [CLI catalog → oneshot](/cli/overview) for the full flag list
+- [Agent operating playbook](/guides/agent-operating-playbook) for routing doctrine

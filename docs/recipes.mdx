@@ -186,10 +186,12 @@ import { OpenAIAgent } from "smithers-orchestrator";
 const researcher  = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" });
 const validator   = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } });
 const reviewer    = new OpenAIAgent({ model: "gpt-5.6-sol", instructions: "...", tools: { read, grep } });
-const implementer = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "...", tools: { read, write, edit, bash } });
+const implementer = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, write, edit, bash } });
 ```
 
-Match the tool surface to the role.
+Match the tool surface to the role. Luna carries only trivial, black-and-white
+work (quick research, mechanical transforms); substantial implementation starts
+on Terra, and the hardest or most ambiguous changes escalate to Sol.
 
 ## Side-effect tools with idempotency
 

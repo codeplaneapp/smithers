@@ -19,7 +19,7 @@ Start a workflow execution. Omit the workflow (or pass --interactive) to pick on
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--detach` | `boolean` | `false` | Run in background, print run ID, exit |
+| `--detach` | `boolean` | `false` | Run in background. Preflight-renders the graph first (a parse/import/graph error prints `file:line:col` and exits non-zero with no run created), then prints run ID/pid/logFile once the run is admitted (up to 10s) |
 | `--runId` | `string` |  | Explicit run ID |
 | `--parentRunId` | `string` |  | Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools) |
 | `--maxConcurrency` | `number` |  | Maximum parallel tasks (default: 4) |

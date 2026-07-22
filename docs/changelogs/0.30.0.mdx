@@ -1,0 +1,203 @@
+---
+title: "0.30.0"
+description: "Smithers 0.30.0 ships a large agentic UI component library, live per-node agent chat and fleet widgets in gateway-ui, a hardened browser viewer, a triage-first Monitor, the new smithers oneshot command, and an updated SOTA model registry with Kimi K3."
+---
+
+**Smithers 0.30.0 is here!** Across the `v0.29.0..HEAD` range that is 168
+commits, 759 files changed, 96,014 insertions and 17,320 deletions, including
+57 feature commits, 73 fix commits (3 of them security fixes), 2 refactors,
+10 test commits, and 18 docs commits. The headline is a
+large new agentic UI component library and the gateway-ui widgets built on
+top of it (live per-node chat, a fleet dashboard), alongside a hardened
+browser viewer, a Monitor overview redesigned around triage, the new
+`smithers oneshot` command for single-agent asks, and a model registry
+update that moves orchestration and gating onto Claude and adds Kimi K3.
+
+## Upgrading
+
+```bash
+bunx smithers-orchestrator update        # upgrade the CLI
+bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smithers-orchestrator packs update  # refresh installed workflow packs
+```
+
+Behavior changes are collected in the [upgrade notes](#upgrade-notes) at the
+bottom.
+
+## An agentic UI component library
+
+Building a UI for an agent run used to mean hand-rolling message bubbles,
+tool-call panels, and diff viewers for every workflow. `packages/ui` now
+ships a component library built for exactly that surface:
+
+- **Conversation:** `Message`, `MessageBranch`, `Bubble`, `MessageScroller`.
+- **Input:** prompt and attachment components.
+- **Agent internals:** reasoning traces, tool-call panels, code blocks.
+- **Work tracking:** plans, tasks, queues, approvals, checkpoints.
+- **Grounding:** sources and citations.
+- **Identity:** agent identity and context components.
+- **Coding artifacts:** stack traces, test results, commits, secrets.
+- **Sandbox previews:** `AgentSandbox`, `WebPreview`, `JSXPreview`.
+- **A workflow canvas** built on `@xyflow/react`, for rendering a run's graph
+  directly in a workflow UI.
+
+The library shipped through ten parallel worktree lanes behind a
+CAS-serialized merge queue, with a dual-reviewed integration pass, so a
+custom workflow UI can now compose these pieces instead of writing markup
+against raw run events. This release also lands a design-contract pass on
+top of the library: cancelled states read as neutral instead of alarming,
+colors and shadows route through shared styleguide tokens, spacing follows a
+2px grid, and pressed-state feedback is consistent across components.
+
+## Live chat and a fleet dashboard in gateway-ui
+
+`gateway-ui` gains the widgets a Monitor or custom workflow UI needs to watch
+more than one thing at a time:
+
+- **`NodeChatStream`** streams an agent's live chat for a single node.
+- **`FleetTable`** and **`NodeStageStrip`** give a fan-out run (many nodes
+  running the same task shape) a dashboard instead of a flat event list.
+- **`RunMeta`** and a **`MonitorButton`** add a one-click deep link from a
+  workflow UI into the run's Monitor page.
+- **`RunEventLog`** is now structured instead of a raw JSON dump: rows are
+  severity-tinted, and repeated heartbeats coalesce instead of scrolling the
+  feed.
+
+## A hardened browser viewer
+
+Smithers can now drive a real browser from a workflow and let you watch it
+happen. The gateway adds a Playwright-driven browser session service:
+`createBrowserSession`, `browserAct`, `browserContext`, `browserPick`,
+`closeBrowserSession`, and `listBrowserSessions`, backed by a live screencast
+in the viewer.
+
+Because a browser session can touch arbitrary pages and arbitrary keystrokes,
+this shipped alongside a hardening pass:
+
+- **Session creation is transactional**, so a failed setup step cannot leave
+  a half-registered session behind.
+- **The pinned browser proxy is tested against DNS rebinding.**
+- **Single-keypress actions aimed at sensitive fields are now redacted.**
+  Only full `type` actions were redacted before; typing a password one key
+  at a time through the viewer leaked each character into the journal and
+  activity broadcast. Both action shapes are redacted now.
+
+## A triage-first Monitor
+
+The Monitor overview used to answer one question: is it done yet? It is now
+organized around triage:
+
+- A **"Needs you"** band surfaces pending approvals, human-parked runs, and
+  recent failures (under 24h) first.
+- An **"Active now"** band lists what is currently running.
+- Operational stats (throughput, counts) move to a demoted footer instead of
+  competing for attention at the top.
+- A **Debug fold** tucks frames and the raw XML tree away until you ask for
+  them.
+- A **keyboard kit** makes triage fast without a mouse: `/` to search, `j`/`k`
+  to move, `Enter` to open, `Esc` to back out.
+
+Every inspector block (Details, Prompt, Tool calls, Transcript, Output, Diff)
+is now a collapsible section that unmounts when closed, so a collapsed
+Transcript stops polling in the background. The inspector also gains a
+**Prompt panel** showing the task's initial prompt. See the
+[Monitor guide](/guides/monitor).
+
+## `smithers oneshot`
+
+Not every ask needs a full workflow. `smithers oneshot` routes a single
+clear task through an implement (and optional review) pipeline, with its own
+live-status dashboard:
+
+```bash
+bunx smithers-orchestrator oneshot "add a loading spinner to the login button"
+```
+
+- The oneshot UI shows a **live status narrator**: a cheap agent watches the
+  implement and review agents' recorded output and posts one-line "what is
+  it doing" updates into a pulsing status card, so you are not staring at a
+  raw transcript to tell whether it is stuck.
+- The `kimi` seat now runs on **Kimi K3** (1M-token context) instead of
+  K2.7.
+
+## Model registry: Claude orchestrates, Kimi K3 joins
+
+The default SOTA model registry moves orchestration and gating decisions
+onto Claude: Opus 4.8 is the default orchestrator at medium reasoning effort,
+Fable 5 holds planning, Codex Sol keeps review, and substantial
+implementation work moves from Luna to Terra. Kimi K3 (1M-token context) is
+newly registered, with usable ids for the Kimi CLI, OpenCode, and the
+Cloudflare AI Gateway.
+
+If you pin agents by name in your own `agents.ts`, this changes nothing;
+if you rely on the shipped defaults, your orchestration and gating calls now
+route to Claude.
+
+## Other improvements
+
+- **Detached runs no longer report success before they exist.** `up -d`,
+  `workflow run -d`, and detached resume now preflight-render the workflow
+  graph before spawning: a parse, import, or graph error prints
+  `file:line:col` and exits non-zero with no run created. Once the graph is
+  valid, the CLI waits up to 10s for proof the run was admitted before
+  printing a success run id.
+- The gateway `listRuns` RPC gains an `offset` filter for server-side
+  pagination over its newest-first run ordering. Zero is a valid offset; a
+  negative or non-integer value is rejected as `INVALID_REQUEST`.
+- A new `OmpAgent` adapter and `omp` engine let Smithers drive the OMP
+  harness, with the full RPC lifecycle handled.
+- `gateway-client` now classifies an unreachable or non-envelope gateway
+  response as `GATEWAY_UNAVAILABLE`. Query collections keep their
+  last-known rows and surface one notice per session instead of spamming
+  `console.error` on every query.
+- A new Recharts-based chart adapter (`ChartContainer`, `ChartTooltip`,
+  `ChartLegend`) ships at `smithers-orchestrator/ui/adapters/chart` with a
+  CVD-validated categorical color palette, for any workflow UI that needs to
+  plot numbers instead of just listing them.
+- The `create-ui` workflow's compliance loop is now hard-gated behind a
+  deterministic scorer (design-system usage, plus mandatory live agent chat
+  for agent workflows), closing prior export bypasses in the structural UI
+  verifier.
+
+## Hardening
+
+73 fix commits, 3 of them security fixes, landed alongside the features above, most
+visibly the browser-viewer redaction fix described earlier. A new 44-case
+deliverable-behavior eval suite now checks whether a doc-grounded agent
+picks the right deliverable shape (a self-contained HTML report versus a
+shipped UI component versus hand-rolled markup), and a release-notes-visual
+eval gates the auto-generated release report on containing real charts with
+honest practice: no dual axis, a visible legend, shipped chart components
+instead of hand-rolled canvas.
+
+257 documentation pages and the Smithers skill were rewritten for concision,
+with mechanical checks (frozen frontmatter, headings, and code fences) and an
+idea-preservation audit pass, so none of the trims should have dropped a
+fact.
+
+## Upgrade notes
+
+There are no breaking changes in 0.30.0.
+
+- **Default orchestration and gating now route to Claude** if you use the
+  shipped SOTA registry defaults rather than a custom `agents.ts`. See the
+  model registry section above.
+- **The `kimi` oneshot seat now runs Kimi K3**, not K2.7.
+- **`listRuns` accepts a new `offset` parameter.** Existing callers that omit
+  it are unaffected; a caller that already passes an invalid offset-shaped
+  value will now get `INVALID_REQUEST` instead of it being ignored.
+- **`gateway-client` no longer logs every failed RPC to `console.error`**
+  when the gateway is unreachable; it logs once per session and classifies
+  the failure as `GATEWAY_UNAVAILABLE` instead.
+- **A detached run can now fail fast before it starts.** If your tooling
+  parses `up -d` output expecting an immediate run id on the happy path, a
+  bad workflow file now exits non-zero with a `file:line:col` error instead
+  of silently succeeding with no run behind it.
+
+## The full changelog
+
+The complete commit-level history for this release is in
+[CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md)
+on GitHub.
+
+Found a bug? Run `bunx smithers-orchestrator bug` to file it.

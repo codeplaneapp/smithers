@@ -2186,6 +2186,89 @@ Before closing:
 
 ---
 
+## Oneshot
+
+> Run one well-scoped goal with a single strong agent in the background, with optional review and a live dashboard. No workflow file to author.
+
+`smithers oneshot` is the built-in minimal workflow: one agent, one goal, no
+authoring. It launches in the background by default and serves a live
+dashboard with chat, diff, hijack, pause, and cancel controls.
+
+```bash
+bunx smithers-orchestrator oneshot "add a loading spinner to the login button"
+bunx smithers-orchestrator oneshot --goal-file TICKET.md
+bunx smithers-orchestrator oneshot "fix the flaky retry test" --review on
+bunx smithers-orchestrator oneshot --status        # usable agents, model chain, preferences
+```
+
+## When to use it
+
+Route work in three tiers:
+
+1. **Trivial asks** (a typo, a rename, an edit under about 10 agent turns): do
+   them directly. If the stored trivial preference is `oneshot`, launch oneshot
+   with `--model opus` or `--model terra`.
+2. **Clear single-agent asks** that fit one context window: `smithers oneshot`.
+3. **Multi-stage, approval-gated, long-horizon, or reusable work**: build and
+   run a real [workflow](/cli/quickstart).
+
+Explicit overrides win over inference: "oneshot" forces oneshot, "oneshot with
+review" adds `--review on`, "oneshot without review" adds `--review off`.
+Ambiguous goals deserve a clarifying question before anything launches.
+
+## Agents and models
+
+Oneshot picks the first usable agent from its chain (codex, then kimi, then
+claude-code, then opencode) unless `--agent` pins one. The kimi seat runs Kimi
+K3 (`kimi-code/k3`, 1M-token context). `--model` accepts a slot (`sol`,
+`terra`, `luna`, `kimi`, `fable`, `opus`, `sonnet`) or a canonical model id;
+the default `auto` follows the seat's registry slot, with review on Sol at
+high reasoning effort.
+
+Run `bunx smithers-orchestrator oneshot --status` before first use. It prints
+the usable agents, the resolved model chain, and the stored preferences as
+JSON; when no usable agent is detected, oneshot is unavailable and work should
+go through the direct or workflow route instead.
+
+## Review and trivial preferences
+
+Two stored preferences shape routing, kept in the global Smithers config:
+
+- **Review** (`--set-review on|off`): add one review-and-polish round after the
+  implement pass. Higher quality, slower. Recommended on.
+- **Trivial** (`--set-trivial direct|oneshot`): whether the most-trivial asks
+  run directly or still launch oneshot. Recommended direct.
+
+`--review on|off` overrides the stored review preference for one run.
+
+## The live dashboard
+
+The oneshot UI shows the run as it happens:
+
+- **Goal and status cards** with the execution metadata (agent, model, chain).
+- **A live status narrator**: a cheap sidecar agent watches the implement and
+  review agents' recorded output and posts one-line "what is it doing"
+  updates into a pulsing status card, so a stuck run is obvious without
+  reading the raw transcript.
+- Chat, diff, hijack, pause, and cancel controls.
+
+On an interactive TTY, `--interactive` opens the full-screen TUI monitor
+instead of the detached default. `--detach false` runs in the foreground.
+
+## Overriding the built-in workflow
+
+A workspace can replace the built-in pipeline with
+`.smithers/workflows/oneshot.tsx`; the CLI passes `goal`, `review`, and
+`model` input fields to it, and uses `.smithers/ui/oneshot.tsx` as the
+dashboard when present. See [Custom workflow UIs](/guides/custom-workflow-ui).
+
+## See also
+
+- [CLI catalog → oneshot](/cli/overview) for the full flag list
+- [Agent operating playbook](/guides/agent-operating-playbook) for routing doctrine
+
+---
+
 ## JSX API
 
 > Author workflows as JSX trees. Smithers renders the tree, dispatches ready tasks, persists outputs, and re-renders. Branching and parallelism are plain JSX conditionals.
@@ -2329,6 +2412,8 @@ the run-wide and group caps compose.
 143 SIGTERM
 ```
 
+A detached launch (`up --detach`, `workflow run --detach`, detached `--resume`) can fail before any run exists: a workflow-file parse/import/graph error exits non-zero with a `file:line:col` error, and an engine that dies before the run is admitted exits non-zero with the child's log tail. Tooling that parses `--detach` output should treat a missing run ID plus non-zero exit as "no run was created".
+
 ## Output envelope and next-step CTAs
 
 On a TTY the CLI prints human-formatted text. When output is piped or captured (any non-TTY consumer, such as an AI agent), each command instead emits a single TOON envelope: the command's `data`, plus a "Next steps" `cta` block that suggests follow-up commands. The `cta` renders as a TOON table:
@@ -2452,7 +2537,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
     flags[37]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -2505,7 +2590,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
     flags[36]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -3088,7 +3173,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
     flags[37]{name,short,type,default,desc}:
-      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
       root,,string,,Tool sandbox root directory
@@ -3281,7 +3366,7 @@ commands[102]:
 
 ## Operational notes
 
-- **Detached mode** (`up --detach`): redirects stdout/stderr to a log file, prints `runId`/`pid`/`logFile`, and exits.
+- **Detached mode** (`up --detach`): preflight-renders the workflow graph before spawning anything (a parse, import, or graph error prints `file:line:col` on stderr and exits non-zero with no run created), then redirects stdout/stderr to a log file, waits up to 10s for proof the run was admitted, prints `runId`/`pid`/`logFile`, and exits. A child that dies before admission prints its log tail and exits non-zero instead of a success run ID. The same preflight and admission gate covers `workflow run --detach` and detached `--resume`.
 - **Serve mode** (`up --serve`): starts the HTTP app and keeps the process alive until interrupted. Add `--supervise` to run stale-run recovery in the same process.
 - **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal.
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
@@ -3823,7 +3908,7 @@ Every agent task produces a reusable session snapshot; use `fork` to start a new
 import { CodexAgent } from "smithers-orchestrator";
 
 const planner = new CodexAgent({ model: "gpt-5.6-sol" });
-const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
 
 const PLAN = "plan" as const;
 const IMPLEMENT = "implement" as const;
@@ -3850,7 +3935,7 @@ const VERIFY = "verify" as const;
 import { CodexAgent } from "smithers-orchestrator";
 
 const researcher = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
-const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
 
 <Task id="investigate" agent={researcher} output={outputs.investigation}>
   Understand the bug and identify possible fixes.
@@ -7361,10 +7446,12 @@ import { OpenAIAgent } from "smithers-orchestrator";
 const researcher  = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" });
 const validator   = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } });
 const reviewer    = new OpenAIAgent({ model: "gpt-5.6-sol", instructions: "...", tools: { read, grep } });
-const implementer = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "...", tools: { read, write, edit, bash } });
+const implementer = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, write, edit, bash } });
 ```
 
-Match the tool surface to the role.
+Match the tool surface to the role. Luna carries only trivial, black-and-white
+work (quick research, mechanical transforms); substantial implementation starts
+on Terra, and the hardest or most ambiguous changes escalate to Sol.
 
 ## Side-effect tools with idempotency
 
@@ -10925,7 +11012,8 @@ tokens, never hex-plus-alpha.
 | `GatewayApprovalList` | The pending approval queue rendered with the agentic `ApprovalCard` anatomy (risk, resources, reviewer note), resolved through `submitApproval`. | `filter`, `note`, `empty`, `onResolved` |
 | `GatewayApprovalConfirmation` | One pending approval row as the `Confirmation` lifecycle anatomy with approve/deny actions, resolved through `submitApproval`. | `approval`, `note`, `onResolved` |
 | `GatewayCheckpointControls` | Durability checkpoint list. Only `rewind` is bound natively (to the Gateway's `rewindRun` RPC); restore/fork/replay/return-to-live render only when the host supplies `onAction`. | `runId`, `checkpoints`, `currentFrameNo`, `onAction`, `onRewound` |
-| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. | `@xyflow/react` `NodeProps` |
+| `WorkflowGraph` | A workflow DAG rendered as an interactive canvas: lays a `WorkflowSpecNode[]` (`id`, `label`, `kind`, `dependsOn?`, `output?`, `status?`) out left-to-right with dagre and renders each node as a `SmithersTaskNode` card (kind kicker, status dot, latest output line). `workflowToFlow(spec)` is exported separately for pure layout without mounting ReactFlow, and `workflowGraphCss` carries the node/edge styles. | `spec`, `nodeTypes`, `className`, `style` |
+| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. Any custom `nodeTypes` renderer must render `SmithersNodeHandles` (target handle left, source handle right) or its edges detach. | `@xyflow/react` `NodeProps` |
 
 `StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
 also exported for building your own rows that match the components, plus the
@@ -12940,11 +13028,16 @@ The command resolves the workspace's singleton gateway like `bunx smithers-orche
 
 ## What you see
 
-- **Workspace operations view**: a paginated, searchable, filterable all-runs page grouped by run state, with an operations summary, scheduled crons, and a Metrics view.
+The overview is organized around triage: what needs you first, what is running now, and the operational numbers last.
+
+- **"Needs you" band**: pending approvals, human-parked runs, and failures from the last 24 hours, first on the page. Each section is row-capped and the rest collapses to "+N more". Approvals decide in place (arm, then confirm), both in the inbox rows and in the health strip's inline gates.
+- **"Active now" band**: one rich row per live run, sorted by triage priority.
+- **Ops footer and Debug fold**: throughput and count stats sit in a demoted footer with a Metrics link, and frames plus the raw XML tree tuck behind a Debug chip until you ask for them.
+- **Keyboard kit**: `/` focuses search, `j`/`k` move the cursor, `Enter` opens the cursor row, `Esc` backs out one level.
 - **Run health and controls**: always-on health diagnosis with one-click recovery where available, plus Pause, Resume, Cancel, approvals, and run-level Scores.
-- **Execution history**: the live expandable tree or XML view, a chronological Timeline, and a frame scrubber for earlier committed states.
-- **Node investigation**: live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal to hijack or reopen supported agent sessions.
-- **Events and navigation**: a filterable live event log with follow mode, shareable `?runId=`/`&nodeId=` deep links, and `?embed=1` for the embeddable run surface.
+- **Execution history**: the live expandable tree or XML view with per-node durations, a chronological Timeline, and a frame scrubber for earlier committed states.
+- **Node investigation**: a collapsible inspector where every section (Details, Prompt, Tool calls, Transcript, Output, Diff) unmounts when closed, so a closed Transcript stops polling in the background. The Prompt section shows the task's initial prompt. Also live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal to hijack or reopen supported agent sessions.
+- **Events and navigation**: a filterable live event log with timestamps and follow mode, shareable `?runId=`/`&nodeId=` deep links, and `?embed=1` for the embeddable run surface.
 - **Connection truth**: Live, Connecting, Offline, and Unauthorized states, each with recovery guidance.
 
 ## How it relates to the other surfaces

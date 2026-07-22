@@ -62,6 +62,7 @@ const CORE_PAGES = [
   "concepts/provenance.mdx",
   "guides/context-engineering.mdx",
   "guides/agent-operating-playbook.mdx",
+  "guides/oneshot.mdx",
   // JSX surface (single page now — installation + quickstart are stubs)
   "jsx/overview.mdx",
   // CLI catalog
@@ -174,6 +175,8 @@ const UI_PAGES = [
   "reference/ui/task-item.mdx",
   "reference/ui/sources.mdx",
   "reference/ui/inline-citation.mdx",
+  "components/code-block.mdx",
+  "components/message-response.mdx",
   "reference/ui/chart.mdx",
   "reference/gateway-react.mdx",
   "guides/workflow-ui-design.mdx",

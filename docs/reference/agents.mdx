@@ -313,6 +313,18 @@ Wraps the Pi CLI and adds extension UI hook support. Key additions: `provider`,
 `onExtensionUiRequest`. See
 [`PiAgentOptions`](/reference/types) and [Pi integration](/integrations/pi-integration).
 
+### OmpAgent
+
+Wraps the Oh My Pi (OMP) harness in headless text, JSON print, or RPC mode.
+Adds `provider`, `mode` (`"text" | "json" | "rpc"`), `thinking` (`"off"` through
+`"max"`, or `"auto"`), `skills` (plural, comma-separated), `hooks`, `maxTime`,
+`autoApprove`, `approvalMode`, and session controls (`resume`, `continueSession`,
+`sessionDir`, `noSession`). A valued `resume` takes precedence over
+`continueSession`; file arguments are rejected in RPC mode. Native hijack is not
+yet supported. See
+[`OmpAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/OmpAgentOptions.ts)
+and [CLI agents → Oh My Pi (OMP)](/integrations/cli-agents).
+
 ### KimiAgent
 
 Wraps the Moonshot `kimi` CLI and auto-isolates `KIMI_SHARE_DIR` per run. Adds

@@ -321,6 +321,80 @@ sanitized URL, with an event whose default action is already prevented.
 
 ---
 
+## CodeBlock
+
+> Render token-themed code with copy, wrapping, line numbers, and a highlighter seam.
+
+`CodeBlock`, the base fenced-code surface from `smithers-orchestrator/ui`, uses
+the shared `--code-bg` and `--code-text` theme tokens and ships no
+syntax-highlighting dependency.
+
+```tsx
+import { CodeBlock } from "smithers-orchestrator/ui";
+
+<CodeBlock
+  code={source}
+  language="typescript"
+  showLineNumbers
+  onCopyCode={(code) => copyThroughYourHost(code)}
+  highlight={(code, language) => tokenAdapter(code, language)}
+/>
+```
+
+The copy button uses `onCopyCode` when provided, else falls back to
+`navigator.clipboard`, and hides when neither is available. A highlighter
+returns readonly `{ text, color? }` token lines; returning `null` or throwing
+renders escaped plain text.
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `code` | `string` | required | Source text to render and copy. |
+| `language` | `string` | none | Optional language label and adapter input. |
+| `showLineNumbers` | `boolean` | `false` | Adds an `aria-hidden` line-number gutter. |
+| `wrap`, `defaultWrap`, `onWrapChange` | controlled trio | `false` | Controls line wrapping. |
+| `showCopy` | `boolean` | `true` | Shows the copy affordance when a copy path exists. |
+| `onCopyCode` | `(code: string) => void` | clipboard fallback | Host-owned copy seam. |
+| `copiedDurationMs` | `number` | `2000` | How long the copied state remains visible. |
+| `highlight` | `CodeBlockHighlighter` | none | Converts source into colored token lines. |
+
+---
+
+## MessageResponse
+
+> Render assistant Markdown safely while content is still streaming.
+
+`MessageResponse` (`smithers-orchestrator/ui`) renders assistant Markdown via
+the dependency-free `Markdown` primitive, keeping incomplete fences and
+inline markers stable across stream chunks, and shows an `aria-hidden` caret
+while `streaming` is true.
+
+```tsx
+import { MessageResponse } from "smithers-orchestrator/ui";
+
+<MessageResponse
+  content={assistantText}
+  streaming={isStreaming}
+  onLinkClick={(href) => navigate(href)}
+/>
+```
+
+`onLinkClick` receives only sanitized `http`, `https`, `mailto`, or
+scheme-less hrefs, once default navigation is prevented; other schemes never
+reach it. The caret stops blinking under reduced-motion preferences.
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `content` | `string` | required | Markdown source, including incomplete streaming chunks. |
+| `streaming` | `boolean` | `false` | Shows the subtle streaming caret. |
+| `onLinkClick` | `MarkdownLinkClick` | none | Handles sanitized link navigation. |
+| native div props | `React.ComponentProps<"div">` | none | Applied to the response root, except `children`. |
+
+---
+
 ## Chart
 
 > Recharts-backed chart primitives with the validated smithers series palette, tooltip, and legend.
@@ -657,14 +731,17 @@ function useGatewayRun(
 Live, bounded run-event buffer (resilient stream with `afterSeq` resume).
 Heartbeats are surfaced separately and never enter `events`; the array is capped
 to `maxEvents`, most-recent wins. Returns its own shape, not `GatewayAsyncState`.
+Frames reconstructed from persisted rows carry an optional `timestampMs` (epoch
+millis from the stored row) so log UIs can render when an event happened without
+a second lookup; those frames surface `stateVersion: 0`.
 
 ```ts
 function useGatewayRunEvents(
   runId: string | undefined,
   options?: { afterSeq?: number; maxEvents?: number },
 ): {
-  events: GatewayEventFrame[];
-  lastHeartbeat: GatewayEventFrame | undefined;
+  events: Array<GatewayEventFrame & { timestampMs?: number }>;
+  lastHeartbeat: (GatewayEventFrame & { timestampMs?: number }) | undefined;
   error: Error | undefined;
   streaming: boolean;
 };
@@ -678,10 +755,11 @@ function useGatewayRunEvents(
   Cap on the retained event buffer.
 </ParamField>
 
-<ResponseField name="events" type="GatewayEventFrame[]">
-  Ordered, capped run events (heartbeats excluded).
+<ResponseField name="events" type="Array<GatewayEventFrame & { timestampMs?: number }>">
+  Ordered, capped run events (heartbeats excluded). `timestampMs` is set on
+  frames reconstructed from persisted rows.
 </ResponseField>
-<ResponseField name="lastHeartbeat" type="GatewayEventFrame | undefined">
+<ResponseField name="lastHeartbeat" type="(GatewayEventFrame & { timestampMs?: number }) | undefined">
   The most recent heartbeat frame, surfaced apart from `events`.
 </ResponseField>
 <ResponseField name="error" type="Error | undefined">
@@ -1330,6 +1408,18 @@ Custom controls suppress the UA ring; give focus back explicitly, and make it fe
   ```
 
 - **Discrete controls** (buttons, links, pills) get a crisp `:focus-visible` ring: `outline: 2px solid var(--brand); outline-offset: 2px;`. Keyboard users must always see where they are.
+
+### Pressed means a step darker, never a transform
+
+Every clickable control gives `:active` feedback by deepening its background with a `color-mix` tint, not by scaling, translating, or adding shadows. Derive the pressed wash from the same tokens as the idle state so it stays correct in both themes and never invents a new hex:
+
+```css
+.button:active:not(:disabled)         { background: color-mix(in srgb, var(--text) 6%, var(--hover)); }
+.button.primary:active:not(:disabled) { background: color-mix(in srgb, var(--brand) 22%, var(--surface)); }
+.button.danger:active:not(:disabled)  { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); }
+```
+
+The shared components ship this recipe already (`:active:not(:disabled)` on every button variant); hand-rolled controls must match it.
 
 ### Motion: short, purposeful, and named
 

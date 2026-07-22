@@ -3,8 +3,9 @@
 // Codex-first roles for the plan/implement family:
 //
 //   - Sol handles planning, review, orchestration, and synthesis.
-//   - Terra handles balanced validation and tool-heavy work.
-//   - Luna handles every implementation and research step.
+//   - Terra handles substantial implementation, balanced validation, and
+//     tool-heavy work.
+//   - Luna is reserved for trivial, black-and-white tasks only.
 //
 // Each planning/review panel seat is a failover chain whose first member is
 // Codex Sol. That shape matters: a flat list would run every provider in
@@ -23,7 +24,7 @@ import { codexFirst } from "../lib/codexAccounts";
 export const SOL_MODEL = process.env.SMITHERS_SOL_MODEL?.trim() || "gpt-5.6-sol";
 export const TERRA_MODEL = process.env.SMITHERS_TERRA_MODEL?.trim() || "gpt-5.6-terra";
 export const IMPLEMENTER_MODEL =
-  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "gpt-5.6-luna";
+  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "gpt-5.6-terra";
 
 const testAgentPath = process.env.SMITHERS_TEST_AGENT_PATH?.trim();
 const testAgentEnv = testAgentPath ? { PATH: testAgentPath } : undefined;
@@ -62,7 +63,7 @@ const terraOptions = {
   skipGitRepoCheck: true,
   env: testAgentEnv,
 } as const;
-const lunaOptions = {
+const implementerOptions = {
   model: IMPLEMENTER_MODEL,
   config: { model_reasoning_effort: "medium" },
   skipGitRepoCheck: true,
@@ -81,8 +82,8 @@ const implementationFallbacks: AgentLike[] = [
   ...(hasKimi ? [kimi] : []),
 ];
 
-/** Luna implementation chain; non-Codex agents engage only when Luna cannot. */
-export const implementer: AgentLike[] = codexFirst(lunaOptions, implementationFallbacks);
+/** Terra implementation chain; non-Codex agents engage only when Terra cannot. */
+export const implementer: AgentLike[] = codexFirst(implementerOptions, implementationFallbacks);
 
 /** Terra validation/mid-tier chain. */
 export const validator: AgentLike[] = codexFirst(terraOptions, implementationFallbacks);

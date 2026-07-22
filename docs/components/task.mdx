@@ -194,7 +194,7 @@ Every agent task produces a reusable session snapshot; use `fork` to start a new
 import { CodexAgent } from "smithers-orchestrator";
 
 const planner = new CodexAgent({ model: "gpt-5.6-sol" });
-const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
 
 const PLAN = "plan" as const;
 const IMPLEMENT = "implement" as const;
@@ -221,7 +221,7 @@ const VERIFY = "verify" as const;
 import { CodexAgent } from "smithers-orchestrator";
 
 const researcher = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
-const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
 
 <Task id="investigate" agent={researcher} output={outputs.investigation}>
   Understand the bug and identify possible fixes.

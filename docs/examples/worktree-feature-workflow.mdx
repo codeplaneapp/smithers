@@ -1,6 +1,6 @@
 ---
 title: "Worktree Feature Workflow"
-description: "A Codex-first pipeline that discovers tickets from a PRD, implements them with GPT-5.6 Luna, validates, reviews with GPT-5.6 Sol, and generates reports, with Claude only as an unavailable-Codex fallback."
+description: "A Codex-first pipeline that discovers tickets from a PRD, implements them with GPT-5.6 Terra, validates, reviews with GPT-5.6 Sol, and generates reports, with Claude only as an unavailable-Codex fallback."
 ---
 
 # Worktree Feature: Full Pipeline
@@ -13,7 +13,7 @@ Claude fallback, through a full development lifecycle.
 ## Pipeline
 
 1. **Discover**: Read PRD, break into ordered independent tickets
-2. **Implement**: Write code end-to-end per ticket with GPT-5.6 Luna
+2. **Implement**: Write code end-to-end per ticket with GPT-5.6 Terra
 3. **Validate**: Run `bun test`
 4. **Review**: GPT-5.6 Sol reviews; Claude only if Codex is unavailable
 5. **ReviewFix**: Address review issues
@@ -100,10 +100,10 @@ const claudeCli = new ClaudeCodeAgent({
 
 const claudeFallback = USE_CLI ? claudeCli : claudeApi;
 
-// Luna owns implementation. Explicit medium effort keeps the direct Luna
-// invocation within the model's supported effort range.
-const codexLuna = new CodexAgent({
-  model: "gpt-5.6-luna",
+// Terra owns substantial implementation; Luna is reserved for trivial,
+// minimal-risk edits. Sol, below, takes the hardest changes and review.
+const codexTerra = new CodexAgent({
+  model: "gpt-5.6-terra",
   config: { model_reasoning_effort: "medium" },
   systemPrompt: SYSTEM_PROMPT,
   yolo: UNSAFE,
@@ -121,7 +121,7 @@ const codexSol = new CodexAgent({
 
 // Smithers tries entries in order and advances only when the preceding agent
 // is unavailable or fails. Claude is never a parallel hot-path reviewer.
-export const implementAgents = [codexLuna, claudeFallback];
+export const implementAgents = [codexTerra, claudeFallback];
 export const reviewAgents = [codexSol, claudeFallback];
 ```
 
@@ -230,7 +230,7 @@ bun install
 
 - **`createSmithers`** registers 6 output schemas; generates typed `tables`, `outputs`, and `Task` components.
 - **`CodexAgent` / `ClaudeCodeAgent`** run real agents with full filesystem access.
-- **Role-specific chains** route implementation to Luna and review to Sol, falling back to Claude only when Codex is unavailable or fails.
+- **Role-specific chains** route implementation to Terra and review to Sol, falling back to Claude only when Codex is unavailable or fails.
 - **`<Loop>`** iterates implement/validate/review/fix until the Codex-first review seat approves or `MAX_REVIEW_ROUNDS` is exhausted.
 - **`ctx.latest(schemaKey, nodeId)`** reads the highest-iteration output for a task.
 - **MDX prompts** -- `.mdx` files serve as JSX-interpolated prompt templates.

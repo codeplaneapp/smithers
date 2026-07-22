@@ -36,12 +36,13 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[13]{class,cli,modelDefault,hijack,notes}:
+agents[14]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
   GeminiAgent,gemini,CLI default,legacy session id,Deprecated legacy Gemini CLI wrapper
   PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
+  OmpAgent,omp,CLI default,not yet,Oh My Pi OMP harness (text/json/rpc modes)
   KimiAgent,kimi,CLI default,native session id,Moonshot Kimi CLI (auto-isolates KIMI_SHARE_DIR)
   ForgeAgent,forge,CLI default,conversation id,Forge CLI (300+ models)
   HermesCliAgent,hermes,CLI default,session id,Nous Research Hermes Agent CLI (hermes -z headless)
@@ -52,7 +53,7 @@ agents[13]{class,cli,modelDefault,hijack,notes}:
   PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
+CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -96,7 +97,7 @@ import { OmpAgent } from "smithers-orchestrator";
 
 const omp = new OmpAgent({
   provider: "openai",
-  model: "gpt-5.2",
+  model: "gpt-5.6-terra",
   mode: "json",
   cwd: process.cwd(),
   autoApprove: true,
@@ -610,7 +611,7 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
+On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, OpenClaw, and OMP stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
 
 ## Notes
 

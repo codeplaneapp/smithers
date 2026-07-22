@@ -447,8 +447,8 @@ describe("extract-prompt barrel and roles", () => {
       const noCli = await run(noCliEnv);
       const active = await run(activeEnv);
       const fallback = await run(fallbackEnv);
-      expect(noCli.models).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
-      expect(noCli.implementer).toEqual([{ type: "CodexAgent", model: "gpt-5.6-luna", opts: { configDir: undefined, env: undefined } }]);
+      expect(noCli.models).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-terra"]);
+      expect(noCli.implementer).toEqual([{ type: "CodexAgent", model: "gpt-5.6-terra", opts: { configDir: undefined, env: undefined } }]);
       expect(noCli.validator).toEqual([{ type: "CodexAgent", model: "gpt-5.6-terra", opts: { configDir: undefined, env: undefined } }]);
       expect(noCli.synthesizer).toEqual([{ type: "CodexAgent", model: "gpt-5.6-sol", opts: { configDir: undefined, env: undefined } }]);
       expect(noCli.fableAuthor).toEqual(noCli.synthesizer);

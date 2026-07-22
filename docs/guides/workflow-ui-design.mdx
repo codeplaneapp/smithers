@@ -200,6 +200,18 @@ Custom controls suppress the UA ring; give focus back explicitly, and make it fe
 
 - **Discrete controls** (buttons, links, pills) get a crisp `:focus-visible` ring: `outline: 2px solid var(--brand); outline-offset: 2px;`. Keyboard users must always see where they are.
 
+### Pressed means a step darker, never a transform
+
+Every clickable control gives `:active` feedback by deepening its background with a `color-mix` tint, not by scaling, translating, or adding shadows. Derive the pressed wash from the same tokens as the idle state so it stays correct in both themes and never invents a new hex:
+
+```css
+.button:active:not(:disabled)         { background: color-mix(in srgb, var(--text) 6%, var(--hover)); }
+.button.primary:active:not(:disabled) { background: color-mix(in srgb, var(--brand) 22%, var(--surface)); }
+.button.danger:active:not(:disabled)  { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); }
+```
+
+The shared components ship this recipe already (`:active:not(:disabled)` on every button variant); hand-rolled controls must match it.
+
 ### Motion: short, purposeful, and named
 
 Animation is fast and earns its place; nothing bounces for decoration.
