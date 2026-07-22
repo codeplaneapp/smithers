@@ -24,15 +24,15 @@ const prompt = (frame: Frame, id: string) => renderPrompt(task(frame, id).prompt
 const row = (nodeId: string, iteration: number, value: Record<string, unknown>) => ({ nodeId, iteration, iterationCount: iteration, ...value });
 
 const WORKFLOW = "converge-agentic-ui-library.tsx";
-const LANE_IDS = ["reasoning-tools", "sandbox-previews", "approvals-checkpoints", "workflow-canvas"];
+const LANE_IDS = ["workflow-canvas"];
 
 describe("converge-agentic-ui-library workflow", () => {
   test("lanes graft prior branches under a scope-locked review contract", async () => {
     const initial = await render(WORKFLOW, {}, {}, { runId: "Conv Run" });
-    const implement = prompt(initial, "conv-sandbox-previews-implement");
-    expect(implement).toContain("agui-fin/run-1784673778698/sandbox-previews");
+    const implement = prompt(initial, "conv-workflow-canvas-implement");
+    expect(implement).toContain("agui-conv/run-1784718901085/workflow-canvas");
     expect(implement).toContain("CLOSED FINDINGS LIST");
-    expect(implement).toContain("frozen Sandbox compound API");
+    expect(implement).toContain("editable mutations");
     const dual = (await import(pathFor(WORKFLOW))) as { CONVERGE_LANES: Array<{ id: string; seats: string[] }> };
     expect(dual.CONVERGE_LANES.find((lane) => lane.id === "workflow-canvas")!.seats).toEqual(["fable", "sol"]);
     expect(optional(initial, "closure-implement")).toBeUndefined();
@@ -45,14 +45,14 @@ describe("converge-agentic-ui-library workflow", () => {
       lgtm: true, exhausted: false, attempts: 1, summary: `Lane ${laneId} LGTM.`, seatVerdicts: [],
     }));
     const withLanes = await render(WORKFLOW, {}, { aguiConvLane: laneRows }, { runId: "Conv Run" });
-    expect(prompt(withLanes, "merge-reasoning-tools")).toContain("update-ref refs/heads/");
+    expect(prompt(withLanes, "merge-workflow-canvas")).toContain("update-ref refs/heads/");
     expect(optional(withLanes, "closure-implement")).toBeUndefined();
 
     const merges = LANE_IDS.map((laneId) => row(`merge-${laneId}`, 0, { laneId, mergedToMain: true, summary: `landed ${laneId}`, commandsRun: [] }));
     const withMerges = await render(WORKFLOW, {}, { aguiConvLane: laneRows, aguiConvMerge: merges }, { runId: "Conv Run" });
     const closure = prompt(withMerges, "closure-implement");
     expect(closure).toContain("MonitorButton");
-    expect(closure).toContain("message-scroller.mdx");
+    expect(closure).toContain("hookComponents.test.tsx");
     expect(optional(withMerges, "cross-adopt-gateway-fable")).toBeUndefined();
 
     const closureGreen = {

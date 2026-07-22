@@ -36,58 +36,26 @@ type ConvergeLane = {
   closedFindings: string[];
 };
 
+// Round 2 (2026-07-22): the first converge run landed reasoning-tools,
+// sandbox-previews, and approvals-checkpoints. Only workflow-canvas remains,
+// scoped to Sol's two genuinely-open findings from that run (Fable already
+// approved; the conv branch below carries everything else).
 export const CONVERGE_LANES: ConvergeLane[] = [
-  {
-    id: "reasoning-tools",
-    seats: ["sol"],
-    priorBranch: `agui-fin/${PRIOR_RUN}/reasoning-tools`,
-    closedFindings: [
-      "Restrict summary parsing to recognized reasoning content parts: parseAgentOutput/Reasoning must not treat a `summary` field on unrelated part kinds as reasoning text.",
-      "Announce streaming state changes accessibly: Reasoning/ChainOfThought streaming transitions get a labelled polite live region (with a reduced-motion-safe presentation).",
-      "Correct every remaining inaccuracy in packages/ui/provenance/reasoning-tools.json and re-aggregate shadcn-provenance.json so the aggregate matches the fragment.",
-      "CodeBlockGroup must generate safe ARIA IDs: never embed opaque caller item IDs verbatim in id/aria-controls attributes.",
-    ],
-  },
-  {
-    id: "sandbox-previews",
-    seats: ["sol"],
-    priorBranch: `agui-fin/${PRIOR_RUN}/sandbox-previews`,
-    closedFindings: [
-      "Reject whole malformed sandbox-token entries: a malformed entry must never be salvaged into an active iframe capability; unknown or malformed tokens fail closed. Adversarial tests cover case, whitespace, duplicates, and escaped separators.",
-      "Ship the frozen Sandbox compound API names: Sandbox, SandboxHeader, SandboxStatus, SandboxActions, SandboxContent (provisioning/ready/disconnected/suspended/failed/destroyed states, retry/reconnect actions, workspace identity).",
-      "Announce sandbox/preview lifecycle changes via an accessible live region.",
-      "Controlled WebPreview URL changes clear stale validation errors.",
-    ],
-  },
-  {
-    id: "approvals-checkpoints",
-    seats: ["sol"],
-    priorBranch: `agui-fin/${PRIOR_RUN}/approvals-checkpoints`,
-    closedFindings: [
-      "Make approval identity reset async-safe: an in-flight submit for a previous approval id must never settle state for the current one (test with interleaved async submissions).",
-      "Isolate observer callbacks: an exception thrown by a consumer-provided observer/callback must not convert a successful mutation into a failure state.",
-      "Synchronize public exports and provenance for the approvals/checkpoints families: barrel exports, provenance fragment, and aggregate all agree.",
-    ],
-  },
   {
     id: "workflow-canvas",
     seats: ["fable", "sol"],
-    priorBranch: `agui-fin/${PRIOR_RUN}/workflow-canvas`,
+    priorBranch: "agui-conv/run-1784718901085/workflow-canvas",
     closedFindings: [
-      "Mounted WorkflowGraph node focus is visible and named: keyboard-focused nodes get a visible focus indicator and an accessible name.",
-      "Read-only and selection contracts are honest: readOnly disables connect/drag mutations for real, and selection state renders truthfully.",
-      "Roving tabindex never focuses newly disabled controls, and the roving handler ignores modifier-key chords.",
-      "WorkflowEdge status is not color-only: add a non-color signifier (pattern, label, or icon).",
-      "Renderer colors resolve through house tokens (no bypassing hex/rgb in the graph renderer layer).",
-      "Complete the canvas provenance fragment and re-aggregate.",
+      "Wire mounted selection and editable mutations for real: in the DEFAULT mounted WorkflowGraph, node selection updates selection state truthfully and editable mutations (connect/drag) actually operate when editable; readOnly still disables them. Add a mounted (not SSR/source-string) test proving both paths.",
+      "Fix the invalid ARIA role: WorkflowNode currently renders role=\"option\" outside any listbox context. Use a valid rendered-context role structure (e.g. listbox on the container with option children, or button/group roles) and assert the accessible tree in a mounted test.",
     ],
   },
 ];
 
 export const CLOSURE_ITEMS = [
-  "1. Fix the architecture violation on packages/gateway-ui/src/MonitorButton.tsx flagged by node scripts/check-ui-architecture.mjs on current main (bring the file into compliance; do not baseline it).",
-  "2. Document the MessageScroller compound API: docs/reference/ui/message-scroller.mdx still documents only the flat API — add the Provider/Scroller/Viewport/Content/Item/Button anatomy (with the compat note for the flat form), then run node scripts/check-docs.mjs and regenerate llms bundles (pnpm docs:llms) ONLY if `jj st` shows no foreign uncommitted docs changes.",
-  "3. Re-run the seven smithers gates green (the compute CI task after you does this authoritatively; leave the tree green).",
+  "1. check-ui-architecture is RED on committed main: packages/gateway-ui/src/MonitorButton.tsx flags 'compatibility-facade-file :: legacy facade implementation' plus an inventory uiImports gain. A prior 'sanction' commit updated the guard but the violation persists. Fix it properly: either make MonitorButton comply with the guard's facade rules (preferred — check how sibling gateway-ui files satisfy the compatibility-facade-file rule) or add the exact ratchet/baseline entries the guard requires (scripts/ui-architecture-baseline.json inventory adds). `node scripts/check-ui-architecture.mjs` must exit 0. Do NOT weaken the guard logic itself.",
+  "2. tests/hookComponents.test.tsx 'RunEventLog > coalesces consecutive per-node heartbeats and toggles to show them all' fails (expects 3 event rows, gets 2) since commit 7d86e81e99 rewrote RunEventLog with structured severity-tinted rows. Read the NEW RunEventLog implementation and determine the intended heartbeat contract: if heartbeats are now intentionally hidden/folded differently, update the test to pin the NEW contract (including the show-heartbeats toggle behavior); if heartbeat coalescing genuinely regressed (heartbeat rows dropped where the UI intends to show a coalesced row), fix RunEventLog instead. Wrap state-updating interactions in act() to clear the warnings. `pnpm -C packages/gateway-ui test` must pass 145/145.",
+  "3. Leave every gate green: pnpm -C packages/ui test, pnpm -C packages/gateway-ui test, node scripts/check-ui-architecture.mjs, node scripts/check-docs.mjs (the compute CI task after you re-runs the full set authoritatively).",
 ].join("\n");
 
 const inputSchema = z.object({
