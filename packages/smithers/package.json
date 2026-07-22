@@ -1,6 +1,6 @@
 {
   "name": "smithers-orchestrator",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "description": "Multi-agent workflows with full observability and time travel: watch every step live, rewind, fork, and replay any run. Claude Code, Codex, Gemini, any model or harness.",
   "license": "MIT",
   "homepage": "https://smithers.sh",

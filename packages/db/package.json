@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/db",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "description": "SQLite and Drizzle persistence adapter for Smithers workflows",
   "type": "module",
   "sideEffects": false,
