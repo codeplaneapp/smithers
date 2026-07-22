@@ -24,13 +24,12 @@ their default.
 
 `input` is a reserved schema key on `createSmithers(...)` that controls the
 TypeScript type of `ctx.input`; every other key is an output schema and becomes
-a typed output ref under `outputs.<key>`. Fresh runs validate the input row
-against the generated input table before insert, but Smithers does **not** call
-`inputSchema.parse()` or write Zod defaults back into `ctx.input`. Treat
-required Zod fields as the authored TypeScript contract; for fields a CLI/UI
-caller may omit, use `.optional()` / `.nullable()` and coalesce inside the
-workflow (`ctx.input.dryRun ?? false`), or add an early compute task with
-stricter Zod parsing.
+a typed output ref under `outputs.<key>`. Fresh runs and graph previews parse
+input through this schema before rendering, so Zod defaults and transforms are
+available in `ctx.input`. The parsed fresh-run input is persisted; previews do
+not persist or mutate input. Treat required Zod fields as the authored
+TypeScript contract. For fields intentionally declared `.optional()` or
+`.nullable()`, coalesce inside the workflow (`ctx.input.dryRun ?? false`).
 
 Prefer `output={outputs.someKey}` on tasks, approvals, sandboxes, and subflows:
 the `outputs` object holds the exact Zod schema objects passed to
