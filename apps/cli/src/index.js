@@ -5628,15 +5628,34 @@ const cli = Cli.create({
                 startedBySession: c.options.startedBySession,
                 startedByPrompt: c.options.startedByPrompt,
             });
+            const admissionNonce = crypto.randomUUID();
             const fd = openSync(logFile, "a");
-            const child = spawn("bun", childArgs, {
-                cwd: taskCwd,
-                detached: true,
-                stdio: ["ignore", fd, fd],
-                env: { ...process.env, SMITHERS_ONESHOT_RUN_ID: effectiveRunId, [DETACHED_RUN_LOG_FILE_ENV]: logFile },
-            });
-            closeSync(fd);
+            let child;
+            try {
+                child = spawn("bun", childArgs, {
+                    cwd: taskCwd,
+                    detached: true,
+                    stdio: ["ignore", fd, fd],
+                    env: {
+                        ...process.env,
+                        SMITHERS_ONESHOT_RUN_ID: effectiveRunId,
+                        [DETACHED_RUN_LOG_FILE_ENV]: logFile,
+                        [DETACHED_ADMISSION_NONCE_ENV]: admissionNonce,
+                    },
+                });
+            }
+            finally {
+                closeSync(fd);
+            }
             child.unref();
+            const admission = await waitForDetachedAdmission({ child, logFile, nonce: admissionNonce });
+            if (!admission.admitted) {
+                terminateUnadmittedChild(child);
+                const tail = admission.tail.trimEnd();
+                const message = `${admission.reason}\nDetached child log (${logFile}):\n${tail || "(empty)"}`;
+                process.stderr.write(`${message}\n`);
+                return fail({ code: "DETACHED_ADMISSION_FAILED", message, exitCode: 1 });
+            }
             return c.ok({ runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" }, {
                 cta: oneshotCta(effectiveRunId),
             });
@@ -5684,7 +5703,7 @@ const cli = Cli.create({
                 return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
             }
             finally {
-                statusUpdater.stop();
+                await statusUpdater.stop();
             }
         }
         catch (error) {

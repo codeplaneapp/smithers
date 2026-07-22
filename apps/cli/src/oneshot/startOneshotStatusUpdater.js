@@ -58,14 +58,14 @@ export function cleanStatusLine(text) {
  * swallowed — status narration must never break the oneshot run it watches.
  *
  * @param {{ db: any; runId: string; goal: string; cwd: string; env?: NodeJS.ProcessEnv }} options
- * @returns {{ stop: () => void }}
+ * @returns {{ stop: () => Promise<void> }}
  */
 export function startOneshotStatusUpdater(options) {
     const env = options.env ?? process.env;
-    let candidates = listNarratorCandidates(env, options.cwd);
+    let candidates = options.candidates ?? listNarratorCandidates(env, options.cwd);
     if (oneshotCodexPaused(env)) candidates = candidates.filter((candidate) => candidate.id !== "codex");
-    if (candidates.length === 0) return { stop() { } };
-    const adapter = new SmithersDb(options.db);
+    if (candidates.length === 0) return { stop() { return Promise.resolve(); } };
+    const adapter = options.adapter ?? new SmithersDb(options.db);
     const state = {
         stopped: false,
         inFlight: false,
@@ -79,12 +79,17 @@ export function startOneshotStatusUpdater(options) {
         /** @type {string | undefined} */
         threadId: undefined,
         failures: 0,
+        activeTick: undefined,
+        abortController: undefined,
     };
 
     function stop() {
-        if (state.stopped) return;
-        state.stopped = true;
+        if (!state.stopped) {
+            state.stopped = true;
+            state.abortController?.abort();
+        }
         clearInterval(timer);
+        return state.activeTick ?? Promise.resolve();
     }
 
     async function narrate() {
@@ -101,9 +106,11 @@ export function startOneshotStatusUpdater(options) {
         try {
             /** @type {string | undefined} */
             let threadId;
+            state.abortController = new AbortController();
             const generated = await state.agent.generate({
                 prompt,
                 timeout: { totalMs: NARRATE_TIMEOUT_MS },
+                abortSignal: state.abortController.signal,
                 ...(canResume ? { resumeSession: state.threadId } : {}),
                 onEvent: (/** { resume?: unknown } */ event) => {
                     if (typeof event?.resume === "string") threadId = event.resume;
@@ -112,9 +119,11 @@ export function startOneshotStatusUpdater(options) {
             const raw = typeof generated === "string" ? generated : (generated?.text ?? "");
             const line = cleanStatusLine(raw);
             if (!line) throw new Error("narrator returned an empty status line");
+            if (state.stopped) return;
             state.delta = "";
             state.failures = 0;
             if (threadId) state.threadId = threadId;
+            if (state.stopped) return;
             const timestampMs = Date.now();
             await runPromise(adapter.insertEventWithNextSeqEffect({
                 runId: options.runId,
@@ -132,6 +141,7 @@ export function startOneshotStatusUpdater(options) {
             }));
         }
         catch {
+            if (state.stopped) return;
             state.failures += 1;
             state.agent = undefined;
             state.threadId = undefined;
@@ -145,6 +155,9 @@ export function startOneshotStatusUpdater(options) {
                 }
             }
         }
+        finally {
+            state.abortController = undefined;
+        }
     }
 
     async function tick() {
@@ -152,6 +165,7 @@ export function startOneshotStatusUpdater(options) {
         state.inFlight = true;
         try {
             const events = await adapter.listEvents(options.runId, state.afterSeq, 1000);
+            if (state.stopped) return;
             for (const event of events) {
                 const seq = Number(event.seq ?? 0);
                 if (Number.isFinite(seq) && seq > state.afterSeq) state.afterSeq = seq;
@@ -180,7 +194,14 @@ export function startOneshotStatusUpdater(options) {
         }
     }
 
-    const timer = setInterval(() => { void tick(); }, POLL_MS);
+    const timer = setInterval(() => {
+        if (state.stopped || state.inFlight) return;
+        const activeTick = tick();
+        state.activeTick = activeTick;
+        void activeTick.finally(() => {
+            if (state.activeTick === activeTick) state.activeTick = undefined;
+        });
+    }, options.pollMs ?? POLL_MS);
     if (typeof timer.unref === "function") timer.unref();
     return { stop };
 }

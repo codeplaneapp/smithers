@@ -59,6 +59,10 @@ smithers oneshot "<goal>" [flags]
   browser (same opener as `smithers ui`).
 - On success prints runId + cta next steps: `ui <runId>`, `chat <runId>`,
   `hijack <runId>`, `pause <runId>`, `cancel <runId>`.
+- Detached success requires admission proof from the persisted run row; a child
+  that fails before admission returns a diagnostic failure and no run ID.
+- Foreground oneshot teardown awaits narrator shutdown before returning or
+  closing workflow resources.
 
 Availability gate: `smithers oneshot` is unavailable when none of the four CLIs
 {claude, codex, kimi, opencode} is usable per `detectAvailableAgents()`
