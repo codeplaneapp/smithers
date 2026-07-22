@@ -81,7 +81,6 @@ export type {
   ResumeRunRequest,
   ResumeRunResponse,
   RewindRunRequest,
-  RunStartedBy,
   SmithersApiVersion,
   StreamDevToolsRequest,
   StreamRunEventsRequest,

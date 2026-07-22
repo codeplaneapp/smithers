@@ -38,7 +38,6 @@ import type {
   RewindRunRequest,
   ResumeRunRequest,
   ResumeRunResponse,
-  RunStartedBy,
   StreamDevToolsRequest,
   StreamRunEventsRequest,
   StreamRunEventsResponse,
