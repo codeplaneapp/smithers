@@ -56,14 +56,16 @@ describe("testing framework production error parity", () => {
   test("family 1: production child-process spawn failure at its native boundary", async () => {
     const command = "smithers-testing-binary-that-does-not-exist";
     const simulatedSpawnError = () => {
-      // The double mirrors the FULL native ENOENT cause the production spawn
-      // path throws — errno/path/spawnargs/syscall included, because the
-      // serializer compares them now.
+      // The double mirrors the native ENOENT cause the production spawn path
+      // throws — errno/path/syscall included, because the serializer compares
+      // them now. `spawnargs` is intentionally absent: the driver strips it
+      // from spawn causes so raw argv (which can carry secrets) never reaches
+      // durable error records.
       const cause = simulationNativeError({
         className: "Error",
         message: `Executable not found in $PATH: "${command}"`,
         code: "ENOENT",
-        extra: { errno: -2, path: command, spawnargs: [], syscall: `spawn ${command}` },
+        extra: { errno: -2, path: command, syscall: `spawn ${command}` },
       });
       return simulationSmithersError("PROCESS_SPAWN_FAILED", `spawn ${command}: ${cause.message}`, {
         details: { command, args: [], cwd: process.cwd(), timeoutMs: undefined, idleTimeoutMs: undefined, operation: `spawn ${command}` },

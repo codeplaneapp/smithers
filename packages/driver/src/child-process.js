@@ -22,11 +22,15 @@ function sanitizeSpawnCause(cause) {
     if (!(cause instanceof Error))
         return cause;
     const safe = new Error(cause.message);
-    safe.name = cause.name;
+    // Assign `name` only when it deviates from Error's inherited default:
+    // an unconditional write would create an own property the original error
+    // never had, changing its serialized shape beyond the spawnargs removal.
+    if (cause.name !== safe.name)
+        safe.name = cause.name;
     if (cause.stack)
         safe.stack = cause.stack;
     for (const key of Object.keys(cause)) {
-        if (key !== "spawnargs")
+        if (key !== "spawnargs" && key !== "name")
             safe[key] = cause[key];
     }
     return safe;
