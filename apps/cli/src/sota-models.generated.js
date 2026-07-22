@@ -4,7 +4,7 @@
 // default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model
 // bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.
 
-export const SOTA_REGISTRY_VERSION = 4;
+export const SOTA_REGISTRY_VERSION = 5;
 
 export const SOTA_REGISTRY_UPDATED_AT = "2026-07-21";
 
@@ -338,6 +338,20 @@ export const SOTA_MODELS = Object.freeze([
       "research"
     ],
     "description": "Moonshot's open-source (modified MIT) trillion-parameter MoE flagship: native multimodal, agent swarms up to 300 sub-agents, up to 13 hours of continuous coding. Ties GPT-5.5 on SWE-Bench Pro at roughly 80% lower cost. The strongest model you can self-host."
+  },
+  {
+    "id": "kimi-k3",
+    "slot": null,
+    "provider": "moonshot",
+    "name": "Kimi K3",
+    "status": "sota",
+    "engines": [
+      "kimi",
+      "opencode"
+    ],
+    "badges": [],
+    "roles": [],
+    "description": "Moonshot's newest long-context model, served on Kimi-for-Coding: a 1M-token context window with thinking plus image and video input. Its niche is very-long-context coding and mid-run model swaps where a huge window absorbs accumulated state. Exact usable ids: `kimi-code/k3` in the Kimi CLI, `kimi-for-coding/k3` in OpenCode, `moonshotai/kimi-k3` via Cloudflare AI Gateway."
   },
   {
     "id": "claude-sonnet-4-6",

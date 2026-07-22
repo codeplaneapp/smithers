@@ -13017,11 +13017,11 @@ Artifacts are Smithers JSON records with baseline score, optimized score, improv
 
 ## SOTA models
 
-> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v4, updated 2026-07-21.
+> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v5, updated 2026-07-21.
 
 {/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
 
-**Registry v4** · updated **2026-07-21**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
+**Registry v5** · updated **2026-07-21**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
 
 ## Badges
 
@@ -13194,6 +13194,12 @@ The high-throughput K2.7-Code variant, around 180 tokens per second. The open-we
 **Best open source** · current · released 2026-04-20 · engines: `kimi` · roles: research
 
 Moonshot's open-source (modified MIT) trillion-parameter MoE flagship: native multimodal, agent swarms up to 300 sub-agents, up to 13 hours of continuous coding. Ties GPT-5.5 on SWE-Bench Pro at roughly 80% lower cost. The strongest model you can self-host.
+
+### Kimi K3 (`kimi-k3`)
+
+state of the art · engines: `kimi`, `opencode`
+
+Moonshot's newest long-context model, served on Kimi-for-Coding: a 1M-token context window with thinking plus image and video input. Its niche is very-long-context coding and mid-run model swaps where a huge window absorbs accumulated state. Exact usable ids: `kimi-code/k3` in the Kimi CLI, `kimi-for-coding/k3` in OpenCode, `moonshotai/kimi-k3` via Cloudflare AI Gateway.
 
 ## Benchmarks
 
