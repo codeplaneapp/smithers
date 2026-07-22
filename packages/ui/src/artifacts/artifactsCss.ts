@@ -19,7 +19,7 @@ export const artifactsCss = `
 .sui-artifact-action { display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:26px; padding:0 6px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:${t.fontSizeCompact}; cursor:pointer; }
 .sui-artifact-action:hover { background:${t.secondary}; color:${t.foreground}; }
 .sui-artifact-action:focus-visible { ${focusRing} }
-.sui-artifact-close { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:14px; line-height:1; cursor:pointer; }
+.sui-artifact-close { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:18px; line-height:1; cursor:pointer; }
 .sui-artifact-close:hover { background:${t.secondary}; color:${t.foreground}; }
 .sui-artifact-close:focus-visible { ${focusRing} }
 .sui-artifact-content { padding:12px; min-width:0; }
@@ -106,9 +106,9 @@ a.sui-pkginfo-name:hover { text-decoration:underline; text-underline-offset:3px;
 .sui-commit-timestamp { font-size:${t.fontSizeCompact}; color:${t.mutedForeground}; }
 .sui-commit-actions { display:inline-flex; align-items:center; gap:4px; }
 .sui-commit-files { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; border:1px solid ${t.border}; border-radius:${t.radiusControl}; overflow:hidden; }
-.sui-commit-file { display:flex; align-items:baseline; gap:8px; padding:3px 10px; font-family:${t.fontMono}; font-size:${t.fontSizeCompact}; }
+.sui-commit-file { display:flex; align-items:baseline; gap:8px; padding:4px 10px; font-family:${t.fontMono}; font-size:${t.fontSizeCompact}; }
 .sui-commit-file + .sui-commit-file { border-top:1px solid ${t.border}; }
-.sui-commit-file-status { flex:none; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:4px; font-size:10px; font-weight:700; }
+.sui-commit-file-status { flex:none; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:4px; font-size:10px; font-weight:650; }
 .sui-commit-file-status[data-tone='ok'] { color:${t.success}; background:${t.successSoft}; }
 .sui-commit-file-status[data-tone='bad'] { color:${t.destructive}; background:${t.destructiveSoft}; }
 .sui-commit-file-status[data-tone='warn'] { color:${t.warning}; background:${t.warningSoft}; }

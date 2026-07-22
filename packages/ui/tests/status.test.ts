@@ -28,8 +28,10 @@ describe("statusClass", () => {
     expect(statusClass("continued")).toBe("ok");
     expect(statusClass("succeeded")).toBe("ok");
     expect(statusClass("produced")).toBe("ok");
-    expect(statusClass("cancelled")).toBe("bad");
-    expect(statusClass("canceled")).toBe("bad");
+    // A user cancel is a neutral outcome, not a failure -- muted, matching
+    // the styleguide badge vocabulary and gateway-ui's RunEventLog.
+    expect(statusClass("cancelled")).toBe("muted");
+    expect(statusClass("canceled")).toBe("muted");
     expect(statusClass("stale")).toBe("bad");
     expect(statusClass("orphaned")).toBe("bad");
     expect(statusClass("denied")).toBe("bad");
@@ -41,19 +43,19 @@ describe("statusClass", () => {
 describe("status colors", () => {
   test("uses one token color per shared status class", () => {
     expect(statusColors.ok).toBe("var(--success, #087461)");
-    expect(statusColors.warn).toBe("var(--warning, #955600)");
+    expect(statusColors.warn).toBe("var(--warning, #916000)");
     expect(statusColors.bad).toBe("var(--danger, #c5343f)");
     expect(statusColors.muted).toBe("var(--text-muted, #52525b)");
     expect(statusColors.run).toBe("var(--brand, #6d56d8)");
     expect(statusColors.running).toBe(statusColors.run);
-    expect(statusColors.cancelled).toBe(statusColors.bad);
+    expect(statusColors.cancelled).toBe(statusColors.muted);
   });
 
   test("routes aliases through statusClass before choosing a color", () => {
     expect(statusColor("RUNNING")).toBe(statusColors.run);
     expect(statusColor("in_progress")).toBe(statusColors.run);
     expect(statusColor("produced")).toBe(statusColors.ok);
-    expect(statusColor("cancelled")).toBe(statusColors.bad);
+    expect(statusColor("cancelled")).toBe(statusColors.muted);
     expect(statusColor("something-new")).toBe(statusColors.muted);
   });
 });

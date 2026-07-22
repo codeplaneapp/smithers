@@ -26,7 +26,7 @@ export const plansTasksQueuesCss = `
 .sui-agenttask-trigger:focus-visible { ${focusRing} }
 .sui-agenttask-chevron { display:inline-flex; align-items:center; justify-content:center; width:12px; flex:none; color:${t.mutedForeground}; font-size:18px; line-height:1; transform:rotate(0deg); transition:transform .12s ease; }
 .sui-agenttask-trigger[aria-expanded='true'] .sui-agenttask-chevron { transform:rotate(90deg); }
-.sui-agenttask-title { min-width:0; flex:1 1 auto; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sui-agenttask-title { min-width:0; flex:1 1 auto; font-size:13px; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sui-agenttask-content { min-width:0; padding:6px 10px 10px; border-top:1px solid ${t.border}; }
 .sui-agenttask-group { min-width:0; display:grid; gap:6px; }
 
@@ -37,7 +37,7 @@ export const plansTasksQueuesCss = `
 .sui-queue-section-trigger:focus-visible { ${focusRing} }
 .sui-queue-section-chevron { display:inline-flex; align-items:center; justify-content:center; width:12px; flex:none; color:${t.mutedForeground}; font-size:18px; line-height:1; transform:rotate(0deg); transition:transform .12s ease; }
 .sui-queue-section-trigger[aria-expanded='true'] .sui-queue-section-chevron { transform:rotate(90deg); }
-.sui-queue-section-label { min-width:0; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600; }
+.sui-queue-section-label { min-width:0; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:650; }
 .sui-queue-section-icon { display:inline-flex; align-items:center; flex:none; color:${t.mutedForeground}; }
 .sui-queue-section-count { flex:none; padding:0 6px; border-radius:999px; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-size:10px; font-variant-numeric:tabular-nums; line-height:16px; }
 .sui-queue-section-content { min-width:0; border-top:1px solid ${t.border}; }
@@ -68,7 +68,7 @@ export const plansTasksQueuesCss = `
 .sui-activity-detail { min-width:0; margin-top:2px; padding:8px 10px; border-radius:${t.radiusControl}; background:${t.surface2}; color:${t.mutedForeground}; font-size:${t.fontSizeCompact}; line-height:1.45; }
 .sui-activity-group { min-width:0; padding:6px 0 6px 2px; }
 .sui-activity-group + .sui-activity-item, .sui-activity-item + .sui-activity-group, .sui-activity-group + .sui-activity-group { border-top:1px solid ${t.border}; }
-.sui-activity-group-label { color:${t.mutedForeground}; font-size:11px; font-weight:600; letter-spacing:0.02em; text-transform:uppercase; }
+.sui-activity-group-label { color:${t.mutedForeground}; font-size:11px; font-weight:650; letter-spacing:0.02em; text-transform:uppercase; }
 .sui-activity-group-items { min-width:0; margin:4px 0 0; padding:0; list-style:none; display:grid; gap:0; }
 
 .sui-taskitem-file-icon { display:inline-flex; align-items:center; margin-right:3px; color:${t.mutedForeground}; }

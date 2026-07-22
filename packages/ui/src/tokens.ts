@@ -57,6 +57,11 @@ export const tokens = {
   secondaryForeground: "var(--text, #18181b)",
   muted: "var(--hover, #f4f4f5)",
   mutedForeground: "var(--text-muted, #52525b)",
+  /**
+   * shadcn's "accent" = the hover fill. Trap: the styleguide's page-global
+   * `--accent` alias is the BRAND violet -- same word, different color. This
+   * bridge deliberately does NOT read `--accent`.
+   */
   accent: "var(--hover, #f4f4f5)",
   accentForeground: "var(--text, #18181b)",
   destructive: "var(--danger, #c5343f)",
@@ -65,25 +70,29 @@ export const tokens = {
   success: "var(--success, #087461)",
   successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #087461) 12%, var(--surface, #ffffff)))",
   successBorder: "var(--success-border, color-mix(in srgb, var(--success, #087461) 40%, transparent))",
-  warning: "var(--warning, #955600)",
-  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #955600) 12%, var(--surface, #ffffff)))",
-  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #955600) 40%, transparent))",
-  info: "var(--info, #2f6fde)",
-  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #2f6fde) 10%, var(--surface, #ffffff)))",
-  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #2f6fde) 40%, transparent))",
+  warning: "var(--warning, #916000)",
+  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #916000) 12%, var(--surface, #ffffff)))",
+  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #916000) 40%, transparent))",
+  info: "var(--info, #2a63c9)",
+  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #2a63c9) 10%, var(--surface, #ffffff)))",
+  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #2a63c9) 40%, transparent))",
   /** Hairline borders. */
   border: "var(--border, rgba(24,24,27,0.08))",
   borderStrong: "var(--border-strong, rgba(24,24,27,0.14))",
   /** Form control borders (slightly stronger). */
   input: "var(--border-solid, #e4e4e7)",
-  /** Focus ring fill; pair with a 50% brand border-color (the house focus rule). */
-  ring: "color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent)",
-  ringBorder: "color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent)",
+  /**
+   * Focus ring fill; pair with a 50% brand border-color (the house focus
+   * rule). Routed through the styleguide's `--ring`/`--ring-border` custom
+   * properties so a host that themes the ring re-themes these components too.
+   */
+  ring: "var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))",
+  ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))",
   /** Extra-subtle fill for chips and hover washes. */
   hoverSubtle: "var(--hover-subtle, rgba(24,24,27,0.04))",
   /** Faint text (placeholders use --text-placeholder). */
   textFaint: "var(--text-faint, #71717a)",
-  placeholder: "var(--text-placeholder, #9f9fa8)",
+  placeholder: "var(--text-placeholder, #8a8a93)",
   /** Inverse surface/text (tooltips, "ink" chips). */
   inverseBg: "var(--inverse-bg, #18181b)",
   inverseText: "var(--inverse-text, #fafafa)",
@@ -92,17 +101,31 @@ export const tokens = {
   codeText: "var(--code-text, #f4f4f5)",
   /** Shadow base as space-separated RGB channels, for `rgb(${tokens.shadowRgb} / a)`. */
   shadowRgb: "var(--shadow-rgb, 24 24 27)",
-  /** Card corner radius. Controls use `radiusControl`. */
+  /**
+   * Elevation shadows, routed through the styleguide's `--shadow-*` custom
+   * properties so dark mode gets the stronger house alphas (a fixed light
+   * alpha is nearly invisible on dark surfaces) and hosts can theme them.
+   */
+  shadow1: "var(--shadow-1, 0 1px 2px rgb(24 24 27 / 0.05))",
+  shadow2: "var(--shadow-2, 0 1px 2px rgb(24 24 27 / 0.04), 0 8px 24px rgb(24 24 27 / 0.07))",
+  shadow3: "var(--shadow-3, 0 4px 12px rgb(24 24 27 / 0.10), 0 16px 48px rgb(24 24 27 / 0.14))",
+  /** Card corner radius. Controls use `radiusControl`; chat surfaces use `radiusBubble`. */
   radius: "var(--r-2, 10px)",
   radiusControl: "var(--r-1, 6px)",
+  radiusBubble: "var(--r-bubble, 18px)",
   /** Shared control height (buttons, inputs, selects, triggers). */
   controlHeight: "var(--ctl-h, 32px)",
   /** Compact UI copy: the documented 12px type-scale step. */
   fontSizeCompact: "var(--fs-2, 12px)",
+  /**
+   * Font stacks routed through the styleguide's `--font-sans`/`--font-mono`
+   * so hosts can theme typography; fallbacks are the canonical house stacks
+   * (identical in ui-styleguide and gateway-ui -- keep all three in sync).
+   */
   fontSans:
-    'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    "var(--font-sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",
   fontMono:
-    'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace',
+    "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
 } as const;
 
 export type SmithersUiTokens = typeof tokens;

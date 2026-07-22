@@ -11,9 +11,9 @@ export type StageStripItem = {
   label: ReactNode;
   /**
    * A status string from the shared vocabulary. `done`/`ok`/`complete` tint
-   * green, `failed`/`error`/`cancelled` tint red, `active`/`running`/`current`
-   * highlight brand, and everything else (`pending`, `queued`, undefined, ...)
-   * reads as neutral/upcoming.
+   * green, `failed`/`error` tint red, `active`/`running`/`current` highlight
+   * brand, and everything else (`pending`, `queued`, `cancelled`, undefined,
+   * ...) reads as neutral/upcoming.
    */
   status: string | undefined;
 };

@@ -2,7 +2,7 @@ export const SANDBOX_CSS_ID = "sandbox-previews";
 
 export const sandboxCss = `
 .sui-sandbox { border:1px solid var(--border, rgba(24,24,27,0.08)); border-radius:var(--r-2, 10px); background:var(--surface, #ffffff); overflow:hidden; }
-.sui-sandbox-trigger { display:flex; align-items:center; gap:6px; width:100%; padding:8px 10px; border:0; background:transparent; color:var(--text, #18181b); font:inherit; font-size:var(--fs-2, 12px); font-weight:600; cursor:pointer; text-align:left; }
+.sui-sandbox-trigger { display:flex; align-items:center; gap:6px; width:100%; padding:8px 10px; border:0; background:transparent; color:var(--text, #18181b); font:inherit; font-size:var(--fs-2, 12px); font-weight:650; cursor:pointer; text-align:left; }
 .sui-sandbox-trigger:hover { background:var(--hover-subtle, rgba(24,24,27,0.04)); }
 .sui-sandbox-trigger:focus-visible { outline:none; border-color:color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent); box-shadow:0 0 0 3px color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent); }
 .sui-sandbox-chevron { display:inline-block; transition:transform 120ms ease; color:var(--text-muted, #52525b); }

@@ -13,7 +13,6 @@ export const PROMPT_ATTACHMENTS_CSS_ID = "prompt-attachments";
 const focusRing = `outline:none; border-color:${t.ringBorder}; box-shadow:0 0 0 3px ${t.ring};`;
 
 export const promptAttachmentsCss = `
-.sui-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 
 .sui-prompt { position:relative; display:grid; gap:8px; width:100%; padding:12px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.foreground}; box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.04); transition:border-color .15s ease, box-shadow .15s ease; }
 .sui-prompt:focus-within { border-color:color-mix(in srgb, ${t.primary} 32%, ${t.border}); box-shadow:0 0 0 4px color-mix(in srgb, ${t.primary} 12%, transparent), 0 1px 2px rgb(${t.shadowRgb} / 0.05); }
@@ -22,7 +21,7 @@ export const promptAttachmentsCss = `
 .sui-prompt-header { min-width:0; display:flex; align-items:center; gap:8px; }
 .sui-prompt-body { min-width:0; display:grid; gap:8px; }
 .sui-prompt-attachments { min-width:0; display:flex; flex-wrap:wrap; gap:8px; }
-.sui-prompt-textarea { width:100%; min-width:0; min-height:24px; max-height:240px; padding:2px 4px; resize:none; overflow-y:auto; border:0; outline:0; background:transparent; color:${t.foreground}; font:inherit; font-size:14px; line-height:1.5; }
+.sui-prompt-textarea { width:100%; min-width:0; min-height:24px; max-height:240px; padding:2px 4px; resize:none; overflow-y:auto; border:0; outline:0; background:transparent; color:${t.foreground}; font:inherit; font-size:16px; line-height:1.5; }
 .sui-prompt-textarea::placeholder { color:${t.placeholder}; }
 .sui-prompt-textarea:disabled { cursor:not-allowed; opacity:.55; }
 .sui-prompt-footer { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:8px; }
@@ -59,6 +58,6 @@ export const promptAttachmentsCss = `
 .sui-attachment-action:disabled { cursor:not-allowed; opacity:.45; }
 .sui-attachment-preview { width:100%; max-width:240px; overflow:hidden; border:1px solid ${t.border}; border-radius:${t.radiusControl}; background:${t.secondary}; }
 .sui-attachment-preview img { display:block; width:100%; height:auto; object-fit:cover; }
-.sui-attachment-preview-tile { display:grid; place-items:center; min-height:64px; padding:8px; color:${t.mutedForeground}; font-family:${t.fontMono}; font-size:11px; font-weight:700; }
+.sui-attachment-preview-tile { display:grid; place-items:center; min-height:64px; padding:8px; color:${t.mutedForeground}; font-family:${t.fontMono}; font-size:11px; font-weight:650; }
 .sui-attachment[data-state='error'] .sui-attachment-title, .sui-attachment[data-state='error'] .sui-attachment-description { color:${t.destructive}; }
 `;

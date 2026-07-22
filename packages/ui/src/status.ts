@@ -40,8 +40,11 @@ const STATUS_CLASS_BY_STATUS = {
   failure: "bad",
   error: "bad",
   denied: "bad",
-  cancelled: "bad",
-  canceled: "bad",
+  // A user-initiated cancel is a neutral outcome, not a failure. This matches
+  // the styleguide's `.badge.cancelled` and gateway-ui's RunEventLog; parity
+  // is pinned by tests/status-vocabulary-parity.test.ts.
+  cancelled: "muted",
+  canceled: "muted",
   stale: "bad",
   orphaned: "bad",
   running: "run",

@@ -19,8 +19,8 @@ export const approvalsCss = `
 .sui-confirm[data-state='expired'], .sui-confirm[data-state='unavailable'] { color:${t.mutedForeground}; }
 .sui-confirm-title { min-width:0; font-size:13px; font-weight:650; }
 .sui-confirm-request { min-width:0; display:grid; align-content:start; gap:6px; }
-.sui-confirm-accepted { min-width:0; display:flex; align-items:center; gap:6px; color:${t.success}; font-weight:600; }
-.sui-confirm-rejected { min-width:0; display:flex; align-items:center; gap:6px; color:${t.destructive}; font-weight:600; }
+.sui-confirm-accepted { min-width:0; display:flex; align-items:center; gap:6px; color:${t.success}; font-weight:650; }
+.sui-confirm-rejected { min-width:0; display:flex; align-items:center; gap:6px; color:${t.destructive}; font-weight:650; }
 .sui-confirm-note { min-width:0; color:${t.mutedForeground}; font-size:12px; }
 .sui-confirm-actions { display:flex; align-items:center; gap:8px; min-width:0; }
 .sui-confirm-action:focus-visible { ${focusRing} }
@@ -40,9 +40,9 @@ export const approvalsCss = `
 .sui-approval-resource a { color:${t.primary}; text-decoration:none; }
 .sui-approval-resource a:hover { text-decoration:underline; }
 .sui-approval-resource a:focus-visible { ${focusRing} }
-.sui-approval-resource-kind { flex:none; padding:1px 6px; border:1px solid ${t.border}; border-radius:999px; background:${t.surface2}; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
+.sui-approval-resource-kind { flex:none; padding:2px 6px; border:1px solid ${t.border}; border-radius:999px; background:${t.surface2}; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
 .sui-approval-note { min-width:0; display:grid; gap:4px; }
-.sui-approval-note-label { font-size:12px; font-weight:600; color:${t.mutedForeground}; }
+.sui-approval-note-label { font-size:12px; font-weight:650; color:${t.mutedForeground}; }
 .sui-approval-note-input { min-width:0; width:100%; min-height:56px; padding:6px 8px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; resize:vertical; }
 .sui-approval-note-input:focus-visible { ${focusRing} }
 .sui-approval-note-input[readonly] { background:${t.surface2}; color:${t.mutedForeground}; }
@@ -51,7 +51,7 @@ export const approvalsCss = `
 .sui-checkpoint[data-current='true'] { border-color:${t.primaryBorder}; background:${t.primarySoft}; }
 .sui-checkpoint-icon { flex:none; display:inline-flex; align-items:center; color:${t.mutedForeground}; }
 .sui-checkpoint[data-current='true'] .sui-checkpoint-icon { color:${t.primary}; }
-.sui-checkpoint-label { min-width:0; flex:1; font-weight:600; }
+.sui-checkpoint-label { min-width:0; flex:1; font-weight:650; }
 .sui-checkpoint-metadata { flex:none; display:flex; align-items:center; gap:8px; color:${t.mutedForeground}; font-size:11px; font-variant-numeric:tabular-nums; }
 .sui-checkpoint-trigger:focus-visible { ${focusRing} }
 .sui-checkpoint-actions { flex:none; display:flex; align-items:center; gap:4px; }

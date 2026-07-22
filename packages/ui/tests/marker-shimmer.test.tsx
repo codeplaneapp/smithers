@@ -67,7 +67,10 @@ describe("Shimmer and scroll fade CSS", () => {
 
   test("ships shimmer, attachment, and edge-fade recipes without a local motion policy", () => {
     expect(chatScrollerCss).not.toContain("@media (prefers-reduced-motion: reduce)");
-    expect(chatScrollerCss).toContain("@keyframes sui-shimmer-sweep");
+    // The shimmer keyframes are owned by sharedCss (defined exactly once);
+    // this sheet references the animation by name.
+    expect(chatScrollerCss).toContain("animation:sui-shimmer-sweep");
+    expect(chatScrollerCss).not.toContain("@keyframes sui-shimmer-sweep");
     expect(chatScrollerCss).toContain("@keyframes sui-attachment-indeterminate");
     expect(chatScrollerCss).toContain(".sui-scroll-fade[data-fade-top='true'][data-fade-bottom='true']");
     expect(chatScrollerCss).toContain("transparent, black 32px, black calc(100% - 32px), transparent");

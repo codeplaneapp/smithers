@@ -108,7 +108,7 @@ describe("Badge + StatusPill", () => {
 
     expect(renderToStaticMarkup(<StatusPill status="ok" />)).toContain("sui-badge-success");
     expect(renderToStaticMarkup(<StatusPill status="failed" />)).toContain("sui-badge-destructive");
-    expect(renderToStaticMarkup(<StatusPill status="cancelled" />)).toContain("sui-badge-destructive");
+    expect(renderToStaticMarkup(<StatusPill status="cancelled" />)).toContain("sui-badge-muted");
     expect(renderToStaticMarkup(<StatusPill status="waiting_approval" />)).toContain("Waiting for approval");
   });
 
@@ -456,7 +456,7 @@ describe("StageStrip", () => {
     expect(stageTone("pending")).toBe("pending");
     expect(stageTone(undefined)).toBe("pending");
     expect(stageTone("failed")).toBe("failed");
-    expect(stageTone("cancelled")).toBe("failed");
+    expect(stageTone("cancelled")).toBe("pending");
   });
 
   test("tints each chip via the shared badge variants and carries the tone", () => {

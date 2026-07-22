@@ -37,7 +37,7 @@ export const conversationFoundationCss = `
 
 .sui-bubble-actions { display:flex; align-items:center; gap:2px; margin-top:6px; }
 .sui-bubble-reactions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:6px; }
-.sui-bubble-reaction { display:inline-flex; align-items:center; gap:4px; min-height:22px; padding:1px 8px; border:1px solid ${t.border}; border-radius:999px; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:11px; cursor:pointer; }
+.sui-bubble-reaction { display:inline-flex; align-items:center; gap:4px; min-height:22px; padding:0 8px; border:1px solid ${t.border}; border-radius:999px; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:11px; cursor:pointer; }
 .sui-bubble-reaction:hover { background:${t.secondary}; }
 .sui-bubble-reaction:focus-visible { ${focusRing} }
 .sui-bubble-reaction[aria-pressed='true'] { border-color:${t.primaryBorder}; background:${t.primarySoft}; color:${t.primary}; }

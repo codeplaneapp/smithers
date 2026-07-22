@@ -22,8 +22,9 @@ export type StatusPillProps = Omit<ComponentProps<"span">, "children"> & {
 
 /**
  * Status string in, correctly tinted Badge out: brand for running, success for
- * finished, warning for waiting, destructive for failures/cancellations, and
- * muted for pending/skipped/unknown. Carries `data-status` for styling.
+ * finished, warning for waiting, destructive for failures, and muted for
+ * cancelled/pending/skipped/unknown (a user cancel is a neutral outcome, not
+ * a failure). Carries `data-status` for styling.
  */
 export function StatusPill({ status, label, withDot = true, className, ...props }: StatusPillProps) {
   return (

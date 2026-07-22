@@ -21,7 +21,12 @@ import { tokens } from "../src/tokens";
 
 /** Strip every var(--x, fallback) expression, including rgba fallbacks. */
 function stripVarFallbacks(css: string): string {
-  return css.replace(/var\(--[\w-]+(?:,\s*(?:#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|[\w\s.%-]+))?\)/g, "VAR");
+  return css
+    // Shadow tokens carry a full shadow list (with raw rgb() stops) as their
+    // light fallback; strip them first so the raw-color rules below only see
+    // colors outside sanctioned fallback position.
+    .replace(/var\(--shadow-[123],\s*(?:[^()]|rgba?\([^)]*\))*\)/g, "VAR")
+    .replace(/var\(--[\w-]+(?:,\s*(?:#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|[\w\s.%-]+))?\)/g, "VAR");
 }
 
 describe("css contract", () => {
@@ -84,9 +89,11 @@ describe("css contract", () => {
     expect(checked).toBeGreaterThan(20);
   });
 
-  test("focus ring follows the house recipe (brand 50% border + brand 22% ring)", () => {
-    expect(smithersUiCss).toContain("color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent)");
-    expect(smithersUiCss).toContain("0 0 0 3px color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent)");
+  test("focus ring follows the house recipe through the --ring custom properties", () => {
+    // Routed through --ring/--ring-border so a host that themes the ring
+    // re-themes these components; the fallbacks stay the house recipe.
+    expect(smithersUiCss).toContain("border-color:var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))");
+    expect(smithersUiCss).toContain("0 0 0 3px var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))");
   });
 
   test("the default button variant is the house tinted primary, not a solid fill", () => {
@@ -130,5 +137,93 @@ describe("css contract", () => {
     expect(tokens.fontSizeCompact).toBe("var(--fs-2, 12px)");
     expect(smithersUiCss).toContain("font-size:var(--fs-2, 12px)");
     expect(smithersUiCss).not.toContain("12.5px");
+  });
+});
+
+/**
+ * The geometry contract: the sheets must practice the scales the styleguide
+ * declares. Named exceptions are listed inline; anything else is drift.
+ */
+describe("geometry contract", () => {
+  // The --fs steps (11/12/13/15/17/20) plus the named exceptions: 10px
+  // micro-labels (tab counts, file chips, citation chips), 16px composer
+  // inputs (an iOS input under 16px triggers page zoom on focus), and 18px
+  // icon glyphs (chevrons, close/remove/send marks).
+  const FONT_SIZES = new Set([10, 11, 12, 13, 15, 16, 17, 18, 20]);
+  // 400 body, 500 de-emphasis, 650 the one emphasis weight; 700 is reserved
+  // for KPI numerals and pinned to exactly one rule below.
+  const FONT_WEIGHTS = new Set([400, 500, 650, 700]);
+  // --r-1 controls, --r-2 cards, --r-bubble chat surfaces, 999 pills, plus
+  // the named micro-radii: 2px caret, 4px favicon/status chips.
+  const RADII = new Set([2, 4, 6, 10, 18, 999]);
+
+  test("every raw font-size sits on the type scale or a named exception", () => {
+    const sizes = [...smithersUiCss.matchAll(/font-size:([\d.]+)px/g)].map((m) => Number(m[1]));
+    expect(sizes.length).toBeGreaterThan(20);
+    for (const size of sizes) {
+      expect(FONT_SIZES.has(size), `font-size:${size}px is off the type scale`).toBe(true);
+    }
+    // The font shorthand carries weight + size; hold it to the same scales.
+    for (const m of smithersUiCss.matchAll(/font:(\d{3})\s+([\d.]+)px/g)) {
+      expect(FONT_WEIGHTS.has(Number(m[1])), `font shorthand weight ${m[1]}`).toBe(true);
+      expect(FONT_SIZES.has(Number(m[2])), `font shorthand size ${m[2]}px`).toBe(true);
+    }
+  });
+
+  test("font weights are 400/500/650, with 700 reserved for the KPI numeral", () => {
+    const weights = [...smithersUiCss.matchAll(/font-weight:(\d+)/g)].map((m) => Number(m[1]));
+    for (const weight of weights) {
+      expect(FONT_WEIGHTS.has(weight), `font-weight:${weight} is off the weight roles`).toBe(true);
+    }
+    expect(weights.filter((w) => w === 700)).toHaveLength(1);
+    expect(smithersUiCss.match(/\.sui-kpi-value \{[^}]+font-weight:700/)).toBeTruthy();
+  });
+
+  test("every border-radius resolves to a house radius", () => {
+    const decls = smithersUiCss.match(/border-radius:[^;}]+/g) ?? [];
+    expect(decls.length).toBeGreaterThan(20);
+    for (const decl of decls) {
+      for (const m of decl.matchAll(/([\d.]+)px/g)) {
+        expect(RADII.has(Number(m[1])), `${decl.trim()} is off the radius scale`).toBe(true);
+      }
+    }
+  });
+
+  test("padding and gap stay on the 2px grid (1px hairline gaps sanctioned)", () => {
+    const decls = smithersUiCss.match(/(?:padding[a-z-]*|gap|row-gap|column-gap):[^;}]+/g) ?? [];
+    expect(decls.length).toBeGreaterThan(50);
+    for (const decl of decls) {
+      // gap:1px is the hairline row-separation device (file tree); like 1px
+      // borders it sits below the grid on purpose.
+      if (/^gap:1px$/.test(decl.trim())) continue;
+      for (const m of decl.matchAll(/(\d+)px/g)) {
+        expect(Number(m[1]) % 2, `${decl.trim()} is off the 2px spacing grid`).toBe(0);
+      }
+    }
+  });
+
+  test("shared utilities and keyframes are defined exactly once", () => {
+    expect(smithersUiCss.match(/\.sui-sr-only \{/g)).toHaveLength(1);
+    expect(smithersUiCss.match(/@keyframes sui-shimmer-sweep/g)).toHaveLength(1);
+    expect(smithersUiCss).not.toContain("sui-plan-shimmer-sweep");
+  });
+
+  test("interactive controls carry pressed feedback at the house speed", () => {
+    expect(smithersUiCss).toContain(".sui-button:active:not(:disabled)");
+    expect(smithersUiCss).toContain(".sui-button-default:active:not(:disabled)");
+    expect(smithersUiCss).toContain(".sui-button-destructive:active:not(:disabled)");
+    expect(smithersUiCss).toContain(".sui-row-button:active:not(:disabled)");
+    const buttonRule = smithersUiCss.match(/\.sui-button \{[^}]+\}/)?.[0] ?? "";
+    expect(buttonRule).toContain("transition:background-color .12s ease, border-color .12s ease, color .12s ease;");
+  });
+
+  test("elevation and fonts route through the styleguide custom properties", () => {
+    expect(tokens.shadow2).toStartWith("var(--shadow-2,");
+    expect(tokens.shadow3).toStartWith("var(--shadow-3,");
+    expect(tokens.ring).toStartWith("var(--ring,");
+    expect(tokens.ringBorder).toStartWith("var(--ring-border,");
+    expect(tokens.fontSans).toStartWith("var(--font-sans,");
+    expect(tokens.fontMono).toStartWith("var(--font-mono,");
+    expect(tokens.radiusBubble).toBe("var(--r-bubble, 18px)");
   });
 });
