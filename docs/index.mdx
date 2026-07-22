@@ -67,6 +67,31 @@ mode: "custom"
           zero config.
         </p>
       </div>
+
+      {/* Ask-your-agent prompt - copyable, like the install command */}
+      <div className="mt-8">
+        <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>
+          <span style={{ width: "0.25rem", height: "0.25rem", borderRadius: "999px", background: "var(--l-brass)" }} aria-hidden="true" />
+          Not sure yet? Ask your agent
+        </div>
+        <div
+          className="landing-cmd flex items-center justify-between gap-4"
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            navigator.clipboard.writeText("what is smithers.sh and how could it help me based on what you know about me and my project");
+            const c = document.getElementById("ask-agent-check");
+            if (c) { c.style.opacity = "1"; setTimeout(() => { c.style.opacity = "0"; }, 1800); }
+          }}
+          style={{ cursor: "pointer" }}
+        >
+          <span style={{ fontStyle: "italic" }}>
+            "what is smithers.sh and how could it help me based on what you know
+            about me and my project"
+          </span>
+          <span id="ask-agent-check" className="landing-brass" style={{ opacity: 0, transition: "opacity 0.2s", fontSize: "0.8rem" }}>copied ✓</span>
+        </div>
+      </div>
     </div>
 
     {/* Demo terminal - a live durable run across multiple harnesses */}
