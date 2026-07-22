@@ -3476,6 +3476,13 @@ bunx smithers-orchestrator up workflow.tsx --interactive              # supply i
 bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive     # pick a discovered workflow and its inputs
 ```
 
+For an implement- or debug-style workflow, `--interactive` prompts for inputs and drops you into the full-screen TUI monitor (TTY only):
+
+```bash
+bunx smithers-orchestrator up workflow.tsx --interactive              # supply inputs interactively, then watch the run
+bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive     # pick a discovered workflow and its inputs
+```
+
 **What success looks like**
 
 `workflow run` and `up` stream the lifecycle event log and exit on a terminal line:
@@ -4113,6 +4120,18 @@ HINDSIGHT_BANK_PREFIX=dev-
 ```
 
 `HINDSIGHT_API_KEY` and `HINDSIGHT_BANK_PREFIX` are optional; the prefix applies to every configured bank before requests are sent.
+
+## CLI: cross-run memory facts
+
+Outside a run, manage durable facts with the `memory` command: `set` writes (remember) a fact, `get` and `list` read (recall) facts.
+
+```bash
+bunx smithers-orchestrator memory set workflow:my-flow last-release '{"tag":"v1.4.0"}'  # remember a fact
+bunx smithers-orchestrator memory get workflow:my-flow last-release                     # recall one fact
+bunx smithers-orchestrator memory list workflow:my-flow                                 # recall every fact in a namespace
+```
+
+Inside a run, set `tools` on `<Memory>` to expose the agent-facing `remember` and `recall` tools instead.
 
 ## CLI: cross-run memory facts
 
