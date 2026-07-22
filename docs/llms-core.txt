@@ -2420,6 +2420,16 @@ even when `N` exceeds the automatic ceiling. The ceiling applies only to
 additional demand-driven raises. See [Parallel](/components/parallel) for how
 the run-wide and group caps compose.
 
+## Launch attribution
+
+`up`, `workflow run`, `oneshot`, and `chat-create` accept
+`--started-by-harness`, `--started-by-session`, and `--started-by-prompt`.
+They persist optional self-reported launch provenance; the prompt is never
+copied from workflow input, `--prompt`, or a oneshot goal. Short-lived CLI
+launches best-effort infer Codex/Claude harness/session markers when those
+identity flags are omitted. Use explicit fields for Kimi, OpenCode, and other
+harnesses with a known session.
+
 ## Exit codes
 
 ```text
@@ -2609,7 +2619,7 @@ commands[102]:
     purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
-    flags[36]{name,short,type,default,desc}:
+    flags[39]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2646,6 +2656,9 @@ commands[102]:
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
       report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
+      started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
+      started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
+      started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
   - name: migrate
     purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
     flags[3]{name,short,type,default,desc}:
@@ -2797,14 +2810,17 @@ commands[102]:
       stderr,,boolean,true,Include agent stderr
   - name: chat-create
     purpose: Create and start a one-task auto-hijacked chat run
-    flags[2]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       agent,,enum,,claude-code|codex|antigravity|pi|kimi|amp
       cwd,,string,.,Working directory for the chat session
+      started-by-harness,,string,,Durable self-reported launch harness
+      started-by-session,,string,,Durable self-reported harness session
+      started-by-prompt,,string,,Explicit durable launch context
   - name: oneshot
     purpose: Run one well-scoped goal with a strong agent in the background, with optional review and a live UI
     args[1]{name,type,required,desc}:
       goal,string,false,Goal to complete; required unless using --status or a preference setter
-    flags[11]{name,short,type,default,desc}:
+    flags[14]{name,short,type,default,desc}:
       goal-file,,string,,Read a long goal from a file
       model,,string,auto,Model slot or canonical model id
       agent,,enum,,codex|kimi|claude-code|opencode
@@ -2816,6 +2832,9 @@ commands[102]:
       detach,d,boolean,true,Run in the background; --detach false runs in the foreground
       interactive,,boolean,false,Open the full-screen TUI monitor
       open,,boolean,true,Open the run UI after launch
+      started-by-harness,,string,,Durable self-reported launch harness
+      started-by-session,,string,,Durable self-reported harness session
+      started-by-prompt,,string,,Explicit durable launch context; never inferred from the goal
   - name: hijack
     purpose: Hand off the latest resumable agent session or Smithers-managed conversation
     args[1]{name,type,required,desc}:
@@ -3192,7 +3211,7 @@ commands[102]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[37]{name,short,type,default,desc}:
+    flags[40]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -3230,6 +3249,9 @@ commands[102]:
       report,,boolean,true,Narrate an interactive run's result with a cheap/fast agent and open an HTML summary in the browser (disable with --no-report or SMITHERS_NO_REPORT=1)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
+      started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
+      started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
+      started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:
@@ -3467,13 +3489,6 @@ your chosen agent's model/provider credentials). See
 ```bash
 bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build a new workflow from a plain-English ask
 bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
-```
-
-For an implement- or debug-style workflow, `--interactive` prompts for inputs and drops you into the full-screen TUI monitor (TTY only):
-
-```bash
-bunx smithers-orchestrator up workflow.tsx --interactive              # supply inputs interactively, then watch the run
-bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive     # pick a discovered workflow and its inputs
 ```
 
 For an implement- or debug-style workflow, `--interactive` prompts for inputs and drops you into the full-screen TUI monitor (TTY only):
@@ -4120,18 +4135,6 @@ HINDSIGHT_BANK_PREFIX=dev-
 ```
 
 `HINDSIGHT_API_KEY` and `HINDSIGHT_BANK_PREFIX` are optional; the prefix applies to every configured bank before requests are sent.
-
-## CLI: cross-run memory facts
-
-Outside a run, manage durable facts with the `memory` command: `set` writes (remember) a fact, `get` and `list` read (recall) facts.
-
-```bash
-bunx smithers-orchestrator memory set workflow:my-flow last-release '{"tag":"v1.4.0"}'  # remember a fact
-bunx smithers-orchestrator memory get workflow:my-flow last-release                     # recall one fact
-bunx smithers-orchestrator memory list workflow:my-flow                                 # recall every fact in a namespace
-```
-
-Inside a run, set `tools` on `<Memory>` to expose the agent-facing `remember` and `recall` tools instead.
 
 ## CLI: cross-run memory facts
 
@@ -8239,6 +8242,7 @@ type RunOptions = {
   hot?: boolean | HotReloadOptions;
   annotations?: Record<string, string | number | boolean>;
   auth?: RunAuthContext | null;
+  startedBy?: RunStartedBy;          // optional self-reported launch provenance
   config?: Record<string, unknown>;
   effectPlatformRuntime?: "bun" | "node" | "worker";     // swappable @effect/platform layer; "node"/"worker" require effectPlatformLayer
   effectPlatformLayer?: Layer.Layer<any, never, never>;  // e.g. NodeContext.layer from a Node serverless entrypoint
@@ -8253,6 +8257,13 @@ type RunOptions = {
     restoreRuntimeOwnerId?: string | null;
     restoreHeartbeatAtMs?: number | null;
   };
+};
+
+type RunStartedBy = {
+  harness?: string;   // trimmed, at most 64 Unicode code points
+  sessionId?: string; // trimmed, at most 256 Unicode code points
+  prompt?: string;    // explicit-only; visibly clipped to 8,192 Unicode code points
+  detected?: true;    // only when environment inference filled harness/session
 };
 
 type HotReloadOptions = {
@@ -11036,12 +11047,12 @@ tokens, never hex-plus-alpha.
 | `RunEventLog` | A scrolling, auto-following event log for a run. One structured row per frame: a severity-tinted kind badge (`NodeStarted`/`NodeFinished`/`NodeFailed`/`TaskHeartbeat`/...), a compact nodeId chip, iteration/attempt when set, and a human one-line summary ("audit-docs finished", "flaky failed: <error>"), with the full JSON payload collapsed behind a per-row toggle. Failures are prominent, consecutive per-node heartbeats coalesce into one de-emphasized row (a toolbar toggle shows them all), and passing `onSelectNode` makes node rows open that node's live chat. | `runId`, `maxEvents`, `follow`, `onSelectNode`, `selectedNodeId` |
 | `NodeOutputView` | The output of a single node: shows the pending state before the node produces, then the formatted output; updates as the run progresses. | `runId`, `nodeId`, `iteration` |
 | `ApprovalPanel` | The pending approval queue with Approve and Deny buttons. | `filter`, `pollMs`, `onError` |
-| `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `onLaunched` |
+| `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `startedBy`, `onLaunched` |
 | `MonitorButton` | A button (rendered as a real link) that opens the Smithers Monitor, the live all-runs control surface the Gateway serves at `/monitor`, deep-linked to the current run via `?runId`. Same-origin with the served workflow UI, so no base URL is needed. | `runId`, `monitorPath`, `baseUrl`, `newTab` |
 | `WorkflowPicker` | A select of the workflows registered on the Gateway. | `value`, `onChange`, `hasUiOnly` |
 | `ConnectionBadge` | A live Gateway connection indicator. | none |
 | `StatusPill` | A colored status badge for any run or node status string. | `status`, `label` |
-| `RunMeta` | The standard header meta cluster: `run-id · live status pill · connection badge`. Drop into `WorkflowUiShell`'s `meta` slot. | `runId`, `showConnection` |
+| `RunMeta` | The standard header meta cluster: `run-id · live status pill · started-by badge · connection badge`. The badge keeps the full session id and auto-detection in its accessible title. | `runId`, `showConnection` |
 | `NodeChatStream` | **Live per-node agent chat**: folds the node's stdout/stderr chunks, tool calls, reasoning, and file-change actions from the run event stream into an auto-following chat transcript. One per agent node in a detail pane. | `runId`, `nodeId`, `title`, `subtitle`, `status`, `height` |
 | `NodeOutputCard` | A run-aware output card for one node with ok/fail/pending chrome and an unwrapped-row render prop. Use for deterministic nodes. | `runId`, `nodeId`, `title`, `summary`, `body`, `remountKey` |
 | `FleetTable` | A selectable fan-out ledger: one row per work item, live status pill rolled up from the item's pipeline `nodeIds`. | `runId`, `items`, `columns`, `selectedKey`, `onSelect` |
@@ -12531,6 +12542,24 @@ function runWorkflow<Schema>(
 
 Both `RunOptions` and `RunResult` are defined in [Types](/reference/types).
 
+## Launch attribution
+
+Pass optional self-reported launch provenance with `startedBy`; it is persisted
+in the run config and is distinct from `auth.triggeredBy` and annotations.
+
+```ts
+await Effect.runPromise(runWorkflow(workflow, {
+  input: {},
+  startedBy: { harness: "codex", sessionId: "thread_123", prompt: "Ship the release" },
+}));
+```
+
+`harness` and `sessionId` are trimmed and limited to 64/256 Unicode code
+points. `prompt` is explicit-only and is clipped with `…` at 8,192 code
+points. Attribution is immutable when resuming an existing run and carries to
+continue-as-new child runs. Do not infer it from workflow input or use it for
+authentication.
+
 ## Concurrency
 
 When `opts.maxConcurrency` is omitted, a run starts with a cap of 4 concurrent
@@ -13076,6 +13105,7 @@ The overview is organized around triage: what needs you first, what is running n
 - **Node investigation**: a collapsible inspector where every section (Details, Prompt, Tool calls, Transcript, Output, Diff) unmounts when closed, so a closed Transcript stops polling in the background. The Prompt section shows the task's initial prompt. Also live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal to hijack or reopen supported agent sessions.
 - **Events and navigation**: a filterable live event log with timestamps and follow mode, shareable `?runId=`/`&nodeId=` deep links, and `?embed=1` for the embeddable run surface.
 - **Connection truth**: Live, Connecting, Offline, and Unauthorized states, each with recovery guidance.
+- **Launch attribution**: run rows and headers show compact harness/session provenance and search it; explicit attribution prompts stay hidden from this shared dashboard and remain available only in `inspect`/raw config.
 
 ## How it relates to the other surfaces
 

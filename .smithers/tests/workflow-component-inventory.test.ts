@@ -46,6 +46,7 @@ const workflowOwners = {
   "./tests/finish-agentic-ui-library.test.tsx": ["finish-agentic-ui-library.tsx"],
   "./tests/docs-concise-workflow.test.tsx": ["docs-concise.tsx"],
   "./tests/agui-cross-verdicts-workflow.test.tsx": ["agui-cross-verdicts.tsx"],
+  "./tests/agui-adopt-product-fix-workflow.test.tsx": ["agui-adopt-product-fix.tsx"],
   "./tests/land-shared-ui.test.tsx": ["land-shared-ui.tsx"],
   "./tests/riskless-github-issue-sweep.test.ts": ["riskless-github-issue-sweep.tsx"],
   "./tests/shared-ui-library.test.tsx": ["shared-ui-library.tsx"],

@@ -429,6 +429,13 @@ Gateway client exports:
 | `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
 | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayNodeEvents`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
 
+### Launch attribution
+
+Pass caller-known provenance under `launchRun(...).options.startedBy`, for
+example `{ harness: "openclaw", sessionId: "session-key" }`. It is durable and
+projects as `startedBy` on run list/get rows. It never changes Gateway auth,
+scopes, `auth.triggeredBy`, or cron/webhook source classification.
+
 ## Live browser viewer
 
 Browser sessions expose a stationary viewer at `/browser/<sessionId>/viewer`.
@@ -1199,6 +1206,7 @@ Start or resume a discovered workflow.
 | `maxOutputBytes` | `number` | - | Cap on node output size |
 | `toolTimeoutMs` | `number` | - | Per-tool call timeout |
 | `hot` | `boolean` | `false` | Enable hot-reload of the workflow file |
+| `startedBy` | `{ harness?, sessionId?, prompt? }` | - | Durable self-reported launch attribution. Harness/session may be inferred from Codex/Claude process markers when omitted; `prompt` is explicit-only, persisted, and visible to run readers (do not copy workflow input). |
 
 **Output:**
 

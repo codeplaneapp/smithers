@@ -26,6 +26,16 @@ step is persisted in the workspace's durable run store, so a restart resumes
 from the last completed node instead of starting over. Retries, human approvals,
 replay, evals, and sandbox review all live in one place.
 
+## Launch attribution
+
+CLI launches may persist self-reported provenance with
+`--started-by-harness`, `--started-by-session`, and
+`--started-by-prompt`. Use the prompt flag only for deliberate launch context:
+never reuse workflow input, `--prompt`, a oneshot goal, or a transcript. MCP
+and Gateway callers send `startedBy: { harness, sessionId, prompt }`. Codex and
+Claude short-lived CLI/MCP launches best-effort detect their active session;
+Kimi/OpenCode callers should pass their known session explicitly.
+
 ## You drive it, not the human
 
 This is the thing to internalize: **you, the AI agent, operate Smithers.** The
