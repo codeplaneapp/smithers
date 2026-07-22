@@ -62,4 +62,47 @@ describe("useGatewayRunTokenUsage", () => {
     await waitFor(() => calls >= 2);
     expect(state?.error).toBeUndefined();
   });
+
+  test("fires one final refetch when polling stops (live → settled)", async () => {
+    let calls = 0;
+    const client = {
+      rpc: async () => {
+        calls += 1;
+        return { runId: "run one", events: [] };
+      },
+    };
+    let state: ReturnType<typeof useGatewayRunTokenUsage> | undefined;
+    function Probe({ refreshMs }: { refreshMs?: number }) {
+      state = useGatewayRunTokenUsage("run one", { refreshMs });
+      return null;
+    }
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push({ root, container });
+    await act(async () => {
+      root.render(createElement(
+        SmithersGatewayContext.Provider,
+        { value: client as never },
+        createElement(Probe, { refreshMs: 20 }),
+      ));
+    });
+
+    await waitFor(() => state?.loading === false && calls >= 1);
+    const callsWhilePolling = calls;
+
+    await act(async () => {
+      root.render(createElement(
+        SmithersGatewayContext.Provider,
+        { value: client as never },
+        createElement(Probe, { refreshMs: undefined }),
+      ));
+    });
+
+    await waitFor(() => calls > callsWhilePolling);
+    const callsAfterSettle = calls;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 60)));
+    expect(calls).toBe(callsAfterSettle);
+  });
 });
