@@ -4357,7 +4357,7 @@ import { z } from "zod";
 
 const { Workflow, Task, Branch, smithers, outputs } = createSmithers({
   input: z.object({
-    deployToProduction: z.boolean(),
+    deployToProduction: z.boolean().default(false),
   }),
   deployment: z.object({
     environment: z.enum(["staging", "production"]),
