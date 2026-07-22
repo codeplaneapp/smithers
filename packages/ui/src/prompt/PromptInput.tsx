@@ -254,6 +254,13 @@ export function PromptInput({
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
+  const cleanupObjectUrls = useCallback(() => {
+    if (canCreateObjectUrl()) {
+      for (const objectUrl of objectUrlsRef.current.values()) URL.revokeObjectURL(objectUrl);
+    }
+    objectUrlsRef.current.clear();
+  }, []);
+
   const addFiles = useCallback(
     (files: FileList | readonly File[]) => {
       const accepted: PromptInputAttachmentItem[] = [];
@@ -331,9 +338,10 @@ export function PromptInput({
   );
 
   const clearAttachments = useCallback(() => {
+    cleanupObjectUrls();
     attachmentsRef.current = [];
     setAttachmentsRef.current([]);
-  }, []);
+  }, [cleanupObjectUrls]);
 
   const openFileDialog = useCallback(() => {
     if (disabled) return;
@@ -341,13 +349,10 @@ export function PromptInput({
   }, [disabled]);
 
   useEffect(() => {
-    const objectUrls = objectUrlsRef.current;
     return () => {
-      if (!canCreateObjectUrl()) return;
-      for (const objectUrl of objectUrls.values()) URL.revokeObjectURL(objectUrl);
-      objectUrls.clear();
+      cleanupObjectUrls();
     };
-  }, []);
+  }, [cleanupObjectUrls]);
 
   useEffect(() => {
     if (!globalDrop || typeof document === "undefined") return;
@@ -372,7 +377,10 @@ export function PromptInput({
     if (value.trim().length === 0 && attachments.length === 0) return;
     void onSubmit({ text: value, attachments }, event);
     if (valueProp === undefined) setInnerValue("");
-    if (attachmentsProp === undefined) setInnerAttachments([]);
+    if (attachmentsProp === undefined) {
+      cleanupObjectUrls();
+      setInnerAttachments([]);
+    }
   };
 
   const contextValue = useMemo<PromptInputContextValue>(

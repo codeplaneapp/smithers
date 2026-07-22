@@ -197,6 +197,97 @@ describe("PromptInput", () => {
     }
   });
 
+  test("clear removes all image object URLs before unmount", async () => {
+    let hook!: ReturnType<typeof usePromptInputAttachments>;
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: (file: File) => {
+        const url = `blob:clear-${created.length}`;
+        created.push(url);
+        return url;
+      },
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: (url: string) => revoked.push(url),
+    });
+    try {
+      function Harness() {
+        hook = usePromptInputAttachments();
+        return <PromptInputTextarea />;
+      }
+      await render(
+        <PromptInput onSubmit={() => {}}>
+          <Harness />
+        </PromptInput>,
+      );
+      await act(async () =>
+        hook.add([makeFile("one.png", { type: "image/png" }), makeFile("two.jpg", { type: "image/jpeg" })]),
+      );
+      expect(created).toHaveLength(2);
+      await act(async () => hook.clear());
+      expect(hook.attachments).toEqual([]);
+      expect(revoked).toEqual(created);
+      await act(async () => root!.unmount());
+      root = undefined;
+      expect(revoked).toEqual(created);
+    } finally {
+      Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreate });
+      Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
+    }
+  });
+
+  test("uncontrolled submit revokes image object URLs after preserving the payload", async () => {
+    const submitted: PromptInputMessage[] = [];
+    let hook!: ReturnType<typeof usePromptInputAttachments>;
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: (file: File) => {
+        const url = `blob:submit-${created.length}`;
+        created.push(url);
+        return url;
+      },
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: (url: string) => revoked.push(url),
+    });
+    try {
+      function Harness() {
+        hook = usePromptInputAttachments();
+        return <PromptInputTextarea />;
+      }
+      await render(
+        <PromptInput onSubmit={(message) => submitted.push(message)}>
+          <Harness />
+        </PromptInput>,
+      );
+      await act(async () =>
+        hook.add([makeFile("one.png", { type: "image/png" }), makeFile("two.jpg", { type: "image/jpeg" })]),
+      );
+      const payloadAttachments = hook.attachments;
+      await act(async () => pressEnter(container!.querySelector<HTMLTextAreaElement>("textarea")!));
+      expect(submitted).toHaveLength(1);
+      expect(submitted[0]!.attachments).toBe(payloadAttachments);
+      expect(hook.attachments).toEqual([]);
+      expect(revoked).toEqual(created);
+      await act(async () => root!.unmount());
+      root = undefined;
+      expect(revoked).toEqual(created);
+    } finally {
+      Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreate });
+      Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
+    }
+  });
+
   test("onError fires for max-files, max-file-size, and accept violations", async () => {
     const errors: string[] = [];
     let hook!: ReturnType<typeof usePromptInputAttachments>;
