@@ -23,6 +23,8 @@ export type SupervisorDeps = {
         adapter: SmithersDb,
         nowMs: number,
     ) => Promise<any[]>;
+    /** Best-effort tail of a detached resume log, for give-up diagnostics. */
+    readDetachedLogTail: (logFile: string) => string | null;
 };
 
 export type SupervisorOptions = {
@@ -32,6 +34,11 @@ export type SupervisorOptions = {
     pollIntervalMs?: number;
     staleThresholdMs?: number;
     maxConcurrent?: number;
+    /**
+     * Consecutive auto-resume attempts that die before the resumed engine
+     * activates before the supervisor gives up and fails the run. Default 3.
+     */
+    maxResumeAttempts?: number;
     dryRun?: boolean;
     supervisorId?: string;
     supervisorRunId?: string;

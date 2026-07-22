@@ -167,7 +167,7 @@ each variant's fields; in a UI those live under `frame.payload`.
 |---|---|
 | `SupervisorStarted` | `runId`, `pollIntervalMs`, `staleThresholdMs`, `timestampMs` |
 | `SupervisorPollCompleted` | `runId`, `staleCount`, `resumedCount`, `skippedCount`, `durationMs`, `timestampMs` |
-| `RunAutoResumed` | `runId`, `lastHeartbeatAtMs`, `staleDurationMs`, `timestampMs` |
+| `RunAutoResumed` | `runId`, `lastHeartbeatAtMs`, `staleDurationMs`, `resumeAttempt`, `timestampMs` |
 | `RunAutoResumeSkipped` | `runId`, `reason`, `timestampMs` |
 | `RunStarted` | `runId`, `timestampMs` |
 | `RunStatusChanged` | `runId`, `status`, `timestampMs` |

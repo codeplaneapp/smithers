@@ -167,6 +167,11 @@ export const smithersErrorDefinitions = {
         when: "A claimed run cannot be moved back into active execution.",
         details: "{ runId, runtimeOwnerId }",
     },
+    AUTO_RESUME_GAVE_UP: {
+        category: "engine",
+        when: "The supervisor stops auto-resuming a run after consecutive detached resumes died before the engine activated, and marks the run failed with the resume log location. The run stays resumable manually once the startup failure is fixed.",
+        details: "{ attempts, lastClaimOwnerId, logFile, logTail? }",
+    },
     RUN_HIJACKED: {
         category: "engine",
         when: "A run is interrupted because another runtime hijacked execution.",

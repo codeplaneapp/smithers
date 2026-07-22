@@ -399,6 +399,14 @@ declare namespace smithersErrorDefinitions {
         let details_21: string;
         export { details_21 as details };
     }
+    namespace AUTO_RESUME_GAVE_UP {
+        let category_100: string;
+        export { category_100 as category };
+        let when_100: string;
+        export { when_100 as when };
+        let details_100: string;
+        export { details_100 as details };
+    }
     namespace RUN_HIJACKED {
         let category_29: string;
         export { category_29 as category };

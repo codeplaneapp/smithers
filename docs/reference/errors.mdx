@@ -115,6 +115,7 @@ try {
 | `RUN_RESUME_CLAIM_LOST` | A runtime loses the resume claim before it can update the run. | `{ runId, runtimeOwnerId }` |
 | `RUN_RESUME_CLAIM_FAILED` | A runtime cannot claim a stale run for resume. | `{ runId, runtimeOwnerId }` |
 | `RUN_RESUME_ACTIVATION_FAILED` | A claimed run cannot be moved back into active execution. | `{ runId, runtimeOwnerId }` |
+| `AUTO_RESUME_GAVE_UP` | The supervisor stops auto-resuming a run after consecutive detached resumes died before the engine activated, and marks the run failed with the resume log location. The run stays manually resumable once the startup failure is fixed. | `{ attempts, lastClaimOwnerId, logFile, logTail? }` |
 | `RUN_HIJACKED` | A run is interrupted because another runtime hijacked execution. | `{ runId, hijackTarget }` |
 | `CONTINUATION_STATE_TOO_LARGE` | Continue-as-new state exceeds the configured serialized size limit. | `{ runId, sizeBytes, maxBytes }` |
 | `INVALID_CONTINUATION_STATE` | Continue-as-new state cannot be parsed or applied. | -- |

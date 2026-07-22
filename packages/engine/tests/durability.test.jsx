@@ -307,6 +307,74 @@ describe("Durability", () => {
         rmSync(dir, { recursive: true, force: true });
         cleanup();
     });
+    test("supervised resume mismatch of a stale running run fails the run durably (issue #1361)", async () => {
+        // Before the unattended-mismatch fail covered every resumable status,
+        // this scenario hot-looped forever: the mismatch threw inside the
+        // supervisor's invisible detached child, the claim release restored
+        // the stale heartbeat, and the next poll re-claimed the run.
+        const dir = mkdtempSync(join(tmpdir(), "smithers-running-resume-metadata-"));
+        const workflowPath = join(dir, "workflow.tsx");
+        writeFileSync(workflowPath, "export default 'v1';\n", "utf8");
+        const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        const runId = "running-resume-metadata";
+        const workflow = smithers(() => (<Workflow name="running-resume-metadata">
+        <Task id="task" output={outputs.outputA}>
+          {{ value: 1 }}
+        </Task>
+      </Workflow>));
+        const first = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId,
+            workflowPath,
+        }));
+        expect(first.status).toBe("finished");
+        // Recreate the wild state: engine process died mid-run, leaving the
+        // run `running` with a stale heartbeat and a dead owner pid.
+        const staleHeartbeatAtMs = nowMs() - 120_000;
+        await Effect.runPromise(adapter.updateRun(runId, {
+            status: "running",
+            finishedAtMs: null,
+            heartbeatAtMs: staleHeartbeatAtMs,
+            runtimeOwnerId: "pid:11111:dead-driver",
+        }));
+        const claimOwnerId = "supervisor:running-test";
+        const claimHeartbeatAtMs = nowMs();
+        const claimed = await adapter.claimRunForResume({
+            runId,
+            expectedStatus: "running",
+            expectedRuntimeOwnerId: "pid:11111:dead-driver",
+            expectedHeartbeatAtMs: staleHeartbeatAtMs,
+            staleBeforeMs: claimHeartbeatAtMs,
+            claimOwnerId,
+            claimHeartbeatAtMs,
+            requireStale: true,
+        });
+        expect(claimed).toBe(true);
+        writeFileSync(workflowPath, "export default 'v2';\n", "utf8");
+        const resumed = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId,
+            resume: true,
+            workflowPath,
+            resumeClaim: {
+                claimOwnerId,
+                claimHeartbeatAtMs,
+                restoreRuntimeOwnerId: "pid:11111:dead-driver",
+                restoreHeartbeatAtMs: staleHeartbeatAtMs,
+            },
+        }));
+        expect(resumed.status).toBe("failed");
+        expect(resumed.error?.code).toBe("RESUME_METADATA_MISMATCH");
+        const run = await adapter.getRun(runId);
+        expect(run?.status).toBe("failed");
+        expect(run?.runtimeOwnerId).toBeNull();
+        expect(JSON.parse(run?.errorJson ?? "{}")?.code).toBe("RESUME_METADATA_MISMATCH");
+        const eventTypes = (await adapter.listEvents(runId, -1, 50)).map((event) => event.type);
+        expect(eventTypes).toContain("RunFailed");
+        rmSync(dir, { recursive: true, force: true });
+        cleanup();
+    });
     test("gateway timer-sweep resume mismatch fails the parked run", async () => {
         const dir = mkdtempSync(join(tmpdir(), "smithers-gateway-timer-resume-metadata-"));
         const workflowPath = join(dir, "workflow.tsx");

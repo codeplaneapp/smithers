@@ -527,6 +527,7 @@ describe("supervisor e2e", () => {
                         runId,
                         lastHeartbeatAtMs: originalHeartbeats[runId],
                         staleDurationMs: now - originalHeartbeats[runId],
+                        resumeAttempt: 1,
                         timestampMs: now,
                     },
                 ]);

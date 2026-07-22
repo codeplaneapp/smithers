@@ -2337,37 +2337,44 @@ export async function runsDueForQuotaResume(adapter, nowMs) {
 /**
  * Claim-owner prefix the supervisor stamps on runs it resumes:
  * apps/cli/src/supervisor.js builds `supervisor:<supervisorId>` when it claims a
- * run for an unattended resume. The engine keys "unattended timer wake"
- * detection off this cross-package contract, so keep the two in sync.
+ * run for an unattended resume. The engine keys unattended-resume detection
+ * off this cross-package contract, so keep the two in sync.
  */
 const SUPERVISOR_CLAIM_OWNER_PREFIX = "supervisor:";
 /**
- * `triggeredBy` the gateway stamps on its default-active timer sweep:
+ * `triggeredBy` the gateway stamps on its default-active timer/quota sweep:
  * packages/server/src/gateway.js `processDueTimers` resumes each due
- * `waiting-timer` run through `resumeRunIfNeeded` -> `startRun`, which surfaces
- * this marker as `config.gatewayTriggeredBy`. That sweep carries no
- * `resumeClaim`, so the engine keys "unattended timer wake" detection off this
- * cross-package contract too — keep the two in sync.
+ * `waiting-timer` (and reset-elapsed `waiting-quota`) run through
+ * `resumeRunIfNeeded` -> `startRun`, which surfaces this marker as
+ * `config.gatewayTriggeredBy`. That sweep carries no `resumeClaim`, so the
+ * engine keys unattended-resume detection off this cross-package contract
+ * too — keep the two in sync.
  */
 const GATEWAY_TIMER_TRIGGERED_BY = "timer:gateway";
 /**
- * An unattended timer wake that hits a resume-durability mismatch must fail the
- * run instead of leaving it parked forever while the waker retries silently.
+ * An unattended resume that hits a resume-durability mismatch must fail the
+ * run instead of leaving it wedged forever while the waker retries silently.
  * Two default-active wakers reach this path on a source-changed run:
  *   - the supervisor sweep (apps/cli/src/supervisor.js), which claims the run and
- *     resumes it with a `supervisor:<id>` `resumeClaim.claimOwnerId`; and
- *   - the gateway timer sweep (packages/server/src/gateway.js `processDueTimers`),
- *     which resumes with no `resumeClaim` but `config.gatewayTriggeredBy ===
- *     "timer:gateway"` and whose `startRun.catch` only broadcasts a transient
- *     failed event without persisting `status: failed` (issue #494).
+ *     resumes it with a `supervisor:<id>` `resumeClaim.claimOwnerId` — for any
+ *     resumable status (stale `running`, waiting-timer/-event/-quota). Before
+ *     this covered every status, a stale `running` run with drifted source
+ *     hot-looped forever: the mismatch threw in the invisible detached child,
+ *     the claim release restored the stale heartbeat, and the next poll
+ *     re-claimed it (issues #494, #1361); and
+ *   - the gateway timer/quota sweep (packages/server/src/gateway.js
+ *     `processDueTimers`), which resumes with no `resumeClaim` but
+ *     `config.gatewayTriggeredBy === "timer:gateway"` and whose
+ *     `startRun.catch` only broadcasts a transient failed event without
+ *     persisting `status: failed` (issue #494).
  * Interactive `--resume` mismatches still throw without failing the run.
  *
  * @param {RunRow | null | undefined} existingRun
  * @param {RunOptions} opts
  * @returns {boolean}
  */
-function shouldFailTimerWakeResume(existingRun, opts) {
-    if (existingRun?.status !== "waiting-timer")
+function shouldFailUnattendedResume(existingRun, opts) {
+    if (!existingRun)
         return false;
     if (opts.resumeClaim?.claimOwnerId?.startsWith(SUPERVISOR_CLAIM_OWNER_PREFIX) === true)
         return true;
@@ -2429,7 +2436,7 @@ function reportSmithersError(onError, rawError, context) {
  * @param {unknown} error
  * @param {RunOptions["onError"]} onError
  */
-async function markTimerWakeResumeFailed(adapter, eventBus, runId, error, onError) {
+async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onError) {
     const errorInfo = errorToJson(error);
     await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
     const failedAtMs = nowMs();
@@ -7816,9 +7823,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 }
             }
             catch (error) {
-                if (shouldFailTimerWakeResume(existingRun, opts)) {
+                if (shouldFailUnattendedResume(existingRun, opts)) {
                     try {
-                        await markTimerWakeResumeFailed(adapter, eventBus, runId, error, opts.onError);
+                        await markUnattendedResumeFailed(adapter, eventBus, runId, error, opts.onError);
                     }
                     catch {
                         // If persisting the failed status itself fails (e.g. a

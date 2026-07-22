@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
@@ -9,7 +9,7 @@ import * as engineModule from "@smithers-orchestrator/engine/engine";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
 import { findAndOpenDb } from "./find-db.js";
-import { resumeRunDetached } from "./resume-detached.js";
+import { resumeRunDetached, resumeRunDetachedLogFile } from "./resume-detached.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./SupervisorOptions.ts").SupervisorOptions} SupervisorOptions */
@@ -18,7 +18,74 @@ import { resumeRunDetached } from "./resume-detached.js";
 export const DEFAULT_SUPERVISOR_INTERVAL_MS = 10_000;
 export const DEFAULT_SUPERVISOR_STALE_THRESHOLD_MS = 30_000;
 export const DEFAULT_SUPERVISOR_MAX_CONCURRENT = 3;
+export const DEFAULT_SUPERVISOR_MAX_RESUME_ATTEMPTS = 3;
 export const SUPERVISOR_EVENT_RUN_ID = "__supervisor__";
+/**
+ * Claim-owner prefix stamped on runs claimed for an unattended resume. The
+ * engine keys unattended-resume mismatch handling off this prefix
+ * (packages/engine/src/engine.js SUPERVISOR_CLAIM_OWNER_PREFIX); keep the two
+ * in sync.
+ */
+const SUPERVISOR_CLAIM_OWNER_PREFIX = "supervisor:";
+/**
+ * Parse the consecutive-resume-attempt count out of a supervisor claim owner.
+ * A claim owner is `supervisor:<id>` for the first attempt and
+ * `supervisor:<id>#a<N>` for attempt N. A run whose owner is STILL a
+ * supervisor claim when its heartbeat goes stale is proof the claimed resume
+ * died before the engine activated (activation replaces the owner with the
+ * engine's own `pid:` owner), so the count is how many resumes died in a row.
+ * Returns 0 for anything that is not a supervisor claim owner.
+ *
+ * @param {string | null | undefined} runtimeOwnerId
+ * @returns {number}
+ */
+export function parseSupervisorClaimAttempts(runtimeOwnerId) {
+    if (!runtimeOwnerId || !runtimeOwnerId.startsWith(SUPERVISOR_CLAIM_OWNER_PREFIX)) {
+        return 0;
+    }
+    const suffix = runtimeOwnerId.match(/#a(\d+)$/);
+    if (!suffix) {
+        return 1;
+    }
+    const attempts = Number(suffix[1]);
+    return Number.isInteger(attempts) && attempts > 0 ? attempts : 1;
+}
+/**
+ * @param {string} supervisorId
+ * @param {number} attempt
+ * @returns {string}
+ */
+function buildSupervisorClaimOwnerId(supervisorId, attempt) {
+    const base = `${SUPERVISOR_CLAIM_OWNER_PREFIX}${supervisorId}`;
+    return attempt <= 1 ? base : `${base}#a${attempt}`;
+}
+/**
+ * Best-effort tail of a detached resume log for give-up diagnostics.
+ *
+ * @param {string} logFile
+ * @returns {string | null}
+ */
+function readDetachedLogTail(logFile) {
+    try {
+        const stat = statSync(logFile);
+        if (!stat.isFile() || stat.size === 0) {
+            return null;
+        }
+        const length = Math.min(stat.size, 4096);
+        const buffer = Buffer.alloc(length);
+        const fd = openSync(logFile, "r");
+        try {
+            readSync(fd, buffer, 0, length, stat.size - length);
+        }
+        finally {
+            closeSync(fd);
+        }
+        return buffer.toString("utf8");
+    }
+    catch {
+        return null;
+    }
+}
 /**
  * Scoped supervisors may start before `up --detach` creates the run store.
  * Workspace-wide supervisors retain the existing fail-fast open behavior.
@@ -75,6 +142,7 @@ function normalizeSupervisorOptions(options) {
             }
             return helper(adapter, nowMs);
         },
+        readDetachedLogTail,
         ...options.deps,
     };
     return {
@@ -83,6 +151,7 @@ function normalizeSupervisorOptions(options) {
         pollIntervalMs: options.pollIntervalMs ?? DEFAULT_SUPERVISOR_INTERVAL_MS,
         staleThresholdMs: options.staleThresholdMs ?? DEFAULT_SUPERVISOR_STALE_THRESHOLD_MS,
         maxConcurrent: options.maxConcurrent ?? DEFAULT_SUPERVISOR_MAX_CONCURRENT,
+        maxResumeAttempts: options.maxResumeAttempts ?? DEFAULT_SUPERVISOR_MAX_RESUME_ATTEMPTS,
         dryRun: Boolean(options.dryRun),
         supervisorId: options.supervisorId ?? randomUUID(),
         supervisorRunId: options.supervisorRunId ?? SUPERVISOR_EVENT_RUN_ID,
@@ -190,6 +259,84 @@ function emitSkipEventEffect(options, runId, reason) {
     });
 }
 /**
+ * Stop hot-looping on a run whose auto-resumes keep dying before activation:
+ * claim it one final time and mark it failed with a diagnosable error instead
+ * of retrying forever (issue #1361). The failed status is resumable, so after
+ * the underlying startup failure is fixed a manual
+ * `smithers up <workflow> --resume --run-id <id> --force` still recovers the
+ * run through the engine's resume-time in-progress reset.
+ *
+ * @param {NormalizedSupervisorOptions} options
+ * @param {{ runId: string; runtimeOwnerId?: string | null; heartbeatAtMs?: number | null }} run
+ * @param {number} staleBeforeMs
+ * @param {number} priorAttempts
+ * @param {string} workflowPath
+ * @param {{ expectedStatus?: string; requireStale: boolean }} claimOptions
+ * @returns {Effect.Effect<"skipped", never>}
+ */
+function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts, workflowPath, claimOptions) {
+    return Effect.gen(function* () {
+        const claimOwnerId = buildSupervisorClaimOwnerId(options.supervisorId, priorAttempts + 1);
+        const claimHeartbeatAtMs = options.deps.now();
+        const claimed = yield* options.adapter
+            .claimRunForResumeEffect({
+            runId: run.runId,
+            expectedStatus: claimOptions.expectedStatus,
+            expectedRuntimeOwnerId: run.runtimeOwnerId ?? null,
+            expectedHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            staleBeforeMs,
+            claimOwnerId,
+            claimHeartbeatAtMs,
+            requireStale: claimOptions.requireStale,
+        })
+            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim run ${run.runId} for give-up: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as(false))));
+        if (!claimed) {
+            return "skipped";
+        }
+        const logFile = resumeRunDetachedLogFile(workflowPath, run.runId);
+        const logTail = options.deps.readDetachedLogTail(logFile);
+        const errorInfo = {
+            name: "SmithersError",
+            code: "AUTO_RESUME_GAVE_UP",
+            message: `Auto-resume failed ${priorAttempts} consecutive times: each detached resume died before the engine activated. ` +
+                `Check the resume log at ${logFile}, fix the startup failure, then resume manually: ` +
+                `smithers up ${workflowPath} --resume --run-id ${run.runId} --force`,
+            details: {
+                attempts: priorAttempts,
+                lastClaimOwnerId: run.runtimeOwnerId ?? null,
+                logFile,
+                ...(logTail ? { logTail } : {}),
+            },
+        };
+        const failed = yield* options.adapter
+            .updateClaimedRun({
+            runId: run.runId,
+            expectedRuntimeOwnerId: claimOwnerId,
+            expectedHeartbeatAtMs: claimHeartbeatAtMs,
+            patch: {
+                status: "failed",
+                finishedAtMs: options.deps.now(),
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                errorJson: JSON.stringify(errorInfo),
+            },
+        })
+            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to mark run ${run.runId} as failed after exhausted resumes: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as(false))));
+        if (!failed) {
+            return "skipped";
+        }
+        yield* Effect.logWarning(`Giving up on run ${run.runId}: ${priorAttempts} consecutive auto-resumes died before activation; marked failed (resume log: ${logFile})`);
+        yield* emitSkipEventEffect(options, run.runId, "resume-attempts-exhausted");
+        yield* emitEventEffect(options.adapter, {
+            type: "RunFailed",
+            runId: run.runId,
+            error: errorInfo,
+            timestampMs: options.deps.now(),
+        });
+        return "skipped";
+    });
+}
+/**
  * @param {NormalizedSupervisorOptions} options
  * @param {StaleRunRecord} staleRun
  * @param {number} staleBeforeMs
@@ -206,7 +353,6 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
         staleDurationMs,
         runtimeOwnerId: staleRun.runtimeOwnerId ?? null,
     };
-    const claimOwnerId = `supervisor:${options.supervisorId}`;
     return Effect.withLogSpan("supervisor:resume")(Effect.gen(function* () {
         if (!workflowPath || !options.deps.workflowExists(workflowPath)) {
             yield* Effect.logWarning(`Skipping run ${staleRun.runId}: workflow file not found at ${workflowPath ?? "(missing path)"}`);
@@ -223,20 +369,39 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
         // the run's frames (land nodes marked finished with empty output rows,
         // issues that landed but never closed). A stale heartbeat alone is NOT
         // proof of death.
+        //
+        // One owner shape IS verifiably dead despite having no pid: a
+        // `supervisor:` claim whose heartbeat went stale again. Activation
+        // replaces the claim owner with the engine's own `pid:` owner, so a
+        // lingering stale claim means the claimed resume died before doing any
+        // work (issue #1361). Those are claimable again, bounded by
+        // maxResumeAttempts below.
+        const priorResumeAttempts = parseSupervisorClaimAttempts(staleRun.runtimeOwnerId);
         const hasOwner = staleRun.runtimeOwnerId != null && staleRun.runtimeOwnerId.length > 0;
         const ownerPid = options.deps.parseRuntimeOwnerPid(staleRun.runtimeOwnerId);
         const ownerPidAlive = ownerPid !== null && options.deps.isPidAlive(ownerPid);
-        const orphaned = !hasOwner || (ownerPid !== null && !ownerPidAlive);
+        const orphaned = !hasOwner ||
+            (ownerPid !== null && !ownerPidAlive) ||
+            priorResumeAttempts > 0;
         if (!orphaned) {
             const reason = ownerPidAlive ? "pid-alive" : "owner-unverified";
             yield* Effect.logInfo(`Skipping run ${staleRun.runId}: heartbeat is stale but runtime owner ${staleRun.runtimeOwnerId} is not verifiably dead (${ownerPidAlive ? `pid ${ownerPid} is alive` : "no locally verifiable owner pid"}); not resuming to avoid a second engine racing the merge queue`);
             yield* emitSkipEventEffect(options, staleRun.runId, reason);
             return "skipped";
         }
+        if (priorResumeAttempts >= options.maxResumeAttempts) {
+            if (options.dryRun) {
+                yield* Effect.logInfo(`Dry-run: would give up on run ${staleRun.runId} after ${priorResumeAttempts} failed auto-resumes and mark it failed`);
+                return "skipped";
+            }
+            return yield* giveUpOnFailedResumesEffect(options, staleRun, staleBeforeMs, priorResumeAttempts, workflowPath, { requireStale: true });
+        }
         if (options.dryRun) {
             yield* Effect.logInfo(`Dry-run: would resume stale run ${staleRun.runId} (last heartbeat ${staleDurationMs}ms ago)`);
             return "would-resume";
         }
+        const resumeAttempt = priorResumeAttempts + 1;
+        const claimOwnerId = buildSupervisorClaimOwnerId(options.supervisorId, resumeAttempt);
         const claimHeartbeatAtMs = options.deps.now();
         const claimed = yield* options.adapter
             .claimRunForResumeEffect({
@@ -277,12 +442,13 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
             return "skipped";
         }
         const resumePid = spawnResult.right;
-        yield* Effect.logInfo(`Resuming stale run ${staleRun.runId} (last heartbeat ${staleDurationMs}ms ago)${resumePid ? ` with pid ${resumePid}` : ""}`);
+        yield* Effect.logInfo(`Resuming stale run ${staleRun.runId} (last heartbeat ${staleDurationMs}ms ago, attempt ${resumeAttempt})${resumePid ? ` with pid ${resumePid}` : ""}`);
         yield* emitEventEffect(options.adapter, {
             type: "RunAutoResumed",
             runId: staleRun.runId,
             lastHeartbeatAtMs: staleRun.heartbeatAtMs ?? null,
             staleDurationMs,
+            resumeAttempt,
             timestampMs: options.deps.now(),
         });
         return "resumed";
@@ -313,11 +479,20 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
             yield* emitSkipEventEffect(options, run.runId, "pid-alive");
             return "skipped";
         }
+        const priorResumeAttempts = parseSupervisorClaimAttempts(run.runtimeOwnerId);
+        if (priorResumeAttempts >= options.maxResumeAttempts) {
+            if (options.dryRun) {
+                yield* Effect.logInfo(`Dry-run: would give up on timer run ${run.runId} after ${priorResumeAttempts} failed auto-resumes and mark it failed`);
+                return "skipped";
+            }
+            return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, workflowPath, { expectedStatus: "waiting-timer", requireStale: true });
+        }
         if (options.dryRun) {
             yield* Effect.logInfo(`Dry-run: would resume due timer run ${run.runId}`);
             return "would-resume";
         }
-        const claimOwnerId = `supervisor:${options.supervisorId}`;
+        const resumeAttempt = priorResumeAttempts + 1;
+        const claimOwnerId = buildSupervisorClaimOwnerId(options.supervisorId, resumeAttempt);
         const claimHeartbeatAtMs = options.deps.now();
         const claimed = yield* options.adapter
             .claimRunForResumeEffect({
@@ -360,7 +535,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
             return "skipped";
         }
         const resumePid = spawnResult.right;
-        yield* Effect.logInfo(`Resuming timer-blocked run ${run.runId}${resumePid ? ` with pid ${resumePid}` : ""}`);
+        yield* Effect.logInfo(`Resuming timer-blocked run ${run.runId} (attempt ${resumeAttempt})${resumePid ? ` with pid ${resumePid}` : ""}`);
         yield* emitEventEffect(options.adapter, {
             type: "RunAutoResumed",
             runId: run.runId,
@@ -368,6 +543,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
             staleDurationMs: typeof run.heartbeatAtMs === "number"
                 ? Math.max(0, options.deps.now() - run.heartbeatAtMs)
                 : 0,
+            resumeAttempt,
             timestampMs: options.deps.now(),
         });
         return "resumed";
@@ -402,11 +578,20 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
             yield* emitSkipEventEffect(options, run.runId, "pid-alive");
             return "skipped";
         }
+        const priorResumeAttempts = parseSupervisorClaimAttempts(run.runtimeOwnerId);
+        if (priorResumeAttempts >= options.maxResumeAttempts) {
+            if (options.dryRun) {
+                yield* Effect.logInfo(`Dry-run: would give up on approval-decided run ${run.runId} after ${priorResumeAttempts} failed auto-resumes and mark it failed`);
+                return "skipped";
+            }
+            return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, workflowPath, { expectedStatus: "waiting-event", requireStale: true });
+        }
         if (options.dryRun) {
             yield* Effect.logInfo(`Dry-run: would resume approval-decided run ${run.runId}`);
             return "would-resume";
         }
-        const claimOwnerId = `supervisor:${options.supervisorId}`;
+        const resumeAttempt = priorResumeAttempts + 1;
+        const claimOwnerId = buildSupervisorClaimOwnerId(options.supervisorId, resumeAttempt);
         const claimHeartbeatAtMs = options.deps.now();
         const claimed = yield* options.adapter
             .claimRunForResumeEffect({
@@ -449,7 +634,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
             return "skipped";
         }
         const resumePid = spawnResult.right;
-        yield* Effect.logInfo(`Resuming approval-decided run ${run.runId}${resumePid ? ` with pid ${resumePid}` : ""}`);
+        yield* Effect.logInfo(`Resuming approval-decided run ${run.runId} (attempt ${resumeAttempt})${resumePid ? ` with pid ${resumePid}` : ""}`);
         yield* emitEventEffect(options.adapter, {
             type: "RunAutoResumed",
             runId: run.runId,
@@ -457,6 +642,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
             staleDurationMs: typeof run.heartbeatAtMs === "number"
                 ? Math.max(0, options.deps.now() - run.heartbeatAtMs)
                 : 0,
+            resumeAttempt,
             timestampMs: options.deps.now(),
         });
         return "resumed";
@@ -480,11 +666,20 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
             yield* emitSkipEventEffect(options, run.runId, "pid-alive");
             return "skipped";
         }
+        const priorResumeAttempts = parseSupervisorClaimAttempts(run.runtimeOwnerId);
+        if (priorResumeAttempts >= options.maxResumeAttempts) {
+            if (options.dryRun) {
+                yield* Effect.logInfo(`Dry-run: would give up on quota-parked run ${run.runId} after ${priorResumeAttempts} failed auto-resumes and mark it failed`);
+                return "skipped";
+            }
+            return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, workflowPath, { expectedStatus: "waiting-quota", requireStale: false });
+        }
         if (options.dryRun) {
             yield* Effect.logInfo(`Dry-run: would resume quota-parked run ${run.runId}`);
             return "would-resume";
         }
-        const claimOwnerId = `supervisor:${options.supervisorId}`;
+        const resumeAttempt = priorResumeAttempts + 1;
+        const claimOwnerId = buildSupervisorClaimOwnerId(options.supervisorId, resumeAttempt);
         const claimHeartbeatAtMs = options.deps.now();
         const claimed = yield* options.adapter
             .claimRunForResumeEffect({
@@ -529,6 +724,7 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
             staleDurationMs: typeof run.heartbeatAtMs === "number"
                 ? Math.max(0, options.deps.now() - run.heartbeatAtMs)
                 : 0,
+            resumeAttempt,
             timestampMs: options.deps.now(),
         });
         return "resumed";
