@@ -106,6 +106,7 @@ import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { removeDetachedRunLog } from "./removeDetachedRunLog.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
+import { DETACHED_ADMISSION_NONCE_ENV, detachedAdmissionMarker, terminateUnadmittedChild, waitForDetachedAdmission } from "./detached-admission.js";
 import { formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, } from "@smithers-orchestrator/agents/cli-capabilities";
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect, } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
@@ -399,9 +400,14 @@ function setupSqliteCleanup(workflow) {
 }
 
 async function closeWorkflowBackend(workflow) {
-    const close = workflow?.close ?? workflow?.db?.close;
+    const close = workflow?.close ?? workflow?.db?.close ?? workflow?.db?.$client?.close;
     if (typeof close === "function") {
-        await close.call(workflow?.close ? workflow : workflow.db);
+        const owner = workflow?.close
+            ? workflow
+            : workflow?.db?.close
+                ? workflow.db
+                : workflow?.db?.$client;
+        await close.call(owner);
     }
 }
 
@@ -432,6 +438,14 @@ function buildProgressReporter() {
     return (event) => {
         const ts = formatElapsed();
         switch (event.type) {
+            case "RunStarted": {
+                const admissionNonce = process.env[DETACHED_ADMISSION_NONCE_ENV];
+                if (admissionNonce) {
+                    process.stderr.write(`${detachedAdmissionMarker(admissionNonce)}\n`);
+                    delete process.env[DETACHED_ADMISSION_NONCE_ENV];
+                }
+                break;
+            }
             case "NodeStarted":
                 process.stderr.write(`[${ts}] → ${event.nodeId} (attempt ${event.attempt ?? 1}, iteration ${event.iteration ?? 0})\n`);
                 break;
@@ -2189,6 +2203,82 @@ async function findParentRunError(parentRunId) {
         opened.cleanup?.();
     }
 }
+
+/**
+ * Load and render the initial graph before a detached child is spawned. This is
+ * the same compilation/render boundary as `smithers graph`, with persisted
+ * input and outputs restored for a resume.
+ *
+ * @param {{
+ *   workflowPath: string;
+ *   resolvedWorkflowPath: string;
+ *   input: Record<string, unknown>;
+ *   runId: string;
+ *   resume: boolean;
+ *   root?: string;
+ *   backend?: string;
+ * }} options
+ */
+async function preflightDetachedLaunch(options) {
+    const previousBackend = process.env.SMITHERS_BACKEND;
+    let workflow;
+    try {
+        if (options.backend) process.env.SMITHERS_BACKEND = options.backend;
+        workflow = await loadWorkflowAsync(options.workflowPath);
+        ensureSmithersTables(workflow.db);
+        const schema = resolveSchema(workflow.db);
+        const inputTable = schema.input;
+        const inputRow = options.resume && inputTable
+            ? (await loadInput(workflow.db, inputTable, options.runId)) ?? options.input
+            : options.input;
+        const outputs = await loadOutputs(workflow.db, schema, options.runId);
+        const ctx = new SmithersCtx({
+            runId: options.runId,
+            iteration: 0,
+            input: inputRow ?? {},
+            outputs,
+        });
+        await Effect.runPromise(renderFrame(workflow, ctx, {
+            baseRootDir: resolveLaunchRootDir(options.root),
+            workflowPath: options.resolvedWorkflowPath,
+        }));
+    }
+    finally {
+        if (workflow) await closeWorkflowBackend(workflow).catch(() => { });
+        if (previousBackend === undefined) delete process.env.SMITHERS_BACKEND;
+        else process.env.SMITHERS_BACKEND = previousBackend;
+    }
+}
+
+/**
+ * Bun's parser throws BuildMessage objects whose stack is undefined and whose
+ * file/line/column live on `.position`. Preserve that diagnostic instead of
+ * collapsing it to a location-free message.
+ *
+ * @param {unknown} error
+ */
+function formatDetachedPreflightError(error) {
+    const candidate = /** @type {any} */ (error);
+    const nested = candidate?.position
+        ? candidate
+        : candidate?.cause?.position
+            ? candidate.cause
+            : Array.isArray(candidate?.errors) && candidate.errors[0]?.position
+                ? candidate.errors[0]
+                : candidate;
+    const position = nested?.position ?? nested?.location;
+    const message = nested instanceof Error || typeof nested?.message === "string"
+        ? nested.message
+        : String(error);
+    if (position && typeof position.file === "string" && Number.isFinite(position.line)) {
+        const column = Number.isFinite(position.column) ? position.column : 0;
+        const lineText = typeof position.lineText === "string" ? `\n${position.lineText}` : "";
+        const caret = lineText ? `\n${" ".repeat(Math.max(0, column))}^` : "";
+        return `${position.file}:${position.line}:${column + 1}: ${message}${lineText}${caret}`;
+    }
+    if (error instanceof Error) return error.stack ?? error.message;
+    return String(error);
+}
 /**
  * @param {EventsCommandOptions} options
  * @returns {NormalizedEventsQuery}
@@ -2298,6 +2388,27 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 if (parentError)
                     return fail(parentError);
             }
+            const effectiveRunId = runId ?? `run-${Date.now()}`;
+            try {
+                await preflightDetachedLaunch({
+                    workflowPath,
+                    resolvedWorkflowPath,
+                    input,
+                    runId: effectiveRunId,
+                    resume,
+                    root: options.root,
+                    backend: options.backend,
+                });
+            }
+            catch (error) {
+                const message = formatDetachedPreflightError(error);
+                process.stderr.write(`${message}\n`);
+                return fail({
+                    code: "DETACHED_PREFLIGHT_FAILED",
+                    message,
+                    exitCode: 1,
+                });
+            }
             const cliPath = fileURLToPath(import.meta.url);
             const childArgs = ["up", workflowPath];
             if (runId)
@@ -2362,7 +2473,6 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 childArgs.push("--backend", options.backend);
             if (options.postFailure === false)
                 childArgs.push("--no-post-failure");
-            const effectiveRunId = runId ?? `run-${Date.now()}`;
             await reapDetachedRunLogs({ cwd: cliWorkspace.cwd() });
             const logFile = resolveDetachedRunLogFile(effectiveRunId, {
                 logDir: options.logDir,
@@ -2371,13 +2481,36 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             mkdirSync(dirname(logFile), { recursive: true });
             if (!runId)
                 childArgs.push("--run-id", effectiveRunId);
+            const admissionNonce = crypto.randomUUID();
             const fd = openSync(logFile, "a");
-            const child = spawn("bun", [cliPath, ...childArgs], {
-                detached: true,
-                stdio: ["ignore", fd, fd],
-                env: { ...process.env, [DETACHED_RUN_LOG_FILE_ENV]: logFile },
-            });
+            let child;
+            try {
+                child = spawn("bun", [cliPath, ...childArgs], {
+                    detached: true,
+                    stdio: ["ignore", fd, fd],
+                    env: {
+                        ...process.env,
+                        [DETACHED_RUN_LOG_FILE_ENV]: logFile,
+                        [DETACHED_ADMISSION_NONCE_ENV]: admissionNonce,
+                    },
+                });
+            }
+            finally {
+                closeSync(fd);
+            }
             child.unref();
+            const admission = await waitForDetachedAdmission({ child, logFile, nonce: admissionNonce });
+            if (!admission.admitted) {
+                terminateUnadmittedChild(child);
+                const tail = admission.tail.trimEnd();
+                const message = `${admission.reason}\nDetached child log (${logFile}):\n${tail || "(empty)"}`;
+                process.stderr.write(`${message}\n`);
+                return fail({
+                    code: "DETACHED_ADMISSION_FAILED",
+                    message,
+                    exitCode: 1,
+                });
+            }
             let supervisorPid;
             if (options.supervise && !options.serve) {
                 const supervisorArgs = [cliPath, "supervise", "--run", effectiveRunId];
