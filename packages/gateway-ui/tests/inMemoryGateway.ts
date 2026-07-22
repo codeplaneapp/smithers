@@ -4,12 +4,13 @@
 // components render against this exactly as they would against a live gateway:
 // real client, real @tanstack/react-db collections, real fetch, real SSE.
 
-// This module is imported (and evaluated) before the test file registers
-// happy-dom, so these globals are still Bun's native implementations. Bun.serve
-// requires native Response/ReadableStream instances; the happy-dom replacements
-// installed later would be rejected, so we pin the natives here.
-const NativeResponse = globalThis.Response;
-const NativeReadableStream = globalThis.ReadableStream;
+// Bun.serve requires native Response/ReadableStream instances; the happy-dom
+// replacements the dom suites install would be rejected. The natives are pinned
+// by the tests/pinNativeGlobals.ts preload (bunfig.toml), which runs before any
+// test file — a module-eval-time capture here is order-dependent, because a
+// happy-dom-registering suite can evaluate first in readdir order.
+const NativeResponse = globalThis.__smithersNativeResponse ?? globalThis.Response;
+const NativeReadableStream = globalThis.__smithersNativeReadableStream ?? globalThis.ReadableStream;
 
 export type SeedState = {
   runs?: Array<Record<string, unknown>>;
