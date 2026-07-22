@@ -38,6 +38,8 @@ The default watch path is still the agent-driven CLI loop above, not a GUI you c
 
 The Smithers workflow UI surface renders the browser UI that lives with that workflow, such as a kanban board, approval dashboard, or review surface. It is for the run you are steering, not a separate product console you must learn before Smithers is useful.
 
+Your agent builds these views for you, and it does not hand-roll them: every workflow UI is composed from the Smithers component library, which ports [shadcn/ui](https://ui.shadcn.com) anatomy and adds agent-native components built specifically for Smithers (reasoning traces, tool calls, plans, approvals, live run trees). That is why every view your agent ships looks consistent, works in light and dark, and stays accessible. The [UI Docs by Type](/reference/ui/overview) page maps the whole surface if you want to see what your agent is working with.
+
 <Note>
 The CLI watch loop (`ps`, `chat --follow`, `inspect --watch`) remains the always-available path, and works on any machine, with any agent, no GUI required.
 </Note>

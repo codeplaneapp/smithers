@@ -8,6 +8,7 @@ This file is the agent-facing core Smithers documentation. It is for Claude, Cod
 Human-facing docs live on the website under the For Humans Guide. Humans ask their agent for outcomes; agents consume these llms files and operate Smithers.
 
 Opt-in topics cover features most users do not need. They are also sections of the full bundle at /llms-full.txt (only /llms.txt and /llms-full.txt are served on the docs site):
+  - UI (per-component library reference, adapters, hooks, design guide)
   - Memory (cross-run state)
   - OpenAPI tools
   - Observability + HTTP server
@@ -11060,7 +11061,9 @@ and [Workflow UI (React)](/examples/workflow-ui-react) for a hand-wired example.
 
 `@smithers-orchestrator/ui` is the shared component library for every Smithers
 UI surface: custom workflow UIs under `.smithers/ui/`, the Monitor, Studio, and
-any app embedding a Gateway page. It ships shadcn component anatomy (`data-slot`
+any app embedding a Gateway page. For a map of every kind of UI documentation
+(chat components, agentic components, adapters, run-aware widgets, hooks, and
+authoring guides), start at [UI Docs by Type](/reference/ui/overview). It ships shadcn component anatomy (`data-slot`
 attributes, CVA variant props, `asChild` via Radix Slot) with Radix behavior for
 dialogs, tabs, tooltips, and selects, styled exclusively through the
 [workflow UI theme tokens](/guides/workflow-ui-design). Every component is
@@ -11791,6 +11794,11 @@ event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
 />`, keep the browser code in `.smithers/ui/<workflow>.tsx`, and the Gateway
 builds and serves it at `/workflows/<key>`. `bunx smithers-orchestrator ui`
 opens it for a run with a stable `?runId=` deep link.
+
+Compose the UI from the shared component library rather than hand-rolling
+markup: [UI Docs by Type](/reference/ui/overview) maps every layer, from the
+shadcn-based base library and agent-native components to the run-aware
+gateway-ui widgets and the gateway-react hooks this guide builds on.
 
 This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through bunx smithers-orchestrator ui and the Gateway.
 

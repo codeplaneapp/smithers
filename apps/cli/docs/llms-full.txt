@@ -31,6 +31,7 @@ This file is the agent-facing core Smithers documentation. It is for Claude, Cod
 Human-facing docs live on the website under the For Humans Guide. Humans ask their agent for outcomes; agents consume these llms files and operate Smithers.
 
 Opt-in topics cover features most users do not need. They are also sections of the full bundle at /llms-full.txt (only /llms.txt and /llms-full.txt are served on the docs site):
+  - UI (per-component library reference, adapters, hooks, design guide)
   - Memory (cross-run state)
   - OpenAPI tools
   - Observability + HTTP server
@@ -11060,7 +11061,9 @@ and Workflow UI (React) for a hand-wired example.
 
 `@smithers-orchestrator/ui` is the shared component library for every Smithers
 UI surface: custom workflow UIs under `.smithers/ui/`, the Monitor, Studio, and
-any app embedding a Gateway page. It ships shadcn component anatomy (`data-slot`
+any app embedding a Gateway page. For a map of every kind of UI documentation
+(chat components, agentic components, adapters, run-aware widgets, hooks, and
+authoring guides), start at UI Docs by Type. It ships shadcn component anatomy (`data-slot`
 attributes, CVA variant props, `asChild` via Radix Slot) with Radix behavior for
 dialogs, tabs, tooltips, and selects, styled exclusively through the
 workflow UI theme tokens. Every component is
@@ -11791,6 +11794,11 @@ event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
 />`, keep the browser code in `.smithers/ui/<workflow>.tsx`, and the Gateway
 builds and serves it at `/workflows/<key>`. `bunx smithers-orchestrator ui`
 opens it for a run with a stable `?runId=` deep link.
+
+Compose the UI from the shared component library rather than hand-rolling
+markup: UI Docs by Type maps every layer, from the
+shadcn-based base library and agent-native components to the run-aware
+gateway-ui widgets and the gateway-react hooks this guide builds on.
 
 This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through bunx smithers-orchestrator ui and the Gateway.
 
@@ -13271,6 +13279,1450 @@ Rewrite these on sight; the daily research job does the same sweep mechanically.
 - Any change to models bumps version by exactly 1 and refreshes updatedAt.
 - Deprecated entries keep their replacedBy id for one release so sweeps know what to rewrite, then get deleted.
 - Orchestration and gating seats (scope, direction, progress, done-or-not, approve/deny) are Claude-held: Opus 4.8 holds the orchestrator default and Fable 5 holds planning. GPT-5.6 Sol and Terra never hold those roles, and Luna is for trivial, minimal-risk work only.
+
+
+===============================================================================
+
+# Smithers UI
+
+> Smithers UI deep reference: the shadcn-based component library's per-component pages, agent-native components, heavy-dependency adapters, gateway-react hooks, and the workflow UI design guide. The everyday UI surface (base library, gateway-ui widgets, chat components, authoring guide) is in the core section.
+
+---
+
+## UI Docs by Type
+
+> One page that maps every kind of Smithers UI documentation, from the shadcn-based component library and agent-native components to run-aware widgets, hooks, adapters, and authoring guides.
+
+Agents build every Smithers UI surface by composing the shared component
+library, never by hand-rolling markup and CSS. The library has two layers:
+`@smithers-orchestrator/ui` ports [shadcn/ui](https://ui.shadcn.com) component
+anatomy (`data-slot` attributes, CVA variants, `asChild` via Radix Slot) and
+adds agent-native components built specifically for Smithers (reasoning, tool
+calls, plans, queues, approvals, checkpoints, context usage), while
+`@smithers-orchestrator/gateway-ui` supplies run-aware widgets composed over
+the `smithers-orchestrator/gateway-react` hooks. A custom workflow UI at
+`.smithers/ui/<workflow>.tsx` imports from those subpaths and nothing else.
+
+## Doc types at a glance
+
+| Doc type | What it covers | Start at |
+| --- | --- | --- |
+| Base component library | Buttons, cards, dialogs, tabs, tables, status pills, tokens, theming rules | UI Component Library |
+| Chat components | MessageScroller, Bubble, Attachment, Marker, Shimmer | UI Component Library |
+| Agentic components | The agent-native catalog plus per-component pages: Reasoning, ToolCall, ChainOfThought, Plan, TaskItem, Sources, InlineCitation | Agentic UI Components |
+| Heavy-dependency adapters | Chart (recharts), Terminal (xterm), PierreDiffView, MarkdownEditor; each ships behind an `adapters/*` subpath so the base barrel stays lightweight | Chart |
+| Run-aware widgets | RunTree, RunEventLog, ApprovalPanel, NodeOutputView, WorkflowGraph, SimpleWorkflowDashboard | Gateway UI |
+| Live data hooks | useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions | Gateway React |
+| Workflow UI authoring | The end-to-end guide for building and serving `.smithers/ui/<workflow>.tsx` | Custom Workflow UIs |
+| Theming and design | Theme tokens, light and dark correctness, reduced motion, the design contract | Workflow UI Design |
+| Migration | Moving a hand-rolled workflow UI onto the shared libraries | Workflow-Owned UI Migration |
+| Terminal surfaces | The full-screen TUI monitor | TUI |
+
+## How the layers stack
+
+1. `react` renders.
+2. `smithers-orchestrator/ui` provides the components: shadcn anatomy, the
+   agent-native families, and tokens that make light and dark correct by
+   construction. Heavy renderers live behind `smithers-orchestrator/ui/adapters/*`.
+3. `smithers-orchestrator/gateway-ui` provides run-aware widgets that already
+   know how to render runs, events, approvals, and node output.
+4. `smithers-orchestrator/gateway-react` provides the live hooks those widgets
+   (and your custom panels) read runs through.
+5. Your workflow UI composes the three subpaths and calls
+   `createGatewayReactRoot(<App />)`. The Gateway bundles and serves it at
+   `/workflows/<key>`.
+
+## Where these docs live in the agent bundle
+
+The core agent bundle (`llms-core.txt`) carries the base library page, the
+gateway-ui widget catalog, the chat component pages, and the custom workflow UI
+guide. The UI fragment of /llms-full.txt adds this page, the
+per-component agentic pages, the adapter pages, the gateway-react hook
+reference, and the design guide.
+
+---
+
+## Reasoning
+
+> Render a streaming-aware disclosure for model reasoning content.
+
+`Reasoning` contains thinking or extended-reasoning content without coupling the
+UI package to a Markdown implementation. Pass `Markdown` or another renderer as
+children when the content is Markdown.
+
+```tsx
+import { Markdown, Reasoning } from "smithers-orchestrator/ui";
+
+<Reasoning streaming={isStreaming} duration={72}>
+  <Markdown content={reasoningText} />
+</Reasoning>
+```
+
+## Props
+
+| Prop | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `streaming` | `boolean` | `false` | Shimmers the title and controls automatic open/close while the user has not toggled the disclosure. |
+| `open` | `boolean` | uncontrolled | Controls the disclosure. |
+| `defaultOpen` | `boolean` | `streaming` | Sets the initial uncontrolled state. |
+| `onOpenChange` | `(open: boolean) => void` | none | Receives requested user toggles and automatic streaming transitions. |
+| `duration` | `number` | none | Renders elapsed seconds as `Thought for Ns` or `Mm SSs` after streaming. |
+| `title` | `string` | `Reasoning` | Header text. |
+
+In uncontrolled mode, a streaming transition opens or closes the block until
+the first user toggle. Controlled mode never changes itself.
+
+---
+
+## ToolCall
+
+> Render tool lifecycle status, JSON input and output, and approval content.
+
+`ToolCall` renders all eight input, approval, execution, output, failure, and
+denial states from an agent tool invocation. Lifecycle tinting flows through the
+shared status vocabulary.
+
+```tsx
+import { ToolCall } from "smithers-orchestrator/ui";
+
+<ToolCall
+  name="search"
+  state="output-available"
+  args={{ query: "run status" }}
+  result={{ matches: 3 }}
+/>
+```
+
+Use `argsText` for partial JSON while input streams. It overrides `args`.
+`resultText` similarly overrides `result`. Object rendering is BigInt-safe and
+cyclic-safe through the exported `formatJsonSafe` helper.
+
+## Lifecycle states
+
+| State | Visible label | Shared status |
+| --- | --- | --- |
+| `input-streaming` | Streaming input | `running` |
+| `input-available` | Ready | `pending` |
+| `approval-requested` | Needs approval | `waiting-approval` |
+| `approval-responded` | Approved | `pending` |
+| `running` | Running | `running` |
+| `output-available` | Done | `complete` |
+| `output-error` | Failed | `error` |
+| `output-denied` | Denied | `denied` |
+
+The default `compact` layout discloses its details with a native button. The
+`expanded` layout always mounts details and ignores disclosure props. Inject
+approve and deny controls through `approvalSlot`; it renders only during
+`approval-requested`.
+
+---
+
+## ChainOfThought
+
+> Render an ordered list of model reasoning steps with accessible statuses.
+
+`ChainOfThought` gives reasoning steps a compact, ordered visual treatment. Step
+status is never color-only: each dot has matching screen-reader text.
+
+```tsx
+import { ChainOfThought } from "smithers-orchestrator/ui";
+
+<ChainOfThought
+  streaming
+  steps={[
+    { id: "inspect", label: "Inspect the parser", status: "done" },
+    { id: "patch", label: "Apply the fix", status: "active", detail: "Editing parser.ts" },
+    { id: "test", label: "Run tests", status: "pending" },
+  ]}
+/>
+```
+
+## Step shape
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `id` | `string` | Stable React key. |
+| `label` | `ReactNode` | Visible step label. |
+| `status` | `pending \| active \| done` | Maps to shared `pending`, `running`, or `complete` status semantics. |
+| `detail` | `ReactNode` | Optional detail shown while the whole block is open. |
+
+The whole block uses the same controlled disclosure and streaming behavior as
+`Reasoning`.
+
+---
+
+## Plan
+
+> Display ordered agent work with shared statuses, progress, and collapsible details.
+
+Import `Plan` from the base UI package:
+
+```tsx
+import { Plan, TaskItem } from "smithers-orchestrator/ui";
+
+<Plan
+  streaming
+  steps={[
+    { id: "inspect", label: "Inspect files", status: "done" },
+    {
+      id: "implement",
+      label: "Implement changes",
+      status: "active",
+      detail: <TaskItem label="Update Plan.tsx" status="running" />,
+    },
+  ]}
+/>
+```
+
+The header shows `done/total done`, counting only steps whose status is `done`.
+The whole plan starts open by default. Both the plan and each available detail
+use native disclosure buttons, and closed bodies are unmounted.
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `title` | `string` | `"Plan"` | Header title. |
+| `steps` | `readonly PlanStep[]` | required | Ordered steps with `id`, plain-string `label`, `status`, optional `detail`, and optional `defaultOpen`. |
+| `streaming` | `boolean` | `false` | Shimmers the title while upstream work streams. |
+| `open`, `defaultOpen`, `onOpenChange` | controlled disclosure trio | open | Controls the whole-plan disclosure. |
+| `openStepIds`, `onOpenStepIdsChange` | `readonly string[]`, callback | uncontrolled | Controls every step-detail disclosure. |
+
+`PlanStepStatus` is `pending | active | done | failed | skipped`.
+`planStepStatus` maps those values to the shared status vocabulary used by the
+rest of the component library.
+
+**Source**: `packages/ui/src/agentic/Plan.tsx`
+
+**Tests**: `packages/ui/tests/plan.test.tsx`
+
+---
+
+## TaskItem
+
+> Render a compact unit-of-work row with shared status semantics.
+
+`TaskItem` works on its own or inside a `Plan` step detail:
+
+```tsx
+import { TaskItem } from "smithers-orchestrator/ui";
+
+<TaskItem
+  label="Run focused tests"
+  status="running"
+  files={["tests/plan.test.tsx"]}
+  elapsedSeconds={72}
+/>
+```
+
+The `status` string goes through the shared `normalizeStatus`, `statusClass`,
+and `formatStatus` helpers. Every tinted dot has matching screen-reader text.
+
+## Props
+
+| Prop | Type | Description |
+| --- | --- | --- |
+| `label` | `ReactNode` | Unit-of-work label. |
+| `status` | `string` | Any shared status vocabulary string, such as `running`, `complete`, or `failed`. |
+| `files` | `readonly string[]` | Optional text-only monospace file badges. |
+| `elapsedSeconds` | `number` | Optional elapsed duration, formatted as seconds or minutes and seconds. |
+
+**Source**: `packages/ui/src/agentic/TaskItem.tsx`
+
+**Tests**: `packages/ui/tests/task-item.test.tsx`
+
+---
+
+## Sources
+
+> Attribute a response with a collapsible text-only source list.
+
+```tsx
+import { Sources } from "smithers-orchestrator/ui";
+
+<Sources
+  sources={[
+    { id: "docs", label: "Smithers UI reference", href: "/reference/ui" },
+    { id: "notes", label: "Local research notes" },
+  ]}
+  onNavigate={(href, event) => router.navigate(href)}
+/>
+```
+
+The trigger reads `Used N source` or `Used N sources`. The list starts closed
+and unmounts while closed. Sources are deliberately text-only, with no favicon
+requests.
+
+Scheme-less URLs and `http`, `https`, and `mailto` links are allowed. Unsafe
+schemes render as plain text and never reach `onNavigate`. When `onNavigate`
+runs, it receives the sanitized URL after default navigation is prevented.
+
+## Props
+
+| Prop | Type | Description |
+| --- | --- | --- |
+| `sources` | `readonly SourceItem[]` | Items with `id`, `label`, and optional `href`. |
+| `open`, `defaultOpen`, `onOpenChange` | controlled disclosure trio | Controls the source list; `defaultOpen` is `false`. |
+| `onNavigate` | `(href, event) => void` | Intercepts safe source-link navigation. |
+
+**Source**: `packages/ui/src/agentic/Sources.tsx`
+
+**Tests**: `packages/ui/tests/sources.test.tsx`
+
+---
+
+## InlineCitation
+
+> Add a keyboard-accessible source chip and tooltip inside prose.
+
+```tsx
+import { InlineCitation } from "smithers-orchestrator/ui";
+
+<p>
+  Smithers keeps durable run history
+  <InlineCitation index={1} label="Run state reference" href="/runtime/run-state" />.
+</p>
+```
+
+The chip renders `[n]` in superscript and announces
+`Source n: label`. Hovering or focusing it shows the source label through the
+shared tooltip primitive.
+
+Safe URLs render an anchor. Missing or unsafe URLs render a focusable button,
+so keyboard users can still inspect the tooltip. `onNavigate` only runs for a
+sanitized URL and receives an event whose default action is already prevented.
+
+## Props
+
+| Prop | Type | Description |
+| --- | --- | --- |
+| `index` | `number` | Citation number rendered as `[n]`. |
+| `label` | `string` | Tooltip content and accessible source name. |
+| `href` | `string` | Optional source URL. |
+| `onNavigate` | `(href, event) => void` | Intercepts safe navigation. |
+
+**Source**: `packages/ui/src/agentic/InlineCitation.tsx`
+
+**Tests**: `packages/ui/tests/inline-citation.test.tsx`
+
+---
+
+## Chart
+
+> Recharts-backed chart primitives with the validated smithers series palette, tooltip, and legend.
+
+Import from the heavy-dependency adapter subpath (never the base `ui` barrel):
+
+```tsx
+import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+  chartConfig,
+} from "smithers-orchestrator/ui/adapters/chart";
+
+const config = chartConfig([
+  { key: "landed", label: "Landed" },
+  { key: "inflight", label: "In flight" },
+]);
+
+<ChartContainer config={config}>
+  <BarChart data={rows}>
+    <CartesianGrid vertical={false} />
+    <XAxis dataKey="area" tickLine={false} axisLine={false} />
+    <ChartTooltip content={<ChartTooltipContent />} />
+    <ChartLegend content={<ChartLegendContent />} />
+    <Bar dataKey="landed" fill="var(--color-landed)" radius={[4, 4, 0, 0]} maxBarSize={24} />
+    <Bar dataKey="inflight" fill="var(--color-inflight)" radius={[4, 4, 0, 0]} maxBarSize={24} />
+  </BarChart>
+</ChartContainer>
+```
+
+`ChartContainer` owns sizing (16:9 by default; size it with CSS), injects one
+`--color-<key>` custom property per config entry for the active theme, and
+restates the Recharts chrome in smithers tokens: hairline grid and axes, muted
+tick text. Colors react to the `data-theme` stamp and the OS scheme.
+
+## Series colors
+
+`chartConfig(series)` assigns the fixed categorical palette slots in order.
+The palette is CVD-validated against both smithers surfaces; the slot order is
+the safety mechanism, so never reorder, cycle, or invent hues. Past eight
+series, fold the tail into "Other" or facet into small multiples.
+`chartSeriesColor(index, theme)` exposes the raw slot values;
+`CHART_SERIES` is the full table. Custom entries can pass
+`{ color }` or `{ theme: { light, dark } }` per key instead.
+
+House chart rules the component expects from callers: one axis per chart
+(never dual-axis), bars at most 24px thick (`maxBarSize={24}`) with rounded
+data-ends, 2px lines, and text in text tokens rather than series colors. Keep
+the tooltip and legend mounted for two or more series: several light-mode
+slots sit below 3:1 contrast by design, and the tooltip/legend/table are the
+mandated relief.
+
+## Props
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `ChartContainer` | component | `config: ChartConfig` plus `div` props; children are Recharts elements |
+| `ChartConfig` | type | `{ [key]: { label?, icon?, color? \| theme: { light, dark } } }` |
+| `chartConfig` | helper | build a config from `{ key, label? }[]`, palette slots in order |
+| `chartSeriesColor` | helper | `(index, "light" \| "dark") => hex`, clamps past the last slot |
+| `CHART_SERIES` | constant | the eight validated `{ light, dark }` slots |
+| `ChartTooltip` / `ChartTooltipContent` | component | Recharts `Tooltip` + token-styled content (labels, swatches, tabular values) |
+| `ChartLegend` / `ChartLegendContent` | component | Recharts `Legend` + token-styled content |
+| `ChartProvider` | component | bare config context for composing tooltip/legend content outside a container |
+
+**Source**: `packages/ui/src/adapters/chart.tsx`
+
+**Tests**: `packages/ui/tests/chart.test.tsx`
+
+---
+
+## Gateway React API
+
+> React hooks for driving a Smithers Gateway from a custom workflow UI.
+
+The Smithers UI surface is React. This package is the SDK that backs it: a
+provider that holds one `SmithersGatewayClient`, a set of live data hooks that
+read a run (or runs, approvals, crons, scores, …) over TanStack DB collections,
+and action hooks that launch, approve, and cancel. Most hooks return the same
+`GatewayAsyncState` shape, so once you know one you know
+them all.
+
+<Note>
+Everything on this page lives at the subpath `smithers-orchestrator/gateway-react`,
+**not** on the bare `smithers-orchestrator` facade. Import from the subpath or
+the build fails.
+</Note>
+
+```tsx
+import {
+  SmithersGatewayProvider,
+  useGatewayRun,
+  useGatewayActions,
+} from "smithers-orchestrator/gateway-react";
+
+function App() {
+  return (
+    <SmithersGatewayProvider options={{ baseUrl: "/" }}>
+      <Run runId={RUN_ID} />
+    </SmithersGatewayProvider>
+  );
+}
+
+function Run({ runId }: { runId: string }) {
+  const { data, loading, error } = useGatewayRun(runId);
+  const { launchRun, submitApproval } = useGatewayActions();
+  if (loading) return <p>loading…</p>;
+  if (error) return <p>{error.message}</p>;
+  return <pre>{String(data?.status ?? "")}</pre>;
+}
+```
+
+For a UI bundled and served by the gateway itself, skip the JSX provider and
+mount with `createGatewayReactRoot` instead. It wires
+both contexts (on-demand hooks **and** the live collections) in one call.
+
+## GatewayAsyncState
+
+The return shape shared by the live data hooks. `data` is `undefined` until the
+first payload lands; `loading` is true only while there is no data yet and a
+fetch is in flight; `refetch()` forces a re-pull.
+
+```ts
+type GatewayAsyncState<T> = {
+  data: T | undefined;
+  error: Error | undefined;
+  loading: boolean;
+  refetch: () => Promise<void>;
+};
+```
+
+<ResponseField name="GatewayAsyncState<T>" type="object">
+  <Expandable title="members">
+    <ResponseField name="data" type="T | undefined">
+      The latest payload, or `undefined` before the first fetch resolves.
+    </ResponseField>
+    <ResponseField name="error" type="Error | undefined">
+      The last fetch error, if any. Live collection hooks resolve via stream and
+      generally leave this `undefined`.
+    </ResponseField>
+    <ResponseField name="loading" type="boolean">
+      True only when there is no `data` yet and a fetch is in flight.
+    </ResponseField>
+    <ResponseField name="refetch" type="() => Promise<void>">
+      Invalidate the backing collection and re-pull.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Source** [`GatewayAsyncState.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/GatewayAsyncState.ts) · **See also** Custom workflow UI
+
+## Provider & root
+
+### SmithersGatewayProvider
+
+Holds one `SmithersGatewayClient` in context for every hook below. Pass a ready
+`client`, or `options` and it constructs one. The client is memoized on
+`baseUrl`/`token` so an inline `options` literal does not trigger a reconnect
+storm.
+
+```tsx
+function SmithersGatewayProvider(props: {
+  client?: SmithersGatewayClient;
+  options?: SmithersGatewayClientOptions;
+  mode?: WorkspaceMode;
+  children?: ReactNode;
+}): ReactElement;
+```
+
+<ParamField path="client" type="SmithersGatewayClient">
+  A pre-built client. Takes precedence over `options`. See the
+  Gateway Client reference.
+</ParamField>
+<ParamField path="options" type="SmithersGatewayClientOptions">
+  Client config (`baseUrl`, `token`, …) used to construct a client when none is
+  passed.
+</ParamField>
+<ParamField path="mode" type="WorkspaceMode">
+  Optional local or multiplayer collection mode. When omitted, local mode uses
+  the client's base URL.
+</ParamField>
+<ParamField path="children" type="ReactNode" />
+
+<Note>
+The provider mounts both the raw `SmithersGatewayClient` context and the
+TanStack DB collection provider. The live hooks and action hooks all work inside
+this one provider.
+</Note>
+
+**Source** [`SmithersGatewayProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/SmithersGatewayProvider.ts) · **Tests** [`SmithersGatewayProvider.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/SmithersGatewayProvider.test.ts)
+
+### createGatewayReactRoot
+
+Mount a full custom UI in one call. Builds a client, mounts
+`SmithersGatewayProvider`, creates the TanStack DB collection registry, and
+renders your element. This is what a gateway-served `ui` entry uses.
+
+```ts
+function createGatewayReactRoot(
+  element: ReactElement,
+  options?: SmithersGatewayClientOptions & { rootId?: string; mode?: WorkspaceMode },
+): SmithersGatewayClient;
+```
+
+<ParamField path="element" type="ReactElement" required>
+  The app root to render.
+</ParamField>
+<ParamField path="options" type="SmithersGatewayClientOptions & { rootId?: string }">
+  Client options plus `rootId` (the DOM element id to mount into; default
+  `"root"`) and optional `mode`. Throws if the element is not found.
+</ParamField>
+
+<ResponseField name="SmithersGatewayClient" type="object">
+  The client it created, for imperative use outside React.
+</ResponseField>
+
+```tsx
+createGatewayReactRoot(<App />, { baseUrl: "/", rootId: "root" });
+```
+
+**Source** [`createGatewayReactRoot.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/createGatewayReactRoot.ts) · **See also** Custom UI
+
+### useSmithersGateway
+
+Read the raw `SmithersGatewayClient` from context. Throws if called outside a
+provider. The escape hatch for client methods the hooks do not wrap.
+
+```ts
+function useSmithersGateway(): SmithersGatewayClient;
+```
+
+**Source** [`useSmithersGateway.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useSmithersGateway.ts) · **See also** Gateway Client
+
+### SmithersCollectionsProvider
+
+Advanced provider for supplying a custom `WorkspaceMode`, `SmithersDataClient`,
+or `QueryClient`. Most apps get this automatically from
+`SmithersGatewayProvider`.
+
+```tsx
+function SmithersCollectionsProvider(props: {
+  mode?: WorkspaceMode;
+  client?: SmithersDataClient;
+  queryClient?: QueryClient;
+  children?: ReactNode;
+}): ReactElement;
+```
+
+<ParamField path="mode" type="WorkspaceMode">
+  Local mode uses the Gateway REST API and SSE invalidation. Multiplayer mode
+  uses Electric shapes for reads and the domain API for writes.
+</ParamField>
+<ParamField path="client" type="SmithersDataClient">
+  Pre-built data client. Takes precedence over `mode`.
+</ParamField>
+<ParamField path="queryClient" type="QueryClient">
+  TanStack Query client. A default client is created when omitted.
+</ParamField>
+
+**Source** [`SmithersCollectionsProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/SmithersCollectionsProvider.ts)
+
+### useSmithersCollections
+
+Read the TanStack DB collection registry and data client from context. Use this
+for custom `useLiveQuery` reads.
+
+```ts
+function useSmithersCollections(): {
+  client: SmithersDataClient;
+  collections: SmithersCollections;
+  queryClient: QueryClient;
+};
+```
+
+**Source** [`useSmithersCollections.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useSmithersCollections.ts) · **See also** Sync
+
+### useGatewayConnectionStatus
+
+The link's connection lifecycle, derived from real transport traffic: RPC
+resolves and stream frames mark it `online`, transport errors mark it `offline`,
+auth failures mark it `unauthorized`.
+
+```ts
+function useGatewayConnectionStatus(): {
+  status: "idle" | "connecting" | "online" | "offline" | "unauthorized";
+  isOnline: boolean;
+  reconnectingSince?: number;
+};
+```
+
+<ResponseField name="status" type='"idle" | "connecting" | "online" | "offline" | "unauthorized"'>
+  Current connection state.
+</ResponseField>
+<ResponseField name="isOnline" type="boolean">
+  Shorthand for `status === "online"`.
+</ResponseField>
+<ResponseField name="reconnectingSince" type="number">
+  Epoch ms of the first failure in the current offline streak, when offline.
+</ResponseField>
+
+**Source** [`useGatewayConnectionStatus.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/sync/useGatewayConnectionStatus.ts) · **Tests** [`sync.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/sync/sync.test.ts)
+
+## Data hooks
+
+Each hook reads one gateway resource as a live TanStack DB collection. They
+share the `GatewayAsyncState` return shape unless noted,
+and may be called unconditionally: pass `undefined` (or an empty `runId`) and
+the hook resolves to an empty, stable state.
+
+### useGatewayRun
+
+Live single-run record. Seeds from `getRun`, then each lifecycle frame upserts
+the row without a whole-tree refetch.
+
+```ts
+function useGatewayRun(
+  runId: string | undefined,
+): GatewayAsyncState<GatewayRunRow>;
+```
+
+<ParamField path="runId" type="string | undefined" required>
+  The run to read. `undefined` yields an empty state.
+</ParamField>
+<ResponseField name="GatewayAsyncState<GatewayRunRow>" type="object">
+  See `GatewayAsyncState`. `data` is the run record.
+</ResponseField>
+
+**Source** [`useGatewayRun.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayRun.ts) · **Tests** [`gateway-react.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/gateway-react.test.ts)
+
+### useGatewayRunEvents
+
+Live, bounded run-event buffer (resilient stream with `afterSeq` resume).
+Heartbeats are surfaced separately and never enter `events`; the array is capped
+to `maxEvents`, most-recent wins. Returns its own shape, not `GatewayAsyncState`.
+
+```ts
+function useGatewayRunEvents(
+  runId: string | undefined,
+  options?: { afterSeq?: number; maxEvents?: number },
+): {
+  events: GatewayEventFrame[];
+  lastHeartbeat: GatewayEventFrame | undefined;
+  error: Error | undefined;
+  streaming: boolean;
+};
+```
+
+<ParamField path="runId" type="string | undefined" required />
+<ParamField path="options.afterSeq" type="number">
+  Drop events at or before this sequence number.
+</ParamField>
+<ParamField path="options.maxEvents" type="number" default="1000">
+  Cap on the retained event buffer.
+</ParamField>
+
+<ResponseField name="events" type="GatewayEventFrame[]">
+  Ordered, capped run events (heartbeats excluded).
+</ResponseField>
+<ResponseField name="lastHeartbeat" type="GatewayEventFrame | undefined">
+  The most recent heartbeat frame, surfaced apart from `events`.
+</ResponseField>
+<ResponseField name="error" type="Error | undefined">
+  Set when the stream fails (offline / unauthorized).
+</ResponseField>
+<ResponseField name="streaming" type="boolean">
+  True while the stream is live.
+</ResponseField>
+
+**Source** [`useGatewayRunEvents.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayRunEvents.ts) · **See also** Event types
+
+### useGatewayRuns
+
+Live run list. Seeds from `listRuns`, re-pulls on invalidate.
+
+```ts
+function useGatewayRuns(
+  params?: ListRunsRequest,
+): GatewayAsyncState<GatewayRunSummaryRow[]>;
+```
+
+<ParamField path="params" type="ListRunsRequest">
+  Optional filters (status, workflow, paging). Defaults to all runs.
+</ParamField>
+<ResponseField name="GatewayAsyncState<GatewayRunSummaryRow[]>" type="object">
+  See `GatewayAsyncState`. `data` is the run summaries.
+</ResponseField>
+
+**Source** [`useGatewayRuns.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayRuns.ts) · **Tests** `gateway-react.test.ts`
+
+### useGatewayWorkflows
+
+Live registered-workflow list (`listWorkflows`).
+
+```ts
+function useGatewayWorkflows(
+  params?: ListWorkflowsRequest,
+): GatewayAsyncState<ListWorkflowsResponse>;
+```
+
+<ParamField path="params" type="ListWorkflowsRequest">
+  Optional `filter`.
+</ParamField>
+<ResponseField name="GatewayAsyncState<ListWorkflowsResponse>" type="object">
+  See `GatewayAsyncState`.
+</ResponseField>
+
+**Source** [`useGatewayWorkflows.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayWorkflows.ts)
+
+### useGatewayApprovals
+
+Live pending-approval list (`listApprovals`). Re-pulls when a run reaches
+waiting-approval or after a `submitApproval`.
+
+```ts
+function useGatewayApprovals(
+  params?: ListApprovalsRequest,
+): GatewayAsyncState<ListApprovalsResponse>;
+```
+
+<ParamField path="params" type="ListApprovalsRequest">
+  Optional filters, e.g. `{ filter: { runId } }` to scope to one run.
+</ParamField>
+<ResponseField name="GatewayAsyncState<ListApprovalsResponse>" type="object">
+  See `GatewayAsyncState`. **`data` IS the array of pending
+  gates** (`ListApprovalsResponse = GatewayApprovalSummary[]`); there is no
+  `data.approvals` wrapper. Each gate is
+  `{ runId, nodeId, iteration, requestTitle?, requestSummary?, workflowKey?, requestedAtMs }`
+  (the title is `requestTitle`, not `title`). Pass `nodeId` + `iteration` straight
+  into `submitApproval`.
+</ResponseField>
+
+```tsx
+const approvals = useGatewayApprovals({ filter: { runId } });
+const { submitApproval } = useGatewayActions();
+return (approvals.data ?? []).map((gate) => (
+  <button
+    key={gate.nodeId}
+    onClick={() => submitApproval({ runId, nodeId: gate.nodeId, iteration: gate.iteration, decision: { approved: true } })}
+  >
+    Approve {gate.requestTitle ?? gate.nodeId}
+  </button>
+));
+```
+
+**Source** [`useGatewayApprovals.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayApprovals.ts) · **See also** `useGatewayActions`
+
+### useGatewayCrons
+
+Live cron-schedule list (`cronList`). Includes enabled **and** disabled rows;
+re-pulls after a `cronCreate` / `cronDelete` / `cronRun`.
+
+```ts
+function useGatewayCrons(
+  params?: CronListRequest,
+): GatewayAsyncState<GatewayCronRow[]>;
+```
+
+<ParamField path="params" type="CronListRequest" />
+<ResponseField name="GatewayAsyncState<GatewayCronRow[]>" type="object">
+  See `GatewayAsyncState`.
+</ResponseField>
+
+**Source** [`useGatewayCrons.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayCrons.ts)
+
+### useGatewayMemoryFacts
+
+Live cross-run memory facts (`listMemoryFacts`). Pass a `namespace` to scope;
+omit it for every namespace. Read-only on the wire, so query-only.
+
+```ts
+function useGatewayMemoryFacts(
+  namespace?: string,
+): GatewayAsyncState<GatewayMemoryFactRow[]>;
+```
+
+<ParamField path="namespace" type="string">
+  Optional namespace filter.
+</ParamField>
+<ResponseField name="GatewayAsyncState<GatewayMemoryFactRow[]>" type="object">
+  See `GatewayAsyncState`. `refetch` works; there is no
+  write RPC.
+</ResponseField>
+
+**Source** [`useGatewayMemoryFacts.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayMemoryFacts.ts)
+
+### useGatewayNodeOutput
+
+On-demand output of one node (`getNodeOutput`). Built on
+`useGatewayRpc`; disabled until both ids are set.
+
+```ts
+function useGatewayNodeOutput(params: {
+  runId: string | undefined;
+  nodeId: string | undefined;
+  iteration?: number;
+}): GatewayAsyncState<GatewayRpcPayload<"getNodeOutput">>;
+```
+
+<ParamField path="params.runId" type="string | undefined" required />
+<ParamField path="params.nodeId" type="string | undefined" required />
+<ParamField path="params.iteration" type="number" default="0">
+  Loop iteration to read. Pass `0` for a normal (non-looping) task.
+</ParamField>
+<ResponseField name="GatewayAsyncState<GetNodeOutput>" type="object">
+  See `GatewayAsyncState`. `data` is a
+  `{ status: "produced" | "pending" | "failed", row, schema, partial? }` envelope;
+  **the task's output object is under `data.row`**, not `data` itself. Destructure
+  defensively (some code paths hand you the row directly), the way `.smithers/ui/vcs.tsx`
+  does:
+
+  ```tsx
+  const output = useGatewayNodeOutput({ runId, nodeId: "report", iteration: 0 });
+  const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  const row = isRecord(output.data?.row) ? output.data.row : isRecord(output.data) ? output.data : {};
+  // row now holds your Zod-typed task output, e.g. row.headline / row.summary
+  ```
+</ResponseField>
+
+**Source** [`useGatewayNodeOutput.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayNodeOutput.ts)
+
+### useGatewayScores
+
+Live scorer/eval results for one run (`listScores`). Pass `nodeId` to scope to
+one node. An empty `runId` resolves to a stable empty collection. Read-only, so
+query-only.
+
+```ts
+function useGatewayScores(
+  runId: string,
+  nodeId?: string,
+): GatewayAsyncState<GatewayScoreRow[]>;
+```
+
+<ParamField path="runId" type="string" required>
+  The run to score. Empty string yields an empty state.
+</ParamField>
+<ParamField path="nodeId" type="string">
+  Optional node scope.
+</ParamField>
+<ResponseField name="GatewayAsyncState<GatewayScoreRow[]>" type="object">
+  See `GatewayAsyncState`.
+</ResponseField>
+
+**Source** [`useGatewayScores.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayScores.ts)
+
+### useGatewayTickets
+
+Live work docs (tickets, plans, specs, proposals) via `listTickets`. Tombstones
+are filtered server-side, so every row is renderable. Pass a `kind` to scope.
+
+```ts
+function useGatewayTickets(
+  params?: ListTicketsRequest,
+): GatewayAsyncState<GatewayTicketRow[]>;
+```
+
+<ParamField path="params" type="ListTicketsRequest">
+  Optional `kind` and other filters.
+</ParamField>
+<ResponseField name="GatewayAsyncState<GatewayTicketRow[]>" type="object">
+  See `GatewayAsyncState`.
+</ResponseField>
+
+**Source** [`useGatewayTickets.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayTickets.ts)
+
+### useGatewayPrompts
+
+Live registered-prompt list (`listPrompts`, walked from `.smithers/prompts/`).
+Read-only on the wire, so query-only; takes no arguments.
+
+```ts
+function useGatewayPrompts(): GatewayAsyncState<GatewayPromptRow[]>;
+```
+
+<ResponseField name="GatewayAsyncState<GatewayPromptRow[]>" type="object">
+  See `GatewayAsyncState`.
+</ResponseField>
+
+**Source** [`useGatewayPrompts.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayPrompts.ts)
+
+### useGatewayRpc
+
+The generic escape hatch: call any gateway RPC by name and get its typed payload
+back in `GatewayAsyncState`. The typed hooks above wrap this; reach for it when
+no dedicated hook exists. Disable with `enabled: false`; a disabled or
+key-changed query clears stale data instead of surfacing it.
+
+```ts
+function useGatewayRpc<Method extends GatewayRpcMethod>(
+  method: Method,
+  params: GatewayRpcParams<Method>,
+  options?: { enabled?: boolean; deps?: readonly unknown[] },
+): GatewayAsyncState<GatewayRpcPayload<Method>>;
+```
+
+<ParamField path="method" type="GatewayRpcMethod" required>
+  The RPC method name.
+</ParamField>
+<ParamField path="params" type="GatewayRpcParams<Method>" required>
+  Typed params for that method.
+</ParamField>
+<ParamField path="options.enabled" type="boolean" default="true">
+  Skip the request when false.
+</ParamField>
+<ParamField path="options.deps" type="readonly unknown[]">
+  Re-fetch trigger. Defaults to the serialized `params`.
+</ParamField>
+<ResponseField name="GatewayAsyncState<GatewayRpcPayload<Method>>" type="object">
+  See `GatewayAsyncState`.
+</ResponseField>
+
+**Source** [`useGatewayRpc.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayRpc.ts) · **See also** Gateway Client
+
+### useDelegationChain
+
+Folded delegation-chain state for one run: the read model behind the
+`delegation-chain` workflow UI. Enumerates every
+physical `dc:*` node from the live run tree, fetches each node's durable output
+row once (re-checked when that node finishes or fails), folds the rows through
+the pure `foldDelegation` reducer, and returns the graph plus the delegation
+actions. Malformed or unknown rows surface in `errors` instead of throwing.
+
+```ts
+function useDelegationChain(params: { runId: string | undefined }): {
+  graph: DelegationGraph;
+  loading: boolean;
+  errors: unknown[];
+  actions: {
+    submitEdit(logicalId: string, editedOutput: unknown, note?: string): Promise<void>;
+    skipPreviews(): Promise<void>;
+    answerHuman(nodeId: string, iteration: number, value: unknown): Promise<void>;
+    submitPoll(answers: DcPollAnswer[], comment?: string): Promise<void>;
+  };
+};
+```
+
+<ParamField path="params.runId" type="string | undefined" required>
+  The run to fold. `undefined` (or an empty string) yields an empty graph.
+</ParamField>
+
+<ResponseField name="graph" type="DelegationGraph">
+  Nodes keyed by logical id (status, version history, gates, attention
+  rollups), edges, the current phase, pending question forms, the refined
+  prompt, the predicted-vs-actual budget rollup, and run scores.
+</ResponseField>
+<ResponseField name="loading" type="boolean">
+  True until the run tree and the first output sweep have hydrated.
+</ResponseField>
+<ResponseField name="errors" type="unknown[]">
+  Fold issues (ignored rows) plus any tree/event/output fetch errors.
+</ResponseField>
+<ResponseField name="actions" type="object">
+  <Expandable title="methods">
+    <ResponseField name="submitEdit" type="(logicalId, editedOutput, note?) => Promise<void>">
+      Deliver a live output edit on the durable `dc-edit` signal. The run
+      treats it exactly like a plan-changing probe finding.
+    </ResponseField>
+    <ResponseField name="skipPreviews" type="() => Promise<void>">
+      Skip the zero-backpressure preview phase (`dc-skip-preview` signal).
+    </ResponseField>
+    <ResponseField name="answerHuman" type="(nodeId, iteration, value) => Promise<void>">
+      Answer a durable human request; `value` rides as JSON in the approval
+      decision note.
+    </ResponseField>
+    <ResponseField name="submitPoll" type="(answers, comment?) => Promise<void>">
+      Answer the pending end-of-run poll HumanTask.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+The pure reducer is exported alongside it (`foldDelegation`,
+`parseDelegationNodeId`, `delegationTableForNodeId`) together with the
+`DelegationGraph` and `Dc*Row` types, for tests and non-React consumers.
+
+**Source** [`useDelegationChain.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/delegation/useDelegationChain.ts) · **See also** `<DelegationChain>`
+
+## Action hooks
+
+### useGatewayActions
+
+Bound, memoized mutation methods off the client. Call them to drive a run:
+launch, resume, cancel, hijack, rewind, approve/deny, signal, and manage crons.
+Each takes the matching RPC params and returns a promise.
+
+```ts
+function useGatewayActions(): {
+  launchRun: SmithersGatewayClient["launchRun"];
+  resumeRun: SmithersGatewayClient["resumeRun"];
+  cancelRun: SmithersGatewayClient["cancelRun"];
+  hijackRun: SmithersGatewayClient["hijackRun"];
+  rewindRun: SmithersGatewayClient["rewindRun"];
+  submitApproval: SmithersGatewayClient["submitApproval"];
+  submitSignal: SmithersGatewayClient["submitSignal"];
+  cronCreate: SmithersGatewayClient["cronCreate"];
+  cronDelete: SmithersGatewayClient["cronDelete"];
+  cronRun: SmithersGatewayClient["cronRun"];
+};
+```
+
+<ResponseField name="actions" type="object">
+  <Expandable title="methods">
+    <ResponseField name="launchRun" type="(params) => Promise<...>">
+      Start a new run of a registered workflow.
+    </ResponseField>
+    <ResponseField name="resumeRun" type="(params) => Promise<...>">
+      Resume a paused/stopped run.
+    </ResponseField>
+    <ResponseField name="cancelRun" type="(params) => Promise<...>">
+      Halt agents and terminate a run.
+    </ResponseField>
+    <ResponseField name="hijackRun" type="(params) => Promise<...>">
+      Hand off a resumable agent session.
+    </ResponseField>
+    <ResponseField name="rewindRun" type="(params) => Promise<...>">
+      Fork from a checkpoint (time travel).
+    </ResponseField>
+    <ResponseField name="submitApproval" type="(params) => Promise<...>">
+      Approve or deny a paused approval gate.
+    </ResponseField>
+    <ResponseField name="submitSignal" type="(params) => Promise<...>">
+      Send a signal to a waiting node.
+    </ResponseField>
+    <ResponseField name="cronCreate / cronDelete / cronRun" type="(params) => Promise<...>">
+      Manage and trigger background schedules.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```tsx
+const { launchRun, submitApproval } = useGatewayActions();
+await launchRun({ workflow: "research", input: { topic: "smithers" } });
+// `decision` is REQUIRED; that object carries the verdict. Pass `iteration`
+// from the approval gate (default 0). Approve:
+await submitApproval({ runId: RUN_ID, nodeId: NODE_ID, iteration: 0, decision: { approved: true } });
+// Deny:
+await submitApproval({ runId: RUN_ID, nodeId: NODE_ID, iteration: 0, decision: { approved: false, note: "not yet" } });
+```
+
+**Source** [`useGatewayActions.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayActions.ts) · **See also** Gateway Client
+
+### useGatewayMutation
+
+Typed mutation helper for supported domain writes. It calls the same domain API
+as `useGatewayActions`, then invalidates the collection registry.
+
+```ts
+function useGatewayMutation<TVariables = Record<string, unknown>, TData = unknown>(
+  method: string,
+  options?: { invalidate?: readonly unknown[] },
+): {
+  mutate: (variables: TVariables) => Promise<TData>;
+  mutateSafe: (variables: TVariables) => Promise<TData | undefined>;
+  isLoading: boolean;
+  error: Error | undefined;
+};
+```
+
+<ParamField path="method" type="string" required>
+  One of the supported domain mutations: `launchRun`, `resumeRun`, `cancelRun`,
+  `hijackRun`, `rewindRun`, `submitApproval`, `submitSignal`, `cronCreate`,
+  `cronDelete`, `cronRun`, `createTicket`, `updateTicket`, or `deleteTicket`.
+</ParamField>
+<ParamField path="options.invalidate" type="readonly unknown[]">
+  Reserved for compatibility. Successful mutations invalidate the collection
+  registry.
+</ParamField>
+<ResponseField name="result" type="object">
+  `{ mutate, mutateSafe, isLoading, error }`.
+</ResponseField>
+
+**Source** [`useGatewayMutation.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayMutation.ts) · **See also** `useGatewayActions`
+
+## Type exports
+
+These types are exported from the same subpath for typing your own components.
+
+<ResponseField name="GatewayAsyncState<T>" type="type">
+  The shared data-hook return shape. See above.
+</ResponseField>
+<ResponseField name="SmithersCollectionsContextValue" type="type">
+  `{ client, collections, queryClient }` from
+  `useSmithersCollections`.
+</ResponseField>
+<ResponseField name="GatewayConnectionState" type="type">
+  Connection state used by `useGatewayConnectionStatus`.
+</ResponseField>
+
+```ts
+import type {
+  SmithersCollectionsContextValue,
+  GatewayConnectionStatus,
+} from "smithers-orchestrator/gateway-react";
+// GatewayAsyncState<T> is generic; see its section above for the full shape.
+```
+
+**Source** [`index.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/index.ts) · **Tests** `gateway-react.test.ts`
+
+---
+
+This is the UI side of the control plane. For the underlying transport and its
+imperative methods, see the Gateway Client reference;
+to embed a UI in a gateway-served workflow, see
+Custom UI and the
+Custom workflow UI guide.
+
+---
+
+## Workflow UI Design Principles
+
+> The shared visual language every smithers ui workflow UI should follow, so each .smithers/ui/<workflow>.tsx looks like one product instead of a different app per workflow.
+
+Custom Workflow UIs covers the *plumbing*: how a `.smithers/ui/<workflow>.tsx` bundle boots, talks to the Gateway, streams events, and stays stale-data-free. This guide covers the *look*: the visual language those UIs share so they read as one coherent product, not a different app per workflow.
+
+The reference implementation is the Smithers product UI. The rules below are extracted from it. When you build or touch a workflow UI, adopt these tokens and principles verbatim rather than inventing a one-off palette. The fastest way to make every workflow UI feel native is to start from the same tokens and the same handful of decisions about shape, depth, motion, and focus.
+
+<Note>Most reference UIs in this repo (`.smithers/ui/vcs.tsx`, `grill-me.tsx`, `ultragrill.tsx`) ship a single inline `<style>` string. That is fine. The point is not *where* the CSS lives; it is that the *values* come from the shared token set below instead of ad-hoc hex codes.</Note>
+
+## Components first
+
+The fastest way to comply with everything in this guide is to not hand-write the CSS at all: `smithers-orchestrator/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) whose styling is generated from the token set below, with the exact house recipes (tinted primary button, brand focus halo, 22px status pills, 8px card radius). They are correct in light and dark by construction, and Radix supplies the accessibility behavior. See the shared component library for usage and the UI Component Library reference for the full catalog.
+
+Everything below remains the contract those components implement, and what you follow whenever you write custom CSS next to them.
+
+## Start from the token set
+
+Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, a tint, or a shadow alpha inline; reach for a token (or derive one with `color-mix`). This is what makes light and dark "just work" and what keeps two different workflow UIs from drifting apart.
+
+<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smithers-orchestrator/ui-styleguide`) into every `/workflows/<key>` page, and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint. So a workflow UI that just *reads* the tokens is themed automatically, including for hosts that embed the page in an iframe and force a theme via the query param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct and keeps the UI portable outside the shell; duplicate declarations are harmless.</Note>
+
+Paste this `:root` block at the top of your `<style>` (it carries the canonical light values, the dark overrides for both the explicit toggle and the OS preference, and the typographic base):
+
+```css
+:root {
+  color-scheme: light;
+
+  /* Surfaces & text */
+  --bg: #ffffff;
+  --text: #0a0a0a;
+  --text-muted: #525252;
+  --text-faint: #6f6f6f;
+  --text-placeholder: #767676;
+  --surface: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong: rgba(255, 255, 255, 0.85);
+
+  /* Lines & hovers */
+  --border: rgba(10, 10, 10, 0.08);
+  --border-strong: rgba(10, 10, 10, 0.14);
+  --border-solid: #ededed;
+  --hover: #f4f4f4;
+  --hover-subtle: rgba(10, 10, 10, 0.03);
+
+  /* Inverse: the high-contrast primary-action surface (black in light, white in dark) */
+  --inverse-bg: #0a0a0a;
+  --inverse-bg-hover: #262626;
+  --inverse-text: #ffffff;
+
+  /* Code */
+  --code-bg: #0a0a0a;
+  --code-text: #f4f4f5;
+  --inline-code-bg: rgba(10, 10, 10, 0.07);
+
+  /* Semantic accents */
+  --brand: #6d56d8;
+  --success: #0f8f78;
+  --danger: #e5484d;
+
+  /* Shadow channels: space-separated so any shadow can pick its own alpha */
+  --shadow-rgb: 10 10 10;
+
+  /* Geometry (theme-invariant): spacing scale, type scale, radii, and the one
+     control height every button/chip/input/select shares. Reach for these
+     instead of bare pixel values so spacing rhythm stays even everywhere. */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px;
+  --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 15px;
+  --fs-5: 17px; --fs-6: 20px; --fs-7: 24px;
+  --lh-tight: 1.35; --lh-body: 1.5;
+  --r-1: 6px; --r-2: 10px; --r-3: 12px; --r-4: 16px; --r-full: 999px;
+  --ctl-h: 32px; --ctl-h-sm: 26px; --ctl-h-lg: 38px;
+
+  color: var(--text);
+  background: var(--bg);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Force-dark via an in-app toggle that sets data-theme on <html>. */
+:root[data-theme="dark"],
+/* And follow the OS when the user has not forced a choice. */
+:root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --bg: #0b0b0d;
+  --text: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --text-faint: #b0b0b8;
+  --text-placeholder: #a6a6ad;
+  --surface: #18181b;
+  --surface-glass: rgba(24, 24, 27, 0.72);
+  --surface-glass-strong: rgba(24, 24, 27, 0.85);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-solid: #2a2a2e;
+  --hover: #26262b;
+  --hover-subtle: rgba(255, 255, 255, 0.05);
+  --inverse-bg: #f4f4f5;
+  --inverse-bg-hover: #d4d4d8;
+  --inverse-text: #0a0a0a;
+  --code-bg: #09090b;
+  --code-text: #e4e4e7;
+  --inline-code-bg: rgba(255, 255, 255, 0.1);
+  --brand: #8b78e6;
+  --success: #2ec9a8;
+  --danger: #f2555a;
+  --shadow-rgb: 0 0 0;
+}
+```
+
+<Note>The OS-follow selector above is written as one rule for brevity. In the product UI the OS branch is split into its own `@media (prefers-color-scheme: dark)` block so it can never override an explicit `data-theme="light"`. If you support an in-app toggle, copy that split; if your UI is dark-only or OS-only, keep just the branch you need.</Note>
+
+## The principles
+
+### Color is semantic, tints are derived
+
+There are exactly three accent roles. Do not introduce a fourth hue per workflow.
+
+- `--brand` (violet): focus, in-progress, the "this is the live thing" accent.
+- `--success` (green): completed, healthy, approved.
+- `--danger` (red): failed, destructive, blocked.
+
+For a status background, a soft border, or a hover wash, **derive** the tint with `color-mix` against a token rather than picking a new hex. This keeps the tint correct in both themes automatically:
+
+```css
+.error {
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
+```
+
+Primary actions ("Run", "Approve", "Submit") use the **inverse** surface (`--inverse-bg` / `--inverse-text`), not the brand color. Brand is for *attention and progress*; inverse is for *the one button you want pressed*. Secondary actions are `--surface` with a `--border` and a `--hover` background on hover.
+
+### Typography: Inter, set tight, weighted heavy
+
+- **Font:** Inter, falling back to the system UI stack. Always render with `-webkit-font-smoothing: antialiased` and `font-synthesis: none`.
+- **Weight does the work.** Labels and titles live at 600 to 800, not 400. Body copy is the default weight; muted metadata is `--text-faint`.
+- **Headings sit tight:** `letter-spacing: -0.01em` (down to `-0.02em` for large display text). Size headings in `rem` (roughly 1.05rem to 1.3rem); never go bigger than you need.
+- **Eyebrows and tiny labels go up, not down.** Section labels and status chips use `text-transform: uppercase` with positive tracking (`letter-spacing: 0.03em` to `0.06em`) at 11 to 12px and weight 700+. This is how you signal "label" without making text large.
+- **Monospace is for identity, not chrome.** Run ids, SHAs, and code use `ui-monospace, monospace`. Do not set whole panels in monospace.
+
+### One radius scale
+
+Pick from a small, consistent ladder. Mixing arbitrary radii is the fastest way to look unfinished.
+
+- **8px** is the workhorse: buttons, inputs, panels, banners, the auth chip.
+- **6 to 7px** for small inline things: chips, glyph tiles, inline code.
+- **14 to 20px** for primary cards and the composer surface (bigger surface, softer corner).
+- **50% / 999px** for avatars, dots, and pills.
+
+Chat-style bubbles use an **asymmetric** radius: a large radius everywhere except one tight 6px corner on the speaker's side, which reads as a tail.
+
+### Depth is glass and layered shadow, never a hard box
+
+Elevated surfaces (cards, floating chrome, toasts, modals) are translucent glass, not flat fills:
+
+```css
+.card {
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.04),
+    0 16px 40px rgb(var(--shadow-rgb) / 0.1);
+}
+```
+
+Two rules make depth read correctly:
+
+1. **Stack two shadows, not one.** A 1px near-shadow grounds the edge; a large (16 to 50px) soft far-shadow at low alpha (0.08 to 0.14) lifts it off the page. A single hard shadow looks cheap.
+2. **Tint shadows through `--shadow-rgb`.** Write `rgb(var(--shadow-rgb) / 0.1)`, never `rgba(0,0,0,0.1)`. In dark mode `--shadow-rgb` becomes pure black so shadows stay believable.
+
+Flat inline rows and list items get a `--border` hairline and a `--hover` (or `--hover-subtle`) background change instead of a shadow. Reserve elevation for things that actually float.
+
+### Focus is a brand halo, not a default outline
+
+Custom controls suppress the UA ring, so give focus back explicitly and make it feel intentional.
+
+- **Containers** (a card holding an input) lift on `:focus-within` with a brand-tinted glow plus a deepened shadow, not a hard border:
+
+  ```css
+  .composer:focus-within {
+    border-color: color-mix(in srgb, var(--brand) 32%, var(--border));
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent),
+      0 20px 48px rgb(var(--shadow-rgb) / 0.14);
+  }
+  ```
+
+- **Discrete controls** (buttons, links, pills) get a crisp `:focus-visible` ring: `outline: 2px solid var(--brand); outline-offset: 2px;`. Keyboard users must always see where they are.
+
+### Motion: short, purposeful, and named
+
+Animation is fast and earns its place; nothing bounces for decoration.
+
+- **Durations live in 120 to 260ms.** Entrances around 120 to 160ms; a deliberate morph can reach 260ms. Anything slower feels broken.
+- **Easing:** `ease-out` for entrances, `cubic-bezier(0.2, 0.8, 0.2, 1)` for a confident morph. Always set `both` as the fill mode so the start and end states stick.
+- **Entrances are subtle:** opacity from 0 with an 8px `translateY`, or a directional `translateX` of about 18px for forward/back view transitions. Small distances, fast.
+- **Use a real FLIP morph for "this became that."** When a composing card turns into a running toast, measure both rects (`getBoundingClientRect`), drive a CSS-variable transform, and let one keyframe interpolate. Do not cross-fade two elements; morph the one.
+- **Spinners and pulses are tokenized too:** a brand-bordered ring for in-progress, a `--brand` dot with a `0 0 0 4px color-mix(...)` halo for "live".
+- **Reduced motion is centralized.** `WorkflowUiStyles`, `SmithersUiStyles`,
+  and `standaloneThemeCss()` already ship the same document-wide safety net,
+  so component CSS must not add its own media-query guard. Imperative canvas
+  widgets use `prefersReducedMotion()` and `observeReducedMotion()` from
+  `smithers-orchestrator/ui`.
+
+### Layout: a readable measure and calm chrome
+
+- **Constrain content width.** Primary columns are `width: min(100%, 720px); margin: 0 auto;`. Wide raw dumps belong in a scroll container, not stretched edge to edge.
+- **Float the chrome, glass it, keep it out of the corners that matter.** Fixed status/auth widgets use `--surface-glass-strong` with backdrop blur and a soft shadow, pinned with breathing room (about 12 to 14px from the edge).
+- **Spacing is generous and even.** Card padding around 16px; gaps of 8 to 18px; list rows around 10px vertical. Empty states get real space (around 48px of padding) and `--text-faint`, not a cramped one-liner.
+
+### Status surfaces read at a glance
+
+Map run state to the semantic accents consistently across every UI so a user learns the language once:
+
+- **In progress / running** → `--brand` (spinner ring, pulsing dot, brand text).
+- **Finished / healthy** → `--success`.
+- **Failed / blocked** → `--danger`.
+
+A status chip is an uppercase, tracked, 11px, weight-600 label with a `color-mix` border and tint in its accent. A run id is a monospace pill on `--surface` with a `--border`.
+
+## Putting it together
+
+A minimal, on-system `.smithers/ui/<workflow>.tsx` looks like this (tokens above, then a thin layer of component classes that only reference tokens):
+
+```tsx
+/** @jsxImportSource react */
+import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
+
+const runId = new URLSearchParams(location.search).get("runId") ?? undefined;
+
+const styles = `
+  /* paste the :root token block here */
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  .shell { width: min(100%, 720px); margin: 0 auto; padding: 36px 24px; }
+  .card {
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-glass);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 16px 40px rgb(var(--shadow-rgb) / 0.1);
+  }
+  .eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--text-faint);
+  }
+  .badge {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+    padding: 3px 8px; border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border)); color: var(--brand);
+  }
+  .badge.finished { border-color: color-mix(in srgb, var(--success) 30%, var(--border)); color: var(--success); }
+  .badge.failed { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); color: var(--danger); }
+  .runid { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-muted); }
+  .btn-primary {
+    min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px;
+    background: var(--inverse-bg); color: var(--inverse-text); font-weight: 650; cursor: pointer;
+  }
+  .btn-primary:hover { background: var(--inverse-bg-hover); }
+  .btn-primary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+`;
+
+function App() {
+  const run = useGatewayRun(runId);
+  return (
+    <main className="shell">
+      <style>{styles}</style>
+      <p className="eyebrow">Workflow</p>
+      <div className="card">
+        <span className="runid">{runId ?? "no run"}</span>
+        <span className={`badge ${run.data?.status ?? ""}`}>{run.data?.status ?? "idle"}</span>
+      </div>
+    </main>
+  );
+}
+
+createGatewayReactRoot(<App />);
+```
+
+## Checklist before you ship a UI
+
+- [ ] Colors, tints, and shadow alphas come from tokens or `color-mix`, never raw hex inline.
+- [ ] Light and dark both look right (the token block handles both; spot-check by toggling `data-theme`).
+- [ ] Type is Inter, antialiased, with heavy weights on labels and tight tracking on headings.
+- [ ] Radii come from the 6/10/12/16/pill scale; nothing arbitrary.
+- [ ] Elevated surfaces are glass with a two-layer, `--shadow-rgb`-tinted shadow.
+- [ ] Primary action is the inverse surface; brand is reserved for focus and progress.
+- [ ] Every interactive control has a visible `:focus-visible` (or `:focus-within`) treatment.
+- [ ] Motion is 120 to 260ms with `both` fill; the shared reduced-motion safety net is present.
+- [ ] Run state maps to brand/success/danger the same way it does in every other UI.
+
+## Reference
+
+- **Guide:** Custom Workflow UIs for the Gateway wiring, hooks, boot config, and stale-data-free model.
+- **Reference bundles in this repo:** `.smithers/ui/vcs.tsx`, `.smithers/ui/grill-me.tsx`, `.smithers/ui/ultragrill.tsx`, `.smithers/ui/workflow-skill.tsx`.
+- **Examples:** Workflow UI (React), Workflow UI (Vanilla).
 
 
 ===============================================================================

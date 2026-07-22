@@ -18,6 +18,7 @@ artifacts and are not served separately: only /llms.txt and /llms-full.txt resol
 docs site.
 
 - Core: runtime, agent operating playbook, JSX surface, CLI, components, recipes, types, errors
+- UI: the component library's deep reference (per-component pages, adapters, hooks, design guide)
 - Memory: cross-run memory (facts, history, recall)
 - OpenAPI tools: generate AI SDK tools from OpenAPI specs
 - Observability: HTTP server, gateway, MCP, OpenTelemetry

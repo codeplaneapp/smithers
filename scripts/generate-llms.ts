@@ -3,6 +3,7 @@
  * Generate the llms-*.txt artifacts from the canonical MDX docs.
  *
  *   docs/llms-core.txt           — the everyday context (~30K tokens target)
+ *   docs/llms-ui.txt             — opt-in fragment: UI component deep reference
  *   docs/llms-memory.txt         — opt-in fragment: cross-run memory
  *   docs/llms-openapi.txt        — opt-in fragment: OpenAPI tools
  *   docs/llms-observability.txt  — opt-in fragment: server, gateway, otel
@@ -158,6 +159,26 @@ const MEMORY_PAGES = [
   "guides/memory-quickstart.mdx",
 ];
 
+// The UI deep reference. Core already carries the base library page, the
+// gateway-ui widget catalog, the chat component pages, and the custom
+// workflow UI guide; this fragment adds the catalog-of-doc-types page, the
+// per-component agentic pages, the adapter pages, the gateway-react hook
+// reference, and the design guide. Pages live in exactly one fragment so
+// llms-full.txt never duplicates content.
+const UI_PAGES = [
+  "reference/ui/overview.mdx",
+  "reference/ui/reasoning.mdx",
+  "reference/ui/tool-call.mdx",
+  "reference/ui/chain-of-thought.mdx",
+  "reference/ui/plan.mdx",
+  "reference/ui/task-item.mdx",
+  "reference/ui/sources.mdx",
+  "reference/ui/inline-citation.mdx",
+  "reference/ui/chart.mdx",
+  "reference/gateway-react.mdx",
+  "guides/workflow-ui-design.mdx",
+];
+
 const OPENAPI_PAGES = [
   "concepts/openapi-tools.mdx",
   "guides/openapi-tools-quickstart.mdx",
@@ -275,6 +296,7 @@ const HEADERS = {
     "Human-facing docs live on the website under the For Humans Guide. Humans ask their agent for outcomes; agents consume these llms files and operate Smithers.",
     "",
     "Opt-in topics cover features most users do not need. They are also sections of the full bundle at /llms-full.txt (only /llms.txt and /llms-full.txt are served on the docs site):",
+    "  - UI (per-component library reference, adapters, hooks, design guide)",
     "  - Memory (cross-run state)",
     "  - OpenAPI tools",
     "  - Observability + HTTP server",
@@ -284,6 +306,7 @@ const HEADERS = {
     "",
     "Changelogs are not included; see /docs/changelogs/ on the docs site.",
   ].join("\n"),
+  ui: "> Smithers UI deep reference: the shadcn-based component library's per-component pages, agent-native components, heavy-dependency adapters, gateway-react hooks, and the workflow UI design guide. The everyday UI surface (base library, gateway-ui widgets, chat components, authoring guide) is in the core section.",
   memory: "> Smithers cross-run memory: working memory, message history, semantic recall, processors.",
   openapi: "> Smithers OpenAPI tools: turn an OpenAPI spec into AI SDK tools, with auth, filters, and observability.",
   observability: "> Smithers observability surface: HTTP server, gateway, MCP, OpenTelemetry, metrics.",
@@ -294,6 +317,7 @@ const HEADERS = {
 
 const builds: Array<{ file: string; pages: string[]; header: string; name: string }> = [
   { file: "llms-core.txt", pages: CORE_PAGES, header: HEADERS.core, name: "Smithers" },
+  { file: "llms-ui.txt", pages: UI_PAGES, header: HEADERS.ui, name: "Smithers UI" },
   { file: "llms-memory.txt", pages: MEMORY_PAGES, header: HEADERS.memory, name: "Smithers Memory" },
   { file: "llms-openapi.txt", pages: OPENAPI_PAGES, header: HEADERS.openapi, name: "Smithers OpenAPI Tools" },
   { file: "llms-observability.txt", pages: OBSERVABILITY_PAGES, header: HEADERS.observability, name: "Smithers Observability" },
@@ -405,6 +429,7 @@ artifacts and are not served separately: only /llms.txt and /llms-full.txt resol
 docs site.
 
 - Core: runtime, agent operating playbook, JSX surface, CLI, components, recipes, types, errors
+- UI: the component library's deep reference (per-component pages, adapters, hooks, design guide)
 - Memory: cross-run memory (facts, history, recall)
 - OpenAPI tools: generate AI SDK tools from OpenAPI specs
 - Observability: HTTP server, gateway, MCP, OpenTelemetry
