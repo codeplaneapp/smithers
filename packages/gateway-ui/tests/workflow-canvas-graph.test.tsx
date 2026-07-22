@@ -354,13 +354,26 @@ describe("WorkflowGraph mounted accessible tree", () => {
     const targetHandle = editable.container.querySelector(
       "[data-id='ship'] .react-flow__handle.target",
     ) as HTMLElement;
+    // xyflow applies the gesture state through its own store subscription,
+    // which can land a commit after act() returns on a loaded runner — poll
+    // for each gesture's observable result instead of asserting immediately.
+    const flushUntil = async (condition: () => boolean) => {
+      const deadline = Date.now() + 5_000;
+      while (!condition() && Date.now() < deadline) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+      }
+    };
     await act(async () => {
       sourceHandle.click();
     });
+    await flushUntil(() => sourceHandle.classList.contains("clickconnecting"));
     expect(sourceHandle.classList.contains("clickconnecting")).toBe(true);
     await act(async () => {
       targetHandle.click();
     });
+    await flushUntil(() => connections.length > 0);
     expect(connections).toEqual([{ source: "plan", target: "ship" }]);
     // The edge mutation, not just the callback: the new edge round-tripped
     // through addEdge into the controlled state (ReactFlow's generated

@@ -203,5 +203,7 @@ describe("runAction (subprocess)", () => {
     // Gate passes (valid PR) → fetchOidcToken throws → process.exit(1)
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr.toString()).toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
-  });
+    // Not the 5s default: a cold bun subprocess boot runs 3-6s on loaded CI
+    // runners.
+  }, 20_000);
 });
