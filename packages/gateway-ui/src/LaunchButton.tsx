@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { useGatewayActions } from "@smithers-orchestrator/gateway-react";
+import type { RunStartedBy } from "@smithers-orchestrator/gateway-client";
 import { theme } from "./theme";
 
 export type LaunchButtonProps = {
@@ -8,6 +9,8 @@ export type LaunchButtonProps = {
   workflow: string;
   /** Input object passed to the run. */
   input?: Record<string, unknown>;
+  /** Optional self-reported launch provenance forwarded as `options.startedBy`. */
+  startedBy?: RunStartedBy;
   /** Button label. Defaults to "Launch <workflow>". */
   children?: ReactNode;
   /** Called with the new runId after a successful launch. */
@@ -25,6 +28,7 @@ export type LaunchButtonProps = {
 export function LaunchButton({
   workflow,
   input,
+  startedBy,
   children,
   onLaunched,
   onError,
@@ -37,7 +41,7 @@ export function LaunchButton({
   const launch = async () => {
     setBusy(true);
     try {
-      const result = await actions.launchRun({ workflow, ...(input ? { input } : {}) });
+      const result = await actions.launchRun({ workflow, ...(input ? { input } : {}), ...(startedBy ? { options: { startedBy } } : {}) });
       const runId = (result as { runId?: string } | undefined)?.runId;
       if (runId) onLaunched?.(runId);
     } catch (cause) {

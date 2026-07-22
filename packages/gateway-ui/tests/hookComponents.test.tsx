@@ -226,7 +226,13 @@ describe("RunList", () => {
   test("lists runs, selects on click, and polls", async () => {
     const gw = boot({
       runs: [
-        { runId: "run-a", workflowKey: "implement", status: "running", createdAtMs: Date.now() },
+        {
+          runId: "run-a",
+          workflowKey: "implement",
+          status: "running",
+          createdAtMs: Date.now(),
+          startedBy: { harness: "codex", sessionId: "thread-1", detected: true },
+        },
         { runId: "run-b", status: "ok" },
       ],
     });
@@ -244,6 +250,9 @@ describe("RunList", () => {
     const buttons = harness.container.querySelectorAll("button");
     expect(buttons.length).toBe(2);
     expect(buttons[0]?.className).toContain("gw-run-row");
+    expect(buttons[0]?.textContent).toContain("codex");
+    expect(buttons[0]?.getAttribute("title")).toBeNull();
+    expect(buttons[0]?.querySelector('[title*="thread-1"]')?.getAttribute("title")).toContain("auto-detected");
     // run-a has createdAtMs (shortTime present); run-b has none (shortTime "").
     click(buttons[1]);
     await harness.flush();
@@ -660,6 +669,7 @@ describe("LaunchButton", () => {
       createElement(LaunchButton, {
         workflow: "implement",
         input: { prompt: "go" },
+        startedBy: { harness: "codex", sessionId: "thread-1" },
         onLaunched: (id: string) => launched.push(id),
       }),
     );
@@ -670,6 +680,7 @@ describe("LaunchButton", () => {
     await harness.flush(60);
     expect(launched.length).toBe(1);
     expect(gw.launches[0]?.workflow).toBe("implement");
+    expect(gw.launches[0]?.options).toEqual({ startedBy: { harness: "codex", sessionId: "thread-1" } });
   });
 
   test("renders custom children and reports launch errors", async () => {

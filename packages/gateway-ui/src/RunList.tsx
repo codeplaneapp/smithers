@@ -109,6 +109,14 @@ export function RunList({
               >
                 {run.runId}
               </span>
+              {run.startedBy?.harness ? (
+                <span
+                  style={{ fontSize: 11, color: theme.textDim }}
+                  title={`Started by ${run.startedBy.harness}${run.startedBy.sessionId ? ` · ${run.startedBy.sessionId}` : ""}${run.startedBy.detected ? " · auto-detected" : ""}`}
+                >
+                  {run.startedBy.harness}
+                </span>
+              ) : null}
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               <span style={{ fontSize: 11, color: theme.textDim }}>

@@ -28,6 +28,21 @@ function runStatusOf(data: unknown): string | undefined {
   return typeof run.status === "string" ? run.status : undefined;
 }
 
+function runStartedByOf(data: unknown): { harness?: string; sessionId?: string; detected?: true } | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const record = data as Record<string, unknown>;
+  const run = typeof record.run === "object" && record.run !== null
+    ? (record.run as Record<string, unknown>)
+    : record;
+  const value = run.startedBy;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const startedBy = value as Record<string, unknown>;
+  const harness = typeof startedBy.harness === "string" && startedBy.harness.trim() ? startedBy.harness.trim() : undefined;
+  const sessionId = typeof startedBy.sessionId === "string" && startedBy.sessionId.trim() ? startedBy.sessionId.trim() : undefined;
+  if (!harness && !sessionId) return undefined;
+  return { ...(harness ? { harness } : {}), ...(sessionId ? { sessionId } : {}), ...(startedBy.detected === true ? { detected: true } : {}) };
+}
+
 /**
  * The standard header meta cluster for a workflow UI: `run-id · status ·
  * connection`, live off {@link useGatewayRun}. Drop it into
@@ -40,6 +55,7 @@ function runStatusOf(data: unknown): string | undefined {
 export function RunMeta({ runId, showConnection = true, className, style, useRun = useGatewayRun }: RunMetaProps) {
   const run = useRun(runId);
   const status = runStatusOf(run.data);
+  const startedBy = runStartedByOf(run.data);
   return (
     <span
       className={className}
@@ -60,6 +76,16 @@ export function RunMeta({ runId, showConnection = true, className, style, useRun
         <span>no run</span>
       )}
       <StatusPill status={status ?? (runId ? "pending" : "unknown")} />
+      {startedBy ? (
+        <span
+          data-slot="run-started-by"
+          aria-label={`Started by ${startedBy.harness ?? "unknown"}${startedBy.sessionId ? ` ${startedBy.sessionId}` : ""}${startedBy.detected ? ", auto-detected" : ""}`}
+          title={`Started by ${startedBy.harness ?? "unknown"}${startedBy.sessionId ? ` · ${startedBy.sessionId}` : ""}${startedBy.detected ? " · auto-detected" : ""}`}
+          style={{ border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 6px", fontSize: 11 }}
+        >
+          {startedBy.harness ?? "session"}
+        </span>
+      ) : null}
       {showConnection ? <ConnectionBadge /> : null}
     </span>
   );

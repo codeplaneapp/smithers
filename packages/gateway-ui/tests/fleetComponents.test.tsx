@@ -267,7 +267,16 @@ describe("NodeStageStrip (live run tree)", () => {
 
 describe("RunMeta (live run)", () => {
   test("shows run id, live status pill, and connection badge", async () => {
-    const gw = boot({ runs: [{ runId: "run-a", workflowKey: "fleet", status: "running" }] });
+    const gw = boot({
+      runs: [
+        {
+          runId: "run-a",
+          workflowKey: "fleet",
+          status: "running",
+          startedBy: { harness: "claude-code", sessionId: "session-1", detected: true, prompt: "private" },
+        },
+      ],
+    });
     const harness = await mount(gw, createElement(RunMeta, { runId: "run-a" }));
     await waitFor(
       harness,
@@ -275,5 +284,10 @@ describe("RunMeta (live run)", () => {
       "the live run status pill",
     );
     expect(harness.container.textContent).toContain("run-a");
+    const attribution = harness.container.querySelector('[data-slot="run-started-by"]');
+    expect(attribution?.textContent).toBe("claude-code");
+    expect(attribution?.getAttribute("aria-label")).toContain("session-1");
+    expect(attribution?.getAttribute("aria-label")).toContain("auto-detected");
+    expect(attribution?.textContent).not.toContain("private");
   }, 15_000);
 });
