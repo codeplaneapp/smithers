@@ -243,7 +243,10 @@ function slugify(s: string): string {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 44) || "fix"
+      .slice(0, 44)
+      // Re-trim after the slice: cutting mid-word can leave a trailing "-",
+      // which jj rejects as a bookmark name.
+      .replace(/-+$/, "") || "fix"
   );
 }
 
