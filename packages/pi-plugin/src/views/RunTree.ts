@@ -1,4 +1,4 @@
-import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
+import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { DevToolsNode } from "@smithers-orchestrator/protocol";
 import { normalizeState } from "../runtime/normalizeState.js";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";

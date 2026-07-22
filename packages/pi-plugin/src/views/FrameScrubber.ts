@@ -1,4 +1,4 @@
-import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
+import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";
 import { type Theme, paint } from "./theme.js";
 

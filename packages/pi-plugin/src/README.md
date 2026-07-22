@@ -1,6 +1,6 @@
 # @smithers-orchestrator/pi-plugin — src
 
-Pi coding-agent (`@mariozechner/pi-coding-agent`) extension for Smithers.
+Pi coding-agent (`@earendil-works/pi-coding-agent`) extension for Smithers.
 
 - `extension.ts` — the plugin entry: registers flags (`--smithers-url`,
   `--smithers-key`), the `/smithers*` slash commands, the status bar, the MCP

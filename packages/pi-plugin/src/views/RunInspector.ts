@@ -1,4 +1,4 @@
-import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
+import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";
 import type { DevToolsClient } from "../runtime/DevToolsClient.js";
 import { FrameScrubber } from "./FrameScrubber.js";
