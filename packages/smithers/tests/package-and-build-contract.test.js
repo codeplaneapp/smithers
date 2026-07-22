@@ -265,7 +265,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       // shards use the generous per-package timeout, the extras lane (shard 0)
       // owns the serial gates.
       "node scripts/run-workspace-tests.mjs --shard",
-      "--timeout-minutes 20",
+      "--timeout-minutes 30",
       "matrix.shard == 0",
       "bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts",
       "bun test --timeout=120000 apps/cli/tests/tui-zmux.e2e.test.js",
