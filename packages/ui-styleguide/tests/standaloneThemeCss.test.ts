@@ -37,6 +37,7 @@ describe("standaloneThemeCss", () => {
   test("uses the corrected dark faint token in both dark selectors", () => {
     const css = standaloneThemeCss();
     expect(css.match(/--text-faint:#8c8c95/g)).toHaveLength(2);
-    expect(css).not.toContain("--text-faint:#71717a; --text-placeholder:#63636b");
+    expect(css.match(/--text-placeholder:#75757e/g)).toHaveLength(2);
+    expect(css).not.toContain("--text-faint:#71717a; --text-placeholder:#75757e");
   });
 });

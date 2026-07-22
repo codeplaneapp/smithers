@@ -13,7 +13,7 @@ const lightTokens = [
   "--text:#18181b",
   "--text-muted:#52525b",
   "--text-faint:#71717a",
-  "--text-placeholder:#9f9fa8",
+  "--text-placeholder:#8a8a93",
   // Elevation ramp: bg < surface (cards) < surface-2 (inset/hover) <
   // surface-3 (overlays, popovers).
   "--surface:#ffffff",
@@ -33,11 +33,13 @@ const lightTokens = [
   "--inline-code-bg:rgba(24,24,27,0.06)",
   // Semantic colors. brand = action/active, info = neutral-highlight,
   // success = done, warning = needs-attention/waiting, danger = failed.
+  // Light values are darkened so 11px badge text stays >= 4.5:1 on the
+  // matching *-soft tint, not just on white.
   "--brand:#6d56d8",
   "--success:#087461",
   "--danger:#c5343f",
-  "--warning:#955600",
-  "--info:#2f6fde",
+  "--warning:#916000",
+  "--info:#2a63c9",
   "--shadow-rgb:24 24 27",
   // Elevation shadows, weakest to strongest (card, raised, overlay).
   "--shadow-1:0 1px 2px rgb(24 24 27 / 0.05)",
@@ -51,7 +53,7 @@ const darkTokens = [
   "--text:#f4f4f5",
   "--text-muted:#a1a1aa",
   "--text-faint:#8c8c95",
-  "--text-placeholder:#63636b",
+  "--text-placeholder:#75757e",
   "--surface:#141417",
   "--surface-2:#1b1b20",
   "--surface-3:#232329",
@@ -81,7 +83,10 @@ const darkTokens = [
 // Theme-invariant tokens: aliases, soft tints (self-adapting color-mix over
 // the semantic colors, correct in both themes), geometry, and type scale.
 const sharedTokens = [
-  // Legacy aliases (do not remove; workflow UIs rely on them).
+  // Legacy aliases (do not remove; workflow UIs rely on them). Trap: this
+  // page-vocabulary `--accent` is the BRAND violet, while the shadcn bridge's
+  // `tokens.accent` (@smithers-orchestrator/ui) is the hover fill -- never
+  // treat the two as interchangeable.
   "--panel:var(--surface)",
   "--card:var(--surface)",
   "--line:var(--border-solid)",
@@ -98,7 +103,9 @@ const sharedTokens = [
   "--run:var(--brand)",
   "--crit:var(--danger)",
   "--major:var(--warning)",
-  "--minor:var(--warning)",
+  // Severity ladder stays distinct: crit=danger, major=warning, minor=info,
+  // nit=muted (minor previously collapsed into warning).
+  "--minor:var(--info)",
   "--nit:var(--muted)",
   "--me:var(--brand-soft)",
   "--ink:var(--inverse-bg)",
@@ -117,8 +124,12 @@ const sharedTokens = [
   "--info-border:color-mix(in srgb, var(--info) 40%, transparent)",
   "--ring:color-mix(in srgb, var(--brand) 22%, transparent)",
   "--ring-border:color-mix(in srgb, var(--brand) 50%, transparent)",
-  // Geometry: 4px spacing scale, type scale, radii, and shared control
-  // heights. Use these instead of bare pixel values in workflow-UI CSS.
+  // Geometry: spacing, type scale, radii, and shared control heights.
+  // Spacing policy (enforced by @smithers-orchestrator/ui css-contract tests):
+  // the --sp scale (4px steps) paces layout-level spacing; component-internal
+  // padding/gap sits on a 2px fine grid (even px values only, no 5/7/9px).
+  // Weight roles: 650 is the only emphasis weight for titles/labels; 700 is
+  // reserved for KPI numerals; body text is 400.
   "--sp-1:4px",
   "--sp-2:8px",
   "--sp-3:12px",
@@ -140,6 +151,8 @@ const sharedTokens = [
   "--r-2:10px",
   "--r-3:12px",
   "--r-4:16px",
+  // Soft radius for chat bubbles and the floating glass composer.
+  "--r-bubble:18px",
   "--r-full:999px",
   "--ctl-h:32px",
   "--ctl-h-sm:26px",
@@ -160,40 +173,46 @@ export const workflowUiThemeCss = [
   "h1,h2,h3,p { margin:0; }",
   "h1 { color:var(--text); font-size:var(--fs-5); font-weight:650; letter-spacing:-0.01em; line-height:var(--lh-tight); }",
   "h2 { color:var(--text); font-size:var(--fs-4); font-weight:650; letter-spacing:-0.005em; line-height:var(--lh-tight); }",
-  "h3 { color:var(--text); font-size:var(--fs-3); font-weight:600; line-height:var(--lh-tight); }",
+  "h3 { color:var(--text); font-size:var(--fs-3); font-weight:650; line-height:var(--lh-tight); }",
   "p { color:var(--muted); line-height:1.45; }",
   "code,.mono { font-family:var(--font-mono); }",
   ".muted,.meta { color:var(--muted); }",
   ".top,.topbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 18px; border-bottom:1px solid var(--border); background:var(--surface-glass-strong); -webkit-backdrop-filter:blur(18px) saturate(180%); backdrop-filter:blur(18px) saturate(180%); }",
   ".title,.title-group { min-width:0; display:flex; align-items:center; gap:10px; }",
   ".toolbar,.actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; flex-wrap:wrap; }",
-  ".button,.primary,.secondary { min-height:var(--ctl-h); display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid var(--line); border-radius:var(--r-1); background:var(--panel); color:var(--text); text-decoration:none; cursor:pointer; white-space:nowrap; box-shadow:var(--shadow-1); }",
+  ".button,.primary,.secondary { min-height:var(--ctl-h); display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid var(--line); border-radius:var(--r-1); background:var(--panel); color:var(--text); text-decoration:none; cursor:pointer; white-space:nowrap; box-shadow:var(--shadow-1); transition:background-color .12s ease, border-color .12s ease, color .12s ease; }",
   ".button:hover,.primary:hover,.secondary:hover { background:var(--hover); }",
+  ".button:active:not(:disabled),.primary:active:not(:disabled),.secondary:active:not(:disabled) { background:color-mix(in srgb, var(--text) 6%, var(--hover)); }",
   ".button:focus-visible,.primary:focus-visible,.secondary:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.run-row:focus-visible,.doc-link:focus-visible,.segmented:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:none; border-color:var(--ring-border); box-shadow:0 0 0 3px var(--ring); }",
   ".button:disabled,.primary:disabled,.secondary:disabled { cursor:not-allowed; opacity:.45; }",
   ".button.primary,.primary { border-color:var(--brand-border); background:var(--brand-soft); color:var(--brand); font-weight:650; }",
   ".button.primary:hover,.primary:hover { background:var(--brand-soft-strong); }",
+  ".button.primary:active:not(:disabled),.primary:active:not(:disabled) { background:color-mix(in srgb, var(--brand) 22%, var(--surface)); }",
   ".button.danger,.danger { border-color:var(--danger-border); color:var(--danger); }",
   ".button.danger:hover,.danger:hover { background:var(--danger-soft); }",
+  ".button.danger:active:not(:disabled),.danger:active:not(:disabled) { background:color-mix(in srgb, var(--danger) 16%, var(--surface)); }",
   ".input,.textarea,.prompt,textarea.prompt,input[type='text'],input[type='search'],input[type='number'],select { min-width:0; border:1px solid var(--line); border-radius:var(--r-1); background:var(--panel); color:var(--text); outline:none; }",
   ".input,.prompt,input[type='text'],input[type='search'],input[type='number'],select { min-height:var(--ctl-h); padding:0 10px; }",
   ".textarea,textarea.prompt,textarea.input,textarea { padding:10px 12px; min-height:88px; resize:vertical; line-height:1.45; }",
   ".input::placeholder,.textarea::placeholder,.prompt::placeholder,textarea::placeholder,input::placeholder { color:var(--text-placeholder); }",
-  ".pill,.badge,.chip { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:1px 10px; border:1px solid var(--border); border-radius:999px; color:var(--text-muted); font-family:var(--font-mono); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }",
+  ".pill,.badge,.chip { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:0 10px; border:1px solid var(--border); border-radius:999px; color:var(--text-muted); font-family:var(--font-mono); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }",
   ".pill { border-color:var(--brand-border); background:var(--brand-soft); color:var(--brand); }",
   ".pill.muted,.badge.muted,.chip { border-color:var(--border); background:var(--hover-subtle); color:var(--text-muted); }",
   ".badge { font-family:inherit; font-weight:650; text-transform:uppercase; }",
   ".badge.ok,.badge.finished,.badge.success { color:var(--success); border-color:var(--success-border); background:var(--success-soft); }",
-  ".badge.warn,.badge.pending,.badge.waiting { color:var(--warning); border-color:var(--warning-border); background:var(--warning-soft); }",
+  ".badge.warn,.badge.waiting { color:var(--warning); border-color:var(--warning-border); background:var(--warning-soft); }",
   ".badge.running,.badge.run { color:var(--brand); border-color:var(--brand-border); background:var(--brand-soft); }",
   ".badge.info { color:var(--info); border-color:var(--info-border); background:var(--info-soft); }",
   ".badge.bad,.badge.failed { color:var(--danger); border-color:var(--danger-border); background:var(--danger-soft); }",
-  ".badge.cancelled,.badge.canceled,.badge.skipped { color:var(--muted); border-color:var(--border); background:var(--hover-subtle); }",
+  // Neutral outcomes and not-started states are muted, matching the shared
+  // status vocabulary in @smithers-orchestrator/ui (a user cancel is not a
+  // failure; pending/queued work has not started).
+  ".badge.cancelled,.badge.canceled,.badge.skipped,.badge.pending,.badge.queued { color:var(--muted); border-color:var(--border); background:var(--hover-subtle); }",
   ".card,.panel,.kpi,.stat,.slot { min-width:0; border:1px solid var(--border); border-radius:var(--r-2); background:var(--surface); box-shadow:var(--shadow-2); }",
   ".card,.panel,.slot { padding:14px; }",
   ".card-head,.panel-title,.section-head { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }",
   ".section-head,.label,.field label,.field span { color:var(--muted); font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }",
-  ".field { min-width:0; display:grid; gap:5px; }",
+  ".field { min-width:0; display:grid; gap:6px; }",
   ".empty { padding:24px; color:var(--muted); text-align:center; }",
   ".alert { border:1px solid var(--border); border-radius:var(--r-2); padding:12px; background:var(--surface); color:var(--muted); }",
   ".alert.err,.error-text { color:var(--danger); border-color:var(--danger-border); }",
@@ -201,12 +220,12 @@ export const workflowUiThemeCss = [
   ".run-row:hover,.run-row.active,.run-row.is-active { background:var(--hover); }",
   ".run-row.active,.run-row.is-active { border-color:var(--brand-border); box-shadow:inset 2px 0 0 var(--brand); }",
   ".table { width:100%; border-collapse:collapse; }",
-  ".table th,.table td { padding:8px 9px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }",
-  ".table th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; }",
+  ".table th,.table td { padding:8px 10px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }",
+  ".table th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; font-weight:650; }",
   ".code,.source,pre.code { display:block; min-width:0; overflow:auto; white-space:pre-wrap; font-family:var(--font-mono); font-size:11px; line-height:1.55; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:var(--r-2); padding:10px; }",
   ".plus { color:var(--success); } .minus { color:var(--danger); }",
   ".livelog { overflow:auto; background:var(--code-bg); border:1px solid var(--border); border-radius:var(--r-2); padding:8px; font-family:var(--font-mono); font-size:11px; line-height:1.55; }",
-  ".livelog-line { display:flex; gap:8px; padding:1px 0; white-space:pre-wrap; word-break:break-word; }",
+  ".livelog-line { display:flex; gap:8px; padding:2px 0; white-space:pre-wrap; word-break:break-word; }",
   ".livelog-event { color:var(--brand); flex:none; }",
   ".livelog-node { color:var(--warning); flex:none; }",
   ".livelog-detail { color:var(--code-text); min-width:0; }",
@@ -224,7 +243,7 @@ export const workflowUiLayoutCss = [
   ".workflow-run-row { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r-2); background:var(--surface); color:var(--text); text-align:left; cursor:pointer; box-shadow:var(--shadow-1); }",
   ".workflow-run-row:hover,.workflow-run-row.active { background:var(--hover); border-color:var(--brand-border); }",
   ".workflow-run-row.active { box-shadow:inset 2px 0 0 var(--brand), var(--shadow-1); }",
-  ".workflow-run-main { min-width:0; display:grid; gap:3px; }",
+  ".workflow-run-main { min-width:0; display:grid; gap:4px; }",
   ".workflow-run-id { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:12px; }",
   ".workflow-run-meta { color:var(--muted); font-size:11px; }",
   ".workflow-detail { min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }",
