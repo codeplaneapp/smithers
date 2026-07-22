@@ -69,6 +69,11 @@ Codex launches the server at session start and the semantic tools
 (`list_workflows`, `run_workflow`, `watch_run`, `resolve_approval`, …) appear in
 the `/mcp` list. Full reference: [MCP Server](/integrations/mcp-server).
 
+Codex CLI and MCP launches detect `CODEX_THREAD_ID` (ahead of inherited Claude
+markers) and persist Codex harness/session attribution. Use the explicit
+`--started-by-*` flags or MCP `startedBy` object when providing additional
+caller-known provenance; attribution is not authentication.
+
 ## Standing instructions
 
 Codex reads `AGENTS.md` from the repo root down to the working directory. Add a

@@ -66,6 +66,11 @@ The server exposes `list_workflows`, `run_workflow`, `watch_run`,
 `list_pending_approvals`, `resolve_approval`, `explain_run`, and more. Full
 reference: [MCP Server](/integrations/mcp-server).
 
+Claude Code CLI and MCP launches automatically persist Claude harness/session
+attribution when its native session environment is present. Supply an explicit
+`--started-by-prompt` (or MCP `startedBy.prompt`) only for deliberate launch
+context; it is never inferred from workflow input.
+
 ## Claude Code plugin
 
 A plugin bundles skill and MCP server into one install, namespaced

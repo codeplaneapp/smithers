@@ -29,6 +29,7 @@ The overview is organized around triage: what needs you first, what is running n
 - **Node investigation**: a collapsible inspector where every section (Details, Prompt, Tool calls, Transcript, Output, Diff) unmounts when closed, so a closed Transcript stops polling in the background. The Prompt section shows the task's initial prompt. Also live output, recorded output and tool calls, an AI “what happened” recap, scorer results, syntax-aware diffs, and an embedded PTY terminal to hijack or reopen supported agent sessions.
 - **Events and navigation**: a filterable live event log with timestamps and follow mode, shareable `?runId=`/`&nodeId=` deep links, and `?embed=1` for the embeddable run surface.
 - **Connection truth**: Live, Connecting, Offline, and Unauthorized states, each with recovery guidance.
+- **Launch attribution**: run rows and headers show compact harness/session provenance and search it; explicit attribution prompts stay hidden from this shared dashboard and remain available only in `inspect`/raw config.
 
 ## How it relates to the other surfaces
 

@@ -23,6 +23,12 @@ Workflow({
 
 By default the script starts the detached run and logs the runId; passing `args: { runId: "run-123" }` instead attaches to an existing run (after a restart, or for a run started elsewhere). The SessionStart hook announces the script's absolute path in every `.smithers` project, with the count of non-terminal runs to re-attach to.
 
+New mirror launches automatically persist `startedBy.harness = "claude-code"`
+and the native `CLAUDE_CODE_SESSION_ID` when available. An optional
+`args.startedByPrompt` is the sole route for an attribution prompt; workflow
+input and transcripts are never copied into durable attribution. Attaching by
+`runId` leaves the original attribution unchanged.
+
 What the mirror renders:
 
 - **Phases** from the workflow's real container tree (`Workflow name`, `Sequence label`, `Parallel label`, loop containers), labeled from the run's persisted frames, so data-dependent fan-outs and loop iterations appear as they materialize.

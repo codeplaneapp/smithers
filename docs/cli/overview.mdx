@@ -38,6 +38,16 @@ even when `N` exceeds the automatic ceiling. The ceiling applies only to
 additional demand-driven raises. See [Parallel](/components/parallel) for how
 the run-wide and group caps compose.
 
+## Launch attribution
+
+`up`, `workflow run`, `oneshot`, and `chat-create` accept
+`--started-by-harness`, `--started-by-session`, and `--started-by-prompt`.
+They persist optional self-reported launch provenance; the prompt is never
+copied from workflow input, `--prompt`, or a oneshot goal. Short-lived CLI
+launches best-effort infer Codex/Claude harness/session markers when those
+identity flags are omitted. Use explicit fields for Kimi, OpenCode, and other
+harnesses with a known session.
+
 ## Exit codes
 
 ```text
@@ -227,7 +237,7 @@ commands[102]:
     purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
-    flags[36]{name,short,type,default,desc}:
+    flags[39]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -264,6 +274,9 @@ commands[102]:
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
       report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
+      started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
+      started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
+      started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
   - name: migrate
     purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
     flags[3]{name,short,type,default,desc}:
@@ -415,14 +428,17 @@ commands[102]:
       stderr,,boolean,true,Include agent stderr
   - name: chat-create
     purpose: Create and start a one-task auto-hijacked chat run
-    flags[2]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       agent,,enum,,claude-code|codex|antigravity|pi|kimi|amp
       cwd,,string,.,Working directory for the chat session
+      started-by-harness,,string,,Durable self-reported launch harness
+      started-by-session,,string,,Durable self-reported harness session
+      started-by-prompt,,string,,Explicit durable launch context
   - name: oneshot
     purpose: Run one well-scoped goal with a strong agent in the background, with optional review and a live UI
     args[1]{name,type,required,desc}:
       goal,string,false,Goal to complete; required unless using --status or a preference setter
-    flags[11]{name,short,type,default,desc}:
+    flags[14]{name,short,type,default,desc}:
       goal-file,,string,,Read a long goal from a file
       model,,string,auto,Model slot or canonical model id
       agent,,enum,,codex|kimi|claude-code|opencode
@@ -434,6 +450,9 @@ commands[102]:
       detach,d,boolean,true,Run in the background; --detach false runs in the foreground
       interactive,,boolean,false,Open the full-screen TUI monitor
       open,,boolean,true,Open the run UI after launch
+      started-by-harness,,string,,Durable self-reported launch harness
+      started-by-session,,string,,Durable self-reported harness session
+      started-by-prompt,,string,,Explicit durable launch context; never inferred from the goal
   - name: hijack
     purpose: Hand off the latest resumable agent session or Smithers-managed conversation
     args[1]{name,type,required,desc}:
@@ -810,7 +829,7 @@ commands[102]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[37]{name,short,type,default,desc}:
+    flags[40]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -848,6 +867,9 @@ commands[102]:
       report,,boolean,true,Narrate an interactive run's result with a cheap/fast agent and open an HTML summary in the browser (disable with --no-report or SMITHERS_NO_REPORT=1)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
+      started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
+      started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
+      started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:

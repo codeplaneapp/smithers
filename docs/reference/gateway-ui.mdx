@@ -37,12 +37,12 @@ tokens, never hex-plus-alpha.
 | `RunEventLog` | A scrolling, auto-following event log for a run. One structured row per frame: a severity-tinted kind badge (`NodeStarted`/`NodeFinished`/`NodeFailed`/`TaskHeartbeat`/...), a compact nodeId chip, iteration/attempt when set, and a human one-line summary ("audit-docs finished", "flaky failed: <error>"), with the full JSON payload collapsed behind a per-row toggle. Failures are prominent, consecutive per-node heartbeats coalesce into one de-emphasized row (a toolbar toggle shows them all), and passing `onSelectNode` makes node rows open that node's live chat. | `runId`, `maxEvents`, `follow`, `onSelectNode`, `selectedNodeId` |
 | `NodeOutputView` | The output of a single node: shows the pending state before the node produces, then the formatted output; updates as the run progresses. | `runId`, `nodeId`, `iteration` |
 | `ApprovalPanel` | The pending approval queue with Approve and Deny buttons. | `filter`, `pollMs`, `onError` |
-| `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `onLaunched` |
+| `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `startedBy`, `onLaunched` |
 | `MonitorButton` | A button (rendered as a real link) that opens the Smithers Monitor, the live all-runs control surface the Gateway serves at `/monitor`, deep-linked to the current run via `?runId`. Same-origin with the served workflow UI, so no base URL is needed. | `runId`, `monitorPath`, `baseUrl`, `newTab` |
 | `WorkflowPicker` | A select of the workflows registered on the Gateway. | `value`, `onChange`, `hasUiOnly` |
 | `ConnectionBadge` | A live Gateway connection indicator. | none |
 | `StatusPill` | A colored status badge for any run or node status string. | `status`, `label` |
-| `RunMeta` | The standard header meta cluster: `run-id · live status pill · connection badge`. Drop into `WorkflowUiShell`'s `meta` slot. | `runId`, `showConnection` |
+| `RunMeta` | The standard header meta cluster: `run-id · live status pill · started-by badge · connection badge`. The badge keeps the full session id and auto-detection in its accessible title. | `runId`, `showConnection` |
 | `NodeChatStream` | **Live per-node agent chat**: folds the node's stdout/stderr chunks, tool calls, reasoning, and file-change actions from the run event stream into an auto-following chat transcript. One per agent node in a detail pane. | `runId`, `nodeId`, `title`, `subtitle`, `status`, `height` |
 | `NodeOutputCard` | A run-aware output card for one node with ok/fail/pending chrome and an unwrapped-row render prop. Use for deterministic nodes. | `runId`, `nodeId`, `title`, `summary`, `body`, `remountKey` |
 | `FleetTable` | A selectable fan-out ledger: one row per work item, live status pill rolled up from the item's pipeline `nodeIds`. | `runId`, `items`, `columns`, `selectedKey`, `onSelect` |

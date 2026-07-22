@@ -81,7 +81,11 @@ from the method catalog; see [`/rpc/launch-run`](/rpc/launch-run) for one in
 full.
 
 ```ts
-const { runId } = await client.launchRun({ workflowId: "review", input: {} });
+const { runId } = await client.launchRun({
+  workflow: "review",
+  input: {},
+  options: { startedBy: { harness: "codex", sessionId: "thread_123" } },
+});
 await client.submitApproval({ runId, nodeId: NODE_ID, decision: "approve" });
 const runs = await client.listRuns();
 await client.cancelRun({ runId });
@@ -90,6 +94,10 @@ await client.cancelRun({ runId });
 <ResponseField name="run lifecycle" type="methods">
   `launchRun`, `resumeRun`, `pauseRun`, `cancelRun`, `hijackRun`, `rewindRun`.
 </ResponseField>
+
+`LaunchRunRequest.options.startedBy` accepts `{ harness?, sessionId?, prompt?,
+detected?: true }` as durable caller-provided provenance. It is not an auth
+credential; use the configured bearer/token identity for access control.
 <ResponseField name="human-in-the-loop" type="methods">
   `submitApproval`, `submitSignal`, `listApprovals`.
 </ResponseField>

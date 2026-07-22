@@ -28,6 +28,24 @@ function runWorkflow<Schema>(
 
 Both `RunOptions` and `RunResult` are defined in [Types](/reference/types).
 
+## Launch attribution
+
+Pass optional self-reported launch provenance with `startedBy`; it is persisted
+in the run config and is distinct from `auth.triggeredBy` and annotations.
+
+```ts
+await Effect.runPromise(runWorkflow(workflow, {
+  input: {},
+  startedBy: { harness: "codex", sessionId: "thread_123", prompt: "Ship the release" },
+}));
+```
+
+`harness` and `sessionId` are trimmed and limited to 64/256 Unicode code
+points. `prompt` is explicit-only and is clipped with `…` at 8,192 code
+points. Attribution is immutable when resuming an existing run and carries to
+continue-as-new child runs. Do not infer it from workflow input or use it for
+authentication.
+
 ## Concurrency
 
 When `opts.maxConcurrency` is omitted, a run starts with a cap of 4 concurrent

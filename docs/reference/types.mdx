@@ -240,6 +240,7 @@ type RunOptions = {
   hot?: boolean | HotReloadOptions;
   annotations?: Record<string, string | number | boolean>;
   auth?: RunAuthContext | null;
+  startedBy?: RunStartedBy;          // optional self-reported launch provenance
   config?: Record<string, unknown>;
   effectPlatformRuntime?: "bun" | "node" | "worker";     // swappable @effect/platform layer; "node"/"worker" require effectPlatformLayer
   effectPlatformLayer?: Layer.Layer<any, never, never>;  // e.g. NodeContext.layer from a Node serverless entrypoint
@@ -254,6 +255,13 @@ type RunOptions = {
     restoreRuntimeOwnerId?: string | null;
     restoreHeartbeatAtMs?: number | null;
   };
+};
+
+type RunStartedBy = {
+  harness?: string;   // trimmed, at most 64 Unicode code points
+  sessionId?: string; // trimmed, at most 256 Unicode code points
+  prompt?: string;    // explicit-only; visibly clipped to 8,192 Unicode code points
+  detected?: true;    // only when environment inference filled harness/session
 };
 
 type HotReloadOptions = {
