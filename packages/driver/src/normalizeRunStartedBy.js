@@ -13,6 +13,21 @@ function codePointLength(value) {
 }
 
 /**
+ * Clamp a startedBy prompt to its persisted budget, surrogate-pair safe.
+ * Transports call this BEFORE generic frame string bounds so an over-long
+ * prompt truncates (the documented behavior) instead of rejecting the frame.
+ *
+ * @param {string} prompt
+ * @returns {string}
+ */
+export function clampRunStartedByPrompt(prompt) {
+    if (codePointLength(prompt) <= RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS) {
+        return prompt;
+    }
+    return `${Array.from(prompt).slice(0, RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS - 1).join("")}…`;
+}
+
+/**
  * Normalize optional harness provenance at public ingress and before durable
  * persistence. Unknown object keys are intentionally ignored for direct JS
  * callers; public schemas reject them before this helper runs.
@@ -50,8 +65,8 @@ export function normalizeRunStartedBy(value) {
     }
 
     let prompt = rawPrompt === "" ? undefined : rawPrompt;
-    if (prompt && codePointLength(prompt) > RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS) {
-        prompt = `${Array.from(prompt).slice(0, RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS - 1).join("")}…`;
+    if (prompt) {
+        prompt = clampRunStartedByPrompt(prompt);
     }
     const result = {
         ...(harness ? { harness } : {}),

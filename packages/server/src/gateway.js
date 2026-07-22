@@ -56,7 +56,7 @@ import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
 import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
 import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
-import { normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
+import { clampRunStartedByPrompt, normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
 import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 import { createBrowserSessionRegistry } from "./browser.js";
 import { validateBrowserRequest } from "./gatewayRoutes/browser.js";
@@ -495,6 +495,22 @@ function resolveRunOwnerId(run) {
     const auth = asObject(config?.auth);
     const owner = asString(auth?.triggeredBy);
     return owner ? owner : null;
+}
+/**
+ * Lift the persisted launch provenance out of a run row's configJson so run
+ * payloads expose a top-level `startedBy`, the shape the v1 contract and the
+ * gateway-ui provenance surfaces consume.
+ *
+ * @param {{ configJson?: string | null }} row
+ * @returns {import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy | undefined}
+ */
+function runStartedByFromRow(row) {
+    const config = parseJson(typeof row?.configJson === "string" ? row.configJson : null);
+    try {
+        return normalizeRunStartedBy(asObject(config?.startedBy) ?? undefined);
+    } catch {
+        return undefined;
+    }
 }
 /**
  * @param {ServerResponse} res
@@ -1234,6 +1250,26 @@ function rawDataToUtf8(raw) {
  * @param {unknown} method
  * @returns {string}
  */
+/**
+ * Clamp a frame's `options.startedBy.prompt` to its persisted budget BEFORE
+ * the generic frame string bound runs: an over-long launch prompt truncates
+ * (the documented startedBy behavior) instead of rejecting the whole frame.
+ * Mutates the params object in place; every other field still faces the
+ * generic bounds untouched.
+ *
+ * @param {unknown} params
+ */
+export function clampFrameStartedByPrompt(params) {
+    if (typeof params !== "object" || params === null) return;
+    const options = /** @type {Record<string, unknown>} */ (params).options;
+    if (typeof options !== "object" || options === null) return;
+    const startedBy = /** @type {Record<string, unknown>} */ (options).startedBy;
+    if (typeof startedBy !== "object" || startedBy === null) return;
+    const prompt = /** @type {Record<string, unknown>} */ (startedBy).prompt;
+    if (typeof prompt !== "string") return;
+    /** @type {Record<string, unknown>} */ (startedBy).prompt = clampRunStartedByPrompt(prompt);
+}
+
 export function validateGatewayMethodName(method) {
     if (typeof method !== "string") {
         throw new SmithersError("INVALID_INPUT", "Gateway method name must be a string.", { methodType: typeof method });
@@ -1260,6 +1296,7 @@ export function parseGatewayRequestFrame(raw, maxPayloadBytes = GATEWAY_RPC_MAX_
     catch (error) {
         throw new SmithersError("INVALID_INPUT", "Gateway RPC payload must be valid JSON.", undefined, { cause: error });
     }
+    clampFrameStartedByPrompt(parsed?.params);
     assertJsonPayloadWithinBounds("gateway frame", parsed, {
         maxArrayLength: GATEWAY_RPC_MAX_ARRAY_LENGTH,
         maxDepth: GATEWAY_RPC_MAX_DEPTH,
@@ -6552,6 +6589,10 @@ a { color: var(--brand); }</style>
                 }, "gateway:http-rpc");
                 return this.sendHttpRpcResponse(res, 400, responseError(requestId, "INVALID_REQUEST", "RPC body must be a JSON object"));
             }
+            // Both frame shapes: body.params (RPC envelope) and body itself
+            // (forcedMethod routes treat the body as the params object).
+            clampFrameStartedByPrompt(body.params);
+            clampFrameStartedByPrompt(body);
             assertJsonPayloadWithinBounds("gateway frame", body, {
                 maxArrayLength: GATEWAY_RPC_MAX_ARRAY_LENGTH,
                 maxDepth: GATEWAY_RPC_MAX_DEPTH,
@@ -6919,9 +6960,11 @@ a { color: var(--brand); }</style>
                 if (workflow && workflowKey !== workflow) {
                     continue;
                 }
+                const rowStartedBy = runStartedByFromRow(row);
                 byRunId.set(row.runId, {
                     ...row,
                     workflowKey,
+                    ...(rowStartedBy ? { startedBy: rowStartedBy } : {}),
                 });
             }
         }
@@ -8139,6 +8182,7 @@ a { color: var(--brand); }</style>
                     resolved.adapter,
                     run,
                 ).catch(() => undefined);
+                const startedBy = runStartedByFromRow(run);
                 return responseOk(frame.id, {
                     ...run,
                     workflowKey: resolved.workflowKey,
@@ -8147,6 +8191,7 @@ a { color: var(--brand); }</style>
                         return acc;
                     }, {}),
                     ...(runState ? { runState } : {}),
+                    ...(startedBy ? { startedBy } : {}),
                 });
             }
             case "frames.list": {

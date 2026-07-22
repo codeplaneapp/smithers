@@ -1048,6 +1048,12 @@ type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
  * @returns {import("./RunStartedBy.ts").RunStartedBy | undefined}
  */
 declare function normalizeRunStartedBy(value: unknown): RunStartedBy$1 | undefined;
+/**
+ * Clamp a startedBy prompt to its persisted budget, surrogate-pair safe.
+ * Transports call this BEFORE generic frame string bounds so an over-long
+ * prompt truncates (the documented behavior) instead of rejecting the frame.
+ */
+declare function clampRunStartedByPrompt(prompt: string): string;
 declare const RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS: 64;
 declare const RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS: 256;
 declare const RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS: 8192;
@@ -1095,4 +1101,4 @@ type SignalRow = SignalRow$1;
 type SignalRowsOptions = SignalRowsOptions$1;
 type SignalRowsReader = SignalRowsReader$2;
 
-export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS, RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS, RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS, type RunAuthContext, type RunOptions, type RunResult, type RunStartedBy, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeSignals, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, type SignalRow, type SignalRowInput, type SignalRowsOptions, type SignalRowsReader, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind, normalizeRunStartedBy };
+export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS, RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS, RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS, type RunAuthContext, type RunOptions, type RunResult, type RunStartedBy, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeSignals, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, type SignalRow, type SignalRowInput, type SignalRowsOptions, type SignalRowsReader, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind, clampRunStartedByPrompt, normalizeRunStartedBy };

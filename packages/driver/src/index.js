@@ -59,6 +59,7 @@ export { WorkflowDriver } from "./WorkflowDriver.js";
 export { SmithersCtx } from "./SmithersCtx.js";
 export { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "./RuntimeCapabilityError.js";
 export {
+    clampRunStartedByPrompt,
     normalizeRunStartedBy,
     RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS,
     RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS,
