@@ -61,9 +61,9 @@ reference, and the design guide.
 
 > Render a streaming-aware disclosure for model reasoning content.
 
-`Reasoning` contains thinking or extended-reasoning content without coupling the
-UI package to a Markdown implementation. Pass `Markdown` or another renderer as
-children when the content is Markdown.
+`Reasoning` holds thinking or extended-reasoning content without coupling the
+UI package to Markdown; pass `Markdown` or another renderer as children for
+Markdown content.
 
 ```tsx
 import { Markdown, Reasoning } from "smithers-orchestrator/ui";
@@ -77,15 +77,15 @@ import { Markdown, Reasoning } from "smithers-orchestrator/ui";
 
 | Prop | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `streaming` | `boolean` | `false` | Shimmers the title and controls automatic open/close while the user has not toggled the disclosure. |
+| `streaming` | `boolean` | `false` | Shimmers the title and auto-toggles open/close until the user toggles it manually. |
 | `open` | `boolean` | uncontrolled | Controls the disclosure. |
 | `defaultOpen` | `boolean` | `streaming` | Sets the initial uncontrolled state. |
-| `onOpenChange` | `(open: boolean) => void` | none | Receives requested user toggles and automatic streaming transitions. |
+| `onOpenChange` | `(open: boolean) => void` | none | Receives user toggles and automatic streaming transitions. |
 | `duration` | `number` | none | Renders elapsed seconds as `Thought for Ns` or `Mm SSs` after streaming. |
 | `title` | `string` | `Reasoning` | Header text. |
 
-In uncontrolled mode, a streaming transition opens or closes the block until
-the first user toggle. Controlled mode never changes itself.
+Uncontrolled mode: a streaming transition opens or closes the block until the
+first user toggle. Controlled mode never changes itself.
 
 ---
 
@@ -94,8 +94,8 @@ the first user toggle. Controlled mode never changes itself.
 > Render tool lifecycle status, JSON input and output, and approval content.
 
 `ToolCall` renders all eight input, approval, execution, output, failure, and
-denial states from an agent tool invocation. Lifecycle tinting flows through the
-shared status vocabulary.
+denial states of an agent tool invocation, tinted through the shared status
+vocabulary.
 
 ```tsx
 import { ToolCall } from "smithers-orchestrator/ui";
@@ -108,9 +108,9 @@ import { ToolCall } from "smithers-orchestrator/ui";
 />
 ```
 
-Use `argsText` for partial JSON while input streams. It overrides `args`.
-`resultText` similarly overrides `result`. Object rendering is BigInt-safe and
-cyclic-safe through the exported `formatJsonSafe` helper.
+Use `argsText` for partial JSON while input streams; it overrides `args`, and
+`resultText` similarly overrides `result`. Object rendering is BigInt- and
+cyclic-safe via the exported `formatJsonSafe` helper.
 
 ## Lifecycle states
 
@@ -125,9 +125,9 @@ cyclic-safe through the exported `formatJsonSafe` helper.
 | `output-error` | Failed | `error` |
 | `output-denied` | Denied | `denied` |
 
-The default `compact` layout discloses its details with a native button. The
-`expanded` layout always mounts details and ignores disclosure props. Inject
-approve and deny controls through `approvalSlot`; it renders only during
+The default `compact` layout discloses details via a native button; `expanded`
+always mounts details and ignores disclosure props. Inject approve/deny
+controls through `approvalSlot`, which renders only during
 `approval-requested`.
 
 ---
@@ -136,8 +136,8 @@ approve and deny controls through `approvalSlot`; it renders only during
 
 > Render an ordered list of model reasoning steps with accessible statuses.
 
-`ChainOfThought` gives reasoning steps a compact, ordered visual treatment. Step
-status is never color-only: each dot has matching screen-reader text.
+`ChainOfThought` gives reasoning steps a compact, ordered visual treatment.
+Step status is never color-only; each dot has matching screen-reader text.
 
 ```tsx
 import { ChainOfThought } from "smithers-orchestrator/ui";
@@ -190,8 +190,8 @@ import { Plan, TaskItem } from "smithers-orchestrator/ui";
 ```
 
 The header shows `done/total done`, counting only steps whose status is `done`.
-The whole plan starts open by default. Both the plan and each available detail
-use native disclosure buttons, and closed bodies are unmounted.
+The whole plan starts open by default; both the plan and each available detail
+use native disclosure buttons, with closed bodies unmounted.
 
 ## Props
 
@@ -230,17 +230,17 @@ import { TaskItem } from "smithers-orchestrator/ui";
 />
 ```
 
-The `status` string goes through the shared `normalizeStatus`, `statusClass`,
-and `formatStatus` helpers. Every tinted dot has matching screen-reader text.
+The `status` string flows through the shared `normalizeStatus`, `statusClass`,
+and `formatStatus` helpers; every tinted dot has matching screen-reader text.
 
 ## Props
 
 | Prop | Type | Description |
 | --- | --- | --- |
 | `label` | `ReactNode` | Unit-of-work label. |
-| `status` | `string` | Any shared status vocabulary string, such as `running`, `complete`, or `failed`. |
+| `status` | `string` | Any shared status vocabulary string, e.g. `running`, `complete`, `failed`. |
 | `files` | `readonly string[]` | Optional text-only monospace file badges. |
-| `elapsedSeconds` | `number` | Optional elapsed duration, formatted as seconds or minutes and seconds. |
+| `elapsedSeconds` | `number` | Optional elapsed duration: seconds, or minutes and seconds. |
 
 **Source**: `packages/ui/src/agentic/TaskItem.tsx`
 
@@ -265,12 +265,12 @@ import { Sources } from "smithers-orchestrator/ui";
 ```
 
 The trigger reads `Used N source` or `Used N sources`. The list starts closed
-and unmounts while closed. Sources are deliberately text-only, with no favicon
+and unmounts while closed. Sources are text-only by design: no favicon
 requests.
 
-Scheme-less URLs and `http`, `https`, and `mailto` links are allowed. Unsafe
-schemes render as plain text and never reach `onNavigate`. When `onNavigate`
-runs, it receives the sanitized URL after default navigation is prevented.
+Scheme-less, `http`, `https`, and `mailto` links are allowed; other schemes
+render as plain text and never reach `onNavigate`, which otherwise receives
+the sanitized URL after default navigation is prevented.
 
 ## Props
 
@@ -299,13 +299,12 @@ import { InlineCitation } from "smithers-orchestrator/ui";
 </p>
 ```
 
-The chip renders `[n]` in superscript and announces
-`Source n: label`. Hovering or focusing it shows the source label through the
-shared tooltip primitive.
+The chip renders `[n]` in superscript, announces `Source n: label`, and shows
+the source label on hover or focus through the shared tooltip primitive.
 
-Safe URLs render an anchor. Missing or unsafe URLs render a focusable button,
-so keyboard users can still inspect the tooltip. `onNavigate` only runs for a
-sanitized URL and receives an event whose default action is already prevented.
+Safe URLs render an anchor; missing or unsafe URLs render a focusable button,
+so keyboard users can still inspect the tooltip. `onNavigate` runs only for a
+sanitized URL, with an event whose default action is already prevented.
 
 ## Props
 
@@ -401,16 +400,16 @@ mandated relief.
 
 > React hooks for driving a Smithers Gateway from a custom workflow UI.
 
-The Smithers UI surface is React. This package is the SDK that backs it: a
-provider that holds one `SmithersGatewayClient`, a set of live data hooks that
-read a run (or runs, approvals, crons, scores, …) over TanStack DB collections,
-and action hooks that launch, approve, and cancel. Most hooks return the same
-[`GatewayAsyncState`](#gatewayasyncstate) shape, so once you know one you know
+The Smithers UI surface is React. This package is its SDK: a provider holding
+one `SmithersGatewayClient`, live data hooks that read a run (or runs,
+approvals, crons, scores, …) over TanStack DB collections, and action hooks
+that launch, approve, and cancel. Most hooks share the
+[`GatewayAsyncState`](#gatewayasyncstate) shape, so knowing one means knowing
 them all.
 
 <Note>
-Everything on this page lives at the subpath `smithers-orchestrator/gateway-react`,
-**not** on the bare `smithers-orchestrator` facade. Import from the subpath or
+Everything here lives at the subpath `smithers-orchestrator/gateway-react`,
+**not** the bare `smithers-orchestrator` facade. Import from the subpath, or
 the build fails.
 </Note>
 
@@ -438,15 +437,13 @@ function Run({ runId }: { runId: string }) {
 }
 ```
 
-For a UI bundled and served by the gateway itself, skip the JSX provider and
-mount with [`createGatewayReactRoot`](#creategatewayreactroot) instead. It wires
-both contexts (on-demand hooks **and** the live collections) in one call.
+For a UI served by the gateway itself, skip the JSX provider and mount with
+[`createGatewayReactRoot`](#creategatewayreactroot) instead: it wires both
+contexts (on-demand hooks **and** the live collections) in one call.
 
 ## GatewayAsyncState
 
-The return shape shared by the live data hooks. `data` is `undefined` until the
-first payload lands; `loading` is true only while there is no data yet and a
-fetch is in flight; `refetch()` forces a re-pull.
+The return shape shared by the live data hooks; see field detail below.
 
 ```ts
 type GatewayAsyncState<T> = {
@@ -482,8 +479,8 @@ type GatewayAsyncState<T> = {
 ### SmithersGatewayProvider
 
 Holds one `SmithersGatewayClient` in context for every hook below. Pass a ready
-`client`, or `options` and it constructs one. The client is memoized on
-`baseUrl`/`token` so an inline `options` literal does not trigger a reconnect
+`client`, or `options` to construct one. The client is memoized on
+`baseUrl`/`token`, so an inline `options` literal won't trigger a reconnect
 storm.
 
 ```tsx
@@ -511,15 +508,15 @@ function SmithersGatewayProvider(props: {
 
 <Note>
 The provider mounts both the raw `SmithersGatewayClient` context and the
-TanStack DB collection provider. The live hooks and action hooks all work inside
-this one provider.
+TanStack DB collection provider, so every live and action hook below works
+inside this one provider.
 </Note>
 
 **Source** [`SmithersGatewayProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/SmithersGatewayProvider.ts) · **Tests** [`SmithersGatewayProvider.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/SmithersGatewayProvider.test.ts)
 
 ### createGatewayReactRoot
 
-Mount a full custom UI in one call. Builds a client, mounts
+Mounts a full custom UI in one call: builds a client, mounts
 `SmithersGatewayProvider`, creates the TanStack DB collection registry, and
 renders your element. This is what a gateway-served `ui` entry uses.
 
@@ -550,8 +547,8 @@ createGatewayReactRoot(<App />, { baseUrl: "/", rootId: "root" });
 
 ### useSmithersGateway
 
-Read the raw `SmithersGatewayClient` from context. Throws if called outside a
-provider. The escape hatch for client methods the hooks do not wrap.
+Reads the raw `SmithersGatewayClient` from context, throwing if called outside
+a provider: the escape hatch for client methods the hooks don't wrap.
 
 ```ts
 function useSmithersGateway(): SmithersGatewayClient;
@@ -630,10 +627,10 @@ function useGatewayConnectionStatus(): {
 
 ## Data hooks
 
-Each hook reads one gateway resource as a live TanStack DB collection. They
-share the [`GatewayAsyncState`](#gatewayasyncstate) return shape unless noted,
-and may be called unconditionally: pass `undefined` (or an empty `runId`) and
-the hook resolves to an empty, stable state.
+Each hook reads one gateway resource as a live TanStack DB collection, sharing
+the [`GatewayAsyncState`](#gatewayasyncstate) return shape unless noted. All may
+be called unconditionally: pass `undefined` (or an empty `runId`) and the hook
+resolves to an empty, stable state.
 
 ### useGatewayRun
 
@@ -848,8 +845,8 @@ function useGatewayNodeOutput(params: {
 
 ### useGatewayScores
 
-Live scorer/eval results for one run (`listScores`). Pass `nodeId` to scope to
-one node. An empty `runId` resolves to a stable empty collection. Read-only, so
+Live scorer/eval results for one run (`listScores`). Pass `nodeId` to scope one
+node; an empty `runId` resolves to a stable empty collection. Read-only, so
 query-only.
 
 ```ts
@@ -908,10 +905,10 @@ function useGatewayPrompts(): GatewayAsyncState<GatewayPromptRow[]>;
 
 ### useGatewayRpc
 
-The generic escape hatch: call any gateway RPC by name and get its typed payload
-back in `GatewayAsyncState`. The typed hooks above wrap this; reach for it when
-no dedicated hook exists. Disable with `enabled: false`; a disabled or
-key-changed query clears stale data instead of surfacing it.
+The generic escape hatch: call any gateway RPC by name and get its typed
+payload back in `GatewayAsyncState`. The typed hooks above wrap this; reach for
+it when none exists. Disable with `enabled: false` (a disabled or key-changed
+query clears stale data instead of surfacing it).
 
 ```ts
 function useGatewayRpc<Method extends GatewayRpcMethod>(
@@ -944,9 +941,9 @@ function useGatewayRpc<Method extends GatewayRpcMethod>(
 Folded delegation-chain state for one run: the read model behind the
 [`delegation-chain`](/workflows/delegation-chain) workflow UI. Enumerates every
 physical `dc:*` node from the live run tree, fetches each node's durable output
-row once (re-checked when that node finishes or fails), folds the rows through
-the pure `foldDelegation` reducer, and returns the graph plus the delegation
-actions. Malformed or unknown rows surface in `errors` instead of throwing.
+row once (re-checked on finish or failure), folds the rows through the pure
+`foldDelegation` reducer, and returns the graph plus delegation actions.
+Malformed or unknown rows surface in `errors` instead of throwing.
 
 ```ts
 function useDelegationChain(params: { runId: string | undefined }): {
@@ -1006,9 +1003,9 @@ The pure reducer is exported alongside it (`foldDelegation`,
 
 ### useGatewayActions
 
-Bound, memoized mutation methods off the client. Call them to drive a run:
-launch, resume, cancel, hijack, rewind, approve/deny, signal, and manage crons.
-Each takes the matching RPC params and returns a promise.
+Bound, memoized mutation methods off the client: launch, resume, cancel,
+hijack, rewind, approve/deny, signal, and manage crons. Each takes the matching
+RPC params and returns a promise.
 
 ```ts
 function useGatewayActions(): {
@@ -1126,8 +1123,8 @@ import type {
 ---
 
 This is the UI side of the control plane. For the underlying transport and its
-imperative methods, see the [Gateway Client reference](/reference/gateway-client);
-to embed a UI in a gateway-served workflow, see
+imperative methods, see the [Gateway Client reference](/reference/gateway-client).
+To embed a UI in a gateway-served workflow, see
 [Custom UI](/integrations/custom-ui) and the
 [Custom workflow UI guide](/guides/custom-workflow-ui).
 
@@ -1137,25 +1134,25 @@ to embed a UI in a gateway-served workflow, see
 
 > The shared visual language every smithers ui workflow UI should follow, so each .smithers/ui/<workflow>.tsx looks like one product instead of a different app per workflow.
 
-[Custom Workflow UIs](/guides/custom-workflow-ui) covers the *plumbing*: how a `.smithers/ui/<workflow>.tsx` bundle boots, talks to the Gateway, streams events, and stays stale-data-free. This guide covers the *look*: the visual language those UIs share so they read as one coherent product, not a different app per workflow.
+[Custom Workflow UIs](/guides/custom-workflow-ui) covers the *plumbing*: how a `.smithers/ui/<workflow>.tsx` bundle boots, talks to the Gateway, streams events, and stays stale-data-free. This guide covers the *look*: the visual language that makes every workflow UI read as one product.
 
-The reference implementation is the Smithers product UI. The rules below are extracted from it. When you build or touch a workflow UI, adopt these tokens and principles verbatim rather than inventing a one-off palette. The fastest way to make every workflow UI feel native is to start from the same tokens and the same handful of decisions about shape, depth, motion, and focus.
+The reference implementation is the Smithers product UI; the rules below are extracted from it. Adopt these tokens and principles verbatim, not a one-off palette, so a workflow UI feels native and shares the same shape, depth, motion, and focus decisions.
 
-<Note>Most reference UIs in this repo (`.smithers/ui/vcs.tsx`, `grill-me.tsx`, `ultragrill.tsx`) ship a single inline `<style>` string. That is fine. The point is not *where* the CSS lives; it is that the *values* come from the shared token set below instead of ad-hoc hex codes.</Note>
+<Note>Most reference UIs in this repo (`.smithers/ui/vcs.tsx`, `grill-me.tsx`, `ultragrill.tsx`) ship a single inline `<style>` string; that's fine as long as its *values* come from the shared token set below, not ad-hoc hex codes.</Note>
 
 ## Components first
 
-The fastest way to comply with everything in this guide is to not hand-write the CSS at all: `smithers-orchestrator/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) whose styling is generated from the token set below, with the exact house recipes (tinted primary button, brand focus halo, 22px status pills, 8px card radius). They are correct in light and dark by construction, and Radix supplies the accessibility behavior. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage and the [UI Component Library reference](/reference/ui) for the full catalog.
+The fastest way to comply with this guide: don't hand-write the CSS. `smithers-orchestrator/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) styled from the tokens below, with house recipes baked in (tinted primary button, brand focus halo, 22px status pills, 8px card radius) and correct in light and dark by construction; Radix supplies accessibility. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage and the [UI Component Library reference](/reference/ui) for the full catalog.
 
-Everything below remains the contract those components implement, and what you follow whenever you write custom CSS next to them.
+Everything below is the contract those components implement, and what you follow when writing custom CSS next to them.
 
 ## Start from the token set
 
-Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, a tint, or a shadow alpha inline; reach for a token (or derive one with `color-mix`). This is what makes light and dark "just work" and what keeps two different workflow UIs from drifting apart.
+Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, tint, or shadow alpha inline: reach for a token, or derive one with `color-mix`. This keeps light and dark correct and workflow UIs from drifting apart.
 
-<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smithers-orchestrator/ui-styleguide`) into every `/workflows/<key>` page, and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint. So a workflow UI that just *reads* the tokens is themed automatically, including for hosts that embed the page in an iframe and force a theme via the query param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct and keeps the UI portable outside the shell; duplicate declarations are harmless.</Note>
+<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smithers-orchestrator/ui-styleguide`) into every `/workflows/<key>` page and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint, so a UI that just *reads* the tokens is themed automatically, even inside an iframe host forcing a theme via that param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct, keeps the UI portable outside the shell, and duplicate declarations are harmless.</Note>
 
-Paste this `:root` block at the top of your `<style>` (it carries the canonical light values, the dark overrides for both the explicit toggle and the OS preference, and the typographic base):
+Paste this `:root` block at the top of your `<style>`: it carries the canonical light values, dark overrides for both the explicit toggle and the OS preference, and the typographic base.
 
 ```css
 :root {
@@ -1248,19 +1245,19 @@ Paste this `:root` block at the top of your `<style>` (it carries the canonical 
 }
 ```
 
-<Note>The OS-follow selector above is written as one rule for brevity. In the product UI the OS branch is split into its own `@media (prefers-color-scheme: dark)` block so it can never override an explicit `data-theme="light"`. If you support an in-app toggle, copy that split; if your UI is dark-only or OS-only, keep just the branch you need.</Note>
+<Note>The OS-follow selector above is written as one rule for brevity; the product UI splits the OS branch into its own `@media (prefers-color-scheme: dark)` block so it can never override an explicit `data-theme="light"`. Copy that split if you support an in-app toggle, or keep just the branch you need for a dark-only or OS-only UI.</Note>
 
 ## The principles
 
 ### Color is semantic, tints are derived
 
-There are exactly three accent roles. Do not introduce a fourth hue per workflow.
+Exactly three accent roles exist. Do not introduce a fourth hue per workflow.
 
 - `--brand` (violet): focus, in-progress, the "this is the live thing" accent.
 - `--success` (green): completed, healthy, approved.
 - `--danger` (red): failed, destructive, blocked.
 
-For a status background, a soft border, or a hover wash, **derive** the tint with `color-mix` against a token rather than picking a new hex. This keeps the tint correct in both themes automatically:
+For a status background, soft border, or hover wash, **derive** the tint with `color-mix` against a token rather than picking a new hex. This keeps it correct in both themes automatically:
 
 ```css
 .error {
@@ -1270,30 +1267,30 @@ For a status background, a soft border, or a hover wash, **derive** the tint wit
 }
 ```
 
-Primary actions ("Run", "Approve", "Submit") use the **inverse** surface (`--inverse-bg` / `--inverse-text`), not the brand color. Brand is for *attention and progress*; inverse is for *the one button you want pressed*. Secondary actions are `--surface` with a `--border` and a `--hover` background on hover.
+Primary actions ("Run", "Approve", "Submit") use the **inverse** surface (`--inverse-bg` / `--inverse-text`), not brand: brand marks *attention and progress*, inverse marks *the one button you want pressed*. Secondary actions use `--surface` with a `--border` and a `--hover` background on hover.
 
 ### Typography: Inter, set tight, weighted heavy
 
-- **Font:** Inter, falling back to the system UI stack. Always render with `-webkit-font-smoothing: antialiased` and `font-synthesis: none`.
-- **Weight does the work.** Labels and titles live at 600 to 800, not 400. Body copy is the default weight; muted metadata is `--text-faint`.
-- **Headings sit tight:** `letter-spacing: -0.01em` (down to `-0.02em` for large display text). Size headings in `rem` (roughly 1.05rem to 1.3rem); never go bigger than you need.
-- **Eyebrows and tiny labels go up, not down.** Section labels and status chips use `text-transform: uppercase` with positive tracking (`letter-spacing: 0.03em` to `0.06em`) at 11 to 12px and weight 700+. This is how you signal "label" without making text large.
-- **Monospace is for identity, not chrome.** Run ids, SHAs, and code use `ui-monospace, monospace`. Do not set whole panels in monospace.
+- **Font:** Inter, falling back to the system UI stack, with `-webkit-font-smoothing: antialiased` and `font-synthesis: none`.
+- **Weight does the work:** labels and titles sit at 600 to 800, not 400; body copy is default weight; muted metadata is `--text-faint`.
+- **Headings sit tight:** `letter-spacing: -0.01em` (down to `-0.02em` for large display text), sized in `rem` (roughly 1.05rem to 1.3rem); never go bigger than you need.
+- **Eyebrows and tiny labels go up, not down:** section labels and status chips use `text-transform: uppercase` with positive tracking (`letter-spacing: 0.03em` to `0.06em`) at 11 to 12px, weight 700+, signaling "label" without making text large.
+- **Monospace is for identity, not chrome:** run ids, SHAs, and code use `ui-monospace, monospace`; never set whole panels in monospace.
 
 ### One radius scale
 
-Pick from a small, consistent ladder. Mixing arbitrary radii is the fastest way to look unfinished.
+Pick from a small, consistent ladder; mixing arbitrary radii is the fastest way to look unfinished.
 
 - **8px** is the workhorse: buttons, inputs, panels, banners, the auth chip.
 - **6 to 7px** for small inline things: chips, glyph tiles, inline code.
 - **14 to 20px** for primary cards and the composer surface (bigger surface, softer corner).
 - **50% / 999px** for avatars, dots, and pills.
 
-Chat-style bubbles use an **asymmetric** radius: a large radius everywhere except one tight 6px corner on the speaker's side, which reads as a tail.
+Chat-style bubbles use an **asymmetric** radius: large everywhere except one tight 6px corner on the speaker's side, reading as a tail.
 
 ### Depth is glass and layered shadow, never a hard box
 
-Elevated surfaces (cards, floating chrome, toasts, modals) are translucent glass, not flat fills:
+Cards, floating chrome, toasts, and modals are translucent glass:
 
 ```css
 .card {
@@ -1308,14 +1305,14 @@ Elevated surfaces (cards, floating chrome, toasts, modals) are translucent glass
 
 Two rules make depth read correctly:
 
-1. **Stack two shadows, not one.** A 1px near-shadow grounds the edge; a large (16 to 50px) soft far-shadow at low alpha (0.08 to 0.14) lifts it off the page. A single hard shadow looks cheap.
-2. **Tint shadows through `--shadow-rgb`.** Write `rgb(var(--shadow-rgb) / 0.1)`, never `rgba(0,0,0,0.1)`. In dark mode `--shadow-rgb` becomes pure black so shadows stay believable.
+1. **Stack two shadows, not one:** a 1px near-shadow grounds the edge; a large (16 to 50px) soft far-shadow at low alpha (0.08 to 0.14) lifts it off the page. A single hard shadow looks cheap.
+2. **Tint shadows through `--shadow-rgb`:** write `rgb(var(--shadow-rgb) / 0.1)`, never `rgba(0,0,0,0.1)`. In dark mode `--shadow-rgb` becomes pure black, so shadows stay believable.
 
-Flat inline rows and list items get a `--border` hairline and a `--hover` (or `--hover-subtle`) background change instead of a shadow. Reserve elevation for things that actually float.
+Flat inline rows and list items get a `--border` hairline and a `--hover` (or `--hover-subtle`) background change instead of a shadow; reserve elevation for things that actually float.
 
 ### Focus is a brand halo, not a default outline
 
-Custom controls suppress the UA ring, so give focus back explicitly and make it feel intentional.
+Custom controls suppress the UA ring; give focus back explicitly, and make it feel intentional.
 
 - **Containers** (a card holding an input) lift on `:focus-within` with a brand-tinted glow plus a deepened shadow, not a hard border:
 
@@ -1334,10 +1331,10 @@ Custom controls suppress the UA ring, so give focus back explicitly and make it 
 
 Animation is fast and earns its place; nothing bounces for decoration.
 
-- **Durations live in 120 to 260ms.** Entrances around 120 to 160ms; a deliberate morph can reach 260ms. Anything slower feels broken.
-- **Easing:** `ease-out` for entrances, `cubic-bezier(0.2, 0.8, 0.2, 1)` for a confident morph. Always set `both` as the fill mode so the start and end states stick.
+- **Durations live in 120 to 260ms:** entrances around 120 to 160ms, a deliberate morph up to 260ms. Anything slower feels broken.
+- **Easing:** `ease-out` for entrances, `cubic-bezier(0.2, 0.8, 0.2, 1)` for a confident morph, with fill mode `both` so start and end states stick.
 - **Entrances are subtle:** opacity from 0 with an 8px `translateY`, or a directional `translateX` of about 18px for forward/back view transitions. Small distances, fast.
-- **Use a real FLIP morph for "this became that."** When a composing card turns into a running toast, measure both rects (`getBoundingClientRect`), drive a CSS-variable transform, and let one keyframe interpolate. Do not cross-fade two elements; morph the one.
+- **Use a real FLIP morph for "this became that":** when a composing card turns into a running toast, measure both rects (`getBoundingClientRect`), drive a CSS-variable transform, and let one keyframe interpolate rather than cross-fading two elements.
 - **Spinners and pulses are tokenized too:** a brand-bordered ring for in-progress, a `--brand` dot with a `0 0 0 4px color-mix(...)` halo for "live".
 - **Reduced motion is centralized.** `WorkflowUiStyles`, `SmithersUiStyles`,
   and `standaloneThemeCss()` already ship the same document-wide safety net,
@@ -1347,13 +1344,13 @@ Animation is fast and earns its place; nothing bounces for decoration.
 
 ### Layout: a readable measure and calm chrome
 
-- **Constrain content width.** Primary columns are `width: min(100%, 720px); margin: 0 auto;`. Wide raw dumps belong in a scroll container, not stretched edge to edge.
-- **Float the chrome, glass it, keep it out of the corners that matter.** Fixed status/auth widgets use `--surface-glass-strong` with backdrop blur and a soft shadow, pinned with breathing room (about 12 to 14px from the edge).
-- **Spacing is generous and even.** Card padding around 16px; gaps of 8 to 18px; list rows around 10px vertical. Empty states get real space (around 48px of padding) and `--text-faint`, not a cramped one-liner.
+- **Constrain content width:** primary columns are `width: min(100%, 720px); margin: 0 auto;`. Wide raw dumps belong in a scroll container, not stretched edge to edge.
+- **Float the chrome, glass it, keep it out of the corners that matter:** fixed status/auth widgets use `--surface-glass-strong` with backdrop blur and a soft shadow, pinned with breathing room (about 12 to 14px from the edge).
+- **Spacing is generous and even:** card padding around 16px, gaps of 8 to 18px, list rows around 10px vertical. Empty states get real space (around 48px of padding) and `--text-faint`, not a cramped one-liner.
 
 ### Status surfaces read at a glance
 
-Map run state to the semantic accents consistently across every UI so a user learns the language once:
+Map run state to the semantic accents the same way in every UI, so users learn the language once:
 
 - **In progress / running** → `--brand` (spinner ring, pulsing dot, brand text).
 - **Finished / healthy** → `--success`.

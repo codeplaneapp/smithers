@@ -8,7 +8,7 @@
 
 > Three patterns for connecting Smithers to external services.
 
-Smithers ships first-party event sources for GitHub, Linear, and Telegram (the `@smithers-orchestrator/integrations` package) that turn provider webhooks into durable workflow signals. For services it does not cover (Notion, Slack, and similar), treat them as external integrations your app owns and pick one of three wirings: tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If a service already exposes an MCP server and you are using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
+Smithers ships first-party event sources for GitHub, Linear, and Telegram (`@smithers-orchestrator/integrations`) that turn provider webhooks into durable workflow signals. For other services (Notion, Slack, etc.), your app owns the integration: pick tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If the service already exposes an MCP server and you're using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
 
 ## Pattern 1: Pass tools to an SDK agent
 
@@ -80,7 +80,7 @@ Use this when the step is deterministic and you do not need the model involved.
 
 ## See also
 
-For React hook patterns see [/recipes#custom-hooks-over-ctx](/recipes#custom-hooks-over-ctx); for agent-class details see [SDK agents](/integrations/sdk-agents), [MCP Toolset](/integrations/mcp-toolset), and [CLI agents](/integrations/cli-agents). To wire Smithers *into* your coding agent so it can drive workflows, see [Agent Support](/agents/overview).
+React hook patterns: [/recipes#custom-hooks-over-ctx](/recipes#custom-hooks-over-ctx). Agent-class details: [SDK agents](/integrations/sdk-agents), [MCP Toolset](/integrations/mcp-toolset), [CLI agents](/integrations/cli-agents). To wire Smithers *into* your coding agent so it can drive workflows, see [Agent Support](/agents/overview).
 
 ---
 
@@ -711,7 +711,7 @@ On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and
 
 > Provider-backed AI SDK agent wrappers for Anthropic, OpenAI, and Hermes that work like first-class Smithers agents.
 
-`AnthropicAgent`, `OpenAIAgent`, and `HermesAgent` are provider-backed [AI SDK](https://ai-sdk.dev) agents with class-style ergonomics matching the [CLI agents](/integrations/cli-agents). `AnthropicAgent` and `OpenAIAgent` wrap `ToolLoopAgent` directly; `HermesAgent` extends the OpenAI-compatible path with Hermes defaults. `ElizaAgent` adapts an Eliza runtime/character into the same Smithers agent interface when you need an in-process ElizaOS-backed agent.
+`AnthropicAgent`, `OpenAIAgent`, and `HermesAgent` are provider-backed [AI SDK](https://ai-sdk.dev) agents with class-style ergonomics matching the [CLI agents](/integrations/cli-agents). `AnthropicAgent` and `OpenAIAgent` wrap `ToolLoopAgent` directly; `HermesAgent` extends the OpenAI-compatible path with Hermes defaults. `ElizaAgent` adapts an Eliza runtime/character into the same Smithers agent interface.
 
 <Note>API reference: [Agents](/reference/agents) lists every agent class, its options, and links to source and tests.</Note>
 
@@ -772,16 +772,14 @@ export default smithers((ctx) => (
 ));
 ```
 
-In workflow JSX, put the schema on the Smithers task by passing
-`output={outputs.plan}`. You do not also configure the schema on the agent
-constructor. At execution time the engine infers the task's Zod schema and calls
-the SDK agent with `agent.generate({ outputSchema })`; the agent receives both
-the prompt and the schema for that task. The `ctx` variable in the example is
-the normal parameter of the `smithers((ctx) => ...)` builder, typed from the
-`input` schema above.
+In workflow JSX, the schema lives on the Smithers task (`output={outputs.plan}`),
+not the agent constructor. At execution time the engine infers the task's Zod
+schema and calls the SDK agent with `agent.generate({ outputSchema })`,
+passing both the prompt and the schema. `ctx` is the normal
+`smithers((ctx) => ...)` parameter, typed from the `input` schema above.
 
-You can also call an SDK agent once without rendering a workflow. Pass
-`outputSchema` directly to `generate()` when you want typed structured output:
+You can also call an SDK agent directly, without a workflow: pass
+`outputSchema` to `generate()` for typed structured output:
 
 ```ts
 import { z } from "zod";
@@ -804,21 +802,21 @@ For `AnthropicAgent`, `outputSchema` is forwarded as AI SDK
 `Output.object({ schema })`, which uses Anthropic's native structured-output
 request path for Claude models. `OpenAIAgent` does the same unless
 `nativeStructuredOutput: false`; `HermesAgent` defaults that option to `false`
-because many local Hermes servers do not honor JSON-schema response formats.
+(see Hermes below).
 
 ## Model Input
 
-`AnthropicAgent` and `OpenAIAgent` accept a model ID string (`"claude-fable-5"`, `"gpt-5.6-luna"`) or a prebuilt provider model instance. `HermesAgent` accepts an optional model ID string and defaults it to `"hermes"`.
+`AnthropicAgent` and `OpenAIAgent` accept a model ID string (`"claude-fable-5"`, `"gpt-5.6-luna"`) or a prebuilt provider model instance; `HermesAgent`'s model is optional and defaults to `"hermes"`.
 
 ## Options
 
-Constructors forward standard AI SDK `ToolLoopAgent` settings: `instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`. The wrappers add provider model resolution on top.
+Constructors forward standard AI SDK `ToolLoopAgent` settings (`instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`) and add provider model resolution on top.
 
-- `AnthropicAgentOptions` is `ToolLoopAgentSettings` without `model`, plus required `model: string | LanguageModel`.
-- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL`, `apiKey`, and `api`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
-- `HermesAgentOptions` makes `model` optional, allows `baseURL` and `apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
+- `AnthropicAgentOptions` is `ToolLoopAgentSettings` with `model` required as `string | LanguageModel`.
+- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and two model forms: a string model may include `baseURL`, `apiKey`, and `api`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
+- `HermesAgentOptions` makes `model` optional, allows `baseURL`/`apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
 
-For the string model form of `OpenAIAgent`, pass `baseURL` and `apiKey` directly when targeting an OpenAI-compatible endpoint instead of the default OpenAI API. This is the simplest path for local servers such as llama.cpp:
+For the string model form of `OpenAIAgent`, pass `baseURL` and `apiKey` directly to target an OpenAI-compatible endpoint instead of the default OpenAI API, the simplest path for local servers like llama.cpp. Use `apiKey: "none"` when the server accepts OpenAI-compatible requests but doesn't require a real key:
 
 ```ts
 const local = new OpenAIAgent({
@@ -831,9 +829,7 @@ const local = new OpenAIAgent({
 });
 ```
 
-Set `apiKey: "none"` in the `OpenAIAgent` config when your local server accepts OpenAI-compatible requests but does not require a real key.
-
-String models default to OpenAI's Responses API (`/responses`), which most OpenAI-compatible servers (Gemini's OpenAI-compat layer, llama.cpp, vLLM) do not implement: every call 404s even though the endpoint serves `/chat/completions` fine. Set `api: "chat"` to route the agent through `/chat/completions` on those endpoints:
+String models default to OpenAI's Responses API (`/responses`), which most OpenAI-compatible servers (Gemini's OpenAI-compat layer, llama.cpp, vLLM) don't implement: every call 404s though `/chat/completions` works fine. Set `api: "chat"` to route the agent through `/chat/completions` on those endpoints:
 
 ```ts
 const gemini = new OpenAIAgent({
@@ -844,7 +840,7 @@ const gemini = new OpenAIAgent({
 });
 ```
 
-Some OpenAI-compatible local servers accept chat requests but do not reliably implement JSON schema structured output. For those servers, keep the output schema on the Smithers task and disable native structured output on the agent so Smithers uses prompt-based JSON extraction instead:
+Some OpenAI-compatible local servers accept chat requests but don't reliably implement JSON schema structured output: keep the output schema on the Smithers task and disable native structured output on the agent so Smithers falls back to prompt-based JSON extraction:
 
 ```ts
 const local = new OpenAIAgent({
@@ -858,7 +854,7 @@ const local = new OpenAIAgent({
 });
 ```
 
-For advanced provider setup, create the AI SDK OpenAI provider yourself and pass the prebuilt model into `OpenAIAgent`:
+For advanced provider setup, create the AI SDK OpenAI provider and pass the prebuilt model into `OpenAIAgent`:
 
 ```ts
 import { createOpenAI } from "@ai-sdk/openai";
@@ -876,11 +872,11 @@ const local = new OpenAIAgent({
 });
 ```
 
-Use the `createOpenAI` path when you need provider-level configuration beyond `baseURL` and `apiKey`; in that form, `baseURL` and `apiKey` belong in the `createOpenAI` config, not in the `OpenAIAgent` constructor.
+Use this path for provider-level config beyond `baseURL`/`apiKey`; in that form `baseURL` and `apiKey` belong in the `createOpenAI` config, not the `OpenAIAgent` constructor.
 
 ## Generic HTTP Tool
 
-`createHttpTool()` returns an AI SDK tool that can call any REST endpoint without an OpenAPI spec. Use it as the universal escape hatch when no curated connector or MCP server exists yet.
+`createHttpTool()` returns an AI SDK tool that calls any REST endpoint without an OpenAPI spec: the universal escape hatch when no curated connector or MCP server exists yet.
 
 ```ts
 const http = createHttpTool({
@@ -899,7 +895,7 @@ The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `au
 
 ## Hermes
 
-[Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API, so `HermesAgent` is a convenience subclass of `OpenAIAgent` that points the provider at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
+[Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API; `HermesAgent` is a convenience `OpenAIAgent` subclass that points at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
 
 ```ts
 import { HermesAgent } from "smithers-orchestrator";
@@ -913,11 +909,11 @@ const hermes = new HermesAgent({
 });
 ```
 
-`baseURL` falls back to the `HERMES_BASE_URL` env var and must be set in either place. `apiKey` falls back to `HERMES_API_KEY` (then `"hermes"`). Pass `nativeStructuredOutput: true` if your server does honor JSON-schema output. To use Smithers *from* Hermes instead of running Hermes as a worker, see [Agent Support → Hermes](/agents/hermes).
+`baseURL` falls back to the `HERMES_BASE_URL` env var and must be set in either place; `apiKey` falls back to `HERMES_API_KEY` (then `"hermes"`). Pass `nativeStructuredOutput: true` if your server honors JSON-schema output. To use Smithers *from* Hermes instead of running Hermes as a worker, see [Agent Support → Hermes](/agents/hermes).
 
 ## Eliza
 
-`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents on this page, it ships in a separate opt-in package that owns the `@elizaos/core` dependency, so install and import it from `@smithers-orchestrator/agent-eliza`:
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smithers-orchestrator/agent-eliza`:
 
 ```ts
 import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
@@ -930,11 +926,11 @@ const eliza = new ElizaAgent({
 });
 ```
 
-The harness lazily initializes the runtime on the first `generate` (or `preflight`) call and reuses it across calls. `settings` and `env` merge onto the character's own `settings` with precedence `env` over `settings` over `character.settings`. Pass an `outputSchema` on the Smithers task (or directly to `generate`) for structured output; `ElizaAgent` extracts JSON from the model's text because it does not set `supportsNativeStructuredOutput`.
+The harness lazily initializes the runtime on the first `generate` (or `preflight`) call and reuses it across calls. `settings` and `env` merge onto the character's `settings`, with precedence `env` > `settings` > `character.settings`. Pass an `outputSchema` on the Smithers task (or to `generate` directly) for structured output; `ElizaAgent` extracts JSON from the model's text since it doesn't set `supportsNativeStructuredOutput`.
 
 ## Hijack Support
 
-SDK agents do not reopen a provider-native CLI. Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
+SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
 
 Live-run behavior:
 
@@ -944,7 +940,7 @@ Live-run behavior:
 
 Limits:
 
-- Smithers reconstructs the agent from the workflow source on hijack. This means cross-engine hijack is not supported: the REPL will use the same agent class that ran originally.
+- Smithers reconstructs the agent from the workflow source on hijack, so cross-engine hijack isn't supported: the REPL uses the same agent class that ran originally.
 
 ## CLI vs SDK
 
@@ -955,15 +951,15 @@ Limits:
 | Flexibility | Native CLI flags | AI SDK `providerOptions` |
 | Structured output | Prompt-injection + text JSON extraction | Native (`supportsNativeStructuredOutput`) |
 
-**Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`, so when a `<Task>` has an `output` schema they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) and the result is schema-constrained. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape does not guarantee meaningful values. For tasks whose primary job is producing typed/JSON output, prefer `AnthropicAgent`/`OpenAIAgent` (or, for an OpenAI-compatible endpoint that honors JSON schema, an `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
+**Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`: when a `<Task>` has an `output` schema, they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) for a schema-constrained result. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape doesn't guarantee meaningful values. For typed/JSON-output tasks, prefer `AnthropicAgent`/`OpenAIAgent` (or an OpenAI-compatible endpoint that honors JSON schema, via `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
 
-Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience, not a separate runtime.
+Pass a raw `ToolLoopAgent` directly if preferred; the wrappers are convenience, not a separate runtime.
 
 ## Transcription Tool
 
-Use `createTranscriptionTool` when an SDK agent needs to transcribe audio as part of its tool loop. The tool accepts either an `audioUrl` or `audioBase64` input and normalizes Whisper or Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
+Use `createTranscriptionTool` when an SDK agent needs to transcribe audio in its tool loop. It accepts `audioUrl` or `audioBase64` input and normalizes Whisper/Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
 
-For Whisper, remote audio downloads are capped at 25 MiB by default. Set `maxResponseBodyBytes` to choose a different cap; the deprecated `maxResponseBytes` option remains a compatibility fallback when `maxResponseBodyBytes` is omitted. The generic `createHttpTool` has its own independent 1 MiB default.
+For Whisper, remote audio downloads are capped at 25 MiB by default; set `maxResponseBodyBytes` for a different cap (the deprecated `maxResponseBytes` is a fallback when it's omitted). The generic `createHttpTool` has its own independent 1 MiB default.
 
 ```ts
 import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
@@ -1010,7 +1006,7 @@ export const claude = useCli
 
 > Connect a stdio MCP server to an SDK agent by projecting its tools into AI SDK tools.
 
-`createMcpToolset` connects to a Model Context Protocol server over stdio, lists its tools once, and returns an AI SDK-compatible `tools` record for an SDK agent. This is the inbound MCP integration path: use any MCP server as an agent tool provider without writing one wrapper per external service.
+`createMcpToolset` connects to a Model Context Protocol server over stdio, lists its tools once, and returns an AI SDK `tools` record: the inbound MCP path, turning any MCP server into an agent tool provider with no per-service wrapper.
 
 For the opposite direction, where an MCP-aware client drives Smithers workflows, see [MCP Server](/integrations/mcp-server).
 
@@ -1050,7 +1046,7 @@ try {
 }
 ```
 
-Call `close()` in a `finally` block when the workflow process owns the connection. The MCP client and spawned server process stay open until `close()` resolves.
+Call `close()` in a `finally` block when the workflow process owns the connection: the MCP client and spawned server process stay open until it resolves.
 
 ## API
 
@@ -1082,7 +1078,7 @@ declare function createMcpToolset(
 ): Promise<McpToolset>;
 ```
 
-`command`, `args`, `env`, and `cwd` are passed to the MCP SDK stdio transport. The Smithers client identity defaults to `clientName: "smithers-mcp-toolset"` and `clientVersion: "0.0.0"`.
+`command`, `args`, `env`, and `cwd` pass through to the MCP SDK stdio transport; client identity defaults to `clientName: "smithers-mcp-toolset"`, `clientVersion: "0.0.0"`.
 
 ## Tool Curation
 
@@ -1105,21 +1101,20 @@ const github = await createMcpToolset(
 
 ## Runtime Behavior
 
-On connect, Smithers calls `tools/list` once and wraps every selected MCP tool with AI SDK `dynamicTool`. When an agent invokes one of those tools, the wrapper calls MCP `tools/call` with the original server tool name and the model-provided arguments.
+On connect, Smithers calls `tools/list` once and wraps each selected MCP tool with AI SDK `dynamicTool`; invoking one calls MCP `tools/call` with the original tool name and the model-provided arguments.
 
-Response handling is intentionally simple:
+Response handling is simple:
 
-- Successful calls return `structuredContent` when the server provides it.
-- Otherwise successful calls return the joined text content blocks.
+- Successful calls return `structuredContent` when the server provides it, otherwise the joined text content blocks.
 - MCP tool errors return `{ error: true, message, status: "failed" }` so the agent can inspect and recover inside its tool loop.
 
-Schema handling follows the MCP server's advertised `inputSchema`. If a server omits it, Smithers uses an empty object JSON schema.
+Schema handling follows the MCP server's advertised `inputSchema`, falling back to an empty object JSON schema if a server omits it.
 
 ## CLI Agents
 
 CLI agents consume MCP through their native configuration surfaces, not through `createMcpToolset`. Claude Code, Kimi, and Amp expose MCP config flags; Codex reads MCP servers from `~/.codex/config.toml` or `codex mcp add`.
 
-Use `createMcpToolset` when you are building an SDK-agent workflow with `AnthropicAgent`, `OpenAIAgent`, `HermesAgent`, or a raw AI SDK tool-loop agent.
+Use `createMcpToolset` when building an SDK-agent workflow with `AnthropicAgent`, `OpenAIAgent`, `HermesAgent`, or a raw AI SDK tool-loop agent.
 
 ## See Also
 
@@ -1146,11 +1141,11 @@ const { read, write, edit, grep, bash } = tools;
 
 <Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
 
-The `smithers-orchestrator/tools` subpath also exports lower-level helpers for advanced integrations:
+The `smithers-orchestrator/tools` subpath also exports lower-level helpers:
 
 | Export | Purpose |
 |---|---|
-| `readFileTool`, `writeFileTool`, `editFileTool`, `grepTool`, `bashTool` | Call the underlying implementation directly instead of the AI SDK tool wrapper. |
+| `readFileTool`, `writeFileTool`, `editFileTool`, `grepTool`, `bashTool` | Calls the tool implementation directly, bypassing the AI SDK wrapper. |
 | `getDefinedToolMetadata(tool)` | Read Smithers metadata (`name`, `sideEffect`, `idempotent`) from a `defineTool()` result. |
 | `getToolContext()`, `runWithToolContext(ctx, fn)` | Inspect or provide the task-local tool runtime context. |
 | `getToolIdempotencyKey(ctx?)`, `nextToolSeq(ctx)` | Build stable idempotency keys and task-local tool-call sequence numbers. |
@@ -1158,7 +1153,7 @@ The `smithers-orchestrator/tools` subpath also exports lower-level helpers for a
 
 ## Sandboxing
 
-All tools are sandboxed to `rootDir` (defaults to the workflow directory). Paths are resolved relative to this root; escapes via symlinks are rejected.
+Tools sandbox to `rootDir` (default: workflow directory).
 
 | Policy | Behavior |
 |---|---|
@@ -1181,11 +1176,11 @@ Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to
 | `seq` | Sequential call counter within the task |
 | `toolName` | `read`, `write`, `edit`, `grep`, or `bash` |
 | `inputJson` | Serialized input arguments |
-| `outputJson` | Reserved for a serialized output; start records leave it `null` |
+| `outputJson` | Reserved for a serialized output; `null` in start records |
 | `startedAtMs` | Start timestamp |
-| `finishedAtMs` | Reserved end timestamp; start records leave it `null` |
+| `finishedAtMs` | Reserved end timestamp; `null` in start records |
 | `status` | `"started"` for the durable pre-execution record |
-| `errorJson` | Reserved error details; start records leave it `null` |
+| `errorJson` | Reserved error details; `null` in start records |
 
 ## defineTool
 
@@ -1213,28 +1208,28 @@ const placeOrder = defineTool({
 ```
 
 - `ctx.idempotencyKey` is stable across retries and resumes for the same task iteration.
-- `sideEffect: true` opts the tool into Smithers side-effect tracking.
+- `sideEffect: true` opts the tool into side-effect tracking.
 - `idempotent: false` marks the tool for retry warnings when a previous attempt has a recorded `_smithers_tool_calls` row.
 - The engine persists the durable start row through the Smithers DB adapter before `execute` runs.
 
 ### Side Effects and Idempotency
 
-Every custom tool that modifies external state **must** declare `sideEffect: true`. This is how Smithers protects your [workflow](/workflows/overview) during retries and resumes. Without it, Smithers treats the tool as a pure read and replays it freely, potentially sending duplicate emails, double-charging payments, or creating duplicate records.
+Every custom tool that modifies external state **must** declare `sideEffect: true`; this is how Smithers protects your [workflow](/workflows/overview) during retries and resumes. Without it, Smithers treats the tool as a pure read and replays it freely: duplicate emails, double-charged payments, duplicate records.
 
 The two flags work together:
 
 | `sideEffect` | `idempotent` | Smithers behavior |
 |---|---|---|
 | `false` (default) | `true` (default) | Pure read. Safe to replay on retry. No warnings. |
-| `true` | `true` | Mutates external state, but calling twice with the same input produces the same result (e.g. an upsert, a PUT request). Safe to replay. No warnings. |
-| `true` | `false` | Mutates external state and is **not** safe to replay (e.g. sending an email, placing an order, charging a payment). On retry, Smithers injects a warning listing the tool as already called so the agent can verify external state before calling again. |
+| `true` | `true` | Mutates external state, but the same input twice yields the same result (e.g. an upsert, a PUT). Safe to replay, no warnings. |
+| `true` | `false` | Mutates external state and is **not** safe to replay (e.g. sending an email, placing an order, charging a payment). See retry behavior below. |
 
 With `sideEffect: true` and `idempotent: false`, Smithers does two things on retry:
 
-1. **Warns the agent.** The retry prompt lists which non-idempotent tools were already called.
-2. **Provides a stable idempotency key.** `ctx.idempotencyKey` is deterministic for a given task + iteration; pass it to external APIs that support idempotency (Stripe, AWS) to deduplicate.
+1. **Warns the agent.** The retry prompt lists non-idempotent tools already called.
+2. **Provides a stable idempotency key.** `ctx.idempotencyKey` is deterministic per task + iteration; pass it to external APIs that support idempotency (Stripe, AWS) to deduplicate.
 
-If your `execute` function has `sideEffect: true, idempotent: false` but omits the `ctx` parameter, Smithers logs a startup warning. This is almost always a bug: you need `ctx.idempotencyKey` to handle retries safely.
+If `execute` has `sideEffect: true, idempotent: false` but omits `ctx`, Smithers logs a startup warning: almost always a bug, since retries need `ctx.idempotencyKey` to be safe.
 
 ```ts
 // ✗ Bad: non-idempotent side effect without ctx
@@ -1262,16 +1257,16 @@ const sendEmail = defineTool({
 
 ### What counts as a side effect
 
-The rule is simple: **if you cannot undo it with `git reset`, mark it as a side effect.**
+**If you cannot undo it with `git reset`, mark it as a side effect.**
 
-A side effect is any mutation the runtime should not blindly repeat on retry. If a custom tool talks to an external API, writes to a database, sends a message, or triggers a webhook, mark it.
+A side effect is any mutation the runtime should not blindly repeat on retry: an external API call, a database write, a sent message, a triggered webhook.
 
-The built-in `write` and `edit` tools are registered as `sideEffect: true` and `idempotent: false` because their file mutations are not safe to blindly replay on retry; like `bash`, they are treated conservatively. All three built-in mutating tools (`write`, `edit`, `bash`) are side-effecting.
+The built-in `write` and `edit` tools are `sideEffect: true, idempotent: false`: their file mutations aren't safe to blindly replay on retry, so like `bash`, all three built-in mutating tools are treated conservatively.
 
 | Tool | Side effect? | Why |
 |---|---|---|
 | Built-in `read`, `grep` | No | Pure reads |
-| Built-in `write`, `edit` | **Yes** | Sandboxed file writes are tracked by git, but replaying on retry could overwrite content that diverged since the first call |
+| Built-in `write`, `edit` | **Yes** | Sandboxed writes are tracked by git, but replaying on retry could overwrite content that diverged since the first call |
 | Built-in `bash` | **Yes** | Arbitrary shell commands may not be safe to repeat |
 | Custom tool calling an external API | **Yes** | Mutates state outside the sandbox |
 | Custom tool writing to a database | **Yes** | External persistent state |
@@ -1321,7 +1316,7 @@ Write content to a file. Creates parent directories as needed.
 }
 ```
 
-Returns `"ok"`. Throws `"Content too large"` if content exceeds `maxOutputBytes`. Logs content hash (SHA-256) and byte size; full content is not stored.
+Returns `"ok"`; throws `"Content too large"` if content exceeds `maxOutputBytes`. Logs content hash (SHA-256) and byte size, not full content.
 
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
@@ -1347,7 +1342,7 @@ Apply a unified diff patch to an existing file.
 }
 ```
 
-Returns `"ok"`. The file must exist. Reads current contents, applies the patch via `applyPatch`, writes back. Throws on size limits (`"Patch too large"`, `"File too large"`) or mismatched context (`"Failed to apply patch"`). Logs patch hash and byte size.
+Returns `"ok"`; the file must exist. Reads, patches via `applyPatch`, writes back. Throws on size limits (`"Patch too large"`, `"File too large"`) or mismatched context (`"Failed to apply patch"`). Logs patch hash and byte size.
 
 ```
 --- a/src/auth.ts
@@ -1371,7 +1366,7 @@ Search for a regex pattern using `ripgrep`.
 }
 ```
 
-Returns matching lines with file paths and line numbers (`rg -n` format). Exit code 1 (no matches) returns empty string. Exit code 2 throws stderr as error. Requires `ripgrep` in PATH.
+Returns matching lines with file paths and line numbers (`rg -n` format). Exit 1 (no matches) returns empty string; exit 2 throws stderr as error. Requires `ripgrep` in PATH.
 
 ```
 src/auth.ts:15:  if (token.expired()) {
@@ -1395,7 +1390,7 @@ Run an executable directly with arguments.
 
 Use `args` for arguments. If you need shell syntax such as pipes or redirects, invoke a shell explicitly, for example `cmd: "sh", args: ["-lc", "..."]`.
 
-Returns combined stdout and stderr. Working directory defaults to `rootDir`. Timeout: 60s (killed with `SIGKILL` via process group). Non-zero exit codes throw.
+Returns combined stdout and stderr; working directory defaults to `rootDir`. Timeout: 60s (killed with `SIGKILL` via process group). Non-zero exit codes throw.
 
 ### Network Blocking
 
@@ -1415,19 +1410,17 @@ plus a remote-operation token is blocked.
 Local git commands (`git status`, `git diff`, `git log`) are allowed.
 
 <Warning>
-**Enforcement vs. bypassable denylist.** True OS-level network isolation is
-enforced **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
-with a network-deny profile (when `sandbox-exec` is available). On Linux and
-every other platform, including the environments Smithers runs in for CI,
-cloud, and production, `allowNetwork:false` cannot enforce a kernel sandbox and
-degrades to the token/basename denylist in the table above. That denylist is
-best-effort defense-in-depth, **not** a security boundary: it is trivially
-bypassable by a shell, an interpreter (`python -c` assembling a URL from parts,
-bash `/dev/tcp`), or a renamed binary. When isolation is unenforced, Smithers
-logs a `TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely
-on `allowNetwork:false` to sandbox untrusted code**. Run untrusted workloads
-under a real [`<Sandbox>`](/components/sandbox) provider with egress controls
-instead.
+**Enforcement vs. bypassable denylist.** True OS-level network isolation runs
+**only on macOS**: a blocked `bash` executes under `sandbox-exec` with a
+network-deny profile (when available). On Linux and every other platform,
+including Smithers' CI, cloud, and production environments, `allowNetwork:false`
+cannot enforce a kernel sandbox and falls back to the
+token/basename denylist above: best-effort defense-in-depth, not a security
+boundary, trivially bypassed by a shell, an interpreter (`python -c` assembling a URL from parts,
+bash `/dev/tcp`), or a renamed binary. Unenforced isolation logs a
+`TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely on
+`allowNetwork:false` to sandbox untrusted code**: run it under a real
+[`<Sandbox>`](/components/sandbox) provider with egress controls instead.
 </Warning>
 
 ```ts
@@ -1565,9 +1558,9 @@ Always mark side-effecting tools with `sideEffect: true` and use `ctx.idempotenc
 
 > Package long-tail integrations as manifest-declared tools, triggers, and auth requirements.
 
-Community connectors are package-level integration descriptors. They let a maintainer publish one connector package that projects agent-callable tools and triggers onto Smithers' existing Tier 0 substrate instead of adding one workflow node per app.
+A community connector is a package-level integration descriptor: it projects agent-callable tools and triggers onto Smithers' Tier 0 substrate, instead of adding a workflow node per app.
 
-A connector package is declarative at the boundary: the manifest says what tool and trigger surfaces exist, which auth grants they require, and which runtime adapter should load them. Runtime code may still live in the package, but Smithers only discovers it through the loader contract below.
+The manifest is declarative, stating what tool and trigger surfaces exist, which auth grants they require, and which runtime adapter loads them. Runtime code may live in the package, but Smithers discovers it only through the loader contract below.
 
 ## Package Layout
 
@@ -1581,7 +1574,7 @@ smithers-connector-acme/
   README.md
 ```
 
-`smithers.connector.json` is the contract. `package.json` should expose the loader module with a normal ESM export and include a `smithers.connector` field that points at the manifest:
+`smithers.connector.json` is the contract. `package.json` exposes the loader module as an ESM export, with a `smithers.connector` field pointing at the manifest:
 
 ```json
 {
@@ -1598,7 +1591,7 @@ smithers-connector-acme/
 
 ## Manifest Format
 
-The manifest format id is `smithers.connector.v1`. Unknown top-level keys are ignored, but unknown keys inside `tools`, `triggers`, `auth`, and `surfaces` must fail validation so package authors notice typos before an agent receives the tool catalog.
+The manifest format id is `smithers.connector.v1`. Unknown top-level keys are ignored; unknown keys inside `tools`, `triggers`, `auth`, and `surfaces` must fail validation, so authors catch typos before an agent receives the tool catalog.
 
 ```json
 {
@@ -1687,11 +1680,11 @@ The manifest format id is `smithers.connector.v1`. Unknown top-level keys are ig
 A Smithers connector loader must:
 
 1. validate the manifest before loading package code.
-2. resolve auth through the OAuth plane and token broker, never by handing durable credentials to an LLM-visible tool call.
+2. resolve auth via the OAuth plane and token broker, never by handing durable credentials to an LLM-visible tool call.
 3. project tools from `surfaces.openapi`, `surfaces.mcp`, or the package loader into AI SDK-compatible tools.
 4. register triggers from `surfaces.webhooks` with signature verification and dedupe before workflow dispatch.
 5. enforce scopes for every tool and trigger invocation against the connected user and tenant.
-6. Preserve idempotency metadata so retries and resumes can avoid duplicate write-side effects.
+6. Preserve idempotency metadata so retries and resumes avoid duplicate write-side effects.
 
 Loader modules export one named `loadConnector` function:
 
@@ -1721,11 +1714,11 @@ export async function loadConnector(ctx: SmithersConnectorContext) {
 }
 ```
 
-The loader may add custom tools that cannot be represented by OpenAPI or MCP, but those tools still need manifest entries. The manifest remains the auditable catalog Smithers can show to agents and humans.
+The loader may add custom tools that OpenAPI or MCP can't represent, but they still need manifest entries: the manifest is the auditable catalog Smithers shows to agents and humans.
 
 ## Tool Declarations
 
-Each tool declaration describes one agent-callable capability, not one raw endpoint. Prefer a small curated surface with clear names and task-shaped descriptions.
+Each tool declaration describes one agent-callable capability, distinct from a raw endpoint. Keep the surface small and curated, with clear names and task-shaped descriptions.
 
 Required fields:
 
@@ -1735,16 +1728,16 @@ Required fields:
 | `surface` | `openapi`, `mcp`, or `custom`. |
 | `description` | Agent-facing behavior, limits, and recovery guidance. |
 | `auth` | Auth profile key, or `none` for public tools. |
-| `scopes` | Minimum delegated scopes required for this action. |
+| `scopes` | Minimum delegated scopes this action requires. |
 | `sideEffect` | `true` for writes, sends, charges, deletes, or external state changes. |
 
-OpenAPI tools bind with `operationId`. MCP tools bind with the upstream MCP `tool` name. Custom tools bind to code returned by `loadConnector`.
+OpenAPI tools bind via `operationId`, MCP tools via the upstream MCP `tool` name, custom tools to code returned by `loadConnector`.
 
-Side-effecting tools must declare `idempotency.required: true` unless the upstream provider supplies an equivalent idempotency key, request id, or natural unique key.
+Side-effecting tools must declare `idempotency.required: true` unless the upstream provider already supplies an idempotency key, request id, or natural unique key.
 
 ## Trigger Declarations
 
-Triggers describe external events that can start or resume workflows. They are not workflow nodes and should not grow into a provider-specific palette.
+Triggers describe external events that start or resume workflows: not workflow nodes, and shouldn't grow into a provider-specific palette.
 
 Required fields:
 
@@ -1756,25 +1749,25 @@ Required fields:
 | `auth` | Auth profile key required to subscribe or poll. |
 | `dedupe.key` | JSONPath or provider event id used for idempotent dispatch. |
 
-Webhook triggers must declare the provider signature scheme and payload mapper through `surfaces.webhooks`. Poll triggers must declare interval bounds and cursor storage requirements in the manifest before registration.
+Webhook triggers declare the provider signature scheme and payload mapper through `surfaces.webhooks`; poll triggers declare interval bounds and cursor storage requirements in the manifest before registration.
 
 ## Auth Requirements
 
-Connector auth declarations are requirements, not secrets. The OAuth plane owns authorization-code + PKCE flows, encrypted refresh-token storage, single-flight refresh, and per-user/per-tenant scoping.
+Connector auth declarations are requirements, not secrets: the OAuth plane owns authorization-code + PKCE flows, encrypted refresh-token storage, single-flight refresh, and per-user/per-tenant scoping.
 
 Supported auth profiles:
 
 | Profile | Use |
 |---|---|
 | `oauth` | Delegated per-user OAuth through the Smithers OAuth plane. |
-| `apiKey` | User-supplied key stored in the credential vault, exposed only through the token broker. |
+| `apiKey` | User-supplied key stored in the credential vault, exposed only via the token broker. |
 | `none` | Public or local-only tools. |
 
-Do not put tokens, client secrets, refresh tokens, service-account credentials, or shared bot tokens in a connector package. Runtime calls receive scoped action tokens from the `tokenBroker`, and the broker exchanges or unwraps provider credentials outside the agent transcript.
+Never put tokens, client secrets, refresh tokens, service-account credentials, or shared bot tokens in a connector package. Runtime calls receive scoped action tokens from the `tokenBroker`; the broker exchanges or unwraps provider credentials outside the agent transcript.
 
 ## Tier 0 Integration Points
 
-Community connectors plug into existing universal surfaces:
+Community connectors plug into these universal surfaces:
 
 | Tier 0 surface | Connector field | Loader behavior |
 |---|---|---|
@@ -1783,16 +1776,16 @@ Community connectors plug into existing universal surfaces:
 | OpenAPI tools | `surfaces.openapi` + `tools[].operationId` | Build curated tools with `createOpenApiTools`; never dump every endpoint by default. |
 | MCP client | `surfaces.mcp` + `tools[].tool` | Pass selected MCP tools through with names and descriptions from the manifest. |
 | Webhook ingress | `surfaces.webhooks` + `triggers[]` | Verify signatures, map payloads, dedupe events, and dispatch workflows. |
-| Generic HTTP / sandbox | `surface: "custom"` | Run package code for cases that cannot be expressed as OpenAPI or MCP. |
+| Generic HTTP / sandbox | `surface: "custom"` | Run package code for cases OpenAPI/MCP can't express. |
 
 ## Anti-Patterns
 
-- Do not add a node per app. Connectors contribute agent tools and triggers, not a giant fixed-schema workflow palette.
-- Do not publish every OpenAPI operation as a tool. Collapse noisy endpoint sets into task-shaped actions.
-- Do not bypass delegated OAuth with service-account or shared-bot tokens.
-- Do not refresh tokens independently in each tool call; refresh must go through the single-flight OAuth/token broker path.
-- Do not omit idempotency from write tools or webhook triggers.
-- Do not hide tool behavior in package code when it can be declared in the manifest.
+- Don't add a node per app: connectors contribute agent tools and triggers, not a giant fixed-schema workflow palette.
+- Don't publish every OpenAPI operation as a tool: collapse noisy endpoint sets into task-shaped actions.
+- Don't bypass delegated OAuth with service-account or shared-bot tokens.
+- Don't refresh tokens independently per tool call; route refresh through the single-flight OAuth/token broker path.
+- Don't omit idempotency from write tools or webhook triggers.
+- Don't hide tool behavior in package code when the manifest can declare it.
 
 ## Review Checklist
 
@@ -1813,7 +1806,7 @@ Before accepting a community connector, verify:
 
 ## Burns
 
-Workspace-first local control plane for Smithers. Single UI for authoring, running, and supervising workflows across repositories. Register repos, launch runs, stream events, inspect frames, handle approvals.
+Workspace-first local control plane for Smithers: single UI for authoring, running, and supervising workflows across repositories. Register repos, launch runs, stream events, inspect frames, handle approvals.
 
 - React web app, ElectroBun (a Bun-native Electron alternative) desktop shell, or headless CLI
 - AI-assisted workflow authoring via local agent CLIs
@@ -1825,10 +1818,10 @@ Workspace-first local control plane for Smithers. Single UI for authoring, runni
 
 ## Ralphinho
 
-Multi-agent development workflows. Two independent workflows:
+Two independent multi-agent development workflows:
 
 - **Ralphinho** (scheduled-work) -- decomposes RFC into work units, runs tier-based quality pipelines (implement, test, review), lands via merge queue with CI verification.
-- **Improvinho** (review-discovery) -- three parallel discovery lenses (refactoring, type safety, architecture), deduplicates findings. Optionally pushes to Linear.
+- **Improvinho** (review-discovery) -- three parallel discovery lenses (refactoring, type safety, architecture), deduplicates findings, optionally pushes to Linear.
 
 Requires Bun and Jujutsu (`jj`). Supports Claude and Codex agents.
 
@@ -1838,7 +1831,7 @@ Requires Bun and Jujutsu (`jj`). Supports Claude and Codex agents.
 
 ## Cairo Coder
 
-AI-powered Cairo smart contract generator. RAG pipeline (DSPy) converting natural language to Cairo contracts for Starknet. Uses Smithers with Claude and Codex agents.
+AI-powered Cairo smart contract generator: RAG pipeline (DSPy) converting natural language to Cairo contracts for Starknet. Uses Smithers with Claude and Codex agents.
 
 <Card title="Cairo Coder" icon="github" href="https://github.com/KasarLabs/cairo-coder">
   github.com/KasarLabs/cairo-coder
@@ -1862,7 +1855,7 @@ Generic multi-phase development workflow engine. Research, Plan, Implementation,
 
 ## Local Isolated Ralph
 
-Kubernetes-native Smithers workflow runner. Runs workflows as isolated K8s Jobs and CronJobs via k3s/k3d. Sandboxed container execution.
+Kubernetes-native Smithers workflow runner: runs workflows as isolated K8s Jobs and CronJobs via k3s/k3d, sandboxed container execution.
 
 <Card title="Local Isolated Ralph" icon="github" href="https://github.com/SamuelLHuber/local-isolated-ralph">
   github.com/SamuelLHuber/local-isolated-ralph
@@ -1878,7 +1871,7 @@ Use the [Workflow Catalog](/workflows/catalog) metadata when publishing a pack o
 
 > Use PI as a Smithers workflow CLI backend and understand how PI extensibility composes with Smithers declarative orchestration.
 
-Smithers provides deterministic orchestration (workflow graph, approvals, retries, durable state). PI provides adaptive agent capabilities (providers, models, extensions, skills, prompt templates). Use both when you need deterministic execution with flexible agent behavior.
+Smithers provides deterministic orchestration (workflow graph, approvals, retries, durable state); PI provides adaptive agent capabilities (providers, models, extensions, skills, prompt templates). Combine them for deterministic execution with flexible agent behavior.
 
 ## Integration Modes
 
@@ -1901,7 +1894,7 @@ const pi = new PiAgent({
 
 `PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text mode uses `--print` by default; JSON/RPC modes set `--mode` and omit `--print`.
 
-PI sessions are first-class hijack targets. `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
+PI sessions are first-class hijack targets: `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
 
 ### 2) PI Server Client
 
@@ -1962,7 +1955,7 @@ pi --version
 
 ## Limitations
 
-Smithers does not provide a chat interface for PI. Chat UI integration is the responsibility of the host application using `@smithers-orchestrator/pi-plugin`.
+Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smithers-orchestrator/pi-plugin`.
 
 ---
 
@@ -1985,13 +1978,13 @@ The relationship is bidirectional:
 
 ## Hermes: a native plugin (not just MCP)
 
-Smithers installs a **native Hermes plugin**, which is far richer than a bare MCP
-entry. MCP can only expose tools. The plugin adds:
+Smithers installs a **native Hermes plugin**, far richer than a bare MCP entry
+(MCP can only expose tools). The plugin adds:
 
 - **Slash commands** (`/smithers run|ps|inspect|output|approve|deny|watch`) usable in the
   Hermes CLI and every gateway (Discord, Telegram, Slack).
-- **A live-run status injector** (`pre_llm_call` hook) so Hermes is aware of
-  active and paused runs, and any pending approval gates, on every turn.
+- **A live-run status injector** (`pre_llm_call` hook) so Hermes sees active
+  and paused runs, and any pending approval gates, on every turn.
 - **Tools**: `smithers_run`, `smithers_ps`, `smithers_inspect`, `smithers_approve`,
   `smithers_deny`, `smithers_output`, `smithers_human_answer`.
 - **A bundled skill** (`smithers:orchestrate`) that teaches Hermes to prefer a
@@ -2014,8 +2007,8 @@ bunx smithers-orchestrator mcp add --agent hermes
 
 The command writes the plugin into `~/.hermes/plugins/smithers/`, installs the
 gateway hook into `~/.hermes/hooks/smithers/`, enables it in
-`~/.hermes/config.yaml`, and also registers the MCP server as a floor (so tools
-work even if user plugins are disabled). It is idempotent: rerun it any time to
+`~/.hermes/config.yaml`, and registers the MCP server as a floor (so tools
+work even if user plugins are disabled). It's idempotent: rerun it anytime to
 upgrade.
 
 Verify it loaded:
@@ -2028,9 +2021,9 @@ hermes -z "/smithers ps"   # lists your runs from inside Hermes
 ## Eliza (elizaOS): built in by default
 
 [Eliza](https://github.com/elizaOS/eliza) has Smithers support **built in by
-default**: there is no plugin to install. Any Eliza agent can launch and operate
+default**, no plugin to install. Any Eliza agent can launch and operate
 durable Smithers workflows out of the box, and a provider injects live Smithers
-run status into the agent's context on every turn.
+run status into the agent's context every turn.
 
 What the agent gets:
 
@@ -2038,19 +2031,20 @@ What the agent gets:
   background task (falls back to `create-workflow` to author one from the
   request).
 - `SMITHERS_APPROVE` / `SMITHERS_DENY`: clear approval gates.
-- `SMITHERS_RUNS` provider: every turn, the agent automatically sees what is
-  running and what needs a human.
+- `SMITHERS_RUNS` provider: every turn, the agent sees what's running and
+  what needs a human.
 
 It reaches Smithers through the `smithers` CLI (override the binary with
 `$SMITHERS_BIN`).
 
 ## Why a workflow, not a skill
 
-In both runtimes the guidance is the same: a Smithers workflow is a **superset of
-a skill**. A skill is static instructions; a workflow is executable, durable,
-typed, inspectable, composable, and optimizable. Capture reusable procedures as
-workflows (even small one-task ones), and optimize them like skills with
-`bunx smithers-orchestrator eval`, scorers, and `bunx smithers-orchestrator optimize`. See the
+In both runtimes the guidance is the same: a Smithers workflow is a **superset
+of a skill**, since a skill is static instructions while a workflow is
+executable, durable, typed, inspectable, composable, and optimizable. Capture
+reusable procedures as workflows (even small one-task ones), and optimize
+them like skills with `bunx smithers-orchestrator eval`, scorers, and
+`bunx smithers-orchestrator optimize`. See the
 [smithers skill](https://github.com/smithersai/smithers/blob/main/skills/smithers/SKILL.md).
 
 ## Links
@@ -2066,18 +2060,16 @@ workflows (even small one-task ones), and optimize them like skills with
 > Typed control state for workflows: fold an XState v5 machine over durable output and signal rows with useSmithersMachine
 
 `smithers-orchestrator/xstate` runs [XState v5](https://stately.ai/docs) state
-machines as an **optional derived-state layer** over the rows Smithers already
-persists: not a backend, not a scheduler, and not a persisted actor.
-Each frame, `useSmithersMachine` recomputes the machine's state as a pure fold
-over durable output and signal rows using XState's pure
-`initialTransition` / `transition` functions. Nothing about the machine is
-persisted; resume, fork, and rewind are correct because the fold's inputs are
-exactly the rows those features restore.
+machines as an **optional derived-state layer** over rows Smithers already
+persists (not a backend, scheduler, or persisted actor): each frame,
+`useSmithersMachine` recomputes state as a pure fold over durable output and
+signal rows via XState's pure `initialTransition` / `transition` functions.
+Nothing is persisted, so resume, fork, and rewind stay correct automatically.
 
-Use it when a workflow's control flow outgrows plain conditionals (revision
-loops, approval ladders, multi-phase pipelines with re-entry) and you want
+Use it when control flow outgrows plain conditionals (revision loops,
+approval ladders, multi-phase pipelines with re-entry) and you want
 `state.matches(...)` instead of hand-rolled row checks. For linear pipelines,
-`ctx.outputs` conditionals remain simpler.
+`ctx.outputs` conditionals stay simpler.
 
 ```tsx
 import { setup, assign } from "xstate";
@@ -2156,25 +2148,25 @@ Each frame, `useSmithersMachine(machine, { id, input, events })`:
 2. Orders them by **(provenance seq, declaration index, mapped-event
    subindex)**: causal arrival order with deterministic tiebreaks, a total
    order that is a pure function of rows on every branch.
-3. Folds: `initialTransition(machine, input)`, then
+3. Folds `initialTransition(machine, input)`, then
    `transition(machine, snapshot, event)` per event. Returned actions are
    discarded; builtin `assign` applies inside `transition`. Events not
    accepted in the current state are discarded, matching live-actor
-   semantics. Events after the machine reaches a final state are discarded.
+   semantics, as are events after the machine reaches a final state.
 4. Returns the final `MachineSnapshot`; `state.matches()`, `state.can()`,
    `state.context`, `state.hasTag()` work as `@xstate/react` users expect.
 
-Multiple machines per workflow are supported; give each `useSmithersMachine`
-call a distinct `id`.
+Multiple machines per workflow: give each `useSmithersMachine` call a
+distinct `id`.
 
 ## Event sources
 
 | Source | Reads | Notes |
 | --- | --- | --- |
-| `taskOutput(output, { nodeId?, scope? }, map)` | Durable output rows via `ctx.outputRows` | One `map` call per row; return an event, an array, or `null` to skip. "A durable row exists", not "the task completed": failed attempts write no row, and `(nodeId, iteration)` writes are upserts. |
+| `taskOutput(output, { nodeId?, scope? }, map)` | Durable output rows via `ctx.outputRows` | One `map` call per row; return an event, an array, or `null` to skip. Only a written row triggers this: failed attempts write no row, and `(nodeId, iteration)` writes are upserts. |
 | `approvalDecided(output, { nodeId?, scope? }, map)` | Approval decision rows | Denials persist a row only with `onDeny: "continue"`; a failing gate ends the branch and writes nothing. |
-| `eventReceived(signalName, schema, { correlationId? }, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table directly on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing, including a signal delivered before its listener has ever mounted. `correlationId` scopes the fold to signals delivered with a matching id, required when the same signal name is used by more than one concurrent wait. Payloads failing `schema.safeParse` are skipped deterministically (same rows ⇒ same skips), so a malformed external delivery can never brick every future render of the run. Rewinding past a delivered signal makes the machine forget it, the same as output rows. |
-| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires the wait to opt into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`); pointing `timedOut()` at a non-tagged wait is a hard render-time error (`TASK_OUTPUT_SCHEMA_INVALID`), not a silent no-op. |
+| `eventReceived(signalName, schema, { correlationId? }, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing, even one delivered before its listener mounted. `correlationId` scopes the fold to matching-id signals, needed when one signal name backs multiple concurrent waits. Payloads failing `schema.safeParse` are skipped deterministically (same rows, same skips), so a malformed delivery can't brick future renders. Rewinding past a delivered signal makes the machine forget it, like output rows. |
+| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires opting into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`); pointing `timedOut()` at a non-tagged wait is a hard render-time error (`TASK_OUTPUT_SCHEMA_INVALID`), never a silent no-op. |
 
 All sources are pure functions of `ctx`; deriving a source's `nodeId` from
 the fold's own output is circular and unsupported.
@@ -2182,8 +2174,8 @@ the fold's own output is circular and unsupported.
 ## Constraints (enforced at mount)
 
 A mount-time lint runs per machine identity (hot reload re-lints) and rejects
-machine features that cannot exist inside a durable fold, each with a typed
-error naming the Smithers-native alternative. There is no escape hatch.
+machine features that can't exist inside a durable fold, each with a typed
+error naming the Smithers-native alternative. No escape hatch.
 
 | Rejected | Use instead |
 | --- | --- |
@@ -2201,32 +2193,29 @@ error naming the Smithers-native alternative. There is no escape hatch.
 
 Every callback in the fold (event mappers, context initializers, guards,
 assigners, machine `output` functions) must be pure, side-effect-free, free
-of time/randomness, and must not mutate inputs. A throwing mapper, guard, or
-assigner (or a throwing context initializer) fails the render with a typed
-`SmithersError` naming the machine and event/phase, rather than an anonymous
-crash deep inside the fold.
+of time/randomness, and non-mutating of inputs; a throwing one fails the
+render with a typed `SmithersError` naming the machine and event/phase,
+instead of an anonymous crash deep inside the fold.
 
 ## Listeners, re-entry, and final states
 
 - **The signal table is the event source; listeners are wake-and-park
   plumbing.** A parked `<WaitForEvent>` matters for liveness: an idle
   machine state with nothing rendered makes the graph quiescent and ends the
-  run. States awaiting external events should render a listener to keep
+  run, so states awaiting external events should render a listener to keep
   the run parked and wake a frame on delivery. A missed wake delays the fold
   by one frame but never loses the event.
-- **Machine re-entry never re-executes a completed Smithers task.** Any task
-  rendered inside a machine state the machine can re-enter needs
-  context-versioned identity (`draft-r${rev}` minted from an `assign`
-  counter). A bare-constant task id in a state on a machine cycle deadlocks
-  the machine: no new row, no new event, and the quiescent graph ends the run.
-  The lint catches this for any state that declares `meta.smithersTaskId`: a
-  re-enterable state (reachable back to itself through the machine's
-  transition graph, whether a direct self-transition or a longer cycle) may only
-  declare it as a function of context, never a bare string.
+- **Machine re-entry never re-executes a completed Smithers task.** A
+  bare-constant task id in a re-enterable state deadlocks the machine on a
+  cycle: no new row or event ever arrives, ending the run the same way as
+  above. The lint requires `meta.smithersTaskId` be a function of context
+  (see table above) for any state reachable back to itself through the
+  machine's transition graph, whether by a direct self-transition or a
+  longer cycle.
 - **Final states are derived-only.** Smithers can finish while the machine is
-  non-final (graph quiescent); a machine final state does not cancel
-  in-flight tasks (stop rendering them instead); `snapshot.output` is not the
-  run output; a failure-flavored final state does not fail the run.
+  non-final (graph quiescent); a machine final state doesn't cancel
+  in-flight tasks (stop rendering them instead); `snapshot.output` isn't the
+  run output; a failure-flavored final state doesn't fail the run.
 
 ## Durability and time travel
 
@@ -2239,34 +2228,32 @@ One carve-out: an in-place payload replacement at the same
 `(nodeId, iteration)` (manual `retry-task` of a completed node, HumanTask
 reopen) keeps its seq but changes its payload, so folded history from that
 position **reinterprets**. The in-process cache validates by content hash and
-refolds automatically; workflows feeding machines from replaceable tasks
+refolds automatically, but workflows feeding machines from replaceable tasks
 should prefer fork-and-migrate.
 
-The prefix cache key is `(runId, machine id, reducer hash)`, where the
-reducer hash is a content hash
-of the machine (config + `setup()` implementations) plus every declared
-event source (kind, target, options, `map`/`schema` source), so one process
-hosting many runs (or a fork, which inherits its parent's row history and
-machine `id` verbatim) never serves one run's snapshot to another, and a
-mid-run machine or event-source edit can't reuse a fold computed under the
-old reducer. The cache is bounded (LRU-evicted) so a long-running process
-does not retain every historical snapshot. Mid-run machine edits ride the
-`acceptWorkflowChange` gate: the reducer hash changing for an already-folded
-`(runId, id)` logs a machine-history reinterpretation warning instead of
-silently reinterpreting.
+The prefix cache key is `(runId, machine id, reducer hash)`; the reducer hash
+content-hashes the machine (config + `setup()` implementations) plus every
+declared event source (kind, target, options, `map`/`schema` source). So one
+process hosting many runs (or a fork, which inherits its parent's row history
+and machine `id` verbatim) never serves one run's snapshot to another. The
+cache is bounded (LRU-evicted), so a long-running process doesn't retain
+every historical snapshot. A mid-run machine or event-source edit can't
+silently reuse a fold computed under the old reducer: it rides the
+`acceptWorkflowChange` gate, where a reducer-hash change for an
+already-folded `(runId, id)` logs a machine-history reinterpretation warning
+instead of reinterpreting silently.
 
 ## Performance
 
-Recomputing per frame is cheap in practice: an in-process prefix cache
-validates folded history by content hash and folds only the new suffix each
-frame. The CI benchmark (`packages/xstate/tests/fold-benchmark.test.js`)
+Recomputing per frame is cheap: the prefix cache above folds only the new
+suffix each frame. The CI benchmark (`packages/xstate/tests/fold-benchmark.test.js`)
 folds 10,000 events on a parallel + nested-compound machine in well under a
-second full-refold (~20µs/event), and proves an incremental frame folds only
-the new suffix by counting actual transitions executed (immune to machine
-load), not by timing it; a wall-clock threshold is logged but kept
+second of full-refold (~20µs/event), and proves incremental folding touches
+only the new suffix by counting actual transitions executed (immune to
+machine load), not by timing it; a wall-clock threshold is logged but stays
 deliberately generous and non-strict, since it isn't the real gate. Practical
-limit: tens of thousands of events per machine per run; beyond that, prefer
-summarizing history into machine context via coarser events.
+limit: tens of thousands of events per machine per run; beyond that, summarize
+history into machine context via coarser events.
 
 ## Visualization
 
@@ -2284,13 +2271,11 @@ visualization work unmodified on the machine definition.
 `@smithers-orchestrator/microsandbox` is a first-class Smithers
 `SandboxProvider` backed by the open source
 [Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
-boots a local microVM with its own Linux kernel, writes the Smithers request
-through the host-to-guest filesystem channel, executes the entry command, and
-reads the result back through the same channel. No daemon or hosted sandbox
-service is required.
+boots a local microVM with its own Linux kernel, exchanges the Smithers
+request and result over a host-to-guest filesystem channel, and runs the
+entry command in between. No daemon or hosted sandbox service is required.
 
-The provider id is `microsandbox` (exported as
-`MICROSANDBOX_PROVIDER_ID`).
+The provider id is `microsandbox` (exported as `MICROSANDBOX_PROVIDER_ID`).
 
 ```ts
 import {
@@ -2300,20 +2285,19 @@ import {
 } from "smithers-orchestrator/microsandbox";
 ```
 
-Microsandbox currently labels the runtime beta. Pin and test the SDK version you
-deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
-Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
-Windows. Run `msb doctor` on every host before accepting work.
-
-Microsandbox `0.6.6` snapshots contain disk state, require a stopped sandbox,
-and cold-boot when restored. They do not preserve memory, running processes,
-sockets, or device state. A fleet integration must not advertise a sticky
-workspace as memory-preserving suspend, instant resume, or a live fork.
+Microsandbox labels the runtime beta: pin and test the SDK version you
+deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization
+(Apple Silicon on macOS, KVM on Linux, Windows Hypervisor Platform on
+Windows); run `msb doctor` on every host before accepting work. Its
+snapshots contain disk state only: they require a stopped sandbox and
+cold-boot on restore, preserving no memory, running processes, sockets, or
+device state. Don't advertise a sticky workspace as memory-preserving
+suspend, instant resume, or a live fork.
 
 ## Install
 
-The provider package declares `microsandbox` as an optional dependency and
-imports it only when a session starts. Install it directly if your package
+The provider package declares `microsandbox` as an optional dependency,
+imported only when a session starts. Install it directly if your package
 manager omits optional dependencies:
 
 ```sh
@@ -2321,7 +2305,7 @@ npm install microsandbox@0.6.6
 ```
 
 The SDK downloads or resolves its platform runtime and pulls the selected OCI
-image on first use. Later sandboxes reuse the local image cache.
+image on first use; later sandboxes reuse the local image cache.
 
 ## Usage
 
@@ -2367,26 +2351,23 @@ const unregister = registerMicrosandboxSandboxProvider({
 // <Sandbox provider="microsandbox" workflow={child} output={outputs.result} />
 ```
 
-The default image is `oven/bun:1`. The default entry command is
-`bun /workspace/run-smithers-sandbox.js`. Put that runner in the image or
+Default image: `oven/bun:1`. Default entry command:
+`bun /workspace/run-smithers-sandbox.js`; put that runner in the image or
 provide it with `setupFiles`. A factory-level `command` wins over the
-`<Sandbox command>` prop. Without either, the default is used.
+`<Sandbox command>` prop; without either, the default runs.
 
 The provider creates its workdir through `sandbox.fs()` after boot and passes
-that path to each command. It does not call `builder.workdir()`, which would
-require the directory to exist in the image before the provider can create it.
+that path to each command, not through `builder.workdir()`, which would
+require the directory to already exist in the image.
 
 ## Smithers prop mapping
-
-The adapter maps the provider-neutral `<Sandbox>` controls onto the
-Microsandbox builder and execution APIs.
 
 | Smithers control | Microsandbox behavior |
 |---|---|
 | `image` | OCI image, local rootfs directory, or disk image passed to `builder.image()` |
 | `env` | Per-command environment, merged below provider `env` and egress variables |
-| `allowNetwork={false}` | `builder.disableNetwork()`, so no guest network interface is created |
-| `allowNetwork` | Microsandbox's default public-only policy, which blocks private and metadata destinations |
+| `allowNetwork={false}` | `builder.disableNetwork()`: no guest network interface is created |
+| `allowNetwork` | Microsandbox's default public-only policy: blocks private and metadata destinations |
 | `ports` | TCP host-to-guest mappings through `builder.port()`; requires `allowNetwork` |
 | `volumes` | Host bind mounts through `builder.volume(...bind...)`; read-only unless `readonly: false` |
 | `cpuLimit` | Rounded up to a whole vCPU and passed to `builder.cpus()` |
@@ -2399,51 +2380,49 @@ Microsandbox builder and execution APIs.
 Provider options can also set `cpus`, `maxCpus`, `memoryMib`, `maxMemoryMib`,
 `maxDurationSecs`, `idleTimeoutSecs`, `security`, `labels`, `scripts`,
 `setupFiles`, `pullPolicy`, and `sandboxName`. `configureBuilder(builder,
-request)` is the escape hatch for Microsandbox features that Smithers does not
-model directly, including custom network policies, secret substitution,
-registry authentication, rootfs patches, and named or tmpfs volumes.
+request)` is the escape hatch for Microsandbox features Smithers does not
+model directly: custom network policies, secret substitution, registry
+authentication, rootfs patches, and named or tmpfs volumes.
 
 ## Request and result contract
 
-The shared provider kit writes the request JSON below the workdir and gives the
-entry command two env vars:
+The shared kit writes the request JSON below the workdir and gives the entry
+command two env vars:
 
 - `SMITHERS_SANDBOX_REQUEST_PATH`: request JSON to read.
 - `SMITHERS_SANDBOX_RESULT_PATH`: result JSON to write.
 
-The entry command may print the result JSON to stdout or write it to the result
-path. The result is `{ bundlePath }` or a structured `{ status,
+The entry command may print the result JSON to stdout or write it to the
+result path, either `{ bundlePath }` or a structured `{ status,
 output|outputs, patches?, diffBundle?, runId? }`. The provider fills
-`remoteRunId`, `workspaceId`, and `containerId` with the Microsandbox name when
-the entry omits them.
+`remoteRunId`, `workspaceId`, and `containerId` with the Microsandbox name
+when the entry omits them.
 
 Parent directories are created through `sandbox.fs()` before files are
-written. Command execution uses `execStreamWith()` so an abort signal or
-timeout can kill the guest process instead of leaving it running after the
-Smithers task ends.
+written. Command execution uses `execStreamWith()`, so an abort signal or
+timeout kills the guest process instead of leaving it running past task end.
 
 ## Network and secrets
 
-Microsandbox runs locally, but its network policy is host-controlled. With
-`allowNetwork` unset or false, Smithers disables the interface. With
-`allowNetwork` true, Microsandbox allows public destinations and DNS while
-blocking private, link-local, host, and cloud metadata destinations by
-default.
+Microsandbox runs locally, but its network policy is host-controlled:
+`allowNetwork` unset or false disables the interface; true allows public
+destinations and DNS while blocking private, link-local, host, and cloud
+metadata destinations by default.
 
 The Smithers provider kit still projects `egress` proxy variables and uploads
-an inline CA certificate into the guest. Use `configureBuilder` with
-Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
+an inline CA certificate into the guest; use `configureBuilder` with
+Microsandbox's `NetworkPolicy` and secret APIs for destination-level
 allowlists or host-side secret substitution.
 
-There is an important `0.6.6` limitation for production secret handling. The
-raw Go SDK `Secret.Env` value is persisted in runtime state, while the declared
-store-backed secret source is not implemented by the runtime. Do not assume
-that selecting a secret API alone keeps plaintext out of provider state. Use a
-nonpersisting, operation-scoped delivery path, and test guest disk, snapshots,
-logs, errors, command arguments, and runtime metadata with a sentinel value.
-When a credential needs method/path policy, signing, audit, approval, MCP
-policy, rate limiting, or response filtering, give the guest a short-lived
-credential-proxy capability instead of the upstream secret.
+Important `0.6.6` limitation for production secrets: the raw Go SDK
+`Secret.Env` value is persisted in runtime state, while the declared
+store-backed secret source is unimplemented. Selecting a secret API alone
+doesn't keep plaintext out of provider state. Use a nonpersisting, operation-scoped
+delivery path, and test guest disk, snapshots, logs, errors, command
+arguments, and runtime metadata with a sentinel value. When a credential needs
+method/path policy, signing, audit, approval, MCP policy, rate limiting, or
+response filtering, give the guest a short-lived credential-proxy capability
+instead of the upstream secret.
 
 Bind mounts deliberately expose host paths to the guest. Keep them read-only
 unless the workflow must write, and never mount a credential directory or the
@@ -2456,22 +2435,22 @@ Microsandbox state directory into an untrusted workload.
 - An ephemeral sandbox is stopped and its state is removed.
 - A sticky workspace is stopped but kept on disk, then reopened by
   `workspace.name` on the next run.
-- `cleanup: "keep"` creates or starts the sandbox detached and leaves it
-  running after the provider returns. Set `idleTimeoutSecs` or
-  `maxDurationSecs` so a crashed orchestrator cannot leave compute running
+- `cleanup: "keep"` creates or starts the sandbox detached, leaving it
+  running after the provider returns; set `idleTimeoutSecs` or
+  `maxDurationSecs` so a crashed orchestrator can't leave compute running
   forever.
 
-Microsandbox is local infrastructure. Capacity, image cache, persisted
+Microsandbox is local infrastructure: capacity, image cache, persisted
 workspaces, logs, and the `~/.microsandbox` database live on the host. Running
-it as a fleet provider therefore requires host scheduling, admission control,
-state placement, generation fencing, snapshot export, authenticated streaming,
-and observability outside this adapter. Plue implements that remote fleet
-boundary separately; this package remains a local Smithers provider and does
-not make an arbitrary API pod a safe KVM host.
+it as a fleet provider requires host scheduling, admission control, state
+placement, generation fencing, snapshot export, authenticated streaming, and
+observability outside this adapter. Plue implements that remote fleet boundary
+separately; this package remains a local Smithers provider and does not make
+an arbitrary API pod a safe KVM host.
 
 ## SDK subset used
 
-The adapter uses the published TypeScript SDK surface:
+Published TypeScript SDK surface used:
 
 - `Sandbox.builder(name)` with image or snapshot, resource, network, mount,
   lifecycle, label, and script setters;
@@ -2484,8 +2463,8 @@ The adapter uses the published TypeScript SDK surface:
 
 The repository-only fixture at
 `packages/microsandbox/tests/fixtures/createMockMicrosandboxEnvironment.js`
-supplies an in-memory SDK double for package tests. It is not part of the
-package's public exports and requires no hypervisor, image pull, or credentials.
+supplies an in-memory SDK double for package tests, is not part of the
+public exports, and requires no hypervisor, image pull, or credentials.
 
 ---
 
@@ -2497,9 +2476,9 @@ package's public exports and requires no hypervisor, image pull, or credentials.
 
 `@smithers-orchestrator/daytona` is a first-class Smithers `SandboxProvider`
 backed by the [Daytona](https://www.daytona.io/) SDK. It runs a `<Sandbox>`
-child workflow's request inside a Daytona sandbox: it uploads the request JSON,
-runs the entry command, and reads the result JSON back. The shared provider-kit
-owns the request/result protocol, egress, secret scrubbing, and cleanup, so this
+child workflow's request inside a Daytona sandbox: uploads the request JSON,
+runs the entry command, reads the result JSON back. The shared provider-kit
+owns the request/result protocol, egress, secret scrubbing, and cleanup; this
 package only maps the small `SandboxSession` seam onto Daytona.
 
 The provider id is `daytona-sandbox` (exported as `DAYTONA_SANDBOX_PROVIDER_ID`).
@@ -2514,16 +2493,16 @@ import {
 
 ## Credentials
 
-`@daytonaio/sdk` is an optional dependency, imported lazily inside the session.
-Install it to use the real provider:
+`@daytonaio/sdk` is an optional dependency, imported lazily inside the session;
+install it to use the real provider:
 
 ```
 npm install @daytonaio/sdk
 ```
 
-Credentials come from factory options first, then the Daytona env chain. They
-are used only to build the local SDK client. They are never written into the
-request JSON and never forwarded into the remote sandbox env.
+Credentials come from factory options first, then the Daytona env chain, and
+are used only to build the local SDK client: never written into the request
+JSON, never forwarded into the remote sandbox env.
 
 - `DAYTONA_API_KEY`: API key (required for a real client).
 - `DAYTONA_API_URL`: API base url (optional).
@@ -2596,7 +2575,7 @@ them.
 
 Per-run `request.config` may carry `image`, `snapshot`, `resources`, `labels`,
 or a `workspace` block (`snapshotId`, `idleTimeoutSecs`,
-`persistence: "ephemeral"`) which maps onto the create options.
+`persistence: "ephemeral"`), mapped onto the create options.
 
 ## SDK subset used
 
@@ -2608,13 +2587,13 @@ env, timeoutSecs)` (Daytona merges stderr into `result`), and
 
 ## Cleanup and cost
 
-`cleanup: "destroy"` (default) deletes the sandbox after the run. `cleanup:
+`cleanup: "destroy"` (default) deletes the sandbox after the run; `cleanup:
 "keep"` leaves it running. `ephemeral` plus `autoStopInterval` bound idle cost
-even when cleanup is skipped, so a crashed orchestrator does not leave a sandbox
+even when cleanup is skipped, so a crashed orchestrator doesn't leave a sandbox
 billing forever. You pay for Daytona sandbox time from create to teardown.
 
 `createMockDaytonaSandboxEnvironment(handler, faults?)` is an in-memory SDK
-double for tests. It needs zero credentials, so unit tests run in CI without
+double for tests: needs zero credentials, so unit tests run in CI without
 touching Daytona.
 
 ---
@@ -2626,15 +2605,14 @@ touching Daytona.
 # Vercel Sandbox Provider
 
 `@smithers-orchestrator/vercel` is a first-class Smithers `SandboxProvider`
-backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK. It
-runs a `<Sandbox>` child workflow's request on Vercel Sandbox compute: it ships
-the request JSON into the sandbox workdir, runs the entry command, and reads the
-result JSON back. The shared provider-kit owns request shipping, egress, result
-parsing, secret scrubbing, and cleanup, so this package only supplies the Vercel
-`createSession` seam.
+backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK: it
+ships a `<Sandbox>` child workflow's request JSON into the sandbox workdir,
+runs the entry command, and reads the result JSON back. The shared
+provider-kit owns request shipping, egress, result parsing, secret scrubbing,
+and cleanup; this package supplies only the Vercel `createSession` seam.
 
-The provider id is `vercel-sandbox` (exported as `VERCEL_SANDBOX_PROVIDER_ID`).
-The default workdir is `/vercel/sandbox`.
+The provider id is `vercel-sandbox` (`VERCEL_SANDBOX_PROVIDER_ID`); default
+workdir `/vercel/sandbox`.
 
 ```ts
 import {
@@ -2646,20 +2624,19 @@ import {
 
 ## Credentials
 
-`@vercel/sandbox` is an optional dependency, imported lazily inside the session.
-Install it to use the real provider:
+`@vercel/sandbox` is an optional dependency, lazily imported inside the
+session. Install it to use the real provider:
 
 ```bash
 npm install @vercel/sandbox
 ```
 
-OIDC is preferred; the access-token trio is the fallback. Auth is resolved and
-validated before the SDK is touched, so a misconfigured provider fails fast with
-`INVALID_INPUT`. These values are used only to create the sandbox. They are
-never written into the request JSON and never forwarded into the remote command
-env.
+OIDC is preferred, the access-token trio a fallback. Auth resolves and
+validates before the SDK is touched, so a misconfigured provider fails fast
+with `INVALID_INPUT`. These values create the sandbox only, never written into
+the request JSON or forwarded into the remote command env.
 
-- `VERCEL_OIDC_TOKEN` (preferred), or
+- `VERCEL_OIDC_TOKEN`, or
 - `VERCEL_TOKEN` + `VERCEL_TEAM_ID` + `VERCEL_PROJECT_ID`.
 
 Each can also be passed as a factory option (`oidcToken`, `token`, `teamId`,
@@ -2709,10 +2686,10 @@ workdir and hands the entry command two env vars:
 - `SMITHERS_SANDBOX_REQUEST_PATH`: where to read the request JSON.
 - `SMITHERS_SANDBOX_RESULT_PATH`: where to write the result JSON.
 
-The entry command either prints the result JSON to stdout or writes it to
-`SMITHERS_SANDBOX_RESULT_PATH`. The result is `{ bundlePath }` or a structured
-`{ status, output|outputs, patches?, diffBundle?, runId? }`. When ports are
-declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
+The entry command prints the result JSON to stdout or writes it to
+`SMITHERS_SANDBOX_RESULT_PATH`: either `{ bundlePath }` or a structured
+`{ status, output|outputs, patches?, diffBundle?, runId? }`. Declared ports
+surface their reachable `sandbox.domain(port)` through a heartbeat.
 
 ## Factory options
 
@@ -2730,19 +2707,19 @@ declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
 
 ## Duration and plan cap
 
-The default session timeout is 5 minutes. `options.timeoutMs` (or
-`request.toolTimeoutMs`) maps to the create `timeout`. Durations above the
-5-minute default warn through a heartbeat and call `sandbox.extendTimeout()`, up
-to `options.maxDurationMs` (default 45 minutes). A request above that cap throws
-`INVALID_INPUT` rather than provisioning a sandbox that would overrun the plan.
-Raise `maxDurationMs` for Pro (up to 5 hours).
+Default session timeout: 5 minutes; `options.timeoutMs` (or
+`request.toolTimeoutMs`) maps to the create `timeout`. Durations above 5
+minutes warn through a heartbeat and call `sandbox.extendTimeout()`, up to
+`options.maxDurationMs` (default 45 minutes); above that cap, a request throws
+`INVALID_INPUT` instead of overrunning the plan. Raise `maxDurationMs` for Pro
+(up to 5 hours).
 
 ## Cleanup and cost
 
-Ephemeral sandboxes are deleted permanently on teardown (`cleanup: "destroy"`,
-the default). Set `persist: true` to `stop()` (pause) the sandbox instead so it
-can be resumed. `cleanup: "keep"` skips teardown entirely. You pay for Vercel
-Sandbox wall-clock from create to teardown.
+Ephemeral sandboxes delete permanently on teardown (`cleanup: "destroy"`, the
+default); `persist: true` calls `stop()` (pause) instead so it can resume, and
+`cleanup: "keep"` skips teardown entirely. You pay Vercel Sandbox wall-clock
+from create to teardown.
 
 `createMockVercelSandboxEnvironment(handler, config?)` is an in-memory SDK
 double for tests. Pass it as `options.client`; it needs zero credentials, so
@@ -2756,15 +2733,15 @@ unit tests run in CI without touching Vercel.
 
 # AWS Sandbox Provider
 
-`@smithers-orchestrator/aws` is a first-class Smithers `SandboxProvider` that
-runs a `<Sandbox>` child workflow's request on AWS. It has two modes: Fargate
-(ECS `RunTask`, the default) and CodeBuild. AWS gives the orchestrator no shared
-filesystem with the remote task, so the request/result bundle is transported
-through an S3 bucket you already own. The shared provider-kit owns the
-request/result protocol, egress, secret scrubbing, and cleanup; this package
-supplies the S3 transport plus the ECS/CodeBuild runners.
+`@smithers-orchestrator/aws` is a Smithers `SandboxProvider` that runs a
+`<Sandbox>` child workflow's request on AWS: Fargate (ECS `RunTask`, the
+default) or CodeBuild. AWS shares no filesystem with the orchestrator, so the
+request/result bundle transports through an S3 bucket. The shared
+provider-kit handles the request/result protocol, egress, secret scrubbing,
+and cleanup; this package adds the S3 transport plus the ECS/CodeBuild
+runners.
 
-The provider id is `aws-sandbox` (exported as `AWS_SANDBOX_PROVIDER_ID`).
+Provider id: `aws-sandbox` (exported as `AWS_SANDBOX_PROVIDER_ID`).
 
 ```ts
 import {
@@ -2776,30 +2753,31 @@ import {
 
 ## Credentials
 
-Authentication uses the standard AWS SDK v3 credential chain: env vars, shared
-config, SSO, or an instance/task role. No explicit credentials are passed to the
-factory and none are ever forwarded into the remote task env. The remote task
-authenticates with its own task or build IAM role.
+Authentication uses the standard AWS SDK v3 credential chain (env vars, shared
+config, SSO, or an instance/task role). The factory takes no explicit
+credentials and forwards none into the remote task env; the task or build
+authenticates with its own IAM role.
 
-The `@aws-sdk/*` clients are optional dependencies, imported lazily. Install the
-ones your mode needs:
+The `@aws-sdk/*` clients are optional, lazily-imported dependencies. Install
+what your mode needs:
 
 - `@aws-sdk/client-s3` (always).
 - `@aws-sdk/client-ecs` (Fargate).
 - `@aws-sdk/client-codebuild` (CodeBuild).
-- `@aws-sdk/client-cloudwatch-logs` (only with `captureLogs`).
+- `@aws-sdk/client-cloudwatch-logs` (with `captureLogs`).
 
 ## Prerequisites
 
-The provider does not provision infrastructure. Set these up first:
+The provider provisions nothing; set these up first:
 
 - An S3 `bucket` that already exists. The provider only manages the key prefix
   `smithers/sandbox/<runId>/<sandboxId>/` under it.
-- For Fargate: an ECS `cluster`, a registered `taskDefinition`, at least one VPC
+- Fargate: an ECS `cluster`, a registered `taskDefinition`, at least one VPC
   `subnet`, optional `securityGroups`, and the `containerName` inside the task
-  definition. The task role needs S3 read/write on the prefix.
-- For CodeBuild: a CodeBuild `projectName`. The build role needs S3 read/write
-  on the prefix.
+  definition.
+- CodeBuild: a CodeBuild `projectName`.
+
+The task or build role needs S3 read/write on the prefix.
 
 ## Usage
 
@@ -2837,20 +2815,20 @@ Or register either provider once and reference it by id with
 ## Request/result contract
 
 The kit hands the entry command `SMITHERS_SANDBOX_REQUEST_PATH` and
-`SMITHERS_SANDBOX_RESULT_PATH`. Because there is no shared filesystem, the
-container round-trips those files through S3. The provider injects four more
-vars so the entry can find them:
+`SMITHERS_SANDBOX_RESULT_PATH`. The container round-trips those files through
+S3; the provider injects four more vars so the entry can find them:
 
 - `SMITHERS_SANDBOX_S3_BUCKET`: the transport bucket.
 - `SMITHERS_SANDBOX_S3_PREFIX`: `smithers/sandbox/<runId>/<sandboxId>`.
 - `SMITHERS_SANDBOX_REQUEST_S3_KEY`: S3 key of the request JSON.
 - `SMITHERS_SANDBOX_RESULT_S3_KEY`: S3 key the entry must write the result to.
 
-Every workdir path maps to `s3://<bucket>/<prefix>/<runId>/<sandboxId>/<encodeURIComponent(workdir-relative path)>` so two files that share a basename never collide. The entry
-either prints the result JSON to stdout or writes it to the result key. An infra
-failure (task or build fails with no result written) throws. A result file with
-`status: "failed"` is a normal failed bundle. Fargate reports a real numeric
-container exit code; CodeBuild reports a status (`SUCCEEDED` maps to 0, else 1).
+Every workdir path maps to `s3://<bucket>/<prefix>/<runId>/<sandboxId>/<encodeURIComponent(workdir-relative path)>`, so files sharing a basename never
+collide. The entry prints the result JSON to stdout or writes it to the result
+key. An infra failure (task or build fails with no result written) throws,
+while a result file with `status: "failed"` is a normal failed bundle. Fargate
+reports a real numeric exit code; CodeBuild reports a status (`SUCCEEDED`
+maps to 0, else 1).
 
 ## Factory options
 
@@ -2866,15 +2844,14 @@ container exit code; CodeBuild reports a status (`SUCCEEDED` maps to 0, else 1).
 
 ## Cleanup and cost
 
-`cleanup: "destroy"` (default) stops the task or build if it is still running
-and deletes the transient S3 objects. `cleanup: "keep"` leaves them. You pay for
-Fargate task time or CodeBuild build minutes, plus S3 storage of the small
-transient bundle objects. Set a short lifecycle TTL on the `smithers/sandbox/`
-prefix to reap anything a crash leaves behind. EC2 mode is documented future
-work.
+`cleanup: "destroy"` (default) stops the task or build if still running and
+deletes the transient S3 objects; `cleanup: "keep"` leaves them. You pay for
+Fargate task time or CodeBuild build minutes, plus S3 storage of those small
+objects. Set a short lifecycle TTL on the `smithers/sandbox/` prefix to reap
+crash leftovers. EC2 mode is future work.
 
 `createMockAwsSandboxEnvironment(handler, mockOptions?)` provides in-memory S3,
-ECS, CodeBuild, and CloudWatch Logs doubles for tests. It needs zero AWS
+ECS, CodeBuild, and CloudWatch Logs doubles for tests, needing zero AWS
 credentials, so unit tests run in CI without touching AWS.
 
 ---
@@ -2887,10 +2864,10 @@ credentials, so unit tests run in CI without touching AWS.
 
 `@smithers-orchestrator/gcp` is a first-class Smithers `SandboxProvider` for
 Google Cloud. It executes a `<Sandbox>` child workflow's request on Cloud Run
-Jobs and ships the request/result bundle through a Cloud Storage bucket, because
-Cloud Run Jobs give no shared filesystem back to the caller. The shared
+Jobs and ships the request/result bundle through a Cloud Storage bucket,
+since Cloud Run Jobs give the caller no shared filesystem. The shared
 provider-kit owns the request/result protocol, egress, secret scrubbing, and
-cleanup; this package supplies the GCS transport plus the Cloud Run runner.
+cleanup; this package supplies just the GCS transport and the Cloud Run runner.
 
 The provider id is `gcp-sandbox` (exported as `GCP_SANDBOX_PROVIDER_ID`).
 
@@ -2906,13 +2883,13 @@ import {
 
 Authentication is Application Default Credentials:
 `GOOGLE_APPLICATION_CREDENTIALS` (a service-account key file) or workload
-identity, plus `GOOGLE_CLOUD_PROJECT`. Local credentials are never forwarded
-into the container. The container env is `options.env` plus the Smithers, egress,
-and GCS-transport variables.
+identity, plus `GOOGLE_CLOUD_PROJECT`. Local credentials never reach the
+container; its env is `options.env` plus the Smithers, egress, and
+GCS-transport variables.
 
-`@google-cloud/run` and `@google-cloud/storage` are optional dependencies,
-imported lazily inside the session, so the package loads without them. Install
-both to use the real provider:
+`@google-cloud/run` and `@google-cloud/storage` are optional, lazily-imported
+dependencies, so the package loads without them; install both to use the
+real provider:
 
 ```
 npm install @google-cloud/run @google-cloud/storage
@@ -2920,14 +2897,14 @@ npm install @google-cloud/run @google-cloud/storage
 
 ## Prerequisites
 
-The provider does not create the bucket. Set these up first:
+The provider doesn't create the bucket; set these up first:
 
-- A Cloud Storage `bucket` that already exists (the transport). Set a short
+- A pre-existing Cloud Storage `bucket` (the transport). Set a short
   lifecycle TTL on the `smithers/sandbox/` prefix to reap crash leftovers.
-- A Cloud Run `jobName` to run, or set `createJob` to have a per-run Job created
-  and torn down. When `createJob` is set you must also pass a container `image`
-  (Cloud Run requires one to create the Job). The job's service account needs
-  read/write on the bucket prefix.
+- A Cloud Run `jobName` to run, or `createJob` to create and tear down a
+  per-run Job. `createJob` also requires a container `image` (Cloud Run needs
+  one to create the Job). The job's service account needs read/write on the
+  bucket prefix.
 
 ## Required options
 
@@ -2970,9 +2947,9 @@ Or register it once and reference it by id with
 
 The kit writes `.smithers/sandbox-request.json` and expects
 `.smithers/sandbox-result.json` back, handing the container
-`SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH`. Because there
-is no shared filesystem, the container round-trips those files through GCS. The
-runner injects four extra vars:
+`SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH`. Since
+there's no shared filesystem, the container round-trips those files through
+GCS via four extra vars the runner injects:
 
 - `SMITHERS_SANDBOX_GCS_BUCKET`: the transport bucket.
 - `SMITHERS_SANDBOX_GCS_PREFIX`: object-name prefix.
@@ -2982,20 +2959,20 @@ runner injects four extra vars:
 Every workdir-relative path maps to
 `<prefix>/<runId>/<sandboxId>/<percent-encoded workdir-relative path>` (the full path, not just the basename, so same-named files never collide). Cloud Run reports task counts
 and conditions, not a numeric exit code: a succeeded task is exit 0 and a failed
-task is exit 1. An infra failure (execution failed, no result written) throws. A
-run that writes `status: "failed"` result JSON is a normal failed bundle the kit
-materializes.
+task is exit 1. An infra failure (execution failed, no result written) throws;
+a run that writes `status: "failed"` result JSON is just a normal failed
+bundle the kit materializes.
 
 ## Cleanup and cost
 
 `cleanup: "destroy"` (default) deletes the transient GCS objects and, when
-`createJob` made a per-run job, deletes that job. `cleanup: "keep"` leaves
+`createJob` made a per-run job, that job too; `cleanup: "keep"` leaves
 everything. The bucket itself is never created or deleted. You pay for Cloud Run
 Job execution time plus GCS storage of the small transient objects. Compute
-Engine execution is documented future work.
+Engine execution is future work.
 
 `createMockGcpSandboxEnvironment(handler, config?)` provides in-memory Cloud
-Storage and Cloud Run doubles for tests. It needs zero real GCP credentials or
+Storage and Cloud Run doubles for tests, needing zero real GCP credentials or
 bucket, so unit tests run in CI without touching GCP.
 
 ---
@@ -3006,20 +2983,20 @@ bucket, so unit tests run in CI without touching GCP.
 
 # Serverless deployment
 
-Deploying Smithers serverlessly is three independent choices. This page maps
-each choice onto the platforms Smithers supports today, states honestly what
-runs where, and points at the exact exports. For the conceptual model behind it
-(in-process vs full-OS agents, what's billed), read
+Deploying Smithers serverlessly means three independent choices. This page maps
+each onto the platforms Smithers supports today, states what runs where, and
+points at the exact exports. For the conceptual model (in-process vs full-OS
+agents, what's billed), read
 [Where agents run, sandboxes & cost](/concepts/execution-model) first.
 
 1. **A control-plane host** -- where the engine drives the run.
 2. **A storage descriptor** -- where durable run state lives.
-3. **A sandbox provider** -- *only* if your workflow uses CLI / full-OS agents
-   via [`<Sandbox>`](/components/sandbox); in-process SDK agents need none.
+3. **A sandbox provider** -- needed only for CLI / full-OS agents, via
+   [`<Sandbox>`](/components/sandbox).
 
 ## 1. Control-plane host
 
-The engine renders the workflow, schedules tasks, and persists frames. Where it
+The engine renders the workflow, schedules tasks, and persists frames; where it
 can run depends on the runtime's system access:
 
 | Host | Runtime | Runs the engine today? |
@@ -3029,24 +3006,24 @@ can run depends on the runtime's system access:
 | Cloudflare **Worker** / Vercel **Edge** | V8 isolate (no `fs`/`child_process`) | ⚠️ In progress |
 
 <Warning>
-  **The engine currently requires the Bun runtime.** Run it on any container
-  platform (ECS, App Runner, Cloud Run, GKE, a VM) under Bun and the full engine
-  works today. Two portability efforts are in flight:
+  **The engine currently requires the Bun runtime**: run it under Bun on any of
+  the container platforms above and the full engine works today. Two
+  portability efforts are in flight:
 
   - **Node runtime** (Vercel Node functions, Lambda Node): closest, since Node
     has `fs` + `child_process`. The engine module now **imports cleanly under
     plain Node** (all `bun:sqlite`-reaching value imports are lazy-loaded, guarded
-    by a node-subprocess regression test), and it no longer hard-binds the Bun
+    by a node-subprocess regression test) and no longer hard-binds the Bun
     platform layer (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`,
-    supplied by your entrypoint from `@effect/platform-node`). The engine now
+    supplied by your entrypoint from `@effect/platform-node`). It now
     **drives a run to completion under plain Node**, proven end-to-end by a
     node-subprocess regression test that runs a compute-task workflow against
     PGlite and asserts the run reaches `finished`; the worker-task dispatch path
-    no longer requires bun-sqlite (under Node the `@effect/cluster` single-runner
+    no longer requires bun-sqlite (under Node, `@effect/cluster`'s single-runner
     uses the in-memory MessageStorage driver, matching the non-durable `:memory:`
-    sqlite the Bun path already used). Still to land before calling Node fully
-    supported: validating agent (CLI/SDK) tasks and the gateway under Node.
-  - **Isolates** (Workers, Edge): further out -- the engine and gateway also use
+    sqlite the Bun path already used). Still to land: validating agent (CLI/SDK)
+    tasks and the gateway under Node.
+  - **Isolates** (Workers, Edge): further out. The engine and gateway also use
     `node:fs` / `node:child_process` (git/jj worktrees on a real filesystem),
     which an `@effect/platform` `FileSystem`/`Command` seam must abstract. Today
     an isolate can host **storage + in-process SDK agents** (via
@@ -3062,18 +3039,18 @@ control plane runs on any of these:
 |---|---|
 | `bun:sqlite` (default) | Local dev on Bun. |
 | PGlite | Embedded Postgres, zero external DB. |
-| Postgres | Production: RDS, Cloud SQL, Neon, Supabase, any Postgres. Use the pooled/serverless endpoint on functions. |
+| Postgres | Production: RDS, Cloud SQL, Neon, Supabase, any Postgres, using the pooled/serverless endpoint on functions. |
 | `createCloudflareDurableObjectSqliteDescriptor` | Cloudflare Workers durable run-of-record (real interactive transactions). |
 | `createCloudflareD1SqliteDescriptor` | Cloudflare D1 -- **read-mostly only** (no interactive transactions; unsafe for durable run state). |
 
-On Node hosts, point Smithers at Postgres and you are done. On Cloudflare, build
+On Node hosts, point Smithers at Postgres and you're done. On Cloudflare, build
 the API with `createSmithersCloudflare` over the Durable Object SQLite
 descriptor (see [Cloudflare](/integrations/cloudflare)).
 
 ## 3. Sandbox provider (only for full-OS / CLI agents)
 
 In-process SDK agents (`AnthropicAgent`, `OpenAIAgent`, `HermesAgent`,
-`ElizaAgent`) need **no** provider -- they are HTTPS calls in your process. CLI
+`ElizaAgent`) need **no** provider: they're HTTPS calls in your process. CLI
 agents (`ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, …) spawn a vendor
 binary and must run inside a container, which a `SandboxProvider` supplies at
 each `<Sandbox>` boundary. Each provider ships a `create…SandboxProvider` and a
@@ -3092,7 +3069,7 @@ helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
 | Any host (Docker) | `@smithers-orchestrator/sandbox` | Docker `http-runner` | Local/remote Docker |
 
 <Note>
-  There is no dedicated Kubernetes provider yet. On a cluster, run the
+  There's no dedicated Kubernetes provider yet: on a cluster, run the
   control plane as a normal Node deployment and use the Docker `http-runner`
   (or register a custom `SandboxProvider` that submits a K8s Job) for the
   full-OS agent path.
@@ -3100,8 +3077,8 @@ helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
 
 ## Per-platform recipes
 
-The control plane runs under **Bun** on any of these container platforms today;
-the Node-runtime and isolate paths are in progress (see the host section above).
+The control plane runs under **Bun** on these container platforms today;
+Node-runtime and isolate paths are still in progress (see above).
 
 | Platform | Control plane (Bun container) | Storage | Sandbox provider (CLI agents) | Status |
 |---|---|---|---|---|
@@ -3139,26 +3116,19 @@ Three independent axes (detailed in
 
 # Run on Plue
 
-`run-on-plue` executes a Smithers workflow script on Plue infrastructure
-instead of the local machine. It uses the
-[`<Sandbox>`](/components/sandbox) provider seam with
-`createPlueSandboxProvider`, and the provider shells through the `plue` CLI so
-Plue owns workspace lifecycle, authentication, quotas, placement, and sandbox
-execution through its self-hosted Microsandbox plane.
-
-Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
+`run-on-plue` executes a Smithers workflow script on Plue infrastructure instead of locally, via the [`<Sandbox>`](/components/sandbox) provider seam and `createPlueSandboxProvider`, which shells through the `plue` CLI so Plue owns workspace lifecycle, authentication, quotas, placement, and execution through its self-hosted Microsandbox plane. Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
 
 ## What it does
 
-The workflow lives at `.smithers/workflows/run-on-plue.tsx`. It accepts a path to any Smithers `.tsx` workflow, reads that file, and sends it to a Plue-backed sandbox provider.
+The workflow lives at `.smithers/workflows/run-on-plue.tsx`: it accepts a path to any Smithers `.tsx` workflow, reads it, and sends it to a Plue-backed sandbox provider.
 
 The provider:
 
 1. Creates a Plue workspace with `plue workspace create --repo <owner>/<repo>`.
-2. Polls `plue workspace view --format json` until the workspace is running and has an SSH command.
+2. Polls `plue workspace view --format json` until running with an SSH command.
 3. Connects over SSH in batch mode.
-4. Installs Bun if missing, then installs `@anthropic-ai/claude-code` and `@openai/codex` when those CLIs are absent.
-5. Seeds Claude and Codex auth via `plue workspace exec --seed-agent-auth claude,codex`.
+4. Installs Bun, then the Claude Code and Codex CLIs, when missing.
+5. Seeds Claude and Codex auth for the remote CLIs.
 6. Ships a small remote project containing the child workflow source, `agents.ts`, `package.json`, and `input.json`.
 7. Runs `smithers-orchestrator up` in the workspace and reads the remote run result back over SSH.
 8. Deletes the workspace unless `keepWorkspace` is true.
@@ -3177,18 +3147,12 @@ The parent workflow receives:
 ## Requirements
 
 - `plue` CLI installed and authenticated on the host running Smithers. Verify with `plue auth status`.
-- The target Plue server must have workspaces enabled. Local Plue uses `SMITHERS_FEATURE_FLAGS_WORKSPACES=true`.
-- The Plue server must be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` and an authenticated Microsandbox controller.
+- The target Plue server must have workspaces enabled (`SMITHERS_FEATURE_FLAGS_WORKSPACES=true` locally) and be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` plus an authenticated Microsandbox controller.
 - The repo passed as `repo` must exist in Plue and be accessible to the authenticated user.
-- Claude auth must be available locally. The preferred path is Claude Code subscription OAuth in the OS credential store; `ANTHROPIC_API_KEY` only works when that key has usable API billing.
-- Codex auth must be available locally. The preferred path is `~/.codex/auth.json`; `OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth.
+- Claude and Codex auth must be available locally: prefer Claude Code subscription OAuth in the OS credential store (`ANTHROPIC_API_KEY` only works with usable API billing) and `~/.codex/auth.json` (`OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth).
 - If `plue` is not on `PATH`, set `PLUE_BIN` or pass `plueBin` in the workflow input.
 
-Secrets are seeded at run time through Plue's operation-scoped secret or
-credential-proxy path. They must not be written into guest disks, snapshots,
-images, command arguments, logs, errors, or durable request state. Do not bake
-Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials
-into workspace snapshots or committed files.
+Secrets are seeded at run time through Plue's operation-scoped secret or credential-proxy path: never write Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials into guest disks, snapshots, images, command arguments, logs, errors, durable request state, or committed files.
 
 ## Run a workflow remotely
 
@@ -3262,18 +3226,16 @@ export default smithers((ctx) => (
 
 ## Non-interactive caveat
 
-Keep `reviewDiffs={false}` for Plue runs. `<Sandbox>` defaults to fail-closed diff review, which expects a local review/approval interaction before applying file changes. The v1 Plue provider is non-interactive: it runs the remote child, maps the remote result into the parent run, and does not open a human approval loop inside the VM.
+Keep `reviewDiffs={false}` for Plue runs: `<Sandbox>` defaults to fail-closed diff review, which expects a local approval interaction before applying file changes, but the v1 Plue provider is non-interactive. It runs the remote child, maps the result into the parent run, and opens no human approval loop inside the VM.
 
-Design child workflows so they return structured output or artifacts. If you need to inspect the remote VM after a failure, run with `keepWorkspace: true`, then use `plue workspace view` or `plue workspace ssh` to connect.
+Design child workflows to return structured output or artifacts. To inspect the remote VM after a failure, run with `keepWorkspace: true` and connect with `plue workspace view` or `plue workspace ssh`.
 
 ## Claude and Codex bootstrap
 
-Remote workspaces may not have all agent CLIs preinstalled. The provider's bootstrap is idempotent:
+Remote workspaces may not have all agent CLIs preinstalled, so the provider bootstraps them idempotently:
 
-- `bun` is installed from the official installer when missing.
-- `claude` is installed with `bun i -g @anthropic-ai/claude-code` when missing.
-- `codex` is installed with `bun i -g @openai/codex` when missing.
+- When missing, `bun` installs from the official installer, and `claude` (`bun i -g @anthropic-ai/claude-code`) and `codex` (`bun i -g @openai/codex`) install via Bun.
 - `~/.bun/bin` is prepended to `PATH` for remote commands.
 - `plue workspace exec --seed-agent-auth claude,codex` stages Claude Code and Codex credentials before the child workflow runs.
 
-The remote mini-project includes an `agents.ts` that exports both `ClaudeCodeAgent` and `CodexAgent`, so child workflows can import or define tasks that use either CLI once bootstrap completes.
+The remote mini-project's `agents.ts` exports both `ClaudeCodeAgent` and `CodexAgent`, so child workflows can use either CLI once bootstrap completes.

@@ -8,7 +8,7 @@
 
 > Subscribe to lifecycle events. Full event union lives in Types.
 
-`SmithersEvent` is the discriminated union of lifecycle events the runtime and observability layer understand. Most variants are emitted by the runtime; reserved variants are called out in [Event Types](/reference/event-types). The full type definition lives in [Types](/reference/types); that's the source of truth for field shapes.
+`SmithersEvent` is the discriminated union of lifecycle events the runtime and observability layer understand. Most variants are emitted by the runtime; reserved variants are called out in [Event Types](/reference/event-types). The full type definition, and source of truth for field shapes, lives in [Types](/reference/types).
 
 ## Subscribe via `onProgress`
 
@@ -52,7 +52,7 @@ type NodeScoped      = CommonFields & { nodeId: string; iteration: number };
 type AttemptScoped   = NodeScoped   & { attempt: number };
 ```
 
-Every event includes `type`, `runId`, `timestampMs`. Node-scoped events add `nodeId` and `iteration`. Attempt-scoped add `attempt`.
+Every event has `type`, `runId`, `timestampMs`; node-scoped adds `nodeId`/`iteration`; attempt-scoped adds `attempt`.
 
 ## Event categories
 
@@ -78,7 +78,7 @@ Used by `bunx smithers-orchestrator events --type <category>` and the metrics la
 | `snapshot` | SnapshotCaptured |
 | `supervisor` | SupervisorStarted, SupervisorPollCompleted |
 
-`RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it. Use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
+`RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it; use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
 
 `OpenApiToolCalled` is categorized as `openapi` for forward compatibility, but the current OpenAPI tool factory records Effect metrics and log spans rather than emitting that event onto the run event bus.
 
@@ -101,7 +101,7 @@ Used by `bunx smithers-orchestrator events --type <category>` and the metrics la
 
 > Current SmithersEvent variants, event categories, and top-level fields.
 
-`SmithersEvent` is the discriminated union understood by the runtime and observability layer. Runtime-emitted variants are persisted to the event log, passed to `runWorkflow({ onProgress })`, streamed by Gateway, and filtered by `bunx smithers-orchestrator events --type <category>`. Reserved variants are documented here when they are typed but not currently emitted.
+`SmithersEvent` is the discriminated union the runtime and observability layer understand. Runtime-emitted variants are persisted to the event log, passed to `runWorkflow({ onProgress })`, streamed by Gateway, and filtered by `bunx smithers-orchestrator events --type <category>`. Reserved variants appear here typed but not yet emitted.
 
 Every variant has `type`, `runId`, and `timestampMs`. Node-scoped variants add `nodeId` and `iteration`. Attempt-scoped variants add `attempt`.
 
@@ -143,10 +143,10 @@ type RunState =
 Discriminate on the `type` field, e.g. `event.type === "NodeFailed"`, to handle specific lifecycle moments.
 
 <Warning>
-**In a browser UI the shape is different.** `useGatewayRunEvents` (and the vanilla
-`streamRunEventsResilient`) yield **`GatewayEventFrame`** objects, not raw
-`SmithersEvent`s. On a frame the event NAME is `frame.event` and every other field
-lives under `frame.payload`. So the client-side equivalents are:
+**Browser UIs see a different shape.** `useGatewayRunEvents` and the vanilla
+`streamRunEventsResilient` yield **`GatewayEventFrame`** objects, not raw
+`SmithersEvent`s: the event NAME is `frame.event`, and every other field lives
+under `frame.payload`. Client-side equivalent:
 
 ```tsx
 const { events } = useGatewayRunEvents(runId, { afterSeq: 0 });
@@ -159,8 +159,8 @@ for (const frame of events) {
 ```
 
 Use `frame.event === "NodeStarted" | "NodeFinished" | "NodeFailed"` to build a
-per-node status view, and `frame.payload.nodeId` to key it. The table below lists
-each variant's fields; in a UI those fields are on `frame.payload`.
+per-node status view, keyed by `frame.payload.nodeId`. The table below lists
+each variant's fields; in a UI those live under `frame.payload`.
 </Warning>
 
 | Event | Top-level fields |
@@ -242,9 +242,7 @@ each variant's fields; in a UI those fields are on `frame.payload`.
 
 ## Agent Event Payload
 
-This type describes the `.event` field of the `AgentEvent` variant above. For structured traces, prefer `AgentTraceEvent`, `AgentTraceSummary`, and `AgentSessionEvent`.
-
-`AgentEvent.event` is the normalized CLI-agent event payload:
+Describes the `.event` field of the `AgentEvent` variant above; for structured traces, prefer `AgentTraceEvent`, `AgentTraceSummary`, and `AgentSessionEvent`. `AgentEvent.event` is the normalized CLI-agent event payload:
 
 ```ts
 type AgentCliEvent =
