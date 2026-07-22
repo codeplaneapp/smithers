@@ -648,6 +648,31 @@ function extractHijackContinuation(meta, engine) {
     return null;
 }
 /**
+ * Resolve the CLI session id an output-correction retry should resume.
+ * CLI harness agents (claude --resume, codex exec resume) carry the whole
+ * task context in their own session, so resuming it makes corrections cheap
+ * and in-context instead of spawning a context-free process. Returns
+ * undefined for SDK agents and when no session id was captured from the
+ * agent's event stream.
+ *
+ * @param {any} agent
+ * @param {Record<string, unknown>} meta
+ * @returns {string | undefined}
+ */
+function resolveCorrectionResumeSession(agent, meta) {
+    const engine = agent && typeof agent === "object" && typeof agent.cliEngine === "string"
+        ? agent.cliEngine
+        : agent && typeof agent === "object" && typeof agent.hijackEngine === "string"
+            ? agent.hijackEngine
+            : null;
+    if (!engine || meta.agentEngine !== engine) {
+        return undefined;
+    }
+    return typeof meta.agentResume === "string" && meta.agentResume.length > 0
+        ? meta.agentResume
+        : undefined;
+}
+/**
  * @param {Array<{ metaJson?: string | null }>} attempts
  * @param {string} engine
  * @returns {{ mode: "native-cli"; resume: string } | { mode: "conversation"; messages: unknown[] } | undefined}
@@ -5349,45 +5374,62 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             }
                         }
                     }
-                    // If no JSON was found, spend one correction slot asking the
-                    // selected agent for structured output. A zero budget must
-                    // never make a second model call.
-                    if (output === undefined && desc.agent && schemaCorrectionAttempts < maxSchemaRetries) {
+                    // If no JSON was found, spend correction slots asking the
+                    // selected agent for structured output until the budget is
+                    // exhausted. A zero budget must never make a second model
+                    // call. CLI harness agents resume their own session
+                    // (claude --resume / codex exec resume) so the correction
+                    // keeps the full task context; agents without a captured
+                    // session id fall back to a context-free repair prompt.
+                    let latestNoJsonText = text;
+                    while (output === undefined && desc.agent && schemaCorrectionAttempts < maxSchemaRetries) {
                         schemaCorrectionAttempts += 1;
                         attemptMeta.schemaCorrectionAttempts = schemaCorrectionAttempts;
                         const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
-                        // Include a truncated summary of the original response so the model has context
-                        const responseSummary = text.length > 2000
-                            ? text.slice(0, 1000) + "\n...[truncated]...\n" + text.slice(-1000)
-                            : text;
-                        // Include the ORIGINAL task so this context-free repair
+                        const correctionResumeSession = resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
+                        // Include a truncated summary of the latest non-JSON response so the model has context
+                        const responseSummary = latestNoJsonText.length > 2000
+                            ? latestNoJsonText.slice(0, 1000) + "\n...[truncated]...\n" + latestNoJsonText.slice(-1000)
+                            : latestNoJsonText;
+                        // Include the ORIGINAL task so a context-free repair
                         // session knows what the work was about. Without it the
                         // model honestly reports the task as missing and emits
-                        // schema-valid but amnesiac values (#277).
+                        // schema-valid but amnesiac values (#277). A resumed CLI
+                        // session already carries the task and the agent's work,
+                        // so it only needs the output contract restated.
                         const originalPrompt = typeof desc.prompt === "string" ? desc.prompt.trim() : "";
                         const originalTask = originalPrompt.length === 0
                             ? undefined
                             : originalPrompt.length > 8000
                                 ? originalPrompt.slice(0, 6000) + "\n...[task truncated]...\n" + originalPrompt.slice(-2000)
                                 : originalPrompt;
-                        const jsonPrompt = [
-                            ...(originalTask
-                                ? [
-                                    `You were given this task:`,
-                                    ``,
-                                    originalTask,
-                                    ``,
-                                ]
-                                : []),
-                            `You previously completed ${originalTask ? "it" : "a task"} and produced this response (possibly truncated):`,
-                            ``,
-                            responseSummary,
-                            ``,
-                            `Now you MUST output ONLY a valid JSON object (no other text) summarizing your work above, with exactly these fields and types:`,
-                            schemaDesc,
-                            ``,
-                            `Output ONLY the raw JSON object, with no markdown fences or prose.`,
-                        ].join("\n");
+                        const jsonPrompt = correctionResumeSession
+                            ? [
+                                `Your previous response did not include the required JSON output.`,
+                                ``,
+                                `Reply with ONLY a valid JSON object (no other text) summarizing the work you already completed, with exactly these fields and types:`,
+                                schemaDesc,
+                                ``,
+                                `Output ONLY the raw JSON object, with no markdown fences or prose.`,
+                            ].join("\n")
+                            : [
+                                ...(originalTask
+                                    ? [
+                                        `You were given this task:`,
+                                        ``,
+                                        originalTask,
+                                        ``,
+                                    ]
+                                    : []),
+                                `You previously completed ${originalTask ? "it" : "a task"} and produced this response (possibly truncated):`,
+                                ``,
+                                responseSummary,
+                                ``,
+                                `Now you MUST output ONLY a valid JSON object (no other text) summarizing your work above, with exactly these fields and types:`,
+                                schemaDesc,
+                                ``,
+                                `Output ONLY the raw JSON object, with no markdown fences or prose.`,
+                            ].join("\n");
                         logInfo("output format correction", {
                             runId,
                             nodeId: desc.nodeId,
@@ -5396,11 +5438,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             schemaRetry: schemaCorrectionAttempts,
                             maxSchemaRetries,
                             correctionKind: "json-format",
+                            resumedSession: Boolean(correctionResumeSession),
                         }, "engine:schema-retry");
                         const retryResult = await raceTaskAbort(effectiveAgent.generate({
                             options: undefined,
                             abortSignal: taskSignal,
                             prompt: jsonPrompt,
+                            resumeSession: correctionResumeSession,
                             ...(generationTools ? { tools: generationTools } : {}),
                             rootDir: taskRoot,
                             maxOutputBytes: toolConfig.maxOutputBytes,
@@ -5430,15 +5474,25 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             onStepFinish: handleSdkStepFinish,
                             onStepEnd: handleSdkStepFinish,
                         }));
+                        // Flush deferred event handlers so a fresh session id
+                        // emitted by this correction call is visible before the
+                        // next iteration decides what to resume.
+                        await Promise.all([...pendingOwnershipChecks]);
                         const retryText = retryResult.text ?? "";
                         responseText = retryText || responseText;
-                        const originalResponseMessages = result?.response?.messages;
+                        latestNoJsonText = retryText || latestNoJsonText;
+                        if (schemaCorrectionMessages.length === 0) {
+                            const originalResponseMessages = result?.response?.messages;
+                            schemaCorrectionMessages = [
+                                { role: "user", content: desc.prompt ?? "" },
+                                ...(Array.isArray(originalResponseMessages) && originalResponseMessages.length > 0
+                                    ? originalResponseMessages
+                                    : [{ role: "assistant", content: text }]),
+                            ];
+                        }
                         const correctionResponseMessages = retryResult?.response?.messages;
                         schemaCorrectionMessages = [
-                            { role: "user", content: desc.prompt ?? "" },
-                            ...(Array.isArray(originalResponseMessages) && originalResponseMessages.length > 0
-                                ? originalResponseMessages
-                                : [{ role: "assistant", content: text }]),
+                            ...schemaCorrectionMessages,
                             { role: "user", content: jsonPrompt },
                             ...(Array.isArray(correctionResponseMessages) && correctionResponseMessages.length > 0
                                 ? correctionResponseMessages
@@ -5677,6 +5731,10 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     ``,
                     `Output ONLY the raw JSON object, with no markdown fences or other text.`,
                 ].join("\n");
+            // CLI harness agents resume their own session so the correction
+            // runs with the full task context; SDK agents replay the recorded
+            // conversation messages instead.
+            const correctionResumeSession = resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
             logInfo("schema validation retry", {
                 runId,
                 nodeId: desc.nodeId,
@@ -5685,6 +5743,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 schemaRetry: schemaCorrectionAttempts,
                 maxSchemaRetries,
                 correctionKind: "schema-validation",
+                resumedSession: Boolean(correctionResumeSession),
                 zodIssues,
             }, "engine:schema-retry");
             // Append the correction as a user message to the conversation
@@ -5695,7 +5754,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const schemaRetryResult = await raceTaskAbort(effectiveAgent.generate({
                 options: undefined,
                 abortSignal: taskSignal,
-                messages: retryMessages,
+                ...(correctionResumeSession
+                    ? { prompt: schemaRetryPrompt, resumeSession: correctionResumeSession }
+                    : { messages: retryMessages }),
                 ...(generationTools ? { tools: generationTools } : {}),
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
@@ -5728,6 +5789,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     ? { outputSchema: desc.outputSchema }
                     : {}),
             }));
+            // Flush deferred event handlers so a fresh session id emitted by
+            // this correction call is visible to the next iteration.
+            await Promise.all([...pendingOwnershipChecks]);
             const retryText = (schemaRetryResult.text ?? "").trim();
             responseText = retryText || responseText;
             if (!(await confirmHeartbeatOwnership())) {

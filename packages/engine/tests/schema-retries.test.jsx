@@ -330,4 +330,142 @@ describe("maxSchemaRetries output-correction budget", () => {
         expect(taskAttempts).toBe(2);
         cleanup();
     }, TIMEOUT_MS);
+
+    test("no-JSON responses consume the whole correction budget before failing", async () => {
+        const { smithers, outputs, db, cleanup } = createTestSmithers({
+            out: z.object({ value: z.number() }),
+        });
+        let calls = 0;
+        const agent = {
+            id: "never-json",
+            tools: {},
+            async generate() {
+                calls += 1;
+                return { text: "prose only, no JSON here" };
+            },
+        };
+        const workflow = smithers(() => (
+            <Workflow name="format-corrections-exhaust">
+                <Task id="t" output={outputs.out} agent={agent} noRetry>
+                    do work
+                </Task>
+            </Workflow>
+        ));
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("failed");
+        // Initial call + MAX_SCHEMA_RETRIES format corrections = MAX+1 calls;
+        // the attempt only fails once the whole correction budget is spent.
+        expect(calls).toBe(MAX_SCHEMA_RETRIES + 1);
+        const adapter = new SmithersDb(db);
+        const attempts = await adapter.listAttempts(result.runId, "t", 0);
+        const errorJson = JSON.parse(attempts[attempts.length - 1]?.errorJson ?? "{}");
+        expect(errorJson.code).toBe("INVALID_OUTPUT");
+        expect(errorJson.details).toMatchObject({
+            schemaRetryAttempts: MAX_SCHEMA_RETRIES,
+            maxSchemaRetries: MAX_SCHEMA_RETRIES,
+        });
+        cleanup();
+    }, TIMEOUT_MS);
+
+    test("CLI agents resume their session for JSON-format corrections", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            out: z.object({ value: z.number() }),
+        });
+        const calls = [];
+        const agent = {
+            id: "cli-format-corrections",
+            cliEngine: "claude-code",
+            tools: {},
+            /** @param {any} args */
+            async generate(args) {
+                calls.push(args);
+                if (calls.length === 1) {
+                    args.onEvent?.({
+                        type: "started",
+                        engine: "claude-code",
+                        title: "Claude Code",
+                        resume: "cli-session-1",
+                    });
+                    return { text: "I finished the work but wrote prose instead of JSON." };
+                }
+                if (calls.length === 2) {
+                    // Resumed CLI sessions get a fresh session id from the CLI's
+                    // init event; later corrections must resume the LATEST one.
+                    args.onEvent?.({
+                        type: "started",
+                        engine: "claude-code",
+                        title: "Claude Code",
+                        resume: "cli-session-2",
+                    });
+                    return { text: "Still prose, still no JSON." };
+                }
+                return { text: '{"value":42}' };
+            },
+        };
+        const workflow = smithers(() => (
+            <Workflow name="cli-format-corrections">
+                <Task id="t" output={outputs.out} agent={agent} noRetry>
+                    do work
+                </Task>
+            </Workflow>
+        ));
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        expect(calls).toHaveLength(3);
+        // Corrections resume the agent's own CLI session instead of spawning a
+        // context-free repair process.
+        expect(calls[0].resumeSession).toBeUndefined();
+        expect(calls[1].resumeSession).toBe("cli-session-1");
+        expect(calls[2].resumeSession).toBe("cli-session-2");
+        // A resumed session already holds the task context, so the correction
+        // prompt only restates the output contract.
+        expect(typeof calls[1].prompt).toBe("string");
+        expect(calls[1].prompt).not.toContain("You were given this task");
+        expect(calls[1].prompt).toContain("ONLY a valid JSON object");
+        cleanup();
+    }, TIMEOUT_MS);
+
+    test("CLI agents resume their session for schema-validation corrections", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            out: z.object({ value: z.number() }),
+        });
+        const calls = [];
+        const agent = {
+            id: "cli-schema-corrections",
+            cliEngine: "claude-code",
+            tools: {},
+            /** @param {any} args */
+            async generate(args) {
+                calls.push(args);
+                if (calls.length === 1) {
+                    args.onEvent?.({
+                        type: "started",
+                        engine: "claude-code",
+                        title: "Claude Code",
+                        resume: "cli-session-a",
+                    });
+                    return { text: '{"wrong":"x"}' };
+                }
+                return { text: '{"value":7}' };
+            },
+        };
+        const workflow = smithers(() => (
+            <Workflow name="cli-schema-corrections">
+                <Task id="t" output={outputs.out} agent={agent} noRetry>
+                    do work
+                </Task>
+            </Workflow>
+        ));
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        expect(calls).toHaveLength(2);
+        // The validation retry resumes the CLI session with only the
+        // correction prompt instead of replaying a flattened transcript.
+        const retryArgs = calls[1];
+        expect(retryArgs.resumeSession).toBe("cli-session-a");
+        expect(retryArgs.messages).toBeUndefined();
+        expect(typeof retryArgs.prompt).toBe("string");
+        expect(retryArgs.prompt).toContain("didn't match the required schema");
+        cleanup();
+    }, TIMEOUT_MS);
 });

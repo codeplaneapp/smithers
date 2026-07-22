@@ -3898,7 +3898,7 @@ const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reas
 
 - `memory` overrides the nearest `<Memory>` provider for this task. Recall and primer failures log a warning and run the original prompt.
 - Forking never reuses a native session id; it always copies into a new one (see Fork, error cases).
-- When `outputSchema` is set, JSON is extracted from agent text; schema-validation retries don't consume `retries`.
+- When `outputSchema` is set, JSON is extracted from agent text. Missing or invalid JSON triggers up to `maxSchemaRetries` correction calls before the attempt fails; corrections resume the agent's own CLI session (`claude --resume`, `codex exec resume`) when a session id was captured, so the fix runs with full task context instead of a fresh session. Correction calls don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.
 
 ---
