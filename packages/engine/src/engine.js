@@ -674,6 +674,31 @@ function resolveCorrectionResumeSession(agent, meta) {
         : undefined;
 }
 /**
+ * Resolve the CLI session id an output-correction retry should resume.
+ * CLI harness agents (claude --resume, codex exec resume) carry the whole
+ * task context in their own session, so resuming it makes corrections cheap
+ * and in-context instead of spawning a context-free process. Returns
+ * undefined for SDK agents and when no session id was captured from the
+ * agent's event stream.
+ *
+ * @param {any} agent
+ * @param {Record<string, unknown>} meta
+ * @returns {string | undefined}
+ */
+function resolveCorrectionResumeSession(agent, meta) {
+    const engine = agent && typeof agent === "object" && typeof agent.cliEngine === "string"
+        ? agent.cliEngine
+        : agent && typeof agent === "object" && typeof agent.hijackEngine === "string"
+            ? agent.hijackEngine
+            : null;
+    if (!engine || meta.agentEngine !== engine) {
+        return undefined;
+    }
+    return typeof meta.agentResume === "string" && meta.agentResume.length > 0
+        ? meta.agentResume
+        : undefined;
+}
+/**
  * @param {Array<{ metaJson?: string | null }>} attempts
  * @param {string} engine
  * @returns {{ mode: "native-cli"; resume: string } | { mode: "conversation"; messages: unknown[] } | undefined}
