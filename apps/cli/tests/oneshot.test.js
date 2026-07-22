@@ -10,6 +10,7 @@ import { loadOneshotConfig } from "../src/oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "../src/oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "../src/oneshot/resolveOneshotChain.js";
 import { rewriteOneshotBooleanValues } from "../src/oneshot/rewriteOneshotBooleanValues.js";
+import { cleanStatusLine } from "../src/oneshot/startOneshotStatusUpdater.js";
 import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
@@ -45,21 +46,33 @@ describe("oneshot model chain", () => {
     test("uses Sol, Kimi, Fable, Opus priority", () => {
         expect(resolveOneshotChain(all, { env: { SMITHERS_CODEX_PAUSED: "0" } })).toEqual([
             { engine: "codex", model: "gpt-5.6-sol" },
-            { engine: "kimi", model: "kimi-k2.7-code" },
+            { engine: "kimi", model: "kimi-code/k3" },
             { engine: "claude", model: "claude-fable-5" },
             { engine: "claude", model: "claude-opus-4-8" },
         ]);
     });
     test("drops paused Codex and maps model slots", () => {
-        expect(resolveOneshotChain(all, { env: { SMITHERS_CODEX_PAUSED: "1" } })[0]).toEqual({ engine: "kimi", model: "kimi-k2.7-code" });
+        expect(resolveOneshotChain(all, { env: { SMITHERS_CODEX_PAUSED: "1" } })[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
         expect(resolveOneshotChain(all, { model: "terra", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "codex", model: "gpt-5.6-terra" });
         expect(resolveOneshotChain(all, { model: "opus", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "claude", model: "claude-opus-4-8" });
+        expect(resolveOneshotChain(all, { model: "kimi", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
+        expect(resolveOneshotChain(all, { model: "kimi-code/k3", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
     });
     test("maps canonical model ids or requires an explicit engine", () => {
         expect(resolveOneshotChain(all, { model: "gpt-future-codex", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "codex", model: "gpt-future-codex" });
         expect(resolveOneshotChain(all, { model: "claude-future", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "claude", model: "claude-future" });
         expect(() => resolveOneshotChain(all, { model: "future-model", env: { SMITHERS_CODEX_PAUSED: "0" } })).toThrow("Pass --agent");
         expect(resolveOneshotChain(all, { model: "future-model", agent: "kimi", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "kimi", model: "future-model" });
+    });
+});
+
+describe("oneshot status updater", () => {
+    test("cleans narrator output to a single bounded line", () => {
+        expect(cleanStatusLine("Editing foo.ts.")).toBe("Editing foo.ts");
+        expect(cleanStatusLine("\n- \"Running tests.\"\nsome second line")).toBe("Running tests");
+        expect(cleanStatusLine("")).toBeNull();
+        expect(cleanStatusLine("   \n  ")).toBeNull();
+        expect(cleanStatusLine("x".repeat(200))).toHaveLength(140);
     });
 });
 

@@ -2,7 +2,11 @@ import { SmithersError } from "@smithers-orchestrator/errors";
 import { SOTA_SLOTS } from "../sota-models.generated.js";
 import { oneshotCodexPaused } from "./oneshotCodexPaused.js";
 
-const SLOTS = Object.freeze({ sol: SOTA_SLOTS.codexSol, terra: SOTA_SLOTS.codexTerra, luna: SOTA_SLOTS.codex, kimi: SOTA_SLOTS.kimi, fable: SOTA_SLOTS.fable, opus: SOTA_SLOTS.opus, sonnet: SOTA_SLOTS.sonnet });
+// Oneshot's kimi seat runs Kimi K3 (`kimi-code/k3` in the Kimi CLI), ahead of
+// the registry's `kimi` slot (k2.7-code): K3's 1M window absorbs a whole
+// oneshot session without compaction.
+export const ONESHOT_KIMI_MODEL = "kimi-code/k3";
+const SLOTS = Object.freeze({ sol: SOTA_SLOTS.codexSol, terra: SOTA_SLOTS.codexTerra, luna: SOTA_SLOTS.codex, kimi: ONESHOT_KIMI_MODEL, fable: SOTA_SLOTS.fable, opus: SOTA_SLOTS.opus, sonnet: SOTA_SLOTS.sonnet });
 const ALLOWED = ["claude", "codex", "kimi", "opencode"];
 
 /** @param {string} model @param {Set<string>} usable */
@@ -27,7 +31,7 @@ export function resolveOneshotChain(detections, options = {}) {
     const requestedModel = options.model ? SLOTS[options.model] ?? options.model : undefined;
     if (!requestedEngine && requestedModel) {
         if ([SOTA_SLOTS.codexSol, SOTA_SLOTS.codexTerra, SOTA_SLOTS.codex].includes(requestedModel)) requestedEngine = "codex";
-        else if (requestedModel === SOTA_SLOTS.kimi) requestedEngine = "kimi";
+        else if (requestedModel === ONESHOT_KIMI_MODEL) requestedEngine = "kimi";
         else if ([SOTA_SLOTS.fable, SOTA_SLOTS.opus, SOTA_SLOTS.sonnet].includes(requestedModel)) requestedEngine = usable.has("claude") ? "claude" : "opencode";
         else requestedEngine = engineForCanonicalModel(requestedModel, usable);
         if (!requestedEngine) throw new SmithersError("CLI_MODEL_UNSUPPORTED", `Cannot infer an agent engine for model "${requestedModel}". Pass --agent with this canonical model id.`);
@@ -36,7 +40,7 @@ export function resolveOneshotChain(detections, options = {}) {
     const claudeEngine = usable.has("claude") ? "claude" : usable.has("opencode") ? "opencode" : null;
     const defaults = [
         ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
-        ...(usable.has("kimi") ? [{ engine: "kimi", model: SOTA_SLOTS.kimi }] : []),
+        ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
         ...(claudeEngine ? [
             { engine: claudeEngine, model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.fable}` : SOTA_SLOTS.fable },
             { engine: claudeEngine, model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.opus}` : SOTA_SLOTS.opus },
