@@ -3,10 +3,10 @@ title: "0.30.0"
 description: "Smithers 0.30.0 ships a large agentic UI component library, live per-node agent chat and fleet widgets in gateway-ui, a hardened browser viewer, a triage-first Monitor, the new smithers oneshot command, and an updated SOTA model registry with Kimi K3."
 ---
 
-**Smithers 0.30.0 is here!** Across the `v0.29.0..HEAD` range that is 168
-commits, 759 files changed, 96,014 insertions and 17,320 deletions, including
-57 feature commits, 73 fix commits (3 of them security fixes), 2 refactors,
-10 test commits, and 18 docs commits. The headline is a
+**Smithers 0.30.0 is here!** Across the `v0.29.0..HEAD` range that is 233
+commits, 844 files changed, 91,249 insertions and 21,316 deletions, including
+73 feature commits, 106 fix commits (3 of them security fixes), 3 refactors,
+15 test commits, and 29 docs commits. The headline is a
 large new agentic UI component library and the gateway-ui widgets built on
 top of it (live per-node chat, a fleet dashboard), alongside a hardened
 browser viewer, a Monitor overview redesigned around triage, the new
@@ -158,10 +158,17 @@ route to Claude.
   deterministic scorer (design-system usage, plus mandatory live agent chat
   for agent workflows), closing prior export bypasses in the structural UI
   verifier.
+- Workflows declaring `<Memory>` through `createSmithers` now resolve a real
+  memory runtime and store end-to-end, with real-backend e2e coverage for the
+  wired path.
+- Runs now carry `startedBy` launch attribution end-to-end: who or what
+  started a run (a CLI invocation, a plugin session, a gateway client) is
+  persisted with the run and surfaced by `getRun`/`listRuns`, with
+  over-length prompts truncating instead of rejecting the launch.
 
 ## Hardening
 
-73 fix commits, 3 of them security fixes, landed alongside the features above, most
+106 fix commits, 3 of them security fixes, landed alongside the features above, most
 visibly the browser-viewer redaction fix described earlier. A new 44-case
 deliverable-behavior eval suite now checks whether a doc-grounded agent
 picks the right deliverable shape (a self-contained HTML report versus a
