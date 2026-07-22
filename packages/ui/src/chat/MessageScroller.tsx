@@ -21,6 +21,7 @@ import { cn } from "../cn";
 import { prefersReducedMotion, useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss } from "./conversationFoundationCss";
+import { subscribeVisibility } from "./visibilitySubscriptionRegistry";
 
 /* -------------------------------------------------------------------------- */
 /* Frozen public types                                                        */
@@ -751,15 +752,7 @@ function MessageScrollerProviderImpl({
       },
       getState: () => stateRef.current,
       subscribeVisibility: (messageId, listener) => {
-        let set = visibilityListenersRef.current.get(messageId);
-        if (!set) {
-          set = new Set();
-          visibilityListenersRef.current.set(messageId, set);
-        }
-        set.add(listener);
-        return () => {
-          set!.delete(listener);
-        };
+        return subscribeVisibility(visibilityListenersRef.current, messageId, listener);
       },
       isMessageVisible: (messageId) => visibleRef.current.has(messageId),
     }),
