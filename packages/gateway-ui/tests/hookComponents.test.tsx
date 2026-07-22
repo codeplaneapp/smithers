@@ -841,9 +841,9 @@ describe("RunEventLog", () => {
     );
     await harness.flush(60);
     // Structured rows (a kind badge + zero-padded seq), not raw JSON lines. The
-    // hook filters the run-level `run.heartbeat` frame, so 4 of the 5 remain.
+    // RunEventLog opts into heartbeat delivery, so all 5 frames remain.
     const rows = harness.container.querySelectorAll('[data-slot="event-row"]');
-    expect(rows.length).toBe(4);
+    expect(rows.length).toBe(5);
     expect(harness.container.textContent).toContain("run.started");
     expect(harness.container.textContent).toContain("0000");
     // The full payload is collapsed; expand the first row's JSON toggle to see it.
@@ -946,6 +946,24 @@ describe("RunEventLog", () => {
     click(main);
     await harness.flush();
     expect(selected).toContain("plan");
+  });
+
+  test("keeps inert row mains out of the tab order while retaining payload toggles", async () => {
+    const gw = boot({
+      events: {
+        "run-a": [
+          { runId: "run-a", seq: 1, event: "run.started", payload: {} },
+          { runId: "run-a", seq: 2, event: "NodeStarted", payload: { nodeId: "plan" } },
+        ],
+      },
+    });
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
+    await harness.flush(40);
+    const rows = [...harness.container.querySelectorAll('[data-slot="event-row"]')];
+    expect(rows[0]!.querySelector(".gw-event-row-main").tagName).toBe("DIV");
+    expect(rows[0]!.querySelector(".gw-event-row-main")?.getAttribute("data-selectable")).toBe("false");
+    expect(rows[1]!.querySelector(".gw-event-row-main").tagName).toBe("DIV");
+    expect(harness.container.querySelectorAll(".gw-event-row-toggle").length).toBe(2);
   });
 
   test("shows the waiting/empty state for a run with no events", async () => {

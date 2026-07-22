@@ -288,7 +288,7 @@ function EventRow({
       data-heartbeat={row.tone === "heartbeat" ? "true" : undefined}
     >
       <div className="gw-event-row-head">
-        <button
+        {selectable ? <button
           type="button"
           className="gw-event-row-main"
           data-selectable={selectable ? "true" : "false"}
@@ -307,7 +307,24 @@ function EventRow({
             </span>
           ) : null}
           <span className="gw-event-row-summary">{row.summary}</span>
-        </button>
+        </button> : <div
+          className="gw-event-row-main"
+          data-selectable="false"
+        >
+          <span className="gw-event-row-seq">{seq}</span>
+          <Badge variant={TONE_BADGE_VARIANT[row.tone]} style={{ flexShrink: 0 }}>
+            {badgeLabel}
+          </Badge>
+          {row.nodeId ? <span className="gw-event-row-chip">{row.nodeId}</span> : null}
+          {row.iteration > 0 || row.attempt > 1 ? (
+            <span className="gw-event-row-meta">
+              {row.iteration > 0 ? `iter ${row.iteration}` : ""}
+              {row.iteration > 0 && row.attempt > 1 ? " · " : ""}
+              {row.attempt > 1 ? `try ${row.attempt}` : ""}
+            </span>
+          ) : null}
+          <span className="gw-event-row-summary">{row.summary}</span>
+        </div>}
         <button
           type="button"
           className="gw-event-row-toggle"
@@ -348,7 +365,7 @@ export function RunEventLog({
   style,
 }: RunEventLogProps) {
   useInsertionEffect(ensureGatewayUiStyles, []);
-  const { events, error, streaming } = useGatewayRunEvents(runId, { maxEvents });
+  const { events, error, streaming } = useGatewayRunEvents(runId, { maxEvents, includeHeartbeats: true });
   const [showAll, setShowAll] = useState(showAllHeartbeats);
   const endRef = useRef<HTMLDivElement | null>(null);
   const latestSeq = events[events.length - 1]?.seq;

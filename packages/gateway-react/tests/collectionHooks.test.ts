@@ -17,6 +17,7 @@ import React, { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { z } from "zod";
 import { Gateway, type GatewayTokenGrant } from "@smithers-orchestrator/server";
+import { SmithersDb } from "@smithers-orchestrator/db";
 import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
 import { createSmithers } from "smithers-orchestrator";
 import {
@@ -117,6 +118,7 @@ async function bootGateway() {
   cleanups.push(() => gateway.close());
   return {
     baseUrl: `http://127.0.0.1:${getPort(server)}`,
+    api,
     grantToken(token: string) {
       tokens[token] = { role: "admin", scopes: ["*"], userId: `user:${token}` };
     },
@@ -190,6 +192,50 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     });
 
     expect(captured.events).toBe(firstEvents);
+    await harness.unmount();
+  });
+
+  test("filters heartbeats by default and opts into ordered, capped heartbeat rows over HTTP", async () => {
+    const { api, baseUrl } = await bootGateway();
+    const db = new SmithersDb(api.db);
+    const runId = "heartbeat-contract";
+    const now = Date.now();
+    await db.insertRun({ runId, workflowName: "value", status: "running", createdAtMs: now });
+    for (const [index, event] of [
+      "run.started",
+      "run.heartbeat",
+      "task.heartbeat",
+      "TaskHeartbeat",
+      "node.finished",
+    ].entries()) {
+      await db.insertEventWithNextSeq({
+        runId,
+        timestampMs: now + index,
+        type: event,
+        payloadJson: JSON.stringify({ event, index }),
+      });
+    }
+    const captured: Record<string, any> = {};
+    function Probe() {
+      captured.default = useGatewayRunEvents(runId, { maxEvents: 10 });
+      captured.included = useGatewayRunEvents(runId, {
+        afterSeq: 1,
+        maxEvents: 3,
+        includeHeartbeats: true,
+      });
+      return null;
+    }
+    const harness = await mountHarness();
+    await harness.render(createElement(SmithersGatewayProvider, { client: makeClient(baseUrl) }, createElement(Probe)));
+    await waitFor(() => captured.included?.events?.length === 3, "heartbeat event rows");
+    expect(captured.default.events.map((frame: any) => frame.event)).toEqual(["run.started", "node.finished"]);
+    expect(captured.default.lastHeartbeat?.event).toBe("TaskHeartbeat");
+    expect(captured.included.events.map((frame: any) => frame.event)).toEqual([
+      "task.heartbeat",
+      "TaskHeartbeat",
+      "node.finished",
+    ]);
+    expect(captured.included.lastHeartbeat?.event).toBe("TaskHeartbeat");
     await harness.unmount();
   });
 

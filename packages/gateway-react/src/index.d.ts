@@ -316,16 +316,23 @@ declare function useGatewayRun(runId: string | undefined): GatewayAsyncState<Gat
  * Live run-event buffer over the bounded `runEvents` collection. Local mode
  * refetches after SSE invalidation; multiplayer mode follows the Electric
  * events shape. Heartbeats remain normal collection rows and are filtered in
- * this hook: the latest heartbeat is returned as `lastHeartbeat`, while
- * `events` contains only non-heartbeat frames capped to `maxEvents` with the
- * most recent rows retained.
+ * this hook: the latest eligible heartbeat is returned as `lastHeartbeat`, while
+ * `events` contains only non-heartbeat frames by default, capped to `maxEvents`
+ * with the most recent rows retained. Set `includeHeartbeats` to include
+ * heartbeat frames in that same newest-first cap; `afterSeq` applies before the
+ * cap in either mode.
  */
 declare function useGatewayRunEvents(runId: string | undefined, options?: {
     afterSeq?: number;
     maxEvents?: number;
+    includeHeartbeats?: boolean;
 }): {
-    events: GatewayEventFrame[];
-    lastHeartbeat: GatewayEventFrame | undefined;
+    events: Array<GatewayEventFrame & {
+        timestampMs?: number;
+    }>;
+    lastHeartbeat: (GatewayEventFrame & {
+        timestampMs?: number;
+    }) | undefined;
     error: Error | undefined;
     streaming: boolean;
     loading: boolean;

@@ -37,13 +37,15 @@ function toFrame(row: GatewayRunEventRow): GatewayEventFrame & { timestampMs?: n
  * Live run-event buffer over the bounded `runEvents` collection. Local mode
  * refetches after SSE invalidation; multiplayer mode follows the Electric
  * events shape. Heartbeats remain normal collection rows and are filtered in
- * this hook: the latest heartbeat is returned as `lastHeartbeat`, while
- * `events` contains only non-heartbeat frames capped to `maxEvents` with the
- * most recent rows retained.
+ * this hook: the latest eligible heartbeat is returned as `lastHeartbeat`, while
+ * `events` contains only non-heartbeat frames by default, capped to `maxEvents`
+ * with the most recent rows retained. Set `includeHeartbeats` to include
+ * heartbeat frames in that same newest-first cap; `afterSeq` applies before the
+ * cap in either mode.
  */
 export function useGatewayRunEvents(
   runId: string | undefined,
-  options: { afterSeq?: number; maxEvents?: number } = {},
+  options: { afterSeq?: number; maxEvents?: number; includeHeartbeats?: boolean } = {},
 ): {
   events: Array<GatewayEventFrame & { timestampMs?: number }>;
   lastHeartbeat: (GatewayEventFrame & { timestampMs?: number }) | undefined;
@@ -59,6 +61,7 @@ export function useGatewayRunEvents(
   );
   const afterSeq = options.afterSeq;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+  const includeHeartbeats = options.includeHeartbeats ?? false;
   const collection = runId
     ? collections.runEvents(runId, DEFAULT_COLLECTION_MAX_ROWS)
     : undefined;
@@ -76,12 +79,13 @@ export function useGatewayRunEvents(
     const eligible = typeof afterSeq === "number" ? sorted.filter((row) => row.seq > afterSeq) : sorted;
     const heartbeats = eligible.filter((row) => HEARTBEAT_EVENTS.has(row.event));
     const nonHeartbeat = eligible.filter((row) => !HEARTBEAT_EVENTS.has(row.event));
-    const capped = nonHeartbeat.slice(Math.max(0, nonHeartbeat.length - maxEvents));
+    const source = includeHeartbeats ? eligible : nonHeartbeat;
+    const capped = source.slice(Math.max(0, source.length - maxEvents));
     return {
       events: capped.map(toFrame),
       lastHeartbeat: heartbeats.length ? toFrame(heartbeats[heartbeats.length - 1]!) : undefined,
     };
-  }, [rows, afterSeq, maxEvents]);
+  }, [rows, afterSeq, maxEvents, includeHeartbeats]);
 
   const streamFailed = Boolean(runId) && (connection.status === "offline" || connection.status === "unauthorized");
   const sourceError = normalizeError(collection?.utils?.lastError);
