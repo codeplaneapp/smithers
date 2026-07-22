@@ -1,11 +1,10 @@
-import { SOTA_SLOTS } from "../sota-models.generated.js";
 import { resolveOneshotChain } from "./resolveOneshotChain.js";
 
 /** @param {string} engine @param {string} model @param {string} cwd */
 async function createAgent(engine, model, cwd) {
     if (engine === "codex") {
         const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
-        return new CodexAgent({ cwd, model, config: { model_reasoning_effort: model === SOTA_SLOTS.codexSol ? "xhigh" : "high" }, skipGitRepoCheck: true });
+        return new CodexAgent({ cwd, model, config: { model_reasoning_effort: "high" }, skipGitRepoCheck: true });
     }
     if (engine === "kimi") {
         const { KimiAgent } = await import("@smithers-orchestrator/agents/KimiAgent");
