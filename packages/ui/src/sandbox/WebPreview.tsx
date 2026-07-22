@@ -149,6 +149,9 @@ function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) {
+      return;
+    }
     const root = ref.current;
     if (!root) return;
     const items = Array.from(root.querySelectorAll<HTMLElement>(ROVING_BUTTONS));

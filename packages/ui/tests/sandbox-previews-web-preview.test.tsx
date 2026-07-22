@@ -161,6 +161,45 @@ describe("WebPreview", () => {
     expect(back.tabIndex).toBe(-1);
   });
 
+  test("address input keeps native arrow-key editing behavior in a navigable toolbar", async () => {
+    await render(
+      <WebPreview url="https://example.com">
+        <WebPreviewToolbar onBack={() => {}} onForward={() => {}}>
+          <span
+            className="sui-webpreview-toolbar-button"
+            contentEditable
+            role="button"
+            suppressContentEditableWarning
+          >
+            Editable toolbar control
+          </span>
+          <WebPreviewAddress />
+        </WebPreviewToolbar>
+        <WebPreviewContent />
+      </WebPreview>,
+    );
+    const editable = container!.querySelector<HTMLElement>('[contenteditable="true"]')!;
+    const input = container!.querySelector<HTMLInputElement>('[data-slot="web-preview-address"] input')!;
+
+    for (const key of ["ArrowLeft", "ArrowRight"]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => {
+        editable.focus();
+        editable.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(editable);
+
+      const inputEvent = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => {
+        input.focus();
+        input.dispatchEvent(inputEvent);
+      });
+      expect(inputEvent.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(input);
+    }
+  });
+
   test("WebPreviewContent drops allow-same-origin when combined with allow-scripts and warns", async () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     try {
