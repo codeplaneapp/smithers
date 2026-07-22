@@ -235,6 +235,35 @@ describe("migrated monitor surfaces", () => {
     await keydown(row, " ");
     expect(selected).toEqual([run.runId, run.runId]);
   });
+
+  test("sorts attention-first by default and click-sorts by start time", async () => {
+    const rows = [
+      { runId: "run-old-finish", workflowKey: "alpha", status: "finished", createdAtMs: 1, startedAtMs: 1 },
+      { runId: "run-live", workflowKey: "beta", status: "running", createdAtMs: 2, startedAtMs: 2 },
+      { runId: "run-blocked", workflowKey: "gamma", status: "waiting-approval", createdAtMs: 3, startedAtMs: 3 },
+    ];
+    await render(<RunsTable runs={rows} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
+
+    const orderedIds = () =>
+      [...document.querySelectorAll(".mon-runs-table-row")].map((row) => row.getAttribute("data-run-id"));
+    // Default triage order: the waiting run first, then the live one.
+    expect(orderedIds()).toEqual(["run-blocked", "run-live", "run-old-finish"]);
+
+    // The workflow cell owns row identity: name first, run id as secondary line.
+    const firstCell = document.querySelector(".mon-runs-table-row .mon-table-workflow")!;
+    expect(firstCell.querySelector(".mon-table-workflow-name")!.textContent).toBe("gamma");
+    expect(firstCell.querySelector(".mon-table-runid")!.textContent).toBe("run-bloc");
+
+    const sortHeader = byTestId("monitor-sort-started");
+    await click(sortHeader); // → newest first
+    expect(orderedIds()).toEqual(["run-blocked", "run-live", "run-old-finish"]);
+    expect(sortHeader.textContent).toContain("▾");
+    await click(sortHeader); // → oldest first
+    expect(orderedIds()).toEqual(["run-old-finish", "run-live", "run-blocked"]);
+    expect(sortHeader.textContent).toContain("▴");
+    await click(sortHeader); // → back to triage order
+    expect(orderedIds()).toEqual(["run-blocked", "run-live", "run-old-finish"]);
+  });
 });
 
 describe("monitor theme contract", () => {

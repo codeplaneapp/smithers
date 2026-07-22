@@ -88,6 +88,7 @@ import {
   labelForStatus,
   looksLikeUnifiedDiff,
   metricValue,
+  middleTruncate,
   nextCron,
   nodeErrorOf,
   nodeStateRowsOf,
@@ -101,6 +102,7 @@ import {
   ptyHijackUrl,
   quotaInfoOf,
   rowOf,
+  runErrorOf,
   runProgress,
   RUNS_PAGE_SIZE,
   scoreRowsOf,
@@ -109,9 +111,12 @@ import {
   scoreTone,
   selectionSinkFor,
   shortRunId,
+  sortRunsForTable,
+  splitHeartbeatEvents,
   splitPatchText,
   statusOptions,
   sumDiffSummaries,
+  taskProgressOf,
   timeAgo,
   toneForStatus,
   treeNodeKey,
@@ -122,6 +127,7 @@ import {
   type NodeStateRow,
   type PromScrape,
   type RunRow,
+  type RunsTableSort,
   type ScoreRow,
   type Tone,
   type TreeNodeLike,
@@ -206,6 +212,35 @@ function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) 
 // ---------------------------------------------------------------------------
 // Shared atoms.
 // ---------------------------------------------------------------------------
+
+/**
+ * Arm-then-confirm: the monitor's ONE confirmation idiom for destructive or
+ * irreversible actions (deny, cancel, retry). First click arms the control
+ * for a few seconds; a second click while armed commits. No window.confirm.
+ */
+function useArmConfirm(timeoutMs = 4_000): {
+  isArmed: (key: string) => boolean;
+  /** Returns true when this click confirms (the control was already armed). */
+  armOrConfirm: (key: string) => boolean;
+} {
+  const [armedKey, setArmedKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (armedKey === null) return;
+    const timer = setTimeout(() => setArmedKey(null), timeoutMs);
+    return () => clearTimeout(timer);
+  }, [armedKey, timeoutMs]);
+  return {
+    isArmed: (key) => armedKey === key,
+    armOrConfirm: (key) => {
+      if (armedKey === key) {
+        setArmedKey(null);
+        return true;
+      }
+      setArmedKey(key);
+      return false;
+    },
+  };
+}
 
 export function StatusTag({ status, label }: { status: string | undefined; label?: string }) {
   const tone = toneForStatus(status);
@@ -300,24 +335,16 @@ type ApprovalLike = {
   requestedAtMs?: number;
 };
 
-function ApprovalsInbox({
-  onSelectRun,
-  onResult,
-}: {
-  onSelectRun: (runId: string) => void;
-  onResult: (kind: "ok" | "err", text: string) => void;
-}) {
-  const approvalsQuery = useGatewayApprovals();
+function approvalKey(approval: ApprovalLike): string {
+  return `${approval.runId}:${approval.nodeId}:${approval.iteration ?? 0}`;
+}
+
+/** Submit one approval decision; shared by the inbox and the health strip's inline gates. */
+function useApprovalDecide(onResult: (kind: "ok" | "err", text: string) => void) {
   const actions = useGatewayActions();
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
-  const approvals = (approvalsQuery.data ?? []) as ApprovalLike[];
-  if (approvals.length === 0) return null;
-
   const decide = async (approval: ApprovalLike, approved: boolean) => {
-    if (!approved && !window.confirm(`Deny "${approval.requestTitle ?? approval.nodeId}"? This fails the waiting gate.`)) {
-      return;
-    }
-    const key = `${approval.runId}:${approval.nodeId}:${approval.iteration ?? 0}`;
+    const key = approvalKey(approval);
     setDecidingKey(key);
     try {
       await actions.submitApproval({
@@ -330,11 +357,67 @@ function ApprovalsInbox({
       onResult("ok", `${approved ? "Approved" : "Denied"} ${approval.nodeId} on ${shortRunId(approval.runId)}.`);
     } catch (error) {
       onResult("err", `Approval failed: ${error instanceof Error ? error.message : String(error)}`);
-      await approvalsQuery.refetch();
     } finally {
       setDecidingKey(null);
     }
   };
+  return { decide, decidingKey };
+}
+
+/**
+ * The decision buttons. Approve is the filled primary and fires immediately;
+ * Deny is destructive and uses the arm-then-confirm idiom — the question is
+ * never separated from its actions by the agent's context essay.
+ */
+function ApprovalActions({
+  approval,
+  decide,
+  busy,
+}: {
+  approval: ApprovalLike;
+  decide: (approval: ApprovalLike, approved: boolean) => Promise<void>;
+  busy: boolean;
+}) {
+  const arm = useArmConfirm();
+  const denyArmed = arm.isArmed(approvalKey(approval));
+  return (
+    <div className="mon-approval-actions">
+      <Button
+        variant="default"
+        className="mon-btn-approve"
+        data-testid="monitor-approval-approve"
+        disabled={busy}
+        onClick={() => void decide(approval, true)}
+      >
+        Approve
+      </Button>
+      <Button
+        variant={denyArmed ? "destructive" : "outline"}
+        data-testid="monitor-approval-deny"
+        disabled={busy}
+        title={denyArmed ? "Click again to deny — this fails the waiting gate" : "Deny this request (fails the waiting gate)"}
+        onClick={() => {
+          if (arm.armOrConfirm(approvalKey(approval))) void decide(approval, false);
+        }}
+      >
+        {denyArmed ? "Confirm deny?" : "Deny"}
+      </Button>
+    </div>
+  );
+}
+
+function ApprovalsInbox({
+  onSelectRun,
+  onResult,
+}: {
+  onSelectRun: (runId: string) => void;
+  onResult: (kind: "ok" | "err", text: string) => void;
+}) {
+  const approvalsQuery = useGatewayApprovals();
+  const { decide, decidingKey } = useApprovalDecide(onResult);
+  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(new Set());
+  const approvals = (approvalsQuery.data ?? []) as ApprovalLike[];
+  if (approvals.length === 0) return null;
 
   return (
     <section className="mon-inbox" data-testid="monitor-approvals">
@@ -342,32 +425,39 @@ function ApprovalsInbox({
         Approvals <span className="mon-count">{approvals.length}</span>
       </h2>
       {approvals.map((approval) => {
-        const key = `${approval.runId}:${approval.nodeId}:${approval.iteration ?? 0}`;
+        const key = approvalKey(approval);
         const busy = decidingKey === key;
+        const expanded = expandedKeys.has(key);
         return (
           <div className="mon-approval" key={key}>
-            <button type="button" className="mon-approval-main" onClick={() => onSelectRun(approval.runId)}>
+            <button type="button" className="mon-approval-main" onClick={() => onSelectRun(approval.runId)} title={`Open run ${shortRunId(approval.runId)}`}>
               <div className="mon-approval-title">{approval.requestTitle ?? approval.nodeId}</div>
               <div className="mon-approval-meta">
                 <span className="mon-mono">{approval.workflowKey ?? "workflow"}</span>
                 <span className="mon-mono mon-dim">{shortRunId(approval.runId)}</span>
                 <ApprovalWait requestedAtMs={approval.requestedAtMs} />
               </div>
-              {approval.requestSummary ? <div className="mon-approval-summary">{approval.requestSummary}</div> : null}
             </button>
-            <div className="mon-approval-actions">
-              <Button
-                variant="outline"
-                className="mon-btn-ok"
-                disabled={busy}
-                onClick={() => void decide(approval, true)}
-              >
-                Approve
-              </Button>
-              <Button variant="destructive" disabled={busy} onClick={() => void decide(approval, false)}>
-                Deny
-              </Button>
-            </div>
+            <ApprovalActions approval={approval} decide={decide} busy={busy} />
+            {approval.requestSummary ? (
+              <div className="mon-approval-summary-wrap">
+                <div className={`mon-approval-summary${expanded ? " is-expanded" : ""}`}>{approval.requestSummary}</div>
+                <button
+                  type="button"
+                  className="mon-approval-more"
+                  onClick={() =>
+                    setExpandedKeys((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
+                >
+                  {expanded ? "less" : "more"}
+                </button>
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -550,9 +640,9 @@ export function StatCard({
 }) {
   return (
     <div className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
-      <div className="mon-stat-value">{value}</div>
-      <div className="mon-stat-label">{label}</div>
-      {sub ? <div className="mon-stat-sub mon-dim">{sub}</div> : null}
+      <div className="mon-stat-value" title={value}>{value}</div>
+      <div className="mon-stat-label" title={label}>{label}</div>
+      {sub ? <div className="mon-stat-sub mon-dim" title={sub}>{sub}</div> : null}
     </div>
   );
 }
@@ -571,6 +661,10 @@ function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }) {
     () => (metrics.scrape ? histogramStats(metrics.scrape, "smithers_agent_duration_ms", ["engine", "model"]) : []),
     [metrics.scrape],
   );
+  // Percentiles over a handful of samples are noise (n=1 renders "1m42s /
+  // 1m42s" twice and reads like a bug) — the strip only shows groups with a
+  // meaningful sample count; everything stays available in the Metrics view.
+  const stripLatency = useMemo(() => agentLatency.filter((stat) => stat.count >= 3), [agentLatency]);
   const upcoming = nextCron(crons);
   const accountsReady = accounts.filter((account) => account.ready).length;
   const memoryCount = memoryApi.loaded ? dataRowsOf(memoryApi.body).length : undefined;
@@ -583,7 +677,7 @@ function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }) {
         value={n(stats.active)}
         label="active runs"
         sub={stats.attention > 0 ? `${stats.attention} need attention` : undefined}
-        tone={stats.active > 0 ? "running" : undefined}
+        tone={stats.attention > 0 ? "waiting" : stats.active > 0 ? "running" : undefined}
         testId="monitor-stat-active"
       />
       <StatCard
@@ -598,7 +692,7 @@ function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }) {
         sub={stats.failedToday > 0 ? `${stats.failedToday} failed` : undefined}
         testId="monitor-stat-completed"
       />
-      {agentLatency.slice(0, 2).map((stat) => (
+      {stripLatency.slice(0, 2).map((stat) => (
         <StatCard
           key={stat.key}
           value={`${formatLatencyMs(stat.p50)} / ${formatLatencyMs(stat.p95)}`}
@@ -607,11 +701,11 @@ function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }) {
           testId="monitor-stat-latency"
         />
       ))}
-      {agentLatency.length === 0 ? (
+      {stripLatency.length === 0 ? (
         <StatCard
           value={metrics.scrape ? "—" : "…"}
           label="agent latency"
-          sub={metrics.failed ? "metrics unreachable" : metrics.scrape ? "no samples this gateway yet" : "scraping…"}
+          sub={metrics.failed ? "metrics unreachable" : metrics.scrape ? "not enough samples yet — see Metrics" : "scraping…"}
           testId="monitor-stat-latency"
         />
       ) : null}
@@ -1002,7 +1096,11 @@ export function RunsTable({
   onPageChange: (page: number) => void;
   onSelect: (runId: string) => void;
 }) {
-  const { pageRows, page: shownPage, pageCount, total } = paginateRuns(runs, page, RUNS_PAGE_SIZE);
+  // Triage order by default (attention first, newest first inside a band);
+  // the Started header click-sorts pure time in either direction.
+  const [sort, setSort] = useState<RunsTableSort>("default");
+  const sorted = useMemo(() => sortRunsForTable(runs, sort), [runs, sort]);
+  const { pageRows, page: shownPage, pageCount, total } = paginateRuns(sorted, page, RUNS_PAGE_SIZE);
   if (total === 0) {
     return (
       <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail">
@@ -1021,22 +1119,33 @@ export function RunsTable({
   }
   const firstRow = (shownPage - 1) * RUNS_PAGE_SIZE + 1;
   const lastRow = Math.min(shownPage * RUNS_PAGE_SIZE, total);
+  const startedIndicator = sort === "newest" ? "▾" : sort === "oldest" ? "▴" : "";
   return (
     <section className="mon-panel mon-runs-table-panel">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">
           All runs <span className="mon-count">{total}</span>
         </h2>
+        {sort === "default" ? <span className="mon-dim mon-sort-note">attention first · newest first</span> : null}
       </header>
       <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
         <Table className="mon-runs-table" data-testid="monitor-runs-table">
           <TableHeader>
             <TableRow>
               <TableHead scope="col">Status</TableHead>
-              <TableHead scope="col">Run</TableHead>
               <TableHead scope="col">Workflow</TableHead>
               <TableHead scope="col">Progress</TableHead>
-              <TableHead scope="col">Started</TableHead>
+              <TableHead scope="col" aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}>
+                <button
+                  type="button"
+                  className="mon-th-sort"
+                  data-testid="monitor-sort-started"
+                  title="Sort by start time"
+                  onClick={() => setSort((current) => (current === "default" ? "newest" : current === "newest" ? "oldest" : "default"))}
+                >
+                  Started{startedIndicator ? <span className="mon-sort-arrow" aria-hidden> {startedIndicator}</span> : null}
+                </button>
+              </TableHead>
               <TableHead scope="col">Duration</TableHead>
             </TableRow>
           </TableHeader>
@@ -1058,9 +1167,9 @@ export function RunsTable({
                 <TableCell>
                   <StatusTag status={run.status} />
                 </TableCell>
-                <TableCell className="mon-mono">{shortRunId(run.runId)}</TableCell>
                 <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
-                  {run.workflowKey ?? "unknown"}
+                  <span className="mon-table-workflow-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+                  <span className="mon-mono mon-dim mon-table-runid">{shortRunId(run.runId)}</span>
                 </TableCell>
                 <TableCell>
                   <RunProgressCell run={run} />
@@ -1242,12 +1351,31 @@ function XmlRow({
   );
 }
 
+/** Leaf kinds own transcripts/outputs; everything else is structural grouping. */
+const LEAF_KINDS = new Set(["task", "agent", "compute", "static"]);
+
+/** One-line glyph legend, surfaced as a tooltip on each tree glyph. */
+const KIND_LABELS: Record<string, string> = {
+  workflow: "workflow",
+  sequence: "sequence — runs children in order",
+  parallel: "parallel — runs children concurrently",
+  task: "task",
+  approval: "approval gate",
+  loop: "loop",
+  foreach: "loop over items",
+  timer: "timer wait",
+  branch: "conditional branch",
+  conditional: "conditional branch",
+  subflow: "sub-workflow",
+};
+
 function TreeRow({
   node,
   depth,
   expandedOverrides,
   defaults,
   selectedNodeKey,
+  durations,
   onToggle,
   onSelect,
   selectDisabled,
@@ -1257,6 +1385,7 @@ function TreeRow({
   expandedOverrides: ReadonlyMap<string, boolean>;
   defaults: ReadonlySet<string>;
   selectedNodeKey: string | undefined;
+  durations?: ReadonlyMap<string, number>;
   onToggle: (key: string) => void;
   onSelect: (node: TreeNode) => void;
   selectDisabled?: boolean;
@@ -1264,13 +1393,20 @@ function TreeRow({
   const key = treeNodeKey(node);
   const children = (node.children ?? []) as TreeNode[];
   const expanded = expandedOverrides.get(key) ?? defaults.has(key);
-  const glyph = KIND_GLYPHS[(node.kind ?? "").toLowerCase()] ?? "○";
+  const kindKey = (node.kind ?? "").toLowerCase();
+  const glyph = KIND_GLYPHS[kindKey] ?? "○";
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
   const failedBelow = !expanded && hasFailedDescendant(node);
+  // Containers read quieter than real tasks: dimmer name, and no status pill
+  // unless the state is worth interrupting for (running/waiting/failed).
+  const isContainer = !LEAF_KINDS.has(kindKey) && children.length > 0;
+  const tone = toneForStatus(node.status);
+  const showPill = !isContainer || tone === "failed" || tone === "waiting" || tone === "running";
+  const durationMs = durations?.get(`${node.id ?? key}#${node.iteration ?? 0}`);
   return (
     <>
       <div
-        className={`mon-tree-row${key === selectedNodeKey ? " is-active" : ""}`}
+        className={`mon-tree-row${key === selectedNodeKey ? " is-active" : ""}${isContainer ? " mon-tree-container" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
       >
         {children.length > 0 ? (
@@ -1295,7 +1431,7 @@ function TreeRow({
           title={selectDisabled ? "Node selection is disabled while scrubbing frames" : undefined}
           aria-disabled={selectDisabled || undefined}
         >
-          <span className="mon-tree-glyph mon-dim" aria-hidden>
+          <span className="mon-tree-glyph mon-dim" title={KIND_LABELS[kindKey] ?? kindKey ?? "node"}>
             {glyph}
           </span>
           <span className="mon-tree-name">{node.cardLabel ?? node.name ?? node.id ?? key}</span>
@@ -1304,7 +1440,10 @@ function TreeRow({
             <span className="mon-chip mon-dim">#{node.iteration}</span>
           ) : null}
           {failedBelow ? <ToneDot tone="failed" /> : null}
-          <StatusTag status={node.status} />
+          {durationMs !== undefined ? (
+            <span className="mon-mono mon-dim mon-tree-duration">{formatDurationMs(durationMs)}</span>
+          ) : null}
+          {showPill ? <StatusTag status={node.status} /> : null}
         </button>
       </div>
       {expanded
@@ -1316,6 +1455,7 @@ function TreeRow({
               expandedOverrides={expandedOverrides}
               defaults={defaults}
               selectedNodeKey={selectedNodeKey}
+              durations={durations}
               onToggle={onToggle}
               onSelect={onSelect}
               selectDisabled={selectDisabled}
@@ -1334,6 +1474,7 @@ function ExecutionTree({
   onAutoSelected,
   frameOverride,
   asXml,
+  durations,
 }: {
   runId: string;
   selectedNodeKey: string | undefined;
@@ -1349,6 +1490,8 @@ function ExecutionTree({
   frameOverride?: { root: TreeNode | null; loading: boolean };
   /** Render the tree as engine-style XML instead of expandable rows. */
   asXml?: boolean;
+  /** nodeId#iteration → duration, right-aligned on settled rows. */
+  durations?: ReadonlyMap<string, number>;
 }) {
   const { root: liveRoot, nodes, isLoading, error } = useGatewayRunTree(runId);
   const isStatic = frameOverride !== undefined;
@@ -1430,6 +1573,7 @@ function ExecutionTree({
         expandedOverrides={overrides}
         defaults={defaults}
         selectedNodeKey={selectedNodeKey}
+        durations={durations}
         onToggle={(key) =>
           setOverrides((prev) => {
             const next = new Map(prev);
@@ -1455,18 +1599,12 @@ function ExecutionTree({
 
 const TIMELINE_POLL_MS = 3_000;
 
-function TimelinePanel({
-  runId,
-  live,
-  selectedNode,
-  onSelectNode,
-}: {
-  runId: string;
-  live: boolean;
-  selectedNode: TreeNode | undefined;
-  onSelectNode: (node: TreeNode) => void;
-}) {
-  const tree = useGatewayRunTree(runId);
+/**
+ * The run's node-state rows (per-attempt timing) from the gateway's
+ * node-states route — shared by the Timeline view and the tree's per-node
+ * duration labels. Polls while the run is live; terminal runs fetch once.
+ */
+function useNodeStates(runId: string, live: boolean): { rows: NodeStateRow[] | null; failed: boolean } {
   const [rows, setRows] = useState<NodeStateRow[] | null>(null);
   const [failed, setFailed] = useState(false);
   // Reset only when switching runs — a live→settled flip must not blank the list.
@@ -1498,6 +1636,31 @@ function TimelinePanel({
       if (timer) clearInterval(timer);
     };
   }, [runId, live]);
+  return { rows, failed };
+}
+
+/** nodeId#iteration → wall-clock duration, for the tree's right-aligned duration labels. */
+function durationsByKey(entries: readonly { key: string; durationMs?: number }[]): ReadonlyMap<string, number> {
+  const map = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.durationMs !== undefined) map.set(entry.key, entry.durationMs);
+  }
+  return map;
+}
+
+function TimelinePanel({
+  runId,
+  live,
+  selectedNode,
+  onSelectNode,
+}: {
+  runId: string;
+  live: boolean;
+  selectedNode: TreeNode | undefined;
+  onSelectNode: (node: TreeNode) => void;
+}) {
+  const tree = useGatewayRunTree(runId);
+  const { rows, failed } = useNodeStates(runId, live);
   const now = useNowMs();
   const entries = useMemo(() => (rows ? buildTimeline(rows, now) : []), [rows, now]);
   // Prefer the real tree node (kind, agent, children intact) so the inspector
@@ -1646,6 +1809,15 @@ function ExecutionPanel({
     if (latestFrameNo === undefined) return;
     setFrame(clampFrameNo(shownFrame + delta, latestFrameNo));
   };
+  // Per-node durations for the tree's right-aligned labels (same node-states
+  // feed as the Timeline view).
+  const runLive = toneForStatus(runStatus) === "running" || toneForStatus(runStatus) === "waiting";
+  const nodeStates = useNodeStates(runId, runLive);
+  const now = useNowMs();
+  const durations = useMemo(
+    () => (nodeStates.rows ? durationsByKey(buildTimeline(nodeStates.rows, now)) : undefined),
+    [nodeStates.rows, now],
+  );
   return (
     <section className="mon-panel mon-tree-panel">
       <header className="mon-panel-head">
@@ -1752,6 +1924,7 @@ function ExecutionPanel({
           onAutoSelected={onAutoSelected}
           frameOverride={scrubbing ? { root: scrubTree, loading: scrubLoading } : undefined}
           asXml={asXml}
+          durations={durations}
         />
       )}
     </section>
@@ -1768,7 +1941,7 @@ const FOLLOW_THRESHOLD_PX = 80;
 type EventView = "notable" | "activity" | "all";
 
 function EventLog({ runId }: { runId: string }) {
-  const { events: allEvents, streaming, error, loading } = useGatewayRunEvents(runId, { maxEvents: 500 });
+  const { events: allEvents, lastHeartbeat, streaming, error, loading } = useGatewayRunEvents(runId, { maxEvents: 500 });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
   // Default to Activity: lifecycle transitions plus the agent's visible work
@@ -1776,8 +1949,15 @@ function EventLog({ runId }: { runId: string }) {
   // bookkeeping stay one click away instead of drowning the log.
   const [view, setView] = useState<EventView>("activity");
   const events = useMemo(() => {
-    if (view === "all") return allEvents;
-    return allEvents.filter((frame) => {
+    // Heartbeats never render as rows — in "all" they collapse to one
+    // liveness line so pulse traffic can't wallpaper the log.
+    const { heartbeats, rest } = splitHeartbeatEvents(allEvents);
+    if (view === "all") {
+      return heartbeats.length > 0
+        ? [...rest, { event: "__heartbeats__", seq: heartbeats[heartbeats.length - 1]!.seq ?? 0, payload: { count: heartbeats.length }, timestampMs: heartbeats[heartbeats.length - 1]!.timestampMs }]
+        : rest;
+    }
+    return rest.filter((frame) => {
       const kind = eventViewFor(asString(frame.event) ?? "");
       return view === "notable" ? kind === "notable" : kind !== "chatter";
     });
@@ -1805,6 +1985,11 @@ function EventLog({ runId }: { runId: string }) {
         <h2 className="mon-kicker">
           Events <span className="mon-count">{events.length}{view === "all" ? "" : `/${allEvents.length}`}</span>
         </h2>
+        {lastHeartbeat?.timestampMs ? (
+          <span className="mon-dim mon-liveness" title="Latest task heartbeat — the engine is alive">
+            <span className="mon-dot tone-ok mon-dot-pulse" aria-hidden /> heartbeat <Ago ms={lastHeartbeat.timestampMs} />
+          </span>
+        ) : null}
         <Chip
           on={view === "notable"}
           onClick={() => setView("notable")}
@@ -1822,7 +2007,7 @@ function EventLog({ runId }: { runId: string }) {
         <Chip
           on={view === "all"}
           onClick={() => setView("all")}
-          title="Every event, including heartbeats and session bookkeeping"
+          title="Every event except heartbeats (collapsed to one liveness row)"
         >
           All
         </Chip>
@@ -1846,17 +2031,38 @@ function EventLog({ runId }: { runId: string }) {
           </div>
         ) : null}
         {events.map((frame) => {
+          if (frame.event === "__heartbeats__") {
+            const count = isRecord(frame.payload) ? asNumber(frame.payload.count) ?? 0 : 0;
+            return (
+              <div className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
+                <span className="mon-mono mon-dim">#{frame.seq}</span>
+                <span className="mon-event-name mon-dim">TaskHeartbeat</span>
+                <span className="mon-event-detail mon-dim">×{count} — collapsed; the engine is alive</span>
+                <EventWhen ms={frame.timestampMs} />
+              </div>
+            );
+          }
           const line = formatEventLine(frame);
           return (
             <div className="mon-event" key={`${runId}:${line.seq}`}>
               <span className="mon-mono mon-dim">#{line.seq}</span>
               <span className="mon-event-name">{line.name}</span>
               <span className="mon-event-detail mon-dim">{line.detail}</span>
+              <EventWhen ms={frame.timestampMs} />
             </div>
           );
         })}
       </div>
     </section>
+  );
+}
+
+/** Right-aligned relative event time (absolute on hover); "—" when the row predates timestamps. */
+function EventWhen({ ms }: { ms: number | undefined }) {
+  return (
+    <span className="mon-dim mon-event-when" title={ms ? new Date(ms).toLocaleString() : undefined}>
+      {ms ? <Ago ms={ms} /> : ""}
+    </span>
   );
 }
 
@@ -1870,17 +2076,23 @@ function HealthStrip({
   status,
   healthState,
   quota,
+  runError,
+  onResult,
 }: {
   runId: string;
   status: string | undefined;
   healthState: string | undefined;
   quota: ReturnType<typeof quotaInfoOf>;
+  /** Run-level failure message (errorJson) — the only error a run that died before its first task has. */
+  runError?: string;
+  onResult?: (kind: "ok" | "err", text: string) => void;
 }) {
   const tree = useGatewayRunTree(runId);
   const approvalsQuery = useGatewayApprovals();
   const actions = useGatewayActions();
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeNote, setResumeNote] = useState<string | null>(null);
+  const { decide, decidingKey } = useApprovalDecide(onResult ?? (() => {}));
   const requestResume = async () => {
     setResumeBusy(true);
     setResumeNote(null);
@@ -1898,9 +2110,13 @@ function HealthStrip({
     }
   };
   const treeNodes = tree.nodes ?? [];
-  const approvalsCount = (Array.isArray(approvalsQuery.data) ? approvalsQuery.data : []).filter(
+  // The approvals blocking THIS run get inline actions — the run knows
+  // exactly which gate parks it, so the decision lives in the banner instead
+  // of sending the operator hunting through the inbox.
+  const runApprovals = (Array.isArray(approvalsQuery.data) ? approvalsQuery.data : []).filter(
     (approval: unknown) => isRecord(approval) && approval.runId === runId,
-  ).length;
+  ) as ApprovalLike[];
+  const approvalsCount = runApprovals.length;
   // One representative failure, so the strip can say WHY without a click.
   const failedTask = treeNodes.find(
     (node) => asString(node.status) === "failed" && !/^\d+$/.test(asString(node.id) ?? ""),
@@ -1909,6 +2125,13 @@ function HealthStrip({
   const failedIteration = failedTask && typeof failedTask.iteration === "number" ? failedTask.iteration : 0;
   const sampleQuery = useGatewayNodeOutput({ runId, nodeId: failedNodeId, iteration: failedIteration });
   const sampleError = nodeErrorOf(sampleQuery.data);
+  // A run that failed before its first task has no node error — fall back to
+  // the run-level error so the red strip shows the actual cause.
+  const failureSample = failedNodeId && sampleError
+    ? { nodeId: failedNodeId, message: sampleError.message }
+    : runError
+      ? { nodeId: "run", message: runError }
+      : null;
   // First paint: the tree collection is still pulling — a verdict computed on
   // an empty tree ("no tasks yet") is wrong, not neutral. Say loading.
   if (tree.isLoading && treeNodes.length === 0) {
@@ -1927,7 +2150,7 @@ function HealthStrip({
     quota,
     approvalsCount,
     treeNodes,
-    failureSample: failedNodeId && sampleError ? { nodeId: failedNodeId, message: sampleError.message } : null,
+    failureSample,
   });
   const tone = diagnosis.tone === "ok" ? "tone-ok" : diagnosis.tone === "crit" ? "tone-failed" : "tone-waiting";
   return (
@@ -1953,13 +2176,20 @@ function HealthStrip({
           ))}
         </ul>
       ) : null}
+      {runApprovals.map((approval) => (
+        <div className="mon-health-approval" key={approvalKey(approval)}>
+          <span className="mon-health-approval-title">{approval.requestTitle ?? approval.nodeId}</span>
+          <ApprovalWait requestedAtMs={approval.requestedAtMs} />
+          <ApprovalActions approval={approval} decide={decide} busy={decidingKey === approvalKey(approval)} />
+        </div>
+      ))}
       <div className="mon-health-fix mon-dim">{diagnosis.fix}</div>
       {diagnosis.action === "resume" ? (
         <div className="mon-health-actions">
           <Button
             variant="outline"
             className="mon-btn-ok"
-            data-testid="monitor-resume-run"
+            data-testid="monitor-health-resume"
             disabled={resumeBusy}
             title="Ask the gateway to re-attach an engine and resume this run now"
             onClick={() => void requestResume()}
@@ -2697,11 +2927,13 @@ function NodeInspector({
   node,
   scores,
   onResult,
+  onClose,
 }: {
   runId: string;
   node: TreeNode;
   scores: RunScores;
   onResult: (kind: "ok" | "err", text: string) => void;
+  onClose: () => void;
 }) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
@@ -2761,11 +2993,10 @@ function NodeInspector({
   const nodeFailed = toneForStatus(node.status) === "failed" && !isContainer;
   const retryEnabled = canRetryTask(node.status, runStatus);
   const [retryBusy, setRetryBusy] = useState(false);
+  const retryArm = useArmConfirm();
+  const retryArmed = retryArm.isArmed("retry");
   const retryTask = async () => {
-    const confirmed = window.confirm(
-      `Retry ${nodeId}? This resets the task (and every task that ran after it) and resumes the run.`,
-    );
-    if (!confirmed) return;
+    if (!retryArm.armOrConfirm("retry")) return;
     setRetryBusy(true);
     try {
       const response = await fetch(
@@ -2803,17 +3034,19 @@ function NodeInspector({
         <h2 className="mon-kicker">Node</h2>
         {nodeFailed ? (
           <Button
-            variant="outline"
+            variant={retryArmed ? "destructive" : "outline"}
             data-testid="monitor-retry-task"
             disabled={!retryEnabled || retryBusy}
             title={
-              retryEnabled
-                ? "Reset this task (and every task that ran after it), then resume the run"
-                : "The run is still executing — pause or cancel it before retrying this task"
+              retryArmed
+                ? "Click again to confirm — this resets the task and everything after it"
+                : retryEnabled
+                  ? "Reset this task (and every task that ran after it), then resume the run"
+                  : "The run is still executing — pause or cancel it before retrying this task"
             }
             onClick={() => void retryTask()}
           >
-            {retryBusy ? "Retrying…" : "Retry task"}
+            {retryBusy ? "Retrying…" : retryArmed ? "Confirm retry?" : "Retry task"}
           </Button>
         ) : null}
         {hijackAction && candidate ? (
@@ -2832,6 +3065,9 @@ function NodeInspector({
           </Button>
         ) : null}
         <StatusTag status={node.status} />
+        <Chip onClick={onClose} aria-label="Close inspector" title="Close inspector (Esc)" data-testid="monitor-inspector-close">
+          ✕
+        </Chip>
       </header>
       {showHijack && hijackAction && candidate ? (
         <HijackModal
@@ -3024,6 +3260,8 @@ function RunDetail({
   // The monitor is an operator surface: system workflows' runs show here too,
   // so their UI lookup (Open UI / Create UI) must see them.
   const workflowsQuery = useGatewayWorkflows({ filter: { includeSystem: true } });
+  // Task-vocabulary progress for the header (the health strip's counting).
+  const detailTree = useGatewayRunTree(runId);
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);
@@ -3081,7 +3319,12 @@ function RunDetail({
     healthState !== undefined &&
     healthState !== labelForStatus(status) &&
     (healthState === "stale" || healthState === "orphaned" || healthState === "recovering");
-  const progress = runProgress(run.summary);
+  // ONE progress vocabulary: logical tasks (the health strip's counting),
+  // never the node-state summary, which also counts structural container rows.
+  // The summary only fills in while the tree is still loading.
+  const taskProgress = taskProgressOf(detailTree.nodes ?? []);
+  const progress = taskProgress ?? runProgress(run.summary);
+  const runError = runErrorOf(run);
 
   const act = async (kind: "cancel" | "resume" | "pause") => {
     setBusyAction(kind);
@@ -3131,12 +3374,12 @@ function RunDetail({
         </div>
         <CopyableRunId runId={runId} />
         {progress ? (
-          <div className="mon-progress" title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}>
+          <div className="mon-progress" title={`${progress.done} done · ${progress.failed} failed · ${progress.total} tasks`}>
             <div className="mon-progress-track">
               <div className="mon-progress-fill" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
             </div>
             <span className="mon-dim mon-mono">
-              {progress.done + progress.failed}/{progress.total}
+              {progress.done + progress.failed}/{progress.total} tasks
               {progress.failed > 0 ? ` · ${progress.failed} failed` : ""}
             </span>
           </div>
@@ -3188,7 +3431,7 @@ function RunDetail({
         </div>
       </header>
 
-      <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} />
+      <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} runError={runError} onResult={onResult} />
 
       <ScoresPanel scores={scores} />
 
@@ -3302,6 +3545,19 @@ function App() {
     if (kind === "ok") bannerTimer.current = setTimeout(() => setBanner(null), 4000);
   };
 
+  // Esc clears the node selection (the inspector's close affordance).
+  useEffect(() => {
+    if (!selectedNodeKey) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Modals own their own Escape handling — don't clear the selection
+      // out from under an open terminal/custom-UI dialog.
+      if (event.key === "Escape" && !document.querySelector(".mon-modal-backdrop")) selectNode(undefined);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNodeKey]);
+
   const visibleRuns = useMemo(
     () => filterRuns(allRuns, { text: filterText, status: statusFilter, workflow: workflowFilter }),
     [allRuns, filterText, statusFilter, workflowFilter],
@@ -3312,6 +3568,7 @@ function App() {
   }, [filterText, statusFilter, workflowFilter]);
   const workflows = useMemo(() => workflowOptions(allRuns), [allRuns]);
   const statuses = useMemo(() => statusOptions(allRuns), [allRuns]);
+  const inspectorOpen = !monitorMode.embed && selectedRunId !== undefined && selectedNode !== undefined;
 
   return (
     <main className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
@@ -3347,7 +3604,7 @@ function App() {
         </div>
       ) : null}
 
-      <div className="mon-body">
+      <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}`}>
         {!monitorMode.embed ? <div className="mon-rail">
           <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
           <RunsRail
@@ -3389,8 +3646,17 @@ function App() {
           )}
         </div>
 
-        {!monitorMode.embed && selectedRunId && selectedNode ? (
-          <NodeInspector runId={selectedRunId} node={selectedNode} scores={scores} onResult={showResult} />
+        {inspectorOpen ? (
+          <>
+            <div className="mon-inspector-backdrop" onClick={() => selectNode(undefined)} aria-hidden />
+            <NodeInspector
+              runId={selectedRunId!}
+              node={selectedNode!}
+              scores={scores}
+              onResult={showResult}
+              onClose={() => selectNode(undefined)}
+            />
+          </>
         ) : null}
       </div>
     </main>
@@ -3483,15 +3749,20 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-banner-app { margin: var(--sp-2) var(--sp-4) 0; }
 
 .mon-body { display: grid; grid-template-columns: 320px minmax(420px, 1fr) minmax(0, 380px); flex: 1; overflow: hidden; }
+/* No node selected: the inspector column collapses instead of reserving ~380px of dead gutter. */
+.mon-body-no-inspector { grid-template-columns: 320px minmax(420px, 1fr); }
 .mon-rail { border-right: 1px solid var(--border); overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
 .mon-main { overflow-y: auto; padding: var(--sp-4); }
 .mon-embed .mon-body { display: block; }
 .mon-embed .mon-main { height: 100%; padding: var(--sp-4); }
 .mon-embed .mon-inspector { display: none; }
 .mon-inspector { border-left: 1px solid var(--border); overflow-y: auto; padding: var(--panel-pad); animation: mon-in 140ms ease-out; }
+/* Click-outside-to-close backdrop — only visible in the overlay layout. */
+.mon-inspector-backdrop { display: none; }
 @media (max-width: 1160px) {
-  .mon-body { grid-template-columns: 300px 1fr; }
+  .mon-body, .mon-body-no-inspector { grid-template-columns: 300px 1fr; }
   .mon-inspector { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 90vw); background: var(--bg); box-shadow: -12px 0 36px rgb(var(--shadow-rgb) / 0.14); z-index: 10; }
+  .mon-inspector-backdrop { display: block; position: fixed; inset: 0; z-index: 9; background: rgb(var(--shadow-rgb) / 0.35); }
 }
 
 /* Phones trade the side-by-side rail for vertically stacked, independently
@@ -3516,15 +3787,25 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 .mon-inbox { border: 1px solid var(--warning-border); border-radius: var(--r-3); padding: var(--panel-pad); background: var(--warning-soft); animation: mon-in 140ms ease-out; }
 .mon-inbox .mon-kicker { margin-bottom: var(--sp-1); }
-.mon-approval { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0; border-top: 1px solid var(--border); }
+.mon-approval { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 .mon-approval:first-of-type { border-top: 0; }
 .mon-approval:last-of-type { padding-bottom: 0; }
-.mon-approval-main { text-align: left; background: none; border: 0; padding: 0; cursor: pointer; }
+.mon-approval-main { text-align: left; background: none; border: 0; padding: 0; cursor: pointer; border-radius: var(--r-1); }
+.mon-approval-main:hover .mon-approval-title { color: var(--brand); }
 .mon-approval-main:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
 .mon-approval-title { font-weight: 600; }
 .mon-approval-meta { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
-.mon-approval-summary { color: var(--muted); font-size: var(--fs-2); }
-.mon-approval-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-1); }
+/* Agent-authored context is clamped to 3 lines — the question and its actions
+   stay together above the fold; "more" expands in place. */
+.mon-approval-summary-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
+.mon-approval-summary { color: var(--muted); font-size: var(--fs-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mon-approval-summary.is-expanded { display: block; overflow: visible; }
+.mon-approval-more { display: inline; background: none; border: 0; padding: 0; cursor: pointer; color: var(--brand); font-size: var(--fs-1); font-weight: 600; }
+.mon-approval-more:hover { text-decoration: underline; }
+.mon-approval-actions { display: flex; gap: var(--sp-2); }
+.mon-approval-actions > * { flex: 1 1 0; justify-content: center; }
+/* The decision is the reason the panel exists: Approve is the filled primary. */
+.mon-btn-approve { color: var(--ok); font-weight: 700; }
 .mon-wait { font-size: var(--fs-1); font-weight: 600; color: var(--tone); }
 
 .mon-run-group { display: flex; flex-direction: column; gap: var(--sp-1); }
@@ -3549,9 +3830,19 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table td { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mon-runs-table tbody tr:last-child td { border-bottom: 0; }
 .mon-runs-table-row { cursor: pointer; }
+.mon-runs-table-row:hover { background: var(--hover); }
 .mon-runs-table-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
-.mon-table-workflow { font-weight: 600; max-width: 0; width: 40%; overflow: hidden; text-overflow: ellipsis; }
+/* Workflow owns the row's identity: name first (middle-truncated so the
+   distinguishing tail survives), the hex run id demoted to a secondary line. */
+.mon-table-workflow { max-width: 0; width: 44%; overflow: hidden; text-overflow: ellipsis; }
+.mon-table-workflow-name { font-weight: 600; }
+.mon-runs-table-row:hover .mon-table-workflow-name { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.mon-table-runid { display: block; font-size: var(--fs-1); }
 .mon-table-failed { color: var(--tone); font-weight: 600; }
+.mon-th-sort { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; font-weight: inherit; }
+.mon-th-sort:hover { color: var(--brand); }
+.mon-sort-arrow { color: var(--brand); }
+.mon-sort-note { font-size: var(--fs-1); }
 .mon-runs-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-3); flex-wrap: wrap; }
 .mon-runs-pagination-controls { display: inline-flex; align-items: center; gap: var(--sp-2); }
 
@@ -3578,9 +3869,16 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-chevron { width: 20px; flex: none; background: none; border: 0; cursor: pointer; color: var(--muted); text-align: center; }
 .mon-tree-main { display: flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: var(--sp-1) var(--sp-2) var(--sp-1) 0; cursor: pointer; }
 .mon-tree-chevron:focus-visible, .mon-tree-main:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
-.mon-tree-glyph { flex: none; width: 14px; text-align: center; }
+.mon-tree-glyph { flex: none; width: 14px; text-align: center; cursor: help; }
 .mon-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Containers (sequence/parallel/loop…) group tasks — they read quieter so
+   the tree scans like a task list interrupted only where structure matters. */
+.mon-tree-container .mon-tree-name { color: var(--muted); font-weight: 400; }
+.mon-tree-duration { flex: none; margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
+/* The status pill hugs the right edge — after the duration when one shows,
+   self-aligned when it doesn't. */
 .mon-tree-main .mon-pill { margin-left: auto; }
+.mon-tree-duration ~ .mon-pill { margin-left: var(--sp-2); }
 .mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
 
@@ -3625,6 +3923,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-event:last-child { border-bottom: 0; }
 .mon-event-name { font-weight: 600; white-space: nowrap; }
 .mon-event-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Relative time pins to the right edge so the log reads as a timed column. */
+.mon-event-when { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+.mon-event-heartbeats { font-style: italic; }
+.mon-liveness { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); white-space: nowrap; }
 
 .mon-inspector-title { font-weight: 700; font-size: var(--fs-4); line-height: var(--lh-tight); margin: var(--sp-1) 0 var(--sp-3); }
 .mon-what { margin: 0 0 var(--sp-3); }
@@ -3670,6 +3972,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-health-fix { font-weight: 400; font-size: var(--fs-1); }
 .mon-quota-list { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); font-weight: 400; font-size: var(--fs-1); }
 .mon-quota-list li { overflow-wrap: anywhere; }
+/* Inline approval gates: the decision lives in the banner that names it. */
+.mon-health-approval { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; width: 100%; padding: var(--sp-2) 0; border-top: 1px solid var(--tone-border); }
+.mon-health-approval-title { font-weight: 600; }
+.mon-health-approval .mon-approval-actions { margin-left: auto; flex: none; min-width: 220px; }
 .mon-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgb(var(--shadow-rgb) / 0.55); display: flex; align-items: center; justify-content: center; padding: var(--sp-6); }
 .mon-modal { width: min(1280px, 96vw); height: min(860px, 92vh); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; box-shadow: 0 18px 60px rgb(var(--shadow-rgb) / 0.45); }
 .mon-modal-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
@@ -3692,8 +3998,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-ops-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
 .mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--sp-3) var(--sp-3); }
 .mon-stat-value { font-size: var(--fs-6); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: var(--lh-tight); color: var(--tone, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mon-stat-label { font-size: var(--fs-1); font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; line-height: var(--lh-tight); color: var(--muted); margin-top: var(--sp-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mon-stat-sub { font-size: var(--fs-1); color: var(--muted); line-height: var(--lh-tight); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Labels and subs wrap to two lines before ever clipping mid-word — the value
+   carries the glance, the label must stay readable. */
+.mon-stat-label { font-size: var(--fs-1); font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; line-height: var(--lh-tight); color: var(--muted); margin-top: var(--sp-1); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mon-stat-sub { font-size: var(--fs-1); color: var(--muted); line-height: var(--lh-tight); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Crons panel: fixed below the table; its own horizontal scroll if narrow. */
 .mon-crons-panel { margin: var(--sp-4) 0 0; flex: none; }
