@@ -2404,6 +2404,19 @@ bunx smithers-orchestrator ui RUN_ID
 - `RESUME_METADATA_MISMATCH`: the workflow source or metadata changed since the run began. Start a fresh run instead of resuming across the edit.
 - Bundled jj exits with `EACCES`: the optional `@smithers-orchestrator/jj-<platform>` binary is present but not executable. Run `chmod +x node_modules/@smithers-orchestrator/jj-*/bin/jj`, reinstall Smithers, or set `SMITHERS_JJ_PATH` to a working `jj` binary. Confirm resolution with `bunx smithers-orchestrator workflow doctor`.
 
+## Time-travel commands compared
+
+Four near-synonym commands roll history back in different ways. Pick by what each acts on:
+
+| Command | Acts on | Behavior |
+| --- | --- | --- |
+| `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
+| `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
+| `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
+| `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
+
+See [Time-travel API](/reference/time-travel) and [Revert](/runtime/revert) for the programmatic surface.
+
 ## Command catalog (TOON)
 
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
@@ -3351,6 +3364,13 @@ bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build 
 bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
 ```
 
+For an implement- or debug-style workflow, `--interactive` prompts for inputs and drops you into the full-screen TUI monitor (TTY only):
+
+```bash
+bunx smithers-orchestrator up workflow.tsx --interactive              # supply inputs interactively, then watch the run
+bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive     # pick a discovered workflow and its inputs
+```
+
 **What success looks like**
 
 `workflow run` and `up` stream the lifecycle event log and exit on a terminal line:
@@ -3988,6 +4008,18 @@ HINDSIGHT_BANK_PREFIX=dev-
 
 `HINDSIGHT_API_KEY` and `HINDSIGHT_BANK_PREFIX` are optional; the prefix applies to every configured bank before requests are sent.
 
+## CLI: cross-run memory facts
+
+Outside a run, manage durable facts with the `memory` command: `set` writes (remember) a fact, `get` and `list` read (recall) facts.
+
+```bash
+bunx smithers-orchestrator memory set workflow:my-flow last-release '{"tag":"v1.4.0"}'  # remember a fact
+bunx smithers-orchestrator memory get workflow:my-flow last-release                     # recall one fact
+bunx smithers-orchestrator memory list workflow:my-flow                                 # recall every fact in a namespace
+```
+
+Inside a run, set `tools` on `<Memory>` to expose the agent-facing `remember` and `recall` tools instead.
+
 ## Task-level override
 
 The `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins over context:
@@ -4242,6 +4274,8 @@ const test = ctx.outputMaybe(outputs.test, { nodeId: "test" });
 
 > Re-run children until `until` is true or `maxIterations` is hit.
 
+`<Loop until={done} maxIterations={5}>…</Loop>` re-runs its children each frame until `until` evaluates true or `maxIterations` is reached.
+
 ```ts
 import { Loop } from "smithers-orchestrator";
 
@@ -4356,35 +4390,41 @@ type ApprovalProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`). `async` parks the gate without blocking the run: the `deploy` lane waits on the decision through `needs`, while the `update-docs` lane proceeds in parallel.
+
 ```tsx
-import { Approval, Sequence, Task, Workflow, approvalDecisionSchema, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Approval, Parallel, Sequence, ClaudeCodeAgent, approvalDecisionSchema } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { smithers, outputs } = createSmithers({
-  publishApproval: approvalDecisionSchema,
-  publishResult: z.object({ status: z.enum(["published", "rejected"]) }),
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  deployApproval: approvalDecisionSchema,
+  deploy: z.object({ status: z.string() }),
+  docs: z.object({ status: z.string() }),
 });
 
-export default smithers((ctx) => {
-  const decision = ctx.outputMaybe(outputs.publishApproval, { nodeId: "approve-publish" });
-  return (
-    <Workflow name="publish-flow">
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="ship">
+    <Parallel>
       <Sequence>
         <Approval
-          id="approve-publish"
-          output={outputs.publishApproval}
-          request={{ title: "Publish the draft?", summary: "Human review required." }}
-          onDeny="continue"
+          id="approve-deploy"
+          async
+          output={outputs.deployApproval}
+          request={{ title: "Approve production deploy?" }}
         />
-        {decision ? (
-          <Task id="record" output={outputs.publishResult}>
-            {{ status: decision.approved ? "published" : "rejected" }}
-          </Task>
-        ) : null}
+        <Task id="deploy" output={outputs.deploy} needs={{ ok: "approve-deploy" }} agent={agent}>
+          Deploy to production once the gate is approved.
+        </Task>
       </Sequence>
-    </Workflow>
-  );
-});
+      <Task id="update-docs" output={outputs.docs} agent={agent}>
+        Update the changelog. This lane proceeds while approval is pending.
+      </Task>
+    </Parallel>
+  </Workflow>
+));
 ```
 
 ## Notes
@@ -5755,18 +5795,37 @@ type WorktreeProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
-<Worktree path="/tmp/smithers/wt-a" baseBranch="main">
-  <Task id="build" output={outputs.outputC}>{{ value: 1 }}</Task>
-  <Task id="test" output={outputs.outputC}>{{ value: 2 }}</Task>
-  <MergeQueue>
-    <Task id="apply" output={outputs.outputC}>{{ value: 3 }}</Task>
-  </MergeQueue>
-  <Parallel maxConcurrency={2}>
-    <Task id="lint" output={outputs.outputC}>{{ value: 4 }}</Task>
-  </Parallel>
-</Worktree>
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Worktree, MergeQueue, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  build: z.object({ summary: z.string() }),
+  land: z.object({ merged: z.boolean() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="isolated-build">
+    <Worktree path="/tmp/smithers/feature-a" baseBranch="main">
+      <Task id="implement" output={outputs.build} agent={agent}>
+        Implement the feature and run the build inside this worktree.
+      </Task>
+      <MergeQueue>
+        <Task id="land" output={outputs.land} agent={agent}>
+          Merge the committed bookmark back into main.
+        </Task>
+      </MergeQueue>
+    </Worktree>
+  </Workflow>
+));
 ```
+
+Leave the agent `cwd` unset so `<Worktree>` supplies the isolated working directory (see Notes).
 
 ## Path Access
 
@@ -5838,12 +5897,25 @@ type ReviewLoopProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, ReviewLoop, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  code: z.object({ diff: z.string() }),
+  review: z.object({ approved: z.boolean(), feedback: z.string() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
 export default smithers(() => (
   <Workflow name="code-review">
     <ReviewLoop
-      producer={coder}
-      reviewer={reviewer}
+      producer={agent}
+      reviewer={agent}
       produceOutput={outputs.code}
       reviewOutput={outputs.review}
       maxIterations={3}
@@ -5883,12 +5955,25 @@ type OptimizerProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Optimizer, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  prompt: z.object({ text: z.string() }),
+  evaluation: z.object({ score: z.number(), feedback: z.string() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
 export default smithers(() => (
   <Workflow name="prompt-optimizer">
     <Optimizer
-      generator={promptEngineer}
-      evaluator={evaluator}
+      generator={agent}
+      evaluator={agent}
       generateOutput={outputs.prompt}
       evaluateOutput={outputs.evaluation}
       targetScore={90}
@@ -6088,22 +6173,39 @@ type ScanFixVerifyProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
-<Workflow name="lint-fix">
-  <ScanFixVerify
-    scanner={lintAgent}
-    fixer={fixerAgent}
-    verifier={verifyAgent}
-    scanOutput={outputs.scan}
-    fixOutput={outputs.fix}
-    verifyOutput={outputs.verify}
-    reportOutput={outputs.report}
-    maxRetries={5}
-    maxConcurrency={3}
-  >
-    Scan the codebase for linting errors and type issues.
-  </ScanFixVerify>
-</Workflow>
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, ScanFixVerify, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  scan: z.object({ issues: z.array(z.string()) }),
+  fix: z.object({ patch: z.string() }),
+  verify: z.object({ resolved: z.boolean() }),
+  report: z.object({ summary: z.string() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="lint-fix">
+    <ScanFixVerify
+      scanner={agent}
+      fixer={agent}
+      verifier={agent}
+      scanOutput={outputs.scan}
+      fixOutput={outputs.fix}
+      verifyOutput={outputs.verify}
+      reportOutput={outputs.report}
+      maxRetries={5}
+      maxConcurrency={3}
+    >
+      Scan the codebase for linting errors and type issues.
+    </ScanFixVerify>
+  </Workflow>
+));
 ```
 
 ## Notes
@@ -6582,21 +6684,32 @@ type KanbanProps = {
 };
 ```
 
-```tsx
-const columns = [
-  { name: "triage", agent: triageAgent, output: outputs.triage },
-  { name: "work", agent: workerAgent, output: outputs.work },
-  { name: "review", agent: reviewAgent, output: outputs.review },
-];
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
 
-<Workflow name="ticket-board">
-  <Kanban
-    columns={columns}
-    useTickets={() => tickets}
-    until={allDone}
-    maxIterations={3}
-  />
-</Workflow>;
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Kanban, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  triage: z.object({ note: z.string() }),
+  build: z.object({ note: z.string(), done: z.boolean() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="ticket-board">
+    <Kanban
+      columns={[
+        { name: "triage", agent, output: outputs.triage },
+        { name: "build", agent, output: outputs.build },
+      ]}
+      useTickets={() => [{ id: "T-1" }, { id: "T-2" }]}
+      maxIterations={2}
+    />
+  </Workflow>
+));
 ```
 
 ## Notes
@@ -7358,7 +7471,7 @@ bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-n
 bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
-Fork makes a child run without starting it (add `--run` to start immediately); replay also makes a child run but immediately resumes it. `--restore-vcs` checks out the original revision so re-execution sees the same source.
+Fork makes a child run without starting it (add `--run` to start immediately); replay also makes a child run but immediately resumes it. `--restore-vcs` checks out the original revision so re-execution sees the same source. See [Time-travel commands compared](/cli/overview#time-travel-commands-compared) to tell `rewind`, `replay`, `timetravel`, and `revert` apart.
 
 ## Scoring tasks
 
