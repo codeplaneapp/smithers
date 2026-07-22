@@ -22,6 +22,7 @@
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
+    "@smithers-orchestrator/ui": "workspace:*",
     "@tanstack/ai": "^0.39.0",
     "@tanstack/ai-openai": "^0.15.10",
     "@tanstack/db": "^0.6.13",

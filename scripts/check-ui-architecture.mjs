@@ -124,10 +124,14 @@ const SHADCN_DIRECTORIES = [
 // The frozen agentic-ui program (freeze v2, integrationContract E) sanctions
 // exactly one new gateway-ui file per gateway lane; each lane adds ONLY its own
 // file to this set in its own branch, and the blanket legacy-facade rule below
-// (which predates the program) would otherwise reject it outright.
+// (which predates the program) would otherwise reject it outright. The closure
+// lane also sanctions MonitorButton.tsx: it predates the tightened guard (so it
+// was never baselined) and already conforms to the program profile, importing
+// only the @smithers-orchestrator/ui barrel plus its local theme module.
 const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
   "packages/gateway-ui/src/GatewayApprovals.tsx",
   "packages/gateway-ui/src/GatewayCheckpointControls.tsx",
+  "packages/gateway-ui/src/MonitorButton.tsx",
   "packages/gateway-ui/src/SmithersCanvasNode.tsx",
 ]);
 // Sanctioned program files are gateway-data bindings: they may import
