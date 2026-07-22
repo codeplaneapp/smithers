@@ -12,7 +12,7 @@
  *   bun scripts/normalize-placeholders.ts
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -491,7 +491,22 @@ if (problems.length) {
   process.exit(1);
 }
 `;
-  const runtimeCheck = spawnSync("bun", ["--eval", runtimeScript], { cwd: root, encoding: "utf8" });
+  // Windows: bun resolves only through a shell (setup-bun ships a shim there),
+  // and a multiline --eval cannot survive shell quoting, so the script goes
+  // through a throwaway file inside the repo (bare specifiers must resolve
+  // against the root node_modules).
+  const runtimeCheckFile = join(root, ".docs-package-import-check.runtime.mjs");
+  writeFileSync(runtimeCheckFile, runtimeScript);
+  let runtimeCheck;
+  try {
+    runtimeCheck = spawnSync("bun", [runtimeCheckFile], {
+      cwd: root,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    });
+  } finally {
+    rmSync(runtimeCheckFile, { force: true });
+  }
 
   const typeLines = [];
   let bindingCounter = 0;
@@ -535,7 +550,9 @@ if (problems.length) {
   if (runtimeCheck.status !== 0 || diagnostics.length) {
     failed = true;
     console.error("\n✗ documented package imports must resolve at runtime and in TypeScript:");
-    if (runtimeCheck.status !== 0) console.error(runtimeCheck.stderr.trim());
+    if (runtimeCheck.status !== 0) {
+      console.error((runtimeCheck.stderr ?? runtimeCheck.error?.message ?? "bun failed to spawn").trim());
+    }
     if (diagnostics.length) {
       for (const diagnostic of diagnostics) {
         const pos = diagnostic.file?.getLineAndCharacterOfPosition(diagnostic.start ?? 0);

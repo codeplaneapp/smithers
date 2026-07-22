@@ -156,3 +156,4 @@ packages/server/.smithers-root-landing-ui-*/
 
 # Claude plugin mirror runtime state
 .smithers/claude-mirror-subscriptions.json
+.docs-package-import-check.runtime.mjs
