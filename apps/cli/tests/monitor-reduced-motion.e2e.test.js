@@ -95,9 +95,10 @@ browserTest("monitor honors reduced motion while retaining normal motion", async
     const reducedStyles = await styles(reduced);
     expect(normalStyles.preference).toBe(false);
     expect(normalStyles.panelAnimationMs).toBe(140);
-    // The default control recipe has no transition; reduced motion still
-    // clamps the shared control sheet's transition duration in the browser.
-    expect(normalStyles.controlTransitionMs).toBe(0);
+    // The control recipe ships pressed-state feedback as a 120ms transition;
+    // reduced motion clamps the shared control sheet's transition duration in
+    // the browser.
+    expect(normalStyles.controlTransitionMs).toBe(120);
     expect(reducedStyles.preference).toBe(true);
     expect(reducedStyles.panelAnimationMs).toBe(0.001);
     expect(reducedStyles.controlTransitionMs).toBe(0.001);

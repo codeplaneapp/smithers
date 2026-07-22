@@ -471,7 +471,7 @@ test("OpenAPI docs document current package limitations", () => {
 
     expect(docs).toContain("## Notes / Limitations");
     expect(docs).toContain("Cookie parameters");
-    expect(docs).toContain("JSON request bodies");
+    expect(docs).toContain("JSON is the only request body media type");
     expect(docs).toContain("Parameter serialization styles");
     expect(docs).toContain("Swagger 2.0");
 });

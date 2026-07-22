@@ -3813,14 +3813,20 @@ async function runGatewayCommand(options) {
     process.stderr.write(auth
         ? `[smithers] Auth: token required (Authorization: Bearer <token>)\n`
         : `[smithers] Auth: NONE — bound to loopback ${options.host}; do not expose this port\n`);
-    void backgroundWorkflowLoad?.then(() => {
+    const logRegisteredWorkflows = () => {
         const discoveredIds = new Set(discoveredWorkflows.map((discovered) => discovered.id));
         const displayWorkflows = [
             ...workflows.filter((workflow) => discoveredIds.has(workflow)),
             ...workflows.filter((workflow) => !discoveredIds.has(workflow)),
         ];
         process.stderr.write(`[smithers] Registered workflows: ${displayWorkflows.join(", ")}\n`);
-    });
+    };
+    // The manifest-fallback path loads workflows eagerly and never creates the
+    // background promise, so log the registration summary immediately there.
+    if (backgroundWorkflowLoad)
+        void backgroundWorkflowLoad.then(logRegisteredWorkflows);
+    else
+        logRegisteredWorkflows();
     await new Promise((resolvePromise) => {
         const shutdown = async () => {
             // Backstop: if gateway/backend close hangs, force-exit after 5s so a
