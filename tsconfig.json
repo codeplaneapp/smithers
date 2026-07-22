@@ -260,6 +260,7 @@
         "./packages/accounts/src/*/index.js"
       ],
       "@smithers-orchestrator/usage": [
+        "./packages/usage/src/publicTypes.ts",
         "./packages/usage/src/index.js"
       ],
       "@smithers-orchestrator/usage/*": [
