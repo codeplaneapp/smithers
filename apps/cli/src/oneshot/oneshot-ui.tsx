@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
+  useGatewayNodeEvents,
   useGatewayRpc,
   useGatewayRun,
   useGatewayRunDiff,
@@ -11,6 +12,7 @@ import {
   NodeChatStream,
   RunEventLog,
   WorkflowUiShell,
+  theme,
 } from "smithers-orchestrator/gateway-ui";
 import {
   Button,
@@ -30,10 +32,24 @@ import { PierreDiffView } from "smithers-orchestrator/ui/adapters/pierre-diff-vi
 
 type HijackCandidate = { nodeId?: string; engine?: string };
 type OneshotChainEntry = { engine?: string; model?: string };
+type OneshotStatus = { text: string; engine?: string; timestampMs?: number };
+
+const STATUS_NODE_ID = "status";
 
 function runIdFromUrl() {
   if (typeof location === "undefined") return undefined;
   return new URLSearchParams(location.search).get("runId") ?? undefined;
+}
+
+function parsePayload(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object") return value as Record<string, unknown>;
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function useHijackCandidates(runId: string | undefined) {
@@ -56,11 +72,110 @@ function useHijackCandidates(runId: string | undefined) {
   return candidates;
 }
 
+function useOneshotStatus(runId: string | undefined): { status?: OneshotStatus; loading: boolean } {
+  const { events, loading } = useGatewayNodeEvents(runId, STATUS_NODE_ID, { maxEvents: 50, pollIntervalMs: 4000 });
+  return useMemo(() => {
+    let status: OneshotStatus | undefined;
+    for (const frame of events) {
+      if (frame.event !== "NodeOutput") continue;
+      const payload = parsePayload(frame.payload);
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+      if (!text) continue;
+      status = {
+        text,
+        engine: typeof payload?.engine === "string" ? payload.engine : undefined,
+        timestampMs: typeof payload?.timestampMs === "number" ? payload.timestampMs : undefined,
+      };
+    }
+    return { status, loading };
+  }, [events, loading]);
+}
+
 function elapsedLabel(startedAtMs: number | undefined, finishedAtMs: number | undefined, now: number) {
   if (!startedAtMs) return "Not started";
   const seconds = Math.max(0, Math.floor(((finishedAtMs ?? now) - startedAtMs) / 1000));
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function agoLabel(timestampMs: number | undefined, now: number) {
+  if (!timestampMs) return undefined;
+  const seconds = Math.max(0, Math.floor((now - timestampMs) / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
+
+const STATUS_STYLES = `
+@keyframes oneshot-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.75); } }
+.oneshot-status-dot { width: 8px; height: 8px; border-radius: 9999px; flex: none; background: ${theme.success}; }
+.oneshot-status-dot[data-live="true"] { animation: oneshot-pulse 1.6s ease-in-out infinite; }
+.oneshot-status-text { transition: opacity 200ms ease; }
+`;
+
+function LunaStatusCard({ runId, running, now }: { runId: string | undefined; running: boolean; now: number }) {
+  const { status, loading } = useOneshotStatus(runId);
+  if (!status && !running && !loading) return null;
+  const label = status?.engine ? `Luna live status · ${status.engine}` : "Luna live status";
+  const ago = agoLabel(status?.timestampMs, now);
+  return (
+    <Card>
+      <CardContent style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 16 }}>
+        <span className="oneshot-status-dot" data-live={running} aria-hidden="true" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: theme.textDim }}>{label}</div>
+          <div className="oneshot-status-text" key={status?.text ?? "empty"} style={{ fontSize: 14, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {status?.text ?? (running ? "Listening for agent activity…" : "No status recorded")}
+          </div>
+        </div>
+        {ago ? <span style={{ fontSize: 12, color: theme.textDim, flex: "none" }}>{ago}</span> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function GoalCard({ goal, chain }: { goal?: string; chain?: OneshotChainEntry[] }) {
+  if (!goal && (!chain || chain.length === 0)) return null;
+  return (
+    <Card>
+      <CardContent style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 16 }}>
+        {goal ? (
+          <div style={{
+            fontSize: 13,
+            color: theme.text,
+            lineHeight: 1.5,
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            WebkitLineClamp: 2,
+            overflow: "hidden",
+          }}>{goal}</div>
+        ) : null}
+        {chain && chain.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {chain.map((entry, index) => {
+              const primary = index === 0;
+              return (
+                <span
+                  key={`${entry.engine}-${entry.model}-${index}`}
+                  style={{
+                    fontSize: 11,
+                    fontFamily: theme.fontMono,
+                    padding: "3px 8px",
+                    borderRadius: 9999,
+                    border: `1px solid ${primary ? theme.accentBorder : theme.neutralBorder}`,
+                    background: primary ? theme.accentSoft : theme.neutralSoft,
+                    color: primary ? theme.accent : theme.textDim,
+                  }}
+                >{[entry.engine, entry.model].filter(Boolean).join(" · ")}</span>
+              );
+            })}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
 }
 
 function App() {
@@ -91,12 +206,13 @@ function App() {
     try { return typeof run?.configJson === "string" ? JSON.parse(run.configJson) as Record<string, unknown> : {}; }
     catch { return {}; }
   }, [run?.configJson]);
-  const chain = config.oneshot && typeof config.oneshot === "object" && "chain" in config.oneshot
-    ? (config.oneshot as { chain?: OneshotChainEntry[] }).chain
-    : undefined;
-  const primary = Array.isArray(chain) ? chain[0] : undefined;
+  const oneshot = config.oneshot && typeof config.oneshot === "object" ? config.oneshot as { chain?: OneshotChainEntry[]; goal?: string; review?: unknown } : undefined;
+  const chain = Array.isArray(oneshot?.chain) ? oneshot.chain : undefined;
+  const goal = typeof oneshot?.goal === "string" && oneshot.goal.trim() ? oneshot.goal : undefined;
+  const primary = chain?.[0];
   const model = [primary?.engine, primary?.model].filter(Boolean).join(" · ") || "Auto chain";
-  const hasReview = Boolean(config.oneshot && typeof config.oneshot === "object" && "review" in config.oneshot && (config.oneshot as { review?: unknown }).review);
+  const hasReview = Boolean(oneshot?.review);
+  const running = status === "running";
 
   const controls = <>
     <Button variant="outline" onClick={() => runId && actions.resumeRun({ runId })} disabled={!runId}>Resume</Button>
@@ -110,7 +226,9 @@ function App() {
 
   return <>
     <SmithersUiStyles withTheme />
+    <style>{STATUS_STYLES}</style>
     <WorkflowUiShell title="Oneshot" meta={<StatusPill status={status} />} actions={controls}>
+      <GoalCard goal={goal} chain={chain} />
       <Card>
         <CardContent style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, paddingTop: 16 }}>
           <KpiStat label="Status" value={status} />
@@ -123,6 +241,7 @@ function App() {
           <KpiStat label="Files changed" value={filesChanged} />
         </CardContent>
       </Card>
+      <LunaStatusCard runId={runId} running={running} now={now} />
       <Tabs defaultValue="chat">
         <TabsList>
           <TabsTrigger value="chat">Chat</TabsTrigger>

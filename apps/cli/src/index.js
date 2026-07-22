@@ -62,6 +62,7 @@ import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
 import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
 import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
+import { startOneshotStatusUpdater } from "./oneshot/startOneshotStatusUpdater.js";
 import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
 import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
@@ -5440,16 +5441,22 @@ const cli = Cli.create({
             if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
             const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
             delete process.env[DETACHED_RUN_LOG_FILE_ENV];
-            const result = await Effect.runPromise(runWorkflow(workflow, {
-                input: {}, runId: effectiveRunId, rootDir: taskCwd,
-                config: {
-                    ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
-                    oneshot: { chain: selected.chain, review },
-                },
-                onProgress: buildProgressReporter(), signal: setupAbortSignal().signal,
-            }));
-            process.exitCode = formatStatusExitCode(result.status);
-            return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
+            const statusUpdater = startOneshotStatusUpdater({ db: workflow.db, runId: effectiveRunId, goal, cwd: taskCwd });
+            try {
+                const result = await Effect.runPromise(runWorkflow(workflow, {
+                    input: {}, runId: effectiveRunId, rootDir: taskCwd,
+                    config: {
+                        ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
+                        oneshot: { chain: selected.chain, review, goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal },
+                    },
+                    onProgress: buildProgressReporter(), signal: setupAbortSignal().signal,
+                }));
+                process.exitCode = formatStatusExitCode(result.status);
+                return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
+            }
+            finally {
+                statusUpdater.stop();
+            }
         }
         catch (error) {
             return fail({ code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED", message: error?.message ?? String(error), exitCode: 1 });
