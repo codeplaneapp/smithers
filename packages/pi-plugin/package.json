@@ -49,8 +49,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.73.1",
-    "@mariozechner/pi-tui": "^0.73.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@sinclair/typebox": "^0.34.49",
     "@smithers-orchestrator/agents": "workspace:*",
@@ -60,7 +58,21 @@
     "@smithers-orchestrator/protocol": "workspace:*",
     "ws": "^8.21.0"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.81.1",
+    "@earendil-works/pi-tui": "^0.81.1",
     "@types/bun": "latest",
     "@types/ws": "^8.18.1",
     "typescript": "~6.0.3"

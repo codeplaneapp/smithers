@@ -1,4 +1,4 @@
-import { truncateToWidth } from "@mariozechner/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";
 import { type Theme, bold, paint, stripAnsi } from "./theme.js";
 
