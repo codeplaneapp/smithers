@@ -207,7 +207,10 @@ function detachedFixture() {
     const codex = join(binDir, "codex");
     writeFileSync(codex, "#!/bin/sh\nexit 0\n");
     chmodSync(codex, 0o755);
-    return { cwd, workflowDir, binDir, env: { ...process.env, PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`, SMITHERS_HOME: join(cwd, "home"), SMITHERS_NO_SKILL_REFRESH: "1" } };
+    // OPENAI_API_KEY makes agent detection self-sufficient: a bare CI runner
+    // has no real agent credentials, and without any usable agent the CLI
+    // exits NO_USABLE_AGENTS before reaching the paths these tests assert.
+    return { cwd, workflowDir, binDir, env: { ...process.env, PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`, SMITHERS_HOME: join(cwd, "home"), SMITHERS_NO_SKILL_REFRESH: "1", OPENAI_API_KEY: "sk-oneshot-detached-fixture" } };
 }
 
 async function waitForDetachedRunTerminal(dbPath, runId) {

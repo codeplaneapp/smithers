@@ -1,5 +1,6 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { delimiter } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import {
     createExecutableDir,
     createTempRepo,
@@ -148,6 +149,14 @@ test("failed run auto-launches the installed post-failure workflow detached", as
         const runs = Array.isArray(ps.json) ? ps.json : (ps.json?.runs ?? []);
         seen = runs.some((r) => String(r.id ?? r.runId ?? "") === autopsyRunId);
         if (!seen) await new Promise((r) => setTimeout(r, 2_000));
+    }
+    if (!seen) {
+        // Surface the detached child's own log; without it a CI failure here
+        // is undiagnosable (the run row never appearing usually means the
+        // child died in its pre-admission preflight).
+        const logFile = join(repo.dir, ".smithers", "logs", `${autopsyRunId}.log`);
+        const tail = existsSync(logFile) ? readFileSync(logFile, "utf8").slice(-4000) : "(no autopsy log file)";
+        console.error(`autopsy run ${autopsyRunId} never registered; detached log tail:\n${tail}`);
     }
     expect(seen).toBe(true);
 });

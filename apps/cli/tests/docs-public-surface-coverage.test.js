@@ -216,8 +216,10 @@ test("feature inventory covers every spec record and local docs reference", () =
         }
 
         for (const hint of feature.diffHints) {
+            // dot: true — bun 1.3.x treats a LITERAL dot-prefixed segment
+            // (.smithers/workflows/*.tsx) as hidden and matches nothing.
             const exists = hint.includes("*")
-                ? Array.from(new Bun.Glob(hint).scanSync({ cwd: REPO_ROOT, onlyFiles: false })).length > 0
+                ? Array.from(new Bun.Glob(hint).scanSync({ cwd: REPO_ROOT, onlyFiles: false, dot: true })).length > 0
                 : existsSync(resolve(REPO_ROOT, hint));
             expect(exists, `${feature.id} diffHint should resolve: ${hint}`).toBe(true);
         }
