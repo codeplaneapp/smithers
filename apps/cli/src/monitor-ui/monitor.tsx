@@ -18,7 +18,10 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
   useGatewayRunTree,
+  useGatewayRunTokenUsage,
+  useGatewayUsageReports,
   useGatewayWorkflows,
+  type UseGatewayRunTreeResult,
 } from "smithers-orchestrator/gateway-react";
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
@@ -95,6 +98,7 @@ import {
   nodeErrorOf,
   nodeStateRowsOf,
   nodeSummaryEligible,
+  nodeTimingsOf,
   nonZeroErrorCounters,
   openTicketCount,
   opsStats,
@@ -106,6 +110,7 @@ import {
   rowOf,
   runErrorOf,
   runProgress,
+  runUsageChipOf,
   RUNS_PAGE_SIZE,
   scoreRowsOf,
   scoresForNode,
@@ -122,6 +127,8 @@ import {
   timeAgo,
   toneForStatus,
   treeNodeKey,
+  usageShareRows,
+  usageWindowRows,
   waitTone,
   workflowOptions,
   type CronRow,
@@ -133,7 +140,22 @@ import {
   type ScoreRow,
   type Tone,
   type TreeNodeLike,
+  type UsageReportLike,
+  type UsageShareRow,
+  type UsageWindowRow,
 } from "./monitorModel.ts";
+import {
+  foldTokenUsage,
+  formatTokens,
+  nodeUsageBreakdown,
+  predictRunUsage,
+  subtreeTokenTotals,
+  tokenBurnBuckets,
+  type NodeTiming,
+  type TokenBurnBucket,
+  type TokenUsageEvent,
+  type TreeNode as PredictionTreeNode,
+} from "./usagePrediction.ts";
 
 const monitorMode = embedModeFromSearch(typeof location === "undefined" ? "" : location.search);
 
@@ -1516,6 +1538,7 @@ function TreeRow({
   defaults,
   selectedNodeKey,
   durations,
+  tokensById,
   onToggle,
   onSelect,
   selectDisabled,
@@ -1526,6 +1549,8 @@ function TreeRow({
   defaults: ReadonlySet<string>;
   selectedNodeKey: string | undefined;
   durations?: ReadonlyMap<string, number>;
+  /** nodeId → subtree token spend (+estimated in-flight), right-aligned beside the duration. */
+  tokensById?: ReadonlyMap<string, { spent: number; inFlight?: number }>;
   onToggle: (key: string) => void;
   onSelect: (node: TreeNode) => void;
   selectDisabled?: boolean;
@@ -1543,6 +1568,7 @@ function TreeRow({
   const tone = toneForStatus(node.status);
   const showPill = !isContainer || tone === "failed" || tone === "waiting" || tone === "running";
   const durationMs = durations?.get(`${node.id ?? key}#${node.iteration ?? 0}`);
+  const tokens = tokensById?.get(node.id ?? key);
   return (
     <>
       <div
@@ -1583,6 +1609,18 @@ function TreeRow({
           {durationMs !== undefined ? (
             <span className="mon-mono mon-dim mon-tree-duration">{formatDurationMs(durationMs)}</span>
           ) : null}
+          {tokens ? (
+            <span
+              className={`mon-mono mon-tree-tokens${tokens.inFlight !== undefined ? " mon-usage-est" : " mon-dim"}`}
+              title={
+                tokens.inFlight !== undefined
+                  ? `${formatTokens(tokens.spent)} tokens measured · ~${formatTokens(tokens.inFlight)} more estimated while running`
+                  : `${formatTokens(tokens.spent)} tokens${isContainer ? " (subtree)" : ""}`
+              }
+            >
+              {tokens.inFlight !== undefined ? `~${formatTokens(tokens.spent + tokens.inFlight)}…` : formatTokens(tokens.spent)}
+            </span>
+          ) : null}
           {showPill ? <StatusTag status={node.status} /> : null}
         </button>
       </div>
@@ -1596,6 +1634,7 @@ function TreeRow({
               defaults={defaults}
               selectedNodeKey={selectedNodeKey}
               durations={durations}
+              tokensById={tokensById}
               onToggle={onToggle}
               onSelect={onSelect}
               selectDisabled={selectDisabled}
@@ -1608,6 +1647,7 @@ function TreeRow({
 
 function ExecutionTree({
   runId,
+  treeQuery,
   selectedNodeKey,
   onSelectNode,
   autoSelectNodeId,
@@ -1615,8 +1655,11 @@ function ExecutionTree({
   frameOverride,
   asXml,
   durations,
+  tokensById,
 }: {
   runId: string;
+  /** The panel-level live tree query (shared with the token prediction). */
+  treeQuery: UseGatewayRunTreeResult;
   selectedNodeKey: string | undefined;
   onSelectNode: (node: TreeNode) => void;
   autoSelectNodeId?: string;
@@ -1632,8 +1675,10 @@ function ExecutionTree({
   asXml?: boolean;
   /** nodeId#iteration → duration, right-aligned on settled rows. */
   durations?: ReadonlyMap<string, number>;
+  /** nodeId → subtree token spend (+estimated in-flight), beside the duration. */
+  tokensById?: ReadonlyMap<string, { spent: number; inFlight?: number }>;
 }) {
-  const { root: liveRoot, nodes, isLoading, error } = useGatewayRunTree(runId);
+  const { root: liveRoot, nodes, isLoading, error } = treeQuery;
   const isStatic = frameOverride !== undefined;
   const root = isStatic ? frameOverride.root : (liveRoot as TreeNode | null);
   // ?nodeId= deep link: select the node once it exists in the live tree.
@@ -1714,6 +1759,7 @@ function ExecutionTree({
         defaults={defaults}
         selectedNodeKey={selectedNodeKey}
         durations={durations}
+        tokensById={tokensById}
         onToggle={(key) =>
           setOverrides((prev) => {
             const next = new Map(prev);
@@ -1789,25 +1835,25 @@ function durationsByKey(entries: readonly { key: string; durationMs?: number }[]
 }
 
 function TimelinePanel({
-  runId,
-  live,
+  nodeStates,
+  treeNodes,
   selectedNode,
   onSelectNode,
 }: {
-  runId: string;
-  live: boolean;
+  nodeStates: { rows: NodeStateRow[] | null; failed: boolean };
+  /** Flat live-tree nodes (from the panel-level tree query) for row → node lookup. */
+  treeNodes: readonly TreeNode[];
   selectedNode: TreeNode | undefined;
   onSelectNode: (node: TreeNode) => void;
 }) {
-  const tree = useGatewayRunTree(runId);
-  const { rows, failed } = useNodeStates(runId, live);
+  const { rows, failed } = nodeStates;
   const now = useNowMs();
   const entries = useMemo(() => (rows ? buildTimeline(rows, now) : []), [rows, now]);
   // Prefer the real tree node (kind, agent, children intact) so the inspector
   // shows everything; a row the tree has not materialized yet falls back to a
   // minimal task node built from the state row.
   const selectEntry = (entry: ReturnType<typeof buildTimeline>[number]) => {
-    const match = (tree.nodes as TreeNode[]).find(
+    const match = treeNodes.find(
       (candidate) => candidate.id === entry.nodeId && (candidate.iteration ?? 0) === entry.iteration,
     );
     onSelectNode(
@@ -1887,24 +1933,34 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 function ExecutionPanel({
   runId,
-  runStatus,
+  live,
   selectedNode,
   onSelectNode,
   autoSelectNodeId,
   onAutoSelected,
+  usageEvents,
+  nodeStates,
+  treeQuery,
 }: {
   runId: string;
-  runStatus: string | undefined;
+  live: boolean;
   selectedNode: TreeNode | undefined;
   onSelectNode: (node: TreeNode | undefined) => void;
   autoSelectNodeId?: string;
   onAutoSelected?: () => void;
+  /** Run-level token-usage events (folded from the shared event subscription in RunDetail). */
+  usageEvents: readonly TokenUsageEvent[];
+  /** Per-attempt node timing rows, lifted to RunDetail so the header chip shares the poll. */
+  nodeStates: { rows: NodeStateRow[] | null; failed: boolean };
+  /** Live tree query, lifted to RunDetail so header/chip/panel share one subscription. */
+  treeQuery: UseGatewayRunTreeResult;
 }) {
   const [scrubbing, setScrubbing] = useState(false);
   // null = pinned to the latest frame until the user actually scrubs.
   const [frame, setFrame] = useState<number | null>(null);
   const [asXml, setAsXml] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
   // Frames + XML are debugging instruments, not monitoring views — they stay
   // folded behind one Debug chip so the default header carries only what the
   // watching operator needs (tree + timeline).
@@ -1916,6 +1972,7 @@ function ExecutionPanel({
     if (scrubbing) setScrubbing(false);
     if (frame !== null) setFrame(null);
     if (showTimeline) setShowTimeline(false);
+    if (showUsage) setShowUsage(false);
   }
   // The latest committed frameNo, fetched only while scrub mode is on. The run
   // may commit more frames while scrubbing; the range simply spans what
@@ -1955,13 +2012,40 @@ function ExecutionPanel({
   };
   // Per-node durations for the tree's right-aligned labels (same node-states
   // feed as the Timeline view).
-  const runLive = toneForStatus(runStatus) === "running" || toneForStatus(runStatus) === "waiting";
-  const nodeStates = useNodeStates(runId, runLive);
   const now = useNowMs();
   const durations = useMemo(
     () => (nodeStates.rows ? durationsByKey(buildTimeline(nodeStates.rows, now)) : undefined),
     [nodeStates.rows, now],
   );
+  // One prediction per render feeds every tree row's token label and the
+  // Usage panel: leaves read their own spend (+estimated in-flight while
+  // running), containers read the subtree rollup of both.
+  const timings = useMemo(() => nodeTimingsOf(nodeStates.rows), [nodeStates.rows]);
+  const predictionTree = treeQuery.root as unknown as PredictionTreeNode | null;
+  const usagePrediction = useMemo(
+    () => predictRunUsage({ events: usageEvents, timings, tree: predictionTree, nowMs: now, live }),
+    [usageEvents, timings, predictionTree, now, live],
+  );
+  const tokensById = useMemo(() => {
+    if (!predictionTree) return undefined;
+    const spent = new Map<string, number>();
+    const inFlight = new Map<string, number>();
+    for (const [nodeId, nodePrediction] of usagePrediction.perNode) {
+      if (nodePrediction.spent > 0) spent.set(nodeId, nodePrediction.spent);
+      if (nodePrediction.inFlight !== undefined && nodePrediction.inFlight >= 1) {
+        inFlight.set(nodeId, nodePrediction.inFlight);
+      }
+    }
+    const subtreeSpent = subtreeTokenTotals(predictionTree, spent);
+    const subtreeInFlight = subtreeTokenTotals(predictionTree, inFlight);
+    const map = new Map<string, { spent: number; inFlight?: number }>();
+    for (const [nodeId, total] of subtreeSpent) {
+      const extra = subtreeInFlight.get(nodeId) ?? 0;
+      if (total <= 0 && extra < 1) continue;
+      map.set(nodeId, { spent: total, ...(extra >= 1 ? { inFlight: extra } : {}) });
+    }
+    return map.size > 0 ? map : undefined;
+  }, [predictionTree, usagePrediction]);
   return (
     <section className="mon-panel mon-tree-panel">
       <header className="mon-panel-head">
@@ -1973,12 +2057,29 @@ function ExecutionPanel({
           on={showTimeline}
           data-testid="monitor-timeline-chip"
           onClick={() => {
-            if (!showTimeline) goLive();
+            if (!showTimeline) {
+              goLive();
+              setShowUsage(false);
+            }
             setShowTimeline((value) => !value);
           }}
           title="Every task execution in the order it ran — loops unrolled, one row per iteration"
         >
           Timeline
+        </Chip>
+        <Chip
+          on={showUsage}
+          data-testid="monitor-usage-panel-chip"
+          onClick={() => {
+            if (!showUsage) {
+              goLive();
+              setShowTimeline(false);
+            }
+            setShowUsage((value) => !value);
+          }}
+          title="Token burn for this run plus per-account rate limits — measured solid, estimates dimmed"
+        >
+          Usage
         </Chip>
         {showDebug ? (
           <Chip
@@ -1986,6 +2087,7 @@ function ExecutionPanel({
             data-testid="monitor-frames-chip"
             onClick={() => {
               setShowTimeline(false);
+              setShowUsage(false);
               if (scrubbing) goLive();
               else setScrubbing(true);
             }}
@@ -2027,7 +2129,7 @@ function ExecutionPanel({
           Debug
         </Chip>
       </header>
-      {scrubbing && !showTimeline ? (
+      {scrubbing && !showTimeline && !showUsage ? (
         <div className="mon-scrub" data-testid="monitor-scrub">
           <Chip
             onClick={() => step(-1)}
@@ -2071,16 +2173,19 @@ function ExecutionPanel({
           </Chip>
         </div>
       ) : null}
-      {showTimeline ? (
+      {showUsage ? (
+        <UsagePanel usageEvents={usageEvents} />
+      ) : showTimeline ? (
         <TimelinePanel
-          runId={runId}
-          live={toneForStatus(runStatus) === "running" || toneForStatus(runStatus) === "waiting"}
+          nodeStates={nodeStates}
+          treeNodes={treeQuery.nodes as TreeNode[]}
           selectedNode={selectedNode}
           onSelectNode={onSelectNode}
         />
       ) : (
         <ExecutionTree
           runId={runId}
+          treeQuery={treeQuery}
           selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
           onSelectNode={onSelectNode}
           autoSelectNodeId={autoSelectNodeId}
@@ -2088,9 +2193,147 @@ function ExecutionPanel({
           frameOverride={scrubbing ? { root: scrubTree, loading: scrubLoading } : undefined}
           asXml={asXml}
           durations={durations}
+          tokensById={tokensById}
         />
       )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Usage panel: per-account rate limits (gateway /v1/api/usage, server-cached
+// 60s), this run's token burn as a per-minute sparkline, and per-agent /
+// per-model breakdowns — all measured, estimates marked.
+// ---------------------------------------------------------------------------
+
+/** Remaining-quota bar row: fill is what is LEFT, tone follows the headroom. */
+function UsageWindowBar({ row }: { row: UsageWindowRow }) {
+  return (
+    <span className="mon-usage-bar" aria-hidden>
+      <span
+        className={`mon-usage-bar-fill tone-${row.tone}`}
+        style={{ width: `${Math.round((row.remainingFraction ?? 0) * 100)}%` }}
+      />
+    </span>
+  );
+}
+
+/** Tiny inline SVG bar chart of tokens/min over the run's recent lifetime. */
+function BurnSparkline({ buckets }: { buckets: readonly TokenBurnBucket[] }) {
+  const max = Math.max(1, ...buckets.map((bucket) => bucket.tokens));
+  const latest = buckets[buckets.length - 1]?.tokens ?? 0;
+  return (
+    <div data-testid="monitor-burn-sparkline">
+      <svg
+        className="mon-spark"
+        viewBox={`0 0 ${buckets.length * 4} 28`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`Token burn per minute — ${formatTokens(latest)} now, peak ${formatTokens(max)}`}
+      >
+        {buckets.map((bucket, index) => {
+          const height = bucket.tokens <= 0 ? 0 : Math.max(1, Math.round((bucket.tokens / max) * 26));
+          return (
+            <rect
+              key={bucket.startMs}
+              x={index * 4}
+              y={28 - height}
+              width={3}
+              height={height}
+              rx={1}
+              className={`mon-spark-bar${index === buckets.length - 1 ? " mon-spark-now" : ""}`}
+            >
+              <title>{`${formatTokens(bucket.tokens)} tok/min`}</title>
+            </rect>
+          );
+        })}
+      </svg>
+      <div className="mon-dim mon-spark-legend">
+        <span>{formatTokens(latest)} tok/min</span>
+        <span>peak {formatTokens(max)} tok/min · {buckets.length}m</span>
+      </div>
+    </div>
+  );
+}
+
+/** Per-agent / per-model token bars, width relative to the biggest consumer. */
+function UsageShareBars({ rows }: { rows: readonly UsageShareRow[] }) {
+  return (
+    <div className="mon-usage-shares">
+      {rows.map((row) => (
+        <div className="mon-usage-row" key={row.key}>
+          <span className="mon-usage-label" title={row.key}>{row.key}</span>
+          <span className="mon-usage-bar" aria-hidden>
+            <span className="mon-usage-bar-fill mon-usage-share-fill" style={{ width: `${Math.round(row.fraction * 100)}%` }} />
+          </span>
+          <span className="mon-mono mon-dim mon-usage-text">{formatTokens(row.tokens)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UsagePanel({ usageEvents }: { usageEvents: readonly TokenUsageEvent[] }) {
+  const reportsQuery = useGatewayUsageReports();
+  const reports = (reportsQuery.data ?? []) as UsageReportLike[];
+  const windowRows = useMemo(() => usageWindowRows(reports), [reports]);
+  const now = useNowMs();
+  const fold = useMemo(() => foldTokenUsage(usageEvents), [usageEvents]);
+  const buckets = useMemo(() => tokenBurnBuckets(usageEvents, 60_000, now, 30), [usageEvents, now]);
+  const agentRows = useMemo(() => usageShareRows(fold.perAgent), [fold]);
+  const modelRows = useMemo(() => usageShareRows(fold.perModel, 5), [fold]);
+  return (
+    <div className="mon-usage-panel" data-testid="monitor-usage-panel">
+      <section className="mon-usage-section">
+        <h3 className="mon-kicker">Rate limits</h3>
+        {reportsQuery.error ? (
+          <div className="mon-dim">Could not load account usage: {reportsQuery.error.message}</div>
+        ) : reportsQuery.loading ? (
+          <div className="mon-dim">Loading account usage…</div>
+        ) : windowRows.length === 0 ? (
+          <div className="mon-dim">No rate-limit windows reported for the registered accounts.</div>
+        ) : (
+          windowRows.map((row) =>
+            row.unavailable ? (
+              <div className="mon-usage-row" key={row.key}>
+                <span className="mon-dim">{row.label}: {row.text}</span>
+              </div>
+            ) : (
+              <div className="mon-usage-row" key={row.key}>
+                <span className="mon-usage-label" title={row.label}>{row.label}</span>
+                <UsageWindowBar row={row} />
+                <span className={`mon-mono mon-usage-text${row.estimate ? " mon-usage-est" : ""}`}>
+                  {row.estimate ? `~${row.text} est` : row.text}
+                </span>
+                <span className="mon-dim mon-usage-reset">
+                  {row.resetsAtMs !== undefined ? <Countdown untilMs={row.resetsAtMs} /> : ""}
+                </span>
+              </div>
+            ),
+          )
+        )}
+      </section>
+      <section className="mon-usage-section">
+        <h3 className="mon-kicker">Burn — tokens/min</h3>
+        {fold.eventCount === 0 ? (
+          <div className="mon-dim">No token usage reported for this run yet.</div>
+        ) : (
+          <BurnSparkline buckets={buckets} />
+        )}
+      </section>
+      {agentRows.length > 0 ? (
+        <section className="mon-usage-section">
+          <h3 className="mon-kicker">By agent</h3>
+          <UsageShareBars rows={agentRows} />
+        </section>
+      ) : null}
+      {modelRows.length > 0 ? (
+        <section className="mon-usage-section">
+          <h3 className="mon-kicker">By model</h3>
+          <UsageShareBars rows={modelRows} />
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -2103,8 +2346,12 @@ const FOLLOW_THRESHOLD_PX = 80;
 
 type EventView = "notable" | "activity" | "all";
 
-function EventLog({ runId }: { runId: string }) {
-  const { events: allEvents, lastHeartbeat, streaming, error, loading } = useGatewayRunEvents(runId, { maxEvents: 500 });
+/** The shared run-event subscription, lifted to RunDetail so the log, the header
+ * token chip, and the usage views all read one buffer. */
+type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
+
+function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
+  const { events: allEvents, lastHeartbeat, streaming, error, loading } = eventsState;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
   // Default to Activity: lifecycle transitions plus the agent's visible work
@@ -3089,16 +3336,23 @@ function NodeInspector({
   runId,
   node,
   scores,
+  usageEvents,
   onResult,
   onClose,
 }: {
   runId: string;
   node: TreeNode;
   scores: RunScores;
+  /** Run-level token-usage events; folded per node for the Details usage rows. */
+  usageEvents?: readonly TokenUsageEvent[];
   onResult: (kind: "ok" | "err", text: string) => void;
   onClose: () => void;
 }) {
   const nodeId = node.id ?? treeNodeKey(node);
+  const nodeUsage = useMemo(
+    () => (usageEvents ? nodeUsageBreakdown(usageEvents, nodeId) : undefined),
+    [usageEvents, nodeId],
+  );
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
   // The first output fetch often lands while the node is still running
   // ("pending"); without a refetch when the lifecycle advances the panel
@@ -3296,7 +3550,49 @@ function NodeInspector({
               <dd className="mon-mono">{node.iteration}</dd>
             </>
           ) : null}
+          {nodeUsage ? (
+            <>
+              <dt>tokens</dt>
+              <dd className="mon-mono" data-testid="monitor-node-tokens">{formatTokens(nodeUsage.total)}</dd>
+              <dt>input</dt>
+              <dd className="mon-mono">{formatTokens(nodeUsage.input)}</dd>
+              <dt>output</dt>
+              <dd className="mon-mono">{formatTokens(nodeUsage.output)}</dd>
+              {nodeUsage.cacheRead > 0 ? (
+                <>
+                  <dt>cache read</dt>
+                  <dd className="mon-mono">{formatTokens(nodeUsage.cacheRead)}</dd>
+                </>
+              ) : null}
+              {nodeUsage.cacheWrite > 0 ? (
+                <>
+                  <dt>cache write</dt>
+                  <dd className="mon-mono">{formatTokens(nodeUsage.cacheWrite)}</dd>
+                </>
+              ) : null}
+              {nodeUsage.reasoning > 0 ? (
+                <>
+                  <dt>reasoning</dt>
+                  <dd className="mon-mono">{formatTokens(nodeUsage.reasoning)}</dd>
+                </>
+              ) : null}
+            </>
+          ) : null}
         </dl>
+        {nodeUsage && nodeUsage.attempts.length > 1 ? (
+          <div className="mon-usage-attempts" data-testid="monitor-node-usage-attempts">
+            {nodeUsage.attempts.map((attempt) => (
+              <div className="mon-usage-attempt" key={`${attempt.iteration ?? 0}:${attempt.attempt ?? 0}`}>
+                <span className="mon-mono">
+                  a{attempt.attempt ?? 0}
+                  {attempt.iteration !== undefined && attempt.iteration > 0 ? ` #${attempt.iteration}` : ""}
+                </span>
+                {attempt.model ? <span className="mon-dim mon-usage-attempt-model">{attempt.model}</span> : null}
+                <span className="mon-mono mon-dim">{formatTokens(attempt.total)}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </InspectorSection>
       {promptText ? (
         <InspectorSection title="Prompt" testId="monitor-node-prompt">
@@ -3401,6 +3697,37 @@ function NodeInspector({
 // Run detail (header + lifecycle actions + tree + events).
 // ---------------------------------------------------------------------------
 
+/**
+ * Header token chip: measured spend solid, predicted total range and ETA dim
+ * and tilde-marked. Subscribes to the shared 1s clock itself so the in-flight
+ * estimate ticks without re-rendering the whole run detail.
+ */
+function RunUsageChip({
+  events,
+  timings,
+  tree,
+  live,
+}: {
+  events: readonly TokenUsageEvent[];
+  timings: readonly NodeTiming[];
+  tree: PredictionTreeNode | null;
+  live: boolean;
+}) {
+  const now = useNowMs();
+  const chip = useMemo(
+    () => runUsageChipOf(predictRunUsage({ events, timings, tree, nowMs: now, live }), { live }),
+    [events, timings, tree, live, now],
+  );
+  return (
+    <span className="mon-usage-chip" title={chip.title} data-testid="monitor-usage-chip">
+      <span className="mon-mono">{chip.spent}</span>
+      {chip.inFlight ? <span className="mon-usage-est">&nbsp;({chip.inFlight})</span> : null}
+      {chip.total ? <span className="mon-usage-est">&nbsp;· {chip.total}</span> : null}
+      {chip.eta ? <span className="mon-usage-est">&nbsp;· {chip.eta}</span> : null}
+    </span>
+  );
+}
+
 function RunDetail({
   runId,
   scores,
@@ -3425,6 +3752,15 @@ function RunDetail({
   const workflowsQuery = useGatewayWorkflows({ filter: { includeSystem: true } });
   // Task-vocabulary progress for the header (the health strip's counting).
   const detailTree = useGatewayRunTree(runId);
+  // Event log remains a bounded live stream. Usage comes from its persisted,
+  // full-run RPC so early attempts cannot fall out of the monitor's ring.
+  const earlyStatus = isRecord(runQuery.data) ? asString(runQuery.data.status) : undefined;
+  const usageLive = toneForStatus(earlyStatus) === "running" || toneForStatus(earlyStatus) === "waiting";
+  const runEvents = useGatewayRunEvents(runId, { maxEvents: 500 });
+  const runTokenUsage = useGatewayRunTokenUsage(runId, { refreshMs: usageLive ? 5_000 : undefined });
+  const nodeStates = useNodeStates(runId, usageLive);
+  const usageEvents = useMemo(() => runTokenUsage.data?.events ?? [], [runTokenUsage.data]);
+  const usageTimings = useMemo(() => nodeTimingsOf(nodeStates.rows), [nodeStates.rows]);
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);
@@ -3547,6 +3883,12 @@ function RunDetail({
             </span>
           </div>
         ) : null}
+        <RunUsageChip
+          events={usageEvents}
+          timings={usageTimings}
+          tree={detailTree.root as unknown as PredictionTreeNode | null}
+          live={usageLive}
+        />
         <div className="mon-detail-actions">
           {customUiUrl ? (
             <Button
@@ -3625,14 +3967,17 @@ function RunDetail({
 
       <ExecutionPanel
         runId={runId}
-        runStatus={status}
+        live={usageLive}
         selectedNode={selectedNode}
         onSelectNode={onSelectNode}
         autoSelectNodeId={autoSelectNodeId}
         onAutoSelected={onAutoSelected}
+        usageEvents={usageEvents}
+        nodeStates={nodeStates}
+        treeQuery={detailTree}
       />
 
-      <EventLog runId={runId} />
+      <EventLog runId={runId} eventsState={runEvents} />
     </div>
   );
 }
@@ -3640,6 +3985,38 @@ function RunDetail({
 // ---------------------------------------------------------------------------
 // App shell.
 // ---------------------------------------------------------------------------
+
+/**
+ * Inspector + the selected run's complete persisted token usage. The query
+ * lives here so updates only re-render the open inspector column.
+ */
+function NodeInspectorWithUsage({
+  runId,
+  node,
+  scores,
+  onResult,
+  onClose,
+}: {
+  runId: string;
+  node: TreeNode;
+  scores: RunScores;
+  onResult: (kind: "ok" | "err", text: string) => void;
+  onClose: () => void;
+}) {
+  const nodeLive = toneForStatus(node.status) === "running" || toneForStatus(node.status) === "waiting";
+  const usageState = useGatewayRunTokenUsage(runId, { refreshMs: nodeLive ? 5_000 : undefined });
+  const usageEvents = useMemo(() => usageState.data?.events ?? [], [usageState.data]);
+  return (
+    <NodeInspector
+      runId={runId}
+      node={node}
+      scores={scores}
+      usageEvents={usageEvents}
+      onResult={onResult}
+      onClose={onClose}
+    />
+  );
+}
 
 function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
@@ -3879,7 +4256,7 @@ function App() {
         {inspectorOpen ? (
           <>
             <div className="mon-inspector-backdrop" onClick={() => selectNode(undefined)} aria-hidden />
-            <NodeInspector
+            <NodeInspectorWithUsage
               runId={selectedRunId!}
               node={selectedNode!}
               scores={scores}
@@ -4116,6 +4493,37 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-duration ~ .mon-pill { margin-left: var(--sp-2); }
 .mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
+
+/* Measured vs estimated: estimates are always dim + italic + tilde-marked,
+   measured numbers stay solid — the one rule across every usage surface. */
+.mon-usage-est { color: var(--muted); font-style: italic; }
+.mon-usage-chip { display: inline-flex; align-items: baseline; font-size: var(--fs-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Tree token labels sit beside the duration; alone they take the right edge. */
+.mon-tree-tokens { flex: none; margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
+.mon-tree-duration ~ .mon-tree-tokens { margin-left: var(--sp-2); }
+.mon-tree-tokens ~ .mon-pill { margin-left: var(--sp-2); }
+
+/* Usage panel: rate-limit bars show REMAINING quota, toned by headroom. */
+.mon-usage-panel { display: flex; flex-direction: column; gap: var(--sp-4); }
+.mon-usage-section { display: flex; flex-direction: column; gap: var(--sp-1); }
+.mon-usage-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; font-size: var(--fs-2); }
+.mon-usage-label { flex: 0 1 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mon-usage-bar { flex: 1; min-width: 60px; height: 6px; border-radius: var(--r-full); background: var(--hover); overflow: hidden; }
+.mon-usage-bar-fill { display: block; height: 100%; border-radius: var(--r-full); background: var(--tone, var(--brand)); }
+.mon-usage-share-fill { background: var(--brand); }
+.mon-usage-text { flex: none; min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+.mon-usage-reset { flex: none; min-width: 72px; text-align: right; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
+.mon-usage-shares { display: flex; flex-direction: column; }
+.mon-spark { display: block; width: 100%; height: 28px; }
+.mon-spark-bar { fill: var(--brand); opacity: 0.5; }
+.mon-spark-now { opacity: 1; }
+.mon-spark-legend { display: flex; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-1); font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
+
+/* Node inspector: compact per-attempt usage breakdown under the Details grid. */
+.mon-usage-attempts { display: flex; flex-direction: column; gap: 0; margin: calc(-1 * var(--sp-2)) 0 var(--sp-4); }
+.mon-usage-attempt { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); font-size: var(--fs-1); }
+.mon-usage-attempt:last-child { border-bottom: 0; }
+.mon-usage-attempt-model { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Timeline: one row per (nodeId, iteration), chronological, click to inspect. */
 .mon-timeline { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }

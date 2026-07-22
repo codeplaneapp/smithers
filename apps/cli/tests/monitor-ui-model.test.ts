@@ -5,20 +5,26 @@ import {
   cronRowsOf,
   dataRowsOf,
   describeErrorCounter,
+  formatDurationRangeMs,
   formatLatencyMs,
   formatScore,
   histogramQuantile,
   histogramStats,
   metricValue,
   nextCron,
+  nodeTimingsOf,
   nonZeroErrorCounters,
   openTicketCount,
   opsStats,
   parsePrometheusText,
+  runUsageChipOf,
   scoreRowsOf,
   scoresForNode,
   scoresSummary,
   scoreTone,
+  tokenUsageEventsOf,
+  usageShareRows,
+  usageWindowRows,
   autoExpandKeys,
   buildTimeline,
   canRetryTask,
@@ -1657,5 +1663,227 @@ describe("ops strip readers", () => {
       }),
     ).toBe(3);
     expect(openTicketCount({ ok: true, data: [] })).toBe(0);
+  });
+});
+
+describe("token usage frame folding", () => {
+  test("tokenUsageEventsOf keeps TokenUsageReported payloads with their timestamps", () => {
+    const events = tokenUsageEventsOf([
+      {
+        type: "event",
+        event: "TokenUsageReported",
+        seq: 7,
+        payload: {
+          nodeId: "build",
+          iteration: 1,
+          attempt: 2,
+          model: "model-a",
+          agent: "codex",
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 3,
+          cacheWriteTokens: 2,
+          reasoningTokens: 1,
+          timestampMs: 123_000,
+        },
+        timestampMs: 999_000,
+      },
+      { type: "event", event: "NodeFinished", seq: 8, payload: { nodeId: "build" } },
+      { type: "event", event: "TokenUsageReported", seq: 9, payload: { outputTokens: 4 } },
+      { type: "event", event: "TokenUsageReported", seq: 10, payload: "junk" },
+      {
+        type: "event",
+        event: "TokenUsageReported",
+        seq: 11,
+        payload: { node_id: "snake", outputTokens: 6 },
+        timestampMs: 456_000,
+      },
+    ]);
+    expect(events).toEqual([
+      {
+        nodeId: "build",
+        iteration: 1,
+        attempt: 2,
+        model: "model-a",
+        agent: "codex",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 3,
+        cacheWriteTokens: 2,
+        reasoningTokens: 1,
+        timestampMs: 123_000,
+      },
+      { nodeId: "snake", outputTokens: 6, timestampMs: 456_000 },
+    ]);
+  });
+
+  test("nodeTimingsOf maps state rows onto the prediction timing view", () => {
+    expect(
+      nodeTimingsOf([
+        { nodeId: "build", iteration: 1, state: "finished", lastAttempt: 2, startedAtMs: 1_000, finishedAtMs: 4_000 },
+        { nodeId: "live", iteration: 0, state: "running", startedAtMs: 9_000 },
+      ]),
+    ).toEqual([
+      { nodeId: "build", iteration: 1, attempt: 2, startedAtMs: 1_000, finishedAtMs: 4_000, status: "finished" },
+      { nodeId: "live", iteration: 0, startedAtMs: 9_000, status: "running" },
+    ]);
+    expect(nodeTimingsOf(null)).toEqual([]);
+  });
+});
+
+describe("duration range formatting", () => {
+  test("collapses equal bounds and picks the high bound's unit", () => {
+    expect(formatDurationRangeMs(45_000, 45_000)).toBe("45s");
+    expect(formatDurationRangeMs(30_000, 45_000)).toBe("30–45s");
+    expect(formatDurationRangeMs(12 * 60_000, 20 * 60_000)).toBe("12–20m");
+    expect(formatDurationRangeMs(12 * 60_000, 12 * 60_000)).toBe("12m");
+    expect(formatDurationRangeMs(3_600_000, 7_200_000)).toBe("1–2h");
+    expect(formatDurationRangeMs(3_600_000, 5_400_000)).toBe("1–1.5h");
+  });
+});
+
+describe("run usage chip shaping", () => {
+  const base = {
+    spentTokens: 184_000,
+    inFlightTokens: 8_000,
+    predictedTotalLow: 260_000,
+    predictedTotalHigh: 340_000,
+    etaLowMs: 12 * 60_000,
+    etaHighMs: 20 * 60_000,
+    confidence: "medium" as const,
+    perNode: new Map(),
+  };
+
+  test("marks measured spend solid and prediction ranges with tildes", () => {
+    const chip = runUsageChipOf(base, { live: true });
+    expect(chip.spent).toBe("184k tok");
+    expect(chip.inFlight).toBe("+~8k running");
+    expect(chip.total).toBe("~260–340k total");
+    expect(chip.eta).toBe("~12–20m left");
+    expect(chip.title).toBe(
+      "spent 184k tokens (measured) · in-flight ~8k (estimate) · predicted total ~260–340k · ETA ~12–20m · estimate — some history",
+    );
+  });
+
+  test("shows just the measured spend when nothing is predicted", () => {
+    const chip = runUsageChipOf(
+      {
+        spentTokens: 842,
+        inFlightTokens: undefined,
+        predictedTotalLow: 842,
+        predictedTotalHigh: 842,
+        etaLowMs: undefined,
+        etaHighMs: undefined,
+        confidence: "low",
+        perNode: new Map(),
+      },
+      { live: true },
+    );
+    expect(chip.spent).toBe("842 tok");
+    expect(chip.inFlight).toBeUndefined();
+    expect(chip.total).toBeUndefined();
+    expect(chip.eta).toBeUndefined();
+    expect(chip.title).toBe("spent 842 tokens (measured) · estimate — limited history");
+  });
+
+  test("hides ETA for settled runs and zero remaining time", () => {
+    expect(runUsageChipOf(base, { live: false }).eta).toBeUndefined();
+    expect(runUsageChipOf({ ...base, etaLowMs: 0, etaHighMs: 0 }, { live: true }).eta).toBeUndefined();
+  });
+});
+
+describe("rate-limit window rows", () => {
+  test("bars show remaining quota with headroom tones", () => {
+    const rows = usageWindowRows([
+      {
+        accountLabel: "claude-1",
+        provider: "anthropic",
+        source: "oauth",
+        estimate: false,
+        windows: [
+          { id: "5h", label: "5-hour session", unit: "percent", usedPercent: 38, resetsAt: "2026-07-22T15:00:00.000Z" },
+          { id: "weekly", label: "weekly", unit: "percent", usedPercent: 65 },
+          { id: "low", label: "monthly", unit: "percent", usedPercent: 90 },
+        ],
+      },
+    ]);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({
+      key: "claude-1:5h",
+      label: "claude-1 · 5-hour session",
+      text: "62% left",
+      tone: "ok",
+      estimate: false,
+      resetsAtMs: Date.parse("2026-07-22T15:00:00.000Z"),
+    });
+    expect(rows[0]!.remainingFraction).toBeCloseTo(0.62);
+    expect(rows[1]).toMatchObject({ text: "35% left", tone: "waiting" });
+    expect(rows[1]!.remainingFraction).toBeCloseTo(0.35);
+    expect(rows[2]).toMatchObject({ text: "10% left", tone: "failed" });
+  });
+
+  test("count windows read remaining/limit and estimated windows are marked", () => {
+    const rows = usageWindowRows([
+      {
+        accountLabel: "api-key",
+        source: "headers",
+        windows: [{ id: "rpm", label: "requests/min", unit: "count", limit: 2_000, remaining: 1_200 }],
+      },
+      {
+        accountLabel: "local",
+        source: "estimate",
+        estimate: true,
+        windows: [{ id: "est", label: "estimated session", unit: "estimated", usedPercent: 50 }],
+      },
+    ]);
+    expect(rows[0]).toMatchObject({ text: "1.2k/2k left", tone: "ok", estimate: false });
+    expect(rows[0]!.remainingFraction).toBeCloseTo(0.6);
+    expect(rows[1]).toMatchObject({ text: "50% left", estimate: true });
+  });
+
+  test("derives remaining from limit minus used and stays barless when underivable", () => {
+    const rows = usageWindowRows([
+      {
+        accountLabel: "derived",
+        windows: [
+          { id: "a", label: "a", unit: "count", limit: 100, used: 25 },
+          { id: "b", label: "b", unit: "count", used: 25 },
+          { id: "c", label: "c", unit: "percent" },
+        ],
+      },
+    ]);
+    expect(rows[0]).toMatchObject({ text: "75/100 left", tone: "ok" });
+    expect(rows[1]).toMatchObject({ text: "—", tone: "idle" });
+    expect(rows[1]!.remainingFraction).toBeUndefined();
+    expect(rows[2]).toMatchObject({ text: "—", tone: "idle" });
+  });
+
+  test("failed probes keep one dim unavailable row; source none stays silent", () => {
+    const rows = usageWindowRows([
+      { accountLabel: "broken", source: "oauth", error: "probe failed", windows: [] },
+      { accountLabel: "unprobeable", source: "none", windows: [] },
+    ]);
+    expect(rows).toEqual([
+      {
+        key: "broken:unavailable",
+        label: "broken",
+        text: "unavailable",
+        tone: "idle",
+        estimate: false,
+        unavailable: true,
+      },
+    ]);
+  });
+});
+
+describe("usage share rows", () => {
+  test("sorts by spend, scales the largest bar to full width, and caps rows", () => {
+    const rows = usageShareRows(new Map([["codex", 30_000], ["claude", 60_000], ["noop", 0]]), 8);
+    expect(rows).toEqual([
+      { key: "claude", tokens: 60_000, fraction: 1 },
+      { key: "codex", tokens: 30_000, fraction: 0.5 },
+    ]);
+    expect(usageShareRows(new Map([["a", 1], ["b", 2], ["c", 3]]), 2).map((row) => row.key)).toEqual(["c", "b"]);
+    expect(usageShareRows(new Map())).toEqual([]);
   });
 });

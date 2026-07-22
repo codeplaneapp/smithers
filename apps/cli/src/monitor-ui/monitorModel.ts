@@ -10,6 +10,13 @@ import {
   statusClass,
   type StatusClass,
 } from "smithers-orchestrator/ui";
+import {
+  formatTokenRange,
+  formatTokens,
+  type NodeTiming,
+  type RunUsagePrediction,
+  type TokenUsageEvent,
+} from "./usagePrediction.ts";
 
 export { normalizeStatus };
 
@@ -1299,6 +1306,272 @@ export function formatDurationMs(durationMs: number | undefined): string {
   const secs = totalSec % 60;
   if (mins < 60) return `${mins}m ${String(secs).padStart(2, "0")}s`;
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+// ---------------------------------------------------------------------------
+// Token usage + rate limits. The run header chip, tree row labels, node
+// inspector block, and the Usage panel all render shapes derived here (or in
+// ./usagePrediction.ts) from `TokenUsageReported` frames and the gateway's
+// /v1/api/usage reports — measured numbers stay visually distinct from
+// estimates everywhere.
+// ---------------------------------------------------------------------------
+
+/** Extract token-usage events from raw run-event frames (payload fields ride top-level). */
+export function tokenUsageEventsOf(
+  frames: readonly { event?: string; payload?: unknown; timestampMs?: number }[],
+): TokenUsageEvent[] {
+  const events: TokenUsageEvent[] = [];
+  for (const frame of frames) {
+    if (asString(frame.event) !== "TokenUsageReported" || !isRecord(frame.payload)) continue;
+    const payload = frame.payload;
+    const nodeId = asString(pick(payload, "nodeId", "node_id"));
+    if (!nodeId) continue;
+    const iteration = asNumber(payload.iteration);
+    const attempt = asNumber(payload.attempt);
+    const model = asString(payload.model);
+    const agent = asString(payload.agent);
+    const inputTokens = asNumber(payload.inputTokens);
+    const outputTokens = asNumber(payload.outputTokens);
+    const cacheReadTokens = asNumber(payload.cacheReadTokens);
+    const cacheWriteTokens = asNumber(payload.cacheWriteTokens);
+    const reasoningTokens = asNumber(payload.reasoningTokens);
+    const timestampMs = asNumber(payload.timestampMs) ?? frame.timestampMs;
+    events.push({
+      nodeId,
+      ...(iteration !== undefined ? { iteration } : {}),
+      ...(attempt !== undefined ? { attempt } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(agent !== undefined ? { agent } : {}),
+      ...(inputTokens !== undefined ? { inputTokens } : {}),
+      ...(outputTokens !== undefined ? { outputTokens } : {}),
+      ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+      ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+      ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+      ...(timestampMs !== undefined ? { timestampMs } : {}),
+    });
+  }
+  return events;
+}
+
+/** Node-state rows → the prediction module's timing view (`lastAttempt` is the row's attempt identity). */
+export function nodeTimingsOf(rows: readonly NodeStateRow[] | null | undefined): NodeTiming[] {
+  return (rows ?? []).map((row) => ({
+    nodeId: row.nodeId,
+    iteration: row.iteration,
+    ...(row.lastAttempt !== undefined ? { attempt: row.lastAttempt } : {}),
+    ...(row.startedAtMs !== undefined ? { startedAtMs: row.startedAtMs } : {}),
+    ...(row.finishedAtMs !== undefined ? { finishedAtMs: row.finishedAtMs } : {}),
+    status: row.state,
+  }));
+}
+
+/** Compact duration range for the header chip ETA: "45s", "12–20m", "1–2.5h". */
+export function formatDurationRangeMs(lowMs: number, highMs: number): string {
+  const low = Math.max(0, lowMs);
+  const high = Math.max(0, highMs);
+  if (high < 60_000) {
+    const lowSec = Math.round(low / 1_000);
+    const highSec = Math.round(high / 1_000);
+    return lowSec === highSec ? `${highSec}s` : `${lowSec}–${highSec}s`;
+  }
+  if (high < 3_600_000) {
+    const lowMin = Math.round(low / 60_000);
+    const highMin = Math.round(high / 60_000);
+    return lowMin === highMin ? `${highMin}m` : `${lowMin}–${highMin}m`;
+  }
+  const lowHr = Math.round((low / 3_600_000) * 10) / 10;
+  const highHr = Math.round((high / 3_600_000) * 10) / 10;
+  const hours = (value: number) => (Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1));
+  return lowHr === highHr ? `${hours(highHr)}h` : `${hours(lowHr)}–${hours(highHr)}h`;
+}
+
+/** Everything the run header token chip renders, text pre-shaped. */
+export type RunUsageChipView = {
+  /** Measured spend, rendered solid: "184k tok". */
+  spent: string;
+  /** Estimated unreported spend of running tasks: "+~8k running". */
+  inFlight?: string;
+  /** Predicted final range, dimmer/italic: "~260–340k total". */
+  total?: string;
+  /** Predicted remaining time, dimmer/italic: "~12–20m left". Live runs only. */
+  eta?: string;
+  confidence: RunUsagePrediction["confidence"];
+  /** Tooltip: the full measured-vs-estimated breakdown plus history confidence. */
+  title: string;
+};
+
+/**
+ * Shape a run prediction for the header chip. Spent is always shown solid;
+ * the total range appears only when it brackets MORE than the measured spend
+ * (a settled run's range equals its spend and would read as noise), and ETA
+ * only for live runs with a known window.
+ */
+export function runUsageChipOf(
+  prediction: RunUsagePrediction,
+  options: { live: boolean },
+): RunUsageChipView {
+  const spent = `${formatTokens(prediction.spentTokens)} tok`;
+  const inFlight =
+    prediction.inFlightTokens !== undefined && prediction.inFlightTokens >= 1
+      ? `+~${formatTokens(prediction.inFlightTokens)} running`
+      : undefined;
+  const total =
+    prediction.predictedTotalHigh > prediction.spentTokens
+      ? `~${formatTokenRange(prediction.predictedTotalLow, prediction.predictedTotalHigh)} total`
+      : undefined;
+  const etaMs =
+    options.live && prediction.etaLowMs !== undefined && prediction.etaHighMs !== undefined && prediction.etaHighMs > 0
+      ? { low: prediction.etaLowMs, high: prediction.etaHighMs }
+      : undefined;
+  const eta = etaMs ? `~${formatDurationRangeMs(etaMs.low, etaMs.high)} left` : undefined;
+  const confidenceLabel =
+    prediction.confidence === "low"
+      ? "estimate — limited history"
+      : prediction.confidence === "medium"
+        ? "estimate — some history"
+        : "estimate — strong history";
+  const titleParts = [`spent ${formatTokens(prediction.spentTokens)} tokens (measured)`];
+  if (prediction.inFlightTokens !== undefined && prediction.inFlightTokens >= 1) {
+    titleParts.push(`in-flight ~${formatTokens(prediction.inFlightTokens)} (estimate)`);
+  }
+  if (total) {
+    titleParts.push(
+      `predicted total ~${formatTokenRange(prediction.predictedTotalLow, prediction.predictedTotalHigh)}`,
+    );
+  }
+  if (etaMs) titleParts.push(`ETA ~${formatDurationRangeMs(etaMs.low, etaMs.high)}`);
+  titleParts.push(confidenceLabel);
+  return {
+    spent,
+    ...(inFlight !== undefined ? { inFlight } : {}),
+    ...(total !== undefined ? { total } : {}),
+    ...(eta !== undefined ? { eta } : {}),
+    confidence: prediction.confidence,
+    title: titleParts.join(" · "),
+  };
+}
+
+/** Minimal structural view of one quota window from the gateway's usage reports. */
+export type UsageWindowLike = {
+  id: string;
+  label: string;
+  unit: "percent" | "count" | "estimated";
+  usedPercent?: number;
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  resetsAt?: string;
+};
+
+/** Minimal structural view of one account's usage report. */
+export type UsageReportLike = {
+  accountLabel: string;
+  provider?: string;
+  planType?: string;
+  source?: string;
+  windows?: readonly UsageWindowLike[];
+  stale?: boolean;
+  estimate?: boolean;
+  error?: string;
+};
+
+/** One rendered rate-limit row in the Usage panel. */
+export type UsageWindowRow = {
+  key: string;
+  /** "account · window". */
+  label: string;
+  /** Remaining fraction 0–1 driving the bar; undefined when not derivable. */
+  remainingFraction?: number;
+  /** "62% left" / "1.2k/2k left" / "unavailable". */
+  text: string;
+  /** Bar tone from remaining headroom: ok >50%, waiting 20–50%, failed <20%. */
+  tone: "ok" | "waiting" | "failed" | "idle";
+  resetsAtMs?: number;
+  /** Locally estimated window — the UI marks it with "~" and "est". */
+  estimate: boolean;
+  /** Probe failure row ("account: unavailable") — rendered as a dim line, no bar. */
+  unavailable?: boolean;
+};
+
+/**
+ * Shape account usage reports into rate-limit rows showing REMAINING quota
+ * (never consumed). Reports whose probe failed keep one honest dim row;
+ * `source: "none"` accounts (registered but unprobeable, no error) stay
+ * silent. Windows without the fields their unit needs get no bar.
+ */
+export function usageWindowRows(reports: readonly UsageReportLike[]): UsageWindowRow[] {
+  const rows: UsageWindowRow[] = [];
+  for (const report of reports) {
+    if (report.error) {
+      rows.push({
+        key: `${report.accountLabel}:unavailable`,
+        label: report.accountLabel,
+        text: "unavailable",
+        tone: "idle",
+        estimate: false,
+        unavailable: true,
+      });
+      continue;
+    }
+    if (report.source === "none") continue;
+    for (const window of report.windows ?? []) {
+      const estimate = report.estimate === true || window.unit === "estimated";
+      let remainingFraction: number | undefined;
+      let text = "—";
+      if (window.unit === "count") {
+        const remaining =
+          window.remaining ??
+          (window.limit !== undefined && window.used !== undefined ? window.limit - window.used : undefined);
+        if (remaining !== undefined && window.limit !== undefined && window.limit > 0) {
+          remainingFraction = Math.max(0, Math.min(1, remaining / window.limit));
+          text = `${formatTokens(remaining)}/${formatTokens(window.limit)} left`;
+        } else if (remaining !== undefined) {
+          text = `${formatTokens(remaining)} left`;
+        }
+      } else if (window.usedPercent !== undefined) {
+        const remainingPercent = Math.max(0, Math.min(100, 100 - window.usedPercent));
+        remainingFraction = remainingPercent / 100;
+        text = `${Math.round(remainingPercent)}% left`;
+      }
+      const tone =
+        remainingFraction === undefined
+          ? "idle"
+          : remainingFraction > 0.5
+            ? "ok"
+            : remainingFraction >= 0.2
+              ? "waiting"
+              : "failed";
+      const resetsAtMs = window.resetsAt !== undefined ? Date.parse(window.resetsAt) : NaN;
+      rows.push({
+        key: `${report.accountLabel}:${window.id}`,
+        label: `${report.accountLabel} · ${window.label}`,
+        ...(remainingFraction !== undefined ? { remainingFraction } : {}),
+        text,
+        tone,
+        ...(Number.isFinite(resetsAtMs) ? { resetsAtMs } : {}),
+        estimate,
+      });
+    }
+  }
+  return rows;
+}
+
+/** One bar in the Usage panel's per-agent / per-model breakdowns. */
+export type UsageShareRow = {
+  key: string;
+  tokens: number;
+  /** Bar width as a fraction of the largest row (0–1). */
+  fraction: number;
+};
+
+/** Top token consumers, largest first; fractions scale the biggest bar to full width. */
+export function usageShareRows(totals: ReadonlyMap<string, number>, maxRows = 8): UsageShareRow[] {
+  const top = [...totals.entries()]
+    .filter(([, tokens]) => tokens > 0)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, Math.max(1, maxRows));
+  const max = top.length > 0 ? top[0]![1] : 0;
+  return top.map(([key, tokens]) => ({ key, tokens, fraction: max > 0 ? tokens / max : 0 }));
 }
 
 // ---------------------------------------------------------------------------
