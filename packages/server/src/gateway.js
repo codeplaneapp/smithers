@@ -3984,6 +3984,7 @@ a { color: var(--brand); }</style>
                 method: "listRuns",
                 params: {
                     limit: queryPositiveInt(url.searchParams, "limit"),
+                    offset: queryNonNegativeInt(url.searchParams, "offset"),
                     status: queryString(url.searchParams, "status"),
                     workflow: queryString(url.searchParams, "workflow"),
                 },
@@ -7885,8 +7886,8 @@ a { color: var(--brand); }</style>
                 // offset pages the newest-first result server-side; 0 is valid
                 // (asOptionalPositiveInt rejects it), so parse non-negative here.
                 const offsetRaw = params.offset ?? filter.offset;
-                const offset = offsetRaw === undefined || offsetRaw === null ? 0 : Math.floor(Number(offsetRaw));
-                if (!Number.isFinite(offset) || offset < 0) {
+                const offset = offsetRaw === undefined || offsetRaw === null ? 0 : offsetRaw;
+                if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) {
                     return responseError(frame.id, "INVALID_REQUEST", "offset must be a non-negative integer");
                 }
                 return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status, workflow, offset));

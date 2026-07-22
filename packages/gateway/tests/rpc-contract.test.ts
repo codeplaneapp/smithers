@@ -330,6 +330,15 @@ describe("Gateway RPC contract", () => {
     expect(isGatewayRpcMethod("compareExperiments")).toBe(false);
   });
 
+  test("publishes the safe integer bound for listRuns offsets", () => {
+    const list = getGatewayRpcDefinition("listRuns")!;
+    expect(list.requestSchema.properties?.filter?.properties?.offset).toMatchObject({
+      type: "integer",
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+    });
+  });
+
   test("pins exact required scopes for every stable RPC method", () => {
     const expectedScopes: Record<string, GatewayScope> = {
       launchRun: "run:write",

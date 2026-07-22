@@ -124,6 +124,22 @@ describe("gateway — many workflows sharing one DB", () => {
       { id: "runs-bad-offset", method: "listRuns", params: { filter: { limit: 2, offset: -1 } } },
     );
     expect(badOffset.ok).toBe(false);
+
+    for (const offset of [1.5, "2", Infinity, -1, Number.MAX_SAFE_INTEGER + 1]) {
+      const invalid = await gateway.routeRequest(
+        { role: "operator", scopes: ["run:read"], userId: "test" },
+        { id: `runs-invalid-${String(offset)}`, method: "listRuns", params: { offset } },
+      );
+      expect(invalid.ok).toBe(false);
+      expect(invalid.error.code).toBe("INVALID_REQUEST");
+    }
+    for (const offset of [0, 1, Number.MAX_SAFE_INTEGER]) {
+      const valid = await gateway.routeRequest(
+        { role: "operator", scopes: ["run:read"], userId: "test" },
+        { id: `runs-valid-${offset}`, method: "listRuns", params: { offset } },
+      );
+      expect(valid.ok).toBe(true);
+    }
   });
 
   test("resolveRun attributes a run to its true workflow, not the first adapter", async () => {

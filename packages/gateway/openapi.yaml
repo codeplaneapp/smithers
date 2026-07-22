@@ -4679,7 +4679,8 @@ paths:
                         offset:
                           type: integer
                           minimum: 0
-                          description: "Rows to skip after the newest-first sort (server-side pagination)."
+                          maximum: 9007199254740991
+                          description: "Rows to skip after the newest-first sort (server-side pagination); a safe non-negative integer."
                         workflow:
                           type: string
                           description: "Optional workflow key filter."
@@ -19652,6 +19653,292 @@ paths:
                       refresh:
                         type: string
   /v1/api/runs:
+    get:
+      operationId: apiListRuns
+      summary: "List runs."
+      description: "REST domain API wrapper over the listRuns Gateway RPC internals."
+      tags:
+        - "Gateway REST"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-required-scope: run:read
+      x-smithers-rpc-method: listRuns
+      parameters:
+        -
+          name: status
+          in: query
+          description: "Optional run status filter."
+          required: false
+          schema:
+            type: string
+            description: "Optional run status filter."
+        -
+          name: workflow
+          in: query
+          description: "Optional workflow key filter."
+          required: false
+          schema:
+            type: string
+            description: "Optional workflow key filter."
+        -
+          name: limit
+          in: query
+          description: "Maximum number of runs."
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            description: "Maximum number of runs."
+        -
+          name: offset
+          in: query
+          description: "Rows to skip after the newest-first sort; a safe non-negative integer."
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            description: "Rows to skip after the newest-first sort (server-side pagination); a safe non-negative integer."
+      responses:
+        200:
+          description: "Gateway REST response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - data
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  txid:
+                    type: string
+                    pattern: "^\\d+$"
+                  seq:
+                    type: integer
+                    minimum: 0
+        400:
+          description: "Invalid request."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        401:
+          description: "Authentication failed."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        403:
+          description: "Missing required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        404:
+          description: "Route or resource not found."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        500:
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
     post:
       operationId: apiLaunchRun
       summary: "Launch a run."

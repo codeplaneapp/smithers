@@ -159,6 +159,8 @@ describe("pushdown validation falls back to the RPC-backed collection", () => {
   test("filters an Electric shape cannot represent return no pushdown", () => {
     // Shapes have no ORDER BY/LIMIT.
     expect(runsShapeWhere({ filter: { limit: 5 } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { offset: 0 } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { offset: 10 } })).toBeUndefined();
     expect(approvalsShapeWhere({ filter: { limit: 1 } })).toBeUndefined();
     // Workflow matching resolves gateway workflow keys in JS.
     expect(runsShapeWhere({ filter: { workflow: "deploy" } })).toBeUndefined();

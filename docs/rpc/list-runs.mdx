@@ -13,4 +13,4 @@ apiVersion: v1
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
 
-`workflow` filters to runs attributed to that workflow key (gateway-started runs match by registered config key, CLI runs by workflow name). Results order newest first. `offset` skips that many rows after the newest-first sort, so `limit` plus `offset` page the full history server-side; a negative or non-integer `offset` is an `InvalidRequest`.
+`workflow` filters to runs attributed to that workflow key (gateway-started runs match by registered config key, CLI runs by workflow name). Results order newest first. `offset` skips that many rows after the newest-first sort, so `limit` plus `offset` page the full history server-side. It must be a finite, non-negative safe integer no greater than `Number.MAX_SAFE_INTEGER`; fractional, string, negative, non-finite, and unsafe values are `InvalidRequest`.

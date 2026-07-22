@@ -355,6 +355,26 @@ for (const backend of backends) {
       await apiRequest(baseUrl, "POST", `/v1/api/runs/${slow.data.runId}/cancel`, {});
     }, 60_000);
 
+    test.skipIf(backend === "pglite" && process.platform === "win32")("listRuns REST offset matches the RPC page", async () => {
+      const { baseUrl } = await bootGateway(backend);
+      const first = await launchRun(baseUrl, "value", { value: 1 });
+      const second = await launchRun(baseUrl, "value", { value: 2 });
+      await waitForRun(baseUrl, first.data.runId, "finished");
+      await waitForRun(baseUrl, second.data.runId, "finished");
+
+      const unpaged = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=2");
+      const rest = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=1&offset=1");
+      const rpc = await rpcRequest(baseUrl, "listRuns", { filter: { limit: 1, offset: 1 } });
+      expect(rest.response.status).toBe(200);
+      expect(rest.json.ok).toBe(true);
+      expect(rpc.response.status).toBe(200);
+      expect(rpc.json.ok).toBe(true);
+      expect((rest.json.data as Array<{ runId: string }>).map((row) => row.runId))
+        .toEqual((rpc.json.payload as Array<{ runId: string }>).map((row) => row.runId));
+      expect((rest.json.data as Array<{ runId: string }>)[0]?.runId)
+        .toBe((unpaged.json.data as Array<{ runId: string }>)[1]?.runId);
+    }, 60_000);
+
     test.skipIf(backend === "pglite" && process.platform === "win32")("write routes return seq locally and invalidate SSE", async () => {
       const { baseUrl } = await bootGateway(backend);
       const eventPromise = readSseUntil(baseUrl, (event) =>

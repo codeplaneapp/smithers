@@ -77,6 +77,13 @@ function requireRequestProperty(definition: GatewayRpcDefinition, property: stri
   return schema;
 }
 
+function requireRequestFilterProperty(definition: GatewayRpcDefinition, property: string): JsonSchema {
+  const filter = definition.requestSchema.properties?.filter;
+  const schema = filter?.properties?.[property];
+  if (!schema) throw new Error(`Missing ${definition.method} filter request property: ${property}`);
+  return schema;
+}
+
 const objectSchema = {
   type: "object",
   additionalProperties: true,
@@ -89,7 +96,21 @@ const listRunTokenUsageRpc = requireRpcDefinition("listRunTokenUsage");
 const launchRunRpc = requireRpcDefinition("launchRun");
 
 const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
-  { method: "get", path: "/v1/api/runs", operationId: "apiListRuns", summary: "List runs.", rpcMethod: "listRuns", requiredScope: scopeForRpc("listRuns"), responseSchema: { type: "array", items: objectSchema } },
+  {
+    method: "get",
+    path: "/v1/api/runs",
+    operationId: "apiListRuns",
+    summary: "List runs.",
+    rpcMethod: "listRuns",
+    requiredScope: scopeForRpc("listRuns"),
+    responseSchema: { type: "array", items: objectSchema },
+    parameters: [
+      { name: "status", in: "query", description: "Optional run status filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "status") },
+      { name: "workflow", in: "query", description: "Optional workflow key filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "workflow") },
+      { name: "limit", in: "query", description: "Maximum number of runs.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "limit") },
+      { name: "offset", in: "query", description: "Rows to skip after the newest-first sort; a safe non-negative integer.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "offset") },
+    ],
+  },
   { method: "post", path: "/v1/api/runs", operationId: "apiLaunchRun", summary: "Launch a run.", rpcMethod: "launchRun", requiredScope: scopeForRpc("launchRun"), requestSchema: launchRunRpc.requestSchema, responseSchema: launchRunRpc.responseSchema, mutation: true },
   { method: "get", path: "/v1/api/runs/{runId}", operationId: "apiGetRun", summary: "Read one run.", rpcMethod: "getRun", requiredScope: scopeForRpc("getRun"), responseSchema: objectSchema },
   {
@@ -434,7 +455,7 @@ function buildOpenApiDocument(): OpenApiDocument {
     paths[rpcPath(definition)] = buildPath(definition);
   }
   for (const definition of gatewayApiRoutes) {
-    paths[definition.path] = buildApiPath(definition);
+    paths[definition.path] = { ...(paths[definition.path] as Record<string, unknown> | undefined), ...buildApiPath(definition) };
   }
   return {
     openapi: "3.1.0",

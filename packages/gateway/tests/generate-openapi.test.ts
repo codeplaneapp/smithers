@@ -92,6 +92,9 @@ describe("generate-openapi helpers", () => {
       expect(doc.paths[`/v1/rpc/${def.method}`]).toBeDefined();
     }
     expect(doc.paths["/v1/api/runs"]).toBeDefined();
+    const runs = (doc.paths["/v1/api/runs"] as any).get;
+    const runParameters = Object.fromEntries((runs.parameters ?? []).map((parameter: any) => [parameter.name, parameter]));
+    expect(runParameters.offset.schema).toMatchObject({ type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
     expect(doc.paths["/v1/api/scores/compare"]).toBeDefined();
     expect(doc.paths["/v1/api/scores/{runId}/{scoreId}"]).toBeDefined();
     expect((doc.paths["/v1/api/scores/compare"] as any).get["x-smithers-rpc-method"]).toBe("listScoresForRuns");

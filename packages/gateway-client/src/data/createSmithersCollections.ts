@@ -199,7 +199,7 @@ function shapeLiteral(value: string): string | undefined {
  */
 export function runsShapeWhere(params: ListRunsRequest): { where?: string } | undefined {
   const filter = params.filter ?? {};
-  if (filter.limit !== undefined || filter.workflow !== undefined) return undefined;
+  if (filter.limit !== undefined || filter.offset !== undefined || filter.workflow !== undefined) return undefined;
   if (filter.status === undefined) return {};
   const status = shapeLiteral(filter.status);
   if (!status) return undefined;

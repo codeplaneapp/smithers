@@ -43,4 +43,13 @@ describe("createSmithersDataClient listRuns query", () => {
     expect(url.searchParams.get("status")).toBe("finished");
     client.close();
   });
+
+  test("forwards zero and non-zero offsets into the /v1/api/runs query string", async () => {
+    const { client, urls } = clientWithCapture();
+    await client.api.listRuns({ filter: { limit: 10, offset: 0 } });
+    await client.api.listRuns({ filter: { limit: 10, offset: 10 } });
+    expect(new URL(urls[0]).searchParams.get("offset")).toBe("0");
+    expect(new URL(urls[1]).searchParams.get("offset")).toBe("10");
+    client.close();
+  });
 });
