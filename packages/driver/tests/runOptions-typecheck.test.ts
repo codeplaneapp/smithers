@@ -23,7 +23,7 @@ describe("RunOptions public type", () => {
     writeFileSync(
       join(dir, "run-options.ts"),
       `
-        import type { OutputRowsReader, RunOptions, SmithersErrorReport } from "@smithers-orchestrator/driver";
+        import type { OutputRowsReader, RunOptions, RunStartedBy, SmithersErrorReport } from "@smithers-orchestrator/driver";
 
         type Outputs = { rows: { value: number } };
         declare const rowsReader: OutputRowsReader<Outputs>;
@@ -31,11 +31,13 @@ describe("RunOptions public type", () => {
         void value;
 
         const reports: SmithersErrorReport[] = [];
+        const startedBy: RunStartedBy = { harness: "codex", sessionId: "session" };
 
         const options: RunOptions = {
           input: {},
           effectPlatformRuntime: "node",
           effectPlatformLayer: {} as RunOptions["effectPlatformLayer"],
+          startedBy,
           initialOutputs: {
             rows: [{ value: 1 }],
           },

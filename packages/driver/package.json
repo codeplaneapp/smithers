@@ -27,6 +27,9 @@
     "./RunAuthContext": {
       "types": "./src/index.d.ts"
     },
+    "./RunStartedBy": {
+      "types": "./src/index.d.ts"
+    },
     "./SmithersCtx": {
       "types": "./src/index.d.ts",
       "import": "./src/SmithersCtx.js",

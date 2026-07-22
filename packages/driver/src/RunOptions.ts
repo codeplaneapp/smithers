@@ -1,4 +1,5 @@
 import type { RunAuthContext } from "./RunAuthContext.ts";
+import type { RunStartedBy } from "./RunStartedBy.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
 import type { SmithersErrorReport } from "./SmithersErrorReport.ts";
 import type { SignalRowInput } from "./SignalRows.ts";
@@ -65,6 +66,8 @@ export type RunOptions = {
   hot?: boolean | HotReloadOptions;
   annotations?: Record<string, string | number | boolean>;
   auth?: RunAuthContext | null;
+  /** Self-reported launch provenance, distinct from authenticated identity. */
+  startedBy?: RunStartedBy;
   config?: Record<string, unknown>;
   /**
    * Effect platform runtime label for engines that support a swappable platform

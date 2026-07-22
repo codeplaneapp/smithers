@@ -13,6 +13,7 @@
 /** @template [Schema=unknown] @typedef {import("./OutputRows.ts").OutputRowsReader<Schema>} OutputRowsReader */
 /** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
+/** @typedef {import("./RunStartedBy.ts").RunStartedBy} RunStartedBy */
 /** @typedef {import("./RunOptions.ts").EffectPlatformRuntime} EffectPlatformRuntime */
 /** @typedef {import("./RunOptions.ts").RunOptions} RunOptions */
 /** @typedef {import("./SmithersErrorReport.ts").SmithersErrorReport} SmithersErrorReport */
@@ -57,3 +58,9 @@
 export { WorkflowDriver } from "./WorkflowDriver.js";
 export { SmithersCtx } from "./SmithersCtx.js";
 export { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "./RuntimeCapabilityError.js";
+export {
+    normalizeRunStartedBy,
+    RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS,
+    RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS,
+    RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS,
+} from "./normalizeRunStartedBy.js";

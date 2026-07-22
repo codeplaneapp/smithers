@@ -55,6 +55,18 @@ type RunAuthContext$2 = {
     createdAt: string;
 };
 
+/**
+ * Optional, self-reported provenance for the process that started a run.
+ * This is distinct from authenticated `RunAuthContext` identity.
+ */
+type RunStartedBy$1 = {
+    harness?: string;
+    sessionId?: string;
+    prompt?: string;
+    /** Present only when environment detection supplied an identity field. */
+    detected?: true;
+};
+
 type OutputSnapshot$2<TFallback = unknown> = {
     [tableName: string]: Array<TFallback>;
 };
@@ -133,6 +145,8 @@ type RunOptions$2 = {
     hot?: boolean | HotReloadOptions$1;
     annotations?: Record<string, string | number | boolean>;
     auth?: RunAuthContext$2 | null;
+    /** Self-reported launch provenance, distinct from authenticated identity. */
+    startedBy?: RunStartedBy$1;
     config?: Record<string, unknown>;
     /**
      * Effect platform runtime label for engines that support a swappable platform
@@ -1025,6 +1039,19 @@ type RenderContext = _smithers_orchestrator_scheduler.RenderContext;
 type WaitReason = _smithers_orchestrator_scheduler.WaitReason;
 type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
 
+/**
+ * Normalize optional harness provenance at public ingress and before durable
+ * persistence. Unknown object keys are intentionally ignored for direct JS
+ * callers; public schemas reject them before this helper runs.
+ *
+ * @param {unknown} value
+ * @returns {import("./RunStartedBy.ts").RunStartedBy | undefined}
+ */
+declare function normalizeRunStartedBy(value: unknown): RunStartedBy$1 | undefined;
+declare const RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS: 64;
+declare const RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS: 256;
+declare const RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS: 8192;
+
 type HotReloadOptions = HotReloadOptions$1;
 type OutputAccessor<Schema = any> = OutputAccessor$2<Schema>;
 type InferOutputEntry<T> = InferOutputEntry$1<T>;
@@ -1033,6 +1060,7 @@ type OutputSnapshot = OutputSnapshot$2;
 type OutputRowsReader<Schema = unknown> = OutputRowsReader$2<Schema>;
 type ProofBinding = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
 type RunAuthContext = RunAuthContext$2;
+type RunStartedBy = RunStartedBy$1;
 type EffectPlatformRuntime = EffectPlatformRuntime$1;
 type RunOptions = RunOptions$2;
 type SmithersErrorReport = SmithersErrorReport$1;
@@ -1067,4 +1095,4 @@ type SignalRow = SignalRow$1;
 type SignalRowsOptions = SignalRowsOptions$1;
 type SignalRowsReader = SignalRowsReader$2;
 
-export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeSignals, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, type SignalRow, type SignalRowInput, type SignalRowsOptions, type SignalRowsReader, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind };
+export { type BrowserRuntimeOptions, type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type MemoryRuntimeService, type MemoryRuntimeTagGroup, type OutputAccessor, type OutputKey, type OutputRowsReader, type OutputSnapshot, type ProofBinding, RUNTIME_CAPABILITY_UNAVAILABLE, RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS, RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS, RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS, type RunAuthContext, type RunOptions, type RunResult, type RunStartedBy, type RunStatus, type RuntimeAdapter, type RuntimeCapability, RuntimeCapabilityError, type RuntimeCapabilityErrorDetails, type RuntimeClock, type RuntimeFilesystem, type RuntimeSandbox, type RuntimeSandboxResult, type RuntimeSignals, type RuntimeStorage, type RuntimeSubprocess, type RuntimeSubprocessResult, type RuntimeWorktree, type SignalRow, type SignalRowInput, type SignalRowsOptions, type SignalRowsReader, SmithersCtx, type SmithersCtxOptions, type SmithersErrorReport, type StoredRunState, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowLiteralViewNode, type WorkflowRuntime, type WorkflowSession, type WorkflowViewDefinition, type WorkflowViewKind, normalizeRunStartedBy };
