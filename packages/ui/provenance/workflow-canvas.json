@@ -30,7 +30,11 @@
       "WorkflowMinimap is a labelled seam frame with no upstream component; upstream parks ReactFlow's MiniMap as a Canvas child",
       "WorkflowToolbar is plain canvas chrome; upstream Toolbar wraps ReactFlow's per-node NodeToolbar",
       "WorkflowControls renders buttons only from caller-provided callbacks; upstream Controls binds the ReactFlow viewport API directly",
-      "WorkflowCanvas is role=group, not role=application: the base layer ships no application-mode keyboard contract"
+      "WorkflowCanvas is role=group, not role=application: the base layer ships no application-mode keyboard contract",
+      "WorkflowNode renders with role=option when the renderer passes a selection state, so aria-selected is supported by the role and survives into the accessibility tree (on a generic div it is stripped); nodes without a selection model stay generic",
+      "WorkflowEdge status is not color-only: a per-status-class shape glyph plus an sr-only status label accompany the colored signifier",
+      "WorkflowControls and WorkflowToolbar implement the ARIA toolbar keyboard contract: roving tabindex with Arrow/Home/End navigation that never lands on disabled items and ignores modifier-key chords",
+      "WorkflowConnection exposes its validity state via sr-only text instead of aria-hidden"
     ]
   },
   {

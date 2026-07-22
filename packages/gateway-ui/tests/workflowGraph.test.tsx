@@ -72,23 +72,23 @@ describe("workflowToFlow", () => {
 });
 
 describe("SmithersTaskNode card", () => {
-  test("renders the kind kicker, a status-colored dot, title and output", () => {
+  test("renders the shared canvas anatomy: kind badge, status pill, title and output", () => {
     const html = renderNode({ label: "Plan the work", kind: "agent", output: "3 steps", status: "running" });
     expect(html).toContain('data-kind="agent"');
     expect(html).toContain('data-status="running"');
-    // The status dot carries the run status and the theme brand token.
-    expect(html).toContain('class="node-dot"');
-    expect(html).toContain("var(--brand, #6d56d8)");
+    // Status flows through the shared StatusPill vocabulary, not a bespoke dot.
+    expect(html).toContain('data-slot="workflow-node-status"');
+    expect(html).toContain("Running");
     expect(html).toContain("Plan the work");
     expect(html).toContain("3 steps");
     // uppercase kind kicker
     expect(html).toContain("agent");
   });
 
-  test("omits the status dot when a node has no status and hides an empty output", () => {
+  test("omits the status pill when a node has no status and hides an empty output", () => {
     const html = renderNode({ label: "Ship it", kind: "approval", output: "" });
-    expect(html).not.toContain("node-dot");
-    expect(html).not.toContain("node-output");
+    expect(html).not.toContain('data-slot="workflow-node-status"');
+    expect(html).not.toContain('data-slot="workflow-node-content"');
     expect(html).toContain("Ship it");
     expect(html).toContain('data-kind="approval"');
   });

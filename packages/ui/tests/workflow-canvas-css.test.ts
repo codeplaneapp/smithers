@@ -46,6 +46,13 @@ describe("workflow-canvas css contract", () => {
     expect(canvasCss).not.toContain("@media (prefers-reduced-motion: reduce)");
   });
 
+  test("edge status glyph rules exist per status class (non-color signifier)", () => {
+    expect(canvasCss).toContain(".sui-canvas-edge-glyph {");
+    for (const statusClass of ["run", "ok", "warn", "bad"]) {
+      expect(canvasCss).toContain(`.sui-canvas-edge[data-status-class='${statusClass}'] .sui-canvas-edge-glyph`);
+    }
+  });
+
   test("covers every shipped data-slot", () => {
     for (const cls of [
       ".sui-canvas {",

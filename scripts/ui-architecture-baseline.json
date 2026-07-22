@@ -281,6 +281,7 @@
       "packages/gateway-ui/src/RunMeta.tsx -> @smithers-orchestrator/ui",
       "packages/gateway-ui/src/RunTree.tsx -> @smithers-orchestrator/gateway-react",
       "packages/gateway-ui/src/SimpleWorkflowDashboard.tsx -> @smithers-orchestrator/gateway-react",
+      "packages/gateway-ui/src/WorkflowGraph.tsx -> @smithers-orchestrator/ui",
       "packages/gateway-ui/src/WorkflowPicker.tsx -> @smithers-orchestrator/gateway-react",
       "packages/gateway-ui/src/nodeChat.ts -> @smithers-orchestrator/ui",
       "packages/gateway-ui/src/styleguide-css.ts -> @smithers-orchestrator/ui-styleguide",

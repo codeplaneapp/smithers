@@ -1,26 +1,42 @@
 /** @jsxImportSource react */
 // n8n-style workflow graph: ReactFlow renders the canvas, dagre computes a
-// left-to-right layout, and each node is a self-styled SmithersTaskNode card.
-// Ported from the Smithers create-workflow UI's `cw-graph` into a generic,
-// props-driven gateway-ui component — feed it a WorkflowSpecNode[] and it draws
-// the DAG. Styling follows the shared `theme` tokens (so it tracks light/dark),
-// and the required react-flow base stylesheet ships inline via `workflowGraphCss`
-// because the gateway bundles UI with Bun.build and drops `.css` imports.
-import { memo, useMemo, useSyncExternalStore, type CSSProperties } from "react";
+// left-to-right layout, and each node paints the shared canvas anatomy from
+// @smithers-orchestrator/ui (WorkflowNode card + StatusPill status vocabulary)
+// via SmithersCanvasNode. Ported from the Smithers create-workflow UI's
+// `cw-graph` into a generic, props-driven gateway-ui component — feed it a
+// WorkflowSpecNode[] and it draws the DAG. The graph composes the shared
+// WorkflowCanvas region rather than inventing its own frame, and the required
+// react-flow base stylesheet ships inline via `workflowGraphCss` because the
+// gateway bundles UI with Bun.build and drops `.css` imports.
+import { memo, useCallback, useEffect, useMemo, useSyncExternalStore, type CSSProperties } from "react";
 import {
+  addEdge,
   Background,
   Controls,
-  Handle,
-  Position,
   ReactFlow,
+  useEdgesState,
+  useNodesState,
+  type Connection,
   type Edge,
   type Node,
-  type NodeProps,
   type NodeTypes,
 } from "@xyflow/react";
 import dagre from "dagre";
+import { WorkflowCanvas } from "@smithers-orchestrator/ui";
 import { resolveTheme, subscribeTheme, theme, type ResolvedTheme } from "./theme";
-import { workflowGraphCss } from "./workflowGraphCss";
+import { workflowGraphChromeCss, workflowGraphCss } from "./workflowGraphCss";
+import { SmithersCanvasNode, SmithersNodeHandles } from "./SmithersCanvasNode";
+
+export { SmithersCanvasNode, SmithersNodeHandles };
+
+/**
+ * @deprecated The default `smithersTask` renderer now composes the shared
+ * @smithers-orchestrator/ui canvas anatomy; this alias of
+ * {@link SmithersCanvasNode} keeps the old import path working. The legacy
+ * inline-styled card (kind kicker + hardcoded status dot) is gone — statuses
+ * flow through the shared status vocabulary instead.
+ */
+export const SmithersTaskNode = SmithersCanvasNode;
 
 export type NodeKind =
   | "agent"
@@ -32,13 +48,19 @@ export type NodeKind =
   | "signal"
   | "human";
 
+/**
+ * @deprecated The common status subset, kept for compatibility. Node statuses
+ * accept any string and resolve through the shared
+ * @smithers-orchestrator/ui status vocabulary (`statusClass`/`formatStatus`).
+ */
 export type FlowNodeStatus = "running" | "done" | "failed" | "pending";
 
 export type FlowNodeData = {
   label: string;
   kind: NodeKind;
   output: string;
-  status?: FlowNodeStatus;
+  /** Any status string; rendered through the shared status vocabulary. */
+  status?: string;
 };
 
 export type SmithersFlowNode = Node<FlowNodeData, "smithersTask">;
@@ -53,139 +75,14 @@ export type WorkflowSpecNode = {
   label: string;
   kind: NodeKind;
   output?: string;
-  status?: FlowNodeStatus;
+  status?: string;
   dependsOn?: string[];
 };
 
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 96;
 
-// Left-border accent per node kind — the one bit of palette that is intrinsic to
-// the card rather than a theme token, mirrored from the create-workflow graph.
-const KIND_ACCENT: Record<NodeKind, string> = {
-  agent: "#0f8f78",
-  approval: "#bf5b16",
-  compute: "#356fd2",
-  loop: "#6d56d8",
-  branch: "#61738a",
-  signal: "#61738a",
-  merge: "#2670a9",
-  human: "#a34d9f",
-};
-
-// Status → dot color, derived from the shared theme tokens so it follows the
-// active light/dark theme (running = brand, done = green, failed = red).
-const STATUS_DOT_COLOR: Record<FlowNodeStatus, string> = {
-  running: theme.accent,
-  done: theme.success,
-  failed: theme.danger,
-  pending: theme.textDim,
-};
-
-function cardStyle(kind: NodeKind, status: FlowNodeData["status"]): CSSProperties {
-  const borderColor =
-    status === "done"
-      ? `color-mix(in srgb, ${theme.success} 45%, ${theme.border})`
-      : status === "failed"
-        ? `color-mix(in srgb, ${theme.danger} 55%, ${theme.border})`
-        : theme.border;
-  const baseShadow = `0 8px 18px color-mix(in srgb, ${theme.text} 8%, transparent)`;
-  return {
-    display: "grid",
-    gap: 6,
-    alignContent: "center",
-    boxSizing: "border-box",
-    width: NODE_WIDTH,
-    minHeight: NODE_HEIGHT,
-    padding: "14px 16px",
-    border: `1px solid ${borderColor}`,
-    borderLeft: `5px solid ${KIND_ACCENT[kind]}`,
-    borderRadius: 7,
-    background: theme.panel,
-    fontFamily: theme.fontSans,
-    boxShadow:
-      status === "running"
-        ? `0 0 0 2px color-mix(in srgb, ${theme.accent} 55%, transparent), ${baseShadow}`
-        : baseShadow,
-  };
-}
-
-const KICKER_STYLE: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  color: theme.textDim,
-  fontSize: 11,
-  fontWeight: 800,
-  textTransform: "uppercase",
-};
-
-const TITLE_STYLE: CSSProperties = {
-  overflow: "hidden",
-  color: theme.text,
-  fontSize: 15,
-  fontWeight: 800,
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-const OUTPUT_STYLE: CSSProperties = {
-  overflow: "hidden",
-  color: theme.textDim,
-  fontFamily: theme.fontMono,
-  fontSize: 12,
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-/**
- * The exact handle pair every `smithersTask` node renderer must render:
- * a target handle on the left and a source handle on the right (no ids).
- * Custom renderers passed via {@link WorkflowGraphProps.nodeTypes} MUST render
- * `<SmithersNodeHandles />` inside the node root or their edges detach.
- */
-export function SmithersNodeHandles() {
-  return (
-    <>
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
-    </>
-  );
-}
-
-/**
- * The presentational card for one workflow node: a kind kicker (with an optional
- * status dot), the node title, and its latest output line. Rendered by ReactFlow
- * as the `smithersTask` node type, so it is wrapped in target/source handles.
- */
-export function SmithersTaskNode({ data }: NodeProps<SmithersFlowNode>) {
-  return (
-    <div className="smithers-node" data-kind={data.kind} data-status={data.status} style={cardStyle(data.kind, data.status)}>
-      <SmithersNodeHandles />
-      <div className="node-kicker" style={KICKER_STYLE}>
-        {data.status ? (
-          <span
-            aria-hidden
-            className="node-dot"
-            data-status={data.status}
-            style={{ width: 7, height: 7, borderRadius: "50%", background: STATUS_DOT_COLOR[data.status] }}
-          />
-        ) : null}
-        {data.kind}
-      </div>
-      <div className="node-title" style={TITLE_STYLE}>
-        {data.label}
-      </div>
-      {data.output ? (
-        <div className="node-output" style={OUTPUT_STYLE}>
-          {data.output}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-const defaultNodeTypes: NodeTypes = { smithersTask: memo(SmithersTaskNode) };
+const defaultNodeTypes: NodeTypes = { smithersTask: memo(SmithersCanvasNode) };
 const FIT_VIEW_OPTIONS = { padding: 0.18 };
 const PRO_OPTIONS = { hideAttribution: true };
 
@@ -193,12 +90,21 @@ const PRO_OPTIONS = { hideAttribution: true };
  * Lay a WorkflowSpecNode[] out left-to-right with dagre and return the ReactFlow
  * `nodes`/`edges`. Pure — no DOM, no ReactFlow context — so it is safe to call
  * (and unit-test) directly. Edges reference only ids present in `spec`, so a
- * dangling `dependsOn` is dropped rather than producing an orphan edge.
+ * dangling `dependsOn` is dropped rather than producing an orphan edge. Every
+ * node carries an `ariaLabel` so keyboard-focused nodes are named for
+ * assistive technology (ReactFlow paints it as the wrapper's `aria-label`).
+ * `readOnly` is baked onto every node (not just the ReactFlow props) so the
+ * contract is honest even before ReactFlow's store updater effects run —
+ * including the server-rendered first paint.
  */
-export function workflowToFlow(spec: WorkflowSpecNode[]): {
+export function workflowToFlow(
+  spec: WorkflowSpecNode[],
+  options?: { readOnly?: boolean },
+): {
   nodes: SmithersFlowNode[];
   edges: Edge[];
 } {
+  const readOnly = options?.readOnly ?? true;
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
   graph.setGraph({ rankdir: "LR", ranksep: 130, nodesep: 90, marginx: 32, marginy: 32 });
@@ -223,6 +129,10 @@ export function workflowToFlow(spec: WorkflowSpecNode[]): {
         y: Math.round((positioned?.y ?? 0) - NODE_HEIGHT / 2),
       },
       data: { label: node.label, kind: node.kind, output: node.output ?? "", status: node.status },
+      ariaLabel: `${node.label} (${node.kind} node)`,
+      draggable: !readOnly,
+      connectable: !readOnly,
+      deletable: !readOnly,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
     };
@@ -246,55 +156,97 @@ export type WorkflowGraphProps = {
   className?: string;
   style?: CSSProperties;
   /**
+   * Read-only canvas (the default): nodes cannot be dragged, connected, or
+   * deleted — ReactFlow's mutation affordances are all off. Pass `false` to
+   * opt an editable graph into drag/connect mutations. Nodes stay
+   * keyboard-focusable and selectable either way.
+   */
+  readOnly?: boolean;
+  /**
+   * Called after an editable (`readOnly={false}`) connect gesture adds an
+   * edge to the graph. The edge is already in the rendered state when this
+   * fires; use it to persist the mutation back to the caller's model.
+   */
+  onConnect?: (connection: Connection) => void;
+  /**
    * Extra/override ReactFlow node renderers, merged over the default as
-   * `{ smithersTask: memo(SmithersTaskNode), ...nodeTypes }`. Passing the
+   * `{ smithersTask: memo(SmithersCanvasNode), ...nodeTypes }`. Passing the
    * required `smithersTask` key (the type every {@link workflowToFlow} node
-   * emits) replaces the default card — e.g. `SmithersCanvasNode`, which
-   * composes the @smithers-orchestrator/ui canvas anatomy. Any custom
-   * renderer MUST render {@link SmithersNodeHandles} or its edges detach.
+   * emits) replaces the default card. Any custom renderer MUST render
+   * {@link SmithersNodeHandles} inside its node root or its edges detach.
    */
   nodeTypes?: NodeTypes;
 };
 
-function WorkflowGraphImpl({ spec, className, style, nodeTypes: nodeTypesProp }: WorkflowGraphProps) {
-  const { nodes, edges } = useMemo(() => workflowToFlow(spec), [spec]);
+function WorkflowGraphImpl({ spec, className, style, readOnly = true, onConnect, nodeTypes: nodeTypesProp }: WorkflowGraphProps) {
+  const initial = useMemo(() => workflowToFlow(spec, { readOnly }), [spec, readOnly]);
+  // Controlled state: selection, drag, delete and connect gestures emit
+  // change events that must be applied back or the graph silently ignores
+  // them. `useNodesState`/`useEdgesState` apply them truthfully; a spec or
+  // readOnly change re-syncs the laid-out model.
+  const [nodes, setNodes, onNodesChange] = useNodesState<SmithersFlowNode>(initial.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initial.edges);
+  useEffect(() => {
+    setNodes(initial.nodes);
+    setEdges(initial.edges);
+  }, [initial, setNodes, setEdges]);
+  const handleConnect = useCallback(
+    (connection: Connection) => {
+      if (readOnly) return;
+      setEdges((current) => addEdge(connection, current));
+      onConnect?.(connection);
+    },
+    [readOnly, setEdges, onConnect],
+  );
   const nodeTypes = useMemo<NodeTypes>(
     () => (nodeTypesProp ? { ...defaultNodeTypes, ...nodeTypesProp } : defaultNodeTypes),
     [nodeTypesProp],
   );
   const colorMode = useSyncExternalStore<ResolvedTheme>(subscribeTheme, resolveTheme, () => "light");
   return (
-    <div
+    <WorkflowCanvas
       className={className ?? "smithers-graph"}
       data-theme-mode={colorMode}
+      role="listbox"
+      aria-multiselectable="true"
+      aria-label="Workflow graph"
       style={{ height: "100%", minHeight: 320, ...style }}
     >
-      {/* react-flow's base stylesheet, shipped inline so it survives Bun.build. */}
-      <style>{workflowGraphCss}</style>
+      {/* react-flow's base stylesheet plus Smithers chrome, shipped inline so it survives Bun.build. */}
+      <style>{workflowGraphCss + workflowGraphChromeCss}</style>
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={handleConnect}
         nodeTypes={nodeTypes}
         colorMode={colorMode}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.3}
-        nodesDraggable={false}
-        nodesConnectable={false}
+        nodesDraggable={!readOnly}
+        nodesConnectable={!readOnly}
+        deleteKeyCode={readOnly ? null : "Backspace"}
+        nodesFocusable
         proOptions={PRO_OPTIONS}
       >
         <Background gap={26} color={theme.border} />
         <Controls showInteractive={false} />
       </ReactFlow>
-    </div>
+    </WorkflowCanvas>
   );
 }
 
 /**
  * An n8n-style workflow DAG canvas. Feed it a {@link WorkflowSpecNode} array and
  * it lays the graph out with dagre ({@link workflowToFlow}) and renders each node
- * as a {@link SmithersTaskNode} card. Read-only (nodes are not draggable or
- * connectable) and generic — it is not wired to any particular workflow's ids.
+ * as a {@link SmithersCanvasNode} card — the shared
+ * @smithers-orchestrator/ui canvas anatomy, inside the shared `WorkflowCanvas`
+ * region, with statuses piped through the shared status vocabulary. Read-only
+ * by default (nodes are not draggable, connectable, or deletable, but remain
+ * keyboard-focusable with visible focus and accessible names) and generic —
+ * it is not wired to any particular workflow's ids.
  *
  * @example
  * <WorkflowGraph spec={[

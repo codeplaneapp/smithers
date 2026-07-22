@@ -1,9 +1,16 @@
 /** @jsxImportSource react */
-import type { ComponentProps, ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  type ComponentProps,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { cn } from "../cn";
 import { Badge } from "../badge";
 import { StatusPill } from "../status-pill";
-import { statusClass } from "../status";
+import { formatStatus, statusClass, type StatusClass } from "../status";
 import { useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { canvasCss, WORKFLOW_CANVAS_CSS_ID } from "./canvasCss";
@@ -20,6 +27,87 @@ function useCanvasCss(): void {
   useInjectUiCss();
   useInjectLaneCss(WORKFLOW_CANVAS_CSS_ID, canvasCss);
 }
+
+const TOOLBAR_ITEM_SELECTOR =
+  "button, [href], input, select, textarea, [tabindex]";
+
+function isDisabledItem(el: HTMLElement): boolean {
+  return el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true";
+}
+
+function toolbarItems(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(TOOLBAR_ITEM_SELECTOR)).filter(
+    (el) => !isDisabledItem(el),
+  );
+}
+
+const ROVING_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
+
+/**
+ * ARIA toolbar keyboard contract: one tab stop into the cluster, then Arrow
+ * keys (either axis) / Home / End move between items with a roving tabindex.
+ * Disabled (or aria-disabled) items are never assigned the roving tab stop
+ * and never receive roved focus; modifier-key chords pass through untouched
+ * so browser/OS shortcuts keep working.
+ */
+function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
+  const currentRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    // Sweep disabled items out of the tab order even if a previous pass
+    // left them with tabIndex 0.
+    for (const el of root.querySelectorAll<HTMLElement>(TOOLBAR_ITEM_SELECTOR)) {
+      if (isDisabledItem(el)) el.tabIndex = -1;
+    }
+    const items = toolbarItems(root);
+    if (items.length === 0) return;
+    let index = currentRef.current ? items.indexOf(currentRef.current) : -1;
+    if (index === -1) index = 0;
+    items.forEach((el, i) => {
+      el.tabIndex = i === index ? 0 : -1;
+    });
+    currentRef.current = items[index]!;
+  });
+
+  function onKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    const { key } = event;
+    if (!ROVING_KEYS.has(key)) return;
+    const root = ref.current;
+    if (!root) return;
+    const items = toolbarItems(root);
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    if (current === -1) return;
+    event.preventDefault();
+    const next =
+      key === "Home"
+        ? 0
+        : key === "End"
+          ? items.length - 1
+          : key === "ArrowRight" || key === "ArrowDown"
+            ? (current + 1) % items.length
+            : (current - 1 + items.length) % items.length;
+    items.forEach((el, i) => {
+      el.tabIndex = i === next ? 0 : -1;
+    });
+    currentRef.current = items[next]!;
+    items[next]!.focus();
+  }
+
+  return onKeyDown;
+}
+
+/** Non-color status signifier shapes, one per shared status class. */
+const STATUS_CLASS_GLYPH: Record<StatusClass, string> = {
+  ok: "\u2713",
+  bad: "\u2715",
+  run: "\u25CF",
+  warn: "\u25B2",
+  muted: "\u25CB",
+};
 
 export type WorkflowCanvasProps = ComponentProps<"div">;
 
@@ -56,7 +144,17 @@ export type WorkflowNodeProps = Omit<ComponentProps<"div">, "children" | "title"
   status?: string;
   /** Node kind discriminator (e.g. "agent", "approval"), rendered as a Badge. */
   kind?: string;
-  /** Selected ring (data-selected), driven by the renderer's selection state. */
+  /**
+   * Selected ring (data-selected + aria-selected), driven by the renderer's
+   * selection state. Providing it puts the node in a selection model: the
+   * card renders with `role="option"` (a role that supports aria-selected,
+   * so the state survives into the accessibility tree) instead of the
+   * generic div role, where aria-selected is unsupported and stripped.
+   * `role="option"` has a required context: the renderer MUST provide an
+   * owning `role="listbox"` ancestor (e.g. `WorkflowCanvas role="listbox"`,
+   * which the gateway-ui WorkflowGraph does by default) or the option is
+   * orphaned in the accessibility tree.
+   */
   selected?: boolean;
   children?: ReactNode;
 };
@@ -67,6 +165,7 @@ export type WorkflowNodeProps = Omit<ComponentProps<"div">, "children" | "title"
  * WorkflowNodeContent directly and pass no header props). Renderer handles
  * (ReactFlow `<Handle>`s) are passed as children by the renderer.
  */
+
 export function WorkflowNode({
   title,
   status,
@@ -84,6 +183,8 @@ export function WorkflowNode({
       data-status={status}
       data-kind={kind}
       data-selected={selected ? "true" : "false"}
+      role={selected !== undefined ? "option" : undefined}
+      aria-selected={selected !== undefined ? selected : undefined}
       className={cn("sui-canvas-node", className)}
       {...props}
     >
@@ -167,12 +268,22 @@ export function WorkflowEdge({ from, to, label, status, className, ...props }: W
       className={cn("sui-canvas-edge", className)}
       {...props}
     >
-      {status !== undefined ? <span aria-hidden className="sui-canvas-edge-dot" /> : null}
+      {status !== undefined ? (
+        <>
+          <span aria-hidden className="sui-canvas-edge-glyph">
+            {STATUS_CLASS_GLYPH[statusClass(status)]}
+          </span>
+          <span className="sui-sr-only">{formatStatus(status)}</span>
+        </>
+      ) : null}
       {from !== undefined ? <span className="sui-canvas-edge-end">{from}</span> : null}
       {from !== undefined && to !== undefined ? (
-        <span aria-hidden className="sui-canvas-edge-arrow">
-          →
-        </span>
+        <>
+          <span aria-hidden className="sui-canvas-edge-arrow">
+            →
+          </span>
+          <span className="sui-sr-only"> to </span>
+        </>
       ) : null}
       {to !== undefined ? <span className="sui-canvas-edge-end">{to}</span> : null}
       {label != null ? <span className="sui-canvas-edge-label">{label}</span> : null}
@@ -195,10 +306,11 @@ export function WorkflowConnection({ status = "pending", className, ...props }: 
     <span
       data-slot="workflow-connection"
       data-status={status}
-      aria-hidden
       className={cn("sui-canvas-connection", className)}
       {...props}
-    />
+    >
+      <span className="sui-sr-only">{`Connection ${status}`}</span>
+    </span>
   );
 }
 
@@ -212,7 +324,8 @@ export type WorkflowControlsProps = Omit<ComponentProps<"div">, "children"> & {
 /**
  * Zoom/fit control cluster. Each button renders only when its callback is
  * provided; the actual zoom behavior lives in the renderer, which wires these
- * callbacks to its viewport API.
+ * callbacks to its viewport API. Keyboard follows the ARIA toolbar contract:
+ * one tab stop in, then Arrow keys / Home / End rove between buttons.
  */
 export function WorkflowControls({
   onZoomIn,
@@ -220,15 +333,23 @@ export function WorkflowControls({
   onFitView,
   className,
   children,
+  onKeyDown,
   ...props
 }: WorkflowControlsProps) {
   useCanvasCss();
+  const ref = useRef<HTMLDivElement>(null);
+  const rove = useRovingTabIndex(ref);
   return (
     <div
+      ref={ref}
       data-slot="workflow-controls"
       role="toolbar"
       aria-label="Canvas controls"
       className={cn("sui-canvas-controls", className)}
+      onKeyDown={(event) => {
+        rove(event);
+        onKeyDown?.(event);
+      }}
       {...props}
     >
       {onZoomIn ? (
@@ -284,14 +405,21 @@ export function WorkflowPanel({ position = "top-left", className, ...props }: Wo
   );
 }
 
-export function WorkflowToolbar({ className, role, "aria-label": ariaLabel, ...props }: ComponentProps<"div">) {
+export function WorkflowToolbar({ className, role, "aria-label": ariaLabel, onKeyDown, ...props }: ComponentProps<"div">) {
   useCanvasCss();
+  const ref = useRef<HTMLDivElement>(null);
+  const rove = useRovingTabIndex(ref);
   return (
     <div
+      ref={ref}
       data-slot="workflow-toolbar"
       role={role ?? "toolbar"}
       aria-label={ariaLabel ?? "Workflow toolbar"}
       className={cn("sui-canvas-toolbar", className)}
+      onKeyDown={(event) => {
+        rove(event);
+        onKeyDown?.(event);
+      }}
       {...props}
     />
   );
