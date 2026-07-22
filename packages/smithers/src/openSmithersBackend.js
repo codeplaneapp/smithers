@@ -125,11 +125,15 @@ export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}),
                 backend,
             });
         }
+        const environmentPoolMax = env.SMITHERS_POSTGRES_POOL_MAX;
         const api = await createSmithersPostgres(schemas, {
             ...opts,
             provider: "postgres",
             ...(connectionString ? { connectionString } : {}),
             ...(opts.connection ? { connection: opts.connection } : {}),
+            ...(opts.postgresPoolMax === undefined && environmentPoolMax !== undefined
+                ? { postgresPoolMax: Number(environmentPoolMax) }
+                : {}),
         });
         await emitBackendResolution({
             backend,

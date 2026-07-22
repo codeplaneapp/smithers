@@ -10153,6 +10153,8 @@ type CreateSmithersOptions = {
   alertPolicy?: SmithersAlertPolicy;
   dbPath?: string;
   journalMode?: string;
+  /** Maximum connections in the shared PostgreSQL pool for one normalized URL; defaults to 10. */
+  postgresPoolMax?: number;
 };
 
 type CreateSmithersPostgresOptions =

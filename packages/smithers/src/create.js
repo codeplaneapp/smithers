@@ -23,6 +23,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 import { prepareOutputSchemas } from "./prepareOutputSchemas.js";
+import { acquireSharedPostgresPool } from "./sharedPostgresPool.js";
 /** @typedef {import("@smithers-orchestrator/components").ApprovalProps<any, any>} ApprovalProps */
 /** @typedef {import("@smithers-orchestrator/components").SandboxProps} SandboxProps */
 /** @typedef {import("@smithers-orchestrator/components").SignalProps<any>} SignalProps */
@@ -603,18 +604,6 @@ export async function createSmithersPostgres(schemas, opts) {
     // 1. Generate Drizzle tables + schema metadata from Zod schemas (shared).
     const { tables, drizzleSchema, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } = prepareSmithersTables(schemas);
     // 2. Boot the Postgres/PGlite connection.
-    const pgModule = await import("pg");
-    const pg = pgModule.default ?? pgModule;
-    // BIGINT (ms timestamps, counters) → JS number, matching SQLite's behavior.
-    // Scoped to this client's `types` config (not `pg.types.setTypeParser`,
-    // which is a process-global singleton shared by every pg.Client/Pool and
-    // would corrupt BIGINT reads for unrelated clients in the host process).
-    // (Text format only, matching setTypeParser's default; binary values are Buffers.)
-    const bigintTypes = {
-        getTypeParser: (oid, format) => oid === 20 && format !== "binary"
-            ? (value) => (value === null ? null : Number(value))
-            : pg.types.getTypeParser(oid, format),
-    };
     /** @type {Array<() => Promise<void>>} */
     const teardown = [];
     let connectionString = opts?.connectionString;
@@ -638,14 +627,38 @@ export async function createSmithersPostgres(schemas, opts) {
         });
         connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
     }
-    const client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });
-    /** @type {{ api: import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> }} */
-    let built;
-    try {
+    const pgModule = await import("pg");
+    const pg = pgModule.default ?? pgModule;
+    let client;
+    if (provider === "postgres" && connectionString) {
+        const pool = await acquireSharedPostgresPool({
+            pg,
+            connectionString,
+            max: opts?.postgresPoolMax,
+        });
+        client = pool.connection;
+        teardown.push(pool.close);
+    }
+    else {
+        // BIGINT (ms timestamps, counters) → JS number, matching SQLite's behavior.
+        // Scoped to this client's `types` config (not `pg.types.setTypeParser`,
+        // which is a process-global singleton shared by every pg.Client/Pool and
+        // would corrupt BIGINT reads for unrelated clients in the host process).
+        // (Text format only, matching setTypeParser's default; binary values are Buffers.)
+        const bigintTypes = {
+            getTypeParser: (oid, format) => oid === 20 && format !== "binary"
+                ? (value) => (value === null ? null : Number(value))
+                : pg.types.getTypeParser(oid, format),
+        };
+        client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });
         await client.connect();
         teardown.push(async () => {
             await client.end().catch(() => {});
         });
+    }
+    /** @type {{ api: import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> }} */
+    let built;
+    try {
         // 3. Postgres descriptor consumed by the engine + adapter. The Drizzle table
         // objects (snake_case columns identical to the DDL below) are attached only
         // for column/name metadata; the engine's reads/writes against this descriptor
