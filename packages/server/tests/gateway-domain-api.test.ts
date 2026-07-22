@@ -14,6 +14,25 @@ const PG_URL = process.env.SMITHERS_TEST_PG_URL;
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
+const usageReport = {
+  accountLabel: "codex-work",
+  provider: "codex",
+  authMode: "subscription",
+  source: "oauth",
+  windows: [{
+    id: "5h",
+    label: "5-hour session",
+    unit: "percent",
+    usedPercent: 42,
+    resetsAt: "2026-07-22T20:00:00.000Z",
+  }],
+  planType: "pro",
+  credits: { hasCredits: true, unlimited: false, balance: "12.50" },
+  fetchedAt: "2026-07-22T15:00:00.000Z",
+  stale: false,
+  estimate: false,
+} as const;
+
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
     await cleanup();
@@ -266,7 +285,8 @@ const backends: Array<"sqlite" | "pglite" | "postgres"> = PG_URL ? ["sqlite", "p
 for (const backend of backends) {
   describe(`Gateway REST domain API (${backend})`, () => {
     test.skipIf(backend === "pglite" && process.platform === "win32")("read routes delegate to the RPC internals", async () => {
-      const { baseUrl } = await bootGateway(backend);
+      const { gateway, baseUrl } = await bootGateway(backend);
+      (gateway as any).listUsageReports = async () => [usageReport];
       const launched = await launchRun(baseUrl, "value", { value: 7 });
       const runId = launched.data.runId;
       await waitForRun(baseUrl, runId, "finished");
@@ -275,6 +295,7 @@ for (const backend of backends) {
         ["GET", "/v1/api/runs", "listRuns", {}],
         ["GET", `/v1/api/runs/${runId}`, "getRun", { runId }],
         ["GET", `/v1/api/runs/${runId}/tree`, "getDevToolsSnapshot", { runId }],
+        ["GET", `/v1/api/runs/${runId}/token-usage`, "listRunTokenUsage", { runId }],
         ["GET", "/v1/api/workflows", "listWorkflows", {}],
         ["GET", "/v1/api/approvals", "listApprovals", {}],
         ["GET", "/v1/api/docs", "listDocs", {}],
@@ -283,6 +304,7 @@ for (const backend of backends) {
         ["GET", "/v1/api/memory-facts", "listMemoryFacts", {}],
         ["GET", "/v1/api/crons", "cronList", {}],
         ["GET", "/v1/api/accounts", "listAccounts", {}],
+        ["GET", "/v1/api/usage", "listUsageReports", {}],
         ["GET", "/v1/api/schema-signature", "getSchemaSignature", {}],
         ["GET", `/v1/api/scores?runId=${runId}`, "listScores", { runId }],
         ["GET", `/v1/api/nodes/${runId}/task1/output`, "getNodeOutput", { runId, nodeId: "task1", iteration: 0 }],
@@ -295,6 +317,9 @@ for (const backend of backends) {
         expect(rest.json.ok, path).toBe(rpc.json.ok);
         if (rest.json.ok) {
           expect(stripVolatile(rest.json.data), path).toEqual(stripVolatile(rpc.json.payload));
+          if (path === "/v1/api/usage") {
+            expect(rest.json.data).toEqual([usageReport]);
+          }
         }
       }
 
@@ -393,6 +418,214 @@ for (const backend of backends) {
     }, 60_000);
   });
 }
+
+describe("Gateway usage reports", () => {
+  test("maps GET /v1/api/usage and dispatches listUsageReports with the report shape", async () => {
+    const gateway = new Gateway();
+    (gateway as any).listUsageReports = async () => [usageReport];
+    const route = gateway.apiRouteForRequest("GET", new URL("http://127.0.0.1/v1/api/usage"), {});
+    expect(route).toEqual({
+      method: "listUsageReports",
+      params: expect.objectContaining({ fresh: undefined }),
+    });
+
+    const response = await gateway.routeRequest(
+      { role: "admin", scopes: ["*"], transport: "http" },
+      { type: "req", id: "usage-1", method: "listUsageReports", params: {} },
+    );
+    expect(response).toMatchObject({
+      type: "res",
+      id: "usage-1",
+      ok: true,
+      payload: [usageReport],
+    });
+
+    let responseBody = "";
+    const res = {
+      statusCode: 0,
+      setHeader() {},
+      end(value: string) { responseBody = value; },
+    };
+    await gateway.handleHttpApi({
+      method: "GET",
+      url: "/v1/api/usage",
+      headers: { host: "127.0.0.1" },
+    } as any, res as any);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(responseBody)).toEqual({ ok: true, data: [usageReport] });
+  });
+
+  test("deduplicates polling, expires after 60 seconds, and supports fresh reads", async () => {
+    const gateway = new Gateway({ auth: { mode: "token", tokens: {} } });
+    const rawAccount = { label: "api", provider: "openai-api", apiKey: "secret" };
+    const calls: Array<{ accounts: unknown[]; options: { fresh?: boolean } }> = [];
+    (gateway as any).registeredAccountsFromRegistry = () => [rawAccount];
+    (gateway as any).fetchUsageReports = async (accounts: unknown[], options: { fresh?: boolean }) => {
+      calls.push({ accounts, options });
+      return [usageReport];
+    };
+
+    const first = gateway.listUsageReports();
+    const concurrent = gateway.listUsageReports();
+    await expect(first).resolves.toEqual([usageReport]);
+    await expect(concurrent).resolves.toEqual([usageReport]);
+    await expect(gateway.listUsageReports()).resolves.toEqual([usageReport]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ accounts: [rawAccount], options: { fresh: false } });
+
+    gateway.usageReportsCache!.cachedAtMs -= 60_001;
+    await gateway.listUsageReports();
+    await gateway.listUsageReports({ fresh: true });
+    expect(calls.map((call) => call.options)).toEqual([
+      { fresh: false },
+      { fresh: false },
+      { fresh: true },
+    ]);
+  });
+
+  test("returns a synthetic unavailable report when the account registry is corrupt", async () => {
+    const gateway = new Gateway({ auth: { mode: "token", tokens: {} } });
+    let fetchCalls = 0;
+    (gateway as any).registeredAccountsFromRegistry = () => {
+      throw new Error("ACCOUNTS_FILE_INVALID: malformed JSON");
+    };
+    (gateway as any).fetchUsageReports = async () => {
+      fetchCalls += 1;
+      return [usageReport];
+    };
+
+    await expect(gateway.listUsageReports()).resolves.toEqual([{
+      accountLabel: "accounts",
+      provider: "codex",
+      authMode: "subscription",
+      source: "none",
+      windows: [],
+      fetchedAt: expect.any(String),
+      stale: false,
+      estimate: false,
+      error: "ACCOUNTS_FILE_INVALID: malformed JSON",
+    }]);
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("clears a rejected single-flight request so the next call retries", async () => {
+    const gateway = new Gateway({ auth: { mode: "token", tokens: {} } });
+    let calls = 0;
+    (gateway as any).registeredAccountsFromRegistry = () => [];
+    (gateway as any).fetchUsageReports = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("provider unavailable");
+      return [usageReport];
+    };
+
+    const first = gateway.listUsageReports();
+    const concurrent = gateway.listUsageReports();
+    const settled = await Promise.allSettled([first, concurrent]);
+    expect(settled.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    for (const result of settled) {
+      expect(result.status === "rejected" ? result.reason : undefined).toMatchObject({
+        message: "provider unavailable",
+      });
+    }
+    expect(calls).toBe(1);
+    expect((gateway as any).usageReportsInFlight).toBeNull();
+
+    await expect(gateway.listUsageReports()).resolves.toEqual([usageReport]);
+    expect(calls).toBe(2);
+  });
+});
+
+describe("Gateway run token usage", () => {
+  test("RPC and REST return every persisted event in sequence order beyond the client ring cap", async () => {
+    const api = await createApi("sqlite");
+    const workflow = createValueWorkflow(api);
+    const gateway = new Gateway();
+    gateway.register("value", workflow);
+    cleanups.push(() => gateway.close());
+    const adapter = (gateway as any).adapterForWorkflow(workflow);
+    const runId = "token-usage-full-history";
+    await adapter.insertRun({
+      runId,
+      workflowName: "domain-api-value",
+      status: "finished",
+      createdAtMs: 1,
+      finishedAtMs: 2,
+    });
+
+    for (let index = 0; index < 1_026; index += 1) {
+      await adapter.insertEventWithNextSeq({
+        runId,
+        timestampMs: 50_000 + index,
+        type: "TokenUsageReported",
+        payloadJson: JSON.stringify({
+          nodeId: `node-${index}`,
+          iteration: index,
+          attempt: index + 1,
+          model: "gpt-test",
+          agent: "test-agent",
+          inputTokens: index + 10,
+          outputTokens: index + 20,
+          cacheReadTokens: index + 30,
+          cacheWriteTokens: index + 40,
+          reasoningTokens: index + 50,
+          ...(index === 0 ? {} : { timestampMs: 90_000 + index }),
+        }),
+      });
+    }
+
+    const rpc = await gateway.routeRequest(
+      { role: "admin", scopes: ["*"], transport: "http" },
+      { type: "req", id: "usage-full", method: "listRunTokenUsage", params: { runId } },
+    );
+    expect(rpc).toMatchObject({ type: "res", id: "usage-full", ok: true });
+
+    let responseBody = "";
+    const res = {
+      statusCode: 0,
+      setHeader() {},
+      end(value: string) { responseBody = value; },
+    };
+    await gateway.handleHttpApi({
+      method: "GET",
+      url: `/v1/api/runs/${encodeURIComponent(runId)}/token-usage`,
+      headers: { host: "127.0.0.1" },
+    } as any, res as any);
+    const rest = JSON.parse(responseBody);
+    expect(res.statusCode).toBe(200);
+    expect(rest.data).toEqual((rpc as any).payload);
+    expect((rpc as any).payload).toEqual({
+      runId,
+      events: expect.any(Array),
+    });
+    expect((rpc as any).payload.events).toHaveLength(1_026);
+    expect((rpc as any).payload.events[0]).toEqual({
+      nodeId: "node-0",
+      iteration: 0,
+      attempt: 1,
+      model: "gpt-test",
+      agent: "test-agent",
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 40,
+      reasoningTokens: 50,
+      timestampMs: 50_000,
+    });
+    expect((rpc as any).payload.events.at(-1)).toEqual({
+      nodeId: "node-1025",
+      iteration: 1_025,
+      attempt: 1_026,
+      model: "gpt-test",
+      agent: "test-agent",
+      inputTokens: 1_035,
+      outputTokens: 1_045,
+      cacheReadTokens: 1_055,
+      cacheWriteTokens: 1_065,
+      reasoningTokens: 1_075,
+      timestampMs: 91_025,
+    });
+  }, 60_000);
+});
 
 test.skipIf(Boolean(PG_URL))("Gateway REST domain API postgres suite skipped because SMITHERS_TEST_PG_URL is not set", () => {
   expect(PG_URL).toBeUndefined();

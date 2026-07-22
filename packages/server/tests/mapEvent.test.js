@@ -309,6 +309,41 @@ describe("Gateway.mapEvent — SmithersEvent→wire mapping", () => {
         });
     });
 
+    test("TokenUsageReported → token.usage with the full payload", () => {
+        const result = gateway.mapEvent({
+            type: "TokenUsageReported",
+            runId: "run-1",
+            nodeId: "node-1",
+            iteration: 2,
+            attempt: 3,
+            model: "gpt-5.4-codex",
+            agent: "codex-work",
+            inputTokens: 120,
+            outputTokens: 30,
+            cacheReadTokens: 40,
+            cacheWriteTokens: 5,
+            reasoningTokens: 12,
+            timestampMs: 1000,
+        });
+        expect(result).toEqual({
+            event: "token.usage",
+            payload: {
+                runId: "run-1",
+                nodeId: "node-1",
+                iteration: 2,
+                attempt: 3,
+                model: "gpt-5.4-codex",
+                agent: "codex-work",
+                inputTokens: 120,
+                outputTokens: 30,
+                cacheReadTokens: 40,
+                cacheWriteTokens: 5,
+                reasoningTokens: 12,
+                timestampMs: 1000,
+            },
+        });
+    });
+
     test("TimeTravelJumped → run.time_travel_jumped", () => {
         const result = gateway.mapEvent({
             type: "TimeTravelJumped",

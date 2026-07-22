@@ -4,6 +4,9 @@ export type {
   GatewayRpcPayload,
   GatewayRpcRequestMap,
   GatewayRpcResponseMap,
+  ListUsageReportsRequest,
+  UsageReport,
+  UsageWindow,
 } from "./GatewayRpcTypeMap.ts";
 export type {
   CancelRunRequest,
@@ -32,6 +35,9 @@ export type {
   GetDevToolsSnapshotRequest,
   GetDevToolsSnapshotResponse,
   GetRunRequest,
+  ListRunTokenUsageRequest,
+  ListRunTokenUsageResponse,
+  RunTokenUsageEvent,
   GetSchemaSignatureRequest,
   GetSchemaSignatureResponse,
   GetScoreDetailRequest,

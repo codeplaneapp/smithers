@@ -47,6 +47,8 @@ import type {
   WhatHappenedRequest,
   WhatHappenedResponse,
   GetRunRequest,
+  ListRunTokenUsageRequest,
+  ListRunTokenUsageResponse,
   GetRunDiffRequest,
   GetRunDiffResponse,
   GetDevToolsSnapshotRequest,
@@ -59,6 +61,11 @@ import type {
   CreateBrowserSessionRequest, BrowserActRequest, BrowserContextRequest, BrowserPickRequest, CloseBrowserSessionRequest, CreateBrowserSessionResponse, BrowserActResponse, BrowserContextResponse, BrowserPickResponse, CloseBrowserSessionResponse, ListBrowserSessionsResponse,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
 import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
+import type { UsageReport, UsageWindow } from "@smithers-orchestrator/usage";
+
+export type { UsageReport, UsageWindow } from "@smithers-orchestrator/usage";
+
+export type ListUsageReportsRequest = { fresh?: boolean };
 
 export type GatewayRpcRequestMap = {
   launchRun: LaunchRunRequest;
@@ -70,6 +77,7 @@ export type GatewayRpcRequestMap = {
   submitApproval: SubmitApprovalRequest;
   submitSignal: SubmitSignalRequest;
   getRun: GetRunRequest;
+  listRunTokenUsage: ListRunTokenUsageRequest;
   listRuns: ListRunsRequest;
   listWorkflows: ListWorkflowsRequest;
   listApprovals: ListApprovalsRequest;
@@ -85,6 +93,7 @@ export type GatewayRpcRequestMap = {
   cronDelete: CronDeleteRequest;
   cronRun: CronRunRequest;
   listAccounts: ListAccountsRequest;
+  listUsageReports: ListUsageReportsRequest;
   listMemoryFacts: ListMemoryFactsRequest;
   listPrompts: ListPromptsRequest;
   listScores: ListScoresRequest;
@@ -114,6 +123,7 @@ export type GatewayRpcResponseMap = {
   submitApproval: SubmitApprovalResponse;
   submitSignal: Record<string, unknown>;
   getRun: Record<string, unknown>;
+  listRunTokenUsage: ListRunTokenUsageResponse;
   listRuns: Array<Record<string, unknown>>;
   listWorkflows: ListWorkflowsResponse;
   listApprovals: ListApprovalsResponse;
@@ -129,6 +139,7 @@ export type GatewayRpcResponseMap = {
   cronDelete: Record<string, unknown>;
   cronRun: LaunchRunResponse;
   listAccounts: ListAccountsResponse;
+  listUsageReports: UsageReport[];
   listMemoryFacts: ListMemoryFactsResponse;
   listPrompts: ListPromptsResponse;
   listScores: ListScoresResponse;

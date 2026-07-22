@@ -20,6 +20,9 @@
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunRequest} GetRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").RunTokenUsageEvent} RunTokenUsageEvent */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageRequest} ListRunTokenUsageRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageResponse} ListRunTokenUsageResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffRequest} GetRunDiffRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffResponse} GetRunDiffResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffOversizedResponse} GetRunDiffOversizedResponse */
@@ -465,6 +468,50 @@ export const GATEWAY_RPC_DEFINITIONS = [
   },
   {
     version: SMITHERS_API_VERSION,
+    method: "listRunTokenUsage",
+    title: "List Run Token Usage",
+    description: "List every persisted TokenUsageReported attempt event for a run, ordered by event sequence.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "run:read",
+    requestSchema: objectSchema({ runId }, ["runId"]),
+    responseSchema: objectSchema({
+      runId,
+      events: arraySchema(objectSchema({
+        nodeId,
+        iteration,
+        attempt: integerSchema("Attempt number.", 0),
+        model: stringSchema("Resolved provider model id."),
+        agent: stringSchema("Agent id or adapter name."),
+        inputTokens: integerSchema("Reported input tokens.", 0),
+        outputTokens: integerSchema("Reported output tokens.", 0),
+        cacheReadTokens: integerSchema("Reported cache-read tokens.", 0),
+        cacheWriteTokens: integerSchema("Reported cache-write tokens.", 0),
+        reasoningTokens: integerSchema("Reported reasoning tokens.", 0),
+        timestampMs: integerSchema("Event timestamp in Unix epoch milliseconds.", 0),
+      }, ["nodeId", "iteration", "attempt", "model", "agent", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens", "timestampMs"]), "Persisted token-usage attempt events."),
+    }, ["runId", "events"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "Internal"],
+    exampleRequest: { runId: "run_01" },
+    exampleResponse: {
+      runId: "run_01",
+      events: [{
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        model: "gpt-5.4-codex",
+        agent: "codex-work",
+        inputTokens: 120,
+        outputTokens: 30,
+        cacheReadTokens: 40,
+        cacheWriteTokens: 5,
+        reasoningTokens: 12,
+        timestampMs: 1710000000000,
+      }],
+    },
+  },
+  {
+    version: SMITHERS_API_VERSION,
     method: "listRuns",
     title: "List Runs",
     description: "List recent runs matching an optional filter.",
@@ -794,6 +841,59 @@ export const GATEWAY_RPC_DEFINITIONS = [
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
     exampleRequest: {},
     exampleResponse: [{ label: "claude-work", provider: "claude-code", configDir: "/Users/me/.claude", hasConfigDir: true, hasApiKey: false, model: "claude-opus-4-8", addedAt: "2026-01-01T00:00:00.000Z" }],
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "listUsageReports",
+    title: "List Usage Reports",
+    description: "List normalized provider rate-limit and subscription-usage reports for registered Smithers accounts.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "account:read",
+    requestSchema: objectSchema({ fresh: booleanSchema("Bypass the Gateway's 60-second in-memory cache.") }),
+    responseSchema: arraySchema(objectSchema({
+      accountLabel: stringSchema("Registered account label."),
+      provider: {
+        type: "string",
+        enum: ACCOUNT_PROVIDERS,
+        description: "Provider id, one of the fixed `smithers agents` catalog.",
+      },
+      authMode: { type: "string", enum: ["subscription", "api-key"] },
+      source: { type: "string", enum: ["oauth", "headers", "local", "none"] },
+      windows: arraySchema(objectSchema({
+        id: stringSchema("Stable quota-window id."),
+        label: stringSchema("Human-readable quota-window label."),
+        unit: { type: "string", enum: ["percent", "count", "estimated"] },
+        usedPercent: { type: "number" },
+        used: { type: "number" },
+        limit: { type: "number" },
+        remaining: { type: "number" },
+        resetsAt: stringSchema("ISO-8601 reset timestamp."),
+      }, ["id", "label", "unit"]), "Provider quota windows."),
+      planType: stringSchema("Provider plan or tier label."),
+      credits: objectSchema({
+        hasCredits: booleanSchema("Whether a credit balance is present."),
+        unlimited: booleanSchema("Whether credits are unlimited."),
+        balance: stringSchema("Provider-formatted credit balance."),
+      }, ["hasCredits", "unlimited"]),
+      fetchedAt: stringSchema("ISO-8601 report timestamp."),
+      stale: booleanSchema("Whether the usage package served a cached report."),
+      estimate: booleanSchema("Whether the report is locally estimated."),
+      error: stringSchema("Human-readable probe failure reason."),
+    }, ["accountLabel", "provider", "authMode", "source", "windows", "fetchedAt", "stale", "estimate"]), "Provider usage reports."),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
+    exampleRequest: {},
+    exampleResponse: [{
+      accountLabel: "codex-work",
+      provider: "codex",
+      authMode: "subscription",
+      source: "oauth",
+      windows: [{ id: "5h", label: "5-hour session", unit: "percent", usedPercent: 42, resetsAt: "2026-01-01T05:00:00.000Z" }],
+      planType: "pro",
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+      stale: false,
+      estimate: false,
+    }],
   },
   {
     version: SMITHERS_API_VERSION,

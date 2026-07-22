@@ -48,6 +48,8 @@ describe("createSmithersDataClient api requests", () => {
     await client.api.listTickets({ kind: "ticket" });
     await client.api.listMemoryFacts({ namespace: "workspace" });
     await client.api.getRun({ runId: "r 1" });
+    await client.api.listRunTokenUsage({ runId: "r 1" });
+    await client.api.listUsageReports({ fresh: true });
     await client.api.getNodeOutput({ runId: "r1", nodeId: "n1" });
     await client.api.getNodeDiff({ runId: "r1", nodeId: "n1", iteration: 2 });
     await client.api.listPrompts();
@@ -67,6 +69,8 @@ describe("createSmithersDataClient api requests", () => {
     expect(urlOf(byPath("/v1/api/memory-facts")).searchParams.get("namespace")).toBe("workspace");
     // runId is URL-encoded into the path.
     expect(calls.some((call) => urlOf(call).pathname === "/v1/api/runs/r%201")).toBe(true);
+    expect(calls.some((call) => urlOf(call).pathname === "/v1/api/runs/r%201/token-usage")).toBe(true);
+    expect(urlOf(byPath("/v1/api/usage")).searchParams.get("fresh")).toBe("true");
     expect(calls.some((call) => urlOf(call).pathname === "/v1/api/nodes/r1/n1/output")).toBe(true);
     expect(urlOf(byPath("/v1/api/nodes/r1/n1/diff")).searchParams.get("iteration")).toBe("2");
     // The bearer token rides on the request headers.

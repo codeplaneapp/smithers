@@ -17,6 +17,9 @@
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunRequest} GetRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").RunTokenUsageEvent} RunTokenUsageEvent */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageRequest} ListRunTokenUsageRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageResponse} ListRunTokenUsageResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffRequest} GetRunDiffRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffResponse} GetRunDiffResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunDiffOversizedResponse} GetRunDiffOversizedResponse */

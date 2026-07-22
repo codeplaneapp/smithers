@@ -41,6 +41,7 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
+    "@smithers-orchestrator/usage": "workspace:*",
     "cron-parser": "^5.6.1",
     "drizzle-orm": "^0.45.2",
     "effect": "3.21.4",

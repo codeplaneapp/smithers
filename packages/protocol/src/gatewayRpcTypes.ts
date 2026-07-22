@@ -45,6 +45,7 @@ export type GatewayRpcMethod =
   | "submitApproval"
   | "submitSignal"
   | "getRun"
+  | "listRunTokenUsage"
   | "listRuns"
   | "getSchemaSignature"
   | "listWorkflows"
@@ -62,6 +63,7 @@ export type GatewayRpcMethod =
   | "cronDelete"
   | "cronRun"
   | "listAccounts"
+  | "listUsageReports"
   | "listMemoryFacts"
   | "listPrompts"
   | "listScores"
@@ -190,6 +192,30 @@ export type SubmitSignalRequest = {
 
 export type GetRunRequest = {
   runId: string;
+};
+
+/** One persisted `TokenUsageReported` attempt event. */
+export type RunTokenUsageEvent = {
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  model: string;
+  agent: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  timestampMs: number;
+};
+
+export type ListRunTokenUsageRequest = {
+  runId: string;
+};
+
+export type ListRunTokenUsageResponse = {
+  runId: string;
+  events: RunTokenUsageEvent[];
 };
 
 export type GatewayDiffPatch = {

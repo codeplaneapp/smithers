@@ -136,6 +136,12 @@ function cronListSearch(params: CronListRequest = {}) {
   return search;
 }
 
+function listUsageReportsSearch(params: { fresh?: boolean } = {}) {
+  const search = new URLSearchParams();
+  append(search, "fresh", params.fresh);
+  return search;
+}
+
 function listScoresSearch(params: ListScoresRequest = { runId: "" }) {
   const search = new URLSearchParams();
   append(search, "runId", params.runId);
@@ -462,6 +468,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     api: {
       listRuns: (params = {}) => request("GET", withSearch("/v1/api/runs", listRunsSearch(params))),
       getRun: (params) => request("GET", `/v1/api/runs/${encodeURIComponent(params.runId)}`),
+      listRunTokenUsage: (params) => request("GET", `/v1/api/runs/${encodeURIComponent(params.runId)}/token-usage`),
       launchRun: (params) => mutate<LaunchRunResponse>("POST", "/v1/api/runs", params),
       resumeRun: (params) => mutate<ResumeRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/resume`, params),
       cancelRun: (params) => mutate<CancelRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/cancel`, params),
@@ -501,6 +508,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       cronCreate: (params: CronCreateRequest) => mutate("POST", "/v1/api/crons", params),
       cronDelete: (params: CronDeleteRequest) => mutate("DELETE", `/v1/api/crons/${encodeURIComponent(params.cronId)}`, params),
       cronRun: (params: CronRunRequest) => mutate<LaunchRunResponse>("POST", "/v1/api/crons/run", params),
+      listUsageReports: (params = {}) => request("GET", withSearch("/v1/api/usage", listUsageReportsSearch(params))),
       listDocs: (params = {}) => request<ListDocsResponse>("GET", withSearch("/v1/api/docs", listDocsSearch(params))),
       listPrompts: () => request("GET", "/v1/api/prompts"),
       listMemoryFacts: (params = {}) => {

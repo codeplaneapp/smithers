@@ -7,6 +7,7 @@ import type {
   CronListRequest,
   CronRunRequest,
   GetRunRequest,
+  ListRunTokenUsageResponse,
   GetScoreDetailRequest,
   GetSchemaSignatureResponse,
   HijackRunRequest,
@@ -47,10 +48,12 @@ import type { GatewayScoreDetail } from "../sync/GatewayScoreDetail.ts";
 import type { GatewayScoreRow } from "../sync/GatewayScoreRow.ts";
 import type { GatewayTicketRow } from "../sync/GatewayTicketRow.ts";
 import type { ApiMutationResult } from "./ApiMutationResult.ts";
+import type { UsageReport } from "@smithers-orchestrator/usage";
 
 export type SmithersApi = {
   listRuns(params?: ListRunsRequest): Promise<GatewayRunSummaryRow[]>;
   getRun(params: GetRunRequest): Promise<GatewayRunRow>;
+  listRunTokenUsage(params: { runId: string }): Promise<ListRunTokenUsageResponse>;
   launchRun(params: LaunchRunRequest): Promise<ApiMutationResult<LaunchRunResponse>>;
   resumeRun(params: ResumeRunRequest): Promise<ApiMutationResult<ResumeRunResponse>>;
   cancelRun(params: CancelRunRequest): Promise<ApiMutationResult<CancelRunResponse>>;
@@ -69,6 +72,7 @@ export type SmithersApi = {
   cronCreate(params: CronCreateRequest): Promise<ApiMutationResult<GatewayCronRow>>;
   cronDelete(params: CronDeleteRequest): Promise<ApiMutationResult<Record<string, unknown>>>;
   cronRun(params: CronRunRequest): Promise<ApiMutationResult<LaunchRunResponse>>;
+  listUsageReports(params?: { fresh?: boolean }): Promise<UsageReport[]>;
   listDocs(params?: ListDocsRequest): Promise<ListDocsResponse>;
   listPrompts(): Promise<ListPromptsResponse>;
   listMemoryFacts(params?: ListMemoryFactsRequest): Promise<GatewayMemoryFactRow[]>;

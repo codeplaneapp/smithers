@@ -47,6 +47,7 @@ import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeFor
 import { hasGatewayScope, isGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializeComparisonScoreRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreDetailRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
+import { getUsageForAccounts } from "@smithers-orchestrator/usage";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
 import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
 import { hijackCandidatesFromAttempts } from "./hijackCandidates.js";
@@ -75,6 +76,7 @@ import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<unknown>} SmithersWorkflow */
 /** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smithers-orchestrator/usage").UsageReport} UsageReport */
 /** @typedef {Record<string, string | number | null | undefined>} GatewayMetricLabels */
 /** @typedef {"ws" | "http"} GatewayTransport */
 /**
@@ -177,6 +179,7 @@ const DEFAULT_REQUEST_TIMEOUT = 60_000;
 // forever, so unauthenticated connections are terminated after this deadline.
 const DEFAULT_AUTH_DEADLINE_MS = 10_000;
 const DEFAULT_OUT_OF_PROCESS_EVENT_BRIDGE_POLL_MS = 1_000;
+const USAGE_REPORT_CACHE_TTL_MS = 60_000;
 const OUT_OF_PROCESS_EVENT_BRIDGE_PAGE_LIMIT = 500;
 const RUN_EVENT_HEARTBEAT_MS = 1_000;
 // Per-subscriber outbound backpressure for streamRunEvents. Each run event
@@ -2161,9 +2164,47 @@ function serializeGatewayApiPayload(method, payload) {
             return serializeRowOrRows(payload, serializeCronRow);
         case "listAccounts":
             return serializeRowOrRows(payload, serializeAccountRow);
+        case "listUsageReports":
+            return payload;
         default:
             return payload;
     }
+}
+/**
+ * Normalize one persisted TokenUsageReported row onto the stable Gateway wire
+ * shape. Persisted event payloads are authoritative; the row timestamp only
+ * fills the timestampMs field for older payloads that predate it.
+ * @param {Record<string, unknown>} row
+ * @returns {Record<string, string | number> | null}
+ */
+function parseRunTokenUsageRow(row) {
+    const payloadJson = asString(row.payloadJson);
+    if (!payloadJson) {
+        return null;
+    }
+    let payload;
+    try {
+        payload = asObject(JSON.parse(payloadJson));
+    }
+    catch {
+        return null;
+    }
+    if (!payload) {
+        return null;
+    }
+    return {
+        nodeId: asString(payload.nodeId) ?? "unknown",
+        iteration: asNumber(payload.iteration) ?? 0,
+        attempt: asNumber(payload.attempt) ?? 0,
+        model: asString(payload.model) ?? "unknown",
+        agent: asString(payload.agent) ?? "unknown",
+        inputTokens: asNumber(payload.inputTokens) ?? 0,
+        outputTokens: asNumber(payload.outputTokens) ?? 0,
+        cacheReadTokens: asNumber(payload.cacheReadTokens) ?? 0,
+        cacheWriteTokens: asNumber(payload.cacheWriteTokens) ?? 0,
+        reasoningTokens: asNumber(payload.reasoningTokens) ?? 0,
+        timestampMs: asNumber(payload.timestampMs) ?? asNumber(row.timestampMs) ?? 0,
+    };
 }
 /**
  * Fails fast at dispatch time if a route names a collection the API layer
@@ -2308,6 +2349,10 @@ export class Gateway {
     workflowRegistryRefresh = null;
     /** @type {Map<string, Promise<void>>} */
     workflowRegistryRefreshes = new Map();
+    /** @type {{ reports: UsageReport[], cachedAtMs: number } | null} */
+    usageReportsCache = null;
+    /** @type {Promise<UsageReport[]> | null} */
+    usageReportsInFlight = null;
     connections = new Set();
     /**
      * Subset of `connections` still awaiting a successful `connect` RPC.
@@ -3952,6 +3997,13 @@ a { color: var(--brand); }</style>
                 params: { runId: decodeURIComponent(runNodeStates[1]) },
             };
         }
+        const runTokenUsage = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/token-usage$/);
+        if (httpMethod === "GET" && runTokenUsage) {
+            return {
+                method: "listRunTokenUsage",
+                params: { runId: decodeURIComponent(runTokenUsage[1]) },
+            };
+        }
         const runTree = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(?:tree|devtools)$/);
         if (httpMethod === "GET" && runTree) {
             return {
@@ -4095,6 +4147,7 @@ a { color: var(--brand); }</style>
             ["/v1/api/memory-facts", "listMemoryFacts"],
             ["/v1/api/crons", "cronList"],
             ["/v1/api/accounts", "listAccounts"],
+            ["/v1/api/usage", "listUsageReports"],
             ["/v1/api/schema-signature", "getSchemaSignature"],
         ]);
         const method = simpleReads.get(pathname);
@@ -4112,6 +4165,7 @@ a { color: var(--brand); }</style>
                     limit: queryPositiveInt(url.searchParams, "limit"),
                     includeDeleted: queryString(url.searchParams, "includeDeleted") === undefined ? undefined : url.searchParams.get("includeDeleted") === "true",
                     updatedAfterMs: queryNonNegativeInt(url.searchParams, "updatedAfterMs"),
+                    fresh: queryString(url.searchParams, "fresh") === undefined ? undefined : url.searchParams.get("fresh") === "true",
                 },
             };
         }
@@ -6861,8 +6915,7 @@ a { color: var(--brand); }</style>
    * @returns {Array<Record<string, unknown>>}
    */
     listAccountsFromRegistry() {
-        const accounts = listAccounts(process.env);
-        return accounts.map((account) => ({
+        return this.registeredAccountsFromRegistry().map((account) => ({
             label: account.label,
             provider: account.provider,
             configDir: typeof account.configDir === "string" ? account.configDir : null,
@@ -6871,6 +6924,92 @@ a { color: var(--brand); }</style>
             model: typeof account.model === "string" ? account.model : null,
             addedAt: typeof account.addedAt === "string" ? account.addedAt : null,
         }));
+    }
+    /**
+   * Raw registered accounts for host-side provider probes. This method must
+   * never be returned directly over the wire because API-key accounts include
+   * their credential.
+   */
+    registeredAccountsFromRegistry() {
+        return listAccounts(process.env);
+    }
+    /**
+   * Injection seam for tests; production delegates to the usage package.
+   * @param {ReturnType<Gateway["registeredAccountsFromRegistry"]>} accounts
+   * @param {{ fresh?: boolean }} options
+   * @returns {Promise<UsageReport[]>}
+   */
+    fetchUsageReports(accounts, options) {
+        return getUsageForAccounts(accounts, options);
+    }
+    /**
+   * Provider rate-limit and subscription-usage reports. Normal polling shares
+   * one in-flight request and reuses its result for 60 seconds; `fresh` skips
+   * the Gateway cache while still honoring provider safety in the usage package.
+   * @param {{ fresh?: boolean }} [options]
+   * @returns {Promise<UsageReport[]>}
+   */
+    async listUsageReports(options = {}) {
+        const fresh = options.fresh === true;
+        const cached = this.usageReportsCache;
+        if (!fresh && cached && nowMs() - cached.cachedAtMs < USAGE_REPORT_CACHE_TTL_MS) {
+            return cached.reports;
+        }
+        if (!fresh && this.usageReportsInFlight) {
+            return this.usageReportsInFlight;
+        }
+        const request = Promise.resolve().then(async () => {
+            let accounts;
+            try {
+                accounts = this.registeredAccountsFromRegistry();
+            }
+            catch (error) {
+                return [{
+                        accountLabel: "accounts",
+                        provider: "codex",
+                        authMode: "subscription",
+                        source: "none",
+                        windows: [],
+                        fetchedAt: new Date(nowMs()).toISOString(),
+                        stale: false,
+                        estimate: false,
+                        error: error instanceof Error ? error.message : String(error),
+                    }];
+            }
+            return this.fetchUsageReports(accounts, { fresh });
+        });
+        if (!fresh) {
+            this.usageReportsInFlight = request;
+        }
+        try {
+            const reports = await request;
+            this.usageReportsCache = { reports, cachedAtMs: nowMs() };
+            return reports;
+        }
+        finally {
+            if (this.usageReportsInFlight === request) {
+                this.usageReportsInFlight = null;
+            }
+        }
+    }
+    /**
+   * Every persisted TokenUsageReported attempt event for a run. Unlike the
+   * live event collections this reads the complete durable history and is not
+   * bounded by a client replay/ring window.
+   * @param {string} runId
+   * @returns {Promise<{ runId: string; events: Array<Record<string, string | number>> } | null>}
+   */
+    async listRunTokenUsage(runId) {
+        const resolved = await this.resolveRun(runId);
+        if (!resolved) {
+            return null;
+        }
+        const rows = await resolved.adapter.listEventsByType(runId, "TokenUsageReported");
+        const events = rows
+            .toSorted((left, right) => (asNumber(left.seq) ?? 0) - (asNumber(right.seq) ?? 0))
+            .map(parseRunTokenUsageRow)
+            .filter((event) => event !== null);
+        return { runId, events };
     }
     /**
    * Registered prompts for the `listPrompts` RPC. A prompt is a `.md`/`.mdx`
@@ -7614,6 +7753,24 @@ a { color: var(--brand); }</style>
                         summary: event.summary,
                     },
                 };
+            case "TokenUsageReported":
+                return {
+                    event: "token.usage",
+                    payload: {
+                        runId: event.runId,
+                        nodeId: event.nodeId,
+                        iteration: event.iteration,
+                        attempt: event.attempt,
+                        model: event.model,
+                        agent: event.agent,
+                        inputTokens: event.inputTokens,
+                        outputTokens: event.outputTokens,
+                        cacheReadTokens: event.cacheReadTokens,
+                        cacheWriteTokens: event.cacheWriteTokens,
+                        reasoningTokens: event.reasoningTokens,
+                        timestampMs: event.timestampMs,
+                    },
+                };
             case "TimeTravelJumped":
                 return {
                     event: "run.time_travel_jumped",
@@ -7869,6 +8026,17 @@ a { color: var(--brand); }</style>
                         finishedAtMs: attempt?.finishedAtMs ?? null,
                     };
                 }));
+            }
+            case "listRunTokenUsage": {
+                const runId = asString(params.runId);
+                if (!runId) {
+                    return responseError(frame.id, "INVALID_REQUEST", "runId is required");
+                }
+                const usage = await this.listRunTokenUsage(runId);
+                if (!usage) {
+                    return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
+                }
+                return responseOk(frame.id, usage);
             }
             case "runs.get":
             case "getRun": {
@@ -8764,6 +8932,9 @@ a { color: var(--brand); }</style>
             }
             case "listAccounts": {
                 return responseOk(frame.id, this.listAccountsFromRegistry());
+            }
+            case "listUsageReports": {
+                return responseOk(frame.id, await this.listUsageReports({ fresh: asBoolean(params.fresh) ?? false }));
             }
             case "listMemoryFacts": {
                 const namespace = asString(params.namespace);

@@ -1473,6 +1473,9 @@ importers:
       '@smithers-orchestrator/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@smithers-orchestrator/usage':
+        specifier: workspace:*
+        version: link:../usage
       '@tanstack/db':
         specifier: 0.6.13
         version: 0.6.13(typescript@6.0.3)
@@ -2018,6 +2021,9 @@ importers:
       '@smithers-orchestrator/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
+      '@smithers-orchestrator/usage':
+        specifier: workspace:*
+        version: link:../usage
       cron-parser:
         specifier: ^5.6.1
         version: 5.6.1

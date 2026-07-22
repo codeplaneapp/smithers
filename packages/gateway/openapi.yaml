@@ -4138,6 +4138,476 @@ paths:
                           - observability:read
                       refresh:
                         type: string
+  /v1/rpc/listRunTokenUsage:
+    post:
+      operationId: listRunTokenUsage
+      summary: "List Run Token Usage"
+      description: "List every persisted TokenUsageReported attempt event for a run, ordered by event sequence."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: run:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: listRunTokenUsage
+                params:
+                  type: object
+                  properties:
+                    runId:
+                      type: string
+                      description: "Stable run identifier."
+                  required:
+                    - runId
+                  additionalProperties: false
+            example:
+              id: listRunTokenUsage-1
+              method: listRunTokenUsage
+              params:
+                runId: run_01
+      responses:
+        200:
+          description: "List Run Token Usage response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: object
+                    properties:
+                      runId:
+                        type: string
+                        description: "Stable run identifier."
+                      events:
+                        type: array
+                        description: "Persisted token-usage attempt events."
+                        items:
+                          type: object
+                          properties:
+                            nodeId:
+                              type: string
+                              description: "Workflow node id."
+                            iteration:
+                              type: integer
+                              minimum: 0
+                              description: "Node iteration."
+                            attempt:
+                              type: integer
+                              minimum: 0
+                              description: "Attempt number."
+                            model:
+                              type: string
+                              description: "Resolved provider model id."
+                            agent:
+                              type: string
+                              description: "Agent id or adapter name."
+                            inputTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported input tokens."
+                            outputTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported output tokens."
+                            cacheReadTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported cache-read tokens."
+                            cacheWriteTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported cache-write tokens."
+                            reasoningTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported reasoning tokens."
+                            timestampMs:
+                              type: integer
+                              minimum: 0
+                              description: "Event timestamp in Unix epoch milliseconds."
+                          required:
+                            - nodeId
+                            - iteration
+                            - attempt
+                            - model
+                            - agent
+                            - inputTokens
+                            - outputTokens
+                            - cacheReadTokens
+                            - cacheWriteTokens
+                            - reasoningTokens
+                            - timestampMs
+                          additionalProperties: false
+                    required:
+                      - runId
+                      - events
+                    additionalProperties: false
+              example:
+                type: res
+                id: listRunTokenUsage-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  runId: run_01
+                  events:
+                    -
+                      nodeId: implement
+                      iteration: 0
+                      attempt: 1
+                      model: gpt-5.4-codex
+                      agent: codex-work
+                      inputTokens: 120
+                      outputTokens: 30
+                      cacheReadTokens: 40
+                      cacheWriteTokens: 5
+                      reasoningTokens: 12
+                      timestampMs: 1710000000000
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        404:
+          description: "The run does not exist."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
   /v1/rpc/listRuns:
     post:
       operationId: listRuns
@@ -10878,6 +11348,449 @@ paths:
                     hasApiKey: false
                     model: claude-opus-4-8
                     addedAt: 2026-01-01T00:00:00.000Z
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+  /v1/rpc/listUsageReports:
+    post:
+      operationId: listUsageReports
+      summary: "List Usage Reports"
+      description: "List normalized provider rate-limit and subscription-usage reports for registered Smithers accounts."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - account:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: account:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: listUsageReports
+                params:
+                  type: object
+                  properties:
+                    fresh:
+                      type: boolean
+                      description: "Bypass the Gateway's 60-second in-memory cache."
+                  required: []
+                  additionalProperties: false
+            example:
+              id: listUsageReports-1
+              method: listUsageReports
+              params: {}
+      responses:
+        200:
+          description: "List Usage Reports response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: array
+                    description: "Provider usage reports."
+                    items:
+                      type: object
+                      properties:
+                        accountLabel:
+                          type: string
+                          description: "Registered account label."
+                        provider:
+                          type: string
+                          enum:
+                            - claude-code
+                            - antigravity
+                            - codex
+                            - gemini
+                            - kimi
+                            - anthropic-api
+                            - openai-api
+                            - gemini-api
+                          description: "Provider id, one of the fixed `smithers agents` catalog."
+                        authMode:
+                          type: string
+                          enum:
+                            - subscription
+                            - api-key
+                        source:
+                          type: string
+                          enum:
+                            - oauth
+                            - headers
+                            - local
+                            - none
+                        windows:
+                          type: array
+                          description: "Provider quota windows."
+                          items:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                                description: "Stable quota-window id."
+                              label:
+                                type: string
+                                description: "Human-readable quota-window label."
+                              unit:
+                                type: string
+                                enum:
+                                  - percent
+                                  - count
+                                  - estimated
+                              usedPercent:
+                                type: number
+                              used:
+                                type: number
+                              limit:
+                                type: number
+                              remaining:
+                                type: number
+                              resetsAt:
+                                type: string
+                                description: "ISO-8601 reset timestamp."
+                            required:
+                              - id
+                              - label
+                              - unit
+                            additionalProperties: false
+                        planType:
+                          type: string
+                          description: "Provider plan or tier label."
+                        credits:
+                          type: object
+                          properties:
+                            hasCredits:
+                              type: boolean
+                              description: "Whether a credit balance is present."
+                            unlimited:
+                              type: boolean
+                              description: "Whether credits are unlimited."
+                            balance:
+                              type: string
+                              description: "Provider-formatted credit balance."
+                          required:
+                            - hasCredits
+                            - unlimited
+                          additionalProperties: false
+                        fetchedAt:
+                          type: string
+                          description: "ISO-8601 report timestamp."
+                        stale:
+                          type: boolean
+                          description: "Whether the usage package served a cached report."
+                        estimate:
+                          type: boolean
+                          description: "Whether the report is locally estimated."
+                        error:
+                          type: string
+                          description: "Human-readable probe failure reason."
+                      required:
+                        - accountLabel
+                        - provider
+                        - authMode
+                        - source
+                        - windows
+                        - fetchedAt
+                        - stale
+                        - estimate
+                      additionalProperties: false
+              example:
+                type: res
+                id: listUsageReports-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  -
+                    accountLabel: codex-work
+                    provider: codex
+                    authMode: subscription
+                    source: oauth
+                    windows:
+                      -
+                        id: 5h
+                        label: "5-hour session"
+                        unit: percent
+                        usedPercent: 42
+                        resetsAt: 2026-01-01T05:00:00.000Z
+                    planType: pro
+                    fetchedAt: 2026-01-01T00:00:00.000Z
+                    stale: false
+                    estimate: false
         400:
           description: "The request shape is invalid."
           content:
@@ -19219,6 +20132,331 @@ paths:
                           - ticket:read
                           - ticket:write
                           - observability:read
+  /v1/api/runs/{runId}/token-usage:
+    get:
+      operationId: apiListRunTokenUsage
+      summary: "List all persisted token usage for a run."
+      description: "REST domain API wrapper over the listRunTokenUsage Gateway RPC internals."
+      tags:
+        - "Gateway REST"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-required-scope: run:read
+      x-smithers-rpc-method: listRunTokenUsage
+      parameters:
+        -
+          name: runId
+          in: path
+          description: "Owning run id."
+          required: true
+          schema:
+            type: string
+            description: "Stable run identifier."
+      responses:
+        200:
+          description: "Gateway REST response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - data
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: true
+                  data:
+                    type: object
+                    properties:
+                      runId:
+                        type: string
+                        description: "Stable run identifier."
+                      events:
+                        type: array
+                        description: "Persisted token-usage attempt events."
+                        items:
+                          type: object
+                          properties:
+                            nodeId:
+                              type: string
+                              description: "Workflow node id."
+                            iteration:
+                              type: integer
+                              minimum: 0
+                              description: "Node iteration."
+                            attempt:
+                              type: integer
+                              minimum: 0
+                              description: "Attempt number."
+                            model:
+                              type: string
+                              description: "Resolved provider model id."
+                            agent:
+                              type: string
+                              description: "Agent id or adapter name."
+                            inputTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported input tokens."
+                            outputTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported output tokens."
+                            cacheReadTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported cache-read tokens."
+                            cacheWriteTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported cache-write tokens."
+                            reasoningTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported reasoning tokens."
+                            timestampMs:
+                              type: integer
+                              minimum: 0
+                              description: "Event timestamp in Unix epoch milliseconds."
+                          required:
+                            - nodeId
+                            - iteration
+                            - attempt
+                            - model
+                            - agent
+                            - inputTokens
+                            - outputTokens
+                            - cacheReadTokens
+                            - cacheWriteTokens
+                            - reasoningTokens
+                            - timestampMs
+                          additionalProperties: false
+                    required:
+                      - runId
+                      - events
+                    additionalProperties: false
+                  txid:
+                    type: string
+                    pattern: "^\\d+$"
+                  seq:
+                    type: integer
+                    minimum: 0
+        400:
+          description: "Invalid request."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        401:
+          description: "Authentication failed."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        403:
+          description: "Missing required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        404:
+          description: "Route or resource not found."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        500:
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
   /v1/api/runs/{runId}/cancel:
     post:
       operationId: apiCancelRun
@@ -24375,6 +25613,369 @@ paths:
                     items:
                       type: object
                       additionalProperties: true
+                  txid:
+                    type: string
+                    pattern: "^\\d+$"
+                  seq:
+                    type: integer
+                    minimum: 0
+        400:
+          description: "Invalid request."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        401:
+          description: "Authentication failed."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        403:
+          description: "Missing required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        404:
+          description: "Route or resource not found."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        500:
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+  /v1/api/usage:
+    get:
+      operationId: apiListUsageReports
+      summary: "List provider usage reports."
+      description: "REST domain API wrapper over the listUsageReports Gateway RPC internals."
+      tags:
+        - "Gateway REST"
+      security:
+        -
+          bearerAuth:
+            - account:read
+      x-smithers-api-version: v1
+      x-smithers-required-scope: account:read
+      x-smithers-rpc-method: listUsageReports
+      parameters:
+        -
+          name: fresh
+          in: query
+          description: "Bypass the Gateway's 60-second in-memory cache."
+          required: false
+          schema:
+            type: boolean
+            description: "Bypass the Gateway's 60-second in-memory cache."
+      responses:
+        200:
+          description: "Gateway REST response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - data
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: true
+                  data:
+                    type: array
+                    description: "Provider usage reports."
+                    items:
+                      type: object
+                      properties:
+                        accountLabel:
+                          type: string
+                          description: "Registered account label."
+                        provider:
+                          type: string
+                          enum:
+                            - claude-code
+                            - antigravity
+                            - codex
+                            - gemini
+                            - kimi
+                            - anthropic-api
+                            - openai-api
+                            - gemini-api
+                          description: "Provider id, one of the fixed `smithers agents` catalog."
+                        authMode:
+                          type: string
+                          enum:
+                            - subscription
+                            - api-key
+                        source:
+                          type: string
+                          enum:
+                            - oauth
+                            - headers
+                            - local
+                            - none
+                        windows:
+                          type: array
+                          description: "Provider quota windows."
+                          items:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                                description: "Stable quota-window id."
+                              label:
+                                type: string
+                                description: "Human-readable quota-window label."
+                              unit:
+                                type: string
+                                enum:
+                                  - percent
+                                  - count
+                                  - estimated
+                              usedPercent:
+                                type: number
+                              used:
+                                type: number
+                              limit:
+                                type: number
+                              remaining:
+                                type: number
+                              resetsAt:
+                                type: string
+                                description: "ISO-8601 reset timestamp."
+                            required:
+                              - id
+                              - label
+                              - unit
+                            additionalProperties: false
+                        planType:
+                          type: string
+                          description: "Provider plan or tier label."
+                        credits:
+                          type: object
+                          properties:
+                            hasCredits:
+                              type: boolean
+                              description: "Whether a credit balance is present."
+                            unlimited:
+                              type: boolean
+                              description: "Whether credits are unlimited."
+                            balance:
+                              type: string
+                              description: "Provider-formatted credit balance."
+                          required:
+                            - hasCredits
+                            - unlimited
+                          additionalProperties: false
+                        fetchedAt:
+                          type: string
+                          description: "ISO-8601 report timestamp."
+                        stale:
+                          type: boolean
+                          description: "Whether the usage package served a cached report."
+                        estimate:
+                          type: boolean
+                          description: "Whether the report is locally estimated."
+                        error:
+                          type: string
+                          description: "Human-readable probe failure reason."
+                      required:
+                        - accountLabel
+                        - provider
+                        - authMode
+                        - source
+                        - windows
+                        - fetchedAt
+                        - stale
+                        - estimate
+                      additionalProperties: false
                   txid:
                     type: string
                     pattern: "^\\d+$"

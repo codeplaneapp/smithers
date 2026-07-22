@@ -31,7 +31,9 @@ import type {
   GatewayScoreDetail,
   GatewayScoreRow,
   GatewayTicketRow,
+  UsageReport,
 } from "../src/index.ts";
+import type { UsageReport as CanonicalUsageReport } from "@smithers-orchestrator/usage";
 import type { GatewayRpcRequestMap, GatewayRpcResponseMap } from "../src/GatewayRpcTypeMap.ts";
 
 type Equal<Left, Right> =
@@ -58,6 +60,8 @@ type _CanonicalGatewayWireAssertions = [
   Expect<Equal<GatewayRpcResponseMap["listTickets"], ListTicketsResponse>>,
   Expect<Equal<GatewayRpcResponseMap["createTicket"], ProtocolGatewayTicketRow>>,
   Expect<Equal<GatewayRpcResponseMap["updateTicket"], ProtocolGatewayTicketRow>>,
+  Expect<Equal<GatewayRpcResponseMap["listUsageReports"], CanonicalUsageReport[]>>,
+  Expect<Equal<UsageReport, CanonicalUsageReport>>,
   Expect<Equal<GatewayAsyncState<string>["data"], string | undefined>>,
 ];
 
@@ -143,6 +147,7 @@ const typedRpcRequestMethods = {
   submitApproval: "submitApproval",
   submitSignal: "submitSignal",
   getRun: "getRun",
+  listRunTokenUsage: "listRunTokenUsage",
   listRuns: "listRuns",
   getSchemaSignature: "getSchemaSignature",
   listWorkflows: "listWorkflows",
@@ -160,6 +165,7 @@ const typedRpcRequestMethods = {
   cronDelete: "cronDelete",
   cronRun: "cronRun",
   listAccounts: "listAccounts",
+  listUsageReports: "listUsageReports",
   listMemoryFacts: "listMemoryFacts",
   listPrompts: "listPrompts",
   listScores: "listScores",

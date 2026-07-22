@@ -17,6 +17,9 @@ export type {
   GatewayRpcPayload,
   GatewayRpcRequestMap,
   GatewayRpcResponseMap,
+  ListUsageReportsRequest,
+  UsageReport,
+  UsageWindow,
 } from "./rpc.ts";
 export type { GatewayUiBootConfig } from "./GatewayUiBootConfig.ts";
 export type { SmithersGatewayClientOptions } from "./SmithersGatewayClientOptions.ts";
@@ -71,6 +74,9 @@ export type {
   ListScoresForRunsResponse,
   GetScoreDetailRequest,
   GetScoreDetailResponse,
+  ListRunTokenUsageRequest,
+  ListRunTokenUsageResponse,
+  RunTokenUsageEvent,
 } from "./rpc.ts";
 export { createSmithersCollections } from "./data/createSmithersCollections.ts";
 export { createSmithersDataClient } from "./data/createSmithersDataClient.ts";

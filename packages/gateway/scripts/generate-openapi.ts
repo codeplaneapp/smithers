@@ -84,11 +84,25 @@ const objectSchema = {
 
 const listScoresForRunsRpc = requireRpcDefinition("listScoresForRuns");
 const getScoreDetailRpc = requireRpcDefinition("getScoreDetail");
+const listUsageReportsRpc = requireRpcDefinition("listUsageReports");
+const listRunTokenUsageRpc = requireRpcDefinition("listRunTokenUsage");
 
 const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
   { method: "get", path: "/v1/api/runs", operationId: "apiListRuns", summary: "List runs.", rpcMethod: "listRuns", requiredScope: scopeForRpc("listRuns"), responseSchema: { type: "array", items: objectSchema } },
   { method: "post", path: "/v1/api/runs", operationId: "apiLaunchRun", summary: "Launch a run.", rpcMethod: "launchRun", requiredScope: scopeForRpc("launchRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
   { method: "get", path: "/v1/api/runs/{runId}", operationId: "apiGetRun", summary: "Read one run.", rpcMethod: "getRun", requiredScope: scopeForRpc("getRun"), responseSchema: objectSchema },
+  {
+    method: "get",
+    path: "/v1/api/runs/{runId}/token-usage",
+    operationId: "apiListRunTokenUsage",
+    summary: "List all persisted token usage for a run.",
+    rpcMethod: "listRunTokenUsage",
+    requiredScope: scopeForRpc("listRunTokenUsage"),
+    responseSchema: listRunTokenUsageRpc.responseSchema,
+    parameters: [
+      { name: "runId", in: "path", description: "Owning run id.", required: true, schema: requireRequestProperty(listRunTokenUsageRpc, "runId") },
+    ],
+  },
   { method: "post", path: "/v1/api/runs/{runId}/cancel", operationId: "apiCancelRun", summary: "Cancel a run.", rpcMethod: "cancelRun", requiredScope: scopeForRpc("cancelRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
   { method: "post", path: "/v1/api/runs/{runId}/resume", operationId: "apiResumeRun", summary: "Resume a run.", rpcMethod: "resumeRun", requiredScope: scopeForRpc("resumeRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
   { method: "post", path: "/v1/api/runs/{runId}/rewind", operationId: "apiRewindRun", summary: "Rewind a run.", rpcMethod: "rewindRun", requiredScope: scopeForRpc("rewindRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
@@ -147,6 +161,18 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
   { method: "get", path: "/v1/api/memory-facts", operationId: "apiListMemoryFacts", summary: "List memory facts.", rpcMethod: "listMemoryFacts", requiredScope: scopeForRpc("listMemoryFacts"), responseSchema: { type: "array", items: objectSchema } },
   { method: "get", path: "/v1/api/crons", operationId: "apiCronList", summary: "List cron schedules.", rpcMethod: "cronList", requiredScope: scopeForRpc("cronList"), responseSchema: { type: "array", items: objectSchema } },
   { method: "get", path: "/v1/api/accounts", operationId: "apiListAccounts", summary: "List registered accounts.", rpcMethod: "listAccounts", requiredScope: scopeForRpc("listAccounts"), responseSchema: { type: "array", items: objectSchema } },
+  {
+    method: "get",
+    path: "/v1/api/usage",
+    operationId: "apiListUsageReports",
+    summary: "List provider usage reports.",
+    rpcMethod: "listUsageReports",
+    requiredScope: scopeForRpc("listUsageReports"),
+    responseSchema: listUsageReportsRpc.responseSchema,
+    parameters: [
+      { name: "fresh", in: "query", description: "Bypass the Gateway's 60-second in-memory cache.", schema: requireRequestProperty(listUsageReportsRpc, "fresh") },
+    ],
+  },
   { method: "get", path: "/v1/api/nodes/{runId}/{nodeId}/output", operationId: "apiGetNodeOutput", summary: "Read node output.", rpcMethod: "getNodeOutput", requiredScope: scopeForRpc("getNodeOutput"), responseSchema: objectSchema },
   { method: "get", path: "/v1/api/nodes/{runId}/{nodeId}/diff", operationId: "apiGetNodeDiff", summary: "Read node diff.", rpcMethod: "getNodeDiff", requiredScope: scopeForRpc("getNodeDiff"), responseSchema: objectSchema },
   { method: "get", path: "/v1/api/runs/{runId}/nodes/{nodeId}/output", operationId: "apiGetRunNodeOutput", summary: "Read node output.", rpcMethod: "getNodeOutput", requiredScope: scopeForRpc("getNodeOutput"), responseSchema: objectSchema },
