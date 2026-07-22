@@ -3,6 +3,8 @@ title: <Loop>
 description: Re-run children until `until` is true or `maxIterations` is hit.
 ---
 
+`<Loop until={done} maxIterations={5}>…</Loop>` re-runs its children each frame until `until` evaluates true or `maxIterations` is reached.
+
 ```ts
 import { Loop } from "smithers-orchestrator";
 

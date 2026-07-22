@@ -72,6 +72,13 @@ bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build 
 bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
 ```
 
+For an implement- or debug-style workflow, `--interactive` prompts for inputs and drops you into the full-screen TUI monitor (TTY only):
+
+```bash
+bunx smithers-orchestrator up workflow.tsx --interactive              # supply inputs interactively, then watch the run
+bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive     # pick a discovered workflow and its inputs
+```
+
 **What success looks like**
 
 `workflow run` and `up` stream the lifecycle event log and exit on a terminal line:

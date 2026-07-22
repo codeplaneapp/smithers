@@ -23,22 +23,39 @@ type ScanFixVerifyProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
-<Workflow name="lint-fix">
-  <ScanFixVerify
-    scanner={lintAgent}
-    fixer={fixerAgent}
-    verifier={verifyAgent}
-    scanOutput={outputs.scan}
-    fixOutput={outputs.fix}
-    verifyOutput={outputs.verify}
-    reportOutput={outputs.report}
-    maxRetries={5}
-    maxConcurrency={3}
-  >
-    Scan the codebase for linting errors and type issues.
-  </ScanFixVerify>
-</Workflow>
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, ScanFixVerify, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  scan: z.object({ issues: z.array(z.string()) }),
+  fix: z.object({ patch: z.string() }),
+  verify: z.object({ resolved: z.boolean() }),
+  report: z.object({ summary: z.string() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="lint-fix">
+    <ScanFixVerify
+      scanner={agent}
+      fixer={agent}
+      verifier={agent}
+      scanOutput={outputs.scan}
+      fixOutput={outputs.fix}
+      verifyOutput={outputs.verify}
+      reportOutput={outputs.report}
+      maxRetries={5}
+      maxConcurrency={3}
+    >
+      Scan the codebase for linting errors and type issues.
+    </ScanFixVerify>
+  </Workflow>
+));
 ```
 
 ## Notes

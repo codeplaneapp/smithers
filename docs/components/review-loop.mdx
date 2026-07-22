@@ -20,12 +20,25 @@ type ReviewLoopProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, ReviewLoop, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  code: z.object({ diff: z.string() }),
+  review: z.object({ approved: z.boolean(), feedback: z.string() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
 export default smithers(() => (
   <Workflow name="code-review">
     <ReviewLoop
-      producer={coder}
-      reviewer={reviewer}
+      producer={agent}
+      reviewer={agent}
       produceOutput={outputs.code}
       reviewOutput={outputs.review}
       maxIterations={3}

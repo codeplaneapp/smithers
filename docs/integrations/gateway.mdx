@@ -211,6 +211,8 @@ bounds memory per stream.
 
 ## RPC methods (TOON)
 
+Stateless RPC POSTs go to `POST /v1/rpc/<method>` with the method's params as the JSON request body. Over WebSocket the same methods use `{ id, method, params }` frames. The legacy `POST /rpc` route takes the full `{ id, method, params }` envelope in the body.
+
 ```toon
 rpc[27]{method,params,returns,scope,transport}:
   launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket

@@ -125,6 +125,19 @@ bunx smithers-orchestrator ui RUN_ID
 - `RESUME_METADATA_MISMATCH`: the workflow source or metadata changed since the run began. Start a fresh run instead of resuming across the edit.
 - Bundled jj exits with `EACCES`: the optional `@smithers-orchestrator/jj-<platform>` binary is present but not executable. Run `chmod +x node_modules/@smithers-orchestrator/jj-*/bin/jj`, reinstall Smithers, or set `SMITHERS_JJ_PATH` to a working `jj` binary. Confirm resolution with `bunx smithers-orchestrator workflow doctor`.
 
+## Time-travel commands compared
+
+Four near-synonym commands roll history back in different ways. Pick by what each acts on:
+
+| Command | Acts on | Behavior |
+| --- | --- | --- |
+| `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
+| `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
+| `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
+| `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
+
+See [Time-travel API](/reference/time-travel) and [Revert](/runtime/revert) for the programmatic surface.
+
 ## Command catalog (TOON)
 
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.

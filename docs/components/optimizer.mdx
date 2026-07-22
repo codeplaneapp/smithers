@@ -21,12 +21,25 @@ type OptimizerProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Optimizer, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  prompt: z.object({ text: z.string() }),
+  evaluation: z.object({ score: z.number(), feedback: z.string() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
 export default smithers(() => (
   <Workflow name="prompt-optimizer">
     <Optimizer
-      generator={promptEngineer}
-      evaluator={evaluator}
+      generator={agent}
+      evaluator={agent}
       generateOutput={outputs.prompt}
       evaluateOutput={outputs.evaluation}
       targetScore={90}

@@ -124,6 +124,18 @@ HINDSIGHT_BANK_PREFIX=dev-
 
 `HINDSIGHT_API_KEY` and `HINDSIGHT_BANK_PREFIX` are optional; the prefix applies to every configured bank before requests are sent.
 
+## CLI: cross-run memory facts
+
+Outside a run, manage durable facts with the `memory` command: `set` writes (remember) a fact, `get` and `list` read (recall) facts.
+
+```bash
+bunx smithers-orchestrator memory set workflow:my-flow last-release '{"tag":"v1.4.0"}'  # remember a fact
+bunx smithers-orchestrator memory get workflow:my-flow last-release                     # recall one fact
+bunx smithers-orchestrator memory list workflow:my-flow                                 # recall every fact in a namespace
+```
+
+Inside a run, set `tools` on `<Memory>` to expose the agent-facing `remember` and `recall` tools instead.
+
 ## Task-level override
 
 The `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins over context:

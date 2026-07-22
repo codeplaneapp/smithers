@@ -17,18 +17,37 @@ type WorktreeProps = {
 };
 ```
 
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+
 ```tsx
-<Worktree path="/tmp/smithers/wt-a" baseBranch="main">
-  <Task id="build" output={outputs.outputC}>{{ value: 1 }}</Task>
-  <Task id="test" output={outputs.outputC}>{{ value: 2 }}</Task>
-  <MergeQueue>
-    <Task id="apply" output={outputs.outputC}>{{ value: 3 }}</Task>
-  </MergeQueue>
-  <Parallel maxConcurrency={2}>
-    <Task id="lint" output={outputs.outputC}>{{ value: 4 }}</Task>
-  </Parallel>
-</Worktree>
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Worktree, MergeQueue, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  build: z.object({ summary: z.string() }),
+  land: z.object({ merged: z.boolean() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="isolated-build">
+    <Worktree path="/tmp/smithers/feature-a" baseBranch="main">
+      <Task id="implement" output={outputs.build} agent={agent}>
+        Implement the feature and run the build inside this worktree.
+      </Task>
+      <MergeQueue>
+        <Task id="land" output={outputs.land} agent={agent}>
+          Merge the committed bookmark back into main.
+        </Task>
+      </MergeQueue>
+    </Worktree>
+  </Workflow>
+));
 ```
+
+Leave the agent `cwd` unset so `<Worktree>` supplies the isolated working directory (see Notes).
 
 ## Path Access
 

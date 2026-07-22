@@ -297,7 +297,7 @@ bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-n
 bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
-Fork makes a child run without starting it (add `--run` to start immediately); replay also makes a child run but immediately resumes it. `--restore-vcs` checks out the original revision so re-execution sees the same source.
+Fork makes a child run without starting it (add `--run` to start immediately); replay also makes a child run but immediately resumes it. `--restore-vcs` checks out the original revision so re-execution sees the same source. See [Time-travel commands compared](/cli/overview#time-travel-commands-compared) to tell `rewind`, `replay`, `timetravel`, and `revert` apart.
 
 ## Scoring tasks
 

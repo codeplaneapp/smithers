@@ -29,21 +29,32 @@ type KanbanProps = {
 };
 ```
 
-```tsx
-const columns = [
-  { name: "triage", agent: triageAgent, output: outputs.triage },
-  { name: "work", agent: workerAgent, output: outputs.work },
-  { name: "review", agent: reviewAgent, output: outputs.review },
-];
+Complete runnable example (renders with `bunx smithers-orchestrator graph`):
 
-<Workflow name="ticket-board">
-  <Kanban
-    columns={columns}
-    useTickets={() => tickets}
-    until={allDone}
-    maxIterations={3}
-  />
-</Workflow>;
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Kanban, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  triage: z.object({ note: z.string() }),
+  build: z.object({ note: z.string(), done: z.boolean() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="ticket-board">
+    <Kanban
+      columns={[
+        { name: "triage", agent, output: outputs.triage },
+        { name: "build", agent, output: outputs.build },
+      ]}
+      useTickets={() => [{ id: "T-1" }, { id: "T-2" }]}
+      maxIterations={2}
+    />
+  </Workflow>
+));
 ```
 
 ## Notes
