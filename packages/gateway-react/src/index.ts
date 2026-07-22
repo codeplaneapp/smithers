@@ -12,6 +12,8 @@ export { useGatewayMutation } from "./useGatewayMutation.ts";
 export { useGatewayPrompts } from "./useGatewayPrompts.ts";
 export { useGatewayScores } from "./useGatewayScores.ts";
 export { useGatewayTickets } from "./useGatewayTickets.ts";
+export { useGatewayUsageReports } from "./useGatewayUsageReports.ts";
+export { useGatewayRunTokenUsage } from "./useGatewayRunTokenUsage.ts";
 export { useGatewayNodeOutput } from "./useGatewayNodeOutput.ts";
 export { useGatewayRunDiff } from "./useGatewayRunDiff.ts";
 export { useGatewayRpc } from "./useGatewayRpc.ts";
