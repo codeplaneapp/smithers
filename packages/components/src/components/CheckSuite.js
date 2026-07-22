@@ -150,6 +150,12 @@ async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) 
                 cwd,
                 shell: true,
                 stdio: ["ignore", "pipe", "pipe"],
+                // The shell wrapper must die as a TREE on timeout: detached
+                // gives it its own process group so killTree can signal the
+                // whole group on POSIX (CI's shell does not exec the command,
+                // so signalling only the wrapper leaves the real process
+                // holding the pipes and `close` never fires).
+                detached: process.platform !== "win32",
             });
         }
         catch (error) {
@@ -170,12 +176,21 @@ async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) 
         let timedOut = false;
         /** @param {NodeJS.Signals} signal */
         const killTree = (signal) => {
-            // shell:true wraps the command: on Windows child.kill only hits
-            // the cmd.exe wrapper while the real process keeps the inherited
-            // pipes open, so `close` never fires. taskkill fells the tree.
+            // shell:true wraps the command: signalling only the wrapper leaves
+            // the real process holding the inherited pipes and `close` never
+            // fires. Windows fells the tree with taskkill; POSIX signals the
+            // detached process group.
             if (process.platform === "win32" && typeof child.pid === "number") {
                 spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
                 return;
+            }
+            if (typeof child.pid === "number") {
+                try {
+                    process.kill(-child.pid, signal);
+                    return;
+                } catch {
+                    // group already reaped (or not a leader); fall through
+                }
             }
             child.kill(signal);
         };

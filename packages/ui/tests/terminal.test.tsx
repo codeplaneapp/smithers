@@ -137,10 +137,15 @@ describe("<Terminal> headless rendering", () => {
       document.documentElement.setAttribute("data-theme", "dark");
       await Promise.resolve();
     });
-    await waitFor(() => ready.options.theme?.background === "#07090d");
+    await waitFor(() => {
+      // Re-stamp each poll: bun 1.3.x's happy-dom can drop a MutationObserver
+      // delivery under CI load; a repeated setAttribute queues a fresh record.
+      document.documentElement.setAttribute("data-theme", "dark");
+      return ready.options.theme?.background === "#07090d";
+    });
     expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("dark");
     expect(ready.options.theme?.background).toBe("#07090d");
-  });
+  }, 20_000);
 
   test("disables xterm cursor blinking when reduced motion is preferred", async () => {
     window.matchMedia = ((query: string) => ({

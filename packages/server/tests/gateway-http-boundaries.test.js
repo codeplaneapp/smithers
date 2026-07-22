@@ -390,14 +390,19 @@ describe("auth header edge cases (gateway HTTP)", () => {
     // sends them. Either way the invariant these tests pin is that a mangled
     // credential can never authenticate: the fetch throws, or the gateway 401s.
     async function expectRejectedOrUnauthorized(headers) {
-        const outcome = await fetch(`http://127.0.0.1:${port}/rpc`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...headers },
-            body: "{}",
-        }).then(
-            (res) => ({ kind: "response", status: res.status }),
-            (cause) => ({ kind: "rejected", message: String(cause) }),
-        );
+        // try/catch, not .then: bun 1.3.x throws the invalid-header TypeError
+        // SYNCHRONOUSLY from fetch() while 1.4+ rejects the promise.
+        let outcome;
+        try {
+            const res = await fetch(`http://127.0.0.1:${port}/rpc`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...headers },
+                body: "{}",
+            });
+            outcome = { kind: "response", status: res.status };
+        } catch (cause) {
+            outcome = { kind: "rejected", message: String(cause) };
+        }
         if (outcome.kind === "rejected") {
             expect(outcome.message).toMatch(/invalid value|invalid header/i);
         } else {
