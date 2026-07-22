@@ -43,5 +43,5 @@ export default smithers((ctx) => {
 ## Notes
 
 - `state` must be JSON-serializable; total continuation envelope < 10 MB.
-- Workflow id is preserved across continuations; only run id increments.
+- Workflow id persists across continuations; only run id increments.
 - Nodes rendered after `<ContinueAsNew>` in the same sequence don't execute.

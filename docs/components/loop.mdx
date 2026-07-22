@@ -41,9 +41,9 @@ export default smithers((ctx) => {
 });
 ```
 
-Loop children are ordinary Tasks, so a loop can drive **compute** tasks (an
-`async` function body, no agent) just as well as agents. A retry-until-green
-test loop is the canonical non-agent case:
+Loop children are ordinary Tasks, so a loop drives **compute** tasks (an
+`async` function body, no agent) as well as agent tasks. Canonical
+non-agent case: a retry-until-green test loop.
 
 ```tsx
 export default smithers((ctx) => {
@@ -67,9 +67,9 @@ export default smithers((ctx) => {
 
 ## Notes
 
-- Give every `<Loop>` an explicit `id`. Without one the loop id is derived from its position in the tree, so a sibling that conditionally mounts or unmounts shifts the path and re-keys the loop, stranding its iteration state and restarting it from 0. An explicit `id` pins identity and makes the loop immune to sibling churn.
-- `onMaxReached` has exactly two values. `"return-last"` (the default) ends the loop cleanly once `maxIterations` is hit, keeping the last iteration's output. `"fail"` instead throws `RALPH_MAX_REACHED` and fails the run. Use `"fail"` when hitting the cap means the work never converged (tests never went green); use the default when the best-so-far result is acceptable.
-- `ctx.latest(table, nodeId)` reads the highest-iteration output; `until` must use `ctx.outputMaybe()` since output is absent on iter 0.
+- Give every `<Loop>` an explicit `id`. An auto id derives from tree position, so a conditionally mounted/unmounted sibling shifts the path, re-keying the loop and resetting its iteration state from 0; an explicit `id` is immune.
+- `onMaxReached` has two values: `"return-last"` (default) ends the loop cleanly at `maxIterations`, keeping the last output; `"fail"` throws `RALPH_MAX_REACHED` and fails the run. Use `"fail"` when hitting the cap means the work never converged (tests never went green), the default when the best-so-far result is acceptable.
+- `ctx.latest(table, nodeId)` reads the highest-iteration output; `until` must use `ctx.outputMaybe()`, since output is absent on iter 0.
 - Direct nesting of `<Loop>` in `<Loop>` throws; wrap the inner loop in `<Sequence>`.
 - Custom Drizzle tables for loop tasks require `iteration` in the primary key.
-- `Ralph` is still exported as a deprecated alias of `Loop` for older workflows. New code should import and render `Loop`.
+- `Ralph` remains a deprecated alias of `Loop`; new code should use `Loop`.

@@ -5,34 +5,34 @@ description: Design the Zod output schema of a Smithers <Task> as the contract b
 
 # Schema Author
 
-This skill is about **one thing: the output schema** — the Zod shape a `<Task>`
-produces and the next step consumes. In Smithers, that schema *is* the contract.
-The runtime injects a JSON-schema description of it into the prompt, parses the
-agent's response, validates against Zod, retries on mismatch, and persists the
-row. Everything downstream — a `ctx.outputMaybe(...)` conditional, a `<Branch>`,
-a `<Loop until={...}>` — reads that row. A loose or prose-heavy schema makes every
-later step unreliable; a tight, typed one makes the graph deterministic.
+This skill is about **one thing: the output schema**, the Zod shape a `<Task>`
+produces and the next step consumes: Smithers's contract between steps. The
+runtime injects a JSON-schema description into the prompt, parses the response,
+validates against Zod, retries on mismatch, and persists the row; everything
+downstream (`ctx.outputMaybe(...)`, `<Branch>`, `<Loop until={...}>`) reads that
+row. A loose or prose-heavy schema makes every later step unreliable; a tight,
+typed one makes the graph deterministic.
 
-This is the BAML insight: **the prompt is a schema.** You don't beg the model for
-JSON in prose, you declare the type and let the runtime enforce it. Design the
-contract before you write the prompt or the workflow.
+This is the BAML insight: **the prompt is a schema.** Don't beg the model for
+JSON in prose: declare the type and let the runtime enforce it, before you write
+the prompt or the workflow.
 
 ## When to reach for it
 
-- A step's output is read by a *later* step, a branch condition, or a loop's
-  `until`, and a wrong shape would silently break the run.
+- A step's output feeds a *later* step, a branch condition, or a loop's `until`,
+  where a wrong shape would silently break the run.
 - An agent keeps returning the right *idea* in the wrong *shape* (free text where
   you need an enum, missing a field downstream code indexes into).
 - You're about to add a reviewer/retry to compensate for output you could just
   *type* instead.
 
-Skip it when the output is terminal (nothing downstream reads it) — a `summary`
-string is fine. Schema rigor is for fields other steps depend on.
+Skip it when the output is terminal (nothing downstream reads it): a `summary`
+string is fine.
 
 ## Design the contract first, keep it minimal
 
 Author the schema in `createSmithers({...})` *before* the prompt or the graph.
-Include only what downstream actually reads — a one-line `summary` plus the few
+Include only what downstream actually reads: a one-line `summary` plus the few
 fields the next step indexes into. Every extra field is another thing the agent
 can get wrong and another retry.
 
@@ -50,11 +50,11 @@ const { Workflow, smithers, outputs } = createSmithers({
 - **Prefer enums and typed fields over prose.** `z.enum([...])`, `z.boolean()`,
   `z.number()` give the next step something it can switch on. A free-string status
   is a bug waiting for a typo.
-- **Make required things required.** Optional fields the downstream step assumes
-  exist are the classic silent failure. If `fix` always reads `analysis.issues`,
-  don't make `issues` optional.
+- **Make required things required.** Optional fields downstream assumes exist
+  are the classic silent failure: if `fix` always reads `analysis.issues`, don't
+  make `issues` optional.
 - **Constrain values, not just types.** `z.number().min(0).max(100)`,
-  `z.array(...).min(1)` — a validation failure feeds the error back and the agent
+  `z.array(...).min(1)`: a validation failure feeds the error back and the agent
   self-corrects on retry, so tighter bounds are free reliability. Annotate
   non-obvious fields with `.describe("...")`; that text rides into the injected
   JSON-schema block and steers the agent.
@@ -78,22 +78,21 @@ checks (a typo in the key is a type error):
 ```
 
 The prompt body stays clean: end it with the task, let the runtime append the
-schema. Don't hand-write a "return JSON like {…}" block — it fights the injected
+schema. Don't hand-write a "return JSON like {…}" block: it fights the injected
 one (see `skills/prompt-author/SKILL.md`).
 
 When a task simply consumes an upstream output with no branching involved,
 prefer `<Task deps={{ triage: outputs.triage }}>` with a `(deps) => ...`
-callback: it makes the dependency explicit and needs no `ctx.outputMaybe`
-guard. `ctx.outputMaybe`/`<Branch>` stays the right tool when downstream logic
-depends on the row's content, as in the example above.
+callback: it makes the dependency explicit and needs no `ctx.outputMaybe` guard.
+`ctx.outputMaybe`/`<Branch>` stays right when downstream logic depends on the
+row's content, as above.
 
 ## Rich or extensible outputs: `z.looseObject`
 
 When you can't enumerate every field up front (a typed-extraction step, a payload
 that carries pass-through metadata, an evolving spec), use `z.looseObject({...})`:
 name and type the fields downstream *depends on*, and let the agent attach extra
-keys without tripping validation. You keep a reliable contract on the load-bearing
-fields and an open door for the rest.
+keys without tripping validation.
 
 ```tsx
 extract: z.looseObject({
@@ -110,7 +109,7 @@ locking the shape.
 ## Verify the contract holds
 
 Attach a `schemaAdherence` scorer to confirm the shape holds run to run, and read
-the persisted row directly:
+the persisted row:
 
 ```bash
 bunx smithers-orchestrator scores <run-id>          # did adherence hold?

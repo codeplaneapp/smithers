@@ -3,13 +3,13 @@ title: "Bug reports"
 description: "File smithers bugs with the smithers bug command; reports land in the bug.smithers.sh worker."
 ---
 
-Hit a smithers bug? Run `smithers bug` (optionally with `--run <runId>` to
-attach the failing run's status, error, and recent events, secrets-scrubbed).
-The command POSTs the report to `https://bug.smithers.sh/api/bugs` and prints
-the bug id and URL. The post-failure autopsy workflow files reports the same
-way after you approve its "this looks like a smithers bug" gate.
+Run `smithers bug`; `--run <runId>` attaches the failing run's status, error,
+and recent events (secrets scrubbed). It POSTs to
+`https://bug.smithers.sh/api/bugs` and prints the bug id and URL. The
+post-failure autopsy workflow does the same after you approve its "this looks
+like a smithers bug" gate.
 
-The receiving side is a small Cloudflare Worker in `apps/bug-worker` in the
-smithers repo. It validates and stores reports in KV, rate-limits per IP, and
-requires no auth to POST, so reporting stays zero-friction. Maintainers deploy
-it with `pnpm -C apps/bug-worker deploy`; see `apps/bug-worker/README.md`.
+The receiver: a small Cloudflare Worker at `apps/bug-worker` (smithers repo),
+validating and storing reports in KV, rate-limiting per IP, and skipping auth,
+keeping reporting zero-friction. Maintainers deploy with
+`pnpm -C apps/bug-worker deploy` (see `apps/bug-worker/README.md`).

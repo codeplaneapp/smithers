@@ -5,8 +5,7 @@ description: A minimal workflow that generates a greeting. Two versions - MDX (d
 
 ## MDX (default)
 
-This is a standalone hello-world example, not a workflow installed by the default init pack. Copy it into `.smithers/workflows/` if you want to try it.
-Edit the copied prompt or inline task to change what the agent says:
+This standalone hello-world example isn't installed by the default init pack: copy it into `.smithers/workflows/` to try it, then edit the copied prompt or inline task to change what the agent says:
 
 ```markdown
 Write a short, friendly one-sentence greeting for {props.name}.
@@ -25,7 +24,7 @@ bunx smithers-orchestrator workflow run hello --name Ada
 [hello] Completed
 ```
 
-Change the instruction - for example, ask for a haiku instead - and run again. No TypeScript needed.
+Change the instruction (ask for a haiku, say) and run again: no TypeScript needed.
 
 See [MDX Workflow Authoring](/guides/mdx-authoring) for how to create your own MDX-backed workflows.
 
@@ -78,4 +77,4 @@ bunx smithers-orchestrator up hello-world.tsx --input '{}'
 [hello-world] Completed
 ```
 
-`createSmithers` registers a `greeting` table with a `message` field. `Task` sends the prompt to the agent and persists structured output. If the workflow crashes mid-run, re-running replays completed tasks from storage and continues from the last incomplete step.
+`createSmithers` registers a `greeting` table with a `message` field; `Task` sends the prompt to the agent and persists the structured output. If the workflow crashes mid-run, re-running replays completed tasks from storage and continues from the last incomplete step.

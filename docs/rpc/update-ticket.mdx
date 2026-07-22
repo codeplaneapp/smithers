@@ -11,6 +11,6 @@ apiVersion: v1
 - Request: `{ path, content?, status? }`
 - Response: `TicketRow`
 
-Patches a LIVE work doc's `content` and/or `status` by `path`. When `content` changes, `content_hash` and `updated_at_ms` are re-stamped; a status-only patch keeps the existing content and hash. An unknown or already-soft-deleted `path` returns `TicketNotFound`.
+Patches a LIVE work doc's `content` and/or `status` by `path`: a `content` change re-stamps `content_hash` and `updated_at_ms`; a status-only patch keeps content and hash. An unknown or soft-deleted `path` returns `TicketNotFound`.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `TicketNotFound`, and `Internal`.

@@ -5,21 +5,20 @@ description: Run Smithers from Cursor. Register the MCP server, add a project ru
 
 [Cursor](https://cursor.com/docs) extends through **MCP servers**, **rules**, and
 the headless **`cursor-agent`** CLI. Smithers plugs into those surfaces; generated
-CLI skill files can also be synced to `~/.agents/skills` for harnesses that read
-that directory.
+CLI skill files can also sync to `~/.agents/skills`.
 
 ```bash
 bunx smithers-orchestrator mcp add --agent cursor
 ```
 
-That registers the MCP server. Reopen Cursor and the Smithers tools are
-available in the Agent.
+Registers the MCP server; reopen Cursor and the Smithers tools appear in the
+Agent.
 
 ## Register the MCP server
 
-`mcp add` writes the registration. To do it by hand, create
-`.cursor/mcp.json` in the project (or `~/.cursor/mcp.json` for all projects).
-Note Cursor uses the `mcpServers` key:
+`mcp add` writes the registration. By hand, create `.cursor/mcp.json` in the
+project (or `~/.cursor/mcp.json` for all projects); Cursor uses the
+`mcpServers` key:
 
 ```json
 {
@@ -32,15 +31,14 @@ Note Cursor uses the `mcpServers` key:
 }
 ```
 
-The server exposes the semantic tools (`list_workflows`, `run_workflow`,
-`watch_run`, `resolve_approval`, and the rest). See the
-[MCP Server reference](/integrations/mcp-server).
+The server exposes `list_workflows`, `run_workflow`, `watch_run`,
+`resolve_approval`, and the rest. Full reference:
+[MCP Server](/integrations/mcp-server).
 
 ## Optional generated skill files
 
 `skills add` syncs generated Smithers CLI skill files into `~/.agents/skills`
-globally, or `.agents/skills` with `--no-global`. Use this if your Cursor setup
-bridges that directory into its skill context:
+globally, or `.agents/skills` with `--no-global`. Use this if Cursor bridges that directory into its skill context:
 
 ```bash
 bunx smithers-orchestrator skills add
@@ -61,22 +59,22 @@ Smithers is a durable control plane for long-running coding agents.
 Run `bunx smithers-orchestrator starters` to list ready-made workflows.
 ```
 
-Cursor also reads a plain `AGENTS.md` at the repo root as a simpler alternative,
-the same file Codex and Copilot use.
+Cursor also reads a plain `AGENTS.md` at the repo root, the same file Codex
+and Copilot use.
 
 ## Headless: cursor-agent
 
-`cursor-agent` runs Cursor's agent in the terminal and honors the same
-`.cursor/` config, so the MCP server and rule above apply in CI. Any bridged
-generated skill files can travel with the same setup:
+`cursor-agent` runs Cursor's agent in the terminal, honoring the same
+`.cursor/` config, so the MCP server and rule above apply in CI. Bridged
+generated skill files travel with the same setup:
 
 ```bash
 cursor-agent chat "use Smithers to run the implement workflow on this ticket"
 ```
 
-Because `cursor-agent` is a CLI, Smithers can also spawn it as a worker inside a
-workflow via a [compute task that shells out](/integrations/integrations#pattern-3-run-an-external-cli-in-a-task);
-there is no dedicated `CursorAgent` class yet.
+Because `cursor-agent` is a CLI, Smithers can spawn it as a worker via a
+[compute task that shells out](/integrations/integrations#pattern-3-run-an-external-cli-in-a-task);
+no dedicated `CursorAgent` class exists yet.
 
 ## See also
 

@@ -6,14 +6,12 @@ description: "Example from scripts/generate-llms.ts: a utility script that gener
 # scripts/generate-llms.ts
 
 <Note>
-**Ghost doc.** Real utility script at `scripts/generate-llms.ts`.
-
-This is an internal script used to maintain the docs, not a smithers-orchestrator workflow example.
+**Ghost doc.** Real utility script at `scripts/generate-llms.ts`: an internal script that maintains the docs, not a smithers-orchestrator workflow example.
 </Note>
 
 ## Source
 
-The script is self-contained (~300 lines). It defines its own frontmatter parser, hardcoded manifest arrays, and a `renderPage` helper. No external helper module is imported.
+The script is self-contained (~300 lines): its own frontmatter parser, hardcoded manifest arrays, and `renderPage` helper, no external imports.
 
 See [`scripts/generate-llms.ts`](https://github.com/smithersai/smithers/blob/main/scripts/generate-llms.ts) for the full source.
 
@@ -27,5 +25,5 @@ bun scripts/generate-llms.ts
 
 - Follows the `llms.txt` convention: produces a family of text files for AI model context.
 - Writes the current `llms-*.txt` bundle set plus version-pinned `llms-v<version>.txt` and `llms-full-v<version>.txt` artifacts for exact-release lookups.
-- Pages are listed in hardcoded manifest arrays inside the script; edit the manifests to change what each fragment contains.
-- Strips YAML frontmatter; converts MDX bodies to Markdown. Each section is emitted as `## title` + optional blockquote description + raw MDX body, separated by `---`.
+- Page lists are hardcoded manifest arrays in the script; edit them to change each fragment's contents.
+- Strips YAML frontmatter, converts MDX bodies to Markdown, and emits each section as `## title` + optional blockquote description + raw MDX body, separated by `---`.

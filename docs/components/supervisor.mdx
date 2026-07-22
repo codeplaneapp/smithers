@@ -45,7 +45,7 @@ export default smithers(() => (
 ## Notes
 
 - Generated node ids: `{id}-plan`, `{id}-loop`, `{id}-worker-{type}`, `{id}-review`, `{id}-final`.
-- Workers run with `continueOnFail`; a single failure does not abort the cycle.
+- Workers run with `continueOnFail`; one failure doesn't abort the cycle.
 - With `useWorktrees`, each worker runs in `.worktrees/{prefix}-worker-{type}` on branch `worker/{prefix}-worker-{type}`.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}

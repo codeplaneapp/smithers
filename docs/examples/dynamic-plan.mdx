@@ -5,7 +5,7 @@ description: A workflow that analyzes input and branches between a simple or com
 
 # Dynamic Plan
 
-`<Branch>` chooses between execution paths at runtime. Here, an analyzer classifies task complexity and routes to either a quick fix or a multi-step plan.
+`<Branch>` chooses between execution paths at runtime: here, an analyzer classifies task complexity and routes to a quick fix or a multi-step plan.
 
 ## Workflow Definition
 
@@ -113,5 +113,5 @@ Low complexity path (planner skipped):
 ## How Branch Works
 
 - `if` is evaluated each time the workflow re-renders. Only the matching branch (`then` or `else`) is mounted.
-- The Branch is inside a `Sequence`, so it is not reached until `analyze` finishes and `analysis` is populated. `<Sequence>` runs children in order and waits for each to complete before starting the next, so the `<Branch>` only evaluates after `analyze` has persisted its output.
+- The Branch sits inside a `Sequence`, which runs children in order and waits for each to complete before starting the next, so `<Branch>` only evaluates after `analyze` finishes and its output is persisted.
 - Resumable: completed task outputs are persisted, so re-running picks up where it left off.

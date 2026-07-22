@@ -47,12 +47,12 @@ type WaitForEventProps = {
 ## Notes
 
 - Push-based; for poll-based checks use `<Task>` with a compute function.
-- `tagged` is an explicit migration opt-in. With `tagged`, signal completion
-  stores `{ kind: "signal", payload }` and timeout continuation stores
-  `{ kind: "timeout" }`. A schema that merely happens to contain `kind` and
-  `payload` is not treated as tagged. `onTimeout="continue"` without
-  `tagged` fails clearly instead of persisting an ambiguous `null` row.
-- External integration webhooks (the `@smithers-orchestrator/integrations` package) deliver these events. A source signals `integration:<service>:<event>` (for example `integration:github:pull_request`) with a `correlationId` that is `owner/repo#number`, `owner/repo`, or `null` depending on the payload, so set `signalName` and `correlationId` to match.
+- `tagged` is an explicit migration opt-in: signal completion then stores
+  `{ kind: "signal", payload }` and timeout continuation stores
+  `{ kind: "timeout" }`. A schema that merely contains `kind` and `payload`
+  isn't treated as tagged. `onTimeout="continue"` without `tagged` fails
+  clearly instead of persisting an ambiguous `null` row.
+- External integration webhooks (`@smithers-orchestrator/integrations`) deliver these events. A source signals `integration:<service>:<event>` (e.g. `integration:github:pull_request`) with a `correlationId` of `owner/repo#number`, `owner/repo`, or `null` depending on payload, so set `signalName`/`correlationId` to match.
 - With `async`, dependents via `dependsOn`/`needs` still block until payload arrives.
 - Async waits are tracked by the `smithers_external_wait_async_pending{kind="event"}` gauge while pending (it rises on start, falls on completion).
-- A run suspended on `<WaitForEvent>` (status `waiting-event`) does not resume itself when the event is delivered out of process. A controller should deliver it with Gateway `submitSignal`, then call `resumeRun`. For ad-hoc CLI operation, deliver the event and resume with `bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true` from the workspace root. Never locate or select the backing store yourself; discover the verified workspace Gateway with `smithers gateway status --format json`. See the keeper-loop pattern in the [CLI overview](/cli/overview).
+- A run suspended on `<WaitForEvent>` (status `waiting-event`) doesn't resume itself when the event is delivered out of process: a controller should deliver it with Gateway `submitSignal`, then call `resumeRun`. For ad-hoc CLI operation, deliver the event and resume with `bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true` from the workspace root. Never locate or select the backing store yourself; discover the verified workspace Gateway with `smithers gateway status --format json`. See the keeper-loop pattern in the [CLI overview](/cli/overview).

@@ -4,8 +4,8 @@ description: Reduced-motion-safe live text shimmer and the CSS-only scroll-aware
 ---
 
 `Shimmer` marks live status text without changing its content. Its root always
-has `sui-shimmer`; animation and gradient styling apply only while `active`.
-Reduced-motion environments render readable muted text with no animation.
+carries `sui-shimmer`; animation and gradient styling apply only while `active`.
+Reduced-motion environments render muted text with no animation.
 
 ```tsx
 import { Shimmer } from "smithers-orchestrator/ui";
@@ -13,10 +13,10 @@ import { Shimmer } from "smithers-orchestrator/ui";
 <Shimmer active={streaming}>Generating response</Shimmer>
 ```
 
-`active` defaults to `true`. Set it to `false` to retain ordinary inherited
-text styling.
+`active` defaults to `true`; set it `false` to keep ordinary inherited text
+styling.
 
-The same `chatScrollerCss` block ships `.sui-scroll-fade`. Apply it to a
+The same `chatScrollerCss` block ships `.sui-scroll-fade`: apply it to a
 scrollable element with `data-fade-top="true|false"` and
-`data-fade-bottom="true|false"`; `MessageScroller` manages those attributes
+`data-fade-bottom="true|false"`. `MessageScroller` manages those attributes
 automatically.

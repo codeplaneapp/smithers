@@ -6,13 +6,13 @@ icon: "clock-rotate-left"
 
 Every successful task attempt records the workspace's [JJ](https://jj-vcs.github.io/jj/)
 change ID into `_smithers_attempts.jj_pointer`. The time-travel API replays a run
-to one of those points: it restores the filesystem from the captured pointer and
-discards the graph snapshots recorded after the attempt began, so the run's
-timeline rolls back to that attempt.
+to one of those points, restoring the filesystem from the captured pointer and
+discarding graph snapshots recorded after the attempt began, rolling the run's
+timeline back to it.
 
-The public, facade-exported surface is two functions. `revertToAttempt` is the
-low-level VCS restore; `timeTravel` is the higher-level reset that can also reset
-the target node and its dependents so the engine re-runs them.
+The public, facade-exported surface is two functions: `revertToAttempt`, the
+low-level VCS restore, and `timeTravel`, the higher-level reset that can also
+reset the target node and its dependents so the engine re-runs them.
 
 ```ts
 import { timeTravel, revertToAttempt } from "smithers-orchestrator";
@@ -25,17 +25,15 @@ import type {
 ```
 
 Both take the run's `SmithersDb` adapter as their first argument. Neither throws
-for a missing attempt or a missing pointer; they report failure on the returned
-`success` boolean. Inspect `result.success` rather than wrapping the call in
-`try`/`catch`.
+for a missing attempt or pointer: both report failure via the returned `success`
+boolean, so inspect `result.success` rather than wrapping the call in `try`/`catch`.
 
 ## timeTravel
 
-Restore VCS to a previous attempt, then reset the target node (and optionally its
-dependents) back to `pending` so the engine re-runs from there. This is the entry
-point you want when you intend to resume the run: it cancels later attempts,
-deletes the affected output rows, discards frames recorded after the attempt
-started, and flips the run back to `running`.
+Restores VCS to a previous attempt, then resets the target node (and optionally
+its dependents) to `pending` so the engine re-runs from there. Use this to resume
+a run: it cancels later attempts, deletes their output rows, discards frames
+recorded after the attempt started, and flips the run back to `running`.
 
 ```ts
 function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeTravelResult>;
@@ -61,9 +59,9 @@ function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeT
       Attempt number to restore. Omit to use the latest recorded attempt.
     </ParamField>
     <ParamField path="resetDependents" type="boolean" default="true">
-      Also reset every node that ran after the target (later iterations, attempts
-      started after the target's start time, or ordered after it) back to
-      `pending`. Set `false` to reset only the target node.
+      Also resets every node that ran after the target (later iterations, attempts
+      started after its start time, or ordered after it) to `pending`. Set `false`
+      to reset only the target node.
     </ParamField>
     <ParamField path="restoreVcs" type="boolean" default="true">
       Restore the working copy from the attempt's JJ pointer before resetting
@@ -86,8 +84,8 @@ function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeT
       The JJ change ID restored from, when one was recorded for the attempt.
     </ResponseField>
     <ResponseField name="vcsRestored" type="boolean">
-      Whether the working copy was actually restored. `false` when `restoreVcs`
-      was off or the attempt had no pointer.
+      Whether the working copy was restored. `false` when `restoreVcs` was off
+      or the attempt had no pointer.
     </ResponseField>
     <ResponseField name="resetNodes" type="string[]">
       The node ids flipped back to `pending`, deduplicated.
@@ -116,11 +114,11 @@ if (!reset.success) throw new Error(reset.error);
 
 ## revertToAttempt
 
-Restore the working copy to an attempt's JJ pointer and discard DB frames
-recorded after the attempt started. This is files-only: it does not reset nodes,
-cancel attempts, or change the run status, so it leaves the graph untouched. Use
-it when you only need the filesystem state of a past attempt. Unlike `timeTravel`,
-both `iteration` and `attempt` are required.
+Restores the working copy to an attempt's JJ pointer and discards DB frames
+recorded after the attempt started. Files-only: it doesn't reset nodes, cancel
+attempts, or change run status, leaving the graph untouched. Use it when you
+need only the filesystem state of a past attempt. Unlike `timeTravel`, both
+`iteration` and `attempt` are required.
 
 ```ts
 function revertToAttempt(adapter: SmithersDb, opts: RevertOptions): Promise<RevertResult>;
@@ -179,8 +177,8 @@ if (!result.success) throw new Error(result.error);
 ```
 
 <Note>
-`revertToAttempt` and `timeTravel` need JJ in `PATH` and a JJ-initialized
-workspace, and the target attempt must have completed while JJ was available
+Both `revertToAttempt` and `timeTravel` need JJ on `PATH` and a JJ-initialized
+workspace; the target attempt must have completed while JJ was available
 (otherwise no pointer was captured). See [Revert](/runtime/revert) for the
 requirements and the equivalent CLI command.
 </Note>
@@ -191,8 +189,8 @@ requirements and the equivalent CLI command.
 
 <Note>
 The richer time-travel surface (fork, replay, rewind, snapshots, and timeline)
-is driven through the CLI and the rewind RPC, not as facade exports. Reach for
-those rather than importing non-exported functions from the package.
+is driven through the CLI and the rewind RPC, not facade exports. Use those
+instead of importing non-exported functions from the package.
 
 - [CLI overview](/cli/overview) for `fork`, `replay`, `rewind`, `snapshots`, and `timeline`.
 - [Revert](/runtime/revert) for the `revert` command that mirrors `revertToAttempt`.

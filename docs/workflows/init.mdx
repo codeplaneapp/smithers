@@ -3,17 +3,16 @@ title: init
 description: System workflow behind `bunx smithers-orchestrator init`: installs or refreshes the .smithers workflow pack and curated agent skills as a durable, replayable run.
 ---
 
-`init` is a **system workflow** (`system: true`): internal plumbing Smithers
-uses for its own durable processes. It is hidden from default listings
-(`workflow list` without `--system`, the interactive picker, MCP
-`list_workflows`, gateway `listWorkflows`) but remains explicitly runnable.
+`init` is a **system workflow** (`system: true`): internal plumbing for
+Smithers' durable processes, hidden from default listings (`workflow list`
+without `--system`, the interactive picker, MCP `list_workflows`, gateway
+`listWorkflows`) but explicitly runnable.
 
-The first-ever `bunx smithers-orchestrator init` bootstraps the pack imperatively: the workflow
-file is itself a pack file, so it cannot run before it exists. Every later
-non-interactive `bunx smithers-orchestrator init` runs this workflow through the engine instead,
-so a pack refresh is a durable, replayable run with each step recorded; if the
-workflow cannot load (stale pack, missing deps), the CLI falls back to the
-imperative scaffold.
+The first-ever `bunx smithers-orchestrator init` bootstraps the pack imperatively (itself a
+pack file, it can't run before existing). Every later
+non-interactive `bunx smithers-orchestrator init` instead runs through the engine, making each
+pack refresh a durable, replayable, step-recorded run; if it can't load (stale
+pack, missing deps), the CLI falls back to the imperative scaffold.
 
 ```bash
 bunx smithers-orchestrator workflow run init --input '{"force":false}'
@@ -23,18 +22,15 @@ bunx smithers-orchestrator workflow run init --input '{"force":false}'
 
 1. **install-pack**: deterministic (no agent), calls the CLI's
    `initWorkflowPack` to write missing pack files, skip existing ones, and
-   report files that drifted from the bundled templates (`changed`). Pass
-   `force: true` to overwrite non-preserved files.
-2. **refresh-skills**: refreshes the curated `smithers` skill for every
-   detected coding agent and removes retired installs. Disable with
-   `refreshSkills: false`.
-3. **output**: surfaces `{ written, skipped, changed, skills }` as the run
-   output.
+   flag files drifted from bundled templates (`changed`). Gated by `force`.
+2. **refresh-skills**: updates the curated `smithers` skill per detected
+   coding agent, removing retired installs; disable via `refreshSkills: false`.
+3. **output**: surfaces `{ written, skipped, changed, skills }`.
 
 ## Input
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `force` | boolean | `false` | Overwrite existing (non-preserved) pack files with the bundled templates. |
+| `force` | boolean | `false` | Overwrite existing (non-preserved) pack files with bundled templates. |
 | `refreshSkills` | boolean | `true` | Refresh the curated `smithers` skill for detected agents. |
 | `skipInstall` | boolean | `false` | Skip `bun install` inside `.smithers/` after scaffolding. |

@@ -16,12 +16,12 @@ import { Sources } from "smithers-orchestrator/ui";
 ```
 
 The trigger reads `Used N source` or `Used N sources`. The list starts closed
-and unmounts while closed. Sources are deliberately text-only, with no favicon
+and unmounts while closed. Sources are text-only by design: no favicon
 requests.
 
-Scheme-less URLs and `http`, `https`, and `mailto` links are allowed. Unsafe
-schemes render as plain text and never reach `onNavigate`. When `onNavigate`
-runs, it receives the sanitized URL after default navigation is prevented.
+Scheme-less, `http`, `https`, and `mailto` links are allowed; other schemes
+render as plain text and never reach `onNavigate`, which otherwise receives
+the sanitized URL after default navigation is prevented.
 
 ## Props
 

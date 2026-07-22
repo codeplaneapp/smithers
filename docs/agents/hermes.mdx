@@ -5,9 +5,9 @@ description: Run Smithers from Nous Research's Hermes agent. Register the MCP se
 
 [Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) is a
 self-improving, multi-channel agent with a terminal TUI, an OpenAI-compatible
-HTTP API, and **first-class MCP support in both directions**. Because Hermes is a
-native MCP client, the cleanest integration is to register Smithers as an MCP
-server. Hermes can then list, run, watch, and approve workflows as tools.
+HTTP API, and **first-class MCP support in both directions**. As a native MCP
+client, Hermes integrates cleanest by registering Smithers as an MCP server,
+then listing, running, watching, and approving workflows as tools.
 
 ## Register the MCP server
 
@@ -18,8 +18,8 @@ The fastest path is `mcp add`, which writes its server straight into Hermes's
 bunx smithers-orchestrator mcp add --agent hermes
 ```
 
-To do it by hand, Hermes reads MCP servers from `~/.hermes/config.yaml` under
-`mcp_servers`. Add Smithers as a stdio server:
+By hand: Hermes reads MCP servers from `~/.hermes/config.yaml` under
+`mcp_servers`; add Smithers as a stdio server:
 
 ```yaml
 mcp_servers:
@@ -41,21 +41,21 @@ reference: [MCP Server](/integrations/mcp-server).
 ## Optional generated skill files
 
 Hermes supports the `SKILL.md` (agentskills.io) format. `skills add` syncs the
-generated Smithers CLI skill set into `~/.agents/skills/`, which Hermes can be
-pointed at if you want command-level skill context:
+generated Smithers CLI skill set into `~/.agents/skills/`; point Hermes there
+for command-level skill context:
 
 ```bash
 bunx smithers-orchestrator skills add
 ```
 
-Because Hermes is a native MCP client, the MCP server above is the primary
-integration; generated skill files are a complement, not a requirement.
+The MCP server above remains the primary integration; generated skill files
+are optional here.
 
 ## Standing instructions
 
 Hermes resolves an instruction file by priority (`.hermes.md`, then `AGENTS.md`,
-then `CLAUDE.md`), and the first match wins. Add an orchestration section to whichever the
-repo already uses:
+then `CLAUDE.md`); first match wins. Add an orchestration section to whichever
+the repo uses:
 
 ```md
 ## Orchestration

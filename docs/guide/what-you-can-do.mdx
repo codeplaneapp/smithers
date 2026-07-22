@@ -4,26 +4,18 @@ icon: "list-check"
 description: "Say the outcome you want. Your agent picks a proven Smithers workflow and runs it for you."
 ---
 
-Say the outcome you want. Your agent picks a proven recipe and runs it.
-
-You don't write workflows or run the CLI by hand. You talk to your coding agent,
-and it uses `create-workflow` to author the durable recipe you need or copies a
-matching pattern from `examples/init-pack/`, then drives it through to a
-validated result. The rows below describe those copyable patterns; they are not
-installed by `init`.
-
-This page is the catalog. Each row is an outcome you want, the exact words you say to your agent, and what Smithers does under the hood.
+You talk to your coding agent instead of writing workflows or running the CLI yourself. It uses `create-workflow` to author the durable recipe you need, or copies a matching pattern from `examples/init-pack/` (patterns `init` doesn't install), then drives it to a validated result. This page catalogs those patterns: each row pairs what you say with what Smithers runs.
 
 ## Build
 
-You know what you want shipped. These workflows turn a request into validated, reviewed code, enforcing a build-check-review loop instead of handing you a first draft.
+You know what you want shipped. These workflows enforce a build-check-review loop, turning requests into validated, reviewed code instead of first drafts.
 
 | You say | Smithers runs |
 | --- | --- |
-| "Add rate limiting to the API and don't stop until it builds, validates, and the review signs off." | [`implement`](/workflows/implement): implement, validate, review, loop on failures. |
-| "Replace the auth cookie format. Research the existing code first, make a plan, then implement it test-first." | [`research-plan-implement`](/workflows/research-plan-implement): research, plan, then the same validation loop. |
-| "Migrate the dashboard to the new gateway APIs. Show me the milestone plan before you start, then work through it." | [`mission`](/workflows/mission): milestone plan, your approval, then focused workers per milestone. |
-| "Take the tickets in my backlog and implement each one on its own branch, then merge the ones that pass." | [`kanban`](/workflows/kanban): one worktree branch per ticket, merge the ones that validate and pass review. |
+| "Add rate limiting to the API. Don't stop until it builds, validates, and passes review." | [`implement`](/workflows/implement): implement, validate, review, loop on failures. |
+| "Replace the auth cookie format: research the code, plan, then implement test-first." | [`research-plan-implement`](/workflows/research-plan-implement): research, plan, the same validation loop. |
+| "Migrate the dashboard to the new gateway APIs. Show me the milestone plan first, then work through it." | [`mission`](/workflows/mission): milestone plan, your approval, focused workers per milestone. |
+| "Take my backlog tickets: implement each on its own branch, merge the ones that pass." | [`kanban`](/workflows/kanban): one worktree branch per ticket, merge the ones that validate and pass review. |
 
 <Frame caption="implement runs a build → validate → review loop and feeds failures back in, so you get reviewed code instead of a first draft.">
   <img src="/images/workflow-ui/implement.png" alt="Smithers workflow UI showing the implement workflow with implementation, validation, and reviewer nodes wired into a loop" />
@@ -43,14 +35,14 @@ You know what you want shipped. These workflows turn a request into validated, r
 
 ## Plan
 
-Shape the work before any code is written. These produce plans, tickets, and sharper requirements. Nothing touches the repo.
+Shape the work before any code is written: plans, tickets, sharper requirements, no repo changes.
 
 | You say | Smithers runs |
 | --- | --- |
-| "Give me an ordered plan for adding account-level billing limits. Don't touch the code." | [`plan`](/workflows/plan): a structured, ordered implementation plan, no repo changes. |
-| "I want to build the billing admin section. Break that into separate implementable tickets with acceptance criteria." | [`tickets-create`](/workflows/tickets-create): decompose the request into tickets with titles, descriptions, and acceptance criteria. |
-| "I want to improve onboarding but I haven't thought it through. Interrogate me until the requirements are clear." | [`grill-me`](/workflows/grill-me): an interview loop that asks you questions until the request is clear enough to act on. |
-| "How should we add audit logs? Inspect the repo and gather context first." | [`research`](/workflows/research): a tool-capable agent inspects the code and external docs for prior art and file references. |
+| "Give me an ordered plan for account-level billing limits. Don't touch the code." | [`plan`](/workflows/plan): a structured, ordered implementation plan, no repo changes. |
+| "Break the billing admin section into tickets with acceptance criteria." | [`tickets-create`](/workflows/tickets-create): decompose the request into tickets with titles, descriptions, and acceptance criteria. |
+| "Improve onboarding, but I haven't thought it through: interrogate me until it's clear." | [`grill-me`](/workflows/grill-me): an interview loop that questions you until the request is clear. |
+| "How should we add audit logs? Inspect the repo and gather context first." | [`research`](/workflows/research): a tool-capable agent inspects code and external docs for prior art and file references. |
 
 <Frame caption="plan returns ordered steps without changing the repo, the input you feed into implement, mission, or tickets-create.">
   <img src="/images/workflow-ui/plan.png" alt="Smithers workflow UI showing a single plan task that emits an ordered step list" />
@@ -70,14 +62,14 @@ Shape the work before any code is written. These produce plans, tickets, and sha
 
 ## Quality
 
-Make existing work stronger: review it, fix bugs at the root, raise coverage, and audit the whole repo for gaps.
+Make existing work stronger: review it, fix bugs at the root, raise coverage, audit the whole repo for gaps.
 
 | You say | Smithers runs |
 | --- | --- |
-| "Review the changes I just made and tell me if they're production-ready, with specific issues." | [`review`](/workflows/review): configured reviewers return approval status and structured issues by severity. |
-| "Fix the intermittent gateway reconnect failure: reproduce it, fix it, and verify the fix." | [`debug`](/workflows/debug): reproduce, fix, then run the full validation loop. |
-| "Add regression coverage for webhook signature failures and make sure the tests actually pass." | [`improve-test-coverage`](/workflows/improve-test-coverage): find high-impact test gaps and validate the new tests. |
-| "Take an inventory of every feature in this repo, then audit each group for missing tests and error handling." | [`feature-enum`](/workflows/feature-enum) → [`audit`](/workflows/audit): build a code-backed feature map, then review each group in parallel for gaps. |
+| "Review my changes and tell me if they're production-ready, with specifics." | [`review`](/workflows/review): configured reviewers return approval status and structured issues by severity. |
+| "Fix the intermittent gateway reconnect failure: reproduce, fix, and verify it." | [`debug`](/workflows/debug): reproduce, fix, then run the full validation loop. |
+| "Add regression coverage for webhook signature failures; make sure the tests pass." | [`improve-test-coverage`](/workflows/improve-test-coverage): find high-impact test gaps and validate the new tests. |
+| "Inventory every feature in this repo, then audit each group for missing tests and error handling." | [`feature-enum`](/workflows/feature-enum) → [`audit`](/workflows/audit): build a code-backed feature map, then review each group in parallel for gaps. |
 
 <Frame caption="review returns approval status plus issues tagged by severity, so 'is this production-ready' gets a structured answer.">
   <img src="/images/workflow-ui/review.png" alt="Smithers workflow UI showing reviewer agents producing approval status and structured issues" />
@@ -101,13 +93,13 @@ Make existing work stronger: review it, fix bugs at the root, raise coverage, an
 
 ## Run while you're away
 
-Smithers runs are durable. They survive crashes, restarts, and flaky tools, and the runtime always knows what's done and what's next. So you can start something long-running, close the lid, and come back to progress.
+Smithers runs are durable: they survive crashes, restarts, and flaky tools, tracking what's done and what's next. Start something long-running, close the lid, come back to progress.
 
 **Keep going until you stop it.** Say:
 
-> "Keep working on reducing our flaky tests and don't stop until I tell you to."
+> "Keep working on reducing flaky tests. Don't stop until I tell you to."
 
-Your agent runs [`ralph`](/workflows/ralph), an unbounded loop that re-runs the smart agent on your prompt. When you've had enough progress, tell your agent to stop it and it runs `bunx smithers-orchestrator cancel RUN_ID`.
+Your agent runs [`ralph`](/workflows/ralph), an unbounded loop that re-runs the smart agent on your prompt. Say stop and it runs `bunx smithers-orchestrator cancel RUN_ID`.
 
 <Frame caption="ralph loops the same prompt indefinitely, so a long-grind task keeps making progress while you're away.">
   <img src="/images/workflow-ui/ralph.png" alt="Smithers workflow UI showing ralph running a single agent task in an unbounded loop" />
@@ -117,24 +109,23 @@ Your agent runs [`ralph`](/workflows/ralph), an unbounded loop that re-runs the 
 
 > "Every morning, scan the repo for stale TODOs and broken doc examples and open fixes."
 
-Your agent registers a cron schedule (`bunx smithers-orchestrator cron add`) that kicks off the workflow on its own. Ask what's scheduled and it runs `bunx smithers-orchestrator cron list`.
+Your agent registers a cron schedule (`bunx smithers-orchestrator cron add`) to run the workflow automatically. Ask what's scheduled with `bunx smithers-orchestrator cron list`.
 
 **Gate on your approval.** Say:
 
 > "Draft the release blog post, but don't publish until I approve it."
 
-The workflow durably suspends at an approval gate. Say "approve it," your agent runs `bunx smithers-orchestrator approve`, and the run resumes exactly where it left off. The work happens while you're away; the irreversible step waits for you. This is the same gate `mission` uses to hold its milestone plan until you sign off.
+The workflow durably suspends at an approval gate. Say "approve it" and your agent runs `bunx smithers-orchestrator approve`, resuming right where it left off: work happens while you're away, the irreversible step waits for you. `mission` uses the same gate for its milestone-plan sign-off.
 
 ## Make your own workflows discoverable
 
-Smithers treats having your agent author new workflows as a first-class path. Once you've built task-specific and project-specific workflows, say:
+Smithers treats agent-authored workflows as first-class. Once you've built task- and project-specific ones, say:
 
-> "Write skill docs for all the Smithers workflows in this repo so any agent can find and run them."
+> "Write skill docs for every Smithers workflow in this repo so any agent can find and run them."
 
 Your agent can copy the archived [`workflow-skill`](/workflows/workflow-skill)
-example, or ask `create-workflow` for the same behavior. It reads local workflow
-metadata and source, then writes concise agent-facing skill docs under
-`.smithers/skills/`.
+example, or ask `create-workflow`: it reads local workflow metadata and
+source, then writes concise agent-facing skill docs under `.smithers/skills/`.
 
 <Frame caption="workflow-skill turns your local workflows into agent-facing skill docs, so the next agent on the repo can drive them by name without reading the source.">
   <img src="/images/workflow-ui/workflow-skill.png" alt="Smithers workflow UI showing workflow-skill reading local workflows and emitting skill documentation" />
@@ -144,7 +135,7 @@ metadata and source, then writes concise agent-facing skill docs under
 
 <CardGroup cols={3}>
   <Card title="Talk to your agent" icon="comments" href="/guide/talk-to-your-agent">
-    **How-to:** phrase the outcomes above so your agent picks the right workflow.
+    **How-to:** phrase the outcomes above so your agent picks the right one.
   </Card>
   <Card title="Watch and steer" icon="eye" href="/guide/watch-and-steer">
     **How-to:** see a run live, approve gates, and redirect work in flight.

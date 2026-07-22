@@ -5,15 +5,15 @@ description: Run a Smithers <Sandbox> child workflow on AWS Fargate or CodeBuild
 
 # AWS Sandbox Provider
 
-`@smithers-orchestrator/aws` is a first-class Smithers `SandboxProvider` that
-runs a `<Sandbox>` child workflow's request on AWS. It has two modes: Fargate
-(ECS `RunTask`, the default) and CodeBuild. AWS gives the orchestrator no shared
-filesystem with the remote task, so the request/result bundle is transported
-through an S3 bucket you already own. The shared provider-kit owns the
-request/result protocol, egress, secret scrubbing, and cleanup; this package
-supplies the S3 transport plus the ECS/CodeBuild runners.
+`@smithers-orchestrator/aws` is a Smithers `SandboxProvider` that runs a
+`<Sandbox>` child workflow's request on AWS: Fargate (ECS `RunTask`, the
+default) or CodeBuild. AWS shares no filesystem with the orchestrator, so the
+request/result bundle transports through an S3 bucket. The shared
+provider-kit handles the request/result protocol, egress, secret scrubbing,
+and cleanup; this package adds the S3 transport plus the ECS/CodeBuild
+runners.
 
-The provider id is `aws-sandbox` (exported as `AWS_SANDBOX_PROVIDER_ID`).
+Provider id: `aws-sandbox` (exported as `AWS_SANDBOX_PROVIDER_ID`).
 
 ```ts
 import {
@@ -25,30 +25,31 @@ import {
 
 ## Credentials
 
-Authentication uses the standard AWS SDK v3 credential chain: env vars, shared
-config, SSO, or an instance/task role. No explicit credentials are passed to the
-factory and none are ever forwarded into the remote task env. The remote task
-authenticates with its own task or build IAM role.
+Authentication uses the standard AWS SDK v3 credential chain (env vars, shared
+config, SSO, or an instance/task role). The factory takes no explicit
+credentials and forwards none into the remote task env; the task or build
+authenticates with its own IAM role.
 
-The `@aws-sdk/*` clients are optional dependencies, imported lazily. Install the
-ones your mode needs:
+The `@aws-sdk/*` clients are optional, lazily-imported dependencies. Install
+what your mode needs:
 
 - `@aws-sdk/client-s3` (always).
 - `@aws-sdk/client-ecs` (Fargate).
 - `@aws-sdk/client-codebuild` (CodeBuild).
-- `@aws-sdk/client-cloudwatch-logs` (only with `captureLogs`).
+- `@aws-sdk/client-cloudwatch-logs` (with `captureLogs`).
 
 ## Prerequisites
 
-The provider does not provision infrastructure. Set these up first:
+The provider provisions nothing; set these up first:
 
 - An S3 `bucket` that already exists. The provider only manages the key prefix
   `smithers/sandbox/<runId>/<sandboxId>/` under it.
-- For Fargate: an ECS `cluster`, a registered `taskDefinition`, at least one VPC
+- Fargate: an ECS `cluster`, a registered `taskDefinition`, at least one VPC
   `subnet`, optional `securityGroups`, and the `containerName` inside the task
-  definition. The task role needs S3 read/write on the prefix.
-- For CodeBuild: a CodeBuild `projectName`. The build role needs S3 read/write
-  on the prefix.
+  definition.
+- CodeBuild: a CodeBuild `projectName`.
+
+The task or build role needs S3 read/write on the prefix.
 
 ## Usage
 
@@ -86,20 +87,20 @@ Or register either provider once and reference it by id with
 ## Request/result contract
 
 The kit hands the entry command `SMITHERS_SANDBOX_REQUEST_PATH` and
-`SMITHERS_SANDBOX_RESULT_PATH`. Because there is no shared filesystem, the
-container round-trips those files through S3. The provider injects four more
-vars so the entry can find them:
+`SMITHERS_SANDBOX_RESULT_PATH`. The container round-trips those files through
+S3; the provider injects four more vars so the entry can find them:
 
 - `SMITHERS_SANDBOX_S3_BUCKET`: the transport bucket.
 - `SMITHERS_SANDBOX_S3_PREFIX`: `smithers/sandbox/<runId>/<sandboxId>`.
 - `SMITHERS_SANDBOX_REQUEST_S3_KEY`: S3 key of the request JSON.
 - `SMITHERS_SANDBOX_RESULT_S3_KEY`: S3 key the entry must write the result to.
 
-Every workdir path maps to `s3://<bucket>/<prefix>/<runId>/<sandboxId>/<encodeURIComponent(workdir-relative path)>` so two files that share a basename never collide. The entry
-either prints the result JSON to stdout or writes it to the result key. An infra
-failure (task or build fails with no result written) throws. A result file with
-`status: "failed"` is a normal failed bundle. Fargate reports a real numeric
-container exit code; CodeBuild reports a status (`SUCCEEDED` maps to 0, else 1).
+Every workdir path maps to `s3://<bucket>/<prefix>/<runId>/<sandboxId>/<encodeURIComponent(workdir-relative path)>`, so files sharing a basename never
+collide. The entry prints the result JSON to stdout or writes it to the result
+key. An infra failure (task or build fails with no result written) throws,
+while a result file with `status: "failed"` is a normal failed bundle. Fargate
+reports a real numeric exit code; CodeBuild reports a status (`SUCCEEDED`
+maps to 0, else 1).
 
 ## Factory options
 
@@ -115,13 +116,12 @@ container exit code; CodeBuild reports a status (`SUCCEEDED` maps to 0, else 1).
 
 ## Cleanup and cost
 
-`cleanup: "destroy"` (default) stops the task or build if it is still running
-and deletes the transient S3 objects. `cleanup: "keep"` leaves them. You pay for
-Fargate task time or CodeBuild build minutes, plus S3 storage of the small
-transient bundle objects. Set a short lifecycle TTL on the `smithers/sandbox/`
-prefix to reap anything a crash leaves behind. EC2 mode is documented future
-work.
+`cleanup: "destroy"` (default) stops the task or build if still running and
+deletes the transient S3 objects; `cleanup: "keep"` leaves them. You pay for
+Fargate task time or CodeBuild build minutes, plus S3 storage of those small
+objects. Set a short lifecycle TTL on the `smithers/sandbox/` prefix to reap
+crash leftovers. EC2 mode is future work.
 
 `createMockAwsSandboxEnvironment(handler, mockOptions?)` provides in-memory S3,
-ECS, CodeBuild, and CloudWatch Logs doubles for tests. It needs zero AWS
+ECS, CodeBuild, and CloudWatch Logs doubles for tests, needing zero AWS
 credentials, so unit tests run in CI without touching AWS.

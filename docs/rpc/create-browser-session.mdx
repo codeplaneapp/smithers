@@ -12,6 +12,6 @@ apiVersion: v1
 - Transports: HTTP RPC, WebSocket RPC
 
 Request: `{ source: { kind: "url", url } | { kind: "dev-server", port, path? }, viewport? }`.
-Response: a `BrowserSnapshot` containing the opaque `sessionId`, status, revision, page summary, viewport, and control owner.
+Response: a `BrowserSnapshot`: opaque `sessionId`, status, revision, page summary, viewport, control owner.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `REVISION_CONFLICT`, `SSRF_BLOCKED`, `QUOTA_EXCEEDED`, and `Internal`.

@@ -82,14 +82,14 @@ export default smithers(
 );
 ```
 
-The merged policy is stored on `workflow.opts.alertPolicy`. Rule names are policy keys for your integration; the core engine does not attach built-in behavior to those names in this release.
+The merged policy is stored on `workflow.opts.alertPolicy`. Rule names are policy keys for your integration: the core engine doesn't attach built-in behavior to them in this release.
 
 ## Merge Semantics
 
 - `defaults` merge shallowly.
 - `defaults.labels` merge by key.
-- `rules` merge by rule name, and workflow-level fields win when the same rule appears in both places.
-- `reactions` merge by reaction name, and workflow-level definitions replace module-level definitions with the same name.
+- `rules` merge by rule name; workflow-level fields win when a rule appears in both places.
+- `reactions` merge by reaction name; workflow-level definitions replace module-level ones with the same name.
 
 ## Reaction Kinds
 
@@ -101,7 +101,7 @@ The merged policy is stored on `workflow.opts.alertPolicy`. Rule names are polic
 | `open-approval` | Escalate into a human approval step. |
 | `deliver` | Send the alert to a logical destination handled by your runtime integration. |
 
-You can reference a named reaction from `rules` or inline a reaction object directly.
+Reference a named reaction from `rules`, or inline a reaction object directly.
 
 ## Runtime Surface
 
@@ -144,15 +144,7 @@ bunx smithers-orchestrator alerts silence <alert-id>
 
 ## Reactions and Delivery
 
-Reaction objects are stored as data:
-
-- `emit-only`
-- `pause`
-- `cancel`
-- `open-approval`
-- `deliver`
-
-Your runtime boundary decides how to interpret those reactions. For example, `deliver` can route to Slack, PagerDuty, email, or an internal incident feed, but Smithers does not bundle those transports.
+Reaction objects (the five kinds above) are stored as data: your runtime boundary decides how to interpret them. `deliver`, for example, can route to Slack, PagerDuty, email, or an internal incident feed, but Smithers doesn't bundle those transports.
 
 ## Recommended Usage
 

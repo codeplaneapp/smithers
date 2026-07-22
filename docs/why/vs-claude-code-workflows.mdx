@@ -3,13 +3,11 @@ title: "Smithers vs. Claude Code Workflows"
 description: "Claude Code's Dynamic Workflows are excellent for one sitting. Smithers is the open, durable version: any model, any harness, survives a crash, and waits overnight for a human."
 ---
 
-Claude Code ships [Dynamic Workflows](https://code.claude.com/docs/en/workflows): describe a task, Claude writes a JavaScript orchestration script, and a runtime fans it out across parallel subagents that attack the problem from independent angles and converge on an answer. If you have a Max or Team plan, you already have it, and for work that fits in one sitting it is genuinely good.
-
-So when do you want Smithers instead? When the work has to outlive the sitting.
+Claude Code ships [Dynamic Workflows](https://code.claude.com/docs/en/workflows): describe a task, Claude writes a JavaScript orchestration script, and a runtime fans it across parallel subagents attacking the problem from independent angles, converging on an answer. Max and Team plans already have it, genuinely good for work that fits in one sitting; you want Smithers when the work has to outlive it.
 
 ## The short version
 
-Dynamic Workflows is a feature of one vendor's coding agent. Smithers is an MIT-licensed runtime that treats coding agents, humans, and plain code as steps in one durable workflow. The two overlap on "run many agents against a problem" and differ on everything around it.
+Dynamic Workflows is a feature of one vendor's coding agent; Smithers is an MIT-licensed runtime treating coding agents, humans, and plain code as steps in one durable workflow. They overlap on "run many agents against a problem," differing on everything else.
 
 | | Claude Code Workflows | Smithers |
 | --- | --- | --- |
@@ -24,17 +22,17 @@ Dynamic Workflows is a feature of one vendor's coding agent. Smithers is an MIT-
 
 ## What that means in practice
 
-**Durability is the line.** A Dynamic Workflow orchestrates subagents and returns an answer; the value lives in that session. A Smithers run persists every completed step the moment it finishes, so killing the process, closing the laptop, or deploying over it costs you nothing. Resume picks up at the right step, and `supervise` does it automatically when a heartbeat goes stale.
+**Durability is the line.** A Dynamic Workflow's value lives only in that session; Smithers persists each completed step immediately, so killing the process, closing the laptop, or deploying over it costs nothing. Resume picks up at the right step; `supervise` revives stale runs automatically when a heartbeat goes stale.
 
-**Vendor scope is the other line.** An orchestration layer earns its keep by outliving the model choice. In Smithers a frontier model plans, a cheaper model fans out, and a different lab's model reviews, in one workflow, with fallback arrays (`agent={[claude, codex]}`) when a provider has a bad day or you hit a rate limit. Dynamic Workflows orchestrates Claude.
+**Vendor scope is the other line.** Smithers outlives the model choice: a frontier model plans, a cheaper model fans out, and a different lab's model reviews, all in one workflow, with fallback arrays (`agent={[claude, codex]}`) for a bad provider day or a rate limit. Dynamic Workflows orchestrates Claude only.
 
-**Approvals change what you can automate.** A run that cannot stop and wait for a human is a run you have to babysit. `<Approval>` suspends a Smithers run as a database row that costs nothing while it waits, then resumes at the right step when someone answers. That is the difference between "agents I watch" and "agents I check on in the morning."
+**Approvals change what you can automate.** `<Approval>` suspends a Smithers run as a free database row and resumes when someone answers: the difference between agents you watch and agents you check on in the morning.
 
 ## They compose
 
-This is not either/or. Smithers drives Claude Code as a first-class agent, on your existing subscription, and the [Claude Code plugin](/integrations/claude-code-plugin) mirrors Smithers runs into the session so your agent can watch and steer them. A sensible split: quick fan-outs in the session, anything long-running, approval-gated, or worth rerunning goes to Smithers.
+Smithers drives Claude Code as a first-class agent on your existing subscription; the [Claude Code plugin](/integrations/claude-code-plugin) mirrors its runs back into the session so your agent can watch and steer them. Split the work: quick fan-outs stay in the session, anything long-running, approval-gated, or worth rerunning goes to Smithers.
 
-The longer argument, with the crash-resume demo, is in [the open, durable version of agent workflows](/why/durable-open-orchestration).
+More, with the crash-resume demo: [the open, durable version of agent workflows](/why/durable-open-orchestration).
 
 ## See also
 

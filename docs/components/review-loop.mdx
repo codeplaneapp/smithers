@@ -39,7 +39,7 @@ export default smithers(() => (
 ## Notes
 
 - The runtime reads `approved` each frame to decide whether to loop.
-- On subsequent iterations the producer is re-run, but the loop does not wire reviewer output into the producer via a `needs` dependency. Any feedback the producer sees comes from the runtime/agent conversation history carrying prior outputs, not from the component's declared data flow.
+- On later iterations the producer reruns without a `needs` dependency wiring reviewer output back to it; feedback reaches it only through runtime/agent conversation history, which carries prior outputs forward.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
 ## Source

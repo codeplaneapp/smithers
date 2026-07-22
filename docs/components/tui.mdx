@@ -3,10 +3,10 @@ title: <TUI>
 description: Declare a workflow-owned React terminal UI for OpenTUI-capable clients.
 ---
 
-`<TUI>` is the terminal counterpart to [`<UI>`](/components/ui). It declares the
-React entry a workflow wants an OpenTUI-capable client to render for terminal
-monitoring. The component renders nothing in the workflow graph; clients read
-the declaration from workflow metadata and choose the appropriate terminal host.
+`<TUI>` is the terminal counterpart to [`<UI>`](/components/ui): it declares
+the React entry an OpenTUI-capable client should render for terminal
+monitoring. It renders nothing in the workflow graph; clients read the
+declaration from workflow metadata and pick the terminal host.
 
 ```tsx
 import { TUI, Workflow } from "smithers-orchestrator";
@@ -21,6 +21,6 @@ export default smithers(() => (
 
 ## Props
 
-`<TUI>` accepts the same view declaration fields as `<UI>`: `entry`, `source`,
+`<TUI>` accepts the same view fields as `<UI>`: `entry`, `source`,
 `exportName`, `title`, `props`, and literal `children`. Prefer `entry` for a
-real terminal app so the OpenTUI host can load the full React component tree.
+real terminal app, so the OpenTUI host loads the full React component tree.

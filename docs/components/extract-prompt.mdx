@@ -5,9 +5,9 @@ description: Resolve a workflow's prompt from a provided string, a cached entry,
 
 <Note>
   `<ExtractPrompt>` is **not** an importable runtime export of `smithers-orchestrator`.
-  It ships as an example/pack composition pattern, a component you scaffold into your own
-  `.smithers/components/extract-prompt/` (via `init`) and import relative to your workflow,
-  as shown below. Copy and adapt it; it is not available from the published package.
+  It ships as an example/pack composition pattern: scaffold it into your own
+  `.smithers/components/extract-prompt/` (via `init`), import it relative to your
+  workflow as shown below, and adapt it.
 </Note>
 
 ```ts
@@ -76,20 +76,18 @@ export default smithers((ctx) => {
 
 ## Three modes
 
-1. **Passthrough**: `prompt` is provided and ≥ 32 chars. Emits a static-output
-   task with `score: 1.0` and `resolved: true`. No agent invoked.
-2. **Cache hit**: caller resolved a `cached` entry by key. Same passthrough behavior:
-   emits `resolved: true`, carries over the cached `score`, and prefixes `scoreReason`
-   with `cached: `.
-3. **Extraction**: wraps `<LoopUntilScored>` around the drafter task. The drafter
-   uses the R-C-T-F backbone, picks one Socratic principle per turn, asks the user
-   via `bun .smithers/scripts/ask-user.ts`, self-scores, and sets `resolved: true`
-   when ready.
+1. **Passthrough**: `prompt` ≥ 32 chars emits a static-output task (`score: 1.0`,
+   `resolved: true`); no agent invoked.
+2. **Cache hit**: caller resolved a `cached` entry by key, same as passthrough but
+   carrying over the cached `score` and prefixing `scoreReason` with `cached: `.
+3. **Extraction**: wraps `<LoopUntilScored>` around the drafter task, which uses the
+   R-C-T-F backbone, picks one Socratic principle per turn, asks the user via
+   `bun .smithers/scripts/ask-user.ts`, self-scores, and sets `resolved: true` when ready.
 
 ## Cache I/O is the caller's responsibility
 
-The component is pure, with no side effects in JSX. Caller does cache `getSync` /
-`setSync` from inside the smithers `(ctx) =>` function. See the example above.
+The component is pure (no side effects in JSX); the caller runs cache `getSync`/`setSync`
+inside the smithers `(ctx) =>` function (see example above).
 
 Drivers shipped:
 - `MarkdownPromptCache` (default): `.smithers/cache/prompts/{slug}.md` with YAML frontmatter
@@ -101,13 +99,12 @@ Drivers shipped:
 - `high` → threshold 1.0 (every R-C-T-F slot must be strongly filled)
 - `low`  → threshold 0.7
 
-Override via the `threshold` prop. Stakes is for callers who don't want to
-remember exact numbers.
+Override via `threshold`; `stakes` just saves callers from remembering exact numbers.
 
 ## Override semantics
 
-The human always has the final word. If the agent's score is below threshold
-and the human types "ship it" via the ask-user CLI, the agent sets:
+The human can override: if the score is below threshold and they type "ship it"
+via the ask-user CLI, the agent sets:
 
 - `resolved: true`
 - `overridden: true`

@@ -6,12 +6,10 @@ icon: "database"
 
 Every Smithers run persists to a relational store: runs, nodes, attempts, output
 rows, render frames, and internal message history. The factory
-([`createSmithers` and friends](/reference/authoring)) owns that store for you and
-hands back a typed `db` handle, so you almost never touch this layer directly.
-
-This page is the escape hatch. Reach for it when you build a custom backend,
-inspect a store outside a running workflow, or generate tables from Zod schemas
-yourself.
+([`createSmithers` and friends](/reference/authoring)) owns that store and hands
+back a typed `db` handle, so you rarely touch this layer directly except to
+build a custom backend, inspect a store outside a running workflow, or generate
+tables from Zod schemas yourself.
 
 ```ts
 import {
@@ -31,15 +29,14 @@ import {
 
 <Note>
 `SmithersDb` is also re-exported from `@smithers-orchestrator/db/adapter` for
-callers that pin the subpath; the facade export above is the supported one.
+callers pinning the subpath; the facade export above is supported.
 </Note>
 
 ## SmithersDb
 
-The adapter. It wraps a Drizzle database handle (a `bun:sqlite` database, or a
-Postgres/PGlite connection descriptor) and exposes every persistence operation
-the engine needs. The factory constructs one and the scheduler drives it; you
-construct one yourself only for a custom control plane.
+The adapter: wraps a Drizzle database handle and exposes every persistence
+operation the engine needs. The factory constructs one and the scheduler
+drives it; only build your own for a custom control plane.
 
 ```ts
 const adapter = new SmithersDb(db);
@@ -50,24 +47,22 @@ const adapter = new SmithersDb(db);
   Postgres/PGlite descriptor routes through the internal SQL message storage.
 </ParamField>
 
-Key responsibilities:
-
 <ResponseField name="run lifecycle" type="methods">
   `insertRun`, `updateRun`, `getRun`, `listRuns`, `heartbeatRun`,
   `requestRunCancel`, `requestRunHijack`, `claimRunForResume`,
-  `listStaleRunningRuns`, and the ancestry helpers track a run from start to
-  terminal state and support crash recovery.
+  `listStaleRunningRuns`, plus ancestry helpers: track a run start-to-terminal
+  and support crash recovery.
 </ResponseField>
 
 <ResponseField name="nodes & attempts" type="methods">
   `insertNode` / `getNode` / `listNodes` and `insertAttempt` / `updateAttempt` /
-  `heartbeatAttempt` record per-node execution and each retry attempt.
+  `heartbeatAttempt` record per-node execution and retries.
 </ResponseField>
 
 <ResponseField name="output rows" type="methods">
   `upsertOutputRow`, `deleteOutputRow`, `getRawNodeOutput`, and `hasPhysicalTable`
-  read and write the typed output tables a workflow's schemas produce. Keyed by
-  `runId` / `nodeId` / `iteration`.
+  read and write a workflow's typed output tables, keyed by `runId` / `nodeId` /
+  `iteration`.
 </ResponseField>
 
 <ResponseField name="render frames" type="methods">
@@ -76,20 +71,20 @@ Key responsibilities:
 </ResponseField>
 
 <ResponseField name="transactions" type="(writeGroup, operation) => RunnableEffect">
-  `withTransaction` / `withTransactionEffect` run a write group atomically.
-  `read(label, op)` and `write(label, op)` wrap a single operation as a runnable
+  `withTransaction` / `withTransactionEffect` run a write group atomically;
+  `read(label, op)` / `write(label, op)` wrap a single operation as a runnable
   Effect with metrics and SQLite write-retry. SQLite serializes writes per
-  client; Postgres uses real transactions.
+  client, Postgres uses real transactions.
 </ResponseField>
 
 <ResponseField name="rawQuery" type="(sql, params?) => RunnableEffect<unknown[]>">
-  Read-only escape hatch. Accepts only `SELECT` / `WITH` / `EXPLAIN` / `VALUES`;
-  any DDL or mutation keyword is rejected before execution. Use it for
-  introspection, never for writes.
+  Read-only escape hatch: accepts only `SELECT` / `WITH` / `EXPLAIN` / `VALUES`;
+  any DDL or mutation keyword is rejected before execution. For introspection,
+  never writes.
 </ResponseField>
 
 <ResponseField name="internalStorage" type="SqlMessageStorage">
-  The agent-message and event-history store behind the adapter, created from the
+  Agent-message and event-history store behind the adapter, created from the
   same handle. See [`ensureSmithersTables`](#ensuresmitherstables).
 </ResponseField>
 
@@ -100,11 +95,10 @@ Effect program, or `await` directly as a promise.
 
 ## loadOutputs / loadOutputsEffect
 
-Read every persisted output row for a run, across all of a workflow's output
-tables, in one call. Given the `tables` map the factory returns and a `RUN_ID`,
-it returns a snapshot keyed by both the schema name and the physical table name.
-Boolean columns are coerced back to JS booleans; the reserved `input` table is
-skipped.
+Reads every persisted output row for a run, across all of a workflow's output
+tables, in one call. Given the factory's `tables` map and a `RUN_ID`, returns a
+snapshot keyed by both schema name and physical table name; boolean columns are
+coerced back to JS booleans, and the reserved `input` table is skipped.
 
 ```ts
 function loadOutputs(
@@ -115,8 +109,8 @@ function loadOutputs(
 ```
 
 <ParamField path="db" type="BunSQLiteDatabase | PostgresDescriptor" required>
-  The same handle the adapter wraps. Dialect-aware: Drizzle for SQLite, a
-  parameterized `$1` query for the Postgres descriptor.
+  The same handle the adapter wraps: Drizzle for SQLite, a parameterized `$1`
+  query for Postgres.
 </ParamField>
 
 <ParamField path="schema" type="Record<string, Table>" required>
@@ -147,8 +141,8 @@ const rows = snapshot.research; // rows from the "research" output table
 
 ## ensureSmithersTables
 
-Create the core Smithers tables (the internal message and event-history storage
-the adapter depends on) on a fresh handle, if they do not already exist. Safe to
+Creates the core Smithers tables (internal message and event-history storage
+the adapter depends on) on a fresh handle if they don't already exist. Safe to
 call on every boot.
 
 ```ts
@@ -160,46 +154,46 @@ function ensureSmithersTables(db: BunSQLiteDatabase): void;
 </ParamField>
 
 <Note>
-For a Postgres connection descriptor this synchronous helper is a no-op:
-Postgres schema setup is asynchronous and the Postgres/PGlite entry points
-ensure the schema (awaited) before the engine starts. Output tables are created
-separately by [`syncZodTableSchema`](#zod-table-helpers).
+For a Postgres descriptor this synchronous helper is a no-op: Postgres schema
+setup is async, so the Postgres/PGlite entry points await it before the engine
+starts. Output tables are created separately by
+[`syncZodTableSchema`](#zod-table-helpers).
 </Note>
 
 **Source** [`ensure.js`](https://github.com/smithersai/smithers/blob/main/packages/db/src/ensure.js) · **Tests** [`db-ensure.test.js`](https://github.com/smithersai/smithers/blob/main/packages/db/tests/db-ensure.test.js)
 
 ## Zod -> table helpers
 
-Turn a Zod object schema into a SQLite output table. Each table gets the fixed
+Turns a Zod object schema into a SQLite output table. Each table gets the fixed
 `run_id` / `node_id` / `iteration` prefix and a composite primary key; field keys
 are snake-cased and mapped to columns by Zod type (string/enum/literal -> `TEXT`,
-`z.number()` / float -> `REAL` (fractions are preserved), `z.int()` -> `INTEGER`,
-boolean -> `INTEGER` boolean mode, and arrays/objects/unions -> JSON `TEXT`). Pass
-`opts.isInput` for the single-PK input-table shape. Output field names may not
+`z.number()` / float -> `REAL` (fractions preserved), `z.int()` -> `INTEGER`,
+boolean -> `INTEGER` boolean mode, arrays/objects/unions -> JSON `TEXT`). Pass
+`opts.isInput` for the single-PK input-table shape. Output field names can't
 reuse the reserved key columns `runId`/`nodeId`/`iteration` (input reserves only
 `runId`); a collision throws `INVALID_INPUT` at construction.
 
 <ResponseField name="zodToTable(name, schema, opts?)" type="Table">
-  Build a Drizzle `sqliteTable` from the schema. This is what the factory calls
-  to materialize `tables`.
+  Builds a Drizzle `sqliteTable` from the schema; what the factory calls to
+  materialize `tables`.
 </ResponseField>
 
 <ResponseField name="zodToCreateTableSQL(name, schema, opts?)" type="string">
-  Emit `CREATE TABLE IF NOT EXISTS ...`. Pass `opts.dialect` (default `"sqlite"`)
-  to emit Postgres-compatible column types instead.
+  Emits `CREATE TABLE IF NOT EXISTS ...`; pass `opts.dialect` (default
+  `"sqlite"`) for Postgres-compatible column types instead.
 </ResponseField>
 
 <ResponseField name="syncZodTableSchema(sqlite, name, schema, opts?)" type="void">
-  Create the table and reconcile a drifted one: it runs the `CREATE TABLE`, then
-  `ALTER TABLE ADD COLUMN` for any field missing from an older table, and records
+  Creates the table and reconciles a drifted one: runs `CREATE TABLE`, then
+  `ALTER TABLE ADD COLUMN` for fields missing from an older table, and records
   column kinds in `_smithers_output_schema_columns`. Idempotent. `sqlite` must be
   a `bun:sqlite` database (or compatible `.run` / `.query` handle).
 </ResponseField>
 
 <ResponseField name="zodSchemaColumns(schema)" type="Array<{ name, sqliteType, kind }>">
-  The user-defined columns derived from the schema, excluding the fixed prefix.
-  Each entry carries the snake_case `name`, the SQLite type, and the logical
-  `kind` (`string` / `number` / `boolean` / `json`).
+  User-defined columns from the schema, excluding the fixed prefix. Each entry
+  carries the snake_case `name`, the SQLite type, and the logical `kind`
+  (`string` / `number` / `boolean` / `json`).
 </ResponseField>
 
 ```ts
@@ -229,12 +223,12 @@ zodToCreateTableSQL("research", Research);
 
 ## Utilities
 
-Small building blocks the helpers above are made of, exported for the same
+Small building blocks behind the helpers above, exported for the same
 custom-backend cases.
 
 <ResponseField name="camelToSnake(str)" type="string">
-  Convert a `camelCase` field name to `snake_case` (the column-naming rule used
-  throughout). `"createdAtMs"` -> `"created_at_ms"`.
+  Convert a `camelCase` field name to `snake_case`, the column-naming rule used
+  throughout. `"createdAtMs"` -> `"created_at_ms"`.
 </ResponseField>
 
 <ResponseField name="unwrapZodType(t)" type="ZodType">
@@ -243,9 +237,9 @@ custom-backend cases.
 </ResponseField>
 
 <ResponseField name="zodSchemaToJsonExample(schema)" type="string">
-  Render a Zod object schema as a pretty-printed JSON example string: field
+  Renders a Zod object schema as a pretty-printed JSON example string: field
   descriptions become string placeholders, numbers `0`, booleans `false`, arrays
-  a one-element sample, and the first enum value is used. Handy for prompting an
+  a one-element sample, and enums use their first value. Handy for prompting an
   agent with the exact output shape it must return.
 </ResponseField>
 

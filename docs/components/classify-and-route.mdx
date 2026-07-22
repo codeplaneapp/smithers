@@ -46,8 +46,8 @@ const classification = ctx.outputMaybe(outputs.classification, {
 
 ## Notes
 
-- Two-phase: first render classifies; pass the result back via `classificationResult` to mount route handlers.
-- Each entry's `category` must match a key in `categories`; unknown categories are silently skipped.
+- Two-phase: the first render classifies; the next uses `classificationResult` to mount route handlers.
+- Each entry's `category` must match a `categories` key; unmatched entries are skipped silently.
 - Route tasks default to `continueOnFail`.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}

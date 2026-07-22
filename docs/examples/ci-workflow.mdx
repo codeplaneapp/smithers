@@ -6,7 +6,7 @@ description: "Example from .github/workflows/ci.yml: GitHub Actions CI workflow 
 # .github/workflows/ci.yml
 
 <Note>
-**Ghost doc** -- an abridged, illustrative excerpt of [`.github/workflows/ci.yml`](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci.yml). The live file is the source of truth; it runs an ubuntu + windows matrix with more typecheck and test steps than shown here.
+**Ghost doc**: an abridged excerpt of [`.github/workflows/ci.yml`](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci.yml). The live file is the source of truth and runs an ubuntu + windows matrix with more typecheck and test steps than shown here.
 </Note>
 
 ## Source
@@ -61,7 +61,7 @@ jobs:
 
 ## Notes
 
-- Uses pnpm/Node as the primary toolchain; `oven-sh/setup-bun` is installed only in the test job to provide the bun runtime for `pnpm test`.
+- pnpm/Node is the primary toolchain; `oven-sh/setup-bun` installs only in the test job, to give `pnpm test` a bun runtime.
 - `--frozen-lockfile` pins exact dependency versions.
-- Typecheck and tests run as separate jobs on independent runners -- type errors surface even if tests pass.
+- Typecheck and tests run as separate jobs on independent runners: type errors surface even if tests pass.
 - Push triggers are filtered to the main branch; pull requests trigger on any branch.

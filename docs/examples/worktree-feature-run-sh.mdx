@@ -6,7 +6,7 @@ description: "Example from scripts/worktree-feature/run.sh: shell script launche
 # scripts/worktree-feature/run.sh
 
 <Note>
-**Example:** aspirational launcher script for a `scripts/worktree-feature/run.sh` workflow directory. The `scripts/worktree-feature/` directory does not exist on `main`; this doc shows the intended structure for a worktree-feature workflow.
+**Example:** aspirational launcher script for a `scripts/worktree-feature/run.sh` workflow directory that does not exist on `main`; this doc shows the intended structure.
 </Note>
 
 ## Source
@@ -82,7 +82,7 @@ mdxPlugin();
 
 ## Key Details
 
-- `USE_CLI_AGENTS=1` selects CLI agents (Claude Code / Codex CLI) over API agents. `SMITHERS_UNSAFE=1` enables `dangerouslySkipPermissions` for unattended execution. This bypasses Claude Code's permission prompts so the workflow can run headlessly. Only use it in a sandboxed environment; the agent will have unrestricted filesystem and shell access.
+- `USE_CLI_AGENTS=1` selects CLI agents (Claude Code / Codex CLI) over API agents. `SMITHERS_UNSAFE=1` enables `dangerouslySkipPermissions`, bypassing Claude Code's permission prompts for headless, unattended runs. Only use it in a sandboxed environment: the agent gets unrestricted filesystem and shell access.
 - `"smithers-orchestrator": "file:../../"` links to the local package for co-development.
 - `preload.ts` registers the MDX plugin, enabling `.mdx` imports as JSX components.
 - `--root` passes the repository root so agents access the full codebase, not just the workflow directory.

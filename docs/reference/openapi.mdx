@@ -4,12 +4,12 @@ description: Turn an OpenAPI spec into a typed set of AI SDK tools, one per oper
 icon: "plug"
 ---
 
-Hand these factories an OpenAPI 3.x spec and they hand back AI SDK tools, one per
+Hand these factories an OpenAPI 3.x spec; get back AI SDK tools, one per
 operation, with Zod input schemas converted from the spec's JSON schemas and an
 `execute(args)` that performs the HTTP call. Drop the result straight into an
 agent's `tools`.
 
-Each operation's `summary` / `description` becomes the tool description, so the
+Each operation's `summary`/`description` becomes the tool description, so the
 agent already knows what each call does.
 
 ```ts
@@ -23,15 +23,14 @@ import {
 ```
 
 <Note>
-The async factories (`createOpenApiTools`, `createOpenApiTool`) fetch URL specs.
-The `*Sync` variants take only an object or a local file path; they do not fetch
+The async factories (`createOpenApiTools`, `createOpenApiTool`) fetch URL specs;
+the `*Sync` variants take only an object or a local file path and never fetch
 URLs. Pick async when the spec lives behind an HTTP URL.
 </Note>
 
 ## createOpenApiTools
 
-Build a record of tools from an entire spec, keyed by `operationId`. Async, so it
-can load a spec from a URL.
+Build a record of tools from an entire spec, keyed by `operationId`.
 
 ```ts
 function createOpenApiTools(
@@ -59,7 +58,7 @@ function createOpenApiTools(
       Authentication applied to every request. See [Types](#types).
     </ParamField>
     <ParamField path="include" type="string[]">
-      Allowlist of `operationId`s. Only listed operations become tools.
+      Allowlist of `operationId`s; only listed operations become tools.
     </ParamField>
     <ParamField path="exclude" type="string[]">
       Blocklist of `operationId`s. If both `include` and `exclude` are set,
@@ -70,10 +69,10 @@ function createOpenApiTools(
       used for filtering.
     </ParamField>
     <ParamField path="operations" type="Record<string, false | OperationCuration>">
-      Per-operation curation keyed by the original `operationId`. Set an entry to
-      `false` or `{ include: false }` to skip it, `name` to rename the tool,
-      `description` to replace the agent-facing text, and `responseExamples` to
-      append concrete response shapes to the description.
+      Per-operation curation keyed by the original `operationId`: `false` or
+      `{ include: false }` skips it, `name` renames the tool, `description`
+      replaces the agent-facing text, and `responseExamples` appends concrete
+      response shapes to it.
     </ParamField>
   </Expandable>
 </ParamField>
@@ -100,8 +99,8 @@ const agent = new ToolLoopAgent({ model: openai("gpt-5.6-terra"), tools });
 
 ## createOpenApiToolsSync
 
-Synchronous `createOpenApiTools`. Accepts only a spec object or a local file
-path, never a URL. Use it when you can resolve the spec on disk at build time.
+Synchronous `createOpenApiTools`. Use when the spec is resolvable on disk at
+build time.
 
 ```ts
 function createOpenApiToolsSync(
@@ -133,10 +132,8 @@ const tools = createOpenApiToolsSync("./petstore.json", {
 
 ## createOpenApiTool / createOpenApiToolSync
 
-Build a single tool from one operation, selected by `operationId`. Same options
-as the bulk factories; the only extra argument is the `operationId`.
-`createOpenApiTool` is async (fetches URL specs); `createOpenApiToolSync` is
-synchronous and object/file-only.
+Build a single tool from one operation, selected by `operationId`, with the same
+options as the bulk factories plus that one extra argument.
 
 ```ts
 function createOpenApiTool(
@@ -179,8 +176,8 @@ const getPet = await createOpenApiTool("./petstore.json", "getPetById", {
 
 ## listOperations
 
-Introspect a spec without building any tools. Returns one entry per operation,
-useful for auditing what an agent would be able to call before wiring it up.
+Introspect a spec without building tools, useful for auditing what an agent
+could call before wiring it up.
 
 ```ts
 function listOperations(input: string | OpenApiSpec): Array<{
@@ -274,9 +271,9 @@ const basic: OpenApiAuth = { type: "basic", username: USER, password: PASS };
 
 ### OpenApiSpec
 
-The parsed OpenAPI 3.x document shape accepted as an object `input`. Most callers
-pass a file path or URL string instead and let the loader parse it, but you can
-import the type to construct or narrow a spec yourself.
+The parsed OpenAPI 3.x document shape accepted as object `input`. Most callers
+pass a file path or URL string and let the loader parse it; import the type only
+to construct or narrow a spec yourself.
 
 ```ts
 import type { OpenApiSpec } from "smithers-orchestrator";
@@ -298,6 +295,6 @@ See the [Types reference](/reference/types) for the full `OpenApiSpec`,
 ---
 
 For request/response handling, filtering semantics, observability metrics, and
-current limitations (cookie params, non-JSON bodies, Swagger 2.0), see the
-[OpenAPI tools concept](/concepts/openapi-tools). For wiring tools into agents,
-see [Tools](/integrations/tools).
+current limitations (cookie params, non-JSON bodies, Swagger 2.0), see
+[OpenAPI tools](/concepts/openapi-tools); for wiring tools into agents, see
+[Tools](/integrations/tools).

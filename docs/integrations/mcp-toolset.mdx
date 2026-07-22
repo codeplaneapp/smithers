@@ -3,7 +3,7 @@ title: MCP Toolset
 description: Connect a stdio MCP server to an SDK agent by projecting its tools into AI SDK tools.
 ---
 
-`createMcpToolset` connects to a Model Context Protocol server over stdio, lists its tools once, and returns an AI SDK-compatible `tools` record for an SDK agent. This is the inbound MCP integration path: use any MCP server as an agent tool provider without writing one wrapper per external service.
+`createMcpToolset` connects to a Model Context Protocol server over stdio, lists its tools once, and returns an AI SDK `tools` record: the inbound MCP path, turning any MCP server into an agent tool provider with no per-service wrapper.
 
 For the opposite direction, where an MCP-aware client drives Smithers workflows, see [MCP Server](/integrations/mcp-server).
 
@@ -43,7 +43,7 @@ try {
 }
 ```
 
-Call `close()` in a `finally` block when the workflow process owns the connection. The MCP client and spawned server process stay open until `close()` resolves.
+Call `close()` in a `finally` block when the workflow process owns the connection: the MCP client and spawned server process stay open until it resolves.
 
 ## API
 
@@ -75,7 +75,7 @@ declare function createMcpToolset(
 ): Promise<McpToolset>;
 ```
 
-`command`, `args`, `env`, and `cwd` are passed to the MCP SDK stdio transport. The Smithers client identity defaults to `clientName: "smithers-mcp-toolset"` and `clientVersion: "0.0.0"`.
+`command`, `args`, `env`, and `cwd` pass through to the MCP SDK stdio transport; client identity defaults to `clientName: "smithers-mcp-toolset"`, `clientVersion: "0.0.0"`.
 
 ## Tool Curation
 
@@ -98,21 +98,20 @@ const github = await createMcpToolset(
 
 ## Runtime Behavior
 
-On connect, Smithers calls `tools/list` once and wraps every selected MCP tool with AI SDK `dynamicTool`. When an agent invokes one of those tools, the wrapper calls MCP `tools/call` with the original server tool name and the model-provided arguments.
+On connect, Smithers calls `tools/list` once and wraps each selected MCP tool with AI SDK `dynamicTool`; invoking one calls MCP `tools/call` with the original tool name and the model-provided arguments.
 
-Response handling is intentionally simple:
+Response handling is simple:
 
-- Successful calls return `structuredContent` when the server provides it.
-- Otherwise successful calls return the joined text content blocks.
+- Successful calls return `structuredContent` when the server provides it, otherwise the joined text content blocks.
 - MCP tool errors return `{ error: true, message, status: "failed" }` so the agent can inspect and recover inside its tool loop.
 
-Schema handling follows the MCP server's advertised `inputSchema`. If a server omits it, Smithers uses an empty object JSON schema.
+Schema handling follows the MCP server's advertised `inputSchema`, falling back to an empty object JSON schema if a server omits it.
 
 ## CLI Agents
 
 CLI agents consume MCP through their native configuration surfaces, not through `createMcpToolset`. Claude Code, Kimi, and Amp expose MCP config flags; Codex reads MCP servers from `~/.codex/config.toml` or `codex mcp add`.
 
-Use `createMcpToolset` when you are building an SDK-agent workflow with `AnthropicAgent`, `OpenAIAgent`, `HermesAgent`, or a raw AI SDK tool-loop agent.
+Use `createMcpToolset` when building an SDK-agent workflow with `AnthropicAgent`, `OpenAIAgent`, `HermesAgent`, or a raw AI SDK tool-loop agent.
 
 ## See Also
 

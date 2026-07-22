@@ -43,7 +43,7 @@ type ScanFixVerifyProps = {
 
 ## Notes
 
-- The loop runs up to `maxRetries` scan-fix-verify cycles. Early exit based on verifier output is not currently wired; the loop always completes all iterations (then ends via `onMaxReached: return-last`).
+- The loop always runs all `maxRetries` cycles; early exit on verifier output isn't wired yet, so it ends via `onMaxReached: return-last`.
 - The report task always runs, even when retries are exhausted.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}

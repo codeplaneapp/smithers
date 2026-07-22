@@ -15,7 +15,7 @@ Claude fallback, through a full development lifecycle.
 1. **Discover**: Read PRD, break into ordered independent tickets
 2. **Implement**: Write code end-to-end per ticket with GPT-5.6 Luna
 3. **Validate**: Run `bun test`
-4. **Review**: Review with GPT-5.6 Sol; use Claude only if Codex is unavailable
+4. **Review**: GPT-5.6 Sol reviews; Claude only if Codex is unavailable
 5. **ReviewFix**: Address review issues
 6. **Report**: Generate final report
 
@@ -25,7 +25,7 @@ parallel reviewers.
 
 ## Schema Setup: smithers.ts
 
-Schema definitions are in `smithers.ts`. See [Worktree Feature Schemas](./worktree-feature-schemas) for the full field list. The file ends with the `createSmithers(...)` registration call:
+Schema definitions live in `smithers.ts`; see [Worktree Feature Schemas](./worktree-feature-schemas) for the full field list. The file ends with the `createSmithers(...)` registration call:
 
 ```tsx
 // scripts/worktree-feature/smithers.ts
@@ -125,7 +125,7 @@ export const implementAgents = [codexLuna, claudeFallback];
 export const reviewAgents = [codexSol, claudeFallback];
 ```
 
-The `Implement` task receives `agent={implementAgents}`. The review component
+The `Implement` task receives `agent={implementAgents}`; the review component
 below receives `agent={reviewAgents}`.
 
 ## Validation Loop: ValidationLoop.tsx
@@ -229,11 +229,11 @@ bun install
 ## Key Patterns
 
 - **`createSmithers`** registers 6 output schemas; generates typed `tables`, `outputs`, and `Task` components.
-- **`CodexAgent` / `ClaudeCodeAgent`** run real agents with full filesystem access; Codex is ordered first and Claude is fallback-only.
-- **Role-specific chains** route implementation to Luna and review to Sol, then advance to Claude only when Codex is unavailable or fails.
+- **`CodexAgent` / `ClaudeCodeAgent`** run real agents with full filesystem access.
+- **Role-specific chains** route implementation to Luna and review to Sol, falling back to Claude only when Codex is unavailable or fails.
 - **`<Loop>`** iterates implement/validate/review/fix until the Codex-first review seat approves or `MAX_REVIEW_ROUNDS` is exhausted.
 - **`ctx.latest(schemaKey, nodeId)`** reads the highest-iteration output for a task.
-- **MDX prompts** -- `.mdx` files serve as prompt templates with JSX interpolation.
+- **MDX prompts** -- `.mdx` files serve as JSX-interpolated prompt templates.
 - **`skipIf`** skips already-completed tickets on resume.
 - **`continueOnFail`** prevents a single review failure from blocking the pipeline.
 - **Dynamic ticket mapping** -- `unfinishedTickets.map()` renders one `TicketPipeline` per ticket.

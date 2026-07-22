@@ -3,7 +3,7 @@ title: Control Plane
 description: Organization, project, identity, billing, usage, secret-reference, and audit primitives for hosted Smithers deployments.
 ---
 
-The control-plane package adds a durable SQLite store for multi-tenant objects: orgs, projects, teams, billing records, usage, secret references, and audit events. Import it alongside the Gateway when you need these boundaries.
+The control-plane package adds a durable SQLite store for multi-tenant objects: orgs, projects, teams, billing records, usage, secret references, and audit events. Import it alongside the Gateway for these boundaries.
 
 ## ControlPlaneStore API
 
@@ -30,7 +30,7 @@ The store creates SQLite tables for:
 - secret manager references, not secret values
 - audit events and org audit export
 
-Constructing `new ControlPlaneStore(sqlite)` calls `ensureControlPlaneTables(sqlite)`. You can call `ensureControlPlaneTables(sqlite)` directly when you only need to bootstrap the schema.
+Constructing `new ControlPlaneStore(sqlite)` calls `ensureControlPlaneTables(sqlite)`. Call `ensureControlPlaneTables(sqlite)` directly when you only need to bootstrap the schema.
 
 ## Store Methods
 
@@ -127,7 +127,7 @@ const quota = store.checkUsageLimit({
 const audit = store.exportOrgAudit({ orgId: org.orgId });
 ```
 
-Deleting an org cascades to all its child rows: projects, teams, identity providers, billing account, usage rows, usage limits, secret references, and audit rows. There is no soft-delete; use a status flag in your application layer if you need recoverable deletion.
+Deleting an org cascades to all child rows: projects, teams, identity providers, billing account, usage rows, usage limits, secret references, and audit rows. There's no soft-delete; use a status flag in your application layer for recoverable deletion.
 
 ## Hosted Boundary
 
@@ -140,4 +140,4 @@ A hosted Smithers service should layer these primitives behind:
 - audit export delivery and retention policy
 - SLAs, support, compliance controls, and incident response
 
-The open-source package owns the durable data contract. The hosted service owns identity, payment collection, tenant isolation, compliance operations, and infrastructure support.
+The open-source package owns the durable data contract; the hosted service owns identity, payment collection, tenant isolation, compliance operations, and infrastructure support.

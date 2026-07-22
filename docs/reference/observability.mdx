@@ -5,10 +5,10 @@ icon: "chart-line"
 ---
 
 Observability ships as a set of [Effect](https://effect.website) layers. One call
-to `createSmithersObservabilityLayer` installs the logger, the metrics registry,
-the tracing service, and (when enabled) an OTLP exporter. Metrics are always
-collected in-process and read back as a Prometheus exposition string; traces and
-logs are exported over OTLP only when `enabled` is set.
+to `createSmithersObservabilityLayer` installs the logger, metrics registry,
+tracing service, and (when enabled) an OTLP exporter. Metrics are always
+collected in-process and read back as a Prometheus exposition string; traces
+and logs export over OTLP only when `enabled` is set.
 
 ```ts
 import {
@@ -25,17 +25,16 @@ import {
 ```
 
 <Note>
-Metric collection is global. `renderPrometheusMetrics()` and `trackSmithersEvent`
-read and write the process-wide Effect registry, so they work whether or not you
-have built a layer. Building a layer adds logging, tracing, and OTLP export on
-top.
+Metric collection is global: `renderPrometheusMetrics()` and `trackSmithersEvent`
+read/write the process-wide Effect registry, working whether or not you've
+built a layer. Building a layer adds logging, tracing, and OTLP export on top.
 </Note>
 
 ## SmithersObservability
 
-An Effect `Context.Tag` for the resolved observability service. Provided by
-`createSmithersObservabilityLayer`; depend on it to read the resolved options or
-to open a span without importing `withSmithersSpan` directly.
+An Effect `Context.Tag` for the resolved observability service, provided by
+`createSmithersObservabilityLayer`. Depend on it to read the resolved options
+or open a span without importing `withSmithersSpan` directly.
 
 ```ts
 import { Effect } from "effect";
@@ -99,9 +98,9 @@ await Effect.runPromise(myProgram.pipe(Effect.provide(layer)));
 
 ### createSmithersRuntimeLayer
 
-Alias of `createSmithersObservabilityLayer`, exported under the name used by the
-runtime. Same signature, same return type. Prefer it in runtime/server wiring so
-the intent reads clearly.
+Alias of `createSmithersObservabilityLayer`, exported under the runtime's name
+(same signature, same return type). Prefer it in runtime/server wiring so
+intent reads clearly.
 
 ```ts
 import { createSmithersRuntimeLayer } from "smithers-orchestrator";
@@ -111,9 +110,10 @@ const layer = createSmithersRuntimeLayer({ logLevel: "debug" });
 
 ### createSmithersOtelLayer
 
-The OTLP-export slice on its own. Returns `Layer.empty` unless `enabled` resolves
-to true, so it is safe to merge unconditionally. Use it when you already have a
-metrics/logging layer and only want to add OpenTelemetry traces.
+The OTLP-export slice on its own. Returns `Layer.empty` unless `enabled`
+resolves to true, so it's safe to merge unconditionally. Use it when you
+already have a metrics/logging layer and just want to add OpenTelemetry
+traces.
 
 ```ts
 function createSmithersOtelLayer(
@@ -221,11 +221,12 @@ const resolved = resolveSmithersObservabilityOptions({ serviceName: "ci" });
 
 ## trackSmithersEvent
 
-Map a [`SmithersEvent`](/reference/event-types) onto the metric registry. Returns
-an `Effect<void>` that increments the relevant counters, updates gauges, and
-records durations for that event type. Every event also bumps the
-`smithers_events_emitted_total` counter. The runtime calls this on each emitted
-event; call it yourself only when feeding events from outside the engine.
+Maps a [`SmithersEvent`](/reference/event-types) onto the metric registry:
+returns an `Effect<void>` that increments the relevant counters, updates
+gauges, records durations for that event type, and bumps
+`smithers_events_emitted_total` for every event. The runtime calls this on
+each emitted event; call it yourself only when feeding events from outside
+the engine.
 
 ```ts
 function trackSmithersEvent(event: SmithersEvent): Effect.Effect<void>;
@@ -258,9 +259,9 @@ await Effect.runPromise(
 ### renderPrometheusMetrics
 
 Render the entire metric registry as a Prometheus exposition string, with
-`# HELP`/`# TYPE` headers and every catalog metric present at zero even before it
-fires. Refreshes the process gauges (uptime, RSS, heap) on each call. This is
-what the server's `GET /metrics` route returns.
+`# HELP`/`# TYPE` headers and every catalog metric present at zero even before
+it fires. Refreshes the process gauges (uptime, RSS, heap) on each call: this
+is what the server's `GET /metrics` route returns.
 
 ```ts
 function renderPrometheusMetrics(): string;
@@ -283,19 +284,18 @@ function handleMetrics() {
 ```
 
 <Note>
-The built-in server already exposes this at `GET /metrics`. See
-[Server integration](/integrations/server). Use these directly only when wiring
-metrics into your own HTTP layer.
+See [Server integration](/integrations/server). Use these directly only when
+wiring metrics into your own HTTP layer.
 </Note>
 
 **Source** [`renderPrometheusMetrics.js`](https://github.com/smithersai/smithers/blob/main/apps/observability/src/renderPrometheusMetrics.js) · [`prometheusContentType.js`](https://github.com/smithersai/smithers/blob/main/apps/observability/src/prometheusContentType.js) · **Tests** [`observability-prometheus.test.js`](https://github.com/smithersai/smithers/blob/main/apps/observability/tests/observability-prometheus.test.js) · **See also** [Server integration](/integrations/server)
 
 ## Metrics catalog
 
-`smithersMetrics` is the registry of every metric, an object keyed by the
-camelCase names below whose values are the underlying Effect `Metric`s. Each
+`smithersMetrics` is the registry of every metric: an object keyed by the
+camelCase names below, valued with the underlying Effect `Metric`s. Each
 metric renders under its Prometheus name; histograms also emit `_bucket`,
-`_sum`, and `_count` series. The table groups the core metrics by area; the
+`_sum`, and `_count` series. The table below groups core metrics by area; the
 registry holds more (gateway, devtools, agent, alert, supervisor families).
 
 ```ts

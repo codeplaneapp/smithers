@@ -3,7 +3,7 @@ title: "Testing workflows"
 description: "Simulate workflows, script agents, and assert task behavior with Bun tests."
 ---
 
-`@smithers-orchestrator/testing` is the consumer-facing test surface for Smithers workflows. Import it from the published facade:
+`@smithers-orchestrator/testing` is the consumer-facing test surface for Smithers workflows; import it from the published facade:
 
 ```ts
 import {
@@ -22,14 +22,14 @@ import {
 ```
 
 <Note>
-The examples below use the normal `createSmithers` workflow API and `bun:test`; the testing helpers do not replace workflow authoring components.
+Examples below use the `createSmithers` workflow API and `bun:test`; the testing helpers don't replace workflow authoring components.
 </Note>
 
 ## Unit-test a workflow
 
-`simulate(workflow, options?)` renders and runs a workflow in memory. Pass the workflow's input through `input`, and provide task responses in `mocks`. Mock keys can be exact task IDs or globs; `"*"` is the fallback key for agent tasks. Each value can be a function, a raw output value, `auto`, or a `FakeAgent`. Agent tasks without a matching mock fail loudly, which keeps a test from accidentally calling a real agent.
+`simulate(workflow, options?)` renders and runs a workflow in memory: pass input via `input`, task responses via `mocks`. Mock keys are exact task IDs or globs (`"*"` is the agent-task fallback); values can be a function, raw output, `auto`, or a `FakeAgent`. Unmocked agent tasks fail loudly, so a test can't accidentally call a real agent.
 
-The returned `Sim` is lazy: call `await sim.run()` to execute it. It records the task IDs it ran, the values stored in each output table, and the final run status.
+The returned `Sim` is lazy: `await sim.run()` executes it and populates the fields below.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -102,23 +102,23 @@ The main `Sim` fields are:
 
 | Field | Meaning |
 | --- | --- |
-| `executed` | Task node IDs in the order they executed. |
-| `outputs` | Arrays of validated task outputs keyed by output-table name, such as `greeting` or `reply`. |
-| `status` | The current run status, including `pending`, `running`, `finished`, or `failed`. |
+| `executed` | Task node IDs, in execution order. |
+| `outputs` | Validated task outputs, as arrays keyed by output-table name (e.g. `greeting`, `reply`). |
+| `status` | Run status: `pending`, `running`, `finished`, or `failed`. |
 
-`sim.output` is the latest workflow output. `sim.task(id)` returns that task's status, outputs, and rendered prompts; `unusedMocks` identifies mock keys that were never consumed. A failed simulation exposes `error` and `sim.run()` rejects. Output schemas are checked before values are recorded.
+`sim.output` is the latest workflow output; `sim.task(id)` returns a task's status, outputs, and rendered prompts; `unusedMocks` lists unconsumed mock keys. A failed simulation exposes `error` and rejects `sim.run()`; output schemas are checked before values are recorded.
 
 ### Scripted agents
 
-`fakeAgent(schema, script, options?)` creates a `FakeAgent` whose script can be a bare schema value, a `{ output, text, files }` response, `auto`, or a function returning one of those forms. Responses with an `output` are validated against the supplied schema. `fakeAgent.sequence(schema, entries, options?)` consumes a fixed list in order, which is useful for retries or repeated task runs.
+`fakeAgent(schema, script, options?)` creates a `FakeAgent`; `script` is a bare schema value, `{ output, text, files }`, `auto`, or a function returning one of those, and `output` values are validated against the schema. `fakeAgent.sequence(schema, entries, options?)` consumes a fixed list in order, for retries or repeated task runs.
 
-The `FakeAgent<T>` type describes the returned agent. Its `generate()` method is compatible with Smithers agents, while `calls`, `lastPrompt()`, and `reset()` let a test inspect or clear its history. The optional agent settings are `id`, `model`, and `supportsNativeStructuredOutput`.
+`FakeAgent<T>` describes the returned agent: `generate()` is Smithers-agent-compatible, while `calls`, `lastPrompt()`, and `reset()` inspect or clear its history. Optional settings: `id`, `model`, `supportsNativeStructuredOutput`.
 
-`auto` is a schema-derived response sentinel. It requires an output schema and supplies an example-shaped output; use an explicit value or function when the exact result matters. File responses are written below the `rootDir` supplied to `generate()` or the test helper.
+`auto` is a schema-derived sentinel that supplies an example-shaped response (requires an output schema); use an explicit value or function when the exact result matters. File responses are written below the `rootDir` passed to `generate()` or the test helper.
 
 ## Render and run one task
 
-Use `renderWorkflow` when a test needs a rendered frame or task descriptors without executing them. It resolves task output schemas and attaches the same subflow and sandbox compute functions as the engine. The returned `RenderedWorkflow` includes the rendered `tasks`, `ctx`, `runId`, `frameNo`, and `toXml()`.
+`renderWorkflow` renders a frame or task descriptors without executing them: it resolves task output schemas, attaches the same subflow and sandbox compute functions as the engine, and returns a `RenderedWorkflow` with rendered `tasks`, `ctx`, `runId`, `frameNo`, and `toXml()`.
 
 ```ts
 import { renderPrompt, renderWorkflow, runTask } from "smithers-orchestrator/testing";
@@ -136,13 +136,13 @@ const output = await runTask(task, { runId: frame.runId });
 console.log({ prompt, output, xml: frame.toXml() });
 ```
 
-`renderPrompt(prompt)` converts a rendered task prompt to the same text form used by the production task renderer. `runTask(task, options?)` executes only one `TaskDescriptor`: static descriptors return their payload, compute descriptors call their compute function, and agent descriptors call their selected agent. When the descriptor has an output schema, the result is validated. For agent descriptors, `RunTaskOptions` forwards `rootDir`, `attempt`, and `runId` to the agent call.
+`renderPrompt(prompt)` converts a rendered task prompt to the text form the production renderer uses. `runTask(task, options?)` executes one `TaskDescriptor`: static descriptors return their payload, compute descriptors call their compute function, and agent descriptors call their selected agent (`RunTaskOptions` forwards `rootDir`, `attempt`, and `runId` to the call); the result is validated when the descriptor has an output schema.
 
-`dryRun(ast, options?)` is the planning companion for the durability scenario API below. It canonicalizes and compiles the scenario, reports required capabilities and admissions, creates a replay-bundle skeleton, lists planned steps, and sets `executesAgents` to `false`. Its returned `run()` function is the point at which the scenario is actually executed.
+`dryRun(ast, options?)` is the planning companion for the durability scenario API below: it canonicalizes and compiles the scenario, reports required capabilities and admissions, creates a replay-bundle skeleton, lists planned steps, sets `executesAgents` to `false`, and returns a `run()` function that executes the scenario.
 
 ## Assertions with Bun matchers
 
-The testing package augments `bun:test`'s matcher types. Register the exported matcher set once in the test file, then assert against a `Sim`:
+The testing package augments `bun:test`'s matcher types; register the set once per file, then assert against a `Sim`:
 
 ```ts
 import { expect, test } from "bun:test";
@@ -164,18 +164,18 @@ test("checks the simulated path", async () => {
 });
 ```
 
-`toHaveExecuted(ids)` requires every listed ID to appear. `toHaveExecutedInOrder(ids)` requires them as an ordered subsequence, so unrelated tasks may occur between them. `toHaveFinished()` checks for the exact `"finished"` status. The same functions are also exported as `toHaveExecuted`, `toHaveExecutedInOrder`, and `toHaveFinished` for direct matcher use.
+`toHaveExecuted(ids)` requires every listed ID to appear; `toHaveExecutedInOrder(ids)` requires them as an ordered subsequence (unrelated tasks may fall between); `toHaveFinished()` checks for the exact `"finished"` status. The same functions are also exported directly as `toHaveExecuted`, `toHaveExecutedInOrder`, and `toHaveFinished`.
 
 ## Advanced: durability scenario harness
 
-For modeled scheduling and durability behavior, compose an immutable scenario AST with `scenario`, `step`, and `fault`; `barrier` and `extension` are available for explicit synchronization and registered extensions. A `step` can declare `input`, `dependsOn`, `capabilities`, and a `run` function. Its task runtime exposes mediated `effect`, virtual `sleep`, structured `log`, and explicitly opaque work. A `fault` names a phase and operation at which to inject a failure or ambiguity.
+For modeled scheduling and durability behavior, compose an immutable scenario AST from `scenario`, `step`, and `fault` (`barrier` and `extension` cover explicit synchronization and registered extensions). A `step` declares `input`, `dependsOn`, `capabilities`, and a `run` function, whose task runtime exposes mediated `effect`, virtual `sleep`, structured `log`, and explicitly opaque work; a `fault` names a phase and operation at which to inject a failure or ambiguity.
 
-`runScenario(ast, options?)` executes the AST and returns a result containing its status, outputs, trace, replay identity, control log, capability report, ambiguity records, and determinism report. `unitSimHarness`, `integrationHarness`, and `e2eHarness` select the capability tier: deterministic virtual-time and seeded-interleaving simulation; a real database adapter; or a real process adapter. `runScenario` defaults to `unitSimHarness()`; the real tiers require verified, executable production adapters and can report a capability failure or skip according to policy.
+`runScenario(ast, options?)` executes the AST and returns status, outputs, trace, replay identity, control log, capability report, ambiguity records, and determinism report. `unitSimHarness`, `integrationHarness`, and `e2eHarness` select the capability tier (deterministic virtual-time/seeded-interleaving simulation, a real database adapter, or a real process adapter); `runScenario` defaults to `unitSimHarness()`, and the real tiers, requiring verified executable production adapters, can report a capability failure or skip per policy.
 
 <Warning>
-Unit simulation is not a database or child-process substitute. External effects remain at-least-once unless the application supplies idempotency, and effects outside the task-runtime mediation boundary are opaque. See [`packages/testing/README.md`](https://github.com/smithersai/smithers/blob/main/packages/testing/README.md) for the real-system boundary, replay, fault, and adapter details.
+Unit simulation doesn't substitute for a database or child process: external effects remain at-least-once unless the application supplies idempotency, and effects outside the task-runtime mediation boundary are opaque. See [`packages/testing/README.md`](https://github.com/smithersai/smithers/blob/main/packages/testing/README.md) for the real-system boundary, replay, fault, and adapter details.
 </Warning>
 
 ## Related evaluation tools
 
-For LLM-judge assertions, see [`llmJudge`](/reference/scorers#llmjudge) and [`runScorersBatch`](/reference/scorers#runscorersbatch) in the [Scorers reference](/reference/scorers). For dataset-driven regression suites, see the [Eval Suites Quickstart](/guides/evals-quickstart).
+For LLM-judge assertions, see [`llmJudge`](/reference/scorers#llmjudge) and [`runScorersBatch`](/reference/scorers#runscorersbatch) in the [Scorers reference](/reference/scorers); for dataset-driven regression suites, see the [Eval Suites Quickstart](/guides/evals-quickstart).

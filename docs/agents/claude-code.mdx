@@ -4,29 +4,28 @@ description: Run Smithers from Anthropic's Claude Code. Sync generated skill fil
 ---
 
 [Claude Code](https://code.claude.com/docs) extends through **skills**, **MCP
-servers**, and **plugins**. Smithers ships into all three. The fastest path is:
+servers**, and **plugins**; Smithers ships into all three. Fastest path:
 
 ```bash
 bunx smithers-orchestrator skills add
 bunx smithers-orchestrator mcp add --agent claude-code
 ```
 
-That syncs generated Smithers CLI skill files to Claude's supported skill
-location and registers the MCP server in `~/.claude.json`. Restart Claude Code
-(or run `/mcp`) and it can list, run, watch, and approve workflows.
+Syncs generated Smithers CLI skill files to Claude's skill location and
+registers the MCP server in `~/.claude.json`. Restart Claude Code (or run
+`/mcp`) to list, run, watch, and approve workflows.
 
 ## Curated onboarding skill
 
-The onboarding skill teaches Claude the Smithers mental model and ships the full
-docs bundle next to it. `init` installs it automatically when Claude Code is
-detected:
+Teaches Claude the Smithers mental model and ships the full docs bundle next
+to it. `init` installs it automatically when Claude Code is detected:
 
 ```bash
 bunx smithers-orchestrator init
 ```
 
-Claude loads a skill when its `description` matches the request, so once it's
-installed you just ask for the outcome, *"orchestrate an agent to add rate
+Claude loads a skill when its `description` matches the request. Once
+installed, ask for the outcome, *"orchestrate an agent to add rate
 limiting and keep iterating until the tests pass"*, and Claude reaches for
 Smithers itself.
 
@@ -38,12 +37,12 @@ Smithers itself.
 bunx smithers-orchestrator skills add
 ```
 
-For project-scoped generated skill files, pass `--no-global`.
+Pass `--no-global` to scope skill files to the project.
 
 ## Register the MCP server
 
-`mcp add` writes the registration for you. To do it by hand, add a server with
-the Claude CLI:
+`mcp add` writes this for you. By hand, register a server with the Claude
+CLI:
 
 ```bash
 claude mcp add --transport stdio --scope user smithers \
@@ -63,14 +62,14 @@ Or commit a project-scoped `.mcp.json` so the whole team gets it:
 }
 ```
 
-The server exposes the semantic tool surface: `list_workflows`, `run_workflow`,
-`watch_run`, `list_pending_approvals`, `resolve_approval`, `explain_run`, and
-more. See the [MCP Server reference](/integrations/mcp-server) for every tool.
+The server exposes `list_workflows`, `run_workflow`, `watch_run`,
+`list_pending_approvals`, `resolve_approval`, `explain_run`, and more. Full
+reference: [MCP Server](/integrations/mcp-server).
 
 ## Claude Code plugin
 
-A plugin bundles the skill and MCP server behind a single install, namespaced as
-`smithers:`. The manifest lives at `.claude-plugin/plugin.json`:
+A plugin bundles skill and MCP server into one install, namespaced
+`smithers:`. Manifest lives at `.claude-plugin/plugin.json`:
 
 ```json
 {
@@ -80,9 +79,9 @@ A plugin bundles the skill and MCP server behind a single install, namespaced as
 }
 ```
 
-The MCP server is wired through a sibling `.claude-plugin/.mcp.json`, and the
-skill is auto-discovered from the plugin's `skills/` directory, so neither is
-declared inside `plugin.json` itself.
+A sibling `.claude-plugin/.mcp.json` wires the MCP server; the skill
+auto-discovers from the plugin's `skills/` directory. Neither is declared in
+`plugin.json` itself.
 
 Install from a marketplace and reload without restarting:
 
@@ -92,13 +91,12 @@ Install from a marketplace and reload without restarting:
 /reload-plugins
 ```
 
-See the worked examples: [plugin (skill)](/examples/claude-plugin-skill) and
+Worked examples: [plugin (skill)](/examples/claude-plugin-skill) and
 [plugin (orchestrator)](/examples/claude-plugin-orchestrator).
 
 ## Standing instructions
 
-Add a line to `CLAUDE.md` so Claude remembers Smithers is the tool for durable,
-multi-step work:
+Add a line to `CLAUDE.md` noting Smithers handles durable, multi-step work:
 
 ```md
 ## Orchestration
@@ -108,8 +106,8 @@ For multi-step, long-running, or human-in-the-loop agent work, use Smithers:
 
 ## Smithers runs Claude Code too
 
-In the other direction, Smithers spawns Claude Code as a worker inside a
-workflow via `ClaudeCodeAgent`, with native session hijack:
+Smithers also spawns Claude Code as a worker inside a workflow via
+`ClaudeCodeAgent`, with native session hijack:
 
 ```tsx
 import { ClaudeCodeAgent } from "smithers-orchestrator";
@@ -117,13 +115,13 @@ import { ClaudeCodeAgent } from "smithers-orchestrator";
 const claude = new ClaudeCodeAgent({ model: "claude-fable-5" });
 ```
 
-By default this bills your Claude Pro/Max subscription: `ClaudeCodeAgent` clears
-`ANTHROPIC_API_KEY` from the spawned process so the CLI uses subscription auth,
-no API key required. To run multiple subscriptions side by side, set one up with
-`CLAUDE_CONFIG_DIR=<dir> claude` plus `/login`, then pass `configDir: "<dir>"`.
-Passing `apiKey` switches that invocation to Anthropic API billing.
+This bills your Claude Pro/Max subscription by default: `ClaudeCodeAgent`
+clears `ANTHROPIC_API_KEY` from the spawned process, so the CLI uses
+subscription auth with no API key. For side-by-side subscriptions, set one up
+with `CLAUDE_CONFIG_DIR=<dir> claude` plus `/login`, then pass
+`configDir: "<dir>"`; `apiKey` switches to Anthropic API billing instead.
 
-You can also call it once for a typed completion with no graph:
+Call it once for a typed completion with no graph:
 
 ```ts
 const { output } = await claude.generate({

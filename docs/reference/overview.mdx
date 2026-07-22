@@ -4,12 +4,11 @@ description: The exhaustive, dry index of every public Smithers export, its sign
 icon: "book-open"
 ---
 
-This is the API reference: the complete, dry catalog of everything Smithers
-exports. Every public function, component, type, and RPC has a page here with its
-signature, parameters, return shape, the source and tests that back it, and a
-runnable example. Where the **For Humans** and **For Agents** tabs explain why
-and walk you through tasks, this tab is the lookup you reach for when you already
-know what you want and need the exact shape of it.
+Every public function, component, type, and RPC has a page here with its
+signature, parameters, return shape, source, tests, and a runnable example. The
+**For Humans** and **For Agents** tabs explain why and walk you through tasks;
+this tab is the lookup for when you already know what you want and need its
+exact shape.
 
 ## Import map
 
@@ -21,25 +20,24 @@ errors from `smithers-orchestrator`.
 import { createSmithers, Task } from "smithers-orchestrator";
 ```
 
-The browser/React Gateway SDK is the exception: it is published as subpaths so it
-can ship independently of the engine and stay client-safe.
+The browser/React Gateway SDK is published as subpaths instead, so it can ship
+independently of the engine and stay client-safe:
 
 - `smithers-orchestrator/gateway-client` · the framework-free RPC/WS client.
 - `smithers-orchestrator/gateway-react` · the React hooks and provider built on it.
 
 ## How to read a page
 
-Every export follows the same layout, so once you can read one you can read all
-of them:
+Every export follows the same layout:
 
 - A one-line summary of what the export does.
-- A `ts` signature block - the exact type you call against.
+- A `ts` signature block: the exact type you call against.
 - `ParamField` rows for each parameter and `ResponseField` rows for the return
   shape, with nested `Expandable` blocks for object members.
 - A **Throws** note linking the relevant error in [Errors](/reference/errors)
   when the export can fail loud.
 - A short, runnable example.
-- A footer line: `**Source** · **Tests** · **See also**`, linking the GitHub
+- A footer line, `**Source** · **Tests** · **See also**`, linking the GitHub
   source file, the test file that pins its behavior, and related guides.
 
 ## Reference pages

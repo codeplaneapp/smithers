@@ -16,17 +16,17 @@ import { TaskItem } from "smithers-orchestrator/ui";
 />
 ```
 
-The `status` string goes through the shared `normalizeStatus`, `statusClass`,
-and `formatStatus` helpers. Every tinted dot has matching screen-reader text.
+The `status` string flows through the shared `normalizeStatus`, `statusClass`,
+and `formatStatus` helpers; every tinted dot has matching screen-reader text.
 
 ## Props
 
 | Prop | Type | Description |
 | --- | --- | --- |
 | `label` | `ReactNode` | Unit-of-work label. |
-| `status` | `string` | Any shared status vocabulary string, such as `running`, `complete`, or `failed`. |
+| `status` | `string` | Any shared status vocabulary string, e.g. `running`, `complete`, `failed`. |
 | `files` | `readonly string[]` | Optional text-only monospace file badges. |
-| `elapsedSeconds` | `number` | Optional elapsed duration, formatted as seconds or minutes and seconds. |
+| `elapsedSeconds` | `number` | Optional elapsed duration: seconds, or minutes and seconds. |
 
 **Source**: `packages/ui/src/agentic/TaskItem.tsx`
 

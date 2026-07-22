@@ -3,19 +3,18 @@ title: Feature inventory
 description: Complete code-backed catalog of the Smithers product surface and its current evidence status.
 ---
 
-This is the public documentation view of
-`.smithers/spec/features.json`, the structured feature ledger used by the
-docs-driven-development workflow. It covers the open-source runtime, CLI,
-published packages, built-in workflow pack, and operator surfaces in this
-repository. Example projects, benchmarks, private deployments, and marketing
-applications are consumers of Smithers. They do not create, downgrade, or
-otherwise count as core product features.
+This is the public view of `.smithers/spec/features.json`, the structured
+feature ledger the docs-driven-development workflow uses. It covers the
+open-source runtime, CLI, published packages, built-in workflow pack, and
+operator surfaces in this repository. Example projects, benchmarks, private
+deployments, and marketing applications consume Smithers; they don't create,
+downgrade, or count as core product features.
 
-`fixed` means the described scope has convincing current tests and no known
-gap. `partial` means the capability ships, but its feature record lists an
+`fixed` means the scope has convincing current tests and no known gap.
+`partial` means the capability ships, but its feature record lists an
 unproved environment, provider path, or explicit limitation. The JSON ledger
-contains the detailed capabilities, tests, architecture, observability,
-debugging notes, and open gaps behind every row.
+holds each row's detailed capabilities, tests, architecture, observability,
+debugging notes, and open gaps.
 
 | Feature id | Surface | Status | Tier | Primary docs |
 | --- | --- | --- | --- | --- |
@@ -52,10 +51,10 @@ debugging notes, and open gaps behind every row.
 Repository checks keep this page and the feature ledger tied to the shipped
 surface:
 
-- Every non-private package under `packages/` and `apps/` must be assigned to
-  at least one feature through an architecture or diff path.
-- Every feature id in `.smithers/spec/features.json` must appear exactly once
-  in this table and link to an existing Mintlify source page.
+- Every non-private package under `packages/` and `apps/` maps to at least one
+  feature via an architecture or diff path.
+- Every feature id in `.smithers/spec/features.json` appears exactly once in
+  this table, linked to an existing Mintlify source page.
 - Public component guides, Gateway RPC pages, workspace packages, and selected
   component prop types are compared directly with their source exports.
 - The agent-facing `llms-*` bundles include this inventory plus browser,

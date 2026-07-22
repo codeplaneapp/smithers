@@ -5,34 +5,34 @@ icon: "server"
 ---
 
 Three host surfaces ship from `packages/server`, each a tighter fit for a
-different deployment.
+different deployment:
 
-- **`startServer`**: a self-contained HTTP server with REST routes for run
-  lifecycle, SSE event streams, and approvals. One server, many workflows by
-  path. Reach for it when you want a plain HTTP API and no client SDK.
-- **`createServeApp`**: a Hono app bound to one already-loaded workflow and
-  run. This is what `bunx smithers-orchestrator up --serve` mounts. Compose it
-  into a larger Hono app or call `app.fetch` in tests.
-- **`Gateway`**: the headless control plane. Authenticate once, stream events
-  over WebSocket with resume-on-reconnect, decide approvals, inject signals,
-  run cron schedules, and serve many registered workflows. This is the surface
-  the [Gateway client](/reference/gateway-client) and custom UIs talk to.
+- **`startServer`**: self-contained HTTP server with REST routes for run
+  lifecycle, SSE event streams, and approvals; one server, many workflows by
+  path. Use it for a plain HTTP API with no client SDK.
+- **`createServeApp`**: Hono app bound to one already-loaded workflow and run;
+  what `bunx smithers-orchestrator up --serve` mounts. Compose it into a
+  larger Hono app or call `app.fetch` in tests.
+- **`Gateway`**: headless control plane. Authenticate once, stream events over
+  WebSocket with resume-on-reconnect, decide approvals, inject signals, run
+  cron schedules, and serve many registered workflows: the surface the
+  [Gateway client](/reference/gateway-client) and custom UIs talk to.
 
 ```ts
 import { startServer, createServeApp, Gateway } from "smithers-orchestrator";
 ```
 
 <Note>
-`createServeApp` needs a `SmithersDb` adapter and a loaded `SmithersWorkflow`;
-both come from your workflow module (`new SmithersDb(workflow.db)`). The
-`Gateway` is constructed with `new Gateway(opts)`, then you `register()`
-workflows and `listen()`.
+`createServeApp` needs a `SmithersDb` adapter and a loaded `SmithersWorkflow`,
+both from your workflow module (`new SmithersDb(workflow.db)`). `Gateway` is
+constructed with `new Gateway(opts)`, then you `register()` workflows and
+`listen()`.
 </Note>
 
 ## startServer
 
-Boot a listening `http.Server` exposing REST run lifecycle, SSE streams, and
-approval routes. Synchronous: it returns the bound server immediately.
+Boots a listening `http.Server` exposing REST run lifecycle, SSE streams, and
+approval routes. Synchronous: returns the bound server immediately.
 
 ```ts
 function startServer(opts?: ServerOptions): import("node:http").Server;
@@ -44,18 +44,18 @@ function startServer(opts?: ServerOptions): import("node:http").Server;
       Port to bind.
     </ParamField>
     <ParamField path="db" type="unknown">
-      Database handle. When set, enables `GET /v1/runs` and approvals listing.
+      Database handle. Enables `GET /v1/runs` and approvals listing when set.
     </ParamField>
     <ParamField path="authToken" type="string">
-      Bearer token required on every route except `/health`. Falls back to
-      `process.env.SMITHERS_API_KEY`; auth is disabled when neither is set.
+      Bearer token for every route but `/health`; falls back to
+      `process.env.SMITHERS_API_KEY`, disabled when neither is set.
     </ParamField>
     <ParamField path="maxBodyBytes" type="number" default="1048576">
-      Maximum accepted request body size. Larger bodies get `PAYLOAD_TOO_LARGE`.
+      Maximum accepted request body size; larger bodies get `PAYLOAD_TOO_LARGE`.
     </ParamField>
     <ParamField path="rootDir" type="string">
-      Sandbox root that workflow paths and tools resolve against. Paths outside
-      it are rejected with `WORKFLOW_PATH_OUTSIDE_ROOT`.
+      Sandbox root workflow paths and tools resolve against; paths outside it
+      are rejected with `WORKFLOW_PATH_OUTSIDE_ROOT`.
     </ParamField>
     <ParamField path="allowNetwork" type="boolean" default="false">
       Allow network access from the built-in `bash` tool.
@@ -71,10 +71,10 @@ function startServer(opts?: ServerOptions): import("node:http").Server;
 </ParamField>
 
 <ResponseField name="http.Server" type="object">
-  A listening Node `http.Server`. `headersTimeout` and `requestTimeout` are
-  applied to it to bound slow header/body uploads. The full route table (run
-  start/resume/cancel, SSE events, frames, approvals, signals, `/metrics`) lives
-  in [Server Mode](/integrations/server).
+  A listening Node `http.Server`, with `headersTimeout`/`requestTimeout`
+  applied to bound slow header/body uploads. Full route table (run
+  start/resume/cancel, SSE events, frames, approvals, signals, `/metrics`)
+  lives in [Server Mode](/integrations/server).
 </ResponseField>
 
 ```ts
@@ -89,10 +89,9 @@ const server = startServer({
 
 ## createServeApp
 
-Build a Hono app for a single, already-loaded workflow and run. Returns a
-standard Hono app: mount it with `Bun.serve`, route it into another Hono app, or
-drive `app.fetch` directly in tests. This backs `bunx smithers-orchestrator up
---serve`.
+Builds a Hono app for a single, already-loaded workflow and run: mount it with
+`Bun.serve`, route it into another Hono app, or drive `app.fetch` directly in
+tests. Backs `bunx smithers-orchestrator up --serve`.
 
 ```ts
 function createServeApp(opts: ServeOptions): import("hono").Hono;
@@ -101,20 +100,20 @@ function createServeApp(opts: ServeOptions): import("hono").Hono;
 <ParamField path="opts" type="ServeOptions" required>
   <Expandable title="ServeOptions">
     <ParamField path="workflow" type="SmithersWorkflow<unknown>" required>
-      The loaded workflow instance.
+      Loaded workflow instance.
     </ParamField>
     <ParamField path="adapter" type="SmithersDb" required>
       Smithers DB adapter, e.g. `new SmithersDb(workflow.db)`.
     </ParamField>
     <ParamField path="runId" type="string" required>
-      The active run id this app serves.
+      Active run id this app serves.
     </ParamField>
     <ParamField path="abort" type="AbortController" required>
       Shared cancellation controller. Aborting it cancels the served run.
     </ParamField>
     <ParamField path="authToken" type="string">
-      Bearer token for every route except `/health`. Falls back to
-      `SMITHERS_API_KEY`; disabled when unset. Accepts `Authorization: Bearer`
+      Bearer token for every route but `/health`; falls back to
+      `SMITHERS_API_KEY`, disabled when unset. Accepts `Authorization: Bearer`
       or `x-smithers-key`.
     </ParamField>
     <ParamField path="metrics" type="boolean" default="true">
@@ -146,13 +145,14 @@ Bun.serve({ port: 7331, fetch: app.fetch });
 
 ## Gateway
 
-The multi-run control plane. Construct it, `register()` one or more workflows,
-then `listen()`. It serves RPC over `POST /v1/rpc/<method>` (and `POST /rpc`)
-and over WebSocket on the same origin, with a `/health`, `/metrics`,
-`/workflows`, and per-workflow webhook endpoints. The RPC methods (`launchRun`,
-`getRun`, `listRuns`, `submitApproval`, `submitSignal`, cron, time-travel, and
-more) are documented per method; see [`launchRun`](/rpc/launch-run) for the
-request/response and scope shape they share.
+The multi-run control plane: construct it, `register()` one or more
+workflows, then `listen()`. Serves RPC over `POST /v1/rpc/<method>` (and
+`POST /rpc`) and over WebSocket on the same origin, plus `/health`,
+`/metrics`, `/workflows`, and per-workflow webhook endpoints. RPC methods
+(`launchRun`, `getRun`, `listRuns`, `submitApproval`, `submitSignal`, cron,
+time-travel, and more) are documented per method; see
+[`launchRun`](/rpc/launch-run) for the request/response and scope shape they
+share.
 
 ```ts
 class Gateway {
@@ -194,24 +194,23 @@ await gateway.listen({ port: 7331 });
       Feature flags advertised on `/health` and in the connect handshake.
     </ParamField>
     <ParamField path="heartbeatMs" type="number" default="15000">
-      WebSocket heartbeat interval. Also clamps the cron poll interval (1 s to
-      15 s).
+      WebSocket heartbeat interval; also clamps the cron poll interval (1-15s).
     </ParamField>
     <ParamField path="auth" type="GatewayAuthConfig">
-      Authentication mode. Omit to leave the gateway unauthenticated. See
+      Authentication mode; omit to leave the gateway unauthenticated. See
       [auth](#gatewayauthconfig) below.
     </ParamField>
     <ParamField path="ui" type="GatewayUiConfig">
-      Custom gateway-level UI. `true` mounts the built-in operator console at
+      Custom gateway-level UI; `true` mounts the built-in operator console at
       `/`. See [UI config](#ui-config) below.
     </ParamField>
     <ParamField path="workspaceRoot" type="string">
-      Absolute path to the workspace root that holds `.smithers/` and
-      `smithers.db`. Disk-backed registry reads (e.g. the `listPrompts` RPC)
+      Absolute path to the workspace root holding `.smithers/` and
+      `smithers.db`; disk-backed registry reads (e.g. the `listPrompts` RPC)
       resolve against it. Defaults to `process.cwd()`.
     </ParamField>
     <ParamField path="operatorUi" type="GatewayOperatorUiConfig | false" default='{ path: "/console" }'>
-      Built-in operator browser console. Set `false` to disable.
+      Built-in operator browser console; set `false` to disable.
     </ParamField>
     <ParamField path="defaults" type="GatewayDefaults">
       Per-gateway defaults. See [defaults](#defaults) below.
@@ -229,14 +228,14 @@ await gateway.listen({ port: 7331 });
       Per-run replay window for run event streams, in frames.
     </ParamField>
     <ParamField path="outOfProcessEventBridge" type="boolean" default="true">
-      Bridge persisted run events from the workspace DB into live streams for
-      runs executed by another process.
+      Bridges persisted run events from the workspace DB into live streams
+      for runs executed by another process.
     </ParamField>
     <ParamField path="outOfProcessEventBridgePollMs" type="number" default="1000">
       Poll interval (ms) for the out-of-process event bridge.
     </ParamField>
     <ParamField path="headersTimeout" type="number" default="30000">
-      Maximum time (ms) to receive complete request headers. Applied to the
+      Maximum time (ms) to receive complete request headers, applied to the
       Node HTTP server on `listen()`.
     </ParamField>
     <ParamField path="requestTimeout" type="number" default="60000">
@@ -256,33 +255,33 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
 
     <Expandable title="GatewayTokenGrant">
       <ParamField path="role" type="string" required>
-        Role assigned to requests bearing this token.
+        Role assigned to requests bearing it.
       </ParamField>
       <ParamField path="scopes" type="string[]" required>
         Granted scopes; `["*"]` grants all.
       </ParamField>
       <ParamField path="userId" type="string">
-        Stable user id recorded as the actor.
+        Stable user id recorded as actor.
       </ParamField>
       <ParamField path="tokenId" type="string">
-        Identifier for the token, for revocation and audit.
+        Token identifier, for revocation and audit.
       </ParamField>
       <ParamField path="issuedAtMs" type="number">
         Issue time (epoch ms).
       </ParamField>
       <ParamField path="expiresAtMs" type="number">
-        Expiry time (epoch ms); past tokens are rejected.
+        Expiry time (epoch ms); past tokens rejected.
       </ParamField>
       <ParamField path="revokedAtMs" type="number">
-        Revocation time (epoch ms); revoked tokens are rejected.
+        Revocation time (epoch ms); revoked tokens rejected.
       </ParamField>
     </Expandable>
   </ParamField>
   <ParamField path="allowedOrigins" type="string[]" default="[]">
-    Origin allowlist (defense-in-depth). `[]` enforces no check. When non-empty,
-    a request or WebSocket upgrade whose browser `Origin` header is not on the
-    list is rejected; requests with no `Origin` (server-to-server / CLI) are
-    allowed.
+    Origin allowlist (defense-in-depth). `[]` disables the check; when
+    non-empty, a request or WebSocket upgrade whose browser `Origin` header
+    isn't listed is rejected. Requests with no `Origin` (server-to-server /
+    CLI) are always allowed.
   </ParamField>
 </Expandable>
 
@@ -302,47 +301,41 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
     Claim holding scopes (array or space/comma-separated string).
   </ParamField>
   <ParamField path="roleClaim" type="string" default='"role"'>
-    Claim holding the role.
+    Claim holding role.
   </ParamField>
   <ParamField path="userClaim" type="string" default='"sub"'>
-    Claim holding the user id.
+    Claim holding user id.
   </ParamField>
   <ParamField path="defaultRole" type="string" default='"operator"'>
-    Role used when the role claim is absent.
+    Role used when role claim absent.
   </ParamField>
   <ParamField path="defaultScopes" type="string[]" default="[]">
-    Scopes used when the scope claim is absent.
+    Scopes used when scope claim absent.
   </ParamField>
   <ParamField path="clockSkewSeconds" type="number" default="60">
     Allowed `exp`/`nbf` skew. Negative values clamp to 0.
   </ParamField>
   <ParamField path="allowedOrigins" type="string[]" default="[]">
-    Origin allowlist (defense-in-depth). `[]` enforces no check. When non-empty,
-    a request or WebSocket upgrade whose browser `Origin` header is not on the
-    list is rejected; requests with no `Origin` (server-to-server / CLI) are
-    allowed.
+    Origin allowlist (defense-in-depth); same behavior as `token` mode above.
   </ParamField>
 </Expandable>
 
 <Expandable title='mode: "trusted-proxy"'>
-  Identity is read from request headers. Only safe behind a proxy you control
-  (Cloudflare Access, an internal API gateway) that strips and rewrites these
-  headers.
+  Identity is read from request headers; only safe behind a proxy you control
+  (Cloudflare Access, an internal API gateway) that strips and rewrites them.
 
   <ParamField path="trustedHeaders" type="string[]" default='["x-user-id","x-user-scopes","x-user-role"]'>
     Headers read as `[user, scopes, role]`.
   </ParamField>
   <ParamField path="allowedOrigins" type="string[]" default="[]">
-    Origin allowlist (defense-in-depth), enforced the same way across all auth
-    modes. `[]` enforces no check. When non-empty, a request or WebSocket upgrade
-    whose browser `Origin` header is not on the list is rejected; requests with
-    no `Origin` (server-to-server / CLI) are allowed.
+    Origin allowlist (defense-in-depth); same behavior as `token`/`jwt` modes
+    above, enforced identically across all auth modes.
   </ParamField>
   <ParamField path="defaultRole" type="string" default='"operator"'>
-    Role used when the role header is absent.
+    Role used when role header absent.
   </ParamField>
   <ParamField path="defaultScopes" type="string[]" default='["*"]'>
-    Scopes used when the scopes header is absent.
+    Scopes used when scopes header absent.
   </ParamField>
 </Expandable>
 
@@ -352,12 +345,12 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
   `true` mounts the built-in operator console. Otherwise an object:
 
   <ParamField path="entry" type="string" required>
-    Browser entry module for the React app. Smithers bundles it with Bun and
-    serves it from the gateway origin.
+    Browser entry module for the React app, bundled by Smithers with Bun and
+    served from the gateway origin.
   </ParamField>
   <ParamField path="path" type="string">
-    Mount path. Gateway-level UI defaults to `/`; workflow-level UI (via
-    `register`) defaults to `/workflows/<workflowKey>`.
+    Mount path: gateway-level UI defaults to `/`, workflow-level (via
+    `register`) to `/workflows/<workflowKey>`.
   </ParamField>
   <ParamField path="title" type="string">
     Document title for the generated HTML shell.
@@ -386,31 +379,30 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
     Default tool exposure for CLI-launched agents.
   </ParamField>
   <ParamField path="outOfProcessEventBridge" type="boolean">
-    Default for the out-of-process event bridge when the top-level option is
-    unset.
+    Default for out-of-process event bridge when top-level option is unset.
   </ParamField>
   <ParamField path="outOfProcessEventBridgePollMs" type="number">
-    Default bridge poll interval (ms) when the top-level option is unset.
+    Default bridge poll interval (ms) when top-level option is unset.
   </ParamField>
 </Expandable>
 
 ### register
 
-Register a workflow under `key`. Wires up its DB tables, optional cron schedule,
-webhook config, and embedded UI bundle. Returns `this`, so calls chain. A
-schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
+Registers a workflow under `key`: wires up its DB tables, optional cron
+schedule, webhook config, and embedded UI bundle. Returns `this`, so calls
+chain. A schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
 `ctx.auth.role = "system"`, `triggeredBy = "cron:gateway"`, `scopes = ["*"]`.
 
 <ParamField path="key" type="string" required>
-  Workflow key. Becomes the path segment for workflow-level UI and webhooks.
+  Workflow key; becomes the path segment for workflow-level UI and webhooks.
 </ParamField>
 <ParamField path="workflow" type="SmithersWorkflow" required>
-  The loaded workflow instance.
+  Loaded workflow instance.
 </ParamField>
 <ParamField path="options" type="GatewayRegisterOptions">
   <Expandable title="GatewayRegisterOptions">
     <ParamField path="schedule" type="string">
-      Cron expression. Fires the workflow on schedule.
+      Cron expression that fires the workflow on schedule.
     </ParamField>
     <ParamField path="webhook" type="GatewayWebhookConfig">
       Inbound webhook config for `POST /webhooks/<key>`. See below.
@@ -440,7 +432,7 @@ schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
         Signal name delivered to the run.
       </ParamField>
       <ParamField path="correlationIdPath" type="string">
-        JSON path to a correlation id used to match the target run.
+        JSON path to a correlation id matching the target run.
       </ParamField>
       <ParamField path="runIdPath" type="string">
         JSON path to an explicit run id in the payload.
@@ -458,7 +450,7 @@ schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
         Whether a webhook may launch a run.
       </ParamField>
       <ParamField path="inputPath" type="string">
-        JSON path to the sub-payload used as the run input.
+        JSON path to the sub-payload used as run input.
       </ParamField>
     </Expandable>
   </ParamField>
@@ -475,7 +467,7 @@ schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
       Host/interface to bind.
     </ParamField>
     <ParamField path="path" type="string">
-      Unix socket path. When set, `port`/`host` are ignored.
+      Unix socket path; when set, `port`/`host` are ignored.
     </ParamField>
   </Expandable>
 </ParamField>
@@ -494,5 +486,5 @@ schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
 ---
 
 For the full route tables and wire shapes, see [Server Mode](/integrations/server),
-[Serve Mode](/integrations/serve), and [Gateway](/integrations/gateway). The
-exact type definitions are mirrored in the [Types reference](/reference/types).
+[Serve Mode](/integrations/serve), and [Gateway](/integrations/gateway); exact
+type definitions are mirrored in [Types reference](/reference/types).

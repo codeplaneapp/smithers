@@ -119,4 +119,4 @@ const secReview = ctx.outputMaybe("review", { nodeId: "security-review" });
 const qualReview = ctx.outputMaybe("review", { nodeId: "quality-review" });
 ```
 
-Both return `undefined` until their respective tasks complete. When a downstream task just needs to consume those results as its prompt, as `aggregate` does above, prefer `<Task deps={{ secReview: outputs.review, qualReview: outputs.review }} needs={{ secReview: "security-review", qualReview: "quality-review" }}>` with a `(deps) => ...` children callback instead: it defers the task until both rows exist and hands you resolved, non-optional values.
+Both return `undefined` until their tasks complete. For a downstream task that just consumes the results as its prompt, like `aggregate` above, prefer `<Task deps={{ secReview: outputs.review, qualReview: outputs.review }} needs={{ secReview: "security-review", qualReview: "quality-review" }}>` with a `(deps) => ...` callback: it waits for both rows and hands you resolved, non-optional values.

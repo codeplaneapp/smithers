@@ -7,9 +7,9 @@ description: Run a Smithers <Sandbox> child workflow inside a Daytona sandbox wi
 
 `@smithers-orchestrator/daytona` is a first-class Smithers `SandboxProvider`
 backed by the [Daytona](https://www.daytona.io/) SDK. It runs a `<Sandbox>`
-child workflow's request inside a Daytona sandbox: it uploads the request JSON,
-runs the entry command, and reads the result JSON back. The shared provider-kit
-owns the request/result protocol, egress, secret scrubbing, and cleanup, so this
+child workflow's request inside a Daytona sandbox: uploads the request JSON,
+runs the entry command, reads the result JSON back. The shared provider-kit
+owns the request/result protocol, egress, secret scrubbing, and cleanup; this
 package only maps the small `SandboxSession` seam onto Daytona.
 
 The provider id is `daytona-sandbox` (exported as `DAYTONA_SANDBOX_PROVIDER_ID`).
@@ -24,16 +24,16 @@ import {
 
 ## Credentials
 
-`@daytonaio/sdk` is an optional dependency, imported lazily inside the session.
-Install it to use the real provider:
+`@daytonaio/sdk` is an optional dependency, imported lazily inside the session;
+install it to use the real provider:
 
 ```
 npm install @daytonaio/sdk
 ```
 
-Credentials come from factory options first, then the Daytona env chain. They
-are used only to build the local SDK client. They are never written into the
-request JSON and never forwarded into the remote sandbox env.
+Credentials come from factory options first, then the Daytona env chain, and
+are used only to build the local SDK client: never written into the request
+JSON, never forwarded into the remote sandbox env.
 
 - `DAYTONA_API_KEY`: API key (required for a real client).
 - `DAYTONA_API_URL`: API base url (optional).
@@ -106,7 +106,7 @@ them.
 
 Per-run `request.config` may carry `image`, `snapshot`, `resources`, `labels`,
 or a `workspace` block (`snapshotId`, `idleTimeoutSecs`,
-`persistence: "ephemeral"`) which maps onto the create options.
+`persistence: "ephemeral"`), mapped onto the create options.
 
 ## SDK subset used
 
@@ -118,11 +118,11 @@ env, timeoutSecs)` (Daytona merges stderr into `result`), and
 
 ## Cleanup and cost
 
-`cleanup: "destroy"` (default) deletes the sandbox after the run. `cleanup:
+`cleanup: "destroy"` (default) deletes the sandbox after the run; `cleanup:
 "keep"` leaves it running. `ephemeral` plus `autoStopInterval` bound idle cost
-even when cleanup is skipped, so a crashed orchestrator does not leave a sandbox
+even when cleanup is skipped, so a crashed orchestrator doesn't leave a sandbox
 billing forever. You pay for Daytona sandbox time from create to teardown.
 
 `createMockDaytonaSandboxEnvironment(handler, faults?)` is an in-memory SDK
-double for tests. It needs zero credentials, so unit tests run in CI without
+double for tests: needs zero credentials, so unit tests run in CI without
 touching Daytona.

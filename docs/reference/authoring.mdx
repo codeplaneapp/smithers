@@ -4,13 +4,13 @@ description: Factory functions that turn Zod schemas into a typed, durable workf
 icon: "pen-nib"
 ---
 
-A Smithers workflow is built from a single factory call. You hand it Zod schemas;
+A Smithers workflow is built from a single factory call. Hand it Zod schemas;
 it owns the storage layer and hands back a typed set of JSX components plus the
 `smithers()` wrapper that produces a runnable `SmithersWorkflow`.
 
-`createSmithers` is synchronous and SQLite-only. The other factories exist for
-the cases it cannot serve: Postgres/PGlite backends, environment-resolved
-backends, store migration, and non-JSX (external) build functions.
+`createSmithers` is synchronous and SQLite-only. The other factories cover what
+it can't: Postgres/PGlite backends, environment-resolved backends, store
+migration, and non-JSX (external) build functions.
 
 ```ts
 import {
@@ -23,18 +23,17 @@ import {
 ```
 
 <Note>
-`smithers`, `useCtx`, `outputs`, `tables`, and `db` are returned by the factory.
-The factory also returns workflow-context-bound component primitives such as
-`Workflow` and `Task`; those primitives are additionally exported from
-`smithers-orchestrator` for direct imports. The [Components
-reference](/reference/components) covers that component set; this page covers
-the factories themselves.
+The factory returns `smithers`, `useCtx`, `outputs`, `tables`, `db`, and
+workflow-context-bound component primitives like `Workflow` and `Task`; those
+primitives are also exported from `smithers-orchestrator` directly. The
+[Components reference](/reference/components) covers that component set; this
+page covers the factories themselves.
 </Note>
 
 ## createSmithers
 
 Schema-driven workflow API over a local SQLite database. The schemas you pass
-become both the output tables and the typed `outputs` accessor. This is the
+become both the output tables and the typed `outputs` accessor; this is the
 default entry point for almost every workflow.
 
 ```ts
@@ -46,7 +45,7 @@ function createSmithers<Schemas extends Record<string, ZodObject>>(
 
 <ParamField path="schemas" type="Record<string, ZodObject>" required>
   A map of output name to Zod object schema. Each key becomes a property on
-  `outputs` and a backing table. Use the reserved `input` key to type the
+  `outputs` and a backing table; use the reserved `input` key to type the
   workflow's run input.
 </ParamField>
 
@@ -71,8 +70,8 @@ function createSmithers<Schemas extends Record<string, ZodObject>>(
       SQLite journal mode passed through to the adapter.
     </ParamField>
     <ParamField path="backend" type='"sqlite" | "pglite" | "postgres"' default='"sqlite"'>
-      The backend the API was resolved to. `createSmithers` serves only
-      `"sqlite"`; `"pglite"`/`"postgres"` fail loud here and require
+      The resolved backend. `createSmithers` serves only `"sqlite"`;
+      `"pglite"`/`"postgres"` fail loud here and require
       `openSmithersBackend` or `createSmithersPostgres`.
     </ParamField>
   </Expandable>
@@ -83,8 +82,8 @@ function createSmithers<Schemas extends Record<string, ZodObject>>(
 
   <Expandable title="members">
     <ResponseField name="smithers" type="(build, opts?) => SmithersWorkflow">
-      Wraps a `(ctx) => JSX.Element` build function into a runnable workflow. The
-      default export of a workflow module.
+      Wraps a `(ctx) => JSX.Element` build function into a runnable workflow;
+      the default export of a workflow module.
     </ResponseField>
     <ResponseField name="Workflow / Task / Sequence / Parallel / Branch / Loop / ..." type="component">
       The full typed JSX component set. See the
@@ -126,7 +125,7 @@ export default smithers((ctx) => (
 ## createSmithersPostgres
 
 PostgreSQL or PGlite equivalent of `createSmithers`. Asynchronous because it
-opens a connection, and it returns an extra `close()`. Reach for it when a run
+opens a connection, and returns an extra `close()`. Reach for it when a run
 must outlive a single process or be shared across hosts.
 
 ```ts
@@ -141,7 +140,7 @@ function createSmithersPostgres<Schemas extends Record<string, ZodObject>>(
 </ParamField>
 
 <ParamField path="opts" type="CreateSmithersPostgresOptions">
-  Extends `CreateSmithersOptions` with the backend connection. A discriminated
+  Extends `CreateSmithersOptions` with the backend connection: a discriminated
   union on `provider`.
 
   <Expandable title="provider: postgres (default)">
@@ -161,7 +160,7 @@ function createSmithersPostgres<Schemas extends Record<string, ZodObject>>(
 
 <ResponseField name="Promise<CreateSmithersApi & { close }>" type="object">
   The same API as `createSmithers`, plus `close()` to release the connection
-  pool. Call it when the process is done with the backend.
+  pool when the process is done with the backend.
 </ResponseField>
 
 <CodeGroup>
@@ -184,10 +183,10 @@ const api = await createSmithersPostgres(schemas, {
 
 ## openSmithersBackend
 
-Resolve the backend from the environment instead of hard-coding it. Reads
-`smithers.config` / env vars and returns whichever of SQLite, PGlite, or Postgres
-they select. Use it in shared CLIs and servers that should honor a deployment's
-configured store.
+Resolve the backend from the environment instead of hard-coding it: reads
+`smithers.config` / env vars and returns whichever of SQLite, PGlite, or
+Postgres they select. Use it in shared CLIs and servers that should honor a
+deployment's configured store.
 
 ```ts
 function openSmithersBackend<Schemas extends Record<string, ZodObject>>(
@@ -197,7 +196,7 @@ function openSmithersBackend<Schemas extends Record<string, ZodObject>>(
 ```
 
 <ParamField path="schemas" type="Record<string, ZodObject>">
-  Optional output schemas. Omit to open the backend without registering tables.
+  Optional output schemas; omit to open the backend without registering tables.
 </ParamField>
 
 <ParamField path="opts" type="OpenSmithersBackendOptions">
@@ -229,7 +228,7 @@ function openSmithersBackend<Schemas extends Record<string, ZodObject>>(
 </ParamField>
 
 <ResponseField name="Promise<CreateSmithersApi & { close? }>" type="object">
-  The authoring API for the resolved backend. `close()` is present when the
+  The authoring API for the resolved backend; `close()` is present when the
   backend holds a connection (PGlite/Postgres).
 </ResponseField>
 
@@ -237,9 +236,9 @@ function openSmithersBackend<Schemas extends Record<string, ZodObject>>(
 
 ## migrateSmithersStore
 
-Copy an existing SQLite store into PGlite or Postgres, table by table, and write
-a migration marker. Use it once when graduating a project from the local SQLite
-default to a shared backend.
+Copy an existing SQLite store into PGlite or Postgres, table by table, and
+write a migration marker. Use it once, when graduating a project from the
+local SQLite default to a shared backend.
 
 ```ts
 function migrateSmithersStore(
@@ -253,7 +252,7 @@ function migrateSmithersStore(
       Directory to resolve paths and config from.
     </ParamField>
     <ParamField path="dbPath" type="string">
-      Source SQLite path. Defaults to the resolved store path.
+      Source SQLite path; defaults to the resolved store path.
     </ParamField>
     <ParamField path="to" type='"pglite" | "postgres"'>
       Target backend.
@@ -274,7 +273,7 @@ function migrateSmithersStore(
       Rows copied per batch.
     </ParamField>
     <ParamField path="onProgress" type="(event) => void | Promise<void>">
-      Progress callback. Receives `table-start`, `table-copied`, and `done`
+      Progress callback receiving `table-start`, `table-copied`, and `done`
       events with row counts and durations.
     </ParamField>
   </Expandable>
@@ -316,9 +315,10 @@ function migrateSmithersStore(
 
 ## createExternalSmithers
 
-Build a `SmithersWorkflow` from a plain build function instead of JSX. The build
-function returns a `HostNodeJson` tree that maps 1:1 to what the JSX renderer
-produces, so a workflow can be authored in any language that can emit that JSON.
+Build a `SmithersWorkflow` from a plain build function instead of JSX. The
+build function returns a `HostNodeJson` tree mapping 1:1 to what the JSX
+renderer produces, so a workflow can be authored in any language that can
+emit that JSON.
 
 ```ts
 function createExternalSmithers<S extends Record<string, ZodObject>>(
@@ -335,7 +335,7 @@ function createExternalSmithers<S extends Record<string, ZodObject>>(
       Named agents the build function references by id.
     </ParamField>
     <ParamField path="buildFn" type="(ctx: SerializedCtx) => HostNodeJson" required>
-      Pure function that returns the host-node tree for a given serialized
+      Pure function returning the host-node tree for a given serialized
       context. See [`HostNodeJson`](/reference/types).
     </ParamField>
     <ParamField path="dbPath" type="string">
@@ -354,5 +354,5 @@ function createExternalSmithers<S extends Record<string, ZodObject>>(
 ---
 
 Once you have a `SmithersWorkflow`, run it with the [Runtime API](/runtime/run-workflow)
-or the [CLI](/cli/overview). For the full type surface, see the
+or the [CLI](/cli/overview); for the full type surface, see the
 [Types reference](/reference/types).

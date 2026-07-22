@@ -91,9 +91,9 @@ bunx smithers-orchestrator up tools-agent.tsx --input '{}'
 |------|-------------|
 | `read` | Read file contents by path. Supports line ranges. |
 | `write` | Write content to a file. Creates if absent. |
-| `edit` | Apply a unified diff `patch` to a file. Input: `{ path, patch }` where `patch` is a valid unified diff string. |
+| `edit` | Apply a unified diff `patch` to a file. Input: `{ path, patch }`, where `patch` is a valid unified diff string. |
 | `grep` | Regex search over file contents. Returns files, lines, context. |
-| `bash` | Execute shell commands. Runs in the workflow's working directory. No sandboxing by default, so combine with `continueOnFail` and `timeoutMs`. |
+| `bash` | Executes shell commands in the workflow's working directory. Unsandboxed by default, so combine with `continueOnFail` and `timeoutMs`. |
 
 ## Robustness Props
 

@@ -3,9 +3,7 @@ title: review
 description: Review the current repository state with configured agents.
 ---
 
-`review` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
-
-`review` runs the shared `Review` component over the prompt and returns structured reviewer feedback, approval status, and issues.
+`review` is an archived example, not installed by `init`: copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. It runs the shared `Review` component over the prompt and returns structured reviewer feedback, approval status, and issues.
 
 ```bash
 bunx smithers-orchestrator workflow run review --prompt "Review the current repository changes"
@@ -25,7 +23,7 @@ bunx smithers-orchestrator workflow run review --prompt "Review the current repo
 
 Reviewers return:
 
-- `reviewer`: identifier string for the agent that produced this review (e.g. `reviewer-1`).
+- `reviewer`: agent id that produced this review (e.g. `reviewer-1`).
 - `approved`: whether the change is production-ready.
 - `feedback`: concise review notes.
 - `issues`: structured findings with severity, title, optional file, and description.

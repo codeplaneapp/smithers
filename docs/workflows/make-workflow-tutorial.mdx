@@ -3,12 +3,11 @@ title: make-workflow-tutorial
 description: First-run tutorial that recommends, builds, launches, and monitors a project-specific workflow.
 ---
 
-`make-workflow-tutorial` is an archived guided example and is not installed by
-`init`. Copy it from `examples/init-pack/` with its dependency closure, or run
-the seeded `create-workflow` workflow directly. Once installed, it turns "what should I automate?"
-into a real Smithers workflow. It reads the Smithers docs, scans the current repo, samples
-recent external coding-agent sessions, recommends a ranked list of workflow ideas, asks you
-which one to build, then delegates the build to [`create-workflow`](/workflows/create-workflow).
+`make-workflow-tutorial` is an archived guided example, not installed by
+`init`: copy it from `examples/init-pack/` with its dependency closure, or run
+the seeded `create-workflow` workflow directly. It turns "what should I automate?"
+into a real Smithers workflow: it recommends one from your repo and recent
+sessions instead of a blank catalog, then delegates the build to [`create-workflow`](/workflows/create-workflow).
 
 ```bash
 bunx smithers-orchestrator workflow run make-workflow-tutorial
@@ -39,11 +38,7 @@ bunx smithers-orchestrator workflow run make-workflow-tutorial \
 
 ## What it reads
 
-The session reader is read-only and bounded. It samples recent files from
-`~/.claude/projects`, `~/.codex/sessions`, `~/.codex/history.jsonl`, and
-`~/.pi/agent/sessions`, extracts user and assistant text where schemas are known, and
-redacts API keys and bearer tokens before passing snippets to the recommendation task.
-
-Use this after copying the example when you want your agent to discover a
-high-leverage workflow from your actual repo and recent work instead of starting from a blank
-catalog.
+The session reader samples recent files from `~/.claude/projects`,
+`~/.codex/sessions`, `~/.codex/history.jsonl`, and `~/.pi/agent/sessions`, extracts
+user and assistant text where schemas are known, and redacts API keys and
+bearer tokens before passing snippets to the recommendation task.

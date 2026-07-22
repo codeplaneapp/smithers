@@ -13,4 +13,4 @@ apiVersion: v1
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, and `Internal`.
 
-This RPC is intentionally scoped above normal run write access. The Gateway verifies the run exists and returns a `sessionId` token that the caller (e.g. `bunx smithers-orchestrator hijack`) uses to coordinate the operator handoff: attaching a terminal, injecting commands, or resuming the agent conversation.
+Scoped above normal run write access, this RPC has the Gateway verify the run exists and return a `sessionId` token the caller (e.g. `bunx smithers-orchestrator hijack`) uses to attach a terminal, inject commands, or resume the agent conversation.

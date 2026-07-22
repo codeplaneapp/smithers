@@ -3,17 +3,16 @@ title: hello
 description: The smallest possible workflow, one agent task that runs a Markdown prompt.
 ---
 
-`hello` is a preserved example: a single agent `<Task>` that runs the prompt in
-`.smithers/prompts/hello.mdx` and greets whoever you name. It is no longer
-installed by default; copy it from `examples/init-pack/` when you want the
-smallest end-to-end workflow.
+`hello` is a preserved example, no longer installed by default: copy it from
+`examples/init-pack/` for the smallest end-to-end workflow. It greets whoever
+you name via `.smithers/prompts/hello.mdx`.
 
 ```bash
 bunx smithers-orchestrator workflow run hello --input '{"name":"Ada"}'
 ```
 
-With no arguments, `name` defaults to `"world"`, so `workflow run hello` works on
-its own.
+With no arguments, `name` defaults to `"world"`, so `workflow run hello` works
+standalone.
 
 ## Inputs
 
@@ -23,25 +22,24 @@ its own.
 
 ## How It Runs
 
-1. Reads the input `name` (defaults to `"world"`).
+1. Reads `name` (default `"world"`).
 2. Runs one agent `<Task>` whose prompt is `.smithers/prompts/hello.mdx`, with
    `name` interpolated into the Markdown via `{props.name}`.
 3. Returns the agent's greeting.
 
-Because the instruction lives in a Markdown prompt rather than code, changing the
-behavior is just editing `.smithers/prompts/hello.mdx` (for example, ask for a
-haiku instead of a greeting) and re-running.
+The instruction lives in a Markdown prompt, so changing the behavior means
+editing `.smithers/prompts/hello.mdx` (e.g. ask for a haiku instead of a
+greeting) and re-running.
 
 ## Output Shape
 
-`hello` returns the single task's text output (the generated greeting). The run
-log records the agent invocation and its result.
+`hello` returns the task's text output, the greeting; the run log records the
+invocation and result.
 
 ## Use it when
 
 - You are learning Smithers and want the smallest end-to-end run.
-- You are scaffolding a new workflow and want a known-good single-task template to
-  grow from.
+- You are scaffolding a new workflow and want a known-good single-task template.
 
 ## Use something else when
 
@@ -52,5 +50,5 @@ log records the agent invocation and its result.
 
 ## Resume & retry
 
-Runs are durable and resume with `up --resume`. `hello` is a single task, so a
-resume simply re-runs that task if it had not completed.
+Runs are durable and resume with `up --resume`; since `hello` is a single task,
+resuming just re-runs it if incomplete.

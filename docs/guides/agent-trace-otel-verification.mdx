@@ -50,8 +50,7 @@ Use the built-in reproducible workflow at `workflows/agent-trace-otel-demo.tsx`.
 It emits:
 
 - one Pi-like high-fidelity attempt with canonical trace events plus persisted session transcript rows
-- one Claude-like structured attempt with canonical trace events plus provider session transcript rows
-- one Codex-like structured attempt with canonical trace events plus provider session transcript rows
+- one Claude-like and one Codex-like structured attempt, each with canonical trace events plus provider session transcript rows
 - one Gemini-like structured attempt
 - one SDK-style final-only attempt
 - stable run annotations for Loki queries
@@ -84,7 +83,7 @@ find .smithers/executions/agent-trace-otel-demo/logs/agent-trace -type f -maxdep
 
 ## End-to-end verification script
 
-`scripts/verify-observability.sh` runs the full reset → start → demo workflow (success + failure) → Loki/Tempo query verification flow and writes a timestamped evidence bundle under `tmp/verification/<timestamp>`. Use this as the canonical reproduction path for reviewers:
+`scripts/verify-observability.sh` runs the full reset → start → demo workflow (success + failure) → Loki/Tempo query verification flow, writing a timestamped evidence bundle under `tmp/verification/<timestamp>`. Use this as the canonical reproduction path for reviewers:
 
 ```bash
 scripts/verify-observability.sh
@@ -112,10 +111,10 @@ Smithers exports two related Loki log families:
 - `agent-trace`: normalized canonical execution events such as deltas, tool lifecycle, usage, and capture warnings/errors
 - `agent-session`: provider transcript/session rows observed live or backfilled from persisted session logs
 
-Both families share the same run/workflow/node/attempt/agent correlation fields and the same redaction rules.
-`artifact.created` remains local-only and is not exported to Loki.
+Both families share the same run/workflow/node/attempt/agent correlation fields and redaction rules.
+`artifact.created` stays local-only, not exported to Loki.
 
-Use `{service_name="smithers-dev"}` as the stream selector, then filter on structured metadata in the LogQL pipeline. Use `| json` to inspect the structured log body.
+Use `{service_name="smithers-dev"}` as the stream selector, then filter on structured metadata in the LogQL pipeline; `| json` inspects the structured log body.
 
 All events for one run:
 
@@ -209,7 +208,7 @@ curl -sG 'http://localhost:3100/loki/api/v1/query_range' \
 
 ## Tempo trace checks
 
-Tempo search should show Smithers spans once a workflow has run:
+Tempo search shows Smithers spans once a workflow has run:
 
 ```bash
 curl -s http://localhost:3200/api/search | jq .
@@ -236,19 +235,17 @@ Expected trace attributes include at least:
 
 ## Verification checklist
 
-- stack starts successfully in Docker
+- stack starts in Docker
 - Loki is present and queryable
 - collector logs pipeline is active
 - Pi traces show text deltas, thinking deltas, tool execution lifecycle, final message, usage, and run/node/attempt correlation
-- Pi session transcript rows are queryable in Loki
-- Claude session transcript rows are queryable in Loki
-- Codex session transcript rows are queryable in Loki
+- Pi, Claude, and Codex session transcript rows are queryable in Loki
 - second agent family is exported with truthful `final-only` completeness classification
 - Gemini `stream-json` attempts preserve structured deltas truthfully
 - malformed or truncated structured streams emit `capture.error` and classify as `capture-failed`
 - artifact write failures emit `capture.warning` and degrade to `partial-observed` without losing durable DB truth
 - Tempo search shows Smithers spans and trace attributes including `runId`
-- Prometheus is still scraping the collector successfully
+- Prometheus is still scraping the collector
 - secrets are redacted from canonical events, OTEL log bodies, and persisted trace artifacts
 
 ## Automated coverage
@@ -262,4 +259,4 @@ Expected trace attributes include at least:
 - canonical OTEL log record shaping with stable Loki query attributes
 - session-event OTEL log record shaping
 
-The full provider-specific test matrix from PR #119 (truncated streams, artifact write failures, multi-family final-only classification) is partially covered and will be extended in a follow-up.
+The full provider-specific test matrix from PR #119 (truncated streams, artifact write failures, multi-family final-only classification) is partially covered; a follow-up will extend it.

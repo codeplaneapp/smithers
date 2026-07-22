@@ -27,9 +27,9 @@ type MergeQueueProps = {
 
 ## Notes
 
-- Innermost group determines the effective cap for its descendants.
-- Tasks outside the queue are unaffected by its limit.
-- The default priority is `1000`, so ready landing work claims a free run slot
-  before ordinary tasks at priority `0`. An explicit child priority wins.
+- Innermost group determines the effective cap for its descendants; tasks
+  outside the queue are unaffected.
+- Default priority `1000` lets ready landing work claim a free run slot before
+  ordinary tasks at priority `0`; an explicit child priority wins.
 - `failurePolicy="quarantine"` lets unrelated queue branches continue after a
-  child fails; the default `halt` behavior fails the run.
+  child fails; default `halt` fails the run.

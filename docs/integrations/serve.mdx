@@ -3,7 +3,7 @@ title: Serve Mode
 description: Run a single workflow as an HTTP server with Hono. Interact with it over REST, stream events via SSE, and manage approvals remotely.
 ---
 
-Serve mode starts a Hono-based HTTP server alongside a running workflow. Every route operates on the single active run, with no workflow path or run ID in requests.
+Serve mode starts a Hono-based HTTP server alongside a running workflow. Every route operates on the single active run: no workflow path or run ID in requests.
 
 <Note>API reference: [Server & Gateway](/reference/server-gateway) lists every server and gateway export, its options, and links to source and tests.</Note>
 
@@ -13,7 +13,7 @@ Serve mode starts a Hono-based HTTP server alongside a running workflow. Every r
 bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
 ```
 
-A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure` to opt out, which is dangerous). Binding to the default `127.0.0.1` needs neither.
+A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure`, dangerous). The default `127.0.0.1` needs neither.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -25,7 +25,7 @@ A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure
 | `--metrics` | `true` | Expose `/metrics` Prometheus endpoint |
 | `--supervise` | `false` | Run the stale-run supervisor loop alongside `--serve` |
 
-The process stays alive after the workflow completes so final state remains queryable. Ctrl+C stops both the server and the workflow.
+The process stays alive after the workflow completes, so final state stays queryable. Ctrl+C stops both server and workflow.
 
 Detached mode:
 
@@ -107,7 +107,7 @@ Run status and node summary.
 
 ### GET /events
 
-SSE stream of lifecycle events. Same format as the [multi-workflow server](/integrations/server#api-routes-toon).
+SSE stream of lifecycle events, same format as the [multi-workflow server](/integrations/server#api-routes-toon).
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -125,7 +125,7 @@ id: 2
 
 - Polls every 500ms.
 - Auto-closes when the run reaches a terminal state.
-- Reconnect with `?afterSeq=N` to resume from a known position.
+- Reconnect with `?afterSeq=N` to resume.
 
 ### GET /frames
 
@@ -165,7 +165,7 @@ Cancel the running workflow.
 
 ### GET /metrics
 
-Prometheus text exposition. Same metrics as the [multi-workflow server](/integrations/server#api-routes-toon).
+Prometheus text exposition, same metrics as the [multi-workflow server](/integrations/server#api-routes-toon).
 
 ---
 

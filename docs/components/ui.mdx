@@ -3,8 +3,8 @@ title: <UI>
 description: Declare a workflow-owned browser UI that the Gateway serves and the client renders with React.
 ---
 
-`<UI>` lets a workflow carry its own Gateway UI declaration in the workflow TSX
-instead of registering a separate UI from the launcher. The component renders
+`<UI>` lets a workflow carry its own Gateway UI declaration in the workflow
+TSX, instead of registering a separate UI from the launcher. It renders
 nothing in the workflow graph; the Gateway discovers it during
 `gateway.register()`, bundles the client-side React entry, and serves it from
 the workflow UI route.
@@ -24,26 +24,26 @@ export default smithers(() => (
 ));
 ```
 
-`entry` paths resolve relative to the workflow source file when the Gateway was
-given `entryFile`. This is the default for `smithers gateway` and generated
+`entry` paths resolve relative to the workflow source file when the Gateway
+was given `entryFile`, the default for `smithers gateway` and generated
 `.smithers/gateway.ts` files.
 
 ## Props
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `entry` | `string` | Client entry module to bundle. Use this for full `gateway-react` apps. |
-| `source` | `string` | Client-safe module exporting a React component. The Gateway mounts it with React and passes boot props. |
+| `entry` | `string` | Client entry module to bundle; use for full `gateway-react` apps. |
+| `source` | `string` | Client-safe module exporting a React component; the Gateway mounts it with React and passes boot props. |
 | `exportName` | `string` | Named export to read from `source`; defaults to `default`. |
 | `title` | `string` | Browser page title. |
 | `path` | `string` | URL route to mount the UI at. Defaults to `/workflows/<key>`. Ignored by `<TUI>`. |
 | `props` | `Record<string, unknown>` | Serializable props passed to a `source` component. |
 | `children` | `ReactNode` | Literal intrinsic React DOM tree for small inline views. |
 
-Inline literal children must be serializable DOM elements and text. Use `entry`
-when the UI needs gateway-react hooks, Gateway actions, or TanStack collection
-state. Use `source` for a small component export that receives serialized props
-and boot metadata from the Gateway.
+Inline literal children must be serializable DOM elements and text. Use
+`entry` when the UI needs gateway-react hooks, Gateway actions, or TanStack
+collection state; use `source` for a small component export that receives
+serialized props and boot metadata from the Gateway.
 
 ## Existing UIs
 

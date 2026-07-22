@@ -40,9 +40,9 @@ type DriftDetectorProps = {
 
 ## Notes
 
-- Without `poll`, the component runs once; with `poll`, it wraps in a Loop.
-- When comparison output exists, `alertIf` decides whether to render `alert`; without `alertIf`, `comparison.drifted === true` is the trigger.
-- Without `alert`, the component compares but takes no action on drift.
+- Without `poll` the component runs once; with `poll` it wraps in a Loop.
+- Given a comparison output, `alertIf` decides whether to render `alert`; without `alertIf`, the trigger is `comparison.drifted === true`.
+- Without `alert`, the component compares but takes no action.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
 ## Source

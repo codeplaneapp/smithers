@@ -31,24 +31,24 @@ Both `RunOptions` and `RunResult` are defined in [Types](/reference/types).
 ## Concurrency
 
 When `opts.maxConcurrency` is omitted, a run starts with a cap of 4 concurrent
-tasks. Smithers can raise that cap as work queues, up to the positive-integer
-`SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` environment setting (16 by default).
-A wider declared `<Parallel maxConcurrency>` or `subtreeConcurrency` also raises
-an unpinned run's initial cap and is not limited by that automatic ceiling.
+tasks that Smithers can raise as work queues up to the positive-integer
+`SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` environment setting (16 by default); a
+wider declared `<Parallel maxConcurrency>` or `subtreeConcurrency` also raises
+an unpinned run's initial cap, unconstrained by that ceiling.
 
-Providing `opts.maxConcurrency` explicitly pins the cap. It disables automatic
-raises, including declared-width raises, and the run cannot exceed the supplied
-value. The supplied value can itself be larger than the automatic ceiling.
+Providing `opts.maxConcurrency` explicitly pins the cap: it disables automatic
+raises, including declared-width raises, so the run can't exceed the supplied
+value, even though that value can itself be larger than the automatic ceiling.
 
 ## Resume
 
-Pass the original `runId` plus `resume: true`. State loads from the configured durable store, completed tasks are skipped, in-progress attempts older than 15 minutes are abandoned and retried.
+Pass the original `runId` plus `resume: true`: state loads from the configured durable store, completed tasks are skipped, and in-progress attempts older than 15 minutes are abandoned and retried.
 
 ```ts
 await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "my-run-123", resume: true }));
 ```
 
-The original input row is loaded from durable state; pass `{}` for `input`. The workflow file hash and VCS root must match the original run.
+The original input row is loaded from durable state, so pass `{}` for `input`; the workflow file hash and VCS root must match the original run.
 
 ## Cancel via AbortSignal
 
@@ -64,11 +64,11 @@ All in-flight attempts are marked cancelled and `NodeCancelled` events are emitt
 
 ## Hijack handoff
 
-If a CLI hijack happens mid-run (`bunx smithers-orchestrator hijack RUN_ID`), the run ends `"cancelled"` and the latest attempt metadata stores `hijackHandoff`. On `resume: true`, Smithers waits for a safe handoff point and continues with the persisted CLI session id (see [CLI Agents](/integrations/cli-agents)) or the persisted message history (SDK agents).
+If a CLI hijack happens mid-run (`bunx smithers-orchestrator hijack RUN_ID`), the run ends `"cancelled"` and the latest attempt metadata stores `hijackHandoff`; on `resume: true`, Smithers waits for a safe handoff point and continues with the persisted CLI session id (see [CLI Agents](/integrations/cli-agents)) or message history (SDK agents).
 
 ## `result.output`
 
-Populated only when the schema passed to `createSmithers()` has a key literally named `output`. Inside a workflow, consume other typed rows through `ctx.output`, `ctx.latest`, or `ctx.outputs`. Outside the workflow, expose the run through the workspace Gateway and fetch a node's typed output through `getNodeOutput`:
+Populated only when the schema passed to `createSmithers()` has a key literally named `output`. Inside a workflow, consume other typed rows through `ctx.output`, `ctx.latest`, or `ctx.outputs`; outside it, expose the run through the workspace Gateway and fetch a node's typed output through `getNodeOutput`:
 
 ```ts
 import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
@@ -85,13 +85,13 @@ const page = await gateway.getNodeOutput({
 ```
 
 Controllers and monitors must not open SQLite/PGlite/Postgres or query output and
-`_smithers_*` tables directly. The Gateway preserves auth, ownership,
-invalidation, event emission, and backend independence. Direct storage access is
-reserved for runtime implementation, migration, backend tests, and maintainer
-diagnostics.
+`_smithers_*` tables directly: the Gateway preserves auth, ownership,
+invalidation, event emission, and backend independence. Direct storage access
+stays reserved for runtime implementation, migration, backend tests, and
+maintainer diagnostics.
 
 ## Notes
 
-- On macOS, `runWorkflow` acquires a `caffeinate` lock to prevent idle sleep and releases it on completion. On other platforms this is a no-op.
+- On macOS, `runWorkflow` acquires a `caffeinate` lock to prevent idle sleep and releases it on completion; elsewhere this is a no-op.
 - Set `SMITHERS_LOG_LEVEL=debug` to enable verbose engine logging.
 - For lifecycle events, pass `onProgress` (see [Events](/runtime/events)).

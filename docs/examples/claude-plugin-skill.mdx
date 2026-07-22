@@ -6,7 +6,7 @@ description: "Example from ~/.claude/plugins/smithers/. A Claude Code plugin tha
 # Claude Code Plugin: Smithers Skill
 
 <Note>
-**Ghost doc.** Real Claude Code plugin at `~/.claude/plugins/smithers/`. Registers the `smithers` skill so Claude Code can create and run workflows.
+**Ghost doc.** Real Claude Code plugin at `~/.claude/plugins/smithers/`, registering the `smithers` skill to create and run workflows.
 </Note>
 
 ## plugin.json
@@ -69,10 +69,10 @@ Five complete workflow examples (see `~/.claude/plugins/smithers/skills/smithers
 
 | Component / Utility | Purpose |
 |---------------------|---------|
-| `<Ralph>` | Loop controller: remounts children each iteration until no agents render or `maxIterations` is reached |
-| `<Claude>` | Self-executing agent: runs a Claude agent on mount, calls `onFinished`/`onError` callbacks |
+| `<Ralph>` | Loop controller: remounts children each iteration until no agents render or `maxIterations` hits |
+| `<Claude>` | Self-executing agent: runs on mount, calls `onFinished`/`onError` |
 | `<Phase>` | Semantic grouping for orchestration phases, used in monitor output |
 | `<Step>` | Fine-grained grouping within a phase |
 | Zustand Store | State management: drives phase transitions via `onFinished` callbacks |
-| `RalphContext` | Context object exposing iteration count and completion signalling |
+| `RalphContext` | Exposes iteration count and completion signalling |
 | `serialize()` | Serializes the orchestration tree to an XML plan string |

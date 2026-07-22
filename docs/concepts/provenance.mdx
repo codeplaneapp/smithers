@@ -3,12 +3,12 @@ title: Provenance binding
 description: Bind a task to the exact upstream artifact that authorized it; stale authority parks instead of running.
 ---
 
-A review approves a *specific* tree. A gate certifies a *specific* commit. The
-moment the artifact changes, the authority is stale - but in a re-rendering
-graph with loops and retries, nothing stops a task from reading last
-iteration's approval and acting on it. Provenance binding makes "the approval
-is only valid for the artifact it approved" an engine-enforced property
-instead of hand-rolled proof-id plumbing.
+A review approves a *specific* tree; a gate certifies a *specific* commit.
+The moment the artifact changes, that authority is stale, but in a
+re-rendering graph with loops and retries, nothing stops a task from reading
+last iteration's approval and acting on it. Provenance binding makes "the
+approval is only valid for the artifact it approved" an engine-enforced
+property, not hand-rolled proof-id plumbing.
 
 ```ts
 // In workflow code (render time):
@@ -34,21 +34,21 @@ type ProofBinding = {
 
 - **`ctx.prove(table, { nodeId, iteration? })`** reads the latest (or the
   named-iteration) output row of that node and returns a `ProofBinding`
-  carrying a content digest of the row. It returns `undefined` while the row
-  does not exist - like `ctx.outputMaybe`, it never throws at render time.
+  carrying a content digest of the row, or `undefined` if the row doesn't
+  exist yet; like `ctx.outputMaybe`, it never throws at render time.
 - **`bind`** on `<Task>` (a single binding or an array) is checked by the
-  engine **at schedule time**, not render time: the digest of the bound row's
-  *current* value is recomputed and compared. On mismatch the task parks as
+  engine **at schedule time**, not render time: the bound row's *current*
+  digest is recomputed and compared, and a mismatch parks the task as
   `BOUND_STALE` instead of executing.
-- A `bind` of `undefined` blocks scheduling the same way an unmet dependency
-  does - a task cannot run on authority that was never produced.
+- A `bind` of `undefined` blocks scheduling like an unmet dependency: a task
+  cannot run on authority that was never produced.
 
 ## Staleness is a signal, not an error
 
-`BOUND_STALE` does not fail the run. It is exposed to workflow code
+`BOUND_STALE` does not fail the run: it's exposed to workflow code
 (`ctx.boundStale("lane:push")`) and to `bunx smithers-orchestrator why`. On a
-subsequent render, that signal can keep an active correction loop open while
-the upstream authority is re-produced against the current artifact:
+subsequent render, that signal can keep a correction loop open while the
+upstream authority is reproduced against the current artifact:
 
 ```tsx
 const pushStale = ctx.boundStale("lane:push");
@@ -59,21 +59,22 @@ const authorityIsCurrent = gate?.approved === true && !pushStale;
 </Loop>
 ```
 
-`until` is a boolean in the public API. A loop that has already completed does
-not reopen merely because a downstream binding later becomes stale. Keep the
-correction path active until the bound action is safe, or re-produce the
-authority through an external/resume path before resuming the parked task.
+`until` is a boolean in the public API: a loop that has already completed
+does not reopen merely because a downstream binding later becomes stale.
+Keep the correction path active until the bound action is safe, or reproduce
+the authority through an external/resume path before resuming the parked
+task.
 
 ## Notes
 
 - Bindings hash **content**, not iteration counters, so they survive resume,
   retry, replay, and time travel: a restored run re-verifies against whatever
   the rows say now.
-- `ctx.boundStale(nodeId)` reports only the current task iteration. A newly
-  rendered iteration starts false even when an older iteration parked stale.
+- `ctx.boundStale(nodeId)` reports only the current task iteration: a newly
+  rendered iteration starts false even when an older one parked stale.
 - Bind the *decision* row (the review verdict, the gate result), not raw agent
   text; digesting is deterministic over the typed output row.
-- This complements, not replaces, human approval:
+- Human approval and provenance binding answer different questions:
   [`<Approval>`](/components/approval) answers "may this happen at all";
   a proof binding answers "is the thing that was approved still the thing
   about to happen".

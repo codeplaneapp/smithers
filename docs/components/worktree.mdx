@@ -32,7 +32,7 @@ type WorktreeProps = {
 
 ## Path Access
 
-Workflow code can read the same resolved absolute worktree path that Smithers uses for task
+Workflow code can read the same resolved absolute worktree path Smithers uses for task
 execution:
 
 ```tsx
@@ -40,39 +40,39 @@ const root = ctx.worktreePath("build") ?? ctx.resolveWorktreePath("/tmp/smithers
 const verify = JSON.parse(readFileSync(join(root, "artifacts/build/verify.json"), "utf8"));
 ```
 
-Use `ctx.worktreePath(taskOrWorktreeId)` when a task descriptor or explicit `<Worktree id>`
-has rendered. Use `ctx.resolveWorktreePath(pathProp)` for the same string passed to
+Use `ctx.worktreePath(taskOrWorktreeId)` once a task descriptor or explicit `<Worktree id>`
+has rendered; use `ctx.resolveWorktreePath(pathProp)` for the same string passed to
 `<Worktree path={...}>`, including on the first render before descriptor lookups exist.
-Both APIs use the graph resolver, so they match the path Smithers gives worker tasks.
+Both use the graph resolver, so they match the path Smithers gives worker tasks.
 
 ## Notes
 
 - Descendants inherit `worktreeId` and absolute `worktreePath` as `cwd`.
 - **Do not pin a `cwd` on an agent used inside a `<Worktree>`.** A worker agent's working
   directory resolves as `agent.cwd ?? worktreePath ?? repoRoot`, so an explicit `cwd` (e.g.
-  `new ClaudeCodeAgent({ cwd: process.cwd() })`) OVERRIDES the worktree, so the agent then reads
-  and writes the repo root instead of the isolated worktree. Its branch stays empty and a
+  `new ClaudeCodeAgent({ cwd: process.cwd() })`) overrides the worktree: the agent then reads
+  and writes the repo root instead of the isolated worktree, its branch stays empty, and a
   downstream merge/land step has nothing to merge. Leave agent `cwd` unset and let
-  `<Worktree>` supply it. Likewise, helpers that touch a worktree's files must use
-  `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)`; never reconstruct paths with
+  `<Worktree>` supply it. Likewise, helpers touching a worktree's files must use
+  `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)`, never reconstructing paths with
   `process.cwd()`, `import.meta.dir`, `../..`, or fallback candidate lists.
 - jj-backed worktrees include colocated git metadata, so git-native CLI agents such as Codex
-  resolve the worktree directory as their repository root. Do not compensate by setting an
-  agent `cwd`; that defeats the worktree isolation above.
+  already resolve the worktree directory as their repository root. Don't set `cwd` to
+  compensate: that's the isolation break described above.
 - **Dependencies are not installed in a fresh worktree.** Agent tasks inside a `<Worktree>`
-  get a `[smithers worktree isolation]` preamble prepended to their prompt: do all work inside
-  the worktree, install dependencies fresh there (e.g. `pnpm install` at the worktree root),
-  and never symlink node_modules from, or write into, the parent checkout. An install through
-  a shared node_modules link rewrites the parent checkout's workspace links to point into the
-  worktree, and every one of them dangles once the worktree is removed.
+  get a `[smithers worktree isolation]` prompt preamble: do all work inside the worktree,
+  install dependencies fresh there (e.g. `pnpm install` at the worktree root), and never
+  symlink node_modules from, or write into, the parent checkout. An install through a shared
+  node_modules link rewrites the parent checkout's workspace links to point into the
+  worktree, all of which dangle once the worktree is removed.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
-  `<Task>` (or helper) that detects changes with `git status --porcelain` can see a *clean*
-  tree and skip its work, because jj has already committed the working-copy edits to the
-  bookmark, and `git checkout` or `git restore` of a file in the worktree won't stick for the
-  same reason (jj re-materializes it). Detect a worktree's changes by diffing against its
-  base branch (`jj diff --from <baseBranch> --to @`, or `git diff <baseBranch>...HEAD`), not
-  by git's dirty-state, and let the merge/land step operate on the committed bookmark rather
-  than re-running `git add`/`git commit`.
+  `<Task>` (or helper) that checks for changes with `git status --porcelain` can see a
+  *clean* tree and skip its work, because jj has already committed the working-copy edits to
+  the bookmark, and `git checkout`/`git restore` won't stick either, for the same reason (jj
+  re-materializes it). Detect changes by diffing against the base branch (`jj diff --from
+  <baseBranch> --to @`, or `git diff <baseBranch>...HEAD`) instead of relying on git's
+  dirty-state, and let the merge/land step operate on the committed bookmark rather than
+  re-running `git add`/`git commit`.
 - Innermost `<Worktree>` wins when nested; duplicate ids are rejected.
 - Empty/whitespace `path` is rejected at render time.
-- A relative `path` resolves against the **launch root**, not the workflow file's directory. The launch root is `--root` (if given), else the nearest ancestor of the operator working directory that contains a `.smithers/` package, else the operator working directory. It is never `dirname(workflowFile)`; `workflowPath` is threaded through render separately and is not used as the path base. A relative `path` like `wt-a` lands beside wherever you ran `bunx smithers-orchestrator up <path>` from, which can differ from where the workflow source lives. Smithers emits a one-time warning for relative worktree paths showing the base and resolved absolute path. Pass an absolute `path` (for example `/tmp/smithers/wt-a`) when you need a deterministic location, and read back the resolved location with `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)` rather than reconstructing it.
+- A relative `path` resolves against the **launch root**, never the workflow file's directory (`workflowPath` is threaded through render separately and isn't used as the path base). The launch root is `--root` if given, else the nearest ancestor of the operator working directory containing a `.smithers/` package, else the operator working directory. A relative `path` like `wt-a` lands beside wherever you ran `bunx smithers-orchestrator up <path>` from, which can differ from where the workflow source lives; Smithers emits a one-time warning for relative worktree paths showing the base and resolved absolute path. Pass an absolute `path` (e.g. `/tmp/smithers/wt-a`) for a deterministic location, and read back the resolved location with `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)` rather than reconstructing it.

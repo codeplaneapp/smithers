@@ -5,7 +5,7 @@ maturity: stable
 apiVersion: v1
 ---
 
-`streamRunEvents` subscribes to per-run events over WebSocket.
+`streamRunEvents` subscribes to per-run events.
 
 - Method: `streamRunEvents`
 - Scope: `run:read`
@@ -16,5 +16,5 @@ apiVersion: v1
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `SeqOutOfRange`, and `Internal`.
 
 - **Reconnect:** pass the last seen `seq` as `afterSeq`.
-- **Gap resync:** if the requested `seq` has been truncated (window default: `10000`), the stream emits `GapResync { fromSeq, toSeq }` with a full run snapshot, then continues.
+- **Gap resync:** if `seq` was truncated (default window `10000`), the stream emits `GapResync { fromSeq, toSeq }` with a full run snapshot, then resumes.
 - **Heartbeat:** `Heartbeat` frames are emitted separately from event frames.

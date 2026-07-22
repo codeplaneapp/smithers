@@ -3,11 +3,11 @@ title: "Smithers vs. LangGraph"
 description: "LangGraph builds custom agents out of LLM calls and tools. Smithers orchestrates the coding agents you already use as durable, reviewable workflow steps."
 ---
 
-LangGraph and Smithers both say "orchestration," both persist state, and both support humans in the loop, so they get compared a lot. They are mostly solving different problems, and the fastest way to choose is to name your unit of work.
+LangGraph and Smithers both say "orchestration," persist state, and support humans in the loop: compared often, but solving different problems. Pick by unit of work.
 
-**LangGraph's unit of work is an LLM call.** You build an agent: wire model calls, tools, memory, and routing into a graph, checkpoint its state, and ship it inside your product. Support bots, RAG pipelines, and custom in-app agents are its home turf.
+**LangGraph's unit of work is an LLM call.** It wires model calls, tools, memory, and routing into a graph, checkpoints its state, and ships inside your product: support bots, RAG pipelines, and custom in-app agents are its home turf.
 
-**Smithers' unit of work is a coding agent doing a job.** Claude Code, Codex, Pi, or an AI SDK model runs as one durable step among many: implement, then review, then wait for a human, then merge. You do not rebuild the agent; you compose the ones you already use against a real repository.
+**Smithers' unit of work is a coding agent doing a job.** It runs Claude Code, Codex, Pi, or an AI SDK model as one durable step among many: implement, review, wait for a human, merge. You don't rebuild the agent, you compose the ones you already use against a real repository.
 
 ## The short version
 
@@ -16,21 +16,21 @@ LangGraph and Smithers both say "orchestration," both persist state, and both su
 | You are building | A custom agent from model calls and tools | A durable process around existing coding agents |
 | Node granularity | One LLM call or tool invocation | One agent run, human gate, or code step |
 | Authoring | Graph-builder API in Python or JS | A JSX tree; prompts are template strings |
-| Persistence | Checkpointers you configure (memory, Postgres, or the Platform) | SQLite by default, zero config, plus filesystem snapshots of the repo |
+| Persistence | Checkpointers (memory, Postgres, or the Platform) | SQLite by default, zero config, plus filesystem snapshots of the repo |
 | Time travel | Rewind agent state via checkpoints | Rewind, fork, and replay the run and the working tree |
-| Human in the loop | Interrupts you wire into the graph | `<Approval>` and `<HumanTask>` primitives that suspend durably |
+| Human in the loop | Interrupts wired into the graph | `<Approval>` and `<HumanTask>` primitives that suspend durably |
 | Coding-agent harnesses | Bring your own integration | First-class: mix Claude Code, Codex, Pi, Antigravity in one workflow, with fallback |
 | Deployment story | LangGraph Platform (commercial) or self-managed | A process you run anywhere; gateway, UI, and observability included |
 
 ## Where the overlap is real
 
-If you were about to use LangGraph to chain coding-agent CLI calls with retries and a review gate, Smithers does that with less machinery: the harness integrations, worktree isolation, merge queues, approvals, and crash-resume are the built-ins, and a workflow is a file your own coding agent can write. The named patterns LangGraph tutorials teach (supervisor, reflection, plan-and-execute) ship as [readable twenty-line components](/components/workflow) here.
+Chaining coding-agent CLI calls in LangGraph, with retries and a review gate? Smithers needs less machinery: harness integrations, worktree isolation, merge queues, approvals, and crash-resume are built in, and a workflow is a file your own coding agent can write. LangGraph's named tutorial patterns (supervisor, reflection, plan-and-execute) ship here as [readable twenty-line components](/components/workflow).
 
-If you are building a customer-facing agent inside your product, with fine-grained control over every model call and token stream, LangGraph is built for that and Smithers is not trying to be. A Smithers task could call a LangGraph agent the way it calls any process; they compose rather than conflict.
+Building a customer-facing agent with fine-grained control over every model call and token stream? That's LangGraph's job, not Smithers'. A Smithers task can call a LangGraph agent like any process: they compose, not conflict.
 
 ## The authoring bet
 
-Both projects agree agents will write and maintain these definitions. LangGraph bets on an imperative graph API; Smithers bets on JSX, the densest tree-composition idiom in any model's training data, so generated workflows stay reviewable by the humans auditing them. Our take on why that matters is in [Why React](/why-react).
+Both bet agents will write and maintain these definitions: LangGraph on an imperative graph API, Smithers on JSX (the densest tree-composition idiom in any model's training data), keeping generated workflows reviewable by the humans auditing them. More: [Why React](/why-react).
 
 ## See also
 

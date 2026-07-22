@@ -3,36 +3,33 @@ title: route-task
 description: Classify a plain-English script and either run it as a single task or recommend the right durable workflow.
 ---
 
-`route-task` is an archived, copyable concierge example; it is not installed by
+`route-task` is an archived, copyable concierge example, not installed by
 `init`. Copy `examples/init-pack/route-task.tsx` and its `examples/` dependency
-closure into your project, or ask `create-workflow` to author a repository-specific
-router. Once installed, describe what you want in
-plain English and it decides whether the work is a quick one-shot task it should
-just do, or a durable job that belongs in a real workflow. It then either runs it
-or hands you the best-fit workflow to run instead.
+closure, or ask `create-workflow` for a repo-specific router. Describe what you
+want in plain English: it decides if the work is a quick one-shot task or a
+durable job for a real workflow, then runs it or hands you the best-fit workflow.
 
 ```bash
 bunx smithers-orchestrator workflow run route-task \
   --prompt "Summarize what changed in the last 10 commits"
 ```
 
-Use this when you have a task but aren't sure which workflow to reach for. The
-classifier is cheap and fast; only the chosen path spends a smart agent.
+Use this when unsure which workflow fits: the classifier is cheap and fast, and
+only the chosen path spends a smart agent.
 
 ## Stages
 
-1. **classify**: sort the script into a task `mode` and decide `durable` (does it
-   need ordering, crash-recovery, approval, or loops?). Cheap/fast agent.
-2. **execute**: non-durable path. A tool-using agent actually does the work in a
-   single pass and reports `{ summary, done }`.
-3. **recommend**: durable path. A smart agent points at the single best-fit
-   available workflow (`implement`, `research-plan-implement`, `review`, `plan`,
+1. **classify**: cheap/fast agent sorts the script into a task `mode` and decides
+   `durable` (needs ordering, crash-recovery, approval, or loops?).
+2. **execute**: non-durable path; a tool-using agent does the work in one pass
+   and reports `{ summary, done }`.
+3. **recommend**: durable path; a smart agent points at the single best-fit
+   workflow (`implement`, `research-plan-implement`, `review`, `plan`,
    `research`, `grill-me`, `ralph`, `debug`, `audit`, `create-workflow`,
    `create-skill`, `extract-skill`, `context-doctor`,
    `triage-run`, `report-slideshow`, `eval-author`, `improve-test-coverage`)
-   and explains why. The recommendation is schema-enforced to one of those
-   ids, so a hallucinated workflow id fails validation instead of flowing
-   downstream.
+   and explains why, schema-enforced to one of those ids so a hallucinated id
+   fails validation instead of flowing downstream.
 
 Only one of `execute` or `recommend` runs, gated on the classifier's `durable`
 verdict.
@@ -51,5 +48,5 @@ bunx smithers-orchestrator ps                                        # active / 
 bunx smithers-orchestrator logs RUN_ID -f                           # follow events
 ```
 
-When `route-task` recommends a durable workflow, run it directly, for example
+Run a recommended durable workflow directly, e.g.
 `bunx smithers-orchestrator workflow run implement --prompt "…"`.

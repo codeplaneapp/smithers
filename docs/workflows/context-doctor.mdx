@@ -3,14 +3,14 @@ title: context-doctor
 description: Run deterministic checks over a context contract and report missing goals, inputs, verification, approvals, and report specs.
 ---
 
-`context-doctor` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+`context-doctor` is an archived example, not installed by `init`; copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` for an equivalent, then run it below.
 
-`context-doctor` lints a context contract. It deterministically parses the
+`context-doctor` lints a context contract: it deterministically parses the
 contract JSON and runs seven structural checks (goal, output spec, acceptance
 criteria, blocking-criteria verification, required-input sources, side-effect
-approvals, report spec), then an agent suggests how to fix each finding. Reach
-for it before handing a contract to an agent, to catch missing inputs, ungated
-side effects, or absent acceptance criteria up front.
+approvals, report spec), then an agent suggests a fix for each finding. Reach
+for it before handing a contract to an agent, catching missing inputs, ungated
+side effects, or absent acceptance criteria.
 
 ```bash
 bunx smithers-orchestrator workflow run context-doctor \
@@ -24,13 +24,13 @@ bunx smithers-orchestrator workflow run context-doctor \
 
 ## Checks
 
-- **hasGoal**: a non-empty `goal` is declared.
-- **hasOutputSpec**: an `outputSpec` (or `output`) describes the produced artifact.
+- **hasGoal**: `goal` is non-empty.
+- **hasOutputSpec**: `outputSpec` (or `output`) describes the produced artifact.
 - **hasAcceptanceCriteria**: at least one acceptance criterion is listed.
-- **allBlockingCriteriaHaveVerification**: every criterion marked `blocking` names a `verification`. Plain-string criteria are flagged as a warning: a string cannot declare `blocking` or `verification`, so use `{text, blocking, verification}` objects.
-- **allRequiredInputsHaveSource**: every input marked `required` declares a `source`.
-- **allSideEffectsHaveApproval**: every entry in `sideEffects` is gated by an `approval`. Plain-string entries count as unguarded; use `{name, approval}` objects.
-- **reportSpecExists**: a `reportSpec` describes how results are reported.
+- **allBlockingCriteriaHaveVerification**: every `blocking` criterion names a `verification`. Plain-string criteria warn: a string can't declare `blocking` or `verification`, so use `{text, blocking, verification}` objects.
+- **allRequiredInputsHaveSource**: every `required` input declares a `source`.
+- **allSideEffectsHaveApproval**: every `sideEffects` entry is gated by an `approval`. Plain-string entries count as unguarded; use `{name, approval}` objects.
+- **reportSpecExists**: `reportSpec` describes how results are reported.
 
 ## Inputs
 

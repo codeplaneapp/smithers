@@ -3,12 +3,10 @@ title: report-slideshow
 description: Generate a concise HTML slideshow report from a Smithers run state and artifacts.
 ---
 
-`report-slideshow` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+`report-slideshow` is an archived example, not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` for one, then run it:
 
 `report-slideshow` turns a finished (or in-progress) Smithers run into a single,
-self-contained HTML slideshow report. Reach for it after a run when you want a
-shareable summary (objective, decisions, the workflow graph, artifacts, tests
-and gates, failures and retries, and remaining issues) without scrolling the
+self-contained HTML slideshow report you can share without scrolling the
 event log.
 
 ```bash
@@ -19,14 +17,10 @@ bunx smithers-orchestrator workflow run report-slideshow \
 The input is `targetRunId`, not `runId`: the engine reserves `input.runId` for
 a run's own id, so a workflow that reports on another run needs a distinct name.
 
-It first captures the run deterministically with `bunx smithers-orchestrator inspect`, then an
-agent renders a dependency-free HTML document (inline CSS, no scripts) you can
-open or attach anywhere.
-
 ## Stages
 
-1. **gather**: deterministic capture. Shell `bunx smithers-orchestrator inspect RUN_ID` and flatten the run state, nodes, and a summary (no agent).
-2. **render**: an agent writes a self-contained HTML slideshow covering the title/objective, decisions, workflow graph, artifacts, tests/gates, failures/retries, and remaining issues.
+1. **gather**: deterministic capture via `bunx smithers-orchestrator inspect RUN_ID`, flattening the run state, nodes, and a summary (no agent).
+2. **render**: an agent writes a self-contained, dependency-free HTML slideshow (inline CSS, no scripts, open or attach anywhere) covering the title/objective, decisions, workflow graph, artifacts, tests/gates, failures/retries, and remaining issues.
 
 ## Inputs
 

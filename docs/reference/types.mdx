@@ -3,7 +3,7 @@ title: Types
 description: Public TypeScript surface for smithers-orchestrator.
 ---
 
-One source of truth: `tsc --emitDeclarationOnly` would produce something close to this. Import these types from `smithers-orchestrator` unless noted otherwise.
+This mirrors what `tsc --emitDeclarationOnly` would emit. Import these types from `smithers-orchestrator` unless noted otherwise.
 
 `createSmithers` is a **named export**:
 
@@ -11,38 +11,38 @@ One source of truth: `tsc --emitDeclarationOnly` would produce something close t
 import { createSmithers } from "smithers-orchestrator";
 ```
 
-It returns a local API object for that workflow module. Destructure the pieces
-you use (`Workflow`, `Task`, `Branch`, `Sandbox`, `smithers`, `outputs`) or keep
-the object and use property access (`api.Workflow`, `api.Task`). Both styles are
-equivalent for one factory; property access is clearer in files with multiple
-factories, such as parent/child workflow examples.
+It returns a local API object for the workflow module. Destructure what you
+need (`Workflow`, `Task`, `Branch`, `Sandbox`, `smithers`, `outputs`) or use
+property access (`api.Workflow`, `api.Task`); both work for one factory, but
+property access reads clearer with multiple factories, e.g. parent/child
+workflows.
 
-There is no top-level default `smithers` export. The `smithers` wrapper function
-is the property returned by `createSmithers(...)`, and
-`smithers((ctx) => <Workflow ... />)` returns the `SmithersWorkflow` value that
-workflow files usually export as their default export.
+There is no top-level default `smithers` export: the `smithers` wrapper is the
+property returned by `createSmithers(...)`. `smithers((ctx) => <Workflow ... />)`
+returns the `SmithersWorkflow` value that workflow files usually export as
+their default.
 
-`input` is a reserved schema key on `createSmithers(...)`. It controls the
+`input` is a reserved schema key on `createSmithers(...)` that controls the
 TypeScript type of `ctx.input`; every other key is an output schema and becomes
 a typed output ref under `outputs.<key>`. Fresh runs validate the input row
-against the generated input table before inserting it, but Smithers does **not**
-call `inputSchema.parse()` and does not write Zod default values back into
-`ctx.input`. Treat required fields in the Zod schema as the authored TypeScript
-contract; for fields that may be omitted by a CLI/UI caller, use `.optional()` /
-`.nullable()` and coalesce inside the workflow (`ctx.input.dryRun ?? false`) or
-add an early compute task that performs stricter Zod parsing.
+against the generated input table before insert, but Smithers does **not** call
+`inputSchema.parse()` or write Zod defaults back into `ctx.input`. Treat
+required Zod fields as the authored TypeScript contract; for fields a CLI/UI
+caller may omit, use `.optional()` / `.nullable()` and coalesce inside the
+workflow (`ctx.input.dryRun ?? false`), or add an early compute task with
+stricter Zod parsing.
 
-Prefer `output={outputs.someKey}` on tasks, approvals, sandboxes, and subflows.
-The `outputs` object contains the exact Zod schema objects passed to
-`createSmithers(...)`, so the task can infer `outputSchema`, validate the
-returned row, persist it to the matching table, and feed the same schema to
+Prefer `output={outputs.someKey}` on tasks, approvals, sandboxes, and subflows:
+the `outputs` object holds the exact Zod schema objects passed to
+`createSmithers(...)`, so the task can infer `outputSchema`, validate and
+persist the returned row to the matching table, and feed the same schema to
 native structured-output agents.
 
 Major sections at a glance:
-- **Workflow / Context**: `SmithersWorkflow`, `WorkflowFileRef`, `SmithersCtx`, `RunOptions`, `RunResult`, the entry points for defining and running workflows.
-- **Task / Graph**: `TaskDescriptor`, `TaskProps`, `GraphSnapshot`, the shape of nodes at runtime and in the JSX layer.
+- **Workflow / Context**: `SmithersWorkflow`, `WorkflowFileRef`, `SmithersCtx`, `RunOptions`, `RunResult`: entry points for defining and running workflows.
+- **Task / Graph**: `TaskDescriptor`, `TaskProps`, `GraphSnapshot`: node shape at runtime and in the JSX layer.
 - **Component props**: `WorkflowProps`, `ApprovalProps`, `SignalProps`, `LoopProps`, etc., all JSX component interfaces.
-- **Errors**: `SmithersError`, `KnownSmithersErrorCode`, typed error codes; see [Errors](/reference/errors) for descriptions.
+- **Errors**: `SmithersError`, `KnownSmithersErrorCode`, typed error codes; see [Errors](/reference/errors).
 - **Server / Gateway**: `ServerOptions`, `GatewayOptions`, `GatewayAuthConfig`, self-hosting configuration.
 - **Scorers / Memory / OpenAPI / Observability**: sub-path imports (`smithers-orchestrator/scorers`, `/memory`, `/openapi`, `/observability`).
 
@@ -2040,12 +2040,11 @@ type ResolvedSmithersObservabilityOptions = SmithersObservabilityOptions & { met
 
 ## Error reporting
 
-`RunOptions.onError` receives a normalized `SmithersError` plus the original
-error value and the available run, node, iteration, and attempt context. It
-fires once for each `NodeFailed` or `RunFailed` event. A retrying task therefore
-produces one node report per failed attempt, and a terminal run failure adds a
-run report. Smithers catches reporter failures so they cannot change the run
-outcome.
+`RunOptions.onError` receives a normalized `SmithersError`, the original error
+value, and the available run, node, iteration, and attempt context. It fires
+once per `NodeFailed` or `RunFailed` event: a retrying task produces one node
+report per failed attempt, and a terminal run failure adds a run report.
+Smithers catches reporter failures so they can't change the run outcome.
 
 ```ts
 runWorkflow(workflow, {

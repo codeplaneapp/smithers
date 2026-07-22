@@ -3,7 +3,7 @@ title: PI Integration
 description: Use PI as a Smithers workflow CLI backend and understand how PI extensibility composes with Smithers declarative orchestration.
 ---
 
-Smithers provides deterministic orchestration (workflow graph, approvals, retries, durable state). PI provides adaptive agent capabilities (providers, models, extensions, skills, prompt templates). Use both when you need deterministic execution with flexible agent behavior.
+Smithers provides deterministic orchestration (workflow graph, approvals, retries, durable state); PI provides adaptive agent capabilities (providers, models, extensions, skills, prompt templates). Combine them for deterministic execution with flexible agent behavior.
 
 ## Integration Modes
 
@@ -26,7 +26,7 @@ const pi = new PiAgent({
 
 `PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text mode uses `--print` by default; JSON/RPC modes set `--mode` and omit `--print`.
 
-PI sessions are first-class hijack targets. `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
+PI sessions are first-class hijack targets: `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
 
 ### 2) PI Server Client
 
@@ -87,4 +87,4 @@ pi --version
 
 ## Limitations
 
-Smithers does not provide a chat interface for PI. Chat UI integration is the responsibility of the host application using `@smithers-orchestrator/pi-plugin`.
+Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smithers-orchestrator/pi-plugin`.

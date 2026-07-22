@@ -11,9 +11,9 @@ apiVersion: v1
 - Request: `{ runIds, nodeId?, scorerId?, scorerName?, source?, order?, offset?, limit? }`
 - Response: `{ rows: ComparisonScoreRow[], total }`
 
-`runIds` accepts up to 30 entries. The Gateway trims each id, removes duplicates
-in first-seen order, merges scores from every distinct backing store, and then
+`runIds` accepts up to 30 entries. The Gateway trims each id, dedupes in
+first-seen order, merges scores from every distinct backing store, then
 applies one deterministic global sort and pagination window. `order` defaults
-to `scoredAtAsc`; `limit` defaults to 500 and cannot exceed 500.
+to `scoredAtAsc`; `limit` defaults to 500 and cannot exceed it.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, and `Internal`.

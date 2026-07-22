@@ -4,15 +4,13 @@ description: Cross-run facts, message threads, namespaces, and the Effect store 
 icon: "brain"
 ---
 
-Memory persists state **across runs**. Task outputs are per-run; memory is
-per-namespace and survives every workflow execution. The store keeps three
-kinds of state: namespaced **facts** (JSON values with optional TTL), ordered
-**message threads**, and append-only **notes** (durable knowledge with
-supersession and a status gate).
+Memory persists state **across runs**: task outputs are per-run, memory is
+per-namespace. The store keeps three kinds of state, detailed below:
+namespaced **facts**, ordered **message threads**, and append-only **notes**.
 
-All memory values and non-generic types are re-exported from the
-`smithers-orchestrator` facade, which is canonical. The
-`smithers-orchestrator/memory` subpath exports the same surface.
+All memory values and non-generic types are re-exported from the canonical
+`smithers-orchestrator` facade; the `smithers-orchestrator/memory` subpath
+exports the same surface.
 
 ```ts
 import {
@@ -45,8 +43,8 @@ import type {
 } from "smithers-orchestrator";
 ```
 
-`createMemoryStore(db)` preserves the local SQLite implementation. Pass that
-store as `contractStore` when constructing the Hindsight adapter:
+`createMemoryStore(db)` preserves the local SQLite implementation; pass it as
+`contractStore` when constructing the Hindsight adapter:
 
 ```ts
 const contractStore = createMemoryStore(db);
@@ -57,27 +55,25 @@ const memory = createHindsightMemoryStore({
 });
 ```
 
-The contract store remains authoritative for atomic exact records and global
-message and note ids. Hindsight projection is best-effort: a remote failure is
-logged and queued for an in-process retry, but it does not reject a contract
-mutation that already committed. The queue is not durable across process
-restarts. The `HindsightMemoryStore` class is exported for callers that need
-its `recallMemory`, `getPrimers`, or `retainMemory` engine-facing methods.
+The contract store stays authoritative for atomic exact records and global
+message/note ids; Hindsight projection is best-effort, logging and queueing a
+remote failure for in-process retry (not durable across restarts) without
+rejecting an already-committed contract mutation. `HindsightMemoryStore` is
+exported for its `recallMemory`, `getPrimers`, and `retainMemory`
+engine-facing methods.
 
 <Note>
-The note types (`MemoryNote`, `SaveNoteInput`, `NoteReadFilter`, and
-`MemoryProvenance`) are exported from the `smithers-orchestrator/memory`
-subpath. `WorkingMemoryConfig<T>` is generic over a Zod schema and is documented
-inline below. `Task` can be imported directly or taken from `createSmithers`;
-both expose the same `memory` prop. See [Memory](/concepts/memory) for the
-declarative `<Task memory={...}>` metadata.
+Note types (`MemoryNote`, `SaveNoteInput`, `NoteReadFilter`, `MemoryProvenance`)
+are exported from `smithers-orchestrator/memory`. `WorkingMemoryConfig<T>` is
+generic over a Zod schema (documented below). `Task`, imported directly or
+from `createSmithers`, exposes the same `memory` prop; see
+[Memory](/concepts/memory) for the declarative `<Task memory={...}>` metadata.
 </Note>
 
 ## Concepts
 
-A `MemoryNamespace` scopes everything you store. Pick the `kind` to match the
-lifetime of the data, and the `id` to identify the specific workflow, agent, or
-user.
+A `MemoryNamespace` scopes everything you store: `kind` matches the data's
+lifetime, `id` identifies the specific workflow, agent, or user.
 
 ```ts
 type MemoryNamespace = { kind: MemoryNamespaceKind; id: string };
@@ -85,7 +81,7 @@ type MemoryNamespaceKind = "workflow" | "agent" | "user" | "global";
 ```
 
 <ParamField path="kind" type='"workflow" | "agent" | "user" | "global"' required>
-  Lifetime scope. `workflow` is per workflow definition, `agent` per agent
+  Lifetime scope: `workflow` per workflow definition, `agent` per agent
   identity, `user` per end user, `global` shared across everything.
 </ParamField>
 <ParamField path="id" type="string" required>
@@ -151,16 +147,16 @@ A **thread** groups ordered **messages**.
       Owning thread.
     </ResponseField>
     <ResponseField name="role" type="string" required>
-      Message role, e.g. `"user"`, `"assistant"`, `"system"`.
+      Message role (e.g. `"user"`, `"assistant"`, `"system"`).
     </ResponseField>
     <ResponseField name="contentJson" type="string" required>
       Message content, JSON-stringified.
     </ResponseField>
     <ResponseField name="runId" type="string | null">
-      Run that produced the message, if any. Use `RUN_ID`.
+      Run that produced the message, if any (`RUN_ID`).
     </ResponseField>
     <ResponseField name="nodeId" type="string | null">
-      Node that produced the message, if any. Use `NODE_ID`.
+      Node that produced the message, if any (`NODE_ID`).
     </ResponseField>
     <ResponseField name="createdAtMs" type="number" required>
       Creation time, epoch milliseconds. Optional on `saveMessage` input
@@ -169,17 +165,16 @@ A **thread** groups ordered **messages**.
   </Expandable>
 </ResponseField>
 
-A **note** is append-only knowledge. Facts are mutable KV (upsert semantics);
-notes are immutable rows: body, labels, and provenance never change after
-insert. `status` is the one deliberate exception: `setNoteStatus` lets a
-human or workflow gate write an answer about an existing note without churning
-its id. Notes carry no TTL: knowledge dies by supersession or rejection, not
-by clock.
+A **note** is append-only knowledge: facts are mutable KV, notes are immutable
+rows, body/labels/provenance fixed after insert. `status` is the one
+deliberate exception: `setNoteStatus` lets a human or workflow gate write an
+answer about an existing note without churning its id. Notes carry no TTL:
+knowledge dies by supersession or rejection, not by clock.
 
 <ResponseField name="MemoryNote" type="object">
   <Expandable title="MemoryNote">
     <ResponseField name="id" type="string" required>
-      Note identifier. Pass your own on `saveNote` to make retries idempotent.
+      Note identifier (see `saveNote` below for idempotency).
     </ResponseField>
     <ResponseField name="namespace" type="string" required>
       Owning namespace, serialized via `namespaceToString`.
@@ -198,8 +193,8 @@ by clock.
       Optional, policy-free author label.
     </ResponseField>
     <ResponseField name="status" type="string" required>
-      Free-form; defaults to `"accepted"`. Conventionally
-      `pending | accepted | rejected`. The one mutable field.
+      Free-form, defaulting to `"accepted"` (conventionally
+      `pending | accepted | rejected`); the one mutable field.
     </ResponseField>
     <ResponseField name="statusChangedAtMs" type="number | null">
       When `setNoteStatus` last flipped the status; null until then.
@@ -208,15 +203,14 @@ by clock.
       Creation time, epoch milliseconds.
     </ResponseField>
     <ResponseField name="runId / nodeId / iteration" type="string | string | number | null">
-      Provenance: the run coordinate that wrote the note (see
-      `MemoryProvenance`).
+      Provenance: the writing run's coordinate (see `MemoryProvenance`).
     </ResponseField>
   </Expandable>
 </ResponseField>
 
-`MemoryProvenance` is the run coordinate a memory write was made from. It is
-passed **explicitly** by the caller on `setFact` and `saveNote`, never
-inferred from ambient context, which does not survive agent/tool boundaries.
+`MemoryProvenance` is the run coordinate a memory write was made from, passed
+**explicitly** by the caller on `setFact` and `saveNote`. It's never inferred
+from ambient context, which doesn't survive agent/tool boundaries.
 
 ```ts
 type MemoryProvenance = {
@@ -229,13 +223,12 @@ type MemoryProvenance = {
 `SaveNoteInput` is the `saveNote` argument: the namespace as the structured
 object, tags as an array, plus optional `kind`, `author`, `status`,
 `provenance`, `supersedes` (note ids this note replaces; junction rows are
-written atomically with the note), and `id` (pass one to make retries
-idempotent).
+written atomically with the note), and `id` (idempotency key, see `saveNote`).
 
 `NoteReadFilter` shapes `listNotes`/`searchNotes` reads. The **default read
-contract** (no filter) is a stability contract: it returns notes that are
-(a) not superseded by an **accepted** note and (b) `status = "accepted"`.
-A pending or rejected superseder hides nothing. Filters widen or narrow:
+contract** (no filter): returns notes that are (a) not superseded by an
+**accepted** note and (b) `status = "accepted"`; a pending or rejected
+superseder hides nothing. Filters widen or narrow:
 
 ```ts
 type NoteReadFilter = {
@@ -248,17 +241,17 @@ type NoteReadFilter = {
 
 ## createMemoryStore
 
-Build a `MemoryStore` over a Drizzle SQLite handle. Synchronous. Create one at
-module scope and reuse it across tasks rather than re-opening the database in
-every task body.
+Build a `MemoryStore` over a Drizzle SQLite handle. Synchronous; create one at
+module scope and reuse it across tasks instead of reopening the database per
+task.
 
 ```ts
 function createMemoryStore(db: BunSQLiteDatabase<any>): MemoryStore;
 ```
 
 <ParamField path="db" type="BunSQLiteDatabase" required>
-  A Drizzle `bun-sqlite` database handle. The memory tables are created on the
-  same database your workflow uses.
+  A Drizzle `bun-sqlite` database handle; the memory tables live on the same
+  database your workflow uses.
 </ParamField>
 
 ```ts
@@ -278,7 +271,7 @@ const all = await store.listFacts(ns);
 
 The Promise-based read/write surface. Every method has an Effect-returning twin
 (`getFactEffect`, `setFactEffect`, `listThreadsEffect`, `deleteMessagesEffect`,
-and so on) with the same arguments, for use inside an Effect pipeline.
+etc.) with the same arguments, for use inside an Effect pipeline.
 
 <ResponseField name="Facts" type="methods">
   <Expandable title="fact methods">
@@ -290,7 +283,7 @@ and so on) with the same arguments, for use inside an Effect pipeline.
     <ResponseField name="deleteFact" type="(ns, key) => Promise<void>" />
     <ResponseField name="listFacts" type="(ns) => Promise<MemoryFact[]>" />
     <ResponseField name="deleteExpiredFacts" type="() => Promise<number>">
-      Removes facts whose TTL has elapsed. Returns the count deleted.
+      Removes facts whose TTL elapsed; returns the count deleted.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -299,48 +292,47 @@ and so on) with the same arguments, for use inside an Effect pipeline.
   <Expandable title="note methods">
     <ResponseField name="saveNote" type="(input: SaveNoteInput) => Promise<MemoryNote>">
       Appends a note and its supersession edges atomically. Idempotent on
-      `id`: a re-save with the same id is a no-op (never an upsert, so history
-      cannot be destroyed), and the returned note is the row the database
-      holds, not the ignored input.
+      `id`: re-saving the same id is a no-op (never an upsert, so history
+      can't be destroyed); the returned note is the row the database holds,
+      not the ignored input.
     </ResponseField>
     <ResponseField name="getNote" type="(id) => Promise<MemoryNote | undefined>" />
     <ResponseField name="listNotes" type="(ns, filter?) => Promise<MemoryNote[]>">
       Notes in one namespace, oldest first, under the default read contract
-      (accepted, not superseded by an accepted note) unless `filter` widens.
+      unless `filter` widens.
     </ResponseField>
     <ResponseField name="setNoteStatus" type="(id, status) => Promise<void>">
       The one mutable write: flips `status` and stamps `statusChangedAtMs`.
       Fails loud when the note does not exist.
     </ResponseField>
     <ResponseField name="enableNoteSearch" type="(kind) => Promise<void>">
-      Opts a namespace **kind** into FTS note search. Creates the FTS5
-      artifacts lazily on first call and backfills existing notes of that
-      kind; until then note writes pay nothing per write. Idempotent.
+      Opts a namespace **kind** into FTS note search, creating FTS5 artifacts
+      lazily on first call and backfilling existing notes of that kind; until
+      then note writes pay nothing extra. Idempotent.
     </ResponseField>
     <ResponseField name="searchNotes" type="(kind, query, limit?, filter?) => Promise<MemoryNote[]>">
-      Full-text search over note bodies, rank order, honoring the same read
-      contract as `listNotes`. Fails loud, not silently empty, when the
-      kind was never enabled. The index spans **every namespace of the
-      kind**; pass `filter.namespace` to keep results namespace-local on a
-      shared database. The read contract is applied to the top `limit * 5`
-      FTS matches, so a heavily superseded corpus can return fewer than
-      `limit` even when more live matches exist further down the rank order.
+      Full-text search over note bodies, rank-ordered, honoring the same read
+      contract as `listNotes`. Fails loud (not silently empty) when the kind
+      was never enabled. The index spans **every namespace of the kind**;
+      pass `filter.namespace` to keep results namespace-local on a shared
+      database. The read contract applies only to the top `limit * 5` FTS
+      matches, so a heavily superseded corpus may return fewer than `limit`
+      despite more live matches further down.
     </ResponseField>
   </Expandable>
 </ResponseField>
 
 <Note>
-Note writes and search require the bun:sqlite backend: transactions provide
-note+edge atomicity and FTS5 provides search. Migration 0023 creates the note
-tables on Postgres/PGlite, but the runtime still rejects `saveNote` and
-`enableNoteSearch` there with `DB_WRITE_FAILED`, and `searchNotes` with
-`DB_QUERY_FAILED`.
+Note writes and search require bun:sqlite: transactions give note+edge
+atomicity, FTS5 gives search. Migration 0023 creates note tables on
+Postgres/PGlite, but the runtime still rejects `saveNote`/`enableNoteSearch`
+there with `DB_WRITE_FAILED`, and `searchNotes` with `DB_QUERY_FAILED`.
 </Note>
 
 <ResponseField name="Threads & messages" type="methods">
-  Thread and message reads/writes use the portable Drizzle tables. The
-  transactional `deleteThread` operation is the exception: it currently
-  requires bun:sqlite and raises `DB_WRITE_FAILED` on Postgres/PGlite.
+  Thread and message reads/writes use the portable Drizzle tables, except the
+  transactional `deleteThread`, which requires bun:sqlite and raises
+  `DB_WRITE_FAILED` on Postgres/PGlite.
   <Expandable title="thread and message methods">
     <ResponseField name="createThread" type="(ns, title?) => Promise<MemoryThread>" />
     <ResponseField name="getThread" type="(threadId) => Promise<MemoryThread | undefined>" />
@@ -353,16 +345,16 @@ tables on Postgres/PGlite, but the runtime still rejects `saveNote` and
     <ResponseField name="listMessages" type="(threadId, limit?) => Promise<MemoryMessage[]>" />
     <ResponseField name="countMessages" type="(threadId) => Promise<number>" />
     <ResponseField name="deleteMessages" type="(threadId, messageIds) => Promise<number>">
-      Deletes the named messages. Returns the count deleted. Used by processors
-      to compact history.
+      Deletes the named messages, returning the count deleted; used by
+      processors to compact history.
     </ResponseField>
   </Expandable>
 </ResponseField>
 
 ## MemoryService
 
-An Effect `Context.Tag` whose service value is a `MemoryServiceApi`. It exposes
-the same operations as the store, but every method returns
+An Effect `Context.Tag` whose service value is a `MemoryServiceApi`: the same
+operations as the store, but every method returns
 `Effect.Effect<T, SmithersError>` instead of a `Promise`. The underlying store
 is reachable via `.store`.
 
@@ -383,8 +375,8 @@ is reachable via `.store`.
     </ResponseField>
     <ResponseField name="deleteExpiredFacts" type="() => Effect<number, SmithersError>" />
     <ResponseField name="store" type="MemoryStore">
-      The underlying Promise-and-Effect store, for the few methods the service
-      does not surface directly (e.g. `listThreads`, `deleteMessages`).
+      The underlying Promise-and-Effect store, for methods the service doesn't
+      surface directly (e.g. `listThreads`, `deleteMessages`).
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -435,10 +427,10 @@ type MemoryProcessor = {
 ```
 
 <ResponseField name="Summarizer" type="(agent) => MemoryProcessor">
-  Compresses older messages in each thread into a single `system` summary
-  message, keeping the two most recent. `agent` is any
-  `{ run: (prompt: string) => Promise<unknown> }`; its output text becomes the
-  summary.
+  Compresses older messages in each thread into one `system` summary message,
+  keeping the two most recent. `agent` is any
+  `{ run: (prompt: string) => Promise<unknown> }` whose output text becomes
+  the summary.
 </ResponseField>
 
 <ResponseField name="TokenLimiter" type="(maxTokens) => MemoryProcessor">
@@ -456,7 +448,7 @@ type MemoryProcessor = {
 <ResponseField name="MemoryProcessorConfig" type="object">
   <Expandable title="MemoryProcessorConfig">
     <ResponseField name="processors" type="string[]">
-      Names of the processors to run, e.g. `["Summarizer", "TtlGarbageCollector"]`.
+      E.g. `["Summarizer", "TtlGarbageCollector"]`.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -486,15 +478,15 @@ await Summarizer(myAgent).process(store);
     </ParamField>
     <ParamField path="recall" type='"auto" | string | false | { namespace?; query?; topK? }'>
       `"auto"` derives the query from the task prompt, a string supplies the
-      query, and `false` disables prompt recall. The object form is legacy
-      compatibility metadata; it is preserved but inert.
+      query, `false` disables prompt recall. The object form is legacy
+      compatibility metadata, preserved but inert.
     </ParamField>
     <ParamField path="budget" type='"low" | "mid" | "high"'>
       Hindsight candidate-search budget. Defaults to `"mid"`.
     </ParamField>
     <ParamField path="maxTokens" type="number">
-      Hard cap for the complete injected memory block and serialized recall
-      tool result. Defaults to `2048`.
+      Hard cap for the injected memory block and serialized recall tool
+      result. Defaults to `2048`.
     </ParamField>
     <ParamField path="primers" type="string[]">
       Mental-model ids fetched across the selected banks and injected verbatim.
@@ -518,9 +510,9 @@ await Summarizer(myAgent).process(store);
   </Expandable>
 </ParamField>
 
-Object-form `recall`, `remember`, `namespace`, and `threadId` do not inject
-facts, retain output, or append message history. Use the bank-based fields for
-runtime memory, or use the store APIs directly for exact local records.
+Object-form `recall`, `remember`, `namespace`, and `threadId` inject no facts,
+retain no output, and append no message history. Use the bank-based fields for
+runtime memory, or the store APIs directly for exact local records.
 
 `SemanticRecallConfig` and `MessageHistoryConfig` describe the two recall
 strategies a memory-aware runtime can apply.

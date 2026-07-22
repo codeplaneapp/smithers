@@ -114,22 +114,22 @@ bunx smithers-orchestrator up review-loop.tsx --input '{}'
 | Prop | Description |
 |------|-------------|
 | `id` | Unique identifier for the loop node. |
-| `until` | Boolean expression. When `true`, the loop stops. |
+| `until` | Boolean; loop stops when `true`. |
 | `maxIterations` | Safety cap on iterations (default: 5). |
-| `onMaxReached` | `"fail"` throws an error; `"return-last"` exits with the last output. |
+| `onMaxReached` | `"fail"` throws; `"return-last"` exits with the last output. |
 
 ## Context Methods
 
-- `ctx.outputMaybe(schemaKey, { nodeId })` returns the value written by that task in the current render iteration (the iteration matching the current re-render frame), or `undefined` if no row exists yet. To retrieve the highest-iteration row regardless of the current frame, use `ctx.latest` instead. The first argument is the schema key from `createSmithers`, not a table name.
+- `ctx.outputMaybe(schemaKey, { nodeId })` returns the value written by that task in the current render iteration, or `undefined` if no row exists yet. The first argument is the schema key from `createSmithers`, not a table name.
 - `ctx.iterationCount(schemaKey, nodeId)` returns how many times a task has executed.
-- `ctx.latest(schemaKey, nodeId)` always returns the highest-iteration row. Inside loops, this is often more convenient than `ctx.outputMaybe`.
+- `ctx.latest(schemaKey, nodeId)` returns the highest-iteration row regardless of the current frame, unlike `outputMaybe`, and is often more convenient inside loops.
 
-All intermediate outputs are persisted. If the workflow crashes mid-iteration, it restarts from the last incomplete task.
+All intermediate outputs are persisted, so a mid-iteration crash restarts from the last incomplete task.
 
 ## Re-render Cycle
 
 1. The builder function `(ctx) => (...)` runs on every render frame.
-2. First render: `ctx.outputMaybe("review", ...)` returns `undefined`. The write task produces an initial draft.
-3. After both tasks complete, the renderer persists outputs and re-renders.
-4. Next render: `latestReview` is populated. The loop evaluates `until`. If not approved, the body executes again with the review feedback.
+2. First render: `ctx.outputMaybe("review", ...)` returns `undefined`, so the write task produces an initial draft.
+3. Once both tasks complete, the renderer persists outputs and re-renders.
+4. Next render: `latestReview` is populated. The loop evaluates `until`; if not approved, the body reruns with the review feedback.
 5. Repeats until approved or `maxIterations` is reached.

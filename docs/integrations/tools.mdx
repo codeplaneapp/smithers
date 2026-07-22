@@ -15,11 +15,11 @@ const { read, write, edit, grep, bash } = tools;
 
 <Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
 
-The `smithers-orchestrator/tools` subpath also exports lower-level helpers for advanced integrations:
+The `smithers-orchestrator/tools` subpath also exports lower-level helpers:
 
 | Export | Purpose |
 |---|---|
-| `readFileTool`, `writeFileTool`, `editFileTool`, `grepTool`, `bashTool` | Call the underlying implementation directly instead of the AI SDK tool wrapper. |
+| `readFileTool`, `writeFileTool`, `editFileTool`, `grepTool`, `bashTool` | Calls the tool implementation directly, bypassing the AI SDK wrapper. |
 | `getDefinedToolMetadata(tool)` | Read Smithers metadata (`name`, `sideEffect`, `idempotent`) from a `defineTool()` result. |
 | `getToolContext()`, `runWithToolContext(ctx, fn)` | Inspect or provide the task-local tool runtime context. |
 | `getToolIdempotencyKey(ctx?)`, `nextToolSeq(ctx)` | Build stable idempotency keys and task-local tool-call sequence numbers. |
@@ -27,7 +27,7 @@ The `smithers-orchestrator/tools` subpath also exports lower-level helpers for a
 
 ## Sandboxing
 
-All tools are sandboxed to `rootDir` (defaults to the workflow directory). Paths are resolved relative to this root; escapes via symlinks are rejected.
+Tools sandbox to `rootDir` (default: workflow directory).
 
 | Policy | Behavior |
 |---|---|
@@ -50,11 +50,11 @@ Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to
 | `seq` | Sequential call counter within the task |
 | `toolName` | `read`, `write`, `edit`, `grep`, or `bash` |
 | `inputJson` | Serialized input arguments |
-| `outputJson` | Reserved for a serialized output; start records leave it `null` |
+| `outputJson` | Reserved for a serialized output; `null` in start records |
 | `startedAtMs` | Start timestamp |
-| `finishedAtMs` | Reserved end timestamp; start records leave it `null` |
+| `finishedAtMs` | Reserved end timestamp; `null` in start records |
 | `status` | `"started"` for the durable pre-execution record |
-| `errorJson` | Reserved error details; start records leave it `null` |
+| `errorJson` | Reserved error details; `null` in start records |
 
 ## defineTool
 
@@ -82,28 +82,28 @@ const placeOrder = defineTool({
 ```
 
 - `ctx.idempotencyKey` is stable across retries and resumes for the same task iteration.
-- `sideEffect: true` opts the tool into Smithers side-effect tracking.
+- `sideEffect: true` opts the tool into side-effect tracking.
 - `idempotent: false` marks the tool for retry warnings when a previous attempt has a recorded `_smithers_tool_calls` row.
 - The engine persists the durable start row through the Smithers DB adapter before `execute` runs.
 
 ### Side Effects and Idempotency
 
-Every custom tool that modifies external state **must** declare `sideEffect: true`. This is how Smithers protects your [workflow](/workflows/overview) during retries and resumes. Without it, Smithers treats the tool as a pure read and replays it freely, potentially sending duplicate emails, double-charging payments, or creating duplicate records.
+Every custom tool that modifies external state **must** declare `sideEffect: true`; this is how Smithers protects your [workflow](/workflows/overview) during retries and resumes. Without it, Smithers treats the tool as a pure read and replays it freely: duplicate emails, double-charged payments, duplicate records.
 
 The two flags work together:
 
 | `sideEffect` | `idempotent` | Smithers behavior |
 |---|---|---|
 | `false` (default) | `true` (default) | Pure read. Safe to replay on retry. No warnings. |
-| `true` | `true` | Mutates external state, but calling twice with the same input produces the same result (e.g. an upsert, a PUT request). Safe to replay. No warnings. |
-| `true` | `false` | Mutates external state and is **not** safe to replay (e.g. sending an email, placing an order, charging a payment). On retry, Smithers injects a warning listing the tool as already called so the agent can verify external state before calling again. |
+| `true` | `true` | Mutates external state, but the same input twice yields the same result (e.g. an upsert, a PUT). Safe to replay, no warnings. |
+| `true` | `false` | Mutates external state and is **not** safe to replay (e.g. sending an email, placing an order, charging a payment). See retry behavior below. |
 
 With `sideEffect: true` and `idempotent: false`, Smithers does two things on retry:
 
-1. **Warns the agent.** The retry prompt lists which non-idempotent tools were already called.
-2. **Provides a stable idempotency key.** `ctx.idempotencyKey` is deterministic for a given task + iteration; pass it to external APIs that support idempotency (Stripe, AWS) to deduplicate.
+1. **Warns the agent.** The retry prompt lists non-idempotent tools already called.
+2. **Provides a stable idempotency key.** `ctx.idempotencyKey` is deterministic per task + iteration; pass it to external APIs that support idempotency (Stripe, AWS) to deduplicate.
 
-If your `execute` function has `sideEffect: true, idempotent: false` but omits the `ctx` parameter, Smithers logs a startup warning. This is almost always a bug: you need `ctx.idempotencyKey` to handle retries safely.
+If `execute` has `sideEffect: true, idempotent: false` but omits `ctx`, Smithers logs a startup warning: almost always a bug, since retries need `ctx.idempotencyKey` to be safe.
 
 ```ts
 // ✗ Bad: non-idempotent side effect without ctx
@@ -131,16 +131,16 @@ const sendEmail = defineTool({
 
 ### What counts as a side effect
 
-The rule is simple: **if you cannot undo it with `git reset`, mark it as a side effect.**
+**If you cannot undo it with `git reset`, mark it as a side effect.**
 
-A side effect is any mutation the runtime should not blindly repeat on retry. If a custom tool talks to an external API, writes to a database, sends a message, or triggers a webhook, mark it.
+A side effect is any mutation the runtime should not blindly repeat on retry: an external API call, a database write, a sent message, a triggered webhook.
 
-The built-in `write` and `edit` tools are registered as `sideEffect: true` and `idempotent: false` because their file mutations are not safe to blindly replay on retry; like `bash`, they are treated conservatively. All three built-in mutating tools (`write`, `edit`, `bash`) are side-effecting.
+The built-in `write` and `edit` tools are `sideEffect: true, idempotent: false`: their file mutations aren't safe to blindly replay on retry, so like `bash`, all three built-in mutating tools are treated conservatively.
 
 | Tool | Side effect? | Why |
 |---|---|---|
 | Built-in `read`, `grep` | No | Pure reads |
-| Built-in `write`, `edit` | **Yes** | Sandboxed file writes are tracked by git, but replaying on retry could overwrite content that diverged since the first call |
+| Built-in `write`, `edit` | **Yes** | Sandboxed writes are tracked by git, but replaying on retry could overwrite content that diverged since the first call |
 | Built-in `bash` | **Yes** | Arbitrary shell commands may not be safe to repeat |
 | Custom tool calling an external API | **Yes** | Mutates state outside the sandbox |
 | Custom tool writing to a database | **Yes** | External persistent state |
@@ -190,7 +190,7 @@ Write content to a file. Creates parent directories as needed.
 }
 ```
 
-Returns `"ok"`. Throws `"Content too large"` if content exceeds `maxOutputBytes`. Logs content hash (SHA-256) and byte size; full content is not stored.
+Returns `"ok"`; throws `"Content too large"` if content exceeds `maxOutputBytes`. Logs content hash (SHA-256) and byte size, not full content.
 
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
@@ -216,7 +216,7 @@ Apply a unified diff patch to an existing file.
 }
 ```
 
-Returns `"ok"`. The file must exist. Reads current contents, applies the patch via `applyPatch`, writes back. Throws on size limits (`"Patch too large"`, `"File too large"`) or mismatched context (`"Failed to apply patch"`). Logs patch hash and byte size.
+Returns `"ok"`; the file must exist. Reads, patches via `applyPatch`, writes back. Throws on size limits (`"Patch too large"`, `"File too large"`) or mismatched context (`"Failed to apply patch"`). Logs patch hash and byte size.
 
 ```
 --- a/src/auth.ts
@@ -240,7 +240,7 @@ Search for a regex pattern using `ripgrep`.
 }
 ```
 
-Returns matching lines with file paths and line numbers (`rg -n` format). Exit code 1 (no matches) returns empty string. Exit code 2 throws stderr as error. Requires `ripgrep` in PATH.
+Returns matching lines with file paths and line numbers (`rg -n` format). Exit 1 (no matches) returns empty string; exit 2 throws stderr as error. Requires `ripgrep` in PATH.
 
 ```
 src/auth.ts:15:  if (token.expired()) {
@@ -264,7 +264,7 @@ Run an executable directly with arguments.
 
 Use `args` for arguments. If you need shell syntax such as pipes or redirects, invoke a shell explicitly, for example `cmd: "sh", args: ["-lc", "..."]`.
 
-Returns combined stdout and stderr. Working directory defaults to `rootDir`. Timeout: 60s (killed with `SIGKILL` via process group). Non-zero exit codes throw.
+Returns combined stdout and stderr; working directory defaults to `rootDir`. Timeout: 60s (killed with `SIGKILL` via process group). Non-zero exit codes throw.
 
 ### Network Blocking
 
@@ -284,19 +284,17 @@ plus a remote-operation token is blocked.
 Local git commands (`git status`, `git diff`, `git log`) are allowed.
 
 <Warning>
-**Enforcement vs. bypassable denylist.** True OS-level network isolation is
-enforced **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
-with a network-deny profile (when `sandbox-exec` is available). On Linux and
-every other platform, including the environments Smithers runs in for CI,
-cloud, and production, `allowNetwork:false` cannot enforce a kernel sandbox and
-degrades to the token/basename denylist in the table above. That denylist is
-best-effort defense-in-depth, **not** a security boundary: it is trivially
-bypassable by a shell, an interpreter (`python -c` assembling a URL from parts,
-bash `/dev/tcp`), or a renamed binary. When isolation is unenforced, Smithers
-logs a `TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely
-on `allowNetwork:false` to sandbox untrusted code**. Run untrusted workloads
-under a real [`<Sandbox>`](/components/sandbox) provider with egress controls
-instead.
+**Enforcement vs. bypassable denylist.** True OS-level network isolation runs
+**only on macOS**: a blocked `bash` executes under `sandbox-exec` with a
+network-deny profile (when available). On Linux and every other platform,
+including Smithers' CI, cloud, and production environments, `allowNetwork:false`
+cannot enforce a kernel sandbox and falls back to the
+token/basename denylist above: best-effort defense-in-depth, not a security
+boundary, trivially bypassed by a shell, an interpreter (`python -c` assembling a URL from parts,
+bash `/dev/tcp`), or a renamed binary. Unenforced isolation logs a
+`TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely on
+`allowNetwork:false` to sandbox untrusted code**: run it under a real
+[`<Sandbox>`](/components/sandbox) provider with egress controls instead.
 </Warning>
 
 ```ts

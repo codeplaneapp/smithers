@@ -3,12 +3,11 @@ title: Run State
 description: The single typed model for "what is this run doing right now?"
 ---
 
-Every Smithers surface (CLI, Gateway, and programmatic clients) answers
-"what is this run doing right now?" by reading the same `RunStateView`,
-computed server-side from persisted state plus liveness signals.
-
-Surfaces never infer status from `ps`, event absence, or partial table
-reads. They call `computeRunState`.
+Every Smithers surface (CLI, Gateway, programmatic clients) answers "what is
+this run doing right now?" by calling `computeRunState`, never inferring
+status from `ps`, event absence, or partial table reads: it reads the same
+`RunStateView`, computed server-side from persisted state plus liveness
+signals.
 
 ## RunState
 
@@ -28,7 +27,7 @@ type RunState =
   | "unknown"           // telemetry gap; never invent a state
 ```
 
-When state cannot be determined (e.g. a missing heartbeat with ambiguous DB status), the runtime returns `unknown`. Never invent a more specific state.
+When state can't be determined (e.g. a missing heartbeat with ambiguous DB status), the runtime returns `unknown`.
 
 The legacy run-row `status` column maps to `RunState` like this:
 
@@ -46,32 +45,31 @@ The legacy run-row `status` column maps to `RunState` like this:
 | `cancelled`             | `cancelled`                    |
 | missing / unknown text  | `unknown`                      |
 
-`recovering` is reserved for the supervisor takeover window. As of this writing, it is defined but not yet emitted by the runtime.
+`recovering` is reserved for the supervisor takeover window. As of this writing, it's defined but not yet emitted.
 <Warning>
-**`waiting-event` is overloaded; do not assume it always means "send a signal."** The same status covers two situations that need opposite recovery:
+**`waiting-event` is overloaded; don't assume it always means "send a signal."** The same status covers two situations needing opposite recovery:
 
-1. A genuine pause on a [`<Signal>`](/components/signal) or [`<WaitForEvent>`](/components/wait-for-event). Recover by delivering the awaited signal: `bunx smithers-orchestrator signal RUN_ID SIGNAL_NAME --data '{}'`.
-2. A run parked with no live event node: an external-trigger / hot-reload / orphan-recovery wait, an aspect or alert human-request, or an approval decided while the run was detached. Here a signal does nothing; the run needs a resume (or `retry-task` / `fork` / answering the human request) after you fix the underlying cause.
+1. A genuine pause on [`<Signal>`](/components/signal) or [`<WaitForEvent>`](/components/wait-for-event): recover by delivering the signal, `bunx smithers-orchestrator signal RUN_ID SIGNAL_NAME --data '{}'`.
+2. A run parked with no live event node (external-trigger, hot-reload, orphan-recovery wait, an aspect/alert human-request, or an approval decided while detached): a signal does nothing; resume the run (or `retry-task` / `fork` / answer the human request) after fixing the underlying cause.
 
-Do not guess between them. Ask the runtime, which already disambiguates on
-`RunStateView.blocked.kind`:
+Don't guess: ask the runtime, which disambiguates on `RunStateView.blocked.kind`:
 
 ```bash
 bunx smithers-orchestrator why RUN_ID     # names the real blocker and prints the exact unblock command
 bunx smithers-orchestrator inspect RUN_ID # includes runState.blocked.kind
 ```
 
-`runState.blocked.kind === "event"` means a node is truly awaiting an event.
-When the run row says `waiting-event` but no node is, `runState.blocked.kind`
-is `approval-decided-resume-required` for a detached approval continuation, or
-`external-trigger` for a generic parked external wait. `why` still provides the
-most detailed unblock command and may report other blockers such as
+`runState.blocked.kind === "event"` means a node truly awaits an event. If the
+run row says `waiting-event` but no node does, `runState.blocked.kind` is
+`approval-decided-resume-required` (a detached approval continuation) or
+`external-trigger` (a generic parked external wait). `why` gives the most
+detailed unblock command and may report other blockers such as
 `retries-exhausted` or `dependency-failed`.
 </Warning>
 <Warning>
-**`succeeded`/`finished` can mask failed child agents.** Run-level status is binary; `finished` or `failed`; and a run is only `failed` when it has an *unhandled* task failure. Two large classes of failed children are deliberately not treated as run-level failures: tasks marked [`continueOnFail`](/components/task), and agent tasks that fail with a *transient* error (rate limits, timeouts, aborts; `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can therefore still report `finished` → `succeeded`.
+**`succeeded`/`finished` can mask failed child agents.** Run-level status is binary (`finished` or `failed`); a run fails only on an *unhandled* task failure. Two classes of failed children don't count as run-level failures: tasks marked [`continueOnFail`](/components/task), and agent tasks failing with a *transient* error (rate limits, timeouts, aborts: `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can still report `finished` → `succeeded`.
 
-Never trust the top-level status alone to conclude a run truly succeeded. Inspect per-node/agent outcomes:
+Never trust top-level status alone; inspect per-node/agent outcomes:
 
 ```bash
 bunx smithers-orchestrator inspect RUN_ID   # top-level runState plus every node's state (look for failed nodes)
@@ -80,32 +78,32 @@ bunx smithers-orchestrator events --run RUN_ID  # the full event history, includ
 bunx smithers-orchestrator scores RUN_ID     # scorer results when you gate on judged output
 ```
 
-You don't have to re-derive the count by eye. When a `finished` run tolerated at
-least one failed child, the masking is surfaced as a first-class **`failedChildren`**
+No need to re-derive the count by eye: when a `finished` run tolerated at least
+one failed child, the masking surfaces as a first-class **`failedChildren`**
 signal in three places:
 
 - **`inspect`** adds `failedChildren` (a count) and `failedChildKeys` (the failed
   task state keys, `nodeId::iteration`) to its JSON next to `runState`, plus a
-  `node …` call-to-action. They are absent when nothing failed, so
+  `node …` call-to-action; both absent when nothing failed, so
   `failedChildren > 0` is the degraded-run gate.
-- The **`RunResult`** returned by a programmatic run carries the same
-  `failedChildren` / `failedChildKeys` fields (omitted when zero).
-- The **`RunFinished`** event row records `failedChildren` / `failedChildKeys`, so the
-  CLI, Gateway, and DevTools can flag the degraded outcome from the event stream
-  without re-reading every node row.
+- **`RunResult`** from a programmatic run carries the same `failedChildren` /
+  `failedChildKeys` fields (omitted when zero).
+- The **`RunFinished`** event row records them too, so the CLI, Gateway, and
+  DevTools can flag the degraded outcome from the event stream without
+  re-reading every node row.
 
-The run-row `status` stays `finished` (and `RunState` stays `succeeded`) so existing
-`finished === success` callers and `continueOnFail` semantics are unchanged. The
+The run-row `status` stays `finished` (`RunState` stays `succeeded`), so existing
+`finished === success` callers and `continueOnFail` semantics are unchanged: the
 count is the signal, not a new terminal status.
 
-To avoid the rate-limit failures in the first place, bound fan-out concurrency with [`<Parallel maxConcurrency={N}>`](/components/parallel) so you don't burst past the provider's limit.
+To avoid rate-limit failures, bound fan-out concurrency with [`<Parallel maxConcurrency={N}>`](/components/parallel) so you don't burst past the provider's limit.
 </Warning>
 
 ## ReasonBlocked / ReasonUnhealthy
 
-`ReasonBlocked` and `ReasonUnhealthy` are optional reason payloads for
-waiting and unhealthy states. The type unions are wider than the variants
-currently derived from the DB rows.
+`ReasonBlocked` and `ReasonUnhealthy` are optional reason payloads for waiting
+and unhealthy states; the type unions are wider than the variants currently
+derived from the DB rows.
 
 ```ts
 type ReasonBlocked =
@@ -129,8 +127,8 @@ type ReasonUnhealthy =
 Timestamps are ISO-8601 strings. Current `computeRunState` / `deriveRunState`
 emits `approval`, `event`, `timer`, `approval-decided-resume-required`, and
 `external-trigger` blocked reasons, plus `engine-heartbeat-stale` and
-`timer-overdue` unhealthy reasons. The other variants are reserved by the
-public type and may appear on future run-state surfaces.
+`timer-overdue` unhealthy reasons; the rest are reserved by the public type for
+future run-state surfaces.
 
 ## RunStateView
 
@@ -148,10 +146,10 @@ type RunStateView = {
 matching pending approval/timer/event context, when a parked `waiting-event`
 run has no event-waiting node, or when that context is supplied to
 `deriveRunState`. A `waiting-*` state can be returned without `blocked` when
-the supporting row is unavailable. `unhealthy` is present for current `stale`,
-`orphaned`, and overdue timer results. `recovering` is reserved by the type but
-is not currently emitted by the DB derivation. Terminal states (`succeeded`,
-`failed`, `cancelled`) carry neither.
+the supporting row is unavailable. `unhealthy` is present for `stale`,
+`orphaned`, and overdue-timer results. `recovering` stays unemitted for now
+(see above), and terminal states (`succeeded`, `failed`, `cancelled`) carry
+neither.
 
 ## computeRunState
 
@@ -164,9 +162,8 @@ view.blocked;     // present for waiting-* only when backing context is found
 view.unhealthy;   // present for stale/orphaned heartbeat expiry or overdue timers
 ```
 
-`computeRunState` is pure over the DB plus the heartbeat / lease signals
-on the run row. It does not call `ps`, does not probe sockets, and does
-not run heuristics.
+`computeRunState` is pure over the DB plus the heartbeat / lease signals on
+the run row: no `ps` calls, no socket probes, no heuristics.
 
 `deriveRunState` is the underlying pure function, useful in tests or
 when you already have the rows in memory:
@@ -200,5 +197,5 @@ engine uses for `isRunHeartbeatFresh`.
   does not emit it; call `getRun` or `computeRunState` when you need the
   derived `RunStateView`.
 
-A run id that does not exist is not a `RunState`. It's an error
-(`RUN_NOT_FOUND`). `unknown` is for ambiguity, not for "doesn't exist."
+A run id that doesn't exist isn't a `RunState`. It's an error
+(`RUN_NOT_FOUND`); `unknown` is for ambiguity, not for "doesn't exist."

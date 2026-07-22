@@ -3,7 +3,7 @@ title: SDK Agents
 description: Provider-backed AI SDK agent wrappers for Anthropic, OpenAI, and Hermes that work like first-class Smithers agents.
 ---
 
-`AnthropicAgent`, `OpenAIAgent`, and `HermesAgent` are provider-backed [AI SDK](https://ai-sdk.dev) agents with class-style ergonomics matching the [CLI agents](/integrations/cli-agents). `AnthropicAgent` and `OpenAIAgent` wrap `ToolLoopAgent` directly; `HermesAgent` extends the OpenAI-compatible path with Hermes defaults. `ElizaAgent` adapts an Eliza runtime/character into the same Smithers agent interface when you need an in-process ElizaOS-backed agent.
+`AnthropicAgent`, `OpenAIAgent`, and `HermesAgent` are provider-backed [AI SDK](https://ai-sdk.dev) agents with class-style ergonomics matching the [CLI agents](/integrations/cli-agents). `AnthropicAgent` and `OpenAIAgent` wrap `ToolLoopAgent` directly; `HermesAgent` extends the OpenAI-compatible path with Hermes defaults. `ElizaAgent` adapts an Eliza runtime/character into the same Smithers agent interface.
 
 <Note>API reference: [Agents](/reference/agents) lists every agent class, its options, and links to source and tests.</Note>
 
@@ -64,16 +64,14 @@ export default smithers((ctx) => (
 ));
 ```
 
-In workflow JSX, put the schema on the Smithers task by passing
-`output={outputs.plan}`. You do not also configure the schema on the agent
-constructor. At execution time the engine infers the task's Zod schema and calls
-the SDK agent with `agent.generate({ outputSchema })`; the agent receives both
-the prompt and the schema for that task. The `ctx` variable in the example is
-the normal parameter of the `smithers((ctx) => ...)` builder, typed from the
-`input` schema above.
+In workflow JSX, the schema lives on the Smithers task (`output={outputs.plan}`),
+not the agent constructor. At execution time the engine infers the task's Zod
+schema and calls the SDK agent with `agent.generate({ outputSchema })`,
+passing both the prompt and the schema. `ctx` is the normal
+`smithers((ctx) => ...)` parameter, typed from the `input` schema above.
 
-You can also call an SDK agent once without rendering a workflow. Pass
-`outputSchema` directly to `generate()` when you want typed structured output:
+You can also call an SDK agent directly, without a workflow: pass
+`outputSchema` to `generate()` for typed structured output:
 
 ```ts
 import { z } from "zod";
@@ -96,21 +94,21 @@ For `AnthropicAgent`, `outputSchema` is forwarded as AI SDK
 `Output.object({ schema })`, which uses Anthropic's native structured-output
 request path for Claude models. `OpenAIAgent` does the same unless
 `nativeStructuredOutput: false`; `HermesAgent` defaults that option to `false`
-because many local Hermes servers do not honor JSON-schema response formats.
+(see Hermes below).
 
 ## Model Input
 
-`AnthropicAgent` and `OpenAIAgent` accept a model ID string (`"claude-fable-5"`, `"gpt-5.6-luna"`) or a prebuilt provider model instance. `HermesAgent` accepts an optional model ID string and defaults it to `"hermes"`.
+`AnthropicAgent` and `OpenAIAgent` accept a model ID string (`"claude-fable-5"`, `"gpt-5.6-luna"`) or a prebuilt provider model instance; `HermesAgent`'s model is optional and defaults to `"hermes"`.
 
 ## Options
 
-Constructors forward standard AI SDK `ToolLoopAgent` settings: `instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`. The wrappers add provider model resolution on top.
+Constructors forward standard AI SDK `ToolLoopAgent` settings (`instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`) and add provider model resolution on top.
 
-- `AnthropicAgentOptions` is `ToolLoopAgentSettings` without `model`, plus required `model: string | LanguageModel`.
-- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL`, `apiKey`, and `api`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
-- `HermesAgentOptions` makes `model` optional, allows `baseURL` and `apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
+- `AnthropicAgentOptions` is `ToolLoopAgentSettings` with `model` required as `string | LanguageModel`.
+- `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and two model forms: a string model may include `baseURL`, `apiKey`, and `api`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
+- `HermesAgentOptions` makes `model` optional, allows `baseURL`/`apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
 
-For the string model form of `OpenAIAgent`, pass `baseURL` and `apiKey` directly when targeting an OpenAI-compatible endpoint instead of the default OpenAI API. This is the simplest path for local servers such as llama.cpp:
+For the string model form of `OpenAIAgent`, pass `baseURL` and `apiKey` directly to target an OpenAI-compatible endpoint instead of the default OpenAI API, the simplest path for local servers like llama.cpp. Use `apiKey: "none"` when the server accepts OpenAI-compatible requests but doesn't require a real key:
 
 ```ts
 const local = new OpenAIAgent({
@@ -123,9 +121,7 @@ const local = new OpenAIAgent({
 });
 ```
 
-Set `apiKey: "none"` in the `OpenAIAgent` config when your local server accepts OpenAI-compatible requests but does not require a real key.
-
-String models default to OpenAI's Responses API (`/responses`), which most OpenAI-compatible servers (Gemini's OpenAI-compat layer, llama.cpp, vLLM) do not implement: every call 404s even though the endpoint serves `/chat/completions` fine. Set `api: "chat"` to route the agent through `/chat/completions` on those endpoints:
+String models default to OpenAI's Responses API (`/responses`), which most OpenAI-compatible servers (Gemini's OpenAI-compat layer, llama.cpp, vLLM) don't implement: every call 404s though `/chat/completions` works fine. Set `api: "chat"` to route the agent through `/chat/completions` on those endpoints:
 
 ```ts
 const gemini = new OpenAIAgent({
@@ -136,7 +132,7 @@ const gemini = new OpenAIAgent({
 });
 ```
 
-Some OpenAI-compatible local servers accept chat requests but do not reliably implement JSON schema structured output. For those servers, keep the output schema on the Smithers task and disable native structured output on the agent so Smithers uses prompt-based JSON extraction instead:
+Some OpenAI-compatible local servers accept chat requests but don't reliably implement JSON schema structured output: keep the output schema on the Smithers task and disable native structured output on the agent so Smithers falls back to prompt-based JSON extraction:
 
 ```ts
 const local = new OpenAIAgent({
@@ -150,7 +146,7 @@ const local = new OpenAIAgent({
 });
 ```
 
-For advanced provider setup, create the AI SDK OpenAI provider yourself and pass the prebuilt model into `OpenAIAgent`:
+For advanced provider setup, create the AI SDK OpenAI provider and pass the prebuilt model into `OpenAIAgent`:
 
 ```ts
 import { createOpenAI } from "@ai-sdk/openai";
@@ -168,11 +164,11 @@ const local = new OpenAIAgent({
 });
 ```
 
-Use the `createOpenAI` path when you need provider-level configuration beyond `baseURL` and `apiKey`; in that form, `baseURL` and `apiKey` belong in the `createOpenAI` config, not in the `OpenAIAgent` constructor.
+Use this path for provider-level config beyond `baseURL`/`apiKey`; in that form `baseURL` and `apiKey` belong in the `createOpenAI` config, not the `OpenAIAgent` constructor.
 
 ## Generic HTTP Tool
 
-`createHttpTool()` returns an AI SDK tool that can call any REST endpoint without an OpenAPI spec. Use it as the universal escape hatch when no curated connector or MCP server exists yet.
+`createHttpTool()` returns an AI SDK tool that calls any REST endpoint without an OpenAPI spec: the universal escape hatch when no curated connector or MCP server exists yet.
 
 ```ts
 const http = createHttpTool({
@@ -191,7 +187,7 @@ The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `au
 
 ## Hermes
 
-[Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API, so `HermesAgent` is a convenience subclass of `OpenAIAgent` that points the provider at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
+[Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API; `HermesAgent` is a convenience `OpenAIAgent` subclass that points at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
 
 ```ts
 import { HermesAgent } from "smithers-orchestrator";
@@ -205,11 +201,11 @@ const hermes = new HermesAgent({
 });
 ```
 
-`baseURL` falls back to the `HERMES_BASE_URL` env var and must be set in either place. `apiKey` falls back to `HERMES_API_KEY` (then `"hermes"`). Pass `nativeStructuredOutput: true` if your server does honor JSON-schema output. To use Smithers *from* Hermes instead of running Hermes as a worker, see [Agent Support → Hermes](/agents/hermes).
+`baseURL` falls back to the `HERMES_BASE_URL` env var and must be set in either place; `apiKey` falls back to `HERMES_API_KEY` (then `"hermes"`). Pass `nativeStructuredOutput: true` if your server honors JSON-schema output. To use Smithers *from* Hermes instead of running Hermes as a worker, see [Agent Support → Hermes](/agents/hermes).
 
 ## Eliza
 
-`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents on this page, it ships in a separate opt-in package that owns the `@elizaos/core` dependency, so install and import it from `@smithers-orchestrator/agent-eliza`:
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smithers-orchestrator/agent-eliza`:
 
 ```ts
 import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
@@ -222,11 +218,11 @@ const eliza = new ElizaAgent({
 });
 ```
 
-The harness lazily initializes the runtime on the first `generate` (or `preflight`) call and reuses it across calls. `settings` and `env` merge onto the character's own `settings` with precedence `env` over `settings` over `character.settings`. Pass an `outputSchema` on the Smithers task (or directly to `generate`) for structured output; `ElizaAgent` extracts JSON from the model's text because it does not set `supportsNativeStructuredOutput`.
+The harness lazily initializes the runtime on the first `generate` (or `preflight`) call and reuses it across calls. `settings` and `env` merge onto the character's `settings`, with precedence `env` > `settings` > `character.settings`. Pass an `outputSchema` on the Smithers task (or to `generate` directly) for structured output; `ElizaAgent` extracts JSON from the model's text since it doesn't set `supportsNativeStructuredOutput`.
 
 ## Hijack Support
 
-SDK agents do not reopen a provider-native CLI. Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
+SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
 
 Live-run behavior:
 
@@ -236,7 +232,7 @@ Live-run behavior:
 
 Limits:
 
-- Smithers reconstructs the agent from the workflow source on hijack. This means cross-engine hijack is not supported: the REPL will use the same agent class that ran originally.
+- Smithers reconstructs the agent from the workflow source on hijack, so cross-engine hijack isn't supported: the REPL uses the same agent class that ran originally.
 
 ## CLI vs SDK
 
@@ -247,15 +243,15 @@ Limits:
 | Flexibility | Native CLI flags | AI SDK `providerOptions` |
 | Structured output | Prompt-injection + text JSON extraction | Native (`supportsNativeStructuredOutput`) |
 
-**Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`, so when a `<Task>` has an `output` schema they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) and the result is schema-constrained. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape does not guarantee meaningful values. For tasks whose primary job is producing typed/JSON output, prefer `AnthropicAgent`/`OpenAIAgent` (or, for an OpenAI-compatible endpoint that honors JSON schema, an `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
+**Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`: when a `<Task>` has an `output` schema, they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) for a schema-constrained result. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape doesn't guarantee meaningful values. For typed/JSON-output tasks, prefer `AnthropicAgent`/`OpenAIAgent` (or an OpenAI-compatible endpoint that honors JSON schema, via `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
 
-Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience, not a separate runtime.
+Pass a raw `ToolLoopAgent` directly if preferred; the wrappers are convenience, not a separate runtime.
 
 ## Transcription Tool
 
-Use `createTranscriptionTool` when an SDK agent needs to transcribe audio as part of its tool loop. The tool accepts either an `audioUrl` or `audioBase64` input and normalizes Whisper or Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
+Use `createTranscriptionTool` when an SDK agent needs to transcribe audio in its tool loop. It accepts `audioUrl` or `audioBase64` input and normalizes Whisper/Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
 
-For Whisper, remote audio downloads are capped at 25 MiB by default. Set `maxResponseBodyBytes` to choose a different cap; the deprecated `maxResponseBytes` option remains a compatibility fallback when `maxResponseBodyBytes` is omitted. The generic `createHttpTool` has its own independent 1 MiB default.
+For Whisper, remote audio downloads are capped at 25 MiB by default; set `maxResponseBodyBytes` for a different cap (the deprecated `maxResponseBytes` is a fallback when it's omitted). The generic `createHttpTool` has its own independent 1 MiB default.
 
 ```ts
 import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";

@@ -43,10 +43,10 @@ type PollerProps = {
 - Backoff scales that gap. For the Nth gap (1-indexed): fixed = `intervalMs`;
   linear = `intervalMs * N`; exponential = `intervalMs * 2^(N-1)`.
 - The gap is a durable [`<Timer>`](/components/timer): the run parks as
-  `waiting-timer` between attempts and survives a crash or resume, rather than
-  sleeping in-process. A detached run is resumed by the gateway's timer sweep.
-- `intervalMs` does **not** bound how long a check may run. Use `checkTimeoutMs`
-  to cap a single attempt.
+  `waiting-timer` between attempts, surviving a crash or resume instead of
+  sleeping in-process. A detached run resumes via the gateway's timer sweep.
+- `intervalMs` doesn't bound how long a check may run; use `checkTimeoutMs` to
+  cap a single attempt.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
 ## Source

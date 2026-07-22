@@ -11,6 +11,6 @@ apiVersion: v1
 - Request: `{}`
 - Response: `Prompt[]`
 
-Each prompt is a `.md`/`.mdx` file walked from the project's `.smithers/prompts/` directory. A row carries `{ id, entryFile, source, createdAtMs?, updatedAtMs? }`, where `id` is the file's relative path without its extension (e.g. `refactor`), `entryFile` is the workspace-relative source path (e.g. `prompts/refactor.mdx`), and `source` is the raw file text. The optional timestamps come from `fs.stat`.
+Each prompt is a `.md`/`.mdx` file walked from `.smithers/prompts/`. A row carries `{ id, entryFile, source, createdAtMs?, updatedAtMs? }`: `id` is the file's relative path without extension (e.g. `refactor`), `entryFile` its workspace-relative source path (e.g. `prompts/refactor.mdx`), `source` the raw file text, and the optional timestamps come from `fs.stat`.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.

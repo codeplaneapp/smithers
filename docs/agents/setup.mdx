@@ -3,17 +3,16 @@ title: Set up in your harness
 description: Wire Smithers into the coding agent you already drive (Claude Code, Codex, Cursor, and the rest), then paste one prompt so the agent installs and starts using Smithers for you.
 ---
 
-Smithers is driven by an agent, not clicked by a human. You ask your coding
-agent for an outcome and it reaches for Smithers to run the work, watch it, and
-clear approvals on your behalf. Setting up takes one of two paths: paste a prompt
-and let your agent wire everything, or run three commands yourself.
+An agent drives Smithers, not you. Ask your coding agent for an outcome; it
+runs the work, watches it, and clears approvals for you. Set up two ways: paste
+a prompt and let your agent wire everything, or run three commands yourself.
 
 ## Fastest path: let your agent do it
 
-Paste this into your harness of choice (Claude Code, Codex, Cursor, Copilot, or
-any agent with shell access). It installs the workflow pack, syncs Smithers'
-generated CLI skill files where supported, registers the MCP server, then reports
-which starter fits your next task.
+Paste this into your harness (Claude Code, Codex, Cursor, Copilot, or any
+shell-capable agent). It installs the workflow pack, syncs Smithers' generated
+CLI skill files where supported, registers the MCP server, and reports which
+starter fits your next task.
 
 ```text Setup prompt
 Set up Smithers (a durable AI workflow orchestrator) in this repo for me.
@@ -30,11 +29,10 @@ From now on, when I ask for multi-step, long-running, or human-in-the-loop work,
 use Smithers to orchestrate it instead of doing it inline.
 ```
 
-`init` prints what it scaffolds, which coding agents it detected on your machine,
-and the next commands to try. `skills add` syncs the generated CLI skill set to
-supported skill locations; `mcp add` registers Smithers as an MCP server for
-detected MCP-capable agents such as Claude Code, Codex, Cursor, Gemini, OpenCode,
-Amp, Windsurf, and more.
+`init` prints what it scaffolds, the agents it detected, and next commands to
+try. `skills add` syncs the CLI skill set to supported locations; `mcp add`
+registers an MCP server for detected agents: Claude Code, Codex, Cursor,
+Gemini, OpenCode, Amp, Windsurf, and more.
 
 ## Or wire it by hand
 
@@ -49,9 +47,8 @@ bunx smithers-orchestrator skills add
 bunx smithers-orchestrator mcp add
 ```
 
-Scope the MCP install with `--agent <name>` for one harness, or use
-`--no-global` with skills to write into the current repo instead of your home
-directory:
+Scope the MCP install with `--agent <name>`, or the skills sync with
+`--no-global` to target the repo instead of home:
 
 ```bash
 bunx smithers-orchestrator mcp add --agent cursor
@@ -59,15 +56,15 @@ bunx smithers-orchestrator skills add --no-global
 ```
 
 <Note>
-No skills directory in your agent? Point it at `bunx smithers-orchestrator docs-full`
+No skills directory? Point it at `bunx smithers-orchestrator docs-full`
 (prints the full docs bundle) or `bunx smithers-orchestrator ask "<question>"`,
-and add a few standing lines to `AGENTS.md` or `CLAUDE.md` so it remembers
-Smithers is available.
+and add a few lines to `AGENTS.md` or `CLAUDE.md` so it remembers Smithers is
+available.
 </Note>
 
 ## Pick your harness
 
-Each page covers the exact paths, config files, and any harness-specific steps.
+Each page covers exact paths, config files, and harness-specific steps.
 
 | Harness | Setup page |
 |---|---|
@@ -79,7 +76,7 @@ Each page covers the exact paths, config files, and any harness-specific steps.
 | Hermes | [agents/hermes](/agents/hermes) |
 | OpenClaw | [agents/openclaw](/agents/openclaw) |
 
-The full support matrix and the three integration surfaces (skill, MCP server,
+The full support matrix and three integration surfaces (skill, MCP server,
 standing instructions) live in [Agent Support](/agents/overview).
 
 ## Verify it worked
@@ -91,8 +88,8 @@ bunx smithers-orchestrator workflow list
 bunx smithers-orchestrator starters
 ```
 
-If the MCP server registered, the agent can now call `list_workflows`,
-`run_workflow`, `watch_run`, and `resolve_approval` directly. See the
+If the MCP server registered, the agent can call `list_workflows`,
+`run_workflow`, `watch_run`, and `resolve_approval`. See the
 [MCP Server reference](/integrations/mcp-server) for every tool.
 
 ## Next steps

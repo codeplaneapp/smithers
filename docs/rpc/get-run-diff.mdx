@@ -11,6 +11,6 @@ apiVersion: v1
 - Request: `{ runId }`
 - Response: `GetRunDiffResponse` (`DiffBundle` or an explicit `status: "oversized"` marker)
 
-The bundle is computed from the run's base VCS revision to its terminal revision. Runs with no changed files return an honest empty `patches` array. Oversized results are never truncated and include `sizeBytes` and `maxBytes`.
+The bundle spans the run's base VCS revision to its terminal revision; runs with no changed files return an honest empty `patches` array. Oversized results are never truncated, only flagged via `sizeBytes` and `maxBytes`.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `VcsError`, and `Internal`.

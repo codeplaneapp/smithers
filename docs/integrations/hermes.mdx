@@ -18,13 +18,13 @@ The relationship is bidirectional:
 
 ## Hermes: a native plugin (not just MCP)
 
-Smithers installs a **native Hermes plugin**, which is far richer than a bare MCP
-entry. MCP can only expose tools. The plugin adds:
+Smithers installs a **native Hermes plugin**, far richer than a bare MCP entry
+(MCP can only expose tools). The plugin adds:
 
 - **Slash commands** (`/smithers run|ps|inspect|output|approve|deny|watch`) usable in the
   Hermes CLI and every gateway (Discord, Telegram, Slack).
-- **A live-run status injector** (`pre_llm_call` hook) so Hermes is aware of
-  active and paused runs, and any pending approval gates, on every turn.
+- **A live-run status injector** (`pre_llm_call` hook) so Hermes sees active
+  and paused runs, and any pending approval gates, on every turn.
 - **Tools**: `smithers_run`, `smithers_ps`, `smithers_inspect`, `smithers_approve`,
   `smithers_deny`, `smithers_output`, `smithers_human_answer`.
 - **A bundled skill** (`smithers:orchestrate`) that teaches Hermes to prefer a
@@ -47,8 +47,8 @@ bunx smithers-orchestrator mcp add --agent hermes
 
 The command writes the plugin into `~/.hermes/plugins/smithers/`, installs the
 gateway hook into `~/.hermes/hooks/smithers/`, enables it in
-`~/.hermes/config.yaml`, and also registers the MCP server as a floor (so tools
-work even if user plugins are disabled). It is idempotent: rerun it any time to
+`~/.hermes/config.yaml`, and registers the MCP server as a floor (so tools
+work even if user plugins are disabled). It's idempotent: rerun it anytime to
 upgrade.
 
 Verify it loaded:
@@ -61,9 +61,9 @@ hermes -z "/smithers ps"   # lists your runs from inside Hermes
 ## Eliza (elizaOS): built in by default
 
 [Eliza](https://github.com/elizaOS/eliza) has Smithers support **built in by
-default**: there is no plugin to install. Any Eliza agent can launch and operate
+default**, no plugin to install. Any Eliza agent can launch and operate
 durable Smithers workflows out of the box, and a provider injects live Smithers
-run status into the agent's context on every turn.
+run status into the agent's context every turn.
 
 What the agent gets:
 
@@ -71,19 +71,20 @@ What the agent gets:
   background task (falls back to `create-workflow` to author one from the
   request).
 - `SMITHERS_APPROVE` / `SMITHERS_DENY`: clear approval gates.
-- `SMITHERS_RUNS` provider: every turn, the agent automatically sees what is
-  running and what needs a human.
+- `SMITHERS_RUNS` provider: every turn, the agent sees what's running and
+  what needs a human.
 
 It reaches Smithers through the `smithers` CLI (override the binary with
 `$SMITHERS_BIN`).
 
 ## Why a workflow, not a skill
 
-In both runtimes the guidance is the same: a Smithers workflow is a **superset of
-a skill**. A skill is static instructions; a workflow is executable, durable,
-typed, inspectable, composable, and optimizable. Capture reusable procedures as
-workflows (even small one-task ones), and optimize them like skills with
-`bunx smithers-orchestrator eval`, scorers, and `bunx smithers-orchestrator optimize`. See the
+In both runtimes the guidance is the same: a Smithers workflow is a **superset
+of a skill**, since a skill is static instructions while a workflow is
+executable, durable, typed, inspectable, composable, and optimizable. Capture
+reusable procedures as workflows (even small one-task ones), and optimize
+them like skills with `bunx smithers-orchestrator eval`, scorers, and
+`bunx smithers-orchestrator optimize`. See the
 [smithers skill](https://github.com/smithersai/smithers/blob/main/skills/smithers/SKILL.md).
 
 ## Links

@@ -5,4 +5,4 @@ description: Folded into Recipes.
 
 This material is now in [Recipes](/recipes).
 
-For 5+ tasks, use a three-file pattern per step: `Component.schema.ts` (Zod), `Component.mdx` (prompt with auto-injected `{props.schema}`), and `Component.tsx` (Task wiring). Keep `workflow.tsx` as pure composition; centralize `createSmithers()` in `smithers.ts`, agents in `agents.ts`, and shared knobs (timeouts, max iterations) in `config.ts`.
+For 5+ tasks, use a three-file-per-step pattern: `Component.schema.ts` (Zod), `Component.mdx` (prompt, auto-injects `{props.schema}`), `Component.tsx` (Task wiring). Keep `workflow.tsx` pure composition; centralize `createSmithers()` in `smithers.ts`, agents in `agents.ts`, shared knobs (timeouts, max iterations) in `config.ts`.

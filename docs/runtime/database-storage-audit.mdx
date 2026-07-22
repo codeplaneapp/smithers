@@ -3,27 +3,26 @@ title: Database storage audit
 description: Durable-storage classification, measured hot spots, and the snapshot growth fix.
 ---
 
-This audit covers SQLite and PGlite/PostgreSQL storage. The live SQLite store was
-inspected read-only; no production rows were deleted, compacted, or vacuumed.
+This audit covers SQLite and PGlite/PostgreSQL storage, inspecting the live
+SQLite store read-only: no production rows were deleted, compacted, or vacuumed.
 
 ## What stays durable
 
-No current durable event should become Prometheus-only. Prometheus is the lossy,
-low-cardinality aggregate projection. `_smithers_events` is ordered run history
-used by SSE reconnect, gateway history, transcript search, replay, and recovery.
-`TokenUsageReported`, for example, seeds a resumed run's budget. Metrics cannot
-reconstruct an individual run or event sequence.
+No current durable event should become Prometheus-only: Prometheus is a lossy,
+low-cardinality aggregate that can't reconstruct an individual run or event
+sequence. `_smithers_events` is ordered run history for SSE reconnect, gateway
+history, transcript search, replay, and recovery; `TokenUsageReported`, for
+example, seeds a resumed run's budget.
 
-`TaskHeartbeat` is the closest tempting candidate, but it occupies about 80.7 MB
-across 228,484 rows: roughly 0.114% of the 65.99 GiB database. It remains durable
-because the gateway exposes heartbeat history and reconnect ordering. Aggregate
-heartbeat count, interval, timeout, and payload-size metrics already exist in the
-Prometheus surface.
+`TaskHeartbeat` is the closest tempting candidate, but at just 80.7 MB across
+228,484 rows (0.114% of the 65.99 GiB database) it stays durable because the
+gateway exposes heartbeat history and reconnect ordering; aggregate count,
+interval, timeout, and payload-size metrics already live in Prometheus.
 
 Runs, nodes, attempts, frames, outputs, snapshots, approvals, human requests,
 signals, alerts, cron state, VCS pointers, scorer results, audit rows, and memory
-remain semantic workflow state. Existing bounded caches and workspace checkpoint
-pruning retain their current eviction contracts.
+remain semantic workflow state; existing bounded caches and workspace checkpoint
+pruning keep their current eviction contracts.
 
 ## Measured storage hot spots
 
@@ -36,59 +35,58 @@ SQLite `dbstat` reported:
 | `_smithers_frames` | 1,489,481,728 |
 | `_smithers_attempts` | 197,328,896 |
 
-The dominant sampled snapshot contained about 6.45 MB of state, almost all in
-`outputs_json`, and 40 consecutive rows had the exact same content hash. Snapshot
-representation is therefore the first storage target by a wide margin.
+The dominant sampled snapshot held about 6.45 MB of state, almost all in
+`outputs_json`; 40 consecutive rows shared the exact same content hash, making
+snapshot representation the first storage target by a wide margin.
 
 ## Snapshot representation
 
 Migration `0025_snapshot_contents` leaves `_smithers_snapshots` physically
-unchanged. It only adds:
+unchanged and only adds:
 
-- `_smithers_snapshot_contents`, keyed by the existing snapshot content hash and
-  containing the four raw JSON fields once;
-- `_smithers_snapshot_payload_refs`, keyed by `(run_id, frame_no)` and foreign
-  keyed to both the snapshot metadata row and its immutable content;
-- a content-hash index on the small reference table and lifecycle triggers that
-  maintain derived reference counts.
+- `_smithers_snapshot_contents`, keyed by the snapshot content hash, holding the
+  four raw JSON fields once;
+- `_smithers_snapshot_payload_refs`, keyed by `(run_id, frame_no)`, foreign-keyed
+  to both the snapshot metadata row and its immutable content;
+- a content-hash index on that reference table, plus lifecycle triggers
+  maintaining derived reference counts.
 
-New snapshot metadata rows keep the existing columns but store empty inline JSON;
-the reference row is the explicit compact marker. Exact/latest loads join metadata,
-reference, and content in one statement, so concurrent rewind cannot delete the
-content between two reads. Legacy inline rows continue to load directly.
+New snapshot metadata rows keep the existing columns but store empty inline JSON,
+with the reference row as the compact marker. Exact/latest loads join metadata,
+reference, and content in one statement, so concurrent rewind can't delete
+content between two reads; legacy inline rows still load directly.
 
 Capture, frame commit, fork, replacement, rewind, and direct snapshot deletion
-preserve their existing atomic boundaries. SQLite-compatible runtimes also
-install a delete fallback trigger for environments that reject
-`PRAGMA foreign_keys`; PostgreSQL uses the foreign-key cascade. Store migration
-continues its existing table-at-a-time commits rather than claiming whole-copy
-atomicity; it orders content before snapshots and references, copies derived
-counts as zero, and lets the destination triggers rebuild them.
+keep their existing atomic boundaries. SQLite-compatible runtimes install a
+delete fallback trigger where `PRAGMA foreign_keys` is rejected; PostgreSQL
+uses the foreign-key cascade instead. Store migration commits table-at-a-time,
+not with whole-copy atomicity, ordering content before snapshots and
+references, copying derived counts as zero, and letting destination triggers
+rebuild them.
 
-The exported low-level `smithersSnapshots` object still maps the physical table.
-Its schema and inline-write path remain compatible: an inline update over a
-compact row atomically retires its old content reference. New compact rows are
-not self-contained through that raw table, however: their four empty JSON strings
-are markers. Raw-table readers must move to `loadSnapshot`/`loadLatestSnapshot`,
+The exported low-level `smithersSnapshots` object still maps the physical table;
+its schema and inline-write path stay compatible, and an inline update over a
+compact row atomically retires its old content reference. New compact rows
+aren't self-contained through that raw table: their four empty JSON strings are
+markers, so raw-table readers must move to `loadSnapshot`/`loadLatestSnapshot`,
 which return the same hydrated public `Snapshot` shape as before.
 
-External SQLite descriptors must provide a real atomic `transaction()` callback.
-Descriptors that cannot hold that physical boundary, including Cloudflare D1,
-fail before a transactional write begins instead of risking a partial frame or
-snapshot.
+External SQLite descriptors must provide an atomic `transaction()` callback;
+those that can't hold that boundary, including Cloudflare D1, fail before a
+transactional write begins rather than risk a partial frame or snapshot.
 
-The unreleased gzip prototype used by existing dogfood data is retained under its
-old table name and remains readable with hash verification. The final migration
-does not rename, copy, index, or add a column to the roughly 41 GB snapshot table.
+The unreleased gzip prototype behind existing dogfood data stays under its old
+table name, readable with hash verification; the final migration doesn't
+rename, copy, index, or add a column to the roughly 41 GB snapshot table.
 
 ## Measurement
 
 The deterministic SQLite fixture uses a structured 6,608,625-byte state with
-1,536 agent-result records. Twelve inline copies occupied 79,761,408 bytes; the
-content-addressed database occupied 13,602,816 bytes (about 17.1% of the inline
-baseline) while returning the identical public snapshot. The test also covers
+1,536 agent-result records: twelve inline copies occupied 79,761,408 bytes
+versus 13,602,816 bytes for the content-addressed database (about 17.1% of the
+inline baseline), returning the identical public snapshot. It also covers
 replacement, shared references, direct deletion, legacy inline rows, and the
-compressed prototype. The engine's real PGlite suite covers capture, resume,
+compressed prototype; the engine's real PGlite suite covers capture, resume,
 fork, and hydration through the PostgreSQL trigger path.
 
 Run the focused fixtures with:
@@ -101,25 +99,25 @@ pnpm -C packages/engine exec bun test tests/time-travel-postgres.test.js
 
 ## What this does not reclaim
 
-The change limits future growth. It intentionally does not rewrite existing
-inline snapshots. SQLite has `auto_vacuum=0`, so deleting or clearing old payloads
-would not return file space to the OS anyway. Existing-space reclamation needs a
-separate offline workflow with a verified backup, free-space check, batched
-materialization, integrity verification, `VACUUM INTO`, and atomic replacement.
-It must never run automatically against the live 66 GB store.
+The change limits future growth without rewriting existing inline snapshots.
+SQLite has `auto_vacuum=0`, so deleting or clearing old payloads wouldn't return
+file space to the OS anyway; reclaiming existing space needs a separate offline
+workflow (verified backup, free-space check, batched materialization, integrity
+verification, `VACUUM INTO`, atomic replacement) that must never run
+automatically against the live 66 GB store.
 
-Old binaries do not understand compact rows. Rollback after new writes therefore
-means restoring a pre-upgrade backup; the migration does not claim an unavailable
+Old binaries don't understand compact rows, so rollback after new writes means
+restoring a pre-upgrade backup: the migration doesn't claim an unavailable
 reverse materializer.
 
 ## Follow-up opportunities
 
-The next candidates are representation changes, not metrics deletion:
+The next candidates are representation changes rather than metrics deletion:
 
 1. Versioned asynchronous compression/normalization for AgentSession, AgentEvent,
    and AgentTrace payloads (about 1.664 GB together in the audited store).
 2. Content-address repeated `mounted_task_ids_json` and `task_index_json` frame
-   metadata while preserving the existing bounded keyframe/delta codec.
+   metadata, preserving the existing bounded keyframe/delta codec.
 3. Deduplicate the same large error JSON currently present in both attempts and
    matching `NodeFailed` events.
 4. Offer explicit terminal-run archival with complete run-owned-table coverage.

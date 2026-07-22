@@ -3,22 +3,22 @@ title: Workflow Catalog
 description: Canonical workflow packs and marketplace-ready metadata.
 ---
 
-The default `.smithers` pack is intentionally small. It installs `create-workflow`, `create-skill`, and `docs-driven-development`; the durable `init`, `post-failure`, and `upgrade` workflows remain hidden system plumbing. Former starter workflows are preserved under `examples/init-pack/`.
+The default `.smithers` pack is small: it installs `create-workflow`, `create-skill`, and `docs-driven-development`; `init`, `post-failure`, and `upgrade` stay hidden as durable system plumbing. Former starter workflows live under `examples/init-pack/`.
 
 ## Canonical Packs
 
 | Pack | Workflows | Audience |
 | --- | --- | --- |
-| Curated default | `create-workflow`, `create-skill`, `docs-driven-development` | Author workflows, author standalone skills, or maintain a target repository's living product spec. |
+| Curated default | `create-workflow`, `create-skill`, `docs-driven-development` | Author workflows, author standalone skills, or maintain a target repo's living product spec. |
 | Examples | `examples/init-pack/` | Former init workflows retained as runnable/copyable examples. |
 | System | `add`, `init`, `post-failure`, `share-pack`, `upgrade` | Internal plumbing (hidden from default listings): durable pack install/refresh, pack sharing, automatic failed-run autopsies, and assisted Smithers upgrades. |
 
 ## Pack Manifest (`smithers.toon`)
 
-Every `.smithers/` directory is a publishable pack, and its manifest is the file
+Every `.smithers/` directory is a publishable pack; its manifest is
 `smithers.toon` at the pack root. `bunx smithers-orchestrator init` scaffolds one automatically
-(including on `--agents-only` runs, where `contents` starts empty), and re-init
-reports drift like any other pack file. The format is
+(`contents` starts empty on `--agents-only` runs), and re-init reports drift
+like any other pack file. The format is
 [TOON](https://github.com/toon-format/toon), the same structured format the CLI
 uses for agent-facing output.
 
@@ -45,7 +45,7 @@ Field reference:
 | `version` | Pack version string. Defaults to `0.0.0`. |
 | `description` / `repository` | Free-text description and source URL for catalogs. |
 | `smithers` | Compatible Smithers version range. Defaults to `*`. |
-| `contents.workflows` / `contents.ui` | Workflow ids and UI entrypoints the pack ships. Scaffolding derives `ui` from actual `<UI entry>` declarations, not from every file in `ui/`. |
+| `contents.workflows` / `contents.ui` | Workflow ids and UI entrypoints the pack ships. Scaffolding derives `ui` from actual `<UI entry>` declarations, not every file in `ui/`. |
 | `capabilities.bins` / `capabilities.env` | Executables and environment variables the pack's workflows require. |
 | `capabilities.writes` | `repo`, `sandbox`, or `none`: the pack's write surface, shown to operators before install. |
 
@@ -62,7 +62,7 @@ Workflow packs should document:
 - required Gateway scopes
 - input schema and example input
 - expected outputs
-- whether the workflow writes files, opens pull requests, or needs approval
+- whether it writes files, opens pull requests, or needs approval
 - recommended sandbox runtime
 - validation command
 
@@ -75,5 +75,5 @@ Before sharing a workflow pack:
 - Run the workflow on a disposable repository.
 - Confirm every write path goes through approval or review when needed.
 - Document the operator steps for non-coding teammates.
-- Include a small example input and the expected final output.
+- Include a small example input and expected final output.
 - Note which failures are safe to retry and which require human intervention.

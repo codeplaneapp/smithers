@@ -13,4 +13,4 @@ apiVersion: v1
 - Request: `{ runId }`
 - Response: `{ runId, status: "cancelling" }`
 
-Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`. `RUN_NOT_ACTIVE` means the run is not currently active, including already-finished runs. Returns `Forbidden` if the caller lacks `run:write` scope.
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`. `RUN_NOT_ACTIVE` means the run is not currently active, including already-finished runs; `Forbidden` means the caller lacks `run:write` scope.

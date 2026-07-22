@@ -3,19 +3,17 @@ title: Introduction
 description: What Smithers is and when to use it.
 ---
 
-Smithers orchestrates AI coding agents at scale with composable, model- and harness-agnostic workflows. Most workflow systems fail quietly. A crash mid-run means lost work and a manual restart from scratch. Smithers solves this with a render-loop execution model: every completed step is persisted immediately, so the runtime always knows exactly what has finished and what to run next.
+Smithers orchestrates AI coding agents at scale with composable, model- and harness-agnostic workflows. Most workflow systems fail quietly, losing work to a crash and forcing a manual restart. Smithers's render loop avoids that: each frame asks what's finished and what can start, validates task outputs against Zod schemas, and persists them to SQLite immediately. Crashes, restarts, and approvals become first-class, and the runtime resumes from the last persisted state without re-running completed work.
 
 <Note>
-This page is in the **For Agents** track. It is for AI harnesses and workflow authors who
-need the runtime model. Human-facing docs live in the **For Humans** Guide, starting at
-[What Smithers Is](/guide/what-is-smithers).
+This page is in the **For Agents** track: for AI harnesses and workflow authors who
+need the runtime model. Human-facing docs start at
+[What Smithers Is](/guide/what-is-smithers) in the **For Humans** Guide.
 </Note>
 
-Smithers runs your workflow on a render loop: each frame it asks "what has finished, and what can start now?" Tasks produce outputs validated by Zod schemas; the runtime persists them to SQLite. Crashes, restarts, and approvals are first-class, and the runtime resumes from the last persisted state without re-running completed work.
+**Default authoring path: MDX prompts.** Edit a plain Markdown file in `.smithers/prompts/`; the seeded TypeScript skeleton picks it up automatically, no build step or TypeScript needed. See [MDX Workflow Authoring](/guides/mdx-authoring).
 
-**Default authoring path - MDX prompts.** For most workflows you edit a plain Markdown file in `.smithers/prompts/` and the seeded TypeScript skeleton picks it up automatically. No build step, no TypeScript required. See [MDX Workflow Authoring](/guides/mdx-authoring).
-
-**Advanced authoring - TypeScript SDK.** When you need branching, schemas, parallel fan-out, or loops, write the workflow as a JSX tree. Smithers renders the tree and drives execution:
+**Advanced authoring: TypeScript SDK.** For branching, schemas, parallel fan-out, or loops, write the workflow as a JSX tree that Smithers renders and drives execution from:
 
 ```tsx
 <Workflow name="review">
@@ -40,11 +38,11 @@ Use Smithers when:
 - different tasks need different models, tools, or policies
 - operators need the [Gateway](/integrations/gateway) API to launch, stream, and approve runs programmatically
 
-Don't use it for a single prompt → single response. Use your model provider's SDK directly; Smithers adds no value there.
+Don't use it for a single prompt → single response: use your model provider's SDK directly.
 
 ## Read next
 
-- [MDX Workflow Authoring](/guides/mdx-authoring) to change what your agent does without writing TypeScript.
-- [Tour](/tour) for a working code-review example (TypeScript SDK).
+- [MDX Workflow Authoring](/guides/mdx-authoring) to change agent behavior without writing TypeScript.
+- [Tour](/tour) for a code-review example (TypeScript SDK).
 - [How It Works](/how-it-works) for the execution model.
-- [Why React?](/why-react) for the rationale behind the JSX runtime.
+- [Why React?](/why-react) for the JSX runtime's rationale.

@@ -5,43 +5,43 @@ description: Design a single high-quality prompt — the innermost layer an agen
 
 # Prompt Author
 
-This skill is about **one layer only: the prompt** — the literal text a single
-agent reads. It is the innermost ring of the layered model (prompt → context →
-harness → workflow → backpressure; see `skills/context-engineer/SKILL.md`). When
-the *graph* is fine but a step keeps producing weak or off-target output, the fix
-is usually here, not in the workflow.
+This skill covers **one layer only: the prompt**: the text a single agent reads,
+the innermost ring of the layered model (prompt → context → harness → workflow →
+backpressure; see `skills/context-engineer/SKILL.md`). When the *graph* is fine
+but a step keeps producing weak or off-target output, fix it here, not in the
+workflow.
 
 ## When to reach for it
 
-- A `<Task>`'s output is vague, wrong-shaped, or inconsistent run to run.
-- The agent ignores a constraint, invents a format, or stops short of the goal.
-- You're tempted to add a retry/reviewer to paper over a prompt that simply
-  never said clearly what "done" looks like. Fix the prompt first.
+- A `<Task>`'s output is vague, wrong-shaped, or inconsistent run to run, or the
+  agent ignores a constraint, invents a format, or stops short of the goal.
+- You're tempted to add a retry/reviewer to paper over a prompt that never said
+  clearly what "done" looks like.
 
-Skip it when the real problem is missing context, the wrong tools/permissions, or
-a missing review gate — those are outer layers (`context-engineer`, the harness in
+Skip it when the real problem is missing context, wrong tools/permissions, or a
+missing review gate: those are outer layers (`context-engineer`, the harness in
 `agents.ts`, the workflow graph).
 
 ## What makes a strong prompt
 
-1. **One clear instruction.** Lead with the single concrete task in plain
-   imperative voice. No instruction soup; goal-based beats step-by-step.
+1. **One clear instruction**, in plain imperative voice: no instruction soup,
+   goal-based beats step-by-step.
 2. **Role / framing** when it changes behavior ("You are an independent reviewer
-   who can reject the diff"). Skip it when it's decoration.
-3. **Explicit constraints.** State the must-nots and the bounds: no dead code, no
-   magic numbers, don't touch file X, stay under N changes.
-4. **Examples** for anything format- or taste-sensitive — one good + one bad
-   example teaches more than a paragraph of rules.
-5. **Decomposition** for multi-part work: a short numbered checklist of what to
-   verify or produce, so nothing is silently dropped.
-6. **Success criteria / finish line.** Define "done" as checkable conditions
-   ("existing tests pass; new tests prove per-account limits; reviewer approves"),
-   plus a cap and fallback for any "keep going until…".
+   who can reject the diff"); skip it when it's decoration.
+3. **Explicit constraints**: must-nots and bounds, no dead code, no magic
+   numbers, don't touch file X, stay under N changes.
+4. **Examples** for format- or taste-sensitive work: one good and one bad example
+   teaches more than a paragraph of rules.
+5. **Decomposition** for multi-part work: a numbered checklist of what to verify
+   or produce, so nothing gets silently dropped.
+6. **Success criteria / finish line**: "done" as checkable conditions (e.g.
+   "existing tests pass; new tests prove per-account limits; reviewer approves"),
+   with a cap and fallback for any "keep going until…".
 
 ## The Smithers angle: prompts are `.mdx` a `<Task>` renders
 
-In a seeded pack, prompts live as `.smithers/prompts/*.mdx`, authored as JSX
-prompt components and imported into a workflow as a tag:
+Prompts live as `.smithers/prompts/*.mdx` (JSX prompt components), imported into
+a workflow as a tag:
 
 ```tsx
 import ReviewPrompt from "../prompts/review.mdx";
@@ -50,31 +50,28 @@ import ReviewPrompt from "../prompts/review.mdx";
 </Task>
 ```
 
-The `.mdx` body *is* the prompt; props inject context. Keep the file focused on
-instruction + constraints + criteria, and let the workflow supply the variable
-context.
+The `.mdx` body *is* the prompt; props inject context. Keep it focused on
+instruction, constraints, and criteria: let the workflow supply variable context.
 
-**Critical: end the prompt before the output schema, not with your own JSON
-spec.** When a `<Task>` has an `output={outputs.x}` Zod schema, the runtime
-auto-appends a `**REQUIRED OUTPUT**` block describing the JSON shape to the *end*
-of the prompt, and the parser reads the **last** JSON object in the response. So:
+**Critical: end the prompt before the output schema, never with your own JSON
+spec.** A `<Task>` with an `output={outputs.x}` Zod schema gets a
+`**REQUIRED OUTPUT**` block auto-appended to the prompt's *end*; the parser reads
+the **last** JSON object in the response, so a hand-written "return JSON like
+{…}" fights the injected block and confuses it.
 
-- **Do** end your `.mdx`/string with the task and criteria — leave the tail clean
-  for the injected schema. Hand-writing your own "return JSON like {…}" fights the
-  injected block and confuses the last-JSON parser.
 - **Do** describe *what* each field means in prose if it's non-obvious; let the
   schema describe the *shape*.
-- **Don't** wrap the agent in conflicting format rules ("write a report" + a JSON
-  schema) — the schema wins, so phrase the body so its result *is* the JSON.
+- **Don't** wrap the agent in conflicting format rules ("write a report" plus a
+  JSON schema): the schema wins, so phrase the body so its result *is* the JSON.
 
-Agents that support native structured output skip the injected block, so a prompt
-that defers to the schema works in both modes.
+Agents with native structured output skip the injected block; a prompt that
+defers to the schema works in both modes.
 
 ## Tighten-and-verify loop
 
 Edit the `.mdx`, re-run with `--hot true` so wording changes apply on the next
 frame without losing finished tasks, then attach a `schemaAdherence` scorer (or a
-small `smithers eval` suite) to confirm the new prompt actually holds the format:
+small `smithers eval` suite) to confirm the new prompt holds the format:
 
 ```bash
 bunx smithers-orchestrator up workflow.tsx --hot true --input '{"prompt":"…"}'

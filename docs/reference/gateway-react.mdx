@@ -4,16 +4,16 @@ description: React hooks for driving a Smithers Gateway from a custom workflow U
 icon: "react"
 ---
 
-The Smithers UI surface is React. This package is the SDK that backs it: a
-provider that holds one `SmithersGatewayClient`, a set of live data hooks that
-read a run (or runs, approvals, crons, scores, …) over TanStack DB collections,
-and action hooks that launch, approve, and cancel. Most hooks return the same
-[`GatewayAsyncState`](#gatewayasyncstate) shape, so once you know one you know
+The Smithers UI surface is React. This package is its SDK: a provider holding
+one `SmithersGatewayClient`, live data hooks that read a run (or runs,
+approvals, crons, scores, …) over TanStack DB collections, and action hooks
+that launch, approve, and cancel. Most hooks share the
+[`GatewayAsyncState`](#gatewayasyncstate) shape, so knowing one means knowing
 them all.
 
 <Note>
-Everything on this page lives at the subpath `smithers-orchestrator/gateway-react`,
-**not** on the bare `smithers-orchestrator` facade. Import from the subpath or
+Everything here lives at the subpath `smithers-orchestrator/gateway-react`,
+**not** the bare `smithers-orchestrator` facade. Import from the subpath, or
 the build fails.
 </Note>
 
@@ -41,15 +41,13 @@ function Run({ runId }: { runId: string }) {
 }
 ```
 
-For a UI bundled and served by the gateway itself, skip the JSX provider and
-mount with [`createGatewayReactRoot`](#creategatewayreactroot) instead. It wires
-both contexts (on-demand hooks **and** the live collections) in one call.
+For a UI served by the gateway itself, skip the JSX provider and mount with
+[`createGatewayReactRoot`](#creategatewayreactroot) instead: it wires both
+contexts (on-demand hooks **and** the live collections) in one call.
 
 ## GatewayAsyncState
 
-The return shape shared by the live data hooks. `data` is `undefined` until the
-first payload lands; `loading` is true only while there is no data yet and a
-fetch is in flight; `refetch()` forces a re-pull.
+The return shape shared by the live data hooks; see field detail below.
 
 ```ts
 type GatewayAsyncState<T> = {
@@ -85,8 +83,8 @@ type GatewayAsyncState<T> = {
 ### SmithersGatewayProvider
 
 Holds one `SmithersGatewayClient` in context for every hook below. Pass a ready
-`client`, or `options` and it constructs one. The client is memoized on
-`baseUrl`/`token` so an inline `options` literal does not trigger a reconnect
+`client`, or `options` to construct one. The client is memoized on
+`baseUrl`/`token`, so an inline `options` literal won't trigger a reconnect
 storm.
 
 ```tsx
@@ -114,15 +112,15 @@ function SmithersGatewayProvider(props: {
 
 <Note>
 The provider mounts both the raw `SmithersGatewayClient` context and the
-TanStack DB collection provider. The live hooks and action hooks all work inside
-this one provider.
+TanStack DB collection provider, so every live and action hook below works
+inside this one provider.
 </Note>
 
 **Source** [`SmithersGatewayProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/SmithersGatewayProvider.ts) · **Tests** [`SmithersGatewayProvider.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/SmithersGatewayProvider.test.ts)
 
 ### createGatewayReactRoot
 
-Mount a full custom UI in one call. Builds a client, mounts
+Mounts a full custom UI in one call: builds a client, mounts
 `SmithersGatewayProvider`, creates the TanStack DB collection registry, and
 renders your element. This is what a gateway-served `ui` entry uses.
 
@@ -153,8 +151,8 @@ createGatewayReactRoot(<App />, { baseUrl: "/", rootId: "root" });
 
 ### useSmithersGateway
 
-Read the raw `SmithersGatewayClient` from context. Throws if called outside a
-provider. The escape hatch for client methods the hooks do not wrap.
+Reads the raw `SmithersGatewayClient` from context, throwing if called outside
+a provider: the escape hatch for client methods the hooks don't wrap.
 
 ```ts
 function useSmithersGateway(): SmithersGatewayClient;
@@ -233,10 +231,10 @@ function useGatewayConnectionStatus(): {
 
 ## Data hooks
 
-Each hook reads one gateway resource as a live TanStack DB collection. They
-share the [`GatewayAsyncState`](#gatewayasyncstate) return shape unless noted,
-and may be called unconditionally: pass `undefined` (or an empty `runId`) and
-the hook resolves to an empty, stable state.
+Each hook reads one gateway resource as a live TanStack DB collection, sharing
+the [`GatewayAsyncState`](#gatewayasyncstate) return shape unless noted. All may
+be called unconditionally: pass `undefined` (or an empty `runId`) and the hook
+resolves to an empty, stable state.
 
 ### useGatewayRun
 
@@ -451,8 +449,8 @@ function useGatewayNodeOutput(params: {
 
 ### useGatewayScores
 
-Live scorer/eval results for one run (`listScores`). Pass `nodeId` to scope to
-one node. An empty `runId` resolves to a stable empty collection. Read-only, so
+Live scorer/eval results for one run (`listScores`). Pass `nodeId` to scope one
+node; an empty `runId` resolves to a stable empty collection. Read-only, so
 query-only.
 
 ```ts
@@ -511,10 +509,10 @@ function useGatewayPrompts(): GatewayAsyncState<GatewayPromptRow[]>;
 
 ### useGatewayRpc
 
-The generic escape hatch: call any gateway RPC by name and get its typed payload
-back in `GatewayAsyncState`. The typed hooks above wrap this; reach for it when
-no dedicated hook exists. Disable with `enabled: false`; a disabled or
-key-changed query clears stale data instead of surfacing it.
+The generic escape hatch: call any gateway RPC by name and get its typed
+payload back in `GatewayAsyncState`. The typed hooks above wrap this; reach for
+it when none exists. Disable with `enabled: false` (a disabled or key-changed
+query clears stale data instead of surfacing it).
 
 ```ts
 function useGatewayRpc<Method extends GatewayRpcMethod>(
@@ -547,9 +545,9 @@ function useGatewayRpc<Method extends GatewayRpcMethod>(
 Folded delegation-chain state for one run: the read model behind the
 [`delegation-chain`](/workflows/delegation-chain) workflow UI. Enumerates every
 physical `dc:*` node from the live run tree, fetches each node's durable output
-row once (re-checked when that node finishes or fails), folds the rows through
-the pure `foldDelegation` reducer, and returns the graph plus the delegation
-actions. Malformed or unknown rows surface in `errors` instead of throwing.
+row once (re-checked on finish or failure), folds the rows through the pure
+`foldDelegation` reducer, and returns the graph plus delegation actions.
+Malformed or unknown rows surface in `errors` instead of throwing.
 
 ```ts
 function useDelegationChain(params: { runId: string | undefined }): {
@@ -609,9 +607,9 @@ The pure reducer is exported alongside it (`foldDelegation`,
 
 ### useGatewayActions
 
-Bound, memoized mutation methods off the client. Call them to drive a run:
-launch, resume, cancel, hijack, rewind, approve/deny, signal, and manage crons.
-Each takes the matching RPC params and returns a promise.
+Bound, memoized mutation methods off the client: launch, resume, cancel,
+hijack, rewind, approve/deny, signal, and manage crons. Each takes the matching
+RPC params and returns a promise.
 
 ```ts
 function useGatewayActions(): {
@@ -729,7 +727,7 @@ import type {
 ---
 
 This is the UI side of the control plane. For the underlying transport and its
-imperative methods, see the [Gateway Client reference](/reference/gateway-client);
-to embed a UI in a gateway-served workflow, see
+imperative methods, see the [Gateway Client reference](/reference/gateway-client).
+To embed a UI in a gateway-served workflow, see
 [Custom UI](/integrations/custom-ui) and the
 [Custom workflow UI guide](/guides/custom-workflow-ui).

@@ -37,7 +37,7 @@ type CheckSuiteProps = {
 ## Notes
 
 - Check task ids are `{prefix}-{checkId}`; verdict is `{prefix}-verdict`.
-- `strategy` is evaluated in pure code: `all-pass` requires every check to pass, `majority` requires more than half (`passCount*2 > total`), and `any-pass` requires at least one to pass.
+- `strategy` is pure code: `all-pass` needs every check to pass, `majority` needs more than half (`passCount*2 > total`), `any-pass` needs at least one.
 - Use `command` instead of `agent` for shell-based checks.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}

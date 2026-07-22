@@ -6,7 +6,7 @@ description: "A two-agent sequential smithers-orchestrator workflow where a plan
 # Workflow Quickstart
 
 <Note>
-Standalone `smithers-orchestrator` quickstart example. A planner task feeds a briefing task through persisted workflow output.
+Standalone `smithers-orchestrator` quickstart: a planner task feeds a briefing task through persisted workflow output.
 </Note>
 
 ## Source
@@ -88,6 +88,6 @@ bunx smithers-orchestrator up workflows/quickstart.tsx --input '{"goal": "Build 
 
 ## Notes
 
-- **Cross-task data flow** -- `deps={{ plan: outputs.plan }}` on the `brief` task defers it until the `plan` task's output is persisted, then passes it to the `(deps) => ...` children callback as `deps.plan`.
-- **Shared schemas** -- The same Zod schemas are reused by `createSmithers(...)` and `Output.object({ schema })`, so task persistence and agent output stay aligned.
-- **Vercel AI SDK** -- `ToolLoopAgent` runs tool-call loops internally until the model stops calling tools, so you do not manage the loop yourself. `Output.object({ schema })` tells the Vercel AI SDK to enforce the Zod schema on the model's JSON output.
+- **Cross-task data flow** -- `deps={{ plan: outputs.plan }}` on `brief` defers it until `plan`'s output is persisted, then passes it to the `(deps) => ...` callback as `deps.plan`.
+- **Shared schemas** -- The same Zod schemas back both `createSmithers(...)` and `Output.object({ schema })` (which tells the Vercel AI SDK to enforce the schema on the model's JSON output), keeping task persistence and agent output aligned.
+- **Vercel AI SDK** -- `ToolLoopAgent` runs tool-call loops internally until the model stops calling tools, so you don't manage the loop yourself.

@@ -46,9 +46,9 @@ export default smithers(() => (
 
 ## Notes
 
-- Each step depends on the previous via `needs`; execution order is guaranteed.
+- Each step depends on the previous via `needs`, guaranteeing execution order.
 - Critical steps set `elevated: true` in approval metadata for stronger auth UIs.
-- Approval output is stored at `{prefix}-{step.id}-approval-decision`.
+- Approval output lives at `{prefix}-{step.id}-approval-decision`.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
 ## Source

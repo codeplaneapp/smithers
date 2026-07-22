@@ -8,7 +8,7 @@ A tool is an [AI SDK](https://ai-sdk.dev) tool an agent may call. `defineTool`
 wraps one with Smithers runtime context: a deterministic idempotency key,
 side-effect metadata, and the side-effect snapshot hook. The five built-in
 tools (`read`, `write`, `edit`, `grep`, `bash`) are themselves `defineTool`
-results and run inside the task's sandbox.
+results, run inside the task's sandbox.
 
 ```ts
 import {
@@ -25,8 +25,8 @@ import {
 
 ## defineTool
 
-Wrap a Zod-validated `execute` function into a durable AI SDK tool. Pass the
-result to an agent's `tools` or a `<Task>`'s `tools` prop.
+Wrap a Zod-validated `execute` function into a durable AI SDK tool, passed to
+an agent's `tools` or a `<Task>`'s `tools` prop.
 
 ```ts
 function defineTool<S extends ZodType>(options: DefineToolOptions<S>): Tool;
@@ -42,33 +42,32 @@ function defineTool<S extends ZodType>(options: DefineToolOptions<S>): Tool;
 </ParamField>
 
 <ParamField path="schema" type="ZodType" required>
-  Zod schema for the tool's input. Validated by the AI SDK before `execute`
-  runs; `execute` receives the parsed args.
+  Zod schema for the tool's input, validated by the AI SDK before `execute`
+  runs with the parsed args.
 </ParamField>
 
 <ParamField path="sideEffect" type="boolean" default="false">
-  Marks the tool as mutating external state. Opts the tool into Smithers
-  side-effect tracking and runs the durability snapshot hook after `execute`.
+  Marks the tool as mutating external state: opts it into Smithers side-effect
+  tracking and runs the durability snapshot hook after `execute`.
 </ParamField>
 
 <ParamField path="idempotent" type="boolean" default="!sideEffect">
-  Whether re-running with the same input is safe. Defaults to `true` when
+  Whether re-running with the same input is safe; defaults to `true` when
   `sideEffect` is `false`. With `sideEffect: true, idempotent: false`, retries
-  inject a warning that the tool was already called so the agent can verify
+  inject a warning that the tool was already called, so the agent can verify
   external state first.
 </ParamField>
 
 <ParamField path="execute" type="(args, ctx) => Promise<unknown>" required>
-  Runs the tool. `args` is the parsed input; `ctx` is the tool context. If
-  `sideEffect: true, idempotent: false` and `execute` omits the second `ctx`
-  parameter, Smithers logs a startup warning, since you almost certainly need
-  `ctx.idempotencyKey` to handle retries safely.
+  Runs the tool: `args` is the parsed input, `ctx` is the tool context. If
+  `sideEffect: true, idempotent: false` and `execute` omits `ctx`, Smithers
+  logs a startup warning, since `ctx.idempotencyKey` is needed to handle
+  retries safely.
 
   <Expandable title="ctx: ToolContext">
     <ParamField path="ctx.idempotencyKey" type="string">
-      Deterministic for a given task + iteration; stable across retries and
-      resumes. Pass it to external APIs that support idempotency (Stripe, AWS)
-      to deduplicate.
+      Deterministic per task + iteration, stable across retries and resumes.
+      Pass it to idempotency-aware external APIs (Stripe, AWS) to deduplicate.
     </ParamField>
     <ParamField path="ctx.toolName" type="string">
       The tool's `name`.
@@ -95,13 +94,13 @@ function defineTool<S extends ZodType>(options: DefineToolOptions<S>): Tool;
       Task-local tool-call sequence counter.
     </ParamField>
     <ParamField path="ctx.rootDir" type="string" default="process.cwd()">
-      Sandbox root. Paths resolve against it; escapes are rejected.
+      Sandbox root; paths resolve against it, escapes rejected.
     </ParamField>
     <ParamField path="ctx.allowNetwork" type="boolean" default="false">
       Whether network commands are permitted (used by `bash`).
     </ParamField>
     <ParamField path="ctx.maxOutputBytes" type="number" default="200000">
-      Output truncation / size limit (200KB).
+      Output size limit (200KB).
     </ParamField>
     <ParamField path="ctx.timeoutMs" type="number" default="60000">
       Process timeout for `bash` and `grep` (60s).
@@ -142,8 +141,8 @@ The `sideEffect` / `idempotent` pair drives retry behavior:
 | `sideEffect` | `idempotent` | Behavior |
 |---|---|---|
 | `false` | `true` | Pure read. Replayed freely. No warnings. |
-| `true` | `true` | Mutates, but replay-safe (e.g. an upsert or PUT). No warnings. |
-| `true` | `false` | Mutates and not replay-safe (e.g. send email, charge payment). Retry warns the agent and supplies a stable `ctx.idempotencyKey`. |
+| `true` | `true` | Mutates, but replay-safe (upsert, PUT). No warnings. |
+| `true` | `false` | Mutates, not replay-safe (send email, charge payment). Retry warns the agent with a stable `ctx.idempotencyKey`. |
 
 The rule: if you cannot undo it with `git reset`, mark it `sideEffect: true`.
 
@@ -191,8 +190,8 @@ getDefinedToolMetadata(write);
 ## Built-in tools
 
 Five `defineTool` results, all sandboxed to `ctx.rootDir` (the workflow
-directory by default). Paths resolve against the root; symlink escapes are
-rejected. Output is truncated to `ctx.maxOutputBytes` (200KB). Import them
+directory by default): paths resolve against the root, symlink escapes are
+rejected, and output truncates to `ctx.maxOutputBytes` (200KB). Import them
 individually or as the `tools` bundle:
 
 ```ts
@@ -217,7 +216,7 @@ Read a UTF-8 file from the sandbox.
   File path, relative to `rootDir` or absolute within it.
 </ParamField>
 
-Returns the file contents. Throws if the file exceeds `maxOutputBytes`.
+Returns the file contents, throwing if it exceeds `maxOutputBytes`.
 
 ### write
 
@@ -280,13 +279,13 @@ Run an executable with arguments. There is no shell parsing: pass arguments via
 </ParamField>
 
 Returns combined stdout and stderr, truncated to `maxOutputBytes`. A non-zero
-exit code throws `TOOL_COMMAND_FAILED`. The process is killed with `SIGKILL`
-after `ctx.timeoutMs` (default 60s; the hard cap is one hour).
+exit code throws `TOOL_COMMAND_FAILED`; the process is killed with `SIGKILL`
+after `ctx.timeoutMs` (default 60s, hard cap one hour).
 
 <Note>
-Network is blocked unless `allowNetwork` is enabled (via `RunOptions`,
-`--allow-network`, or server config). When blocked, Smithers rejects commands
-whose executable basename is `curl`, `wget`, `npm`, `bun`, or `pip`, any token
+Network is blocked unless `allowNetwork` is enabled (`RunOptions`,
+`--allow-network`, or server config): Smithers then rejects commands whose
+executable basename is `curl`, `wget`, `npm`, `bun`, or `pip`, any token
 beginning with `http://` or `https://`, and `git` together with a `push`,
 `pull`, `fetch`, `clone`, or `remote` token (throwing `TOOL_NETWORK_DISABLED`
 or `TOOL_GIT_REMOTE_DISABLED`). Local git commands such as `git status` are
@@ -294,19 +293,17 @@ allowed.
 </Note>
 
 <Warning>
-**This denylist is not isolation on Linux.** True OS-level network isolation is
-enforced **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
-with a network-deny profile (when `sandbox-exec` is available). On Linux and
-every other platform, including the environments Smithers runs in for CI,
-cloud, and production, `allowNetwork:false` cannot enforce a kernel sandbox and
-falls back to the token/basename denylist above. That denylist is best-effort
-defense-in-depth, **not** a security boundary: it is trivially bypassable by a
-shell, an interpreter (`python -c` assembling a URL from parts, bash
-`/dev/tcp`), or a renamed binary. When isolation is unenforced, Smithers logs a
-`TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely on
-`allowNetwork:false` to sandbox untrusted code.** For untrusted workloads, run
-them under a real [`<Sandbox>`](/components/sandbox) provider with egress
-controls instead.
+**This denylist is not isolation on Linux.** True OS-level network isolation
+exists **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
+with a network-deny profile (if available). Elsewhere, including Smithers' CI,
+cloud, and production environments, `allowNetwork:false` cannot enforce a
+kernel sandbox and falls back to the denylist above: best-effort
+defense-in-depth, **not** a security boundary, trivially bypassed by a shell, an interpreter (`python -c`
+assembling a URL from parts, bash `/dev/tcp`), or a renamed binary. When
+isolation is unenforced, Smithers logs a `TOOL_NETWORK_ISOLATION_UNENFORCED`
+observability warning. **Do not rely on `allowNetwork:false` to sandbox
+untrusted code**; run it under a real [`<Sandbox>`](/components/sandbox)
+provider with egress controls instead.
 </Warning>
 
 ```tsx

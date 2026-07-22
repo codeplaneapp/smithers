@@ -5,20 +5,20 @@ description: How to run the Smithers control plane serverlessly across platforms
 
 # Serverless deployment
 
-Deploying Smithers serverlessly is three independent choices. This page maps
-each choice onto the platforms Smithers supports today, states honestly what
-runs where, and points at the exact exports. For the conceptual model behind it
-(in-process vs full-OS agents, what's billed), read
+Deploying Smithers serverlessly means three independent choices. This page maps
+each onto the platforms Smithers supports today, states what runs where, and
+points at the exact exports. For the conceptual model (in-process vs full-OS
+agents, what's billed), read
 [Where agents run, sandboxes & cost](/concepts/execution-model) first.
 
 1. **A control-plane host** -- where the engine drives the run.
 2. **A storage descriptor** -- where durable run state lives.
-3. **A sandbox provider** -- *only* if your workflow uses CLI / full-OS agents
-   via [`<Sandbox>`](/components/sandbox); in-process SDK agents need none.
+3. **A sandbox provider** -- needed only for CLI / full-OS agents, via
+   [`<Sandbox>`](/components/sandbox).
 
 ## 1. Control-plane host
 
-The engine renders the workflow, schedules tasks, and persists frames. Where it
+The engine renders the workflow, schedules tasks, and persists frames; where it
 can run depends on the runtime's system access:
 
 | Host | Runtime | Runs the engine today? |
@@ -28,24 +28,24 @@ can run depends on the runtime's system access:
 | Cloudflare **Worker** / Vercel **Edge** | V8 isolate (no `fs`/`child_process`) | ⚠️ In progress |
 
 <Warning>
-  **The engine currently requires the Bun runtime.** Run it on any container
-  platform (ECS, App Runner, Cloud Run, GKE, a VM) under Bun and the full engine
-  works today. Two portability efforts are in flight:
+  **The engine currently requires the Bun runtime**: run it under Bun on any of
+  the container platforms above and the full engine works today. Two
+  portability efforts are in flight:
 
   - **Node runtime** (Vercel Node functions, Lambda Node): closest, since Node
     has `fs` + `child_process`. The engine module now **imports cleanly under
     plain Node** (all `bun:sqlite`-reaching value imports are lazy-loaded, guarded
-    by a node-subprocess regression test), and it no longer hard-binds the Bun
+    by a node-subprocess regression test) and no longer hard-binds the Bun
     platform layer (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`,
-    supplied by your entrypoint from `@effect/platform-node`). The engine now
+    supplied by your entrypoint from `@effect/platform-node`). It now
     **drives a run to completion under plain Node**, proven end-to-end by a
     node-subprocess regression test that runs a compute-task workflow against
     PGlite and asserts the run reaches `finished`; the worker-task dispatch path
-    no longer requires bun-sqlite (under Node the `@effect/cluster` single-runner
+    no longer requires bun-sqlite (under Node, `@effect/cluster`'s single-runner
     uses the in-memory MessageStorage driver, matching the non-durable `:memory:`
-    sqlite the Bun path already used). Still to land before calling Node fully
-    supported: validating agent (CLI/SDK) tasks and the gateway under Node.
-  - **Isolates** (Workers, Edge): further out -- the engine and gateway also use
+    sqlite the Bun path already used). Still to land: validating agent (CLI/SDK)
+    tasks and the gateway under Node.
+  - **Isolates** (Workers, Edge): further out. The engine and gateway also use
     `node:fs` / `node:child_process` (git/jj worktrees on a real filesystem),
     which an `@effect/platform` `FileSystem`/`Command` seam must abstract. Today
     an isolate can host **storage + in-process SDK agents** (via
@@ -61,18 +61,18 @@ control plane runs on any of these:
 |---|---|
 | `bun:sqlite` (default) | Local dev on Bun. |
 | PGlite | Embedded Postgres, zero external DB. |
-| Postgres | Production: RDS, Cloud SQL, Neon, Supabase, any Postgres. Use the pooled/serverless endpoint on functions. |
+| Postgres | Production: RDS, Cloud SQL, Neon, Supabase, any Postgres, using the pooled/serverless endpoint on functions. |
 | `createCloudflareDurableObjectSqliteDescriptor` | Cloudflare Workers durable run-of-record (real interactive transactions). |
 | `createCloudflareD1SqliteDescriptor` | Cloudflare D1 -- **read-mostly only** (no interactive transactions; unsafe for durable run state). |
 
-On Node hosts, point Smithers at Postgres and you are done. On Cloudflare, build
+On Node hosts, point Smithers at Postgres and you're done. On Cloudflare, build
 the API with `createSmithersCloudflare` over the Durable Object SQLite
 descriptor (see [Cloudflare](/integrations/cloudflare)).
 
 ## 3. Sandbox provider (only for full-OS / CLI agents)
 
 In-process SDK agents (`AnthropicAgent`, `OpenAIAgent`, `HermesAgent`,
-`ElizaAgent`) need **no** provider -- they are HTTPS calls in your process. CLI
+`ElizaAgent`) need **no** provider: they're HTTPS calls in your process. CLI
 agents (`ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, …) spawn a vendor
 binary and must run inside a container, which a `SandboxProvider` supplies at
 each `<Sandbox>` boundary. Each provider ships a `create…SandboxProvider` and a
@@ -91,7 +91,7 @@ helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
 | Any host (Docker) | `@smithers-orchestrator/sandbox` | Docker `http-runner` | Local/remote Docker |
 
 <Note>
-  There is no dedicated Kubernetes provider yet. On a cluster, run the
+  There's no dedicated Kubernetes provider yet: on a cluster, run the
   control plane as a normal Node deployment and use the Docker `http-runner`
   (or register a custom `SandboxProvider` that submits a K8s Job) for the
   full-OS agent path.
@@ -99,8 +99,8 @@ helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
 
 ## Per-platform recipes
 
-The control plane runs under **Bun** on any of these container platforms today;
-the Node-runtime and isolate paths are in progress (see the host section above).
+The control plane runs under **Bun** on these container platforms today;
+Node-runtime and isolate paths are still in progress (see above).
 
 | Platform | Control plane (Bun container) | Storage | Sandbox provider (CLI agents) | Status |
 |---|---|---|---|---|

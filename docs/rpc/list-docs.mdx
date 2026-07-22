@@ -13,4 +13,4 @@ apiVersion: v1
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
 
-Each row includes `path`, `kind`, `content`, `contentHash`, `updatedAtMs`, and optional `deletedAtMs`. Tombstone rows are returned only when `includeDeleted` is true. Conflict marker rows use `kind: "conflict"` and a `conflicts/*.json` path.
+Each row includes `path`, `kind`, `content`, `contentHash`, `updatedAtMs`, and optional `deletedAtMs`. Tombstone rows return only when `includeDeleted` is true; conflict marker rows use `kind: "conflict"` and a `conflicts/*.json` path.

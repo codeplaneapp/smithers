@@ -6,7 +6,7 @@ description: "Example from workflows/approval.tsx: A two-step sequential workflo
 # workflows/approval.tsx
 
 <Note>
-**Synthetic example**: `workflows/approval.tsx` does not exist in the repo. This is a standalone illustration of `needsApproval` for human-in-the-loop workflows, not a copy of a real file.
+**Synthetic example**: `workflows/approval.tsx` doesn't exist in the repo. It's a standalone illustration of `needsApproval` for human-in-the-loop workflows.
 
 For a richer approval flow with custom request summaries and an `<Approval>` component, see [Approval Gate](./approval-gate).
 </Note>
@@ -80,4 +80,4 @@ bunx smithers-orchestrator up workflows/approval.tsx --run-id mno345 --resume tr
 ## Notes
 
 - **`needsApproval`** -- Pauses execution until a human approves. Core human-in-the-loop primitive.
-- **Resumable** -- Workflow state is persisted to SQLite. Approval is recorded durably; `--resume true` continues from the gate.
+- **Resumable** -- Workflow state persists to SQLite, and approval is recorded durably; `--resume true` continues from the gate.

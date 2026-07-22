@@ -3,7 +3,7 @@ title: Events
 description: Subscribe to lifecycle events. Full event union lives in Types.
 ---
 
-`SmithersEvent` is the discriminated union of lifecycle events the runtime and observability layer understand. Most variants are emitted by the runtime; reserved variants are called out in [Event Types](/reference/event-types). The full type definition lives in [Types](/reference/types); that's the source of truth for field shapes.
+`SmithersEvent` is the discriminated union of lifecycle events the runtime and observability layer understand. Most variants are emitted by the runtime; reserved variants are called out in [Event Types](/reference/event-types). The full type definition, and source of truth for field shapes, lives in [Types](/reference/types).
 
 ## Subscribe via `onProgress`
 
@@ -47,7 +47,7 @@ type NodeScoped      = CommonFields & { nodeId: string; iteration: number };
 type AttemptScoped   = NodeScoped   & { attempt: number };
 ```
 
-Every event includes `type`, `runId`, `timestampMs`. Node-scoped events add `nodeId` and `iteration`. Attempt-scoped add `attempt`.
+Every event has `type`, `runId`, `timestampMs`; node-scoped adds `nodeId`/`iteration`; attempt-scoped adds `attempt`.
 
 ## Event categories
 
@@ -73,7 +73,7 @@ Used by `bunx smithers-orchestrator events --type <category>` and the metrics la
 | `snapshot` | SnapshotCaptured |
 | `supervisor` | SupervisorStarted, SupervisorPollCompleted |
 
-`RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it. Use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
+`RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it; use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
 
 `OpenApiToolCalled` is categorized as `openapi` for forward compatibility, but the current OpenAPI tool factory records Effect metrics and log spans rather than emitting that event onto the run event bus.
 

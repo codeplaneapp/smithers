@@ -7,10 +7,10 @@ description: Run a Smithers <Sandbox> child workflow on Cloud Run Jobs with crea
 
 `@smithers-orchestrator/gcp` is a first-class Smithers `SandboxProvider` for
 Google Cloud. It executes a `<Sandbox>` child workflow's request on Cloud Run
-Jobs and ships the request/result bundle through a Cloud Storage bucket, because
-Cloud Run Jobs give no shared filesystem back to the caller. The shared
+Jobs and ships the request/result bundle through a Cloud Storage bucket,
+since Cloud Run Jobs give the caller no shared filesystem. The shared
 provider-kit owns the request/result protocol, egress, secret scrubbing, and
-cleanup; this package supplies the GCS transport plus the Cloud Run runner.
+cleanup; this package supplies just the GCS transport and the Cloud Run runner.
 
 The provider id is `gcp-sandbox` (exported as `GCP_SANDBOX_PROVIDER_ID`).
 
@@ -26,13 +26,13 @@ import {
 
 Authentication is Application Default Credentials:
 `GOOGLE_APPLICATION_CREDENTIALS` (a service-account key file) or workload
-identity, plus `GOOGLE_CLOUD_PROJECT`. Local credentials are never forwarded
-into the container. The container env is `options.env` plus the Smithers, egress,
-and GCS-transport variables.
+identity, plus `GOOGLE_CLOUD_PROJECT`. Local credentials never reach the
+container; its env is `options.env` plus the Smithers, egress, and
+GCS-transport variables.
 
-`@google-cloud/run` and `@google-cloud/storage` are optional dependencies,
-imported lazily inside the session, so the package loads without them. Install
-both to use the real provider:
+`@google-cloud/run` and `@google-cloud/storage` are optional, lazily-imported
+dependencies, so the package loads without them; install both to use the
+real provider:
 
 ```
 npm install @google-cloud/run @google-cloud/storage
@@ -40,14 +40,14 @@ npm install @google-cloud/run @google-cloud/storage
 
 ## Prerequisites
 
-The provider does not create the bucket. Set these up first:
+The provider doesn't create the bucket; set these up first:
 
-- A Cloud Storage `bucket` that already exists (the transport). Set a short
+- A pre-existing Cloud Storage `bucket` (the transport). Set a short
   lifecycle TTL on the `smithers/sandbox/` prefix to reap crash leftovers.
-- A Cloud Run `jobName` to run, or set `createJob` to have a per-run Job created
-  and torn down. When `createJob` is set you must also pass a container `image`
-  (Cloud Run requires one to create the Job). The job's service account needs
-  read/write on the bucket prefix.
+- A Cloud Run `jobName` to run, or `createJob` to create and tear down a
+  per-run Job. `createJob` also requires a container `image` (Cloud Run needs
+  one to create the Job). The job's service account needs read/write on the
+  bucket prefix.
 
 ## Required options
 
@@ -90,9 +90,9 @@ Or register it once and reference it by id with
 
 The kit writes `.smithers/sandbox-request.json` and expects
 `.smithers/sandbox-result.json` back, handing the container
-`SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH`. Because there
-is no shared filesystem, the container round-trips those files through GCS. The
-runner injects four extra vars:
+`SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH`. Since
+there's no shared filesystem, the container round-trips those files through
+GCS via four extra vars the runner injects:
 
 - `SMITHERS_SANDBOX_GCS_BUCKET`: the transport bucket.
 - `SMITHERS_SANDBOX_GCS_PREFIX`: object-name prefix.
@@ -102,18 +102,18 @@ runner injects four extra vars:
 Every workdir-relative path maps to
 `<prefix>/<runId>/<sandboxId>/<percent-encoded workdir-relative path>` (the full path, not just the basename, so same-named files never collide). Cloud Run reports task counts
 and conditions, not a numeric exit code: a succeeded task is exit 0 and a failed
-task is exit 1. An infra failure (execution failed, no result written) throws. A
-run that writes `status: "failed"` result JSON is a normal failed bundle the kit
-materializes.
+task is exit 1. An infra failure (execution failed, no result written) throws;
+a run that writes `status: "failed"` result JSON is just a normal failed
+bundle the kit materializes.
 
 ## Cleanup and cost
 
 `cleanup: "destroy"` (default) deletes the transient GCS objects and, when
-`createJob` made a per-run job, deletes that job. `cleanup: "keep"` leaves
+`createJob` made a per-run job, that job too; `cleanup: "keep"` leaves
 everything. The bucket itself is never created or deleted. You pay for Cloud Run
 Job execution time plus GCS storage of the small transient objects. Compute
-Engine execution is documented future work.
+Engine execution is future work.
 
 `createMockGcpSandboxEnvironment(handler, config?)` provides in-memory Cloud
-Storage and Cloud Run doubles for tests. It needs zero real GCP credentials or
+Storage and Cloud Run doubles for tests, needing zero real GCP credentials or
 bucket, so unit tests run in CI without touching GCP.

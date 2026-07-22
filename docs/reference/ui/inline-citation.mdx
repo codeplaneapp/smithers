@@ -12,13 +12,12 @@ import { InlineCitation } from "smithers-orchestrator/ui";
 </p>
 ```
 
-The chip renders `[n]` in superscript and announces
-`Source n: label`. Hovering or focusing it shows the source label through the
-shared tooltip primitive.
+The chip renders `[n]` in superscript, announces `Source n: label`, and shows
+the source label on hover or focus through the shared tooltip primitive.
 
-Safe URLs render an anchor. Missing or unsafe URLs render a focusable button,
-so keyboard users can still inspect the tooltip. `onNavigate` only runs for a
-sanitized URL and receives an event whose default action is already prevented.
+Safe URLs render an anchor; missing or unsafe URLs render a focusable button,
+so keyboard users can still inspect the tooltip. `onNavigate` runs only for a
+sanitized URL, with an event whose default action is already prevented.
 
 ## Props
 

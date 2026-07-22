@@ -49,18 +49,17 @@ type SidecarDelta = {
 
 ## Behavior
 
-`<Sidecar>` renders a `<Parallel>` with two `<Task>` children. The primary task uses the component `id`, writes to `output`, and is the node downstream workflow code should consume. The sidecar task uses `${id}-sidecar`, receives the same prompt, gets `continueOnFail: true`, and writes to `sidecarOutput` when supplied or to `output` by default.
+`<Sidecar>` renders a `<Parallel>` with two `<Task>` children: the primary keeps the component `id`, writes to `output`, and is the node downstream code reads; the sidecar (`${id}-sidecar`) shares the prompt, runs with `continueOnFail: true`, and writes to `sidecarOutput` or `output` by default.
 
-Both tasks receive the same `scorers` prop. Smithers records live scorer results in `_smithers_scorers` once per task node id, so `bunx smithers-orchestrator scores RUN_ID` can show the primary row and the sidecar row separately.
+Both tasks share the `scorers` prop; Smithers records live results in `_smithers_scorers` per task node id, so `bunx smithers-orchestrator scores RUN_ID` lists the primary and sidecar rows separately.
 
-Use `computeSidecarDelta(rows, { primaryNodeId, sidecarNodeId, scorerId })` after reading persisted scorer rows. It derives `primaryScore`, `sidecarScore`, `delta`, and `cheaperWins` from those rows only.
+`computeSidecarDelta(rows, { primaryNodeId, sidecarNodeId, scorerId })` derives `primaryScore`, `sidecarScore`, `delta`, and `cheaperWins` from persisted scorer rows only.
 
 ## Notes
 
-- The sidecar can fail without failing the workflow.
-- The sidecar result does not replace the primary result.
+- The sidecar can fail without failing the workflow, and its result never replaces the primary's.
 - `delta` is `primaryScore - sidecarScore`.
-- `cheaperWins` is true when the sidecar score is greater than or equal to the primary score.
+- `cheaperWins` is `sidecarScore >= primaryScore`.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
 ## Source

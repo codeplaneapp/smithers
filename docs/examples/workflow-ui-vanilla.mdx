@@ -3,7 +3,7 @@ title: Workflow UI (Vanilla)
 description: A complete zero-dep workflow UI on `@smithers-orchestrator/gateway-client`: boot, live events, node output, approvals, all in one file.
 ---
 
-This is the same workflow UI as the [React example](/examples/workflow-ui-react), built directly on `@smithers-orchestrator/gateway-client` with no framework. Pick this shape when you want a tiny bundle, when you already own your render layer (Solid, Lit, Mithril, plain DOM), or when you need the UI to render before any framework has booted.
+Same workflow UI as the [React example](/examples/workflow-ui-react), built directly on `@smithers-orchestrator/gateway-client` with no framework: for a tiny bundle, an already-owned render layer (Solid, Lit, Mithril, plain DOM), or rendering before any framework boots.
 
 For the full conceptual walkthrough, see [Custom Workflow UIs](/guides/custom-workflow-ui).
 
@@ -156,13 +156,13 @@ void watchRun();
 
 ## Stale-data-free in vanilla
 
-The React layer's stale-data-free model is built into the hooks. In vanilla code you wear that hat yourself. Three rules:
+React's hooks bake in the stale-data-free model; vanilla code implements it by hand:
 
-1. **Re-key on `runId` change.** If your UI lets the user switch between runs without a full page reload, abort the live stream, clear `state`, and re-issue `refreshRun()` / `refreshApprovals()` before painting.
+1. **Re-key on `runId` change.** If the UI lets users switch runs without a full reload, abort the live stream, clear `state`, and re-issue `refreshRun()` / `refreshApprovals()` before painting.
 2. **Generation-tag in-flight reads.** Increment a counter on every input change; drop responses whose generation no longer matches.
-3. **Render after every fetch resolves, never before.** A render that prepaints the previous state and then updates is the most confusing failure mode at the iframe boundary; render only after the new fetch lands or after an explicit "loading" tick.
+3. **Render after every fetch resolves, never before.** Painting stale state before an update is the most confusing failure mode at the iframe boundary; render only after the fetch lands or an explicit "loading" tick.
 
-The React `useGatewayRpc` source in [`packages/gateway-react/src/useGatewayRpc.ts`](/reference/package-configuration) is a 60-line reference if you want a minimal recipe.
+For a minimal recipe, see the 60-line React `useGatewayRpc` source: [`packages/gateway-react/src/useGatewayRpc.ts`](/reference/package-configuration).
 
 ## Declaring the UI
 
@@ -183,11 +183,11 @@ export default smithers(() => (
 ));
 ```
 
-The Gateway discovers the `<UI>` declaration when it registers the workflow with its `entryFile`, bundles the entry with esbuild (no React injected, no framework assumed), and serves it at `/workflows/demo-vanilla-ui`.
+The Gateway discovers `<UI>` when it registers the workflow's `entryFile`, bundles the entry with esbuild (no React injected, no framework assumed), and serves it at `/workflows/demo-vanilla-ui`.
 
 ## Test pattern (no UI library coupling)
 
-A vanilla bundle pairs nicely with a Playwright test that asserts the HTML the bundle painted, since there is no virtual DOM to traverse. The fixture in `apps/smithers/tests/fixtures/demoWorkflowUi.ts` is exactly this pattern: render a `<main data-testid="demo-vanilla-ui">` with a `data-testid="demo-run-id"` child, then assert against the iframe with `customUiFrame(page).getByTestId("demo-run-id")`.
+A vanilla bundle has no virtual DOM to traverse, so pair it with a Playwright test that asserts the painted HTML directly, as in the fixture `apps/smithers/tests/fixtures/demoWorkflowUi.ts`: render a `<main data-testid="demo-vanilla-ui">` with a `data-testid="demo-run-id"` child, then assert against the iframe with `customUiFrame(page).getByTestId("demo-run-id")`.
 
 ```ts
 import { expect, test } from "@playwright/test";
@@ -199,12 +199,12 @@ test("vanilla custom UI renders and reads the run id from ?runId=", async ({ pag
 });
 ```
 
-This is the *integration* test (bundle + serve + embed + deep-link) that catches the regressions vanilla bundles are most likely to hit.
+This *integration* test (bundle, serve, embed, deep-link) catches the regressions vanilla bundles hit most.
 
 ## What this example demonstrates
 
 - **Vanilla SDK boot**: `new SmithersGatewayClient()` reads the boot config; no framework required.
-- **`?runId=` parsing** + same-origin RPC against the Gateway.
+- **`?runId=` parsing** and same-origin RPC against the Gateway.
 - **`streamRunEventsResilient`** as an async generator for pushed updates and metrics, managed with an `AbortController` lifecycle.
-- **Node output reads**, **approvals**, and **submitApproval** with explicit error handling.
-- **A render model you author yourself** that mirrors the stale-data-free contract the React hooks provide.
+- **Node output reads**, **approvals**, and **submitApproval**, with explicit error handling.
+- **A hand-authored render model** mirroring the stale-data-free contract the React hooks provide.

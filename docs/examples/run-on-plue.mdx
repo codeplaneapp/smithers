@@ -5,26 +5,19 @@ description: Execute a Smithers workflow on Plue workspaces through the Plue san
 
 # Run on Plue
 
-`run-on-plue` executes a Smithers workflow script on Plue infrastructure
-instead of the local machine. It uses the
-[`<Sandbox>`](/components/sandbox) provider seam with
-`createPlueSandboxProvider`, and the provider shells through the `plue` CLI so
-Plue owns workspace lifecycle, authentication, quotas, placement, and sandbox
-execution through its self-hosted Microsandbox plane.
-
-Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
+`run-on-plue` executes a Smithers workflow script on Plue infrastructure instead of locally, via the [`<Sandbox>`](/components/sandbox) provider seam and `createPlueSandboxProvider`, which shells through the `plue` CLI so Plue owns workspace lifecycle, authentication, quotas, placement, and execution through its self-hosted Microsandbox plane. Use it when a child workflow needs a real Plue workspace: a repo-bound VM with SSH, `git`, `jj`, Node, network egress, and bootstrapped Claude Code and Codex CLIs.
 
 ## What it does
 
-The workflow lives at `.smithers/workflows/run-on-plue.tsx`. It accepts a path to any Smithers `.tsx` workflow, reads that file, and sends it to a Plue-backed sandbox provider.
+The workflow lives at `.smithers/workflows/run-on-plue.tsx`: it accepts a path to any Smithers `.tsx` workflow, reads it, and sends it to a Plue-backed sandbox provider.
 
 The provider:
 
 1. Creates a Plue workspace with `plue workspace create --repo <owner>/<repo>`.
-2. Polls `plue workspace view --format json` until the workspace is running and has an SSH command.
+2. Polls `plue workspace view --format json` until running with an SSH command.
 3. Connects over SSH in batch mode.
-4. Installs Bun if missing, then installs `@anthropic-ai/claude-code` and `@openai/codex` when those CLIs are absent.
-5. Seeds Claude and Codex auth via `plue workspace exec --seed-agent-auth claude,codex`.
+4. Installs Bun, then the Claude Code and Codex CLIs, when missing.
+5. Seeds Claude and Codex auth for the remote CLIs.
 6. Ships a small remote project containing the child workflow source, `agents.ts`, `package.json`, and `input.json`.
 7. Runs `smithers-orchestrator up` in the workspace and reads the remote run result back over SSH.
 8. Deletes the workspace unless `keepWorkspace` is true.
@@ -43,18 +36,12 @@ The parent workflow receives:
 ## Requirements
 
 - `plue` CLI installed and authenticated on the host running Smithers. Verify with `plue auth status`.
-- The target Plue server must have workspaces enabled. Local Plue uses `SMITHERS_FEATURE_FLAGS_WORKSPACES=true`.
-- The Plue server must be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` and an authenticated Microsandbox controller.
+- The target Plue server must have workspaces enabled (`SMITHERS_FEATURE_FLAGS_WORKSPACES=true` locally) and be configured for real workspaces with `SMITHERS_SANDBOX_PROVIDER=microsandbox` plus an authenticated Microsandbox controller.
 - The repo passed as `repo` must exist in Plue and be accessible to the authenticated user.
-- Claude auth must be available locally. The preferred path is Claude Code subscription OAuth in the OS credential store; `ANTHROPIC_API_KEY` only works when that key has usable API billing.
-- Codex auth must be available locally. The preferred path is `~/.codex/auth.json`; `OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth.
+- Claude and Codex auth must be available locally: prefer Claude Code subscription OAuth in the OS credential store (`ANTHROPIC_API_KEY` only works with usable API billing) and `~/.codex/auth.json` (`OPENAI_API_KEY` is only a fallback for setups where the Codex CLI honors API-key auth).
 - If `plue` is not on `PATH`, set `PLUE_BIN` or pass `plueBin` in the workflow input.
 
-Secrets are seeded at run time through Plue's operation-scoped secret or
-credential-proxy path. They must not be written into guest disks, snapshots,
-images, command arguments, logs, errors, or durable request state. Do not bake
-Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials
-into workspace snapshots or committed files.
+Secrets are seeded at run time through Plue's operation-scoped secret or credential-proxy path: never write Claude, Codex, OpenAI, Anthropic, Microsandbox, or proxy credentials into guest disks, snapshots, images, command arguments, logs, errors, durable request state, or committed files.
 
 ## Run a workflow remotely
 
@@ -128,18 +115,16 @@ export default smithers((ctx) => (
 
 ## Non-interactive caveat
 
-Keep `reviewDiffs={false}` for Plue runs. `<Sandbox>` defaults to fail-closed diff review, which expects a local review/approval interaction before applying file changes. The v1 Plue provider is non-interactive: it runs the remote child, maps the remote result into the parent run, and does not open a human approval loop inside the VM.
+Keep `reviewDiffs={false}` for Plue runs: `<Sandbox>` defaults to fail-closed diff review, which expects a local approval interaction before applying file changes, but the v1 Plue provider is non-interactive. It runs the remote child, maps the result into the parent run, and opens no human approval loop inside the VM.
 
-Design child workflows so they return structured output or artifacts. If you need to inspect the remote VM after a failure, run with `keepWorkspace: true`, then use `plue workspace view` or `plue workspace ssh` to connect.
+Design child workflows to return structured output or artifacts. To inspect the remote VM after a failure, run with `keepWorkspace: true` and connect with `plue workspace view` or `plue workspace ssh`.
 
 ## Claude and Codex bootstrap
 
-Remote workspaces may not have all agent CLIs preinstalled. The provider's bootstrap is idempotent:
+Remote workspaces may not have all agent CLIs preinstalled, so the provider bootstraps them idempotently:
 
-- `bun` is installed from the official installer when missing.
-- `claude` is installed with `bun i -g @anthropic-ai/claude-code` when missing.
-- `codex` is installed with `bun i -g @openai/codex` when missing.
+- When missing, `bun` installs from the official installer, and `claude` (`bun i -g @anthropic-ai/claude-code`) and `codex` (`bun i -g @openai/codex`) install via Bun.
 - `~/.bun/bin` is prepended to `PATH` for remote commands.
 - `plue workspace exec --seed-agent-auth claude,codex` stages Claude Code and Codex credentials before the child workflow runs.
 
-The remote mini-project includes an `agents.ts` that exports both `ClaudeCodeAgent` and `CodexAgent`, so child workflows can import or define tasks that use either CLI once bootstrap completes.
+The remote mini-project's `agents.ts` exports both `ClaudeCodeAgent` and `CodexAgent`, so child workflows can use either CLI once bootstrap completes.

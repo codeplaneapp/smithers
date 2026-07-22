@@ -6,14 +6,11 @@ description: The SandboxProvider contract, the shared provider-kit, provider sel
 # Sandbox Providers
 
 A [`<Sandbox>`](/components/sandbox) boundary runs a child workflow outside the
-parent task process. Where it runs is decided by a provider. A provider is a
-plain object that takes a request and returns a result. Smithers ships a local
-microVM provider, five cloud providers, and a shared kit so a new provider is a
-thin adapter.
-
-The built-in providers are Microsandbox, Daytona, Vercel, AWS, GCP, and
-Cloudflare. Each is a separate optional package with its own SDK as an optional
-dependency, so you install only what you use.
+parent task process; a provider decides where. Smithers ships one
+local-microVM provider (Microsandbox), five cloud providers (Daytona, Vercel,
+AWS, GCP, Cloudflare), and a shared kit that reduces a new provider to a thin
+adapter. Each ships as a separate optional package with its own SDK as an
+optional dependency: install only what you use.
 
 ## The SandboxProvider contract
 
@@ -27,29 +24,29 @@ type SandboxProvider = {
 };
 ```
 
-`run()` receives the child workflow, the `<Sandbox input>` value, the request and
-result bundle paths, the network and output-size limits, an abort signal, and a
-heartbeat callback. It returns either a `bundlePath` to a bundle it wrote, or a
-structured `{ status, output, remoteRunId?, workspaceId?, diffBundle? }`. Smithers
-validates the result, enforces diff-review policy, and returns the outputs to the
-parent task. See [`<Sandbox>`](/components/sandbox) for the full request and
-result types.
+`run()` receives the child workflow, the `<Sandbox input>` value, request/
+result bundle paths, network and output-size limits, an abort signal, and a
+heartbeat callback, then returns either a `bundlePath` to a bundle it wrote or
+a structured `{ status, output, remoteRunId?, workspaceId?, diffBundle? }`.
+Smithers validates the result, enforces diff-review policy, and returns the
+outputs to the parent task; see [`<Sandbox>`](/components/sandbox) for the full
+request and result types.
 
 ## The provider-kit
 
-First-class providers do not implement `run()` from scratch. They call
+First-class providers don't hand-roll `run()`: they call
 `createCommandSandboxProvider` from `smithers-orchestrator/sandbox`, which owns
-the request/result-file protocol once so every provider behaves the same:
+the request/result-file protocol so every provider behaves the same:
 
 1. Create a vendor session and emit a `session-created` heartbeat.
-2. Write the request JSON, carrying only the safe fields (`runId`, `sandboxId`,
+2. Write the request JSON: only the safe fields (`runId`, `sandboxId`,
    `input`, `config`, `allowNetwork`, `maxOutputBytes`, redacted egress).
 3. Merge the command env: `options.env`, the egress env, and the two path vars
-   below. It never copies arbitrary `process.env`.
+   below; it never copies arbitrary `process.env`.
 4. Run the entry command with the request's `toolTimeoutMs` and abort signal.
 5. Parse the result from stdout if it starts with `{`, otherwise read the result
-   file. A nonzero exit with no valid result JSON throws
-   `SANDBOX_EXECUTION_FAILED` with stdout and stderr truncated to
+   file; a nonzero exit with no valid result JSON throws
+   `SANDBOX_EXECUTION_FAILED` with stdout/stderr truncated to
    `maxOutputBytes` and redacted.
 6. On `cleanup`, resolve the cached session and destroy it per policy.
 
@@ -71,53 +68,49 @@ The kit hands the entry command two env vars:
 - `SMITHERS_SANDBOX_RESULT_PATH`: where to write the result JSON.
 
 The entry command either prints the result JSON to stdout or writes it to
-`SMITHERS_SANDBOX_RESULT_PATH`. Providers with no shared filesystem (AWS, GCP)
-transport those files through S3 or GCS and inject extra vars pointing the entry
-at the object keys.
+`SMITHERS_SANDBOX_RESULT_PATH`; providers with no shared filesystem (AWS, GCP)
+instead transport those files through S3 or GCS, injecting extra vars that
+point the entry at the object keys.
 
 ## Selecting a provider
 
-There are three ways to pick a provider, in precedence order:
+Three ways to pick a provider, in precedence order:
 
 1. **Provider object (primary).** Pass the factory result straight to the prop:
    `<Sandbox provider={createDaytonaSandboxProvider({...})} workflow={child} />`.
 2. **Registered id.** Register once, then reference by id:
    `registerSandboxProvider(createVercelSandboxProvider({...}))` then
-   `<Sandbox provider="vercel-sandbox" />`. The provider packages also export
-   `register<Provider>SandboxProvider(...)` convenience wrappers.
-3. **Env default (planned, not yet shipped).** A future `SMITHERS_SANDBOX_PROVIDER`
+   `<Sandbox provider="vercel-sandbox" />` (provider packages also export
+   `register<Provider>SandboxProvider(...)` convenience wrappers).
+3. **Env default (planned, not shipped).** A future `SMITHERS_SANDBOX_PROVIDER`
    env var will select a registered id when a `<Sandbox>` sets no explicit
-   `provider`, resolving a registered id only (never auto-creating a cloud
-   client). It is not implemented yet; setting it today has no effect. The
-   intended precedence, once shipped, mirrors the DB-backend chain: an explicit
-   `provider` prop wins, then workflow config, then `SMITHERS_SANDBOX_PROVIDER`,
-   then the local default. Until then, select a provider with method 1 or 2.
+   `provider` (never auto-creating a cloud client), with precedence mirroring
+   the DB-backend chain: explicit `provider` prop, then workflow config, then
+   `SMITHERS_SANDBOX_PROVIDER`, then the local default. Setting it today has
+   no effect; use method 1 or 2 until it ships.
 
-Credentials always come from factory options first and the vendor env chain
-second. They are never required in `request.config`.
+Credentials come from factory options first, then the vendor env chain; never required in `request.config`.
 
 ## Egress and secret redaction
 
 Egress is configured on the `<Sandbox egress>` prop and reaches the provider as
-the normalized `request.egress`. The kit projects it into the command env
-through `sandboxEgressEnv()`, and when `caCertPem` is set it uploads the CA to
-the workspace so `NODE_EXTRA_CA_CERTS` resolves inside the sandbox. See
+the normalized `request.egress`; the kit projects it into the command env
+through `sandboxEgressEnv()`. See
 [`<Sandbox>` egress controls](/components/sandbox#egress-controls).
 
-Providers with a guest filesystem (Microsandbox, Daytona, Vercel, Cloudflare)
-resolve that CA path directly. The object-store providers (AWS, GCP) have no shared
-filesystem, so they upload the CA to their bundle store and pass its location to
-the container: AWS injects `SMITHERS_SANDBOX_CA_S3_KEY` and GCP injects
-`SMITHERS_SANDBOX_CA_GCS_OBJECT`. The container entry command must download that
-object and write it to the path named by `NODE_EXTRA_CA_CERTS` before it makes
-outbound calls.
+When `caCertPem` is set, providers with a guest filesystem (Microsandbox,
+Daytona, Vercel, Cloudflare) resolve the CA path directly, making it visible
+to `NODE_EXTRA_CA_CERTS` inside the sandbox. AWS and GCP transport the CA the
+same way as the result JSON (above): AWS injects `SMITHERS_SANDBOX_CA_S3_KEY`,
+GCP injects `SMITHERS_SANDBOX_CA_GCS_OBJECT`, and the entry command downloads
+the object and writes it to the `NODE_EXTRA_CA_CERTS` path before outbound
+calls.
 
-Credentials are used only to build the local SDK client. They are never placed
-in the request JSON and never forwarded into the remote env unless you list them
-explicitly in `options.env`. `redactSandboxProviderValue()` redacts keys
-containing `token`, `secret`, `key`, `password`, `credential`, or
-`authorization` from every thrown message, heartbeat payload, and the persisted
-`configJson` audit row.
+Credentials build the local SDK client only: never placed in the request JSON,
+never forwarded into the remote env unless listed explicitly in `options.env`.
+`redactSandboxProviderValue()` redacts keys containing `token`, `secret`,
+`key`, `password`, `credential`, or `authorization` from every thrown message,
+heartbeat payload, and the persisted `configJson` audit row.
 
 ## Provider comparison
 

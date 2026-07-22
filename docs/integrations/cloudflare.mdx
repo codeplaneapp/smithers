@@ -57,10 +57,10 @@ export class SmithersDurableObject {
 }
 ```
 
-This is the durable choice. When `storage` exposes a `transaction` method the
-descriptor binds and forwards it, so Smithers gets real interactive
-transactions (`BEGIN` / `COMMIT` / `ROLLBACK`). Frame commits, run-state
-checkpoints, and task completion all rely on that atomicity.
+This is the durable choice: when `storage` exposes a `transaction` method, the
+descriptor binds and forwards it, giving Smithers real interactive
+transactions (`BEGIN`/`COMMIT`/`ROLLBACK`) that frame commits, run-state
+checkpoints, and task completion depend on.
 
 ## Storage: D1 (read-mostly only)
 
@@ -71,18 +71,17 @@ const descriptor = createCloudflareD1SqliteDescriptor(env.DB);
 ```
 
 <Warning>
-  D1 has no interactive transactions. Its `prepare`/`bind`/`run` API cannot hold
+  D1 has no interactive transactions: its `prepare`/`bind`/`run` API can't hold
   an open `BEGIN`/`COMMIT`/`ROLLBACK` across round-trips. The descriptor reports
-  that limitation, and Smithers rejects transactional writes before their
-  operation begins instead of risking a partial commit. Do not back durable run
-  state with D1. Use `createCloudflareDurableObjectSqliteDescriptor` for
-  durability and reserve D1 for read-mostly use.
+  that limitation, and Smithers rejects transactional writes before they begin
+  rather than risk a partial commit. Use `createCloudflareDurableObjectSqliteDescriptor`
+  for durable run state; reserve D1 for read-mostly use.
 </Warning>
 
 ## Sandbox provider
 
-Runtime `"cloudflare"` is provider-backed: it has no built-in transport, so a
-[`<Sandbox>`](/components/sandbox) that requests it needs a provider.
+Runtime `"cloudflare"` is provider-backed: it has no built-in transport, so any
+[`<Sandbox>`](/components/sandbox) requesting it needs a provider.
 `createCloudflareSandboxProvider(options)` builds one over the Cloudflare
 Sandbox SDK (`@cloudflare/sandbox`, an optional dependency imported lazily):
 
@@ -126,11 +125,9 @@ On Cloudflare, Smithers splits along the two execution modes described in
   every run uses `node:fs` and `node:child_process` (git/jj worktrees on a real
   filesystem), so a Node/Bun host is still required to *drive* runs. The
   Cloudflare provider also creates **one container per `<Sandbox>` `run()`**
-  (keyed `${runId}-${sandboxId}`) -- not per agent turn. Both `exec` and
+  (keyed `${runId}-${sandboxId}`), not per agent turn. Both `exec` and
   `process` execution modes wait for the work to finish and reconcile the result
-  bundle; set `sleepAfter` to control idle hibernation. Treat Workers-native
-  execution as the storage + in-process-agent path today, not turnkey serverless
-  for CLI harnesses.
+  bundle; set `sleepAfter` to control idle hibernation.
 </Warning>
 
 What's billed on Cloudflare:
@@ -138,19 +135,19 @@ What's billed on Cloudflare:
 | Component | Billing driver |
 |---|---|
 | In-process SDK agents | Model API tokens (billed by the model provider, not Cloudflare) |
-| Worker / Durable Object control plane | Worker invocations + Durable Object requests and duration; DO-SQLite storage (rows read/written). Use **DO-SQLite** for durable run-of-record -- **D1 has no interactive transactions** and can leave partial state (see the D1 warning above) |
-| `@cloudflare/sandbox` container (per `<Sandbox>`) | Container wall-clock from create → teardown. Idle hibernation follows `sleepAfter` (Sandbox SDK default ~10m if unset). `cleanup: "keep"` leaves the container billing until it hibernates; the default `cleanup: "destroy"` stops it at the end of the boundary -- in both `exec` and `process` modes, since `run()` awaits completion before cleanup |
+| Worker / Durable Object control plane | Worker invocations + Durable Object requests and duration; DO-SQLite storage (rows read/written). Use **DO-SQLite** for durable run-of-record: **D1 has no interactive transactions** and can leave partial state (see the D1 warning above) |
+| `@cloudflare/sandbox` container (per `<Sandbox>`) | Container wall-clock from create → teardown. Idle hibernation follows `sleepAfter` (Sandbox SDK default ~10m if unset). `cleanup: "keep"` leaves the container billing until it hibernates; the default `cleanup: "destroy"` stops it at the end of the boundary in both `exec` and `process` modes, since `run()` awaits completion before cleanup |
 
 <Note>
   Cloudflare's own pricing for Workers, Durable Objects, and the Sandbox SDK
-  changes independently of Smithers -- check Cloudflare's current pricing pages for
-  exact per-unit figures. Smithers only determines the **shape** of what's
+  changes independently of Smithers; check Cloudflare's current pricing pages
+  for exact per-unit figures. Smithers only determines the **shape** of what's
   consumed: token calls, DO storage/requests, and container wall-clock per
   `<Sandbox>` boundary.
 </Note>
 
 ## Notes
 
-- The package exports no Durable Object class and no Worker entry helper. You write the Worker and Durable Object; the package supplies the storage descriptors and sandbox provider.
+- You write the Worker and Durable Object class; the package supplies only the storage descriptors and sandbox provider.
 - `createMockCloudflareSandboxEnvironment(handler)` is exported for tests: it implements the subset of the Sandbox SDK the provider uses.
 - The descriptor helpers are also exported from `@smithers-orchestrator/cloudflare`; only `createSmithersCloudflare` requires the `smithers-orchestrator/cloudflare` subpath.

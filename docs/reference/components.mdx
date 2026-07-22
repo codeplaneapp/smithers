@@ -5,8 +5,8 @@ icon: "shapes"
 ---
 
 Components are exported from `smithers-orchestrator`. `createSmithers(...)`
-also returns the same primitives bound to the workflow context and typed output
-schemas, which is the preferred form inside workflow modules.
+also returns the same primitives bound to the workflow context and typed
+output schemas: the preferred form inside workflow modules.
 
 ```ts
 const { Workflow, Task, Sequence, Parallel, Branch, Loop } = createSmithers(schemas);
@@ -18,7 +18,7 @@ the [Types reference](/reference/types); for the model, see the
 
 ## Control flow
 
-The structural primitives. They order, branch, repeat, and gate the work.
+The structural primitives: order, branch, repeat, and gate the work.
 
 | Component | Props type | Purpose | Reference |
 | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ The structural primitives. They order, branch, repeat, and gate the work.
 
 ## Composite
 
-Higher-order patterns built from the primitives. Reach for these before
+Higher-order patterns built from the primitives; reach for these before
 hand-rolling the same shape.
 
 | Component | Props type | Purpose | Reference |

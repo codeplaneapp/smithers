@@ -3,14 +3,12 @@ title: VCS Helper Reference
 description: Public JJ and VCS helper APIs for repo detection, snapshot inspection, binary resolution, and workspace management.
 ---
 
-Smithers exports a small VCS helper surface for applications that inspect or manage Jujutsu state directly.
-
-Lightweight by design:
+Smithers exports a small VCS helper surface for applications that inspect or manage Jujutsu state directly:
 
 - every helper accepts an optional `cwd` to target a specific repository
-- spawn failures are normalized instead of throwing, so they are safe to call even when `jj` is not installed
+- spawn failures are normalized instead of thrown, safe to call even without `jj` installed
 - workspace helpers try a few command shapes to tolerate JJ version drift
-- JJ command helpers return `Effect` values, so direct callers must provide an Effect `CommandExecutor` layer
+- JJ command helpers return `Effect` values; direct callers must supply an Effect `CommandExecutor` layer
 
 ## Import
 
@@ -53,7 +51,7 @@ const runVcs = <A,>(effect: VcsEffect<A>) =>
   Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer)));
 ```
 
-Install `@effect/platform-bun` when using the Bun snippet, or use the equivalent `CommandExecutor` layer for another runtime.
+Install `@effect/platform-bun` for the Bun snippet, or use an equivalent `CommandExecutor` layer for another runtime.
 
 ## `runJj(args, opts?)`
 
@@ -79,13 +77,12 @@ function runJj(args: string[], opts?: RunJjOptions): VcsEffect<RunJjResult>;
 
 Notes:
 
-- returns `{ code: 127, stdout: "", stderr: "..." }` when `jj` cannot be started
-- does not throw for ordinary process failures
-- a raw escape hatch beyond the higher-level helpers below
+- normalizes process failures instead of throwing, e.g. `{ code: 127, stdout: "", stderr: "..." }` when `jj` cannot be started
+- a raw escape hatch beneath the higher-level helpers below
 
 ## `getJjPointer(cwd?)`
 
-Return the current workspace `change_id` for `@`, or `null` when JJ is unavailable or the current directory is not a JJ repo.
+Returns the current workspace `change_id` for `@` (`null` if JJ is unavailable or the directory isn't a JJ repo).
 
 ```ts
 const pointer = await runVcs(getJjPointer("/path/to/repo"));
@@ -95,11 +92,11 @@ const pointer = await runVcs(getJjPointer("/path/to/repo"));
 function getJjPointer(cwd?: string): VcsEffect<string | null>;
 ```
 
-Smithers uses the same pointer model internally for revert support and cache invalidation.
+Smithers uses the same pointer model for revert support and cache invalidation.
 
 ## `revertToJjPointer(pointer, cwd?)`
 
-Restore the working copy from a previously recorded JJ pointer. A pointer is a JJ `change_id` string, as returned by `getJjPointer`.
+Restore the working copy from a recorded JJ pointer (a `change_id` string, as returned by `getJjPointer`).
 
 ```ts
 const result = await runVcs(revertToJjPointer("zqkopwvn", "/path/to/repo"));
@@ -114,7 +111,7 @@ type JjRevertResult = {
 function revertToJjPointer(pointer: string, cwd?: string): VcsEffect<JjRevertResult>;
 ```
 
-This helper wraps `jj restore --from <pointer>`.
+Wraps `jj restore --from <pointer>`.
 
 ## `isJjRepo(cwd?)`
 
@@ -159,8 +156,7 @@ function workspaceAdd(name: string, path: string, opts?: WorkspaceAddOptions): V
 
 Behavior notes:
 
-- removes an existing workspace with the same name before retrying
-- removes the target directory if it exists and creates its parent directory if needed
+- removes any existing workspace with the same name and its target directory if present before retrying, creating the parent directory if needed
 - tries multiple `jj workspace add` syntaxes to work across JJ versions
 
 ## `workspaceList(cwd?)`
@@ -202,7 +198,7 @@ function workspaceClose(
 ): VcsEffect<WorkspaceResult>;
 ```
 
-This wraps `jj workspace forget <name>`.
+Wraps `jj workspace forget <name>`.
 
 ## `captureWorkspaceSnapshot(cwd?)`
 
@@ -222,7 +218,7 @@ type WorkspaceSnapshot = {
 function captureWorkspaceSnapshot(cwd?: string): VcsEffect<WorkspaceSnapshot | null>;
 ```
 
-It returns `null` on failures and timeouts, including non-JJ directories. Smithers uses the `commitId` and `operationId` values for workspace durability checkpoints.
+Returns `null` on failures and timeouts, including non-JJ directories. Smithers uses `commitId` and `operationId` for workspace durability checkpoints.
 
 ## `findVcsRoot(startDir)`
 
@@ -259,7 +255,7 @@ function resolveGitBinary(): ResolvedBinary;
 function resolveJjBinary(): ResolvedBinary;
 ```
 
-`resolveGitBinary()` checks `SMITHERS_GIT_PATH`, then falls back to `git` on `PATH`. `resolveJjBinary()` checks `SMITHERS_JJ_PATH`, then a bundled `@smithers-orchestrator/jj-<platform>` package, then `jj` on `PATH`.
+`resolveGitBinary()` checks `SMITHERS_GIT_PATH`, then `git` on `PATH`. `resolveJjBinary()` checks `SMITHERS_JJ_PATH`, then a bundled `@smithers-orchestrator/jj-<platform>` package, then `jj` on `PATH`.
 
 ## `vcsToolingStatus()`
 
@@ -279,7 +275,7 @@ type VcsToolingStatus = {
 function vcsToolingStatus(): VcsToolingStatus;
 ```
 
-This is synchronous and best-effort. It runs version probes with a short timeout and powers the CLI's VCS preflight checks.
+Synchronous and best-effort: runs version probes with a short timeout and powers the CLI's VCS preflight checks.
 
 ## When To Use These Helpers
 

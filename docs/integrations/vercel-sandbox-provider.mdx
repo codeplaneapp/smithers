@@ -6,15 +6,14 @@ description: Run a Smithers <Sandbox> child workflow on Vercel Sandbox compute w
 # Vercel Sandbox Provider
 
 `@smithers-orchestrator/vercel` is a first-class Smithers `SandboxProvider`
-backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK. It
-runs a `<Sandbox>` child workflow's request on Vercel Sandbox compute: it ships
-the request JSON into the sandbox workdir, runs the entry command, and reads the
-result JSON back. The shared provider-kit owns request shipping, egress, result
-parsing, secret scrubbing, and cleanup, so this package only supplies the Vercel
-`createSession` seam.
+backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK: it
+ships a `<Sandbox>` child workflow's request JSON into the sandbox workdir,
+runs the entry command, and reads the result JSON back. The shared
+provider-kit owns request shipping, egress, result parsing, secret scrubbing,
+and cleanup; this package supplies only the Vercel `createSession` seam.
 
-The provider id is `vercel-sandbox` (exported as `VERCEL_SANDBOX_PROVIDER_ID`).
-The default workdir is `/vercel/sandbox`.
+The provider id is `vercel-sandbox` (`VERCEL_SANDBOX_PROVIDER_ID`); default
+workdir `/vercel/sandbox`.
 
 ```ts
 import {
@@ -26,20 +25,19 @@ import {
 
 ## Credentials
 
-`@vercel/sandbox` is an optional dependency, imported lazily inside the session.
-Install it to use the real provider:
+`@vercel/sandbox` is an optional dependency, lazily imported inside the
+session. Install it to use the real provider:
 
 ```bash
 npm install @vercel/sandbox
 ```
 
-OIDC is preferred; the access-token trio is the fallback. Auth is resolved and
-validated before the SDK is touched, so a misconfigured provider fails fast with
-`INVALID_INPUT`. These values are used only to create the sandbox. They are
-never written into the request JSON and never forwarded into the remote command
-env.
+OIDC is preferred, the access-token trio a fallback. Auth resolves and
+validates before the SDK is touched, so a misconfigured provider fails fast
+with `INVALID_INPUT`. These values create the sandbox only, never written into
+the request JSON or forwarded into the remote command env.
 
-- `VERCEL_OIDC_TOKEN` (preferred), or
+- `VERCEL_OIDC_TOKEN`, or
 - `VERCEL_TOKEN` + `VERCEL_TEAM_ID` + `VERCEL_PROJECT_ID`.
 
 Each can also be passed as a factory option (`oidcToken`, `token`, `teamId`,
@@ -89,10 +87,10 @@ workdir and hands the entry command two env vars:
 - `SMITHERS_SANDBOX_REQUEST_PATH`: where to read the request JSON.
 - `SMITHERS_SANDBOX_RESULT_PATH`: where to write the result JSON.
 
-The entry command either prints the result JSON to stdout or writes it to
-`SMITHERS_SANDBOX_RESULT_PATH`. The result is `{ bundlePath }` or a structured
-`{ status, output|outputs, patches?, diffBundle?, runId? }`. When ports are
-declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
+The entry command prints the result JSON to stdout or writes it to
+`SMITHERS_SANDBOX_RESULT_PATH`: either `{ bundlePath }` or a structured
+`{ status, output|outputs, patches?, diffBundle?, runId? }`. Declared ports
+surface their reachable `sandbox.domain(port)` through a heartbeat.
 
 ## Factory options
 
@@ -110,19 +108,19 @@ declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
 
 ## Duration and plan cap
 
-The default session timeout is 5 minutes. `options.timeoutMs` (or
-`request.toolTimeoutMs`) maps to the create `timeout`. Durations above the
-5-minute default warn through a heartbeat and call `sandbox.extendTimeout()`, up
-to `options.maxDurationMs` (default 45 minutes). A request above that cap throws
-`INVALID_INPUT` rather than provisioning a sandbox that would overrun the plan.
-Raise `maxDurationMs` for Pro (up to 5 hours).
+Default session timeout: 5 minutes; `options.timeoutMs` (or
+`request.toolTimeoutMs`) maps to the create `timeout`. Durations above 5
+minutes warn through a heartbeat and call `sandbox.extendTimeout()`, up to
+`options.maxDurationMs` (default 45 minutes); above that cap, a request throws
+`INVALID_INPUT` instead of overrunning the plan. Raise `maxDurationMs` for Pro
+(up to 5 hours).
 
 ## Cleanup and cost
 
-Ephemeral sandboxes are deleted permanently on teardown (`cleanup: "destroy"`,
-the default). Set `persist: true` to `stop()` (pause) the sandbox instead so it
-can be resumed. `cleanup: "keep"` skips teardown entirely. You pay for Vercel
-Sandbox wall-clock from create to teardown.
+Ephemeral sandboxes delete permanently on teardown (`cleanup: "destroy"`, the
+default); `persist: true` calls `stop()` (pause) instead so it can resume, and
+`cleanup: "keep"` skips teardown entirely. You pay Vercel Sandbox wall-clock
+from create to teardown.
 
 `createMockVercelSandboxEnvironment(handler, config?)` is an in-memory SDK
 double for tests. Pass it as `options.client`; it needs zero credentials, so

@@ -46,7 +46,7 @@ type ServerOptions = {
 };
 ```
 
-`startServer` returns a listening `http.Server`. `headersTimeout` and `requestTimeout` are applied to that server to bound slow header/body uploads.
+`startServer` returns a listening `http.Server`, with `headersTimeout` and `requestTimeout` applied to bound slow header/body uploads.
 
 ## API Routes (TOON)
 
@@ -75,7 +75,7 @@ Errors use the envelope `{ "error": { "code", "message", "details" } }`. Common 
 
 ## Tool surface
 
-Tools resolve relative to `rootDir`. The example below exposes a workflow that uses the built-in `bash` tool through the server; clients call it via `POST /v1/runs`.
+Tools resolve relative to `rootDir`. The example below exposes a workflow using the built-in `bash` tool through the server, called via `POST /v1/runs`.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -109,7 +109,7 @@ Missing or invalid tokens return `401`. No scopes; for finer access control use 
 
 ## Notes
 
-- Each `POST /v1/runs` and `/resume` reloads the workflow source via a content-addressed shadow file with the same extension as the source, so edits take effect on the next call without a restart.
+- Each `POST /v1/runs` and `/resume` reloads the workflow source via a content-addressed shadow file (same extension as the source), so edits take effect on the next call without a restart.
 - Active runs heartbeat to `_smithers_runs.heartbeat_at_ms` every 1 s; stale rows (no heartbeat in 30 s) are treated as crashed and may be resumed.
-- When a server-level `db` differs from a workflow's database, runs and events are mirrored asynchronously to the server db so they show up in `GET /v1/runs`.
+- When a server-level `db` differs from a workflow's database, runs and events are mirrored asynchronously to the server db to show up in `GET /v1/runs`.
 - Metrics are exported via `/metrics`; set `SMITHERS_OTEL_ENABLED=1` plus `OTEL_EXPORTER_OTLP_ENDPOINT` for OTLP. See [Observability](/guides/monitoring-logs).

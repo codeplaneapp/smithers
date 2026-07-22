@@ -64,16 +64,15 @@ type TaskProps = {
 };
 ```
 
-`output={outputs.someKey}` is the canonical schema path. `outputs` comes from
-the same `createSmithers(...)` call as the workflow, and each value is the exact
-Zod schema object you registered. When a Task renders, Smithers uses that object
-as the output target, infers `outputSchema`, passes it to native
-structured-output agents, validates the returned row, and persists it to the
-matching output table. You only need `outputSchema={...}` when `output` is a
-custom Drizzle table or string key and Smithers cannot infer the Zod schema.
+`output={outputs.someKey}` is canonical: `outputs` comes from the workflow's
+`createSmithers(...)` call, each value the exact registered Zod schema.
+Smithers infers `outputSchema` from it, passes that to native
+structured-output agents, validates the returned row, and persists to the
+matching table. Set `outputSchema={...}` only for a custom Drizzle table or
+string key it can't infer a schema from.
 
 <Warning>
-**Do not name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every node output alongside those internal columns, so an output schema that declares one collides and the workflow fails to load (`bunx smithers-orchestrator graph` errors before it runs). This bites loop counters especially; name the field `round`, `pass`, or `attempt` instead of `iteration`.
+**Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smithers-orchestrator graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
 </Warning>
 
 ```tsx
@@ -100,15 +99,15 @@ const reviewAgent = new CodexAgent({
 
 ## Three task modes: agent, compute, static
 
-The `children` shape decides what a Task does. No `agent` prop is needed for the
-compute and static modes.
+`children`'s shape decides what a Task does; compute and static modes need no
+`agent` prop.
 
 - **Agent** (`agent={...}`, children is a prompt string or `(deps) => string`):
   runs the agent, parses its output against the schema, persists.
-- **Compute** (no `agent`, children is a function returning a value): runs your
-  code. The function **may be `async`** and is awaited, so do real work here
-  (run a test command, call an API, read a file). Whatever it returns is
-  validated against `output` and persisted, exactly like an agent's parsed JSON.
+- **Compute** (no `agent`, children is a function returning a value): runs
+  your code (the function **may be `async`** and is awaited, so it can run a
+  test, call an API, read a file). The return value validates against
+  `output` and persists, like an agent's parsed JSON.
 - **Static** (no `agent`, children is a literal value): persists the value as-is.
 
 ```tsx
@@ -135,20 +134,20 @@ compute and static modes.
 
 A compute or static Task is a first-class node: it persists, resumes, gates
 downstream `deps`, and works inside `<Loop>`, `<Branch>`, `<Parallel>`, and
-`<Sequence>` just like an agent Task. The only thing it cannot do is be a `fork`
-source (no agent session). Throwing inside a compute function fails the task and
-triggers its retry policy.
+`<Sequence>` like an agent Task, except it can't be a `fork` source (no agent
+session). Throwing in a compute function fails the task and triggers its retry
+policy.
 
 ## Dependencies: dependsOn, needs, deps
 
-Three props express upstream dependencies. They compose.
+`dependsOn`, `needs`, and `deps` compose:
 
-- **`dependsOn: string[]`**: ordering only. The task waits until every listed task id is terminal. No values are passed in.
-- **`needs: Record<string, string>`**: named dependencies. Each value is an upstream task id; each key is the name that value is looked up under.
-- **`deps: Record<string, OutputTarget>`**: typed render-time outputs. The task gates on each dependency and passes the resolved rows to a `children` callback via `{(deps) => ...}`.
-- **`depsOptional: boolean`**: tolerate unresolved deps. By default a task with `deps` defers until every dependency has an output row. With `depsOptional`, the task renders as soon as it can, and any dependency that has no row (for example an upstream `continueOnFail` task that failed) is simply absent from the `deps` object. Read those values defensively: `deps.summary?.text`, because an unresolved dep is missing, not present-but-undefined.
+- **`dependsOn: string[]`**: ordering only: the task waits until every listed task id is terminal; no values are passed in.
+- **`needs: Record<string, string>`**: named dependencies: each value is an upstream task id, each key the name it's looked up under.
+- **`deps: Record<string, OutputTarget>`**: typed render-time outputs: the task gates on each dependency and passes resolved rows to a `children` callback via `{(deps) => ...}`.
+- **`depsOptional: boolean`**: tolerate unresolved deps: a task with `deps` normally defers until every dependency has an output row; `depsOptional` renders as soon as it can, dropping any dependency with no row (e.g. an upstream `continueOnFail` failure). Read defensively (`deps.summary?.text`): an unresolved dep is missing, not present-but-undefined.
 
-The detail that bites people: **a `deps` key is treated as the upstream task's id.** `deps={{ analyze: outputs.analysis }}` depends on a task whose id is `analyze`. If your dep name differs from the upstream id, remap it with `needs`:
+**A `deps` key is the upstream task's id.** `deps={{ analyze: outputs.analysis }}` depends on the task id `analyze`; if yours differs, remap it with `needs`:
 
 ```tsx
 // Upstream task id is "parse-summary", but you want to call it `summary` locally.
@@ -161,11 +160,11 @@ The detail that bites people: **a `deps` key is treated as the upstream task's i
 </Task>
 ```
 
-Without the `needs` remap, `deps={{ summary: ... }}` depends on a node id `summary` that no task produces. The dependency can never resolve, and the run fails with `DEPENDENCY_DEADLOCK` naming the stuck task. (Previously this hung or finished while silently skipping the task.) `needs` alone works too when you don't need the typed `children` callback.
+Without the remap, `deps={{ summary: ... }}` depends on a node id `summary` no task produces: it never resolves, and the run fails with `DEPENDENCY_DEADLOCK` naming the stuck task (previously it hung or silently skipped it). `needs` alone works too, when you don't need the typed `children` callback.
 
 ### Across a loop boundary
 
-A task inside a `<Loop>` can depend on a task outside the loop. The upstream is resolved at its own iteration, not the loop's, so `deps`/`needs` reach it from any iteration:
+A task inside a `<Loop>` can depend on a task outside it: the upstream resolves at its own iteration, not the loop's, so `deps`/`needs` reach it from any iteration:
 
 ```tsx
 <Task id="config" output={outputs.config}>{/* runs once, outside the loop */}</Task>
@@ -181,15 +180,15 @@ A task inside a `<Loop>` can depend on a task outside the loop. The upstream is 
 
 ## Fork
 
-Every agent task produces a reusable session snapshot. Use `fork` to start a new task from any previous task's context.
+Every agent task produces a reusable session snapshot; use `fork` to start a new task from any previous task's context.
 
 `<Task id={B} fork={A}>` means:
 
 - `B` depends on `A` and cannot run until `A` has completed.
 - `B` starts from a **copy** of `A`'s final agent session context, then submits its own prompt into that copy.
-- `B` produces its own output and its own session snapshot. `A` is never mutated.
+- `B` produces its own output and its own session snapshot.
 
-`fork` is immutable. It does not continue or mutate the source task; it copies the conversation into a fresh, independent session. Multiple tasks may fork the same source safely, and a forked task may itself be forked.
+`fork` never mutates or continues the source task; multiple tasks may fork the same source safely, and a forked task may itself be forked.
 
 ```tsx
 import { CodexAgent } from "smithers-orchestrator";
@@ -216,7 +215,7 @@ const VERIFY = "verify" as const;
 
 `VERIFY` forks `IMPLEMENT`, which forked `PLAN`, so `VERIFY` sees the whole `plan → implement` conversation.
 
-**Parallel branches**: fork the same source from sibling tasks; each gets its own copy and they never affect each other:
+**Parallel branches**: fork the same source from sibling tasks; each gets its own copy, unaffected by the others:
 
 ```tsx
 import { CodexAgent } from "smithers-orchestrator";
@@ -238,19 +237,18 @@ const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reas
 </Parallel>
 ```
 
-`fork` composes with `dependsOn`, `needs`, `deps`, `Sequence`, `Parallel`, `Branch`, and `Loop`. Inside a loop, `fork` resolves to the **latest completed** session snapshot for that task id; there is no iteration selector and no ambiguity.
+`fork` composes with `dependsOn`, `needs`, `deps`, `Sequence`, `Parallel`, `Branch`, and `Loop`. Inside a loop, it resolves to the **latest completed** session snapshot for that task id: no iteration selector, no ambiguity.
 
 ### Error cases
 
-- **`TASK_FORK_SOURCE_NOT_FOUND`**: `fork` points to a task id not present in the graph (including a source that exists only in an unselected `<Branch>`).
+- **`TASK_FORK_SOURCE_NOT_FOUND`**: `fork` points to a task id absent from the graph (including one that exists only in an unselected `<Branch>`).
 - **`TASK_FORK_CYCLE`**: `fork` creates a cycle, directly or indirectly.
-- **`TASK_FORK_SESSION_UNAVAILABLE`**: the forking task is not an agent task, or the source completed but produced no usable session snapshot (e.g. a compute/static source, or a source that was skipped/cancelled).
-- **`TASK_FORK_SOURCE_NOT_COMPLETE`**: the source exists but has not completed; the forked task waits and does not run.
+- **`TASK_FORK_SESSION_UNAVAILABLE`**: the forking task isn't an agent task, or its source completed with no usable session snapshot (e.g. a compute/static source, or one skipped/cancelled).
+- **`TASK_FORK_SOURCE_NOT_COMPLETE`**: the source exists but hasn't completed; the forked task waits rather than running.
 
 ## Notes
 
-- Three modes by `children` shape: agent (with `agent`), compute (function, no agent), static (value, no agent).
 - `memory` overrides the nearest [`<Memory>`](/components/memory) provider for this task. Recall and primer failures log a warning and run the original prompt.
-- `fork` requires an agent task; the source must be an agent task with a session snapshot. Forking copies the conversation into a new session and never reuses a native session id.
+- Forking never reuses a native session id; it always copies into a new one (see [Fork](#fork), [error cases](#error-cases)).
 - When `outputSchema` is set, JSON is extracted from agent text; schema-validation retries don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.

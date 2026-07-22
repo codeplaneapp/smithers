@@ -3,9 +3,9 @@ title: plan
 description: Create a practical implementation plan.
 ---
 
-`plan` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+`plan` is an archived example, not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` for one, then run it:
 
-`plan` turns a request into a structured implementation plan without changing the repo.
+`plan` turns a request into a structured plan without changing the repo.
 
 ```bash
 bunx smithers-orchestrator workflow run plan --prompt "Add account-level billing limits"
@@ -23,19 +23,18 @@ bunx smithers-orchestrator workflow run plan --prompt "Add account-level billing
 
 ## Output Shape
 
-The plan task returns a summary and ordered steps. Use it before `implement`, `research-plan-implement`, `mission`, or `tickets-create`.
+`plan` returns a summary and ordered steps, for use before `implement`, `research-plan-implement`, `mission`, or `tickets-create`.
 
 ## Use it when
 
-- You want an ordered, reviewable plan before any code changes.
-- The request is clear enough to plan but you do not want edits yet.
+- The request is clear enough to plan, and you want an ordered, reviewable plan before touching code.
 
 ## Use something else when
 
 - The task touches unfamiliar code: run [`research`](/workflows/research) first, or use [`research-plan-implement`](/workflows/research-plan-implement).
 - Requirements are still vague: run [`grill-me`](/workflows/grill-me).
-- You are ready to build: use [`implement`](/workflows/implement).
+- Ready to build: use [`implement`](/workflows/implement).
 
 ## Resume & retry
 
-`plan` does not change the repo; it returns a plan in the run output. Runs are durable and resume with `up --resume`.
+Runs are durable and resume with `up --resume`.

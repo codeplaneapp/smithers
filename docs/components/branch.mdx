@@ -49,11 +49,9 @@ export default smithers((ctx) => (
 ));
 ```
 
-Use a plain boolean for `if`. The example above reads immutable run input, so
-there is no stale-read hazard: `ctx.input.deployToProduction` is the same value
-on every frame of that run. When the condition depends on an upstream task, read
-with `ctx.outputMaybe(...)`, coalesce the missing first-frame value, and let the
-render loop re-evaluate after the upstream task persists:
+Use a plain boolean for `if`: the example above reads immutable run input, so
+there's no stale-read hazard. For a condition depending on an upstream task,
+read with `ctx.outputMaybe(...)` and coalesce the missing first-frame value:
 
 ```tsx
 const test = ctx.outputMaybe(outputs.test, { nodeId: "test" });
@@ -67,8 +65,7 @@ const test = ctx.outputMaybe(outputs.test, { nodeId: "test" });
 
 ## Notes
 
-- `if` re-evaluates every render frame; run input is immutable, and task outputs become visible on later frames after they persist.
-- Read incomplete upstream outputs with `ctx.outputMaybe()` rather than `ctx.output()`.
+- `if` re-evaluates every render frame: run input is immutable, but task outputs only become visible once they persist, so read incomplete upstream outputs with `ctx.outputMaybe()` rather than `ctx.output()`.
 - Each branch takes one element; wrap multiples in `<Sequence>` or `<Parallel>`.
 - Unselected branch tasks are absent from the task graph.
-- `<Branch>` takes **no children**; pass branches via `then`/`else`. Writing `<Branch>...</Branch>` throws `INVALID_INPUT` (children would otherwise be silently dropped).
+- `<Branch>` takes **no children**; pass branches via `then`/`else`. `<Branch>...</Branch>` throws `INVALID_INPUT` instead of silently dropping children.

@@ -3,9 +3,9 @@ title: "Smithers vs. Temporal"
 description: "Temporal is the durable-execution heavyweight for distributed business systems. Smithers brings the same crash-safe guarantees to coding-agent work with no cluster, no workers, and no determinism rules."
 ---
 
-Temporal is the reference point for durable execution, and it earned that. If you are building payment processing, order fulfillment, or any high-throughput distributed transaction system with a platform team behind it, Temporal is a great answer and this page will not talk you out of it.
+Temporal is the reference point for durable execution, earning that answer for payment processing, order fulfillment, and high-throughput distributed transaction systems; this page won't argue otherwise.
 
-Smithers applies the same core guarantee, "a crash never loses finished work," to a different unit of work: an AI agent editing a real repository over many steps, with humans in the loop. That difference in unit of work drives every design difference below.
+Smithers applies the same guarantee, "a crash never loses finished work," to a different unit of work: an AI agent editing a real repository over many steps, with humans in the loop. That difference drives every design choice below.
 
 ## The short version
 
@@ -14,23 +14,23 @@ Smithers applies the same core guarantee, "a crash never loses finished work," t
 | Built for | Distributed business transactions | Coding-agent work with human gates |
 | Infrastructure | A server cluster (self-hosted or Temporal Cloud) plus worker fleets | One process and a SQLite file; `bunx smithers-orchestrator up` |
 | Workflow code | Deterministic by contract: side effects live in activities, code replays against event history | Ordinary TypeScript and JSX; state is re-read, code is never replayed |
-| Agents | You integrate them yourself inside activities | Claude Code, Codex, Pi, and AI SDK models are first-class task nodes |
+| Agents | You integrate them inside activities | Claude Code, Codex, Pi, and AI SDK models are first-class task nodes |
 | Humans | Signals and queries you design | `<Approval>`, `<HumanTask>`, and durable questions in the box |
-| History | Event log per workflow | Every render frame is a row: `timeline`, `rewind`, `fork`, `replay`, plus filesystem snapshots for the repo the agent edited |
-| Authoring | SDK code in Go, Java, TypeScript, Python | A JSX tree agents write fluently and humans can review at a glance |
-| Operating it | A platform team's job, done well | A developer runs it locally; observability is one command |
+| History | Event log per workflow | Every render frame is a row: `timeline`, `rewind`, `fork`, `replay`, plus filesystem snapshots of the edited repo |
+| Authoring | SDK code in Go, Java, TypeScript, Python | A JSX tree agents write fluently; humans review at a glance |
+| Operating it | A platform team's job | A developer runs it locally; observability is one command |
 
 ## The two designs, honestly
 
-**Temporal replays; Smithers re-renders.** Temporal reconstructs workflow state by re-executing your code against an event history, which is why the determinism rules exist: no direct IO, no random, no time, side effects quarantined in activities. It is a powerful model and it scales to enormous throughput. Smithers persists each task's validated output to SQLite and re-renders the workflow tree against that state, so your code has no determinism contract at all. An agent task can shell out, edit files, and call flaky tools, because the unit of recovery is the step, not the instruction.
+**Temporal replays; Smithers re-renders.** Temporal reconstructs workflow state by re-executing your code against an event history: that's why the determinism rules exist (no IO, no randomness, no time, side effects quarantined in activities), a powerful, high-throughput model. Smithers persists each task's validated output to SQLite and re-renders the workflow tree against that state, so your code carries no determinism contract: an agent task can shell out, edit files, and call flaky tools, because the unit of recovery is the step, not the instruction.
 
-**The infrastructure floor is different by orders of magnitude.** A Temporal deployment is a service, a database, and worker fleets, or a Temporal Cloud contract. A Smithers deployment is a file next to your repo. That is not a criticism of Temporal; it is the cost of its scale profile. But most teams orchestrating coding agents are one developer with a laptop and a CI runner, and they should not need a platform team to get durable runs.
+**The infrastructure floor is different by orders of magnitude.** That's the cost of Temporal's scale profile, not a knock on it: most teams orchestrating coding agents are one developer with a laptop and a CI runner, and shouldn't need a platform team for durable runs.
 
-**Agent work needs things business transactions do not.** Reviewing an agent's work means seeing the diff, rewinding the repo to before the bad decision, and forking an alternate attempt. Smithers snapshots the filesystem alongside the database, so `rewind` and `fork` restore the working tree, not just the workflow state. Approvals, review loops, evals, and prompt optimization ship in the box because agent output quality is part of orchestration, not an application concern layered on top.
+**Agent work needs things business transactions do not.** Reviewing an agent's work: see the diff, rewind before a bad decision, fork an alternate attempt. Smithers snapshots the filesystem alongside the database: `rewind` and `fork` restore the working tree, not just workflow state. Approvals, review loops, evals, and prompt optimization ship in the box: agent output quality is part of orchestration, not bolted on top.
 
 ## When to pick which
 
-Pick Temporal when the workload is high-volume distributed transactions, the team already runs (or wants) a workflow platform, or you need polyglot SDKs across services. Pick Smithers when the workload is agents doing real work in real repositories, you want durability without operating anything, and humans need to gate what ships. Plenty of teams will run both; they do not compete for the same jobs.
+Pick Temporal for high-volume distributed transactions, a team that already runs (or wants) a workflow platform, or polyglot SDKs across services. Pick Smithers for agents doing real work in real repositories, durability without operating anything, and humans gating what ships. Plenty of teams run both: they don't compete for the same jobs.
 
 ## See also
 

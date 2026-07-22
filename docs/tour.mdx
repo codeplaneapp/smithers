@@ -3,7 +3,7 @@ title: Tour
 description: Build a code-review workflow in six steps. Every core feature shows up.
 ---
 
-A code-review workflow built one capability at a time. Each step is a diff against the previous. Reading time: 15 minutes.
+A code-review workflow, built one capability at a time; each step is a diff against the last. Reading time: 15 minutes.
 
 ## 1. Install and scaffold
 
@@ -15,13 +15,13 @@ codex login
 ```
 
 `init` creates `.smithers/` with seeded workflows, prompts, and components. The
-bun deps add Smithers and Zod (schemas); `codex login` makes your Codex
-subscription available to workflow workers.
+bun deps add Smithers and Zod (schemas); `codex login` authorizes your Codex
+subscription for workflow workers.
 
 <Note>
-**Zod v4 is required.** Smithers introspects your output schemas via Zod v4
-internals, so pin `zod@^4`. A Zod **v3** schema fails when building an agent
-command with the cryptic error `undefined is not an object (evaluating
+**Zod v4 is required.** Smithers introspects output schemas via Zod v4
+internals; pin `zod@^4`, or a **v3** schema fails building an agent command
+with the cryptic error `undefined is not an object (evaluating
 'schema._zod.def')`.
 </Note>
 
@@ -42,7 +42,7 @@ A minimal `tsconfig.json`:
 }
 ```
 
-`jsxImportSource` is the only line specific to Smithers; it routes JSX through the workflow runtime instead of React DOM.
+`jsxImportSource` is the only Smithers-specific line; it routes JSX through the workflow runtime instead of React DOM.
 
 ## 2. One-task workflow
 
@@ -67,9 +67,9 @@ export default smithers((ctx) => (
 ));
 ```
 
-`createSmithers` registers Zod schemas; each becomes a durable output relation managed by the runtime. `outputs.greeting` is the typed reference for the `greeting` schema; using it as the `output` prop gives compile-time checks (typo `outputs.greting` is a type error).
+`createSmithers` registers Zod schemas as durable output relations the runtime manages. `outputs.greeting` is the typed reference for the `greeting` schema; using it as the `output` prop catches typos at compile time (`outputs.greting` is a type error).
 
-The `input` key is special: its schema types `ctx.input` (so `ctx.input.name` is a checked `string`, not `unknown`). Every other key is an output table. Omit `input` and `ctx.input` is untyped, forcing a defensive guard on each field (`ctx.input?.name ?? "world"`). Input fields also arrive as supplied, with no Zod defaults applied, so coalesce any field you do not require. The other schemas (`greeting` here) are the workflow's outputs.
+The `input` key is special: its schema types `ctx.input`, so `ctx.input.name` is a checked `string`, not `unknown`; every other key, like `greeting` here, is an output table. Omitting `input` leaves `ctx.input` untyped, forcing a defensive guard on each field (`ctx.input?.name ?? "world"`). Input fields arrive as supplied with no Zod defaults applied: coalesce any field you don't require.
 
 This Task has no `agent`, just a literal value. Run it.
 
@@ -85,8 +85,8 @@ bunx smithers-orchestrator inspect RUN_ID    # structured state
 bunx smithers-orchestrator output RUN_ID greet --pretty  # typed node output
 ```
 
-For a controller or custom monitor, read the same output through Gateway
-`getNodeOutput({ runId, nodeId: "greet" })`. Do not query the backing store;
+A controller or custom monitor reads the same output through Gateway
+`getNodeOutput({ runId, nodeId: "greet" })`, never the backing store directly;
 SQLite/PGlite/Postgres are interchangeable runtime details.
 
 ## 3. Add an agent task
@@ -131,9 +131,9 @@ The runtime injects a JSON-schema description of `outputs.analysis` into the pro
 
 ## 4. A second task that depends on the first
 
-Tasks see each other's outputs through `ctx.outputMaybe(...)`. An incomplete upstream returns `undefined`; on the next render frame the upstream output appears and the downstream Task mounts.
+Tasks see each other's outputs through `ctx.outputMaybe(...)`: an incomplete upstream returns `undefined`, and once it appears on a later render frame, the downstream Task mounts.
 
-For the common case of one Task consuming exactly one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more ergonomic form; reach for `ctx.outputMaybe` when the guard needs to inspect content or gate more than one sibling.
+When a Task consumes exactly one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` callback is more ergonomic; reach for `ctx.outputMaybe` to inspect content or gate multiple siblings.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -192,11 +192,11 @@ export default smithers((ctx) => {
 });
 ```
 
-Render 1: only `analyze` is mounted. Render 2 (after `analyze` finishes): `analysis` is populated, `fix` mounts and runs. That is the entire reactivity story: no hooks, no subscriptions, JSX conditionals over persisted state.
+Render 1 mounts only `analyze`. Render 2, once `analyze` finishes: `analysis` is populated, `fix` mounts and runs. That's the whole reactivity story: no hooks, no subscriptions, just JSX conditionals over persisted state.
 
-Same shape works for branching, parallel groups, and loops. A `?:` conditional
-is the inline form; [`<Branch>`](/components/branch) is the declarative form when
-you want explicit `then`/`else` (it takes those as props, not children):
+The same shape covers branching, parallel groups, and loops: `?:` is the inline
+conditional form, [`<Branch>`](/components/branch) the declarative form for
+explicit `then`/`else` (as props, not children):
 
 ```tsx
 <Parallel maxConcurrency={3}>
@@ -219,7 +219,7 @@ you want explicit `then`/`else` (it takes those as props, not children):
 
 ## 5. An approval gate
 
-Pause for a human. The runtime persists the pending decision and exits cleanly; the operating agent relays the question to the human, then approves or denies through the CLI; resume picks up from the gate.
+Pause for a human: the runtime persists the decision and exits cleanly. The operating agent relays the question, then approves or denies through the CLI; resume continues from the gate.
 
 ```tsx
 import { Approval } from "smithers-orchestrator";
@@ -245,7 +245,7 @@ import { Approval } from "smithers-orchestrator";
 ) : null}
 ```
 
-Operator side (you, the agent, run these on the human's behalf; never hand them to the human):
+Operator side (you, the agent, run these for the human; never hand them off):
 
 ```bash
 bunx smithers-orchestrator ps --status waiting-approval     # find paused runs
@@ -254,7 +254,7 @@ bunx smithers-orchestrator approve RUN_ID --node confirm-fix --by alice
 bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true
 ```
 
-`onDeny` controls behavior on rejection: `"fail"` aborts the run, `"continue"` proceeds without the approved branch, `"skip"` skips the gated tasks.
+`onDeny` controls rejection: `"fail"` aborts the run, `"continue"` proceeds without the approved branch, `"skip"` skips the gated tasks.
 
 ## 6. Crash, then resume
 
@@ -272,7 +272,7 @@ bunx smithers-orchestrator up workflow.tsx --run-id review-1 --resume true
   <img src="/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" />
 </Frame>
 
-In-flight attempts are marked stale and re-tried; finished tasks are not. Resume is deterministic: same input + same code = same task IDs.
+In-flight attempts are marked stale and retried on resume. Same input + same code = same task IDs, so resume is deterministic.
 
 For unattended recovery, run the supervisor:
 
@@ -284,11 +284,11 @@ It auto-resumes runs whose owner process died.
 
 ## What you skipped (and where to find it)
 
-- **Time travel** (replay a frame, fork a run, diff two runs): `bunx smithers-orchestrator replay|fork|diff|timeline`. See [How It Works → Time travel](/how-it-works#time-travel).
-- **Scorers** (attach evaluators to Tasks): see [Recipes → Scoring tasks](/recipes#scoring-tasks).
-- **Memory** (cross-run facts and message history): see [How It Works → Memory](/how-it-works#memory-cross-run-state).
-- **RAG**, **voice**, **OpenAPI tools**: opt-in fragments. See the index in [llms.txt](/llms.txt).
-- **Tool sandbox** (read/grep/bash with path containment): see [Recipes → Tools](/recipes#coherent-task-with-tools).
+- **Time travel** (replay a frame, fork a run, diff two runs): `bunx smithers-orchestrator replay|fork|diff|timeline`, detailed in [How It Works → Time travel](/how-it-works#time-travel).
+- **Scorers** (attach evaluators to Tasks): [Recipes → Scoring tasks](/recipes#scoring-tasks).
+- **Memory** (cross-run facts and message history): [How It Works → Memory](/how-it-works#memory-cross-run-state).
+- **RAG**, **voice**, **OpenAPI tools**: opt-in fragments, indexed in [llms.txt](/llms.txt).
+- **Tool sandbox** (read/grep/bash with path containment): [Recipes → Tools](/recipes#coherent-task-with-tools).
 
 ## Read next
 

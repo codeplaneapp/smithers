@@ -3,11 +3,11 @@ title: trellis
 description: Experimental prompt-first workflow where Sol or Fable grows a bounded delegation graph from settled evidence.
 ---
 
-`trellis` is the repository's executable Dynamic Delegation v2 workflow. It is
-an experimental local workflow, not yet part of the default
+`trellis` is the repository's executable Dynamic Delegation v2 workflow: an
+experimental local workflow, not yet part of the default
 `bunx smithers-orchestrator init`
 pack. It maps Sol/Fable authors, a Terra validator, and a Luna implementer into
-the [`<Trellis>`](/components/trellis) component and declares the real
+the [`<Trellis>`](/components/trellis) component and declares the
 `Smithers Trellis` custom UI.
 
 ```bash
@@ -16,9 +16,9 @@ bunx smithers-orchestrator workflow run trellis \
   --max-concurrency 4
 ```
 
-The explicit flag is required even at the default value: Trellis verifies that
-its component cap and the persisted run cap are identical. To use another
-value, pass it both as workflow input and as the run option:
+The explicit flag is required even at the default value: Trellis verifies its
+component cap matches the persisted run cap. To use another value, pass it as
+both workflow input and run option:
 
 ```bash
 bunx smithers-orchestrator workflow run trellis \
@@ -40,9 +40,9 @@ bunx smithers-orchestrator workflow run trellis \
 | `criticalExecutionPolicy` | object | omitted; direct Sol/Fable execution disabled |
 
 The optional policy contains `allowedCategories`, normalized workspace-relative
-`allowedPathPrefixes`, and `maxChangedLines` (`1..500`). It is a trusted
-per-execution admission ceiling; Phase A does not claim measured diff or
-filesystem-sandbox enforcement. For example:
+`allowedPathPrefixes`, and `maxChangedLines` (`1..500`): a trusted per-execution
+admission ceiling. Phase A does not claim measured diff or filesystem-sandbox
+enforcement. For example:
 
 ```bash
 bunx smithers-orchestrator workflow run trellis \
@@ -58,27 +58,28 @@ Open the workflow UI to launch and inspect runs:
 bunx smithers-orchestrator ui --workflow trellis
 ```
 
-The launcher submits the same selected concurrency as workflow input and run
+The launcher submits the selected concurrency as workflow input and run
 policy. The live surface shows the canonical final outcome, author fuel,
-accepted or rejected validation generations, the real execution tree, exact
-node outputs, and durable events. It discovers the semantic final node from
-trusted Trellis metadata rather than parsing hashed physical IDs.
+accepted/rejected validation generations, the execution tree, node outputs,
+and durable events, discovering the semantic final node from trusted Trellis
+metadata rather than parsing hashed physical IDs.
 
-The controls are labeled as defaults for the **next launch**; they are not
-presented as configuration recovered from whichever historical run is selected.
-Each new run instead persists its pinned root concurrency, total author-turn
-cap, generation/depth limits, and per-invocation allocated/remaining author
-fuel in trusted Trellis task metadata. The selected-run strip reads those
-fields from the selected run, including runs launched outside the UI. A
-root-local remaining value is one immutable allocation, not a mutable global
-fuel counter; older runs without these fields are labeled as not persisted.
-The capability strip deliberately reports Phase A gaps: questions are
-unavailable, hierarchical token/USD budgets are not enforced, and tool or
-filesystem authority depends on the configured agent adapter and sandbox.
-Prompt restrictions alone are advisory. Rejected IR is visible but never
-described as executed. The current UI launcher omits a critical-execution
-policy, so its runs force implementation down to Terra/Luna; policy-enabled
-runs can still be launched through workflow input and inspected in the UI.
+Controls default to the **next launch**, not the selected historical run's
+configuration. Each run persists its pinned root concurrency,
+author-turn cap, generation/depth limits, and per-invocation
+allocated/remaining author fuel in trusted Trellis task metadata; the
+selected-run strip reads those fields from the selected run, even ones
+launched outside the UI. A root-local remaining value is one immutable
+allocation, not a mutable global counter; older runs missing these fields are
+labeled not persisted.
+
+The capability strip reports Phase A gaps: questions are unavailable,
+hierarchical token/USD budgets aren't enforced, tool/filesystem authority
+depends on the configured agent adapter and sandbox, and prompt restrictions
+alone are advisory. Rejected IR is visible but never shown as executed. The
+launcher also omits a critical-execution policy, forcing implementation to
+Terra/Luna; policy-enabled runs can still launch via workflow input and be
+inspected in the UI.
 
 ## Agent mapping
 

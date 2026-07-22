@@ -4,7 +4,7 @@ description: User, assistant, and system message surfaces with alignment and lon
 ---
 
 `Bubble` renders a standalone chat message surface. Its optional collapse mode
-uses a clamp: content stays mounted for selection and accessibility while the
+clamps: content stays mounted for selection and accessibility while the
 surface clips it visually.
 
 ```tsx
@@ -27,5 +27,5 @@ import { Bubble } from "smithers-orchestrator/ui";
 | `onExpandedChange` | `(expanded: boolean) => void` | Not set | Receives expansion requests. |
 | `expandLabel`, `collapseLabel` | `string` | `"Show more"`, `"Show less"` | Visible disclosure labels. |
 
-Use `bubbleVariants({ variant })` when another element needs the same visual
-variant classes.
+Use `bubbleVariants({ variant })` for other elements needing the same variant
+classes.

@@ -59,7 +59,7 @@ type OpenApiToolsOptions = {
 };
 ```
 
-Pass the spec itself as the first argument to `createOpenApiTools(input, options)`. `input` may be a parsed spec object, file path, URL, or raw OpenAPI text.
+Pass the spec itself as the first argument to `createOpenApiTools(input, options)`; `input` may be a parsed spec object, file path, URL, or raw OpenAPI text.
 
 ## Public API
 
@@ -68,7 +68,7 @@ Pass the spec itself as the first argument to `createOpenApiTools(input, options
 | `createOpenApiTools(input, options?)` / `createOpenApiToolsSync(input, options?)` | Build a record of AI SDK tools keyed by operationId. |
 | `createOpenApiTool(input, operationId, options?)` / `createOpenApiToolSync(...)` | Build one operation as a tool. |
 | `listOperations(input)` | Return parsed operation metadata without creating tools. |
-| `extractOperations(spec)` | Extract operations from an already parsed spec. |
+| `extractOperations(spec)` | Extract operations from a parsed spec. |
 | `loadSpecEffect(input)` | Load and parse a spec from object, path, URL, or raw text. |
 | `loadSpecSync(input)` | Load and parse a spec from object, local file path, or raw text. It does not fetch URLs. |
 | `jsonSchemaToZod(schema, spec, visited?)` / `buildOperationSchema(parameters, requestBody, spec)` | Lower-level schema conversion helpers. |
@@ -87,7 +87,7 @@ The generated module imports `createOpenApiToolsSync`, creates the tools from th
 bunx smithers-orchestrator openapi list ./api/openapi.yaml
 ```
 
-`openapi list` previews every operationId, method, path, and summary. Useful for auditing what an agent will be able to call before wiring it up.
+`openapi list` previews every operationId, method, path, and summary: useful for auditing what an agent can call before wiring it up.
 
 ## What gets generated
 
@@ -101,14 +101,14 @@ For each operation:
 
 - JSON responses are parsed and returned as objects.
 - Non-JSON responses are returned as strings.
-- HTTP status codes are not special-cased by the tool factory; if the server returns a JSON or text error body, that body is returned to the agent.
+- HTTP status codes are not special-cased by the tool factory: a JSON or text error body from the server is returned straight to the agent.
 - Request failures, fetch failures, and schema/tool execution exceptions are returned as `{ error: true, message, status: "failed" }` so the agent can react in its loop.
 
 ## Filtering
 
-`include` / `exclude` accept arrays of `operationId`. If both are set, exclude wins. Useful for limiting an agent's surface area to a specific feature ("just the inventory endpoints"). `namePrefix` prefixes generated tool names without changing the operationIds used for filtering.
+`include` / `exclude` accept arrays of `operationId`; if both are set, exclude wins. Useful for limiting an agent's surface area to a specific feature ("just the inventory endpoints"). `namePrefix` prefixes generated tool names without changing the operationIds used for filtering.
 
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
+Use `operations` for per-operation curation keyed by the original `operationId`: set an entry to `false` or `{ include: false }` to skip that endpoint, `name` to rename the generated tool, `description` to replace the spec summary/description with agent-facing instructions, and `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
 
 ## Observability
 
@@ -119,6 +119,6 @@ OpenAPI tool calls update the exported Effect metrics (`openApiToolCallsTotal`, 
 - Schema composition (`allOf`, `anyOf`, `oneOf`) is supported; converts to Zod unions/intersections.
 - Nullable fields and defaults from the spec are preserved.
 - Cookie parameters are ignored when generating tool input schemas and requests.
-- JSON request bodies are the only request body media type generated today; non-JSON bodies such as form data, multipart uploads, and binary payloads are not encoded.
-- Parameter serialization styles are not implemented. Path parameters are URL-encoded and substituted directly, and query parameters are sent with default `URLSearchParams` serialization.
-- Swagger 2.0 objects are not supported as a first-class input format. Use OpenAPI 3.x specs with `openapi`, `paths`, and `info` fields.
+- JSON is the only request body media type generated today; non-JSON bodies (form data, multipart uploads, binary payloads) are not encoded.
+- Parameter serialization styles are not implemented: path parameters are URL-encoded and substituted directly; query parameters use default `URLSearchParams` serialization.
+- Swagger 2.0 objects aren't supported as a first-class input format; use OpenAPI 3.x specs with `openapi`, `paths`, and `info` fields.

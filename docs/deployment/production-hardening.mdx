@@ -3,7 +3,7 @@ title: Production Hardening
 description: Operate Smithers with durable storage, scoped access, bounded execution, and auditable workflows.
 ---
 
-This page covers storage durability, access scoping, execution isolation, secrets handling, cache policy, and audit for production Gateway deployments. Treat the Gateway, database, workflow modules, and sandbox workers as one operational boundary.
+Treat the Gateway, database, workflow modules, and sandbox workers as one operational boundary: storage, access, execution, secrets, caching, and audit all matter for production deployments.
 
 ## Required Checks
 
@@ -16,37 +16,35 @@ pnpm -r typecheck
 pnpm test
 ```
 
-The default CI workflow (`.github/workflows/ci.yml`) runs `check:effect`, `check:deps`, typecheck, and `test` on pull requests and pushes to `main`.
+The default CI workflow (`.github/workflows/ci.yml`) runs these same checks on pull requests and pushes to `main`.
 
 ## Persistence
 
-Use one SQLite database file per deployment and place it on durable storage, or run against PostgreSQL for managed, multi-connection storage (see PostgreSQL and PGlite below). The internal tables are created and migrated idempotently on startup on either backend.
-
-Recommended database practices:
+Use one SQLite database file per deployment on durable storage, or run PostgreSQL for managed, multi-connection storage (see below); internal tables are created and migrated idempotently on startup either way. Recommended practices:
 
 - Back up the database file and its WAL files together.
-- Keep `PRAGMA foreign_keys = ON`; Smithers enables it during schema setup and uses referential checks for core run artifacts.
+- Keep `PRAGMA foreign_keys = ON`; Smithers enables it during schema setup and relies on it for core run artifacts.
 - Keep run IDs stable across resume attempts.
-- Use the Gateway event stream sequence numbers for reconnects; clients should resume from the last seen `seq`.
-- Avoid manually deleting internal rows. Delete whole runs through supported administrative paths so dependent frames, node diffs, and audit rows stay consistent.
+- Use Gateway event-stream sequence numbers for reconnects: clients resume from the last seen `seq`.
+- Avoid manually deleting internal rows; delete whole runs through supported administrative paths so dependent frames, node diffs, and audit rows stay consistent.
 
 ### PostgreSQL and PGlite
 
-`openSmithersBackend(schemas, opts)` is the async resolver used by the local Gateway path. It resolves `opts.backend`, then `SMITHERS_BACKEND=sqlite|pglite|postgres`, then `backend` in `.smithers/smithers.config.ts`, defaulting fresh workspaces to PGlite under `.smithers/pg/`. If a legacy `smithers.db` has run data and no `.smithers/migrated.json` marker, boot fails with `SMITHERS_MIGRATION_REQUIRED` instead of silently opening an empty backend. Run `smithers migrate` to copy the SQLite store into PGlite or `smithers migrate --to postgres --url <pg-url>` for managed Postgres. An explicit backend is a Gateway boot/deployment or migration-diagnostic choice, not a flag clients should pass to `ps`, `inspect`, or other run controls. Once the Gateway is healthy, controllers use the same RPC/client API regardless of the store behind it. Migration opens the source SQLite database read-only, copies tables in bounded batches, verifies per-table counts, writes `.smithers/migrated.json`, and keeps `smithers.db` as a rollback backup unless you pass `--keep-sqlite=false`.
+`openSmithersBackend(schemas, opts)` resolves the backend for the local Gateway path (async): `opts.backend`, then `SMITHERS_BACKEND=sqlite|pglite|postgres`, then `backend` in `.smithers/smithers.config.ts`, defaulting fresh workspaces to PGlite under `.smithers/pg/`. A legacy `smithers.db` with run data and no `.smithers/migrated.json` marker fails boot with `SMITHERS_MIGRATION_REQUIRED` instead of silently opening an empty backend. `smithers migrate` copies the SQLite store into PGlite; `smithers migrate --to postgres --url <pg-url>` targets managed Postgres instead. Migration opens the source database read-only, copies tables in bounded batches, verifies per-table counts, writes `.smithers/migrated.json`, and keeps `smithers.db` as a rollback backup unless you pass `--keep-sqlite=false`. Backend choice is a boot/deployment or migration-diagnostic decision only, not a `ps`, `inspect`, or other run-control flag: once healthy, controllers use the same RPC/client API regardless of the store behind it.
 
-`createSmithersPostgres(schemas, opts)` runs the same durable engine, and the same crash-and-resume guarantees, on PostgreSQL or an embedded PGlite through the SQL dialect seam in `packages/db/src/dialect.js`. Point it at managed Postgres with `{ provider: "postgres", connectionString }`, pass a node-postgres connection config with `{ provider: "postgres", connection }`, or run an in-process PGlite with `{ provider: "pglite", dataDir }`. The factory is async and returns the same `createSmithers` API plus a `close()` teardown.
+`createSmithersPostgres(schemas, opts)` runs the same durable engine and crash-and-resume guarantees on PostgreSQL or embedded PGlite, via the SQL dialect seam in `packages/db/src/dialect.js`: point it at managed Postgres with `{ provider: "postgres", connectionString }`, pass a node-postgres connection config with `{ provider: "postgres", connection }`, or run an in-process PGlite with `{ provider: "pglite", dataDir }`. The async factory returns the same `createSmithers` API plus a `close()` teardown.
 
-`pg`, `@electric-sql/pglite`, and `@electric-sql/pglite-socket` are optional dependencies loaded only when you take this path; the explicit synchronous `bun:sqlite` path needs none of them. On Postgres, take database-native backups and connection-pool sizing in place of the SQLite file-and-WAL backup guidance above.
+`pg`, `@electric-sql/pglite`, and `@electric-sql/pglite-socket` are optional, loaded only on this path; the synchronous `bun:sqlite` path needs none of them. On Postgres, use database-native backups and connection-pool sizing instead of the file-and-WAL guidance above.
 
 ### Electric Cloud Sync
 
-Cloud GUI replicas use `@smithers-orchestrator/electric-proxy` in front of ElectricSQL. Run it only against managed PostgreSQL configured for logical replication: set `wal_level=logical`, create a publication that includes every `_smithers_*` table plus workflow output tables, and provision a replication slot for Electric. PGlite is not a valid Electric source because it runs with `wal_level=replica` and cannot create logical replication slots.
+Cloud GUI replicas use `@smithers-orchestrator/electric-proxy` in front of ElectricSQL, run only against managed PostgreSQL configured for logical replication: `wal_level=logical`, a publication covering every `_smithers_*` table plus workflow output tables, and a replication slot for Electric. PGlite can't be a source: it runs `wal_level=replica` and can't create logical replication slots.
 
-The proxy is the public shape endpoint. It authenticates the same scoped Gateway tokens, maps `run:read` to read-only shape access, injects workspace/run/user predicates from the grant, strips `Authorization` before forwarding to Electric, and enforces 60 shape opens per minute, 50 active shapes, and a 4 MiB per-frame payload limit. Writes do not go through Electric shapes: clients post to `/v1/electric/write`, the Gateway applies the existing RPC mutation under scope checks, returns the PostgreSQL txid, and TanStack DB holds optimistic state until Electric streams that txid back.
+The proxy is the public shape endpoint: it authenticates the same scoped Gateway tokens, maps `run:read` to read-only shape access, injects workspace/run/user predicates from the grant, strips `Authorization` before forwarding to Electric, and caps 60 shape opens/minute, 50 active shapes, and 4 MiB per frame. Writes skip Electric shapes: clients post to `/v1/electric/write`, the Gateway applies the RPC mutation under scope checks and returns the PostgreSQL txid, and TanStack DB holds optimistic state until Electric streams that txid back.
 
 ## Access Control
 
-Expose the Gateway only behind TLS. Use scoped bearer grants for automation and short TTLs for human-triggered actions.
+Expose the Gateway only behind TLS, with scoped bearer grants for automation and short TTLs for human-triggered actions.
 
 Recommended scopes by client type:
 
@@ -57,13 +55,13 @@ Recommended scopes by client type:
 | Approval inbox | `run:read`, `approval:read`, `approval:submit` |
 | Operator tools | `run:read`, `run:write`, `approval:submit` |
 
-Rotate token grants regularly and revoke grants when a user, CI job, or integration no longer needs access.
+Rotate token grants regularly; revoke them once a user, CI job, or integration no longer needs access.
 
 For multi-tenant deployments, see [Control Plane](/deployment/control-plane) for org, project, usage, and audit primitives.
 
 ## Execution Boundary
 
-Sandbox workers run in an isolated environment so that untrusted workflow code cannot reach the Gateway database or host filesystem. The concrete controls are:
+Sandbox workers run isolated so untrusted workflow code can't reach the Gateway database or host filesystem:
 
 - request and result bundles are written under the run sandbox directory
 - bundle manifests are size-bounded
@@ -71,11 +69,11 @@ Sandbox workers run in an isolated environment so that untrusted workflow code c
 - produced diffs require review unless `autoAcceptDiffs` is enabled
 - sandbox records and events are persisted for audit
 
-Configure `allowNetwork`, container images, environment variables, ports, volumes, and CPU or memory limits per worker. Verify your chosen runtime (Docker, Kubernetes, etc.) actually enforces these limits before running untrusted code. For high-risk code generation, run sandbox workers in a separate account, namespace, or machine with no ambient production credentials.
+Configure `allowNetwork`, container images, environment variables, ports, volumes, and CPU/memory limits per worker, and verify your runtime (Docker, Kubernetes, etc.) actually enforces them before running untrusted code. For high-risk code generation, run sandbox workers in a separate account, namespace, or machine with no ambient production credentials.
 
 ## Secrets
 
-Never pass long-lived credentials through workflow input. Prefer short-lived tokens from the caller, scoped environment injection at the worker boundary, or a secret manager mounted only into the worker process that needs it.
+Never pass long-lived credentials through workflow input; prefer short-lived caller tokens, scoped environment injection at the worker boundary, or a secret manager mounted only into the process that needs it.
 
 Operational rules:
 
@@ -102,7 +100,7 @@ cachePolicy: {
 - `ttlMs` bounds staleness; expired cache rows are treated as misses and refreshed.
 - `version` should change whenever prompt, model, provider, tool behavior, or output semantics change.
 
-Cached payloads are still validated against the current output schema on every hit. A schema mismatch is a cache miss.
+Cached payloads are still validated against the current output schema on every hit; a mismatch is a cache miss.
 
 ## Audit Trail
 
@@ -115,7 +113,7 @@ For incident review, preserve:
 - approval decisions, notes, and actor IDs
 - deployment version and workflow module revision
 
-Keep the audit log append-only from the perspective of normal operators.
+Keep the audit log append-only for normal operators.
 
 ## Release Checklist
 

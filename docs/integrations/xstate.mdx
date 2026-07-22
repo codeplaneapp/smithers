@@ -4,18 +4,16 @@ description: "Typed control state for workflows: fold an XState v5 machine over 
 ---
 
 `smithers-orchestrator/xstate` runs [XState v5](https://stately.ai/docs) state
-machines as an **optional derived-state layer** over the rows Smithers already
-persists: not a backend, not a scheduler, and not a persisted actor.
-Each frame, `useSmithersMachine` recomputes the machine's state as a pure fold
-over durable output and signal rows using XState's pure
-`initialTransition` / `transition` functions. Nothing about the machine is
-persisted; resume, fork, and rewind are correct because the fold's inputs are
-exactly the rows those features restore.
+machines as an **optional derived-state layer** over rows Smithers already
+persists (not a backend, scheduler, or persisted actor): each frame,
+`useSmithersMachine` recomputes state as a pure fold over durable output and
+signal rows via XState's pure `initialTransition` / `transition` functions.
+Nothing is persisted, so resume, fork, and rewind stay correct automatically.
 
-Use it when a workflow's control flow outgrows plain conditionals (revision
-loops, approval ladders, multi-phase pipelines with re-entry) and you want
+Use it when control flow outgrows plain conditionals (revision loops,
+approval ladders, multi-phase pipelines with re-entry) and you want
 `state.matches(...)` instead of hand-rolled row checks. For linear pipelines,
-`ctx.outputs` conditionals remain simpler.
+`ctx.outputs` conditionals stay simpler.
 
 ```tsx
 import { setup, assign } from "xstate";
@@ -94,25 +92,25 @@ Each frame, `useSmithersMachine(machine, { id, input, events })`:
 2. Orders them by **(provenance seq, declaration index, mapped-event
    subindex)**: causal arrival order with deterministic tiebreaks, a total
    order that is a pure function of rows on every branch.
-3. Folds: `initialTransition(machine, input)`, then
+3. Folds `initialTransition(machine, input)`, then
    `transition(machine, snapshot, event)` per event. Returned actions are
    discarded; builtin `assign` applies inside `transition`. Events not
    accepted in the current state are discarded, matching live-actor
-   semantics. Events after the machine reaches a final state are discarded.
+   semantics, as are events after the machine reaches a final state.
 4. Returns the final `MachineSnapshot`; `state.matches()`, `state.can()`,
    `state.context`, `state.hasTag()` work as `@xstate/react` users expect.
 
-Multiple machines per workflow are supported; give each `useSmithersMachine`
-call a distinct `id`.
+Multiple machines per workflow: give each `useSmithersMachine` call a
+distinct `id`.
 
 ## Event sources
 
 | Source | Reads | Notes |
 | --- | --- | --- |
-| `taskOutput(output, { nodeId?, scope? }, map)` | Durable output rows via `ctx.outputRows` | One `map` call per row; return an event, an array, or `null` to skip. "A durable row exists", not "the task completed": failed attempts write no row, and `(nodeId, iteration)` writes are upserts. |
+| `taskOutput(output, { nodeId?, scope? }, map)` | Durable output rows via `ctx.outputRows` | One `map` call per row; return an event, an array, or `null` to skip. Only a written row triggers this: failed attempts write no row, and `(nodeId, iteration)` writes are upserts. |
 | `approvalDecided(output, { nodeId?, scope? }, map)` | Approval decision rows | Denials persist a row only with `onDeny: "continue"`; a failing gate ends the branch and writes nothing. |
-| `eventReceived(signalName, schema, { correlationId? }, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table directly on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing, including a signal delivered before its listener has ever mounted. `correlationId` scopes the fold to signals delivered with a matching id, required when the same signal name is used by more than one concurrent wait. Payloads failing `schema.safeParse` are skipped deterministically (same rows ⇒ same skips), so a malformed external delivery can never brick every future render of the run. Rewinding past a delivered signal makes the machine forget it, the same as output rows. |
-| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires the wait to opt into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`); pointing `timedOut()` at a non-tagged wait is a hard render-time error (`TASK_OUTPUT_SCHEMA_INVALID`), not a silent no-op. |
+| `eventReceived(signalName, schema, { correlationId? }, map)` | Durable `_smithers_signals` rows via `ctx.signalRows` | Folds the signal table on the shared seq clock, so every delivered signal reaches the machine regardless of listener mount timing, even one delivered before its listener mounted. `correlationId` scopes the fold to matching-id signals, needed when one signal name backs multiple concurrent waits. Payloads failing `schema.safeParse` are skipped deterministically (same rows, same skips), so a malformed delivery can't brick future renders. Rewinding past a delivered signal makes the machine forget it, like output rows. |
+| `timedOut(output, { nodeId?, scope? }, map)` | Tagged `{ kind: "timeout" }` rows | Requires opting into the tagged wait-result envelope (`tagged` + `onTimeout: "continue"`); pointing `timedOut()` at a non-tagged wait is a hard render-time error (`TASK_OUTPUT_SCHEMA_INVALID`), never a silent no-op. |
 
 All sources are pure functions of `ctx`; deriving a source's `nodeId` from
 the fold's own output is circular and unsupported.
@@ -120,8 +118,8 @@ the fold's own output is circular and unsupported.
 ## Constraints (enforced at mount)
 
 A mount-time lint runs per machine identity (hot reload re-lints) and rejects
-machine features that cannot exist inside a durable fold, each with a typed
-error naming the Smithers-native alternative. There is no escape hatch.
+machine features that can't exist inside a durable fold, each with a typed
+error naming the Smithers-native alternative. No escape hatch.
 
 | Rejected | Use instead |
 | --- | --- |
@@ -139,32 +137,29 @@ error naming the Smithers-native alternative. There is no escape hatch.
 
 Every callback in the fold (event mappers, context initializers, guards,
 assigners, machine `output` functions) must be pure, side-effect-free, free
-of time/randomness, and must not mutate inputs. A throwing mapper, guard, or
-assigner (or a throwing context initializer) fails the render with a typed
-`SmithersError` naming the machine and event/phase, rather than an anonymous
-crash deep inside the fold.
+of time/randomness, and non-mutating of inputs; a throwing one fails the
+render with a typed `SmithersError` naming the machine and event/phase,
+instead of an anonymous crash deep inside the fold.
 
 ## Listeners, re-entry, and final states
 
 - **The signal table is the event source; listeners are wake-and-park
   plumbing.** A parked `<WaitForEvent>` matters for liveness: an idle
   machine state with nothing rendered makes the graph quiescent and ends the
-  run. States awaiting external events should render a listener to keep
+  run, so states awaiting external events should render a listener to keep
   the run parked and wake a frame on delivery. A missed wake delays the fold
   by one frame but never loses the event.
-- **Machine re-entry never re-executes a completed Smithers task.** Any task
-  rendered inside a machine state the machine can re-enter needs
-  context-versioned identity (`draft-r${rev}` minted from an `assign`
-  counter). A bare-constant task id in a state on a machine cycle deadlocks
-  the machine: no new row, no new event, and the quiescent graph ends the run.
-  The lint catches this for any state that declares `meta.smithersTaskId`: a
-  re-enterable state (reachable back to itself through the machine's
-  transition graph, whether a direct self-transition or a longer cycle) may only
-  declare it as a function of context, never a bare string.
+- **Machine re-entry never re-executes a completed Smithers task.** A
+  bare-constant task id in a re-enterable state deadlocks the machine on a
+  cycle: no new row or event ever arrives, ending the run the same way as
+  above. The lint requires `meta.smithersTaskId` be a function of context
+  (see table above) for any state reachable back to itself through the
+  machine's transition graph, whether by a direct self-transition or a
+  longer cycle.
 - **Final states are derived-only.** Smithers can finish while the machine is
-  non-final (graph quiescent); a machine final state does not cancel
-  in-flight tasks (stop rendering them instead); `snapshot.output` is not the
-  run output; a failure-flavored final state does not fail the run.
+  non-final (graph quiescent); a machine final state doesn't cancel
+  in-flight tasks (stop rendering them instead); `snapshot.output` isn't the
+  run output; a failure-flavored final state doesn't fail the run.
 
 ## Durability and time travel
 
@@ -177,34 +172,32 @@ One carve-out: an in-place payload replacement at the same
 `(nodeId, iteration)` (manual `retry-task` of a completed node, HumanTask
 reopen) keeps its seq but changes its payload, so folded history from that
 position **reinterprets**. The in-process cache validates by content hash and
-refolds automatically; workflows feeding machines from replaceable tasks
+refolds automatically, but workflows feeding machines from replaceable tasks
 should prefer fork-and-migrate.
 
-The prefix cache key is `(runId, machine id, reducer hash)`, where the
-reducer hash is a content hash
-of the machine (config + `setup()` implementations) plus every declared
-event source (kind, target, options, `map`/`schema` source), so one process
-hosting many runs (or a fork, which inherits its parent's row history and
-machine `id` verbatim) never serves one run's snapshot to another, and a
-mid-run machine or event-source edit can't reuse a fold computed under the
-old reducer. The cache is bounded (LRU-evicted) so a long-running process
-does not retain every historical snapshot. Mid-run machine edits ride the
-`acceptWorkflowChange` gate: the reducer hash changing for an already-folded
-`(runId, id)` logs a machine-history reinterpretation warning instead of
-silently reinterpreting.
+The prefix cache key is `(runId, machine id, reducer hash)`; the reducer hash
+content-hashes the machine (config + `setup()` implementations) plus every
+declared event source (kind, target, options, `map`/`schema` source). So one
+process hosting many runs (or a fork, which inherits its parent's row history
+and machine `id` verbatim) never serves one run's snapshot to another. The
+cache is bounded (LRU-evicted), so a long-running process doesn't retain
+every historical snapshot. A mid-run machine or event-source edit can't
+silently reuse a fold computed under the old reducer: it rides the
+`acceptWorkflowChange` gate, where a reducer-hash change for an
+already-folded `(runId, id)` logs a machine-history reinterpretation warning
+instead of reinterpreting silently.
 
 ## Performance
 
-Recomputing per frame is cheap in practice: an in-process prefix cache
-validates folded history by content hash and folds only the new suffix each
-frame. The CI benchmark (`packages/xstate/tests/fold-benchmark.test.js`)
+Recomputing per frame is cheap: the prefix cache above folds only the new
+suffix each frame. The CI benchmark (`packages/xstate/tests/fold-benchmark.test.js`)
 folds 10,000 events on a parallel + nested-compound machine in well under a
-second full-refold (~20µs/event), and proves an incremental frame folds only
-the new suffix by counting actual transitions executed (immune to machine
-load), not by timing it; a wall-clock threshold is logged but kept
+second of full-refold (~20µs/event), and proves incremental folding touches
+only the new suffix by counting actual transitions executed (immune to
+machine load), not by timing it; a wall-clock threshold is logged but stays
 deliberately generous and non-strict, since it isn't the real gate. Practical
-limit: tens of thousands of events per machine per run; beyond that, prefer
-summarizing history into machine context via coarser events.
+limit: tens of thousands of events per machine per run; beyond that, summarize
+history into machine context via coarser events.
 
 ## Visualization
 

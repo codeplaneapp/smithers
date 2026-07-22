@@ -4,14 +4,14 @@ description: Run Smithers from GitHub Copilot. Register the MCP server in VS Cod
 ---
 
 [GitHub Copilot](https://docs.github.com/copilot) extends through **MCP
-servers**, **custom instructions**, and **prompt files**. Copilot has two
-surfaces with *different* MCP schemas, the in-editor agent (VS Code) and the
-autonomous coding agent (cloud), so they're covered separately below.
+servers**, **custom instructions**, and **prompt files**. Its two surfaces,
+the in-editor agent (VS Code) and the autonomous coding agent (cloud), use
+*different* MCP schemas, covered separately below.
 
 ## MCP in VS Code
 
-Create `.vscode/mcp.json` in the workspace. VS Code uses the `servers` key and
-requires a `type`:
+Create `.vscode/mcp.json` in the workspace; VS Code requires a `servers` key
+and a `type`:
 
 ```json
 {
@@ -25,13 +25,13 @@ requires a `type`:
 }
 ```
 
-Reload the window and the Smithers tools appear in Copilot Chat's agent mode.
+Reload the window; Smithers tools appear in Copilot Chat's agent mode.
 
 ## MCP in the Copilot coding agent
 
-The autonomous coding agent is configured in **repo Settings → Copilot → Coding
-agent → MCP configuration**. It uses a different schema: `mcpServers`, a
-`type` of `"local"`, and a `tools` array:
+Configure the autonomous coding agent at **repo Settings → Copilot → Coding
+agent → MCP configuration**, using a different schema: `mcpServers`,
+`type: "local"`, and a `tools` array:
 
 ```json
 {
@@ -46,14 +46,14 @@ agent → MCP configuration**. It uses a different schema: `mcpServers`, a
 }
 ```
 
-Secrets are Actions/Agents secrets prefixed `COPILOT_MCP_` and referenced as
-`$VAR` in the `env` block. The semantic tool surface is the same on both
-surfaces; see the [MCP Server reference](/integrations/mcp-server).
+Secrets are Actions/Agents secrets prefixed `COPILOT_MCP_`, referenced as
+`$VAR` in the `env` block; the tool surface is identical on both. See
+[MCP Server](/integrations/mcp-server).
 
 ## Custom instructions
 
-Copilot reads `.github/copilot-instructions.md` (repo-wide) and, for the coding
-agent, `AGENTS.md`. Add a section pointing at Smithers:
+Copilot reads `.github/copilot-instructions.md` (repo-wide) and, for the
+coding agent, `AGENTS.md`; add a section pointing at Smithers:
 
 ```md
 ## Orchestration

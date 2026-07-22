@@ -6,12 +6,12 @@ description: "Example from scripts/worktree-feature/components/*.mdx: MDX prompt
 # scripts/worktree-feature/: MDX Prompt Templates
 
 <Note>
-**Ghost doc.** Source MDX prompt files live in `.worktrees/12-feature-flag-gate-all-non-mvp/scripts/worktree-feature/components/` (a worktree branch, not on `main`). The excerpts below reflect that source.
+**Ghost doc.** Source MDX prompt files live in `.worktrees/12-feature-flag-gate-all-non-mvp/scripts/worktree-feature/components/` (a worktree branch, not `main`); the excerpts below reflect that source.
 </Note>
 
 ## Usage
 
-Each `.mdx` file is imported as a JSX component and rendered as children of `<Task>`. Props interpolate via `{props.xxx}`:
+Each `.mdx` file imports as a JSX component and renders as children of `<Task>`; props interpolate via `{props.xxx}`:
 
 ```tsx
 import ImplementPrompt from "./Implement.mdx";
@@ -88,7 +88,7 @@ IMPLEMENTATION RULES:
 ```
 
 <Note>
-The "all commits on main" rule is specific to the worktree-feature pipeline, which uses Git worktrees for isolation so each ticket runs in its own filesystem sandbox. Standard Smithers workflows do not restrict branching strategy.
+The "all commits on main" rule is specific to the worktree-feature pipeline: Git worktrees isolate each ticket in its own filesystem sandbox. Standard Smithers workflows don't restrict branching strategy.
 </Note>
 
 ## Review.mdx
@@ -199,7 +199,7 @@ export const SYSTEM_PROMPT = renderMdx(SystemPromptMdx, {
 
 ## Key Patterns
 
-- **MDX as prompt templates** -- structured prompts with JSX interpolation for dynamic content.
+- **MDX as prompt templates** -- structured prompts, JSX-interpolated for dynamic content.
 - **Props-driven** -- ticket data, previous results, and feedback pass as props.
 - **Conditional sections** -- `{props.previousImplementation ? ... : ""}` adds context only when iterating.
-- **`renderMdx()`** -- composes system prompts from multiple sources using custom MDX components.
+- **`renderMdx()`** -- composes system prompts from multiple sources via custom MDX components.

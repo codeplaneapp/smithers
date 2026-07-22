@@ -13,4 +13,4 @@ apiVersion: v1
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
 
-Use `schemaVersion` as the client persistence version for Gateway-backed synced collections. The value is derived from the server `_smithers_schema_migrations` head; when it changes, clients should clear local persisted rows and cold re-sync from the Gateway.
+`schemaVersion` is the client persistence version for Gateway-backed synced collections, derived from the server `_smithers_schema_migrations` head. When it changes, clear local persisted rows and cold re-sync from the Gateway.

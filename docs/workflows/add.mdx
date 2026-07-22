@@ -3,14 +3,12 @@ title: add
 description: System workflow behind `bunx smithers-orchestrator add`: installs a workflow pack from GitHub, npm, or a local file as a durable, replayable run.
 ---
 
-`add` is a **system workflow** (`system: true`): internal plumbing Smithers
-uses for its own durable processes. It is hidden from default listings
-(`workflow list` without `--system`, the interactive picker, MCP
-`list_workflows`, gateway `listWorkflows`) but remains explicitly runnable.
+`add` is a **system workflow** (`system: true`): internal plumbing for
+Smithers' own durable processes, hidden from default listings (`workflow list` without `--system`, the interactive picker,
+MCP `list_workflows`, gateway `listWorkflows`) but explicitly runnable.
 
-`bunx smithers-orchestrator add <spec>` performs the installation imperatively; running the
-workflow instead records the same installation as a durable run, so a pack
-install can be replayed and inspected like any other Smithers process.
+`bunx smithers-orchestrator add <spec>` installs imperatively; running the workflow
+instead records the same install as a durable, replayable, inspectable run.
 
 ```bash
 bunx smithers-orchestrator workflow run add --input '{"spec":"user/repo"}'
@@ -31,6 +29,6 @@ bunx smithers-orchestrator workflow run add --input '{"spec":"user/repo"}'
    the host-provided allowlist, extract into the packs directory, and record
    the resolved version in `packs.lock.toon`.
 
-The output row records the installed pack's name, path, scope, and the trust
-report. See the [Workflow Catalog](/workflows/catalog) for the pack manifest
-format and [share-pack](/workflows/share-pack) for the publishing direction.
+The output row records the installed pack's name, path, scope, and trust
+report. See [Workflow Catalog](/workflows/catalog) for the manifest format and
+[share-pack](/workflows/share-pack) for publishing.

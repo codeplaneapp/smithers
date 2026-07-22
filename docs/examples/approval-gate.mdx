@@ -7,7 +7,7 @@ description: A workflow with a human-in-the-loop approval step that pauses execu
 
 `<Approval>` pauses a workflow at an explicit node, waits for a human decision, then continues.
 
-For a simpler inline approval using the `needsApproval` prop on a `<Task>`, see [workflow-approval](./workflow-approval).
+For simpler inline approval, use the `needsApproval` prop on `<Task>`: see [workflow-approval](./workflow-approval).
 
 ## Workflow Definition
 
@@ -150,6 +150,6 @@ bunx smithers-orchestrator ps --status waiting-approval
 
 ## How It Works
 
-- `<Approval>` persists a decision object (`approved`, `note`, `decidedBy`, `decidedAt`) when the workflow resumes. The audit timestamp itself lives in Smithers' approval records and event log, so `decidedAt` remains deterministic in durable outputs.
+- `<Approval>` persists a decision object (`approved`, `note`, `decidedBy`, `decidedAt`) on resume; `decidedAt` stays deterministic because Smithers records the timestamp in its approval records and event log.
 - Re-running after approval replays completed tasks from the database and continues from the approval point.
-- Denial is permanent for that run. To retry, start a new run.
+- Denial is permanent for that run; retry by starting a new run.

@@ -5,8 +5,7 @@ description: Run portable Smithers workflows in a browser through the RuntimeAda
 
 Import the browser-safe facade from `smithers-orchestrator/browser`. It runs the
 real Smithers driver, scheduler, renderer, graph extractor, schema validation,
-and task dependency semantics without pulling Node database, server, CLI-agent,
-or subprocess code into the bundle.
+and task dependency semantics in a lean, Node-free bundle.
 
 ```tsx
 import React from "react";
@@ -49,10 +48,10 @@ console.log(run.status); // "finished"
 console.log(await smithers.getOutputs(run.runId));
 ```
 
-`createBrowserSmithers` creates a fresh driver and scheduler session for every
+`createBrowserSmithers` creates a fresh driver and scheduler session per
 `run()` call. `getRun(runId)` and `getOutputs(runId)` read through the selected
-runtime storage adapter. `runBrowserWorkflow(workflow, options)` is the
-one-shot equivalent when you do not need to retain the Smithers wrapper.
+storage adapter. `runBrowserWorkflow(workflow, options)` is the one-shot
+equivalent when you don't need to retain the wrapper.
 
 ## Browser-safe exports
 
@@ -83,25 +82,24 @@ type BrowserRuntimeOptions = {
 };
 ```
 
-Provide `storage` when state must outlive a page refresh. Provide
-`executeTask` to route task execution through an application-owned worker,
-provider client, or policy boundary. The default executor supports static and
-compute tasks plus in-process agents exposing `generate`, `execute`, `run`, or
-`call`. It validates Zod-like `outputSchema` values before storing outputs.
+Provide `storage` when state must outlive a page refresh, and `executeTask` to
+route execution through an application-owned worker, provider client, or
+policy boundary. The default executor supports static and compute tasks plus
+in-process agents exposing `generate`, `execute`, `run`, or `call`, and
+validates Zod-like `outputSchema` values before storing outputs.
 
 ## Capability boundary
 
-The browser adapter intentionally fails closed for `filesystem`, `subprocess`,
-`worktree`, and `sandbox`. Calling one of those operations throws a
-`RuntimeCapabilityError` with code `RUNTIME_CAPABILITY_UNAVAILABLE`, the
-runtime name, capability, and operation. The exported `Worktree` primitive is
-portable at graph-render time, but a browser run cannot resolve a real
-worktree unless the application supplies a custom `RuntimeAdapter` that owns
-that capability.
+The browser adapter fails closed for `filesystem`, `subprocess`, `worktree`,
+and `sandbox`: calling one of those throws a `RuntimeCapabilityError` with
+code `RUNTIME_CAPABILITY_UNAVAILABLE`, plus the runtime name, capability, and
+operation. The exported `Worktree` primitive is portable at graph-render time,
+but a browser run can't resolve a real worktree unless the application
+supplies a custom `RuntimeAdapter` that owns that capability.
 
-The browser facade does not include Node database factories, server helpers,
-CLI agents, bundled tools, or the full Node component barrel. Use the main
-`smithers-orchestrator` entry point for those surfaces.
+The browser facade omits Node database factories, server helpers, CLI agents,
+subprocess code, bundled tools, and the full Node component barrel. Use the
+main `smithers-orchestrator` entry point for those surfaces.
 
 ---
 

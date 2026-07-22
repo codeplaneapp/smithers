@@ -11,6 +11,6 @@ apiVersion: v1
 - Request: `{ path, content, kind?, status? }`
 - Response: `TicketRow`
 
-Creates or replaces a work doc by `path` in `_smithers_docs`. The handler stamps `content_hash = sha256(content)` and `updated_at_ms = now` through the same hash/clock the file-watcher uses, so RPC-written and file-derived hashes are comparable (last-write-wins). Writing a row revives a previously soft-deleted `path` by design.
+Creates or replaces a work doc by `path` in `_smithers_docs`. The handler stamps `content_hash = sha256(content)` and `updated_at_ms = now` using the same hash/clock as the file-watcher, so RPC-written and file-derived hashes are comparable (last-write-wins). Writing a row revives a soft-deleted `path` by design.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.

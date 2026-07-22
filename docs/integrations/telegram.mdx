@@ -5,18 +5,17 @@ description: Bot API calls, webhook ingestion, durable in-chat approvals, and Mi
 
 Smithers ships two Telegram surfaces:
 
-- `@smithers-orchestrator/telegram` for bots that run inside serverless
-  functions, workflow tasks, or tests without owning a long-lived polling
-  process (this page's first half).
-- `@smithers-orchestrator/integrations/telegram` for workflows that wait on
-  Telegram durably: listen for messages, and approve gated steps from the chat
-  with inline buttons or a Mini App ([Approve from the chat](#approve-from-the-chat)).
+- `@smithers-orchestrator/telegram`: bots in serverless functions, workflow
+  tasks, or tests, with no long-lived polling process (this page's first
+  half).
+- `@smithers-orchestrator/integrations/telegram`: workflows that durably wait
+  on Telegram, listening for messages and approving gated steps from the chat
+  via inline buttons or a Mini App ([Approve from the chat](#approve-from-the-chat)).
 
-The package follows the integration shape proven by Eliza's Telegram plugin:
-separate bot lifecycle/API access, normalized incoming messages, formatting
-helpers, and a fake test client. Smithers keeps the implementation raw `fetch`
-instead of Telegraf so Vercel Functions, Cloudflare Workers, and Sandbox tasks
-can call the Bot API without starting a local polling loop.
+The package mirrors Eliza's Telegram plugin (bot lifecycle/API access,
+normalized messages, formatting helpers, a fake test client), using raw
+`fetch` instead of Telegraf so Vercel Functions, Cloudflare Workers, and
+Sandbox tasks can call the Bot API without a local polling loop.
 
 ## Install
 
@@ -44,10 +43,9 @@ await sendTelegramTextChunks(telegram, {
 });
 ```
 
-`createTelegramClient` retries Bot API `429` and `5xx` responses plus transient
-network/read failures. `429` honors Telegram's `retry_after` parameter; other
-retryable failures use exponential backoff. Permanent `4xx` responses are not
-retried.
+`createTelegramClient` retries `429`, `5xx`, and transient network/read
+failures: `429` honors Telegram's `retry_after`, others use exponential
+backoff. Permanent `4xx` responses are not retried.
 
 ## Verify webhooks
 
@@ -75,11 +73,10 @@ export async function POST(request: Request) {
 ```
 
 `normalizeTelegramUpdate` handles `message`, `edited_message`, `channel_post`,
-and `edited_channel_post` updates and ignores bot-authored messages by default.
-`isTelegramChatAllowed` follows Eliza's fail-closed access-control shape:
-missing or blank `TELEGRAM_ALLOWED_CHATS` allows all chats, a JSON array of chat
-ids restricts processing to those ids, and malformed values block all chats until
-the configuration is fixed.
+and `edited_channel_post`, ignoring bot-authored messages by default.
+`isTelegramChatAllowed` fails closed (Eliza's access-control shape): blank
+`TELEGRAM_ALLOWED_CHATS` allows all chats, a JSON array of ids restricts to
+those, and malformed values block all chats until fixed.
 
 ## Test with a fake
 
@@ -92,18 +89,18 @@ await telegram.sendMessage({ chatId: 123, text: "hello" });
 console.log(telegram.messages[0].message_id);
 ```
 
-Use the fake in local e2e tests when production uses real Telegram credentials.
+Use it in local e2e tests when production runs on real Telegram credentials.
 
 ## Approve from the chat
 
-`<Telegram.Approval>` turns a workflow approval into inline Approve and Reject
-buttons in a chat and resolves it from the button press, using the durable
-long-poll source. No web server, no gateway wiring. The decision has the same
-shape as the core [`<Approval>`](/components/approval) component:
+`<Telegram.Approval>` turns a workflow approval into inline Approve/Reject
+buttons, resolved from the button press via the durable long-poll source: no
+web server, no gateway wiring. The decision matches core
+[`<Approval>`](/components/approval)'s shape:
 `{ approved, note, decidedBy, decidedAt }`.
 
-Register the two internal node schemas with `telegramApprovalSchemas`, then drop
-the component in:
+Register the two internal node schemas with `telegramApprovalSchemas`, then
+use the component:
 
 ```tsx
 import { createSmithers } from "smithers-orchestrator";
@@ -134,8 +131,8 @@ export default smithers(() => (
 For a menu instead of Approve and Reject, pass `mode="select"` with `options`;
 the decision becomes `{ selected, notes }`.
 
-For the run to receive the press, a Telegram source must be polling. Run one
-next to your workflow:
+The run only receives the press if a Telegram source is polling next to your
+workflow:
 
 ```ts
 import { makeIntegrationRuntime, makeDbCursorStore } from "@smithers-orchestrator/integrations";
@@ -148,16 +145,16 @@ const source = makeTelegramSource({
 const runtime = makeIntegrationRuntime({ adapter, sources: [source] });
 ```
 
-`WaitForEvent` wakes on the first callback query for the chat, so run one
+`WaitForEvent` wakes on the first callback query for the chat: run one
 interactive approval per chat at a time, or pass `threadId` (a forum topic) to
 isolate concurrent approvals. Any chat member can press a button, so keep
-approvals in a private or allowlisted chat.
+approvals private or allowlisted.
 
 ## Mini App approvals
 
-For a richer decision (read a diff, pick an option, add a note) inside Telegram,
-add a Mini App button. `miniApp` opens a `web_app` page in the chat alongside the
-plain buttons:
+For a richer decision (read a diff, pick an option, add a note), add a Mini
+App button: `miniApp` opens a `web_app` page in the chat alongside the plain
+buttons:
 
 ```tsx
 <TelegramApproval
@@ -169,8 +166,8 @@ plain buttons:
 />
 ```
 
-A Mini App exposes a signed `initData` string. Your backend must verify it
-before trusting the user. Never trust `initDataUnsafe`.
+A Mini App exposes a signed `initData` string your backend must verify before
+trusting the user; never trust `initDataUnsafe`.
 
 ```ts
 import { verifyTelegramWebAppInitData } from "@smithers-orchestrator/integrations/telegram";
@@ -184,13 +181,13 @@ console.log(data.user?.id);
 ```
 
 Verification is HMAC-SHA256 with a crossed key: `secret =
-HMAC_SHA256(key="WebAppData", message=botToken)`, and the data is authentic when
-`hex(HMAC_SHA256(key=secret, message=dataCheckString))` equals the `hash` field,
-where `dataCheckString` is every field except `hash`, formatted `key=value`,
-sorted, and newline-joined. It runs on Web Crypto, so the same call works in the
-Smithers runtime and in a Cloudflare Worker. `verifyTelegramWebAppInitDataSignature`
-verifies the newer Ed25519 `signature` from a third party with only the numeric
-bot id.
+HMAC_SHA256(key="WebAppData", message=botToken)`. Data is authentic when
+`hex(HMAC_SHA256(key=secret, message=dataCheckString))` equals `hash`, where
+`dataCheckString` is every field except `hash`, formatted `key=value`, sorted,
+and newline-joined. It runs on Web Crypto, working in both the Smithers
+runtime and a Cloudflare Worker. `verifyTelegramWebAppInitDataSignature`
+verifies the newer Ed25519 `signature` from a third party with only the
+numeric bot id.
 
 A runnable reference (a static Mini App page plus a Worker endpoint that verifies
 `initData` for real) ships in `apps/telegram-site`: `site/approve.html` and

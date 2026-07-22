@@ -3,25 +3,25 @@ title: Workflow UI (React)
 description: A complete `gateway-react` workflow UI you can drop next to a workflow, with boot, run state, pushed live events, metrics, node output, approvals, and a stale-data-free render model.
 ---
 
-This example is a minimal first-class React UI for a workflow that ships with the Gateway. It demonstrates every piece a real UI exercises: the `createGatewayReactRoot` bootstrap, reading `?runId=` and the boot config, live event subscription, node-output reads, a lifecycle action, and an approvals strip, all in one file. Drop it at `.smithers/ui/<your-workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<your-workflow>.tsx" />`, and open it with `bunx smithers-orchestrator ui`.
+A minimal, first-class React UI for a workflow, shipped with the Gateway in one file. It demonstrates every piece a real UI needs (see the breakdown below). Drop it at `.smithers/ui/<your-workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<your-workflow>.tsx" />`, and open it with `bunx smithers-orchestrator ui`.
 
 For the full conceptual walkthrough, see [Custom Workflow UIs](/guides/custom-workflow-ui).
 
 ## Hijacked pipeline chat
 
-For a runnable multi-step version of this pattern, see
-[`examples/hijacked-chat-pipeline`](https://github.com/smithersai/smithers/tree/main/examples/hijacked-chat-pipeline).
-It declares three sequential agent tasks with `hijack` and
+For a runnable multi-step version, see
+[`examples/hijacked-chat-pipeline`](https://github.com/smithersai/smithers/tree/main/examples/hijacked-chat-pipeline):
+three sequential agent tasks declared with `hijack` and
 `onHijackExit="complete"`. The workflow UI follows the active hijack candidate,
 opens the Gateway's PTY WebSocket, and presents the native agent session through
 the shared `ChatTranscript`, `ChatMessage`, and `ChatComposer` components from
 `smithers-orchestrator/ui`.
 
-Each session is still a real resumable Codex session. The browser only replaces
-the terminal presentation: submitted chat messages are written as PTY bytes and
-the streamed PTY screen is rendered in the assistant bubble. Ending a stage
-returns control to Smithers, which resumes the run and advances the `Sequence`
-to the next hijacked task.
+Each session is still a real, resumable Codex session: the browser only replaces
+the terminal presentation, writing chat input as PTY bytes and rendering the
+streamed PTY screen in the assistant bubble. Ending a stage returns control to
+Smithers, which resumes the run and advances the `Sequence` to the next
+hijacked task.
 
 ## The bundle
 
@@ -222,17 +222,17 @@ bunx smithers-orchestrator up demo-react-ui -d
 bunx smithers-orchestrator ui                          # opens the bundle in your browser
 ```
 
-The Gateway discovers the `<UI>` declaration when it registers the workflow with its `entryFile`. The bundle is served at `/workflows/demo-react-ui`. The HTML shell injects `__SMITHERS_GATEWAY_UI__` and `?runId=` before your script runs; `createGatewayReactRoot` picks both up automatically.
+The Gateway discovers the `<UI>` declaration when it registers the workflow's `entryFile`, and serves the bundle at `/workflows/demo-react-ui`. Its HTML shell injects `__SMITHERS_GATEWAY_UI__` and `?runId=` before your script runs; `createGatewayReactRoot` picks up both automatically.
 
 ## Embedding it in `apps/smithers`
 
-The PWA discovers workflows that advertise `hasUi: true` and renders this exact bundle in an iframe at `/gw/demo-react-ui/<runId>`. The same-origin Vite proxy (in dev) and Worker proxy (in Cloud) make the iframe's RPC and WebSocket reach the real Gateway. No CORS, no token shuttling. See [Same-origin proxy patterns](/guides/custom-workflow-ui#same-origin-proxy-patterns).
+The PWA discovers workflows that advertise `hasUi: true` and renders this exact bundle in an iframe at `/gw/demo-react-ui/<runId>`. The same-origin Vite proxy (dev) and Worker proxy (Cloud) let the iframe's RPC and WebSocket reach the real Gateway: no CORS, no token shuttling. See [Same-origin proxy patterns](/guides/custom-workflow-ui#same-origin-proxy-patterns).
 
 ## What this example demonstrates
 
 - **`createGatewayReactRoot` boot**: one call, reads the boot config, mounts the provider, renders the tree.
 - **`?runId=` parsing** with a safe fallback to the most recent run via `useGatewayRuns`.
-- **Live subscription** with `useGatewayRunEvents`: resilient reconnect, pushed updates, gap resync, metrics, and automatic teardown when `runId` changes.
+- **Live subscription** with `useGatewayRunEvents`: resilient reconnect, pushed updates, gap resync, and metrics.
 - **Node output reads** with `useGatewayNodeOutput`: handles `produced` / `pending` / `failed`.
 - **Approvals strip** with `useGatewayApprovals` + `useGatewayActions().submitApproval`.
 - **Lifecycle action** with `useGatewayActions().cancelRun`.

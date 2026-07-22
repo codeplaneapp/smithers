@@ -6,7 +6,7 @@ description: "Example from ~/.claude/plugins/smithers-orchestrator/: A Claude Co
 # Claude Code Plugin: Smithers Orchestrator
 
 <Note>
-**Ghost doc** -- an illustrative example of a Smithers orchestrator plugin. The shipped plugin is [`claude-plugin/`](https://github.com/smithersai/smithers/tree/main/claude-plugin) (installed as `smithers`).
+**Ghost doc**: an illustrative Smithers orchestrator plugin. The shipped plugin is [`claude-plugin/`](https://github.com/smithersai/smithers/tree/main/claude-plugin), installed as `smithers`.
 </Note>
 
 ## plugin.json
@@ -72,7 +72,7 @@ export default smithers((ctx) => (
 ## Best Practices
 
 1. Use `createSmithers` for schema-driven workflows with auto-persistence.
-2. Use `outputs.xxx` as the `output` prop on `<Task>` (the Zod schema, not a string key).
-3. Use `ctx.outputMaybe()` for cross-task data flow (returns `undefined` if not yet available). For a single task consuming one upstream output, prefer `<Task deps={{ id: outputs.x }}>` with a `(deps) => ...` children callback instead.
+2. Use `outputs.xxx`, the Zod schema (not a string key), as the `output` prop on `<Task>`.
+3. Use `ctx.outputMaybe()` for cross-task data flow (`undefined` if not yet available); for a single upstream output, prefer `<Task deps={{ id: outputs.x }}>` with a `(deps) => ...` children callback.
 4. Set `maxIterations` on `<Loop>` to prevent infinite loops.
 5. Include `continueOnFail` on non-critical tasks.

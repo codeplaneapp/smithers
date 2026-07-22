@@ -4,8 +4,8 @@ description: Render tool lifecycle status, JSON input and output, and approval c
 ---
 
 `ToolCall` renders all eight input, approval, execution, output, failure, and
-denial states from an agent tool invocation. Lifecycle tinting flows through the
-shared status vocabulary.
+denial states of an agent tool invocation, tinted through the shared status
+vocabulary.
 
 ```tsx
 import { ToolCall } from "smithers-orchestrator/ui";
@@ -18,9 +18,9 @@ import { ToolCall } from "smithers-orchestrator/ui";
 />
 ```
 
-Use `argsText` for partial JSON while input streams. It overrides `args`.
-`resultText` similarly overrides `result`. Object rendering is BigInt-safe and
-cyclic-safe through the exported `formatJsonSafe` helper.
+Use `argsText` for partial JSON while input streams; it overrides `args`, and
+`resultText` similarly overrides `result`. Object rendering is BigInt- and
+cyclic-safe via the exported `formatJsonSafe` helper.
 
 ## Lifecycle states
 
@@ -35,7 +35,7 @@ cyclic-safe through the exported `formatJsonSafe` helper.
 | `output-error` | Failed | `error` |
 | `output-denied` | Denied | `denied` |
 
-The default `compact` layout discloses its details with a native button. The
-`expanded` layout always mounts details and ignores disclosure props. Inject
-approve and deny controls through `approvalSlot`; it renders only during
+The default `compact` layout discloses details via a native button; `expanded`
+always mounts details and ignores disclosure props. Inject approve/deny
+controls through `approvalSlot`, which renders only during
 `approval-requested`.

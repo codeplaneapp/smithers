@@ -4,7 +4,7 @@ description: Anchored conversation scrolling with streaming follow, prepend comp
 ---
 
 `MessageScroller` is the transport-neutral scroll container behind
-`ChatTranscript`. It follows new content by default, stops following when the
+`ChatTranscript`: it follows new content by default, stops following when the
 reader scrolls away, and exposes a jump button without coupling the UI to a
 Gateway or streaming client.
 
@@ -20,12 +20,12 @@ import { MessageScroller } from "smithers-orchestrator/ui";
 
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
-| `stickToBottom` | `boolean` | `true` | Follow content growth while the reader remains at the bottom. |
+| `stickToBottom` | `boolean` | `true` | Follow content growth while the reader stays at bottom. |
 | `streaming` | `boolean` | `false` | Exposes streaming state through `data-streaming`. |
-| `bottomThreshold` | `number` | `24` | Pixel distance treated as the bottom. |
+| `bottomThreshold` | `number` | `24` | Pixel distance treated as bottom. |
 | `firstItemKey` | `string \| number` | Not set | Compensates scroll position when older history is prepended. |
 | `fade` | `boolean` | `true` | Enables token-free mask fades at scrollable edges. |
-| `hideJumpToLatest` | `boolean` | `false` | Hides the jump affordance while away from the bottom. |
+| `hideJumpToLatest` | `boolean` | `false` | Hides the jump affordance while away from bottom. |
 | `jumpToLatestLabel` | `string` | `"Jump to latest"` | Accessible jump-button label. |
 | `onFollowChange` | `(following: boolean) => void` | Not set | Fires only when follow state transitions, never on mount. |
 | `contentClassName` | `string` | Not set | Class applied to the inner content element. |

@@ -4,9 +4,9 @@ icon: "stethoscope"
 description: "When a run fails, Smithers automatically launches an autopsy that finds out why, tells you the fix, and (with your approval) reports suspected Smithers bugs."
 ---
 
-When a run fails, something already happens. The moment `bunx smithers-orchestrator up` or `bunx smithers-orchestrator workflow run` reports a failed run, the CLI launches the `post-failure` system workflow in the background against that run. It gathers the run's state, events, and workflow source, has an agent investigate the root cause, and produces a verdict: what broke, how sure it is, and the exact command(s) to run next.
+The moment `bunx smithers-orchestrator up` or `bunx smithers-orchestrator workflow run` reports a failed run, it launches the `post-failure` system workflow in the background against that run, gathering evidence and producing a verdict (see below).
 
-The trigger prints one line so you can follow along:
+It prints one line to follow along:
 
 ```
 [smithers] Run failed. Post-failure autopsy launched: post-failure-abc123. Watch it with `bunx smithers-orchestrator inspect post-failure-abc123` (opt out with --no-post-failure or SMITHERS_POST_FAILURE=0).
@@ -20,28 +20,28 @@ bunx smithers-orchestrator output post-failure-abc123 output
 
 ## What the autopsy does
 
-The `post-failure` workflow runs four steps against the failed run:
+Four steps run:
 
-1. **Gather** (deterministic): `inspect`, `events`, and the workflow source for the failed run, plus the Smithers version.
-2. **Investigate** (agent, read-only tools): digs through the evidence, re-runs read-only CLI commands, and reads the workflow. It never mutates anything: no retries, no rewinds, no edits.
+1. **Gather** (deterministic): `inspect`, `events`, and the workflow source, plus the Smithers version.
+2. **Investigate** (agent, read-only tools): digs through the evidence, re-runs read-only CLI commands, reads the workflow. It never mutates anything: no retries, no rewinds, no edits.
 3. **Bug gate** (only when it suspects Smithers itself): an Approval pauses the run and asks you before anything is reported.
-4. **Verdict**: a stable output row with the failure class, root cause, suggestion, and commands.
+4. **Verdict**: a stable output row with the failure class, root cause, confidence, suggestion, and exact commands to run next.
 
 ## Failure classes
 
-The investigator classifies every failure as one of:
+Every failure is classified as one of:
 
 | Class | Meaning |
 | --- | --- |
 | `workflow-bug` | The workflow script or prompts are at fault (bad schema, wrong `deps`/`needs`, a compute task throwing). |
 | `environment` | A missing CLI, auth, network, or disk problem on this machine. |
 | `agent-flake` | A transient provider fault (rate limit, 5xx, timeout) that a re-run would likely clear. |
-| `smithers-bug` | Smithers itself misbehaved: an engine/CLI/component defect. Chosen conservatively, only when the evidence points into Smithers code. |
+| `smithers-bug` | Smithers itself misbehaved: an engine/CLI/component defect, chosen conservatively, only when evidence points into Smithers code. |
 | `unknown` | Evidence too thin to say. |
 
 ## Suggestions
 
-The verdict carries one suggestion plus the exact commands implementing it:
+One suggestion per verdict, plus the exact commands implementing it:
 
 - `retry`: transient; re-run the failed task (`bunx smithers-orchestrator retry-task`) or the whole run.
 - `resume`: the run can continue from where it stopped.
@@ -50,13 +50,13 @@ The verdict carries one suggestion plus the exact commands implementing it:
 - `fix-environment`: the exact install/auth/config fix.
 - `escalate`: a human must decide; the verdict says what to look at.
 
-The autopsy only ever suggests. It never retries, rewinds, or edits the failed run itself.
+The autopsy only ever suggests: it never retries, rewinds, or edits the failed run itself.
 
 ## Reporting Smithers bugs (approval-gated)
 
-When the investigation concludes the failure is a bug in Smithers itself (not your workflow or environment), the autopsy pauses on an Approval gate explaining what it thinks the bug is. Nothing is sent anywhere without your explicit approval. If you approve, the workflow files the report with `bunx smithers-orchestrator bug`, which POSTs to `https://bug.smithers.sh/api/bugs` and records the returned bug id and URL in the verdict. If you deny, the verdict is kept and nothing is reported.
+When the investigation concludes the failure is a bug in Smithers itself, the autopsy pauses on an Approval gate explaining what it thinks the bug is. Nothing is sent without your explicit approval: approve, and the workflow files the report with `bunx smithers-orchestrator bug`, which POSTs to `https://bug.smithers.sh/api/bugs` and records the returned bug id and URL in the verdict; deny, and the verdict is kept but nothing is reported.
 
-You can also file a report by hand at any time:
+File a report by hand at any time:
 
 ```bash
 bunx smithers-orchestrator bug --run <failed-run-id>
@@ -66,15 +66,15 @@ bunx smithers-orchestrator bug --run <failed-run-id>
 
 ## Opting out
 
-The trigger is on by default. Turn it off with either:
+On by default; turn it off with either:
 
 - the `--no-post-failure` flag on `bunx smithers-orchestrator up` / `bunx smithers-orchestrator workflow run`, or
 - the `SMITHERS_POST_FAILURE=0` environment variable.
 
-The trigger also skips itself automatically:
+It also skips itself automatically:
 
 - when the failing workflow is `post-failure` itself or another ops workflow (`triage-run`, `init`), so autopsies never recurse; the launched autopsy runs with `SMITHERS_POST_FAILURE=0` in its environment for the same reason;
-- when the `post-failure` workflow is not installed. Then it prints the manual command instead:
+- when the `post-failure` workflow is not installed, printing the manual command instead:
 
 ```bash
 bunx smithers-orchestrator workflow run post-failure --input '{"targetRunId":"<failed-run-id>"}'

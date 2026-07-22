@@ -3,9 +3,9 @@ title: JSX API
 description: Author workflows as JSX trees. Smithers renders the tree, dispatches ready tasks, persists outputs, and re-renders. Branching and parallelism are plain JSX conditionals.
 ---
 
-Workflows are JSX trees. Smithers renders the tree, extracts ready tasks, executes them, persists their outputs, and re-renders. Branching, looping, and parallelism are normal JSX.
+Workflows are JSX trees. Smithers renders the tree, extracts ready tasks, executes them, persists outputs, and re-renders. Branching, looping, and parallelism are normal JSX.
 
-<Note>API reference: [Authoring](/reference/authoring) and [Components](/reference/components) list every authoring helper and JSX element, their options, and links to source and tests.</Note>
+<Note>API reference: [Authoring](/reference/authoring) and [Components](/reference/components) list every authoring helper and JSX element, with options and links to source and tests.</Note>
 
 ## Setup
 
@@ -18,13 +18,7 @@ bun add smithers-orchestrator zod
 bun add -d typescript @types/react @types/node
 ```
 
-`smithers-orchestrator` bundles React and ships the JSX runtime as
-`smithers-orchestrator/jsx-runtime`, so you do **not** add `react` or `react-dom`
-yourself. `jsxImportSource` (below) routes JSX through the workflow reconciler,
-never React DOM. The one required dev dep is `@types/react` (React ships no
-bundled types, and the JSX transform resolves its JSX namespace from it). The
-browser UI surface (`smithers-orchestrator/gateway-react`) is the only place that
-takes `react`/`react-dom` as peers.
+`smithers-orchestrator` bundles React and ships the JSX runtime at `smithers-orchestrator/jsx-runtime`: skip `react` and `react-dom`. `jsxImportSource` (below) routes JSX through the workflow reconciler, never React DOM. The one required dev dep is `@types/react` (React ships no bundled types; the JSX transform resolves its namespace from it). Only the browser UI surface, `smithers-orchestrator/gateway-react`, takes `react`/`react-dom` as peers.
 
 Minimal `tsconfig.json`:
 
@@ -72,27 +66,22 @@ export default smithers((ctx) => (
 ));
 ```
 
-`createSmithers` is a named export. The lowercase `smithers` wrapper is not a
-top-level import; it is the property returned by `createSmithers(...)`.
-`smithers((ctx) => ...)` returns the `SmithersWorkflow` value to export from the
-workflow file. The `input` schema above types `ctx.input.repo`; omit `input` and
-`ctx.input` is `unknown`, so you must guard or parse it yourself.
+`createSmithers` is a named export; the lowercase `smithers` it returns is not a separate top-level import. `smithers((ctx) => ...)` returns the `SmithersWorkflow` value the workflow file exports. The `input` schema above types `ctx.input.repo`; omit it and `ctx.input` is `unknown`, so guard or parse it yourself.
 
-`outputs.analysis` is the typed reference for the Zod schema, so typos are compile errors. The task body is a JSX expression (`{...}`) whose value is a plain object, with no LLM call here, just a static return. Real tasks pass a `run` prop or an AI model. See the [Task component reference](/components/workflow).
+`outputs.analysis` is the typed reference for the Zod schema, so typos are compile errors. The task body here is a JSX expression (`{...}`) returning a plain object: a static return, no LLM call. Real tasks pass a `run` prop or an AI model; see the [Task component reference](/components/workflow).
 
 ## Reactivity
 
-The tree re-renders on every frame, so branching is a normal JSX conditional. Inside a workflow function, `ctx` exposes `ctx.input` and `ctx.outputMaybe(ref, { nodeId })`. The latter returns the output of a completed task, or `undefined` if it hasn't run yet:
-The `ctx` parameter is optional: it is just a normal function argument, so a workflow that never reads `ctx.input` or `ctx.outputMaybe` can drop it entirely and write `smithers(() => ( ... ))`. Add `(ctx)` only when you actually reference dynamic input or prior task output.
+The tree re-renders every frame. `ctx` is just an optional function argument: drop it and write `smithers(() => ( ... ))` if a workflow never reads `ctx.input` or `ctx.outputMaybe`. When used, `ctx` exposes `ctx.input` and `ctx.outputMaybe(ref, { nodeId })`, which returns a completed task's output, or `undefined` if it hasn't run yet:
 
 ```tsx
 const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 {analysis ? <Task id="report" output={outputs.report} agent={writer}>...</Task> : null}
 ```
 
-The `report` Task doesn't exist in the plan until `analysis` completes. No placeholder, no skipped node. The conditional IS the dependency. Unlike static DAG tools that require you to declare optional nodes upfront, the JSX conditional is evaluated fresh each frame: if `analysis` is undefined, the `report` task simply doesn't exist in that frame's plan.
+The `report` Task doesn't exist in the plan until `analysis` completes: no placeholder, no skipped node, the conditional IS the dependency. Static DAG tools require declaring optional nodes upfront; the JSX conditional instead evaluates fresh each frame, so `report` simply isn't there while `analysis` is undefined.
 
-For the common case of a task simply consuming one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback expresses the same gating more directly; reach for `ctx.outputMaybe` when the logic is structural (branching on content, loops, counts) rather than plain existence.
+For a task that just consumes one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback expresses the same gating more directly. Reach for `ctx.outputMaybe` when the logic is structural: branching on content, loops, counts.
 
 ## Read next
 

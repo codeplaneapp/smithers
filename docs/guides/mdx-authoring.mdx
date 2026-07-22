@@ -3,20 +3,20 @@ title: MDX Workflow Authoring
 description: Author workflows by editing plain Markdown prompt files. No TypeScript required - change the instruction, run again, see it change.
 ---
 
-`create-workflow` writes a `.tsx` orchestration skeleton and its prompts, then verifies and documents the result with a companion agent skill. For most workflows you describe the behavior instead of hand-editing the generated `.tsx` file.
+`create-workflow` writes a `.tsx` orchestration skeleton and its prompts, then verifies and documents it with a companion agent skill.
 
 ## The two-file model
 
 | File | What it is | Who edits it |
 |---|---|---|
-| `.smithers/workflows/WORKFLOW_ID.tsx` | Durable run, agent wiring, output schema | Rarely - only when you need branching, schemas, or loops |
-| `.smithers/prompts/WORKFLOW_ID.mdx` | The agent's instruction - what you actually change | You, always |
+| `.smithers/workflows/WORKFLOW_ID.tsx` | Durable run, agent wiring, output schema | Rarely: branching, schemas, or loops |
+| `.smithers/prompts/WORKFLOW_ID.mdx` | The agent's instruction: what you change | You, always |
 
-The `.tsx` file imports and renders the `.mdx` file at runtime. Editing the prompt changes agent behavior on the next run - no build step, no TypeScript.
+The `.tsx` imports and renders the `.mdx` at runtime: editing the prompt changes behavior on the next run, no build step, no TypeScript.
 
 ## Your first edit
 
-After `create-workflow` has generated a workflow, open its companion `.smithers/prompts/WORKFLOW_ID.mdx`:
+After `create-workflow` generates a workflow, open its companion `.smithers/prompts/WORKFLOW_ID.mdx`:
 
 ```markdown
 Write a short, friendly one-sentence greeting for {props.name}.
@@ -26,7 +26,7 @@ it is plain Markdown, no TypeScript required. Anything in {curly braces} is a
 value passed in from the workflow (here, props.name).
 ```
 
-Change the instruction - for example, ask for a haiku:
+Change the instruction, e.g. ask for a haiku:
 
 ```markdown
 Write a haiku about {props.name}.
@@ -52,7 +52,7 @@ Summarize this pull request for a non-technical stakeholder:
 Keep it under two sentences. Plain language only.
 ```
 
-Any input field the workflow declares is available as `props.<field>` in the prompt.
+Any input field the workflow declares is available as `props.<field>`.
 
 ## Create a new MDX-backed workflow
 
@@ -64,17 +64,17 @@ bunx smithers-orchestrator workflow run create-workflow
 
 Or scaffold by hand:
 
-1. Create `.smithers/prompts/my-task.mdx` - write the instruction.
+1. Create `.smithers/prompts/my-task.mdx` and write the instruction.
 2. Copy `examples/init-pack/hello.tsx`, rename the workflow name and prompt import.
 3. Run `bunx smithers-orchestrator workflow run my-task`.
 
 ## When to graduate to TypeScript
 
-Stay in MDX as long as possible. Add TypeScript only when you need:
+Stay in MDX until you need:
 
 - **Multi-step branching** - different tasks depending on a prior output
-- **Parallel fan-out** - multiple tasks running simultaneously
+- **Parallel fan-out** - tasks running simultaneously
 - **Validated structured output** - Zod schemas on task results
 - **Loops** - retry until a score threshold passes
 
-See the [TypeScript SDK](/jsx/overview) for all of that. Start with MDX, graduate only when the task demands it.
+See the [TypeScript SDK](/jsx/overview) for all of that.

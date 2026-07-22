@@ -3,9 +3,9 @@ title: CodeBlock
 description: Render token-themed code with copy, wrapping, line numbers, and a highlighter seam.
 ---
 
-`CodeBlock` is the base fenced-code surface from `smithers-orchestrator/ui`.
-It uses the shared `--code-bg` and `--code-text` theme tokens and does not ship
-a syntax-highlighting dependency.
+`CodeBlock`, the base fenced-code surface from `smithers-orchestrator/ui`, uses
+the shared `--code-bg` and `--code-text` theme tokens and ships no
+syntax-highlighting dependency.
 
 ```tsx
 import { CodeBlock } from "smithers-orchestrator/ui";
@@ -19,10 +19,10 @@ import { CodeBlock } from "smithers-orchestrator/ui";
 />
 ```
 
-The copy button uses `onCopyCode` when provided and otherwise falls back to
-`navigator.clipboard`. It is hidden when neither path is available. A
-highlighter returns readonly lines of `{ text, color? }` tokens; returning
-`null` or throwing renders escaped plain text.
+The copy button uses `onCopyCode` when provided, else falls back to
+`navigator.clipboard`, and hides when neither is available. A highlighter
+returns readonly `{ text, color? }` token lines; returning `null` or throwing
+renders escaped plain text.
 
 ## Props
 
@@ -32,7 +32,7 @@ highlighter returns readonly lines of `{ text, color? }` tokens; returning
 | `language` | `string` | none | Optional language label and adapter input. |
 | `showLineNumbers` | `boolean` | `false` | Adds an `aria-hidden` line-number gutter. |
 | `wrap`, `defaultWrap`, `onWrapChange` | controlled trio | `false` | Controls line wrapping. |
-| `showCopy` | `boolean` | `true` | Enables the copy affordance when a copy path exists. |
+| `showCopy` | `boolean` | `true` | Shows the copy affordance when a copy path exists. |
 | `onCopyCode` | `(code: string) => void` | clipboard fallback | Host-owned copy seam. |
 | `copiedDurationMs` | `number` | `2000` | How long the copied state remains visible. |
 | `highlight` | `CodeBlockHighlighter` | none | Converts source into colored token lines. |

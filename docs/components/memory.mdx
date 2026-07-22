@@ -25,33 +25,32 @@ import { Memory } from "smithers-orchestrator";
 </Memory>
 ```
 
-`<Memory>` provides one memory configuration to every descendant `<Task>`. Each task receives that configuration in `TaskDescriptor.memoryConfig`. A task-level `memory={...}` prop replaces the inherited configuration for that task. Provider and task-level configurations use the same validation and defaults, including the positive safe-integer `maxTokens` bound and the `bank`/`banks` exclusivity check.
+`<Memory>` gives one memory configuration to every descendant `<Task>` via `TaskDescriptor.memoryConfig`; a task-level `memory={...}` prop replaces it for that task, under the same validation and defaults (below).
 
 ## Props
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `bank` | `string` | none | One Hindsight bank. Use either `bank` or `banks`. |
-| `banks` | `string[]` | none | Banks recalled in parallel. Results share the `maxTokens` injection cap. Use either `bank` or `banks`. |
-| `tags` | `string[]` | `[]` | Stable dimensions: `branch:*`, `stream:*`, `source:chat\|run\|reflection\|import`, and `scope:main\|branch`. A write may contain at most 16 distinct tags after configured, tool-supplied, and automatic source/scope tags are merged. Project-bank recall derives a compound filter from these tags. |
-| `recall` | `"auto" \| string \| false` | `"auto"` | `"auto"` uses the task prompt as the query, a string supplies a fixed query, and `false` disables pre-task recall. |
-| `budget` | `"low" \| "mid" \| "high"` | `"mid"` | Hindsight recall search budget. Higher budgets examine more candidates before reranking. |
-| `maxTokens` | `number` | `2048` | Hard upper bound for the complete fenced prompt block and serialized `recall` tool result. It includes primers, recall rows, bank labels, and framing. Must be a positive safe integer. |
-| `primers` | `string[]` | `[]` | Mental-model ids searched across the configured banks and inserted verbatim. A missing bank/id pair is ignored, so user and project primers can share one list. Smithers does not run reflection in the task hot path. |
-| `retain` | `"on-complete" \| "off"` | `"off"` | Retain a digest of a successful task result asynchronously, or disable automatic retention. Retention never delays task completion. |
+| `bank` | `string` | none | One Hindsight bank. Mutually exclusive with `banks`. |
+| `banks` | `string[]` | none | Banks recalled in parallel, sharing the `maxTokens` injection cap. |
+| `tags` | `string[]` | `[]` | Stable dimensions: `branch:*`, `stream:*`, `source:chat\|run\|reflection\|import`, `scope:main\|branch`. Max 16 distinct tags after merging configured, tool-supplied, and automatic tags; project-bank recall derives a compound filter from these. |
+| `recall` | `"auto" \| string \| false` | `"auto"` | `"auto"` uses the task prompt as the query, a string sets a fixed query, `false` disables pre-task recall. |
+| `budget` | `"low" \| "mid" \| "high"` | `"mid"` | Hindsight recall search budget; higher examines more candidates before reranking. |
+| `maxTokens` | `number` | `2048` | Hard upper bound for the fenced prompt block and serialized `recall` tool result, including primers, recall rows, bank labels, and framing. Must be a positive safe integer. |
+| `primers` | `string[]` | `[]` | Mental-model ids searched across configured banks and inserted verbatim. A missing bank/id pair is ignored, so user and project primers can share one list (Smithers never runs reflection in the task hot path). |
+| `retain` | `"on-complete" \| "off"` | `"off"` | Retain a digest of a successful task result asynchronously, or disable retention; never delays completion. |
 | `tools` | `boolean` | `false` | Add `remember` and `recall` tools to the task agent for memory access during the run. |
 | `children` | `ReactNode` | none | Workflow content that inherits this configuration. |
 
-At least one non-empty bank is required after inheritance. Nested `<Memory>` components inherit omitted fields. Setting `bank` or `banks` on an inner component replaces the parent bank selection.
+At least one non-empty bank is required after inheritance. Nested `<Memory>` components inherit omitted fields; `bank`/`banks` on an inner component replaces the parent selection.
 
 ## Prompt injection
 
-Before an agent task starts, Smithers fetches the configured primers and recalls memories from every bank. It prepends the result inside a fenced `<smithers_memory_context>` block. `maxTokens` caps the complete block so recalled context cannot crowd out the task instructions. Smithers applies a conservative UTF-8 byte ceiling to remain within the limit without depending on a specific model tokenizer. The same ceiling covers the complete serialized result returned by the `recall` tool.
+Before an agent task starts, Smithers fetches configured primers and bank recalls, prepending them inside a fenced `<smithers_memory_context>` block, and enforces the `maxTokens` cap (a conservative UTF-8 byte ceiling, not a model-specific tokenizer) so recalled context can't crowd out task instructions.
 
-Tasks with an active `bank` or `banks` memory configuration bypass task-output caching. Their recalled snapshot can change while the prompt, agent, and worktree stay the same, so reusing an older task result would skip recall and return stale output. Legacy-only memory metadata is inert and keeps the task's existing cache semantics. The memory snapshot itself remains frozen across retries of one task execution.
+Tasks with an active `bank`/`banks` configuration skip task-output caching, since the recalled snapshot can change even when prompt, agent, and worktree don't, and a cached result would return stale output (legacy-only memory metadata is inert and keeps existing cache semantics). The snapshot itself stays frozen across retries of one task execution.
 
-Recall and primer reads are advisory. A timeout or backend error logs a warning and runs the task with its original prompt. A memory failure never fails the task.
-Missing mental-model ids are handled per bank. For example, `user-primer` can exist only in the user bank and `project-primer` only in the project bank; both valid primers are still injected.
+Recall and primer reads are advisory: a timeout or backend error logs a warning and runs the task with its original prompt rather than failing it. Missing mental-model ids are handled per bank: `user-primer` may exist only in the user bank, `project-primer` only in the project bank, and both still inject.
 
 ```tsx
 <Memory bank="project-checkout" recall="release rollback procedure" maxTokens={1200}>
@@ -73,7 +72,7 @@ Set `recall={false}` for tools-only memory:
 
 ## Banks, tags, and run identity
 
-Banks are isolation boundaries. Use a user bank for personal preferences and a project bank for team knowledge. Use stable, recall-relevant tags below the bank boundary:
+Banks are isolation boundaries: a user bank for personal preferences, a project bank for team knowledge. Use stable, recall-relevant tags below the bank boundary:
 
 ```tsx
 <Memory
@@ -88,9 +87,9 @@ Banks are isolation boundaries. Use a user bank for personal preferences and a p
 </Memory>
 ```
 
-Do not put run ids, task ids, session ids, or project ids in `tags`. Smithers records volatile identity in Hindsight metadata and uses a stable per-run document id with append mode. This preserves provenance without fragmenting Hindsight observation consolidation.
+Do not put run, task, session, or project ids in `tags`: Smithers records volatile identity in Hindsight metadata via a stable per-run document id with append mode, preserving provenance without fragmenting observation consolidation.
 
-Use `scope:main` only with `branch:main`. Use `scope:branch` for branch-local writes. You may omit the scope tag on a project bank; Smithers derives it from the single configured branch tag. A tagless project-bank write defaults to `scope:main`, which matches the canonical project recall filter. A conflicting explicit scope is rejected before retention.
+Use `scope:main` with `branch:main` and `scope:branch` for branch-local writes. Omitting the scope tag on a project bank lets Smithers derive it from the configured branch tag, defaulting a tagless write to `scope:main` (the canonical project recall filter); a conflicting explicit scope is rejected before retention.
 
 Smithers applies the standard two-bank recall policy automatically:
 
@@ -98,25 +97,24 @@ Smithers applies the standard two-bank recall policy automatically:
 - `project-*` banks use a `tag_groups`-only filter for `(scope:main OR branch:current)`, then apply configured `stream:*` and other tags as additional constraints.
 - Other bank names use all configured tags as a strict filter.
 
-The `recall` tool preserves those base filters. Tags passed by the agent add stable constraints and cannot widen the configured branch or stream scope. The `remember` tool rejects volatile tags and rejects project scope tags when writing to a user bank. The local SQLite fallback evaluates the same strict filters before keyword scoring, so branch-local facts cannot cross into another branch recall.
+The `recall` tool preserves those base filters; agent-supplied tags add constraints but can't widen the configured branch or stream scope. `remember` rejects volatile tags and project-scope tags written to a user bank. The local SQLite fallback applies the same strict filters before keyword scoring, so branch-local facts can't cross into another branch's recall.
 
 ## Backend selection
 
-Hindsight is a Postgres-family feature. The Hindsight service stores its data in Postgres 15 or later with pgvector. Smithers selects it only when `HINDSIGHT_URL` is set.
-`openSmithersBackend` performs this selection and attaches the resulting memory service to every workflow it creates.
+Hindsight is a Postgres-family feature Smithers selects only when `HINDSIGHT_URL` is set; `openSmithersBackend` performs the selection and attaches the resulting memory service to every workflow it creates.
 
 | Smithers configuration | Memory behavior |
 |---|---|
-| `HINDSIGHT_URL` unset, default SQLite backend | Existing local SQLite facts store and keyword recall. Primers are unavailable because SQLite facts have no Hindsight mental models. |
-| `HINDSIGHT_URL` unset, PGlite or Postgres workflow backend | Same local SQLite facts fallback. Workflow state can use another backend without enabling Hindsight. |
-| `HINDSIGHT_URL` set | Remote Hindsight recall, mental-model primers, and asynchronous retention. The Hindsight deployment must use Postgres with pgvector. |
+| `HINDSIGHT_URL` unset, default SQLite backend | Local SQLite facts store and keyword recall; primers are unavailable since SQLite facts have no Hindsight mental models. |
+| `HINDSIGHT_URL` unset, PGlite or Postgres workflow backend | Same local SQLite facts fallback; workflow state can use another backend without enabling Hindsight. |
+| `HINDSIGHT_URL` set | Remote Hindsight recall, mental-model primers, and asynchronous retention; deployment must use Postgres 15+ with pgvector. |
 | Embedded Hindsight deployment | Use `SMITHERS_BACKEND=postgres`; embedded Hindsight is not supported with SQLite or PGlite. |
 
 <Warning>
-Use one `HindsightMemoryStore` writer instance per transactional contract store. Same-document projections are serialized inside that instance only. Separate instances can project competing mutations out of order because the process-local queues do not share a durable version fence.
+Use one `HindsightMemoryStore` writer instance per transactional contract store: same-document projections serialize only inside that instance, so separate instances can project competing mutations out of order (process-local queues share no durable version fence).
 </Warning>
 
-When workflow state uses PGlite or Postgres and Hindsight is unset, Smithers keeps the fallback facts in the local `.smithers/smithers.db` sidecar. The workflow database remains on its selected backend.
+When workflow state uses PGlite or Postgres and Hindsight is unset, Smithers keeps fallback facts in the local `.smithers/smithers.db` sidecar; the workflow database stays on its selected backend.
 
 ```bash
 HINDSIGHT_URL=http://127.0.0.1:8888
@@ -124,11 +122,11 @@ HINDSIGHT_API_KEY=replace-me
 HINDSIGHT_BANK_PREFIX=dev-
 ```
 
-`HINDSIGHT_API_KEY` and `HINDSIGHT_BANK_PREFIX` are optional. The prefix is applied to every configured bank before requests are sent.
+`HINDSIGHT_API_KEY` and `HINDSIGHT_BANK_PREFIX` are optional; the prefix applies to every configured bank before requests are sent.
 
 ## Task-level override
 
-The existing `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins over context:
+The `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins over context:
 
 ```tsx
 <Memory bank="project-checkout" recall="auto" retain="on-complete">
@@ -148,4 +146,4 @@ The existing `Task.memory` prop uses the same `TaskMemoryConfig` shape and wins 
 </Memory>
 ```
 
-Legacy `namespace`, `remember`, `threadId`, and object-form `recall` fields remain accepted and preserved on `Task.memory` for compatibility. They are inert metadata: the engine does not use them for prompt injection, retention, or message history. Use banks, tags, recall mode, primers, retention, and tools for runtime memory.
+Legacy `namespace`, `remember`, `threadId`, and object-form `recall` fields remain accepted on `Task.memory` for compatibility but are inert: the engine never uses them for prompt injection, retention, or message history. Use banks, tags, recall mode, primers, retention, and tools instead.

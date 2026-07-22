@@ -14,15 +14,15 @@ bunx smithers-orchestrator optimize workflow.tsx \
 ```
 
 The implicit optimizer is OpenAI-compatible `gpt-5.6-luna` with reasoning
-effort `medium`. Pass `--provider` to select Cerebras, Claude, Kimi, or another
-supported backend explicitly.
+effort `medium`; pass `--provider` to use another backend (see
+[Providers](#providers)).
 
 `bunx smithers-orchestrator optimize` runs the eval suite twice:
 
 1. baseline run with the workflow's current prompts
 2. optimized run with GEPA-generated prompt patches applied
 
-The command writes the artifact only when the optimized score improves by at least `--min-improvement`. Reports for both runs are written under `.smithers/optimizations/reports` unless `--report-dir` is set.
+The command writes the artifact only when the optimized score improves by at least `--min-improvement`; reports for both runs go to `.smithers/optimizations/reports` unless `--report-dir` is set.
 
 ## Reuse an artifact
 
@@ -35,11 +35,11 @@ bunx smithers-orchestrator eval workflow.tsx \
   --optimization .smithers/optimizations/smoke-gepa.json
 ```
 
-The artifact patches only agent-backed `<Task>` prompts by `nodeId`. Workflow structure, output schemas, retries, approvals, and persistence behavior stay unchanged.
+The artifact patches only agent-backed `<Task>` prompts by `nodeId`; workflow structure, output schemas, retries, approvals, and persistence behavior stay unchanged.
 
 ## Cerebras improvement demo
 
-Example: the following run demonstrates a baseline failure corrected by a GEPA-generated patch. The baseline prompt did not include the required optimization token, so the eval failed. Cerebras GEPA generated a prompt patch that included the missing requirement, and the optimized eval passed.
+This run shows a GEPA patch fixing a baseline failure: the baseline prompt omitted the required optimization token and failed the eval, then Cerebras GEPA's patch added the token and the optimized eval passed.
 
 ```bash
 CEREBRAS_API_KEY=... bunx smithers-orchestrator optimize workflow.tsx \
@@ -87,16 +87,16 @@ Observed result:
 | `kimi`, `moonshot` | OpenAI-compatible Moonshot API | `MOONSHOT_API_KEY` | `kimi-k2.7-code` |
 | `opencode` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `anthropic/claude-fable-5` |
 | `pi` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `gpt-5.6-luna` |
-| `amp`, `forge`, `openai-compatible` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | pass `--model` when needed |
+| `amp`, `forge`, `openai-compatible` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | requires `--model` |
 
-The default models track the [SOTA model registry](/reference/sota-models), which lists the current defaults and badges and is refreshed by a daily research job. The CLI provider names (`codex`, `claude-code`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
+Default models track the [SOTA model registry](/reference/sota-models) (current defaults and badges, refreshed by a daily research job). CLI provider names (`codex`, `claude-code`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization, since GEPA needs a direct model call to propose prompt patches; providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) go through a generic OpenAI-compatible endpoint instead.
 
 Smithers defaults research and prompt-optimization work to Luna. Automatic
-workflow routing keeps non-Codex providers behind Codex; this standalone command
-does not silently change paid API backends. If OpenAI is unavailable, select a
+workflow routing keeps non-Codex providers behind Codex, but this standalone command
+never silently swaps paid API backends: if OpenAI is unavailable, select a
 Cerebras, Claude, Kimi, or other fallback explicitly with `--provider`.
 
-`--provider heuristic` is deterministic and intended for local tests and fixtures. Use `heuristic` when you want deterministic optimization without an API call: place `optimizationHints` in each case's `metadata` to control the patch. It uses eval-case metadata such as:
+`--provider heuristic` is deterministic, needs no API call, and is meant for local tests and fixtures: place `optimizationHints` in each case's `metadata` to control the patch, for example:
 
 ```json
 {

@@ -161,9 +161,9 @@ Use `tables.discover`, `tables.review`, etc. to access the auto-generated SQLite
 
 ## Key Patterns
 
-- **Dual export** -- each file exports the Zod schema and its inferred `type`, giving runtime validation and compile-time types from one source.
+- **Dual export** -- each file exports the Zod schema and its inferred `type`: runtime validation and compile-time types from one source.
 - **`.describe()` annotations** -- Smithers passes these to the LLM as field-level instructions in the structured output schema.
 - **`.nullable()`** -- ensures optional fields are always present in output JSON (e.g., `dependencies`, `failingSummary`).
 - **`z.enum()`** -- constrains agent output to valid values (severity levels, status codes, quality ratings).
 - **Schema composition** -- `Ticket` defined once, reused in `DiscoverOutput.tickets` and as a prop type throughout the pipeline.
-- **Single registration** -- `createSmithers` auto-generates SQLite tables and accepts an optional second argument for `dbPath` and `journalMode`; `tables` provides typed references to each stage's table.
+- **Single registration** -- the one `createSmithers` call also accepts `dbPath` and `journalMode` as an optional second argument.

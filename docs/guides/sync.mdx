@@ -3,7 +3,7 @@ title: Sync
 description: Use TanStack DB collections with the Smithers Gateway in local and multiplayer workspaces.
 ---
 
-Smithers custom UIs use TanStack DB as their frontend data layer. UI code reads from named collections with `useLiveQuery`, and writes go through the Smithers domain API. The collection provider changes with the workspace mode.
+Smithers custom UIs use TanStack DB as the frontend data layer: UI code reads collections via `useLiveQuery`, writes through the domain API, and the provider changes with workspace mode.
 
 ```ts
 import { QueryClient } from "@tanstack/react-query";
@@ -37,7 +37,7 @@ type WorkspaceMode =
     };
 ```
 
-`SmithersGatewayProvider` chooses local mode by default from the Gateway client base URL. Pass `mode` to `createGatewayReactRoot` or `SmithersGatewayProvider` when you need multiplayer reads.
+`SmithersGatewayProvider` defaults to local mode from the Gateway client base URL; pass `mode` to `createGatewayReactRoot` or `SmithersGatewayProvider` for multiplayer.
 
 ## Collections
 
@@ -59,7 +59,7 @@ collections.memoryFacts()
 collections.crons()
 ```
 
-Large node blobs stay fetch-on-demand through `useGatewayNodeOutput` and `useGatewayRpc("getNodeDiff", ...)`; they are not collection rows.
+Large node blobs stay fetch-on-demand via `useGatewayNodeOutput` and `useGatewayRpc("getNodeDiff", ...)`, not collection rows.
 
 ## Local Provider
 
@@ -74,16 +74,16 @@ GET  /v1/api/approvals
 GET  /v1/api/stream
 ```
 
-`GET /v1/api/stream` is an SSE invalidation feed. Change frames look like this:
+`GET /v1/api/stream` is an SSE invalidation feed; change frames look like this:
 
 ```txt
 event: change
 data: {"seq":42,"collections":["runs","events"]}
 ```
 
-The client invalidates matching TanStack Query keys, and QueryCollection refetches from `/v1/api/*`. The stream coalesces bursts, sends heartbeats, reconnects with backoff, and uses bounded buffers. When the ring cannot replay a missed sequence, it sends a reset event and the client invalidates every collection key.
+The client invalidates matching TanStack Query keys and QueryCollection refetches from `/v1/api/*`; the stream coalesces bursts, sends heartbeats, reconnects with backoff, and bounds its buffers, sending a reset event (which invalidates every collection key) when the ring can't replay a missed sequence.
 
-SQLite and embedded PGlite mutating routes return `{ seq }`. That `seq` is the invalidation sequence that confirms the local optimistic write.
+SQLite and embedded PGlite mutating routes return `{ seq }`, the invalidation sequence that confirms the local optimistic write.
 
 ## Multiplayer Provider
 
@@ -93,9 +93,9 @@ Multiplayer workspaces use the official ElectricCollection provider through `@sm
 ElectricCollection -> electricBaseUrl/v1/shape -> electric-proxy -> Postgres
 ```
 
-The proxy owns shape scoping, auth, and rate limits. The client passes the catalog shape name and the same auth token it uses for the domain API. Rows from Electric are mapped from snake_case Postgres columns to the same camelCase row types returned by REST, so React components and `useLiveQuery` code do not branch by mode.
+The proxy owns shape scoping, auth, and rate limits; the client passes the catalog shape name and its domain-API auth token. Electric rows map snake_case Postgres columns to the same camelCase types REST returns, so React components and `useLiveQuery` code never branch on mode.
 
-Writes still go through `/v1/api/*`. Postgres mutating routes return `{ txid }`, captured inside the write transaction with `pg_current_xact_id()::xid::text`. Electric transaction matching uses that txid to confirm optimistic state once the shape stream catches up.
+Writes still go through `/v1/api/*`: Postgres mutating routes return `{ txid }`, captured inside the write transaction with `pg_current_xact_id()::xid::text`, which Electric transaction matching uses to confirm optimistic state once the shape stream catches up.
 
 ## React Hooks
 
@@ -111,7 +111,7 @@ useGatewayActions()
 useGatewayConnectionStatus()
 ```
 
-Use these hooks for normal workflow UIs. Use `useSmithersCollections()` when you need a custom collection query:
+Use these hooks for workflow UIs, and `useSmithersCollections()` for a custom collection query:
 
 ```tsx
 import { useLiveQuery } from "@tanstack/react-db";
@@ -142,4 +142,4 @@ await collections.runs().insert({
 });
 ```
 
-Local mode confirms via SSE invalidation and refetch. Multiplayer mode confirms through Electric transaction matching with the returned `txid`. Shape streams are read paths only.
+Confirmation follows the paths above: SSE invalidation for local mode, Electric transaction matching on `txid` for multiplayer. Shape streams are read-only.

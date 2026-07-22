@@ -3,10 +3,10 @@ title: MessageResponse
 description: Render assistant Markdown safely while content is still streaming.
 ---
 
-`MessageResponse` is the assistant-message content renderer from
-`smithers-orchestrator/ui`. It uses the dependency-free `Markdown` primitive,
-keeps incomplete fences and inline markers stable between stream chunks, and
-adds an `aria-hidden` caret while `streaming` is true.
+`MessageResponse` (`smithers-orchestrator/ui`) renders assistant Markdown via
+the dependency-free `Markdown` primitive, keeping incomplete fences and
+inline markers stable across stream chunks, and shows an `aria-hidden` caret
+while `streaming` is true.
 
 ```tsx
 import { MessageResponse } from "smithers-orchestrator/ui";
@@ -18,10 +18,9 @@ import { MessageResponse } from "smithers-orchestrator/ui";
 />
 ```
 
-`onLinkClick` receives only sanitized scheme-less, `http`, `https`, or
-`mailto` hrefs after default navigation has been prevented. Other schemes are
-never passed to the callback. The caret stops blinking under reduced-motion
-preferences.
+`onLinkClick` receives only sanitized `http`, `https`, `mailto`, or
+scheme-less hrefs, once default navigation is prevented; other schemes never
+reach it. The caret stops blinking under reduced-motion preferences.
 
 ## Props
 

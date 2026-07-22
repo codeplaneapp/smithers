@@ -5,11 +5,10 @@ description: Recursive tiered delegation with risk probes, per-node backpressure
 
 `<DelegationChain>` is the composite behind the
 [`delegation-chain` workflow](/workflows/delegation-chain): a `<Sequence>` of
-seven phases running in `<Parallel>` with a live-edit signal listener. Every
-phase is reactive: it re-derives its slice of the delegation tree from the
-`dc*` output rows on each render, so fan-out materializes level by level as
-rows land, and user edits or probe findings replan the affected subtree
-without restarting anything.
+seven phases in `<Parallel>` with a live-edit signal listener. Each phase
+re-derives its slice of the delegation tree from the `dc*` output rows on
+every render, so fan-out materializes level by level, and edits or probe
+findings replan the affected subtree without a restart.
 
 ```ts
 // Props
@@ -66,16 +65,16 @@ export default smithers((ctx) => (
 ```
 
 Register `delegationSchemas` in `createSmithers` and pass the matching
-`outputs` subset. Tiers are labels only; missing tiers fall back to the
-nearest configured tier in `tierOrder`. When `budget.maxMinutes` is set the
-whole chain is wrapped in `<Aspects>` with a wall-clock `latencySlo`; dollar
-budgets are enforced by per-leaf guard tasks over rolled-up `dcExec` actuals
-(hard error over the limit, warning row at 80%).
+`outputs` subset. Tiers are labels only: missing ones fall back to the
+nearest configured tier in `tierOrder`. Setting `budget.maxMinutes` wraps the
+chain in `<Aspects>` with a wall-clock `latencySlo`; dollar budgets are
+enforced by per-leaf guard tasks over rolled-up `dcExec` actuals (hard error
+over the limit, warning row at 80%).
 
 ## Phase composites
 
 Each phase is exported separately for standalone use and takes
-`DelegationSharedProps` (plus the extras noted):
+`DelegationSharedProps` plus the extras noted:
 
 | Component | Phase | Extra props |
 | --- | --- | --- |
@@ -85,43 +84,43 @@ Each phase is exported separately for standalone use and takes
 | `<BackpressurePlanning>` | Every node declares gates and dependencies before execution | none |
 | `<DeriskLoop>` | Risk probes, findings to the nearest parent, replan/reaffirm cascades | none |
 | `<DelegationExecution>` | Dependency-ordered leaf pipelines: exec, gates, approvals, developer previews, budget guards | `maxAttempts` |
-| `<DelegationScoring>` | Run-level score digest plus the satisfaction poll | none |
+| `<DelegationScoring>` | Run-level score digest plus satisfaction poll | none |
 | `<DelegationEditListener>` | Re-arming `dc-edit` signal wait feeding the derisk loop | `until?`, `maxEdits` |
 
 ## Output tables
 
 `delegationSchemas` (from `smithers-orchestrator`) registers every table;
-`DelegationOutputs` is the matching prop shape. `dcApproval` is only needed
-with an `approvalPolicy`, `dcBudget` only with a `budget`, and `dcScore` only
-with run-level `scorers`.
+`DelegationOutputs` is the matching prop shape. `dcApproval` needs an
+`approvalPolicy`, `dcBudget` needs a `budget`, and `dcScore` needs run-level
+`scorers`.
 
 | Table | One row per |
 | --- | --- |
 | `dcGoal` | Refined goal (prompt, assumptions, questions asked) |
 | `dcQuestion` | Rendered question form / resolved answer |
-| `dcForecast` | The goal agent's upfront question batch (internal) |
-| `dcGoalApproval` | The human's `{ approved, refinedPrompt }` decision |
-| `dcPlan` | A delegating node's plan: children, risks, estimates; replans append superseding rows |
-| `dcPreview` | A leaf's never-executed expected output |
-| `dcGates` | A node's declared gates and logical dependencies |
-| `dcProbe` | A probe's finding (`planImpact`: changes / confirms / none) |
-| `dcReplan` | A replan decision (`invalidated` or `reaffirmed`) with its trigger |
-| `dcExec` | One execution attempt, with best-effort `actual` usage and the measured `commitRange` |
-| `dcReview` | A review/check gate verdict for one attempt |
-| `dcDevPreview` | A developer-preview build (`builtOk` is required to pass) |
-| `dcApproval` | An approval-gate decision |
-| `dcEdit` | A live user edit (signal payload) |
-| `dcSkip` | The skip-previews signal payload |
-| `dcPoll` | The end-of-run poll answers |
-| `dcBudget` | A budget-guard checkpoint (`ok` or `warn`) |
-| `dcScore` | The run-level scoring digest |
+| `dcForecast` | Goal agent's upfront question batch (internal) |
+| `dcGoalApproval` | Human's `{ approved, refinedPrompt }` decision |
+| `dcPlan` | Delegating node's plan: children, risks, estimates; replans append superseding rows |
+| `dcPreview` | Leaf's never-executed expected output |
+| `dcGates` | Node's declared gates and logical dependencies |
+| `dcProbe` | Probe's finding (`planImpact`: changes / confirms / none) |
+| `dcReplan` | Replan decision (`invalidated` or `reaffirmed`) with its trigger |
+| `dcExec` | One execution attempt, with best-effort `actual` usage and measured `commitRange` |
+| `dcReview` | Review/check gate verdict for one attempt |
+| `dcDevPreview` | Developer-preview build (`builtOk` required to pass) |
+| `dcApproval` | Approval-gate decision |
+| `dcEdit` | Live user edit (signal payload) |
+| `dcSkip` | Skip-previews signal payload |
+| `dcPoll` | End-of-run poll answers |
+| `dcBudget` | Budget-guard checkpoint (`ok` or `warn`) |
+| `dcScore` | Run-level scoring digest |
 
 ## Physical node ids
 
-Every task id follows `dc:<logicalId>:<phase>` (the `dc` prefix is
-`idPrefix`). Logical ids are `/`-separated paths (`root/core/reducer`); in
-physical ids the `/` is encoded as `:` because node ids only allow
-`[a-zA-Z0-9:_-]`. Row `logicalId` fields keep the `/` form. Phases:
+Every task id follows `dc:<logicalId>:<phase>` (`idPrefix` defaults to `dc`).
+Logical ids are `/`-separated paths (`root/core/reducer`); physical ids
+encode the `/` as `:` because node ids only allow `[a-zA-Z0-9:_-]`. Row
+`logicalId` fields keep the `/` form. Phases:
 
 - Goal: `dc:goal:forecast`, `dc:goal:forms:question-<seq>`,
   `dc:goal:question-<seq>` (the durable human answer),
@@ -142,8 +141,8 @@ Two fixed durable signal names (exported as `DC_EDIT_SIGNAL` and
 `DC_SKIP_PREVIEW_SIGNAL`):
 
 - `dc-edit` with payload `{ editId, logicalId, editedOutput, note? }`. Each
-  delivered edit writes a `dcEdit` row that the derisk loop treats exactly
-  like a plan-changing probe finding.
+  delivered edit writes a `dcEdit` row that the derisk loop treats like a
+  plan-changing probe finding.
 - `dc-skip-preview` with payload `{ skipped: true }`. Once a `dcSkip` row
   exists, no further preview tasks mount.
 
@@ -159,32 +158,32 @@ type Gate =
   | { method: "preview"; kind: "app" | "terminal" | "api" | "throwaway-ui" | "slideshow"; brief: string };
 ```
 
-Review gates receive the node's output and its `dcExec.commitRange` values
-with instructions to inspect the commits themselves; chunk-level reviews get
-the union of their subtree's ranges (exec agents are wrapped with the
-exported `withCommitRange`, which measures the working-copy commit before and
-after the attempt, jj first with a git fallback). `preview` gates build a
-developer preview after execution; `builtOk: false` fails the attempt like a
-failed review. The gates prompt requires the root node to declare a
-`slideshow` preview, so a run always ends showable.
+Review gates receive the node's output and `dcExec.commitRange`, with
+instructions to inspect the commits themselves; chunk-level reviews get the
+union of their subtree's ranges (exec agents wrap with the exported
+`withCommitRange`, measuring the working-copy commit before and after the
+attempt: jj first, git fallback). `preview` gates build a developer preview
+after execution; `builtOk: false` fails the attempt like a failed review. The
+gates prompt requires the root node to declare a `slideshow` preview, so a
+run always ends showable.
 
 ## UI side
 
 `smithers-orchestrator/gateway-react` exports the matching read model:
 [`useDelegationChain`](/reference/gateway-react#usedelegationchain) folds a
 run's `dc*` rows into a `DelegationGraph` (nodes with status, versions,
-attention rollups, budget rollup, phase) and returns the `submitEdit`,
-`skipPreviews`, `answerHuman`, and `submitPoll` actions. The pure reducer
+attention rollups, budget rollup, phase) and returns `submitEdit`,
+`skipPreviews`, `answerHuman`, and `submitPoll`. The pure reducer
 `foldDelegation` is exported for tests and non-React use.
 
 ## Notes
 
 - Approval gates require `outputs.dcApproval`; `<DelegationExecution>` throws
   `INVALID_INPUT` if the policy produced approval gates without it.
-- `dcPlan.orchestration` (`"tasks" | "workflow"`) is reserved for planned
+- `dcPlan.orchestration` (`"tasks" | "workflow"`) is reserved for
   higher-order orchestration (a node authoring its own workflow as its
-  execution strategy); it is accepted and ignored today. The fold store behind
+  execution strategy); accepted but ignored today. The fold store behind
   `useDelegationChain` runs on Effect.ts behind the frozen hook signature.
 - Scoring wiring: `scorers.exec` / `scorers.review` ride the exec and review
   tasks; `scorers.run` rides the digest task. The delegation scorers live in
-  `smithers-orchestrator/scorers` (see the [scorer reference](/reference/scorers)).
+  `smithers-orchestrator/scorers` (see [scorer reference](/reference/scorers)).

@@ -3,9 +3,7 @@ title: tickets-create
 description: Break a request into multiple implementable tickets.
 ---
 
-`tickets-create` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
-
-`tickets-create` decomposes a broad request into a set of tickets. Each ticket includes title, description, and acceptance criteria.
+`tickets-create` is an archived example, not installed by `init`: copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. It decomposes a broad request into a set of tickets, each with a title, description, and acceptance criteria.
 
 ```bash
 bunx smithers-orchestrator workflow run tickets-create --prompt "Build the billing admin workflow"
@@ -26,7 +24,7 @@ bunx smithers-orchestrator workflow run tickets-create --prompt "Build the billi
 1. Run `research` or `grill-me` for context.
 2. Run `tickets-create` to split the work.
 3. Copy the generated ticket Markdown into `.smithers/tickets/` before running `kanban`.
-4. Run `kanban` to implement them in parallel worktrees.
+4. Run [`kanban`](/workflows/kanban) to implement them in parallel worktrees.
 
 ## Use it when
 
@@ -39,4 +37,4 @@ bunx smithers-orchestrator workflow run tickets-create --prompt "Build the billi
 
 ## Resume & retry
 
-`tickets-create` returns ticket Markdown in the run output. Copy the tickets into `.smithers/tickets/` before running [`kanban`](/workflows/kanban). Runs are durable and resume with `up --resume`.
+`tickets-create` returns ticket Markdown in the run output. Runs are durable and resume with `up --resume`.

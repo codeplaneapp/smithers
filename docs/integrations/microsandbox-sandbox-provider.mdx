@@ -8,13 +8,11 @@ description: Run a Smithers <Sandbox> child workflow in a local Microsandbox mic
 `@smithers-orchestrator/microsandbox` is a first-class Smithers
 `SandboxProvider` backed by the open source
 [Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
-boots a local microVM with its own Linux kernel, writes the Smithers request
-through the host-to-guest filesystem channel, executes the entry command, and
-reads the result back through the same channel. No daemon or hosted sandbox
-service is required.
+boots a local microVM with its own Linux kernel, exchanges the Smithers
+request and result over a host-to-guest filesystem channel, and runs the
+entry command in between. No daemon or hosted sandbox service is required.
 
-The provider id is `microsandbox` (exported as
-`MICROSANDBOX_PROVIDER_ID`).
+The provider id is `microsandbox` (exported as `MICROSANDBOX_PROVIDER_ID`).
 
 ```ts
 import {
@@ -24,20 +22,19 @@ import {
 } from "smithers-orchestrator/microsandbox";
 ```
 
-Microsandbox currently labels the runtime beta. Pin and test the SDK version you
-deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization:
-Apple Silicon on macOS, KVM on Linux, or Windows Hypervisor Platform on
-Windows. Run `msb doctor` on every host before accepting work.
-
-Microsandbox `0.6.6` snapshots contain disk state, require a stopped sandbox,
-and cold-boot when restored. They do not preserve memory, running processes,
-sockets, or device state. A fleet integration must not advertise a sticky
-workspace as memory-preserving suspend, instant resume, or a live fork.
+Microsandbox labels the runtime beta: pin and test the SDK version you
+deploy. The `0.6.6` SDK requires Node 22 or Bun plus hardware virtualization
+(Apple Silicon on macOS, KVM on Linux, Windows Hypervisor Platform on
+Windows); run `msb doctor` on every host before accepting work. Its
+snapshots contain disk state only: they require a stopped sandbox and
+cold-boot on restore, preserving no memory, running processes, sockets, or
+device state. Don't advertise a sticky workspace as memory-preserving
+suspend, instant resume, or a live fork.
 
 ## Install
 
-The provider package declares `microsandbox` as an optional dependency and
-imports it only when a session starts. Install it directly if your package
+The provider package declares `microsandbox` as an optional dependency,
+imported only when a session starts. Install it directly if your package
 manager omits optional dependencies:
 
 ```sh
@@ -45,7 +42,7 @@ npm install microsandbox@0.6.6
 ```
 
 The SDK downloads or resolves its platform runtime and pulls the selected OCI
-image on first use. Later sandboxes reuse the local image cache.
+image on first use; later sandboxes reuse the local image cache.
 
 ## Usage
 
@@ -91,26 +88,23 @@ const unregister = registerMicrosandboxSandboxProvider({
 // <Sandbox provider="microsandbox" workflow={child} output={outputs.result} />
 ```
 
-The default image is `oven/bun:1`. The default entry command is
-`bun /workspace/run-smithers-sandbox.js`. Put that runner in the image or
+Default image: `oven/bun:1`. Default entry command:
+`bun /workspace/run-smithers-sandbox.js`; put that runner in the image or
 provide it with `setupFiles`. A factory-level `command` wins over the
-`<Sandbox command>` prop. Without either, the default is used.
+`<Sandbox command>` prop; without either, the default runs.
 
 The provider creates its workdir through `sandbox.fs()` after boot and passes
-that path to each command. It does not call `builder.workdir()`, which would
-require the directory to exist in the image before the provider can create it.
+that path to each command, not through `builder.workdir()`, which would
+require the directory to already exist in the image.
 
 ## Smithers prop mapping
-
-The adapter maps the provider-neutral `<Sandbox>` controls onto the
-Microsandbox builder and execution APIs.
 
 | Smithers control | Microsandbox behavior |
 |---|---|
 | `image` | OCI image, local rootfs directory, or disk image passed to `builder.image()` |
 | `env` | Per-command environment, merged below provider `env` and egress variables |
-| `allowNetwork={false}` | `builder.disableNetwork()`, so no guest network interface is created |
-| `allowNetwork` | Microsandbox's default public-only policy, which blocks private and metadata destinations |
+| `allowNetwork={false}` | `builder.disableNetwork()`: no guest network interface is created |
+| `allowNetwork` | Microsandbox's default public-only policy: blocks private and metadata destinations |
 | `ports` | TCP host-to-guest mappings through `builder.port()`; requires `allowNetwork` |
 | `volumes` | Host bind mounts through `builder.volume(...bind...)`; read-only unless `readonly: false` |
 | `cpuLimit` | Rounded up to a whole vCPU and passed to `builder.cpus()` |
@@ -123,51 +117,49 @@ Microsandbox builder and execution APIs.
 Provider options can also set `cpus`, `maxCpus`, `memoryMib`, `maxMemoryMib`,
 `maxDurationSecs`, `idleTimeoutSecs`, `security`, `labels`, `scripts`,
 `setupFiles`, `pullPolicy`, and `sandboxName`. `configureBuilder(builder,
-request)` is the escape hatch for Microsandbox features that Smithers does not
-model directly, including custom network policies, secret substitution,
-registry authentication, rootfs patches, and named or tmpfs volumes.
+request)` is the escape hatch for Microsandbox features Smithers does not
+model directly: custom network policies, secret substitution, registry
+authentication, rootfs patches, and named or tmpfs volumes.
 
 ## Request and result contract
 
-The shared provider kit writes the request JSON below the workdir and gives the
-entry command two env vars:
+The shared kit writes the request JSON below the workdir and gives the entry
+command two env vars:
 
 - `SMITHERS_SANDBOX_REQUEST_PATH`: request JSON to read.
 - `SMITHERS_SANDBOX_RESULT_PATH`: result JSON to write.
 
-The entry command may print the result JSON to stdout or write it to the result
-path. The result is `{ bundlePath }` or a structured `{ status,
+The entry command may print the result JSON to stdout or write it to the
+result path, either `{ bundlePath }` or a structured `{ status,
 output|outputs, patches?, diffBundle?, runId? }`. The provider fills
-`remoteRunId`, `workspaceId`, and `containerId` with the Microsandbox name when
-the entry omits them.
+`remoteRunId`, `workspaceId`, and `containerId` with the Microsandbox name
+when the entry omits them.
 
 Parent directories are created through `sandbox.fs()` before files are
-written. Command execution uses `execStreamWith()` so an abort signal or
-timeout can kill the guest process instead of leaving it running after the
-Smithers task ends.
+written. Command execution uses `execStreamWith()`, so an abort signal or
+timeout kills the guest process instead of leaving it running past task end.
 
 ## Network and secrets
 
-Microsandbox runs locally, but its network policy is host-controlled. With
-`allowNetwork` unset or false, Smithers disables the interface. With
-`allowNetwork` true, Microsandbox allows public destinations and DNS while
-blocking private, link-local, host, and cloud metadata destinations by
-default.
+Microsandbox runs locally, but its network policy is host-controlled:
+`allowNetwork` unset or false disables the interface; true allows public
+destinations and DNS while blocking private, link-local, host, and cloud
+metadata destinations by default.
 
 The Smithers provider kit still projects `egress` proxy variables and uploads
-an inline CA certificate into the guest. Use `configureBuilder` with
-Microsandbox's `NetworkPolicy` and secret APIs when you need destination-level
+an inline CA certificate into the guest; use `configureBuilder` with
+Microsandbox's `NetworkPolicy` and secret APIs for destination-level
 allowlists or host-side secret substitution.
 
-There is an important `0.6.6` limitation for production secret handling. The
-raw Go SDK `Secret.Env` value is persisted in runtime state, while the declared
-store-backed secret source is not implemented by the runtime. Do not assume
-that selecting a secret API alone keeps plaintext out of provider state. Use a
-nonpersisting, operation-scoped delivery path, and test guest disk, snapshots,
-logs, errors, command arguments, and runtime metadata with a sentinel value.
-When a credential needs method/path policy, signing, audit, approval, MCP
-policy, rate limiting, or response filtering, give the guest a short-lived
-credential-proxy capability instead of the upstream secret.
+Important `0.6.6` limitation for production secrets: the raw Go SDK
+`Secret.Env` value is persisted in runtime state, while the declared
+store-backed secret source is unimplemented. Selecting a secret API alone
+doesn't keep plaintext out of provider state. Use a nonpersisting, operation-scoped
+delivery path, and test guest disk, snapshots, logs, errors, command
+arguments, and runtime metadata with a sentinel value. When a credential needs
+method/path policy, signing, audit, approval, MCP policy, rate limiting, or
+response filtering, give the guest a short-lived credential-proxy capability
+instead of the upstream secret.
 
 Bind mounts deliberately expose host paths to the guest. Keep them read-only
 unless the workflow must write, and never mount a credential directory or the
@@ -180,22 +172,22 @@ Microsandbox state directory into an untrusted workload.
 - An ephemeral sandbox is stopped and its state is removed.
 - A sticky workspace is stopped but kept on disk, then reopened by
   `workspace.name` on the next run.
-- `cleanup: "keep"` creates or starts the sandbox detached and leaves it
-  running after the provider returns. Set `idleTimeoutSecs` or
-  `maxDurationSecs` so a crashed orchestrator cannot leave compute running
+- `cleanup: "keep"` creates or starts the sandbox detached, leaving it
+  running after the provider returns; set `idleTimeoutSecs` or
+  `maxDurationSecs` so a crashed orchestrator can't leave compute running
   forever.
 
-Microsandbox is local infrastructure. Capacity, image cache, persisted
+Microsandbox is local infrastructure: capacity, image cache, persisted
 workspaces, logs, and the `~/.microsandbox` database live on the host. Running
-it as a fleet provider therefore requires host scheduling, admission control,
-state placement, generation fencing, snapshot export, authenticated streaming,
-and observability outside this adapter. Plue implements that remote fleet
-boundary separately; this package remains a local Smithers provider and does
-not make an arbitrary API pod a safe KVM host.
+it as a fleet provider requires host scheduling, admission control, state
+placement, generation fencing, snapshot export, authenticated streaming, and
+observability outside this adapter. Plue implements that remote fleet boundary
+separately; this package remains a local Smithers provider and does not make
+an arbitrary API pod a safe KVM host.
 
 ## SDK subset used
 
-The adapter uses the published TypeScript SDK surface:
+Published TypeScript SDK surface used:
 
 - `Sandbox.builder(name)` with image or snapshot, resource, network, mount,
   lifecycle, label, and script setters;
@@ -208,5 +200,5 @@ The adapter uses the published TypeScript SDK surface:
 
 The repository-only fixture at
 `packages/microsandbox/tests/fixtures/createMockMicrosandboxEnvironment.js`
-supplies an in-memory SDK double for package tests. It is not part of the
-package's public exports and requires no hypervisor, image pull, or credentials.
+supplies an in-memory SDK double for package tests, is not part of the
+public exports, and requires no hypervisor, image pull, or credentials.

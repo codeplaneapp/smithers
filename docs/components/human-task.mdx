@@ -62,6 +62,6 @@ export default smithers((ctx) => {
 
 ## Notes
 
-- The operating agent submits the answer via `bunx smithers-orchestrator human answer <requestId> --value '<json>'`: relay the prompt to the human in conversation, collect their answer, and run the command yourself; never ask the human to run it. Find the requestId with `bunx smithers-orchestrator human inbox`. The `bunx smithers-orchestrator approve` command is for `<Approval>` components, not `<HumanTask>`.
+- The operating agent submits the answer via `bunx smithers-orchestrator human answer <requestId> --value '<json>'` (find the requestId with `human inbox`). Relay the prompt to the human, collect their answer, and run the command yourself, never the human. `bunx smithers-orchestrator approve` is for `<Approval>`, not `<HumanTask>`.
 - Failed JSON re-prompts up to `maxAttempts` with zero backoff.
 - Same durable deferred mechanism as `<Approval>`; survives restarts.

@@ -3,9 +3,9 @@ title: debug
 description: Reproduce and fix a reported bug with validation.
 ---
 
-`debug` is an archived example and is not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. Once installed, run it with the command below.
+`debug` is an archived example, not installed by `init`. Copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent.
 
-`debug` reuses the same `ValidationLoop` component as `implement`, but with a bug-focused default prompt. Unlike `implement`, `debug` does not pass early-exit (`done`) or prior-attempt feedback to the loop, so it runs all iterations (up to `maxIterations` = 3) rather than stopping as soon as validation passes and a reviewer approves.
+`debug` reuses `implement`'s `ValidationLoop` component with a bug-focused default prompt, but skips early-exit (`done`) and prior-attempt feedback, so it always runs all `maxIterations` (up to 3) instead of stopping once validation passes and a reviewer approves.
 
 ```bash
 bunx smithers-orchestrator workflow run debug --prompt "Fix the intermittent gateway reconnect failure"
@@ -23,12 +23,12 @@ bunx smithers-orchestrator workflow run debug --prompt "Fix the intermittent gat
 
 ## How It Runs
 
-1. Attempts to understand and reproduce the bug.
+1. Reproduces the bug.
 2. Applies a targeted fix.
 3. Validates the result.
-4. Reviews the fix and re-runs the implement/validate/review cycle using `ValidationLoop` for a fixed number of iterations (up to 3). Unlike `implement`, `debug` does not stop early when validation passes; it runs all iterations and returns the last attempt.
+4. Reviews the fix, repeating the implement/validate/review cycle via `ValidationLoop` for all `maxIterations` (up to 3).
 
-After the fix is applied, run `improve-test-coverage` to add a regression test, then `review` to confirm the change is production-ready.
+After the fix lands, run `improve-test-coverage` for a regression test, then `review` to confirm production-readiness.
 
 ## Output Shape
 
@@ -46,4 +46,4 @@ After the fix is applied, run `improve-test-coverage` to add a regression test, 
 
 ## Resume & retry
 
-Runs are durable and resume with `up --resume`. Unlike `implement`, `debug` does not stop early; it runs all iterations (up to 3) and returns the last attempt.
+Runs are durable and resume with `up --resume`.

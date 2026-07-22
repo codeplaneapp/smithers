@@ -45,7 +45,7 @@ type EscalationLevel = {
 ## Notes
 
 - Each level uses `continueOnFail`; failures propagate to the next level.
-- `escalateIf` is evaluated at render time. The chain re-renders reactively as each level's output becomes available and calls the predicate to decide whether the next level mounts.
+- `escalateIf` evaluates at render time: as each level's output becomes available, the chain re-renders and calls the predicate to decide whether the next level mounts.
 
 {/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
 ## Source

@@ -3,7 +3,7 @@ title: <Sandbox>
 description: Run a child workflow through an injectable sandbox provider and collect outputs, artifacts, and reviewed file changes.
 ---
 
-`<Sandbox>` is a task boundary for work that should execute outside the parent task process. The public component is provider-first: pass an injectable provider object or a registered provider id. `runtime` remains only for the built-in legacy local transports.
+`<Sandbox>` is a task boundary for work that runs outside the parent task process. It's provider-first: pass an injectable provider object or a registered provider id; `runtime` covers only the built-in legacy local transports.
 
 ```ts
 import { Sandbox } from "smithers-orchestrator";
@@ -62,14 +62,13 @@ type SandboxProps = {
 };
 ```
 
-The sandbox provider contract types are public exports from
-`"smithers-orchestrator/sandbox"`: `SandboxProvider`,
-`SandboxProviderRequest`, `SandboxProviderResult`, and
-`ExecuteSandboxOptions`. Import them with `import type` when writing adapters.
+The sandbox provider contract types (`SandboxProvider`, `SandboxProviderRequest`,
+`SandboxProviderResult`, `ExecuteSandboxOptions`) are public exports from
+`"smithers-orchestrator/sandbox"`. Import them with `import type` when writing adapters.
 
 ## Egress controls
 
-Use `egress` when the sandbox itself should own outbound-network configuration. Smithers does not mutate the parent harness environment for this path. It serializes the egress contract into the sandbox request and passes it to the selected provider or local transport.
+Use `egress` when the sandbox itself should own outbound-network configuration. Smithers doesn't mutate the parent harness environment for this path; it serializes the egress contract into the request and passes it to the selected provider or local transport.
 
 ```tsx
 <Sandbox
@@ -94,7 +93,7 @@ Use `egress` when the sandbox itself should own outbound-network configuration. 
 />
 ```
 
-Provider-backed sandboxes receive the normalized contract as `request.egress`, and the raw serializable value remains in `request.config.egress` for adapters that need provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core does not hardcode an iron-proxy sandbox adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
+Provider-backed sandboxes receive the normalized contract as `request.egress`; the raw serializable value stays in `request.config.egress` for adapters needing provider-specific fields. The JSX prop is typed `unknown`; at execution time Smithers accepts a provider object directly or a string id only after registering a provider with `registerSandboxProvider({ id, run })`. The `unknown` type lets provider packages supply their own shapes, so TypeScript will not reject a bad provider at the JSX call site; invalid provider values fail during execution with `INVALID_INPUT`. Smithers core doesn't hardcode an iron-proxy adapter. Local transports merge the generated proxy environment into the sandbox handle environment, after `env`, so `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS` are visible inside the sandbox process.
 
 When `caCertPem` is provided, Smithers writes it into the request bundle at `.smithers/egress/ca.crt` and points local transports at `/workspace/.smithers/egress/ca.crt`. If the CA is already installed by the sandbox image or sidecar, use `caCertPath` instead. Persisted sandbox config redacts egress env values, CA PEM, and secret-binding entries.
 
@@ -132,9 +131,9 @@ const provider = {
 </Workflow>
 ```
 
-`workflow` takes a `SmithersWorkflow`, the same value a workflow file's default
-export holds. `smithers((ctx) => ...)` returns a `SmithersWorkflow`, so the child
-is a normal `createSmithers` module you import; no extra wrapping is needed:
+`workflow` takes a `SmithersWorkflow`: the same value a workflow file's default
+export holds. `smithers((ctx) => ...)` returns one, so the child is just a
+`createSmithers` module you import, no extra wrapping needed:
 
 ```tsx
 // child workflow, defined and exported like any other
@@ -152,17 +151,16 @@ export const generateCodeWorkflow = child.smithers((ctx) => (
 ));
 ```
 
-The provider's `run()` returns the result your parent receives. The minimal
-structured shape is `{ status: "finished", output, remoteRunId?, workspaceId? }`,
-where `output` matches the `output` schema (`outputs.result` above). Add a
-`diffBundle` when the sandbox changed files (see [Result bundles](#result-bundles)).
+The provider's `run()` result is what the parent receives: minimally
+`{ status: "finished", output, remoteRunId?, workspaceId? }`, where `output`
+matches the `output` schema (`outputs.result` above). Add `diffBundle` when the
+sandbox changed files (see [Result bundles](#result-bundles)).
 
 ## Complete one-file provider and child workflow
 
-This is the smallest complete pattern: a concrete provider object,
-`allowNetwork={true}`, and a child workflow in the same file. Real providers
-usually create a VM or container, but they still return the same structured
-`SandboxProviderResult`.
+The smallest complete pattern: a concrete provider object, `allowNetwork={true}`,
+and a child workflow in one file. Real providers usually create a VM or
+container but return the same structured `SandboxProviderResult`.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -227,12 +225,12 @@ export default parent.smithers((ctx) => (
 
 ## Execution model
 
-1. Smithers renders `<Sandbox>` as one scheduler task. Children do not become parent-run tasks.
+1. Smithers renders `<Sandbox>` as one scheduler task; children don't become parent-run tasks.
 2. At execution time Smithers writes a request bundle under `.smithers/sandboxes/<run>/<sandbox>/request-bundle`.
-3. A provider receives the request, runs work remotely, and returns either a local bundle path or a structured result.
+3. A provider receives the request, runs work remotely, and returns a local bundle path or a structured result.
 4. Smithers validates the result bundle, records sandbox lifecycle events, enforces diff review policy, applies accepted `diffBundle`s, and returns `outputs` to the parent task output table.
 
-The provider contract receives the child workflow, input, root directory, request/result bundle paths, limits, abort signal, and a heartbeat callback:
+Providers receive a `SandboxProviderRequest` and return a `SandboxProviderResult`:
 
 ```ts
 type SandboxProviderRequest = {
@@ -306,22 +304,18 @@ return {
 
 Use the structured-result form when your adapter can return the output JSON and
 optional `diffBundle` directly. Use `bundlePath` when the remote side already
-wrote a full Smithers result bundle, when you need to preserve larger artifacts,
-or when the provider owns bundle materialization.
+wrote a full Smithers result bundle, you need to preserve larger artifacts, or
+the provider owns bundle materialization.
 
 Bundle limits are enforced before the result is accepted: 100 MB total, 5 MB manifest file (README.md), 1,000 patch files, bounded JSON output, and no path traversal or symlinks in bundle paths.
 
 ## Diff review
 
-`reviewDiffs` defaults to `true`. If the sandbox returns patch files or a `diffBundle`, Smithers records `SandboxDiffReviewRequested`.
-
-When `autoAcceptDiffs` is false, changed bundles fail closed until a review path accepts them. When `autoAcceptDiffs` is true, or `reviewDiffs` is false, Smithers applies `diffBundle` through the engine diff-bundle applier. Legacy patch files are still collected and review-gated, but the apply path is `diffBundle`.
+`reviewDiffs` defaults to `true`. If the sandbox returns patch files or a `diffBundle`, Smithers records `SandboxDiffReviewRequested`. When `autoAcceptDiffs` is false, changed bundles fail closed until reviewed; when it's true, or `reviewDiffs` is false, Smithers applies `diffBundle` via the engine diff-bundle applier. Legacy patch files are still collected and review-gated, but the apply path is `diffBundle`.
 
 ## Nested sandboxes
 
-Nested sandbox execution is disabled by default. A sandbox running inside another sandbox must set `allowNested`.
-
-Use nesting only when the provider and diff policy are designed for it. The hard cases are:
+Nested sandbox execution is disabled by default (a sandbox running inside another must set `allowNested`). Use it only when the provider and diff policy are designed for nesting. Hard cases:
 
 - Diff base conflicts: an inner sandbox can generate a `diffBundle` against a different base than the outer sandbox.
 - Cleanup ordering: an outer provider cleanup can delete the workspace before the inner provider finishes.
@@ -333,17 +327,15 @@ For most workflows, use sibling sandboxes under a `Parallel` or `MergeQueue` ins
 
 ## Built-in local transports
 
-When `provider` is omitted, Smithers uses the legacy local transport path. `runtime` may be `"bubblewrap"`, `"docker"`, or `"codeplane"`. `"cloudflare"` is provider-backed; use it with `createCloudflareSandboxProvider()` from `smithers-orchestrator/cloudflare`. If `runtime` is omitted, the local path defaults to `"bubblewrap"`.
-
-Unknown runtimes now fail closed. Docker is not silently replaced by bubblewrap when Docker is unavailable.
+When `provider` is omitted, Smithers uses the legacy local transport path: `runtime` is `"bubblewrap"` (the default), `"docker"`, or `"codeplane"`. `"cloudflare"` is provider-backed, via `createCloudflareSandboxProvider()` from `smithers-orchestrator/cloudflare`. Unknown runtimes fail closed; Docker is no longer silently replaced by bubblewrap when unavailable.
 
 ## First-class providers
 
-Smithers ships a local microVM provider and five cloud providers. Each is a
-separate optional package that maps the provider contract onto a runtime SDK, so
+Smithers ships a local microVM provider and five cloud providers, each a
+separate optional package mapping the provider contract onto a runtime SDK:
 `<Sandbox provider={createDaytonaSandboxProvider({...})}>` runs the child
 workflow on that backend with no runtime change. See
-[Sandbox Providers](/components/sandbox-providers) for the shared contract, the
+[Sandbox Providers](/components/sandbox-providers) for the shared contract,
 provider-kit, selection precedence, and a comparison table.
 
 - [Microsandbox Provider](/integrations/microsandbox-sandbox-provider): id `microsandbox` (local microVM)

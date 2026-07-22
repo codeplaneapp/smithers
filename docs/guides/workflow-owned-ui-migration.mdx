@@ -4,10 +4,10 @@ description: Move a Gateway UI from launcher registration or .smithers/ui auto-m
 ---
 
 Workflow UIs are now declared by the workflow itself with `<UI>`. The UI still
-runs in the browser, still talks to the Gateway through `gateway-react`, and can
-keep the same `.smithers/ui/<workflow>.tsx` file. The change is ownership: the
-workflow TSX names the UI entry, so any Gateway that registers the workflow can
-serve the right UI without out-of-band launcher code.
+runs in the browser, talks to the Gateway through `gateway-react`, and can
+keep the same `.smithers/ui/<workflow>.tsx` file: only ownership changes. The
+workflow TSX names the UI entry, so any Gateway that registers the workflow
+serves the right UI without out-of-band launcher code.
 
 ## Before
 
@@ -23,9 +23,8 @@ gateway.register("release", releaseWorkflow, {
 });
 ```
 
-Some workspaces relied on the old pack convention where a matching
-`.smithers/ui/release.tsx` file was auto-mounted. That convention is replaced by
-an explicit workflow declaration.
+The old pack convention auto-mounted a matching `.smithers/ui/release.tsx`
+file; an explicit workflow declaration replaces it.
 
 ## After
 
@@ -55,8 +54,8 @@ gateway.register("release", releaseWorkflow, {
 });
 ```
 
-`entry` paths are resolved relative to the workflow file when `entryFile` is
-provided. Existing self-mounting UI files that end with
+`entry` paths resolve relative to the workflow file when `entryFile` is
+provided; existing self-mounting UI files ending in
 `createGatewayReactRoot(<App />)` can stay as-is.
 
 ## Entry vs Source
@@ -67,7 +66,7 @@ Use `entry` for existing Gateway UI files:
 <UI entry="../ui/release.tsx" title="Release" />
 ```
 
-Use `source` for a browser-safe module that exports a React component. The
+Use `source` for a browser-safe module that exports a React component; the
 Gateway mounts it with React and passes `props` plus boot metadata:
 
 ```tsx
@@ -79,9 +78,8 @@ Gateway mounts it with React and passes `props` plus boot metadata:
 />
 ```
 
-Do not point `source` at the workflow module itself. Workflow modules often
-import Node/Bun APIs, agents, prompts, and database setup that cannot run in the
-browser.
+Don't point `source` at the workflow module itself: it often imports Node/Bun
+APIs, agents, prompts, and database setup that can't run in the browser.
 
 ## Checklist
 
@@ -89,10 +87,10 @@ browser.
 2. Add `<UI entry="../ui/<workflow>.tsx" title="..." />` as a direct child of
    the root `<Workflow>`.
 3. Remove `ui: { entry, title }` from `gateway.register`; keep `entryFile`.
-4. Leave the browser UI file in `.smithers/ui/<workflow>.tsx` unless you want to
-   convert it to the `source` component-export shape.
+4. Leave the browser UI file in `.smithers/ui/<workflow>.tsx` unless converting
+   it to the `source` component-export shape.
 5. Verify with `bunx smithers-orchestrator gateway` and open
    `/workflows/<workflow>` or run `bunx smithers-orchestrator ui RUN_ID`.
 
-The Gateway discovers `<UI>` during `register()`. The component renders nothing
-into the workflow graph and does not execute client code on the backend.
+The Gateway discovers `<UI>` during `register()`; the component renders nothing
+into the workflow graph and never executes client code on the backend.

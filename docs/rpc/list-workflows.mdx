@@ -13,4 +13,4 @@ apiVersion: v1
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, and `Internal`.
 
-Each summary includes `key`, `hasUi`, `uiPath`, and `system`. `readableName` and `description` are included when the workflow exposes them. System (internal plumbing) workflows are excluded by default; pass `filter.includeSystem: true` to include them, and the `system` boolean marks them.
+Each summary includes `key`, `hasUi`, `uiPath`, and `system`, plus `readableName`/`description` when the workflow exposes them. System (internal plumbing) workflows are excluded by default; pass `filter.includeSystem: true` to include them (the `system` boolean marks them).

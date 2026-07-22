@@ -11,6 +11,6 @@ apiVersion: v1
 - Request: `{ path }`
 - Response: `{ path, deleted }`
 
-Soft-deletes a work doc by `path`, stamping a `deleted_at_ms` tombstone rather than removing the row. The row survives so `listTickets` hides it without losing history, and the file-watcher never materializes a tombstone back to disk. An unknown or already-deleted `path` returns `TicketNotFound`.
+Soft-deletes a work doc by `path`: stamps a `deleted_at_ms` tombstone instead of removing the row, so `listTickets` hides it without losing history and the file-watcher never writes it back to disk. Unknown or already-deleted `path` returns `TicketNotFound`.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `TicketNotFound`, and `Internal`.

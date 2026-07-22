@@ -4,18 +4,17 @@ description: Scaffold and run a Smithers workflow in two commands.
 ---
 
 <Note>
-  The commands below are operated by the coding agent. If you are an agent, run
-  them yourself on the human's behalf; never hand them to the human. If you are
-  a human, ask your agent for the outcome and it runs these for you; the initial
-  `init` is the only command worth typing by hand before an agent is set up.
+  The coding agent runs these commands. Agents: run them on the human's behalf, never
+  hand them off. Humans: ask your agent for the outcome; it runs these for you. Exception:
+  type the initial `init` yourself, before an agent exists.
 </Note>
 
 <Steps>
   <Step title="Scaffold a project">
-    `init` creates `.smithers/` (the focused authoring workflows, DDD spec/UI closure, and agent config). Add
-    `--template <id>` when you want a create-workflow-driven starter request and
-    follow-up notes; it does not install an archived workflow. Run
-    `bunx smithers-orchestrator starters` to browse template IDs.
+    `init` creates `.smithers/`: authoring workflows, DDD spec/UI closure, and agent
+    config. `--template <id>` requests a create-workflow-driven starter with follow-up
+    notes, not an archived workflow. Browse template IDs with
+    `bunx smithers-orchestrator starters`.
 
     ```bash
     bunx smithers-orchestrator init
@@ -39,8 +38,8 @@ description: Scaffold and run a Smithers workflow in two commands.
     ```
   </Step>
   <Step title="Resume after a crash">
-    Every completed step is persisted, so a crashed or stopped run resumes from its
-    last checkpoint.
+    Every completed step persists, so a crashed or stopped run resumes from its last
+    checkpoint.
 
     ```bash
     bunx smithers-orchestrator workflow run create-workflow --run-id RUN_ID --resume true
@@ -49,9 +48,9 @@ description: Scaffold and run a Smithers workflow in two commands.
 </Steps>
 
 <Tip>
-  `init` installed the smithers skill for your coding agents automatically. Just ask for the
-  outcome (*"orchestrate an agent to add rate limiting and keep iterating until the tests
-  pass"*) and your agent runs Smithers for you.
+  `init` auto-installs the smithers skill for your coding agents. Ask for the outcome
+  (*"orchestrate an agent to add rate limiting and keep iterating until the tests pass"*)
+  and your agent runs Smithers for you.
 </Tip>
 
-For a full worked example, see the [Tour](/tour). For every CLI command see the [CLI catalog](/cli/overview).
+Full worked example: [Tour](/tour). Every CLI command: [CLI catalog](/cli/overview).
