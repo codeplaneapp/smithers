@@ -12,9 +12,18 @@ const DEFAULT_COLLECTION_MAX_ROWS = 1024;
  * Reconstruct a `GatewayEventFrame` from a stored row. The transport collapses
  * the resilient frame down to `{ event, payload, seq }`, so `stateVersion` is
  * not retained in the collection; surface 0 (consumers read event/payload/seq).
+ * The persisted row's `timestampMs` rides along so log UIs can render when an
+ * event happened without a second lookup.
  */
-function toFrame(row: GatewayRunEventRow): GatewayEventFrame {
-  return { type: "event", event: row.event, payload: row.payload, seq: row.seq, stateVersion: 0 };
+function toFrame(row: GatewayRunEventRow): GatewayEventFrame & { timestampMs?: number } {
+  return {
+    type: "event",
+    event: row.event,
+    payload: row.payload,
+    seq: row.seq,
+    stateVersion: 0,
+    ...(row.timestampMs !== undefined ? { timestampMs: row.timestampMs } : {}),
+  };
 }
 
 /**
@@ -29,8 +38,8 @@ export function useGatewayRunEvents(
   runId: string | undefined,
   options: { afterSeq?: number; maxEvents?: number } = {},
 ): {
-  events: GatewayEventFrame[];
-  lastHeartbeat: GatewayEventFrame | undefined;
+  events: Array<GatewayEventFrame & { timestampMs?: number }>;
+  lastHeartbeat: (GatewayEventFrame & { timestampMs?: number }) | undefined;
   error: Error | undefined;
   streaming: boolean;
   loading: boolean;
