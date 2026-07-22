@@ -264,6 +264,35 @@ describe("migrated monitor surfaces", () => {
     await click(sortHeader); // → back to triage order
     expect(orderedIds()).toEqual(["run-blocked", "run-live", "run-old-finish"]);
   });
+
+  test("controlled sort reports header clicks upward and the keyboard cursor row is marked", async () => {
+    const rows = [
+      { runId: "run-a", workflowKey: "alpha", status: "finished", createdAtMs: 1, startedAtMs: 1 },
+      { runId: "run-b", workflowKey: "beta", status: "finished", createdAtMs: 2, startedAtMs: 2 },
+    ];
+    const sorts: string[] = [];
+    await render(
+      <RunsTable
+        runs={rows}
+        loading={false}
+        page={1}
+        onPageChange={() => {}}
+        onSelect={() => {}}
+        sort="oldest"
+        onSortChange={(sort) => sorts.push(sort)}
+        cursorRunId="run-b"
+      />,
+    );
+    // Controlled: rendered order follows the sort prop, clicks go to the owner.
+    const orderedIds = () =>
+      [...document.querySelectorAll(".mon-runs-table-row")].map((row) => row.getAttribute("data-run-id"));
+    expect(orderedIds()).toEqual(["run-a", "run-b"]);
+    await click(byTestId("monitor-sort-started"));
+    expect(sorts).toEqual(["default"]);
+    // The j/k cursor row carries its marker class for the highlight styles.
+    expect(document.querySelector('[data-run-id="run-b"]')!.className).toContain("is-kbcursor");
+    expect(document.querySelector('[data-run-id="run-a"]')!.className).not.toContain("is-kbcursor");
+  });
 });
 
 describe("monitor theme contract", () => {

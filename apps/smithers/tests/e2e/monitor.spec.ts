@@ -191,6 +191,8 @@ test.describe.serial("served Smithers Monitor", () => {
       "seeded intake output",
     );
 
+    // Frames + XML are folded behind the Debug chip — open it first.
+    await page.getByTestId("monitor-debug-chip").click();
     await page.getByTestId("monitor-xml-chip").click();
     await expect(page.getByTestId("monitor-tree-xml")).toContainText(
       "review-loop",
@@ -303,7 +305,9 @@ test.describe.serial("served Smithers Monitor", () => {
     const pageErrors = trackPageErrors(page);
     await rpc(page, "launchRun", { workflow: "e2e-approval" });
     await page.goto(`${gatewayOrigin}/monitor`);
-    await expect(page.getByTestId("monitor-approvals")).toContainText(
+    // The overview has no rail: pending approvals surface in the "Needs you"
+    // band, with the decision inline.
+    await expect(page.getByTestId("monitor-needs-you")).toContainText(
       "Approve the deploy",
     );
 

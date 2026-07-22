@@ -1628,6 +1628,27 @@ export function nonZeroErrorCounters(scrape: PromScrape): PromSample[] {
     .sort((a, b) => b.value - a.value);
 }
 
+/** Known error-counter names → plain English. Everything else gets prettified. */
+const ERROR_COUNTER_LABELS: Record<string, string> = {
+  smithers_gateway_errors_total: "gateway internal errors",
+  smithers_agent_errors_total: "agent errors",
+  smithers_errors_total: "engine errors",
+};
+
+/**
+ * A plain-English label for a Prometheus error counter — raw metric-name +
+ * label syntax ("smithers_gateway_errors_total {code=Error, kind=timer}") is
+ * operator-hostile; the raw identity stays available on hover via the title.
+ */
+export function describeErrorCounter(name: string, labels: Record<string, string>): string {
+  const base =
+    ERROR_COUNTER_LABELS[name] ?? name.replace(/^smithers_/, "").replace(/_total$/, "").replace(/_/g, " ");
+  const detail = Object.entries(labels)
+    .map(([key, value]) => `${key} ${value}`)
+    .join(" · ");
+  return detail ? `${base} · ${detail}` : base;
+}
+
 /** "412ms" under a second, then "1.2s", "45s", then minutes — for latency stats. */
 export function formatLatencyMs(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms)) return "—";

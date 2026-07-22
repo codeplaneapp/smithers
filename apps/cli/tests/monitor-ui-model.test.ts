@@ -4,6 +4,7 @@ import {
   asArray,
   cronRowsOf,
   dataRowsOf,
+  describeErrorCounter,
   formatLatencyMs,
   formatScore,
   histogramQuantile,
@@ -1426,6 +1427,16 @@ describe("metricValue and error counters", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].name).toBe("smithers_gateway_errors_total");
     expect(errors[0].value).toBe(3);
+  });
+
+  test("describeErrorCounter translates known counters and prettifies the rest", () => {
+    expect(describeErrorCounter("smithers_gateway_errors_total", { code: "Error", kind: "timer" })).toBe(
+      "gateway internal errors · code Error · kind timer",
+    );
+    expect(describeErrorCounter("smithers_agent_errors_total", {})).toBe("agent errors");
+    expect(describeErrorCounter("smithers_errors_total", {})).toBe("engine errors");
+    // Unknown counters degrade to readable words, never raw snake_case.
+    expect(describeErrorCounter("smithers_webhook_delivery_errors_total", {})).toBe("webhook delivery errors");
   });
 });
 

@@ -7,6 +7,13 @@ import { useSmithersCollections } from "./useSmithersCollections.ts";
 const DEFAULT_MAX_EVENTS = 1000;
 /** Mirrors the `runEvents` collection's default `maxRows` ring size. */
 const DEFAULT_COLLECTION_MAX_ROWS = 1024;
+/**
+ * Every heartbeat spelling the engine emits (run-level and per-task). All of
+ * them are liveness proof, not log content — task heartbeats fire every few
+ * seconds and would otherwise consume the `maxEvents` cap and age real events
+ * out of the buffer.
+ */
+const HEARTBEAT_EVENTS = new Set(["run.heartbeat", "task.heartbeat", "TaskHeartbeat"]);
 
 /**
  * Reconstruct a `GatewayEventFrame` from a stored row. The transport collapses
@@ -67,8 +74,8 @@ export function useGatewayRunEvents(
   const { events, lastHeartbeat } = useMemo(() => {
     const sorted = [...rows].sort((left, right) => left.seq - right.seq);
     const eligible = typeof afterSeq === "number" ? sorted.filter((row) => row.seq > afterSeq) : sorted;
-    const heartbeats = eligible.filter((row) => row.event === "run.heartbeat");
-    const nonHeartbeat = eligible.filter((row) => row.event !== "run.heartbeat");
+    const heartbeats = eligible.filter((row) => HEARTBEAT_EVENTS.has(row.event));
+    const nonHeartbeat = eligible.filter((row) => !HEARTBEAT_EVENTS.has(row.event));
     const capped = nonHeartbeat.slice(Math.max(0, nonHeartbeat.length - maxEvents));
     return {
       events: capped.map(toFrame),

@@ -61,6 +61,7 @@ import {
   connectionViewFor,
   cronRowsOf,
   dataRowsOf,
+  describeErrorCounter,
   diagnoseRun,
   diffPatchesOf,
   diffSummaryOf,
@@ -74,6 +75,7 @@ import {
   formatOutputValue,
   formatScore,
   frameScrubBounds,
+  groupForStatus,
   groupRuns,
   hasFailedDescendant,
   histogramStats,
@@ -406,6 +408,46 @@ function ApprovalActions({
   );
 }
 
+/**
+ * One decision card: question → actions → clamped context. Shared by the
+ * run-detail rail inbox and the overview's "Needs you" band, so the decision
+ * UX is identical wherever an approval appears.
+ */
+function ApprovalCard({
+  approval,
+  busy,
+  decide,
+  onSelectRun,
+}: {
+  approval: ApprovalLike;
+  busy: boolean;
+  decide: (approval: ApprovalLike, approved: boolean) => Promise<void>;
+  onSelectRun: (runId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mon-approval">
+      <button type="button" className="mon-approval-main" onClick={() => onSelectRun(approval.runId)} title={`Open run ${shortRunId(approval.runId)}`}>
+        <div className="mon-approval-title">{approval.requestTitle ?? approval.nodeId}</div>
+        <div className="mon-approval-meta">
+          <span className="mon-mono">{approval.workflowKey ?? "workflow"}</span>
+          <span className="mon-mono mon-dim">{shortRunId(approval.runId)}</span>
+          <ApprovalWait requestedAtMs={approval.requestedAtMs} />
+        </div>
+      </button>
+      <ApprovalActions approval={approval} decide={decide} busy={busy} />
+      {approval.requestSummary ? (
+        <div className="mon-approval-summary-wrap">
+          <div className={`mon-approval-summary${expanded ? " is-expanded" : ""}`}>{approval.requestSummary}</div>
+          <button type="button" className="mon-approval-more" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? "less" : "more"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ApprovalsInbox({
   onSelectRun,
   onResult,
@@ -415,7 +457,6 @@ function ApprovalsInbox({
 }) {
   const approvalsQuery = useGatewayApprovals();
   const { decide, decidingKey } = useApprovalDecide(onResult);
-  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(new Set());
   const approvals = (approvalsQuery.data ?? []) as ApprovalLike[];
   if (approvals.length === 0) return null;
 
@@ -424,43 +465,15 @@ function ApprovalsInbox({
       <h2 className="mon-kicker">
         Approvals <span className="mon-count">{approvals.length}</span>
       </h2>
-      {approvals.map((approval) => {
-        const key = approvalKey(approval);
-        const busy = decidingKey === key;
-        const expanded = expandedKeys.has(key);
-        return (
-          <div className="mon-approval" key={key}>
-            <button type="button" className="mon-approval-main" onClick={() => onSelectRun(approval.runId)} title={`Open run ${shortRunId(approval.runId)}`}>
-              <div className="mon-approval-title">{approval.requestTitle ?? approval.nodeId}</div>
-              <div className="mon-approval-meta">
-                <span className="mon-mono">{approval.workflowKey ?? "workflow"}</span>
-                <span className="mon-mono mon-dim">{shortRunId(approval.runId)}</span>
-                <ApprovalWait requestedAtMs={approval.requestedAtMs} />
-              </div>
-            </button>
-            <ApprovalActions approval={approval} decide={decide} busy={busy} />
-            {approval.requestSummary ? (
-              <div className="mon-approval-summary-wrap">
-                <div className={`mon-approval-summary${expanded ? " is-expanded" : ""}`}>{approval.requestSummary}</div>
-                <button
-                  type="button"
-                  className="mon-approval-more"
-                  onClick={() =>
-                    setExpandedKeys((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(key)) next.delete(key);
-                      else next.add(key);
-                      return next;
-                    })
-                  }
-                >
-                  {expanded ? "less" : "more"}
-                </button>
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
+      {approvals.map((approval) => (
+        <ApprovalCard
+          key={approvalKey(approval)}
+          approval={approval}
+          busy={decidingKey === approvalKey(approval)}
+          decide={decide}
+          onSelectRun={onSelectRun}
+        />
+      ))}
     </section>
   );
 }
@@ -647,91 +660,203 @@ export function StatCard({
   );
 }
 
-function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }) {
+/** How far back a failure still counts as "needs you" — older failures are history. */
+const FAILURE_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Per-section row cap in the "Needs you" band; the rest collapses to "+N more". */
+const NEEDS_YOU_ROW_CAP = 6;
+
+function NeedsYouRunRow({ run, onSelectRun }: { run: RunRow; onSelectRun: (runId: string) => void }) {
+  return (
+    <button type="button" className="mon-needs-row" onClick={() => onSelectRun(run.runId)}>
+      <StatusTag status={run.status} />
+      <span className="mon-needs-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+      <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
+      <span className="mon-dim mon-needs-when">
+        {groupForStatus(run.status) === "failed" ? <Ago ms={run.finishedAtMs ?? run.createdAtMs} /> : <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The home page's single attention surface: pending approvals (with inline
+ * decisions), runs parked waiting on a human, and failures recent enough to
+ * still be actionable. Empty = one green all-clear line, and everything else
+ * on the page is calm history.
+ */
+function NeedsYouBand({
+  runs,
+  loading,
+  onSelectRun,
+  onResult,
+}: {
+  runs: RunRow[];
+  loading: boolean;
+  onSelectRun: (runId: string) => void;
+  onResult: (kind: "ok" | "err", text: string) => void;
+}) {
   const now = useNowMs();
-  const metrics = useMetricsScrape(true);
+  const approvalsQuery = useGatewayApprovals();
+  const { decide, decidingKey } = useApprovalDecide(onResult);
+  const cronsApi = useJsonApi("/v1/api/crons", 30_000);
+  const approvals = (approvalsQuery.data ?? []) as ApprovalLike[];
+  const groups = useMemo(() => groupRuns(runs), [runs]);
+  const attention = groups.find((group) => group.group === "attention")?.runs ?? [];
+  const active = groups.find((group) => group.group === "active")?.runs ?? [];
+  // A failed run needs attention while it is fresh; two-week-old corpses in a
+  // permanent red band train operators to ignore it (alarm fatigue by design).
+  const recentFailures = useMemo(
+    () =>
+      (groups.find((group) => group.group === "failed")?.runs ?? []).filter(
+        (run) => (run.finishedAtMs ?? run.createdAtMs ?? 0) >= now - FAILURE_ATTENTION_WINDOW_MS,
+      ),
+    [groups, now],
+  );
+  // Approval-parked runs already render as approval cards — listing the same
+  // run again as an attention row would double-count one decision.
+  const approvalRunIds = new Set(approvals.map((approval) => approval.runId));
+  const parked = attention.filter((run) => !approvalRunIds.has(run.runId));
+  const needsCount = approvals.length + parked.length + recentFailures.length;
+
+  if (loading && runs.length === 0) return null;
+  if (needsCount === 0) {
+    const upcoming = nextCron(cronRowsOf(cronsApi.body));
+    const cronNote =
+      upcoming?.nextRunAtMs !== undefined
+        ? now >= upcoming.nextRunAtMs
+          ? " · next cron due now"
+          : ` · next cron in ${Math.max(1, Math.round((upcoming.nextRunAtMs - now) / 60_000))}m`
+        : "";
+    return (
+      <div className="mon-needs mon-needs-clear" data-testid="monitor-needs-you">
+        <ToneDot tone="ok" />
+        All clear — {active.length} running{cronNote}
+      </div>
+    );
+  }
+  return (
+    <section className="mon-needs mon-inbox" data-testid="monitor-needs-you">
+      <h2 className="mon-kicker">
+        Needs you <span className="mon-count">{needsCount}</span>
+      </h2>
+      {approvals.map((approval) => (
+        <ApprovalCard
+          key={approvalKey(approval)}
+          approval={approval}
+          busy={decidingKey === approvalKey(approval)}
+          decide={decide}
+          onSelectRun={onSelectRun}
+        />
+      ))}
+      {parked.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
+        <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
+      ))}
+      {parked.length > NEEDS_YOU_ROW_CAP ? (
+        <div className="mon-dim mon-needs-more">+{parked.length - NEEDS_YOU_ROW_CAP} more waiting — see the table below</div>
+      ) : null}
+      {recentFailures.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
+        <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
+      ))}
+      {recentFailures.length > NEEDS_YOU_ROW_CAP ? (
+        <div className="mon-dim mon-needs-more">
+          +{recentFailures.length - NEEDS_YOU_ROW_CAP} more failed in the last 24h — filter the table on failed
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/** One rich row per live run: pulse, name, progress, elapsed — click opens it. */
+function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (runId: string) => void }) {
+  const active = useMemo(
+    () => groupRuns(runs).find((group) => group.group === "active")?.runs ?? [],
+    [runs],
+  );
+  if (active.length === 0) return null;
+  return (
+    <section className="mon-panel mon-active-band" data-testid="monitor-active-now">
+      <header className="mon-panel-head">
+        <h2 className="mon-kicker">
+          Active now <span className="mon-count">{active.length}</span>
+        </h2>
+      </header>
+      {active.map((run) => (
+        <button type="button" className="mon-active-row" key={run.runId} onClick={() => onSelectRun(run.runId)}>
+          <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
+          <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+          <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
+          <span className="mon-active-progress">
+            <RunProgressCell run={run} />
+          </span>
+          <span className="mon-mono mon-dim mon-active-elapsed">
+            <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
+          </span>
+        </button>
+      ))}
+    </section>
+  );
+}
+
+/**
+ * The ops facts that used to be a wall of stat tiles, demoted to one quiet
+ * line: still one glance away, no longer competing with the triage band.
+ * Latency percentiles live in the Metrics view they came from.
+ */
+function OpsFooter({
+  runs,
+  onShowMetrics,
+}: {
+  runs: RunRow[];
+  onShowMetrics: () => void;
+}) {
+  const now = useNowMs();
   const cronsApi = useJsonApi("/v1/api/crons", 30_000);
   const accountsApi = useJsonApi("/v1/api/accounts", 60_000);
   const memoryApi = useJsonApi("/v1/api/memory-facts", 60_000);
   const ticketsApi = useJsonApi("/v1/api/tickets", 60_000);
   const stats = useMemo(() => opsStats(runs as Array<Record<string, unknown>>, now), [runs, now]);
-  const crons = useMemo(() => cronRowsOf(cronsApi.body), [cronsApi.body]);
   const accounts = useMemo(() => accountRowsOf(accountsApi.body), [accountsApi.body]);
-  const agentLatency = useMemo(
-    () => (metrics.scrape ? histogramStats(metrics.scrape, "smithers_agent_duration_ms", ["engine", "model"]) : []),
-    [metrics.scrape],
-  );
-  // Percentiles over a handful of samples are noise (n=1 renders "1m42s /
-  // 1m42s" twice and reads like a bug) — the strip only shows groups with a
-  // meaningful sample count; everything stays available in the Metrics view.
-  const stripLatency = useMemo(() => agentLatency.filter((stat) => stat.count >= 3), [agentLatency]);
-  const upcoming = nextCron(crons);
+  const upcoming = nextCron(useMemo(() => cronRowsOf(cronsApi.body), [cronsApi.body]));
   const accountsReady = accounts.filter((account) => account.ready).length;
   const memoryCount = memoryApi.loaded ? dataRowsOf(memoryApi.body).length : undefined;
   const ticketsOpen = ticketsApi.loaded ? openTicketCount(ticketsApi.body) : undefined;
-  const pending = loading && runs.length === 0;
-  const n = (value: number | undefined): string => (value === undefined || pending ? "…" : String(value));
+  const parts: Array<{ key: string; text: string; tone?: Tone }> = [
+    { key: "engines", text: `${stats.enginesLive} engine${stats.enginesLive === 1 ? "" : "s"} live` },
+    {
+      key: "completed",
+      text: `${stats.completedToday} completed today${stats.failedToday > 0 ? ` · ${stats.failedToday} failed` : ""}`,
+      tone: stats.failedToday > 0 ? "failed" : undefined,
+    },
+  ];
+  if (accountsApi.loaded && accounts.length > 0) {
+    parts.push({
+      key: "accounts",
+      text: `accounts ${accountsReady}/${accounts.length}`,
+      tone: accountsReady < accounts.length ? "waiting" : undefined,
+    });
+  }
+  if (upcoming) {
+    parts.push({
+      key: "cron",
+      text:
+        upcoming.nextRunAtMs !== undefined && now < upcoming.nextRunAtMs
+          ? `next cron in ${Math.max(1, Math.round((upcoming.nextRunAtMs - now) / 60_000))}m · ${upcoming.workflow}`
+          : `next cron due now · ${upcoming.workflow}`,
+    });
+  }
+  if (memoryCount !== undefined) parts.push({ key: "memory", text: `${memoryCount} memory facts` });
+  if (ticketsOpen !== undefined) parts.push({ key: "tickets", text: `${ticketsOpen} open tickets` });
   return (
-    <div className="mon-ops-strip" data-testid="monitor-ops-strip">
-      <StatCard
-        value={n(stats.active)}
-        label="active runs"
-        sub={stats.attention > 0 ? `${stats.attention} need attention` : undefined}
-        tone={stats.attention > 0 ? "waiting" : stats.active > 0 ? "running" : undefined}
-        testId="monitor-stat-active"
-      />
-      <StatCard
-        value={n(stats.enginesLive)}
-        label="engines live"
-        sub="heartbeat < 60s"
-        testId="monitor-stat-engines"
-      />
-      <StatCard
-        value={n(stats.completedToday)}
-        label="completed today"
-        sub={stats.failedToday > 0 ? `${stats.failedToday} failed` : undefined}
-        testId="monitor-stat-completed"
-      />
-      {stripLatency.slice(0, 2).map((stat) => (
-        <StatCard
-          key={stat.key}
-          value={`${formatLatencyMs(stat.p50)} / ${formatLatencyMs(stat.p95)}`}
-          label={`agent p50/p95 · ${stat.key}`}
-          sub={`${stat.count} runs (this gateway)`}
-          testId="monitor-stat-latency"
-        />
+    <footer className="mon-ops-footer mon-dim" data-testid="monitor-ops-footer">
+      {parts.map((part) => (
+        <span key={part.key} className={part.tone ? `tone-${part.tone} mon-ops-footer-item` : "mon-ops-footer-item"}>
+          {part.text}
+        </span>
       ))}
-      {stripLatency.length === 0 ? (
-        <StatCard
-          value={metrics.scrape ? "—" : "…"}
-          label="agent latency"
-          sub={metrics.failed ? "metrics unreachable" : metrics.scrape ? "not enough samples yet — see Metrics" : "scraping…"}
-          testId="monitor-stat-latency"
-        />
-      ) : null}
-      <StatCard
-        value={
-          cronsApi.loaded
-            ? upcoming?.nextRunAtMs !== undefined
-              ? now >= upcoming.nextRunAtMs
-                ? "due now"
-                : `in ${Math.max(1, Math.round((upcoming.nextRunAtMs - now) / 60_000))}m`
-              : "—"
-            : "…"
-        }
-        label={upcoming ? `next cron · ${upcoming.workflow}` : "next cron"}
-        sub={upcoming ? upcoming.pattern : cronsApi.loaded ? "none registered" : undefined}
-        testId="monitor-stat-cron"
-      />
-      <StatCard
-        value={accountsApi.loaded ? `${accountsReady}/${accounts.length}` : "…"}
-        label="accounts ready"
-        tone={accountsApi.loaded && accountsReady < accounts.length ? "waiting" : undefined}
-        testId="monitor-stat-accounts"
-      />
-      <StatCard value={n(memoryCount)} label="memory facts" testId="monitor-stat-memory" />
-      <StatCard value={n(ticketsOpen)} label="open tickets" testId="monitor-stat-tickets" />
-    </div>
+      <button type="button" className="mon-ops-footer-link" onClick={onShowMetrics}>
+        Metrics
+      </button>
+    </footer>
   );
 }
 
@@ -1034,7 +1159,9 @@ function MetricsPanel() {
         </div>
 
         <div className="mon-metrics-section" data-testid="monitor-metrics-errors">
-          <h3 className="mon-kicker">Errors</h3>
+          <h3 className="mon-kicker">
+            Error counters <span className="mon-dim">— since gateway start; growth matters, not size</span>
+          </h3>
           {errors.length === 0 ? (
             <div className="mon-metric-row">
               <span className="mon-metric-label tone-ok">no non-zero error counters</span>
@@ -1043,12 +1170,14 @@ function MetricsPanel() {
           ) : (
             <div className="mon-metrics-table">
               {errors.map((sample, index) => (
-                <MetricRow
+                <div
+                  className="mon-metric-row"
                   key={`${sample.name}:${index}`}
-                  label={`${sample.name}${Object.keys(sample.labels).length ? ` {${Object.entries(sample.labels).map(([k, v]) => `${k}=${v}`).join(", ")}}` : ""}`}
-                  value={String(sample.value)}
-                  tone="failed"
-                />
+                  title={`${sample.name}${Object.keys(sample.labels).length ? `{${Object.entries(sample.labels).map(([k, v]) => `${k}=${v}`).join(",")}}` : ""}`}
+                >
+                  <span className="mon-metric-label">{describeErrorCounter(sample.name, sample.labels)}</span>
+                  <span className="mon-mono mon-metric-value">{String(sample.value)}</span>
+                </div>
               ))}
             </div>
           )}
@@ -1089,16 +1218,26 @@ export function RunsTable({
   page,
   onPageChange,
   onSelect,
+  sort: sortProp,
+  onSortChange,
+  cursorRunId,
 }: {
   runs: RunRow[];
   loading: boolean;
   page: number;
   onPageChange: (page: number) => void;
   onSelect: (runId: string) => void;
+  /** Controlled sort (the App lifts it so j/k keyboard order matches); uncontrolled falls back to local state. */
+  sort?: RunsTableSort;
+  onSortChange?: (sort: RunsTableSort) => void;
+  /** The keyboard cursor row (j/k) — highlighted and kept scrolled into view. */
+  cursorRunId?: string;
 }) {
   // Triage order by default (attention first, newest first inside a band);
   // the Started header click-sorts pure time in either direction.
-  const [sort, setSort] = useState<RunsTableSort>("default");
+  const [internalSort, setInternalSort] = useState<RunsTableSort>("default");
+  const sort = sortProp ?? internalSort;
+  const setSort = onSortChange ?? setInternalSort;
   const sorted = useMemo(() => sortRunsForTable(runs, sort), [runs, sort]);
   const { pageRows, page: shownPage, pageCount, total } = paginateRuns(sorted, page, RUNS_PAGE_SIZE);
   if (total === 0) {
@@ -1141,7 +1280,7 @@ export function RunsTable({
                   className="mon-th-sort"
                   data-testid="monitor-sort-started"
                   title="Sort by start time"
-                  onClick={() => setSort((current) => (current === "default" ? "newest" : current === "newest" ? "oldest" : "default"))}
+                  onClick={() => setSort(sort === "default" ? "newest" : sort === "newest" ? "oldest" : "default")}
                 >
                   Started{startedIndicator ? <span className="mon-sort-arrow" aria-hidden> {startedIndicator}</span> : null}
                 </button>
@@ -1153,10 +1292,11 @@ export function RunsTable({
             {pageRows.map((run) => (
               <TableRow
                 key={run.runId}
-                className="mon-runs-table-row"
+                className={`mon-runs-table-row${run.runId === cursorRunId ? " is-kbcursor" : ""}`}
                 data-run-id={run.runId}
                 role="button"
                 tabIndex={0}
+                ref={run.runId === cursorRunId ? (el: HTMLTableRowElement | null) => el?.scrollIntoView({ block: "nearest" }) : undefined}
                 onClick={() => onSelect(run.runId)}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter" && event.key !== " ") return;
@@ -1765,6 +1905,10 @@ function ExecutionPanel({
   const [frame, setFrame] = useState<number | null>(null);
   const [asXml, setAsXml] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  // Frames + XML are debugging instruments, not monitoring views — they stay
+  // folded behind one Debug chip so the default header carries only what the
+  // watching operator needs (tree + timeline).
+  const [showDebug, setShowDebug] = useState(false);
   // Reset scrub state when switching runs.
   const lastRunId = useRef(runId);
   if (lastRunId.current !== runId) {
@@ -1826,33 +1970,6 @@ function ExecutionPanel({
           <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip>
         ) : null}
         <Chip
-          on={scrubbing}
-          data-testid="monitor-frames-chip"
-          onClick={() => {
-            setShowTimeline(false);
-            if (scrubbing) goLive();
-            else setScrubbing(true);
-          }}
-          title="Scrub the execution tree frame by frame instead of following it live"
-        >
-          Frames
-        </Chip>
-        <Chip
-          on={asXml && !showTimeline}
-          data-testid="monitor-xml-chip"
-          onClick={() => {
-            if (showTimeline) {
-              setShowTimeline(false);
-              setAsXml(true);
-              return;
-            }
-            setAsXml((value) => !value);
-          }}
-          title="Toggle between the expandable tree and the engine's XML view of the same nodes"
-        >
-          XML
-        </Chip>
-        <Chip
           on={showTimeline}
           data-testid="monitor-timeline-chip"
           onClick={() => {
@@ -1862,6 +1979,52 @@ function ExecutionPanel({
           title="Every task execution in the order it ran — loops unrolled, one row per iteration"
         >
           Timeline
+        </Chip>
+        {showDebug ? (
+          <Chip
+            on={scrubbing}
+            data-testid="monitor-frames-chip"
+            onClick={() => {
+              setShowTimeline(false);
+              if (scrubbing) goLive();
+              else setScrubbing(true);
+            }}
+            title="Scrub the execution tree frame by frame instead of following it live"
+          >
+            Frames
+          </Chip>
+        ) : null}
+        {showDebug ? (
+          <Chip
+            on={asXml && !showTimeline}
+            data-testid="monitor-xml-chip"
+            onClick={() => {
+              if (showTimeline) {
+                setShowTimeline(false);
+                setAsXml(true);
+                return;
+              }
+              setAsXml((value) => !value);
+            }}
+            title="Toggle between the expandable tree and the engine's XML view of the same nodes"
+          >
+            XML
+          </Chip>
+        ) : null}
+        <Chip
+          on={showDebug}
+          data-testid="monitor-debug-chip"
+          onClick={() => {
+            // Folding the tools away also puts them down: back to the live tree.
+            if (showDebug) {
+              goLive();
+              setAsXml(false);
+            }
+            setShowDebug((value) => !value);
+          }}
+          title="Power tools: frame-by-frame time travel and the engine's XML view"
+        >
+          Debug
         </Chip>
       </header>
       {scrubbing && !showTimeline ? (
@@ -3545,19 +3708,10 @@ function App() {
     if (kind === "ok") bannerTimer.current = setTimeout(() => setBanner(null), 4000);
   };
 
-  // Esc clears the node selection (the inspector's close affordance).
-  useEffect(() => {
-    if (!selectedNodeKey) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      // Modals own their own Escape handling — don't clear the selection
-      // out from under an open terminal/custom-UI dialog.
-      if (event.key === "Escape" && !document.querySelector(".mon-modal-backdrop")) selectNode(undefined);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNodeKey]);
-
+  // The table's sort state lives here (not in the table) so the j/k keyboard
+  // order below always matches the shown order; the cursor is the j/k row.
+  const [tableSort, setTableSort] = useState<RunsTableSort>("default");
+  const [cursorRunId, setCursorRunId] = useState<string | undefined>(undefined);
   const visibleRuns = useMemo(
     () => filterRuns(allRuns, { text: filterText, status: statusFilter, workflow: workflowFilter }),
     [allRuns, filterText, statusFilter, workflowFilter],
@@ -3565,10 +3719,76 @@ function App() {
   // A changed filter means a new result set: land back on its first page.
   useEffect(() => {
     setRunsPage(1);
+    setCursorRunId(undefined);
   }, [filterText, statusFilter, workflowFilter]);
   const workflows = useMemo(() => workflowOptions(allRuns), [allRuns]);
   const statuses = useMemo(() => statusOptions(allRuns), [allRuns]);
   const inspectorOpen = !monitorMode.embed && selectedRunId !== undefined && selectedNode !== undefined;
+  // The rail is a run switcher — it earns its place only next to a run. The
+  // overview owns one run list (the table); two orders on one screen was noise.
+  const railOpen = !monitorMode.embed && selectedRunId !== undefined;
+
+  // Keyboard kit: `/` focuses search, j/k move the cursor (overview) or step
+  // runs (run detail), Enter opens the cursor row, Esc backs out one level.
+  const sortedTableRuns = useMemo(() => sortRunsForTable(visibleRuns, tableSort), [visibleRuns, tableSort]);
+  const railOrderRuns = useMemo(() => groupRuns(visibleRuns).flatMap((group) => group.runs), [visibleRuns]);
+  // The handler registers once and reads the latest snapshot from a ref —
+  // re-registering a window listener per keystroke-relevant render churns.
+  const keyState = useRef({ selectedRunId, selectedNodeKey, sortedTableRuns, railOrderRuns, cursorRunId });
+  keyState.current = { selectedRunId, selectedNodeKey, sortedTableRuns, railOrderRuns, cursorRunId };
+  useEffect(() => {
+    if (monitorMode.embed) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // Modals own their own keys — don't act out from under a terminal/dialog.
+      if (document.querySelector(".mon-modal-backdrop")) return;
+      const state = keyState.current;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const typing =
+        target !== null &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
+      if (event.key === "Escape") {
+        if (typing) {
+          target?.blur();
+          return;
+        }
+        if (state.selectedNodeKey) selectNode(undefined);
+        else if (state.selectedRunId) selectRun(undefined);
+        return;
+      }
+      if (typing) return;
+      if (event.key === "/") {
+        event.preventDefault();
+        document.querySelector<HTMLInputElement>(".mon-topbar input")?.focus();
+        return;
+      }
+      if (event.key === "j" || event.key === "k") {
+        const delta = event.key === "j" ? 1 : -1;
+        if (state.selectedRunId) {
+          // Run detail: step to the neighbouring run in the rail's order.
+          const index = state.railOrderRuns.findIndex((run) => run.runId === state.selectedRunId);
+          const next = state.railOrderRuns[index + delta];
+          if (index >= 0 && next) selectRun(next.runId);
+          return;
+        }
+        // Overview: move the cursor through the FULL sorted list; pagination
+        // follows the cursor so it never walks off the visible page.
+        const list = state.sortedTableRuns;
+        if (list.length === 0) return;
+        const index = list.findIndex((run) => run.runId === state.cursorRunId);
+        const nextIndex = index < 0 ? (delta > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, index + delta));
+        setCursorRunId(list[nextIndex]!.runId);
+        setRunsPage(Math.floor(nextIndex / RUNS_PAGE_SIZE) + 1);
+        return;
+      }
+      if (event.key === "Enter") {
+        if (!state.selectedRunId && state.cursorRunId) selectRun(state.cursorRunId);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
@@ -3604,8 +3824,8 @@ function App() {
         </div>
       ) : null}
 
-      <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}`}>
-        {!monitorMode.embed ? <div className="mon-rail">
+      <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}${railOpen ? "" : " mon-body-no-rail"}`}>
+        {railOpen ? <div className="mon-rail">
           <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
           <RunsRail
             runs={visibleRuns}
@@ -3633,15 +3853,25 @@ function App() {
             />
           ) : (
             <div className="mon-overview">
-              <OpsStrip runs={allRuns} loading={runsQuery.loading ?? false} />
+              <NeedsYouBand
+                runs={allRuns}
+                loading={runsQuery.loading ?? false}
+                onSelectRun={selectRun}
+                onResult={showResult}
+              />
+              <ActiveNowBand runs={allRuns} onSelectRun={selectRun} />
               <RunsTable
                 runs={visibleRuns}
                 loading={runsQuery.loading ?? false}
                 page={runsPage}
                 onPageChange={setRunsPage}
                 onSelect={selectRun}
+                sort={tableSort}
+                onSortChange={setTableSort}
+                cursorRunId={cursorRunId}
               />
               <CronsPanel />
+              <OpsFooter runs={allRuns} onShowMetrics={() => setShowMetrics(true)} />
             </div>
           )}
         </div>
@@ -3751,6 +3981,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-body { display: grid; grid-template-columns: 320px minmax(420px, 1fr) minmax(0, 380px); flex: 1; overflow: hidden; }
 /* No node selected: the inspector column collapses instead of reserving ~380px of dead gutter. */
 .mon-body-no-inspector { grid-template-columns: 320px minmax(420px, 1fr); }
+/* Overview: no rail (the table owns the run list), main takes the row. */
+.mon-body-no-rail { grid-template-columns: minmax(420px, 1fr) minmax(0, 380px); }
+.mon-body-no-rail.mon-body-no-inspector { grid-template-columns: minmax(0, 1fr); }
+.mon-overview { max-width: 1160px; margin: 0 auto; width: 100%; }
 .mon-rail { border-right: 1px solid var(--border); overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
 .mon-main { overflow-y: auto; padding: var(--sp-4); }
 .mon-embed .mon-body { display: block; }
@@ -3761,6 +3995,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-inspector-backdrop { display: none; }
 @media (max-width: 1160px) {
   .mon-body, .mon-body-no-inspector { grid-template-columns: 300px 1fr; }
+  .mon-body-no-rail, .mon-body-no-rail.mon-body-no-inspector { grid-template-columns: minmax(0, 1fr); }
   .mon-inspector { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 90vw); background: var(--bg); box-shadow: -12px 0 36px rgb(var(--shadow-rgb) / 0.14); z-index: 10; }
   .mon-inspector-backdrop { display: block; position: fixed; inset: 0; z-index: 9; background: rgb(var(--shadow-rgb) / 0.35); }
 }
@@ -3995,6 +4230,35 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
    The runs table keeps the scrollable middle; the strip and crons are fixed. */
 .mon-overview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .mon-overview .mon-runs-table-panel { flex: 1; min-height: 200px; }
+/* "Needs you" band: the only colored surface on the overview. */
+.mon-needs { margin: 0 0 var(--sp-4); }
+.mon-needs-clear { display: flex; align-items: center; gap: var(--sp-2); border: 1px solid var(--success-border); border-radius: var(--r-3); padding: var(--sp-3) var(--panel-pad); background: var(--success-soft); color: var(--ok); font-weight: 600; }
+.mon-needs-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) 0; border-top: 1px solid var(--border); background: none; border-left: 0; border-right: 0; border-bottom: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.mon-needs-row:hover .mon-needs-name { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.mon-needs-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.mon-needs-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-needs-when { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; }
+.mon-needs-more { font-size: var(--fs-1); padding: var(--sp-1) 0; }
+
+/* "Active now" band: one rich row per live run. */
+.mon-active-band { margin: 0 0 var(--sp-4); }
+.mon-active-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) 0; border-top: 1px solid var(--border); background: none; border-left: 0; border-right: 0; border-bottom: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.mon-active-row:first-of-type { border-top: 0; }
+.mon-active-row:hover .mon-active-name { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.mon-active-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.mon-active-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-active-progress { flex: 1 1 220px; min-width: 120px; display: flex; justify-content: flex-end; }
+.mon-active-elapsed { flex: none; min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Ops footer: the demoted stat tiles — one quiet line under everything. */
+.mon-ops-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-3) 0 0; margin-top: var(--sp-4); border-top: 1px solid var(--border); font-size: var(--fs-1); }
+.mon-ops-footer-item { white-space: nowrap; }
+.mon-ops-footer-link { background: none; border: 0; padding: 0; cursor: pointer; color: var(--brand); font: inherit; font-weight: 600; }
+.mon-ops-footer-link:hover { text-decoration: underline; }
+
+/* Keyboard cursor (j/k): distinct from hover so both can coexist. */
+.mon-runs-table-row.is-kbcursor { background: var(--hover); box-shadow: inset 2px 0 0 var(--brand); }
+
 .mon-ops-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
 .mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--sp-3) var(--sp-3); }
 .mon-stat-value { font-size: var(--fs-6); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: var(--lh-tight); color: var(--tone, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

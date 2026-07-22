@@ -17,7 +17,11 @@ test.describe("responsive monitor overview", () => {
       await page.setViewportSize(viewport);
       await page.goto(`${gatewayOrigin}/monitor`);
       await expect(page.getByTestId("monitor-root")).toBeVisible();
-      await expect(page.getByTestId("monitor-runs")).toBeVisible();
+      // The overview retired the rail: one run list (the table), plus the
+      // triage band and the ops footer.
+      await expect(page.locator(".mon-rail")).toHaveCount(0);
+      await expect(page.getByTestId("monitor-needs-you")).toBeVisible();
+      await expect(page.getByTestId("monitor-ops-footer")).toBeVisible();
       await expect(page.getByTestId("monitor-runs-table")).toBeVisible();
       await expect(page.getByTestId("monitor-runs-pagination")).toBeVisible();
       await expect(page.getByTestId("monitor-page-prev")).toBeDisabled();
@@ -37,7 +41,6 @@ test.describe("responsive monitor overview", () => {
 
       await page.getByTestId("monitor-filter").fill("no-responsive-match");
       await expect(page.getByTestId("monitor-empty-detail")).toContainText("No runs match.");
-      await expect(page.getByTestId("monitor-empty")).toContainText("No runs match.");
     }
   });
 });
