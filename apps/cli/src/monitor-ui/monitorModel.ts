@@ -244,6 +244,49 @@ function taskRows(
   return [...seen.entries()].map(([id, status]) => ({ id, status }));
 }
 
+/**
+ * Task-vocabulary progress from the live tree — the same counting the health
+ * strip uses (logical tasks only, containers excluded). This is THE progress
+ * number humans read; node-state summaries count structural rows too and must
+ * never be shown side by side with it.
+ */
+export function taskProgressOf(
+  treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>,
+): RunProgress | null {
+  const tasks = taskRows(treeNodes);
+  if (tasks.length === 0) return null;
+  const done = tasks.filter((task) => task.status === "ok").length;
+  const failed = tasks.filter((task) => task.status === "failed").length;
+  return { done, failed, total: tasks.length, fraction: (done + failed) / tasks.length };
+}
+
+/**
+ * The run-level error message from a run row's `errorJson` (the engine writes
+ * `{name, code, message, stack}` there on failure). A failed run that never
+ * started a task has no node error — this is the only error it has.
+ */
+export function runErrorOf(row: Record<string, unknown>): string | undefined {
+  const raw = pick(row, "errorJson", "error_json");
+  if (isRecord(raw)) {
+    const message = asString(raw.message);
+    if (message) return message;
+  }
+  const text = asString(raw);
+  if (text) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (isRecord(parsed)) {
+        const message = asString(parsed.message);
+        if (message) return message;
+      }
+      if (typeof parsed === "string" && parsed) return parsed;
+    } catch {
+      return text;
+    }
+  }
+  return asString(row.error);
+}
+
 export function diagnoseRun(input: {
   runId: string;
   status: string | undefined;
@@ -308,7 +351,7 @@ export function diagnoseRun(input: {
       tone: "warn",
       headline: `Waiting on you — ${Math.max(input.approvalsCount, 1)} approval(s) pending`,
       detail: `The run is parked until a human decides; ${progress}.`,
-      fix: "Approve or deny in the approvals panel (or `smithers approve <runId> --node <id>`).",
+      fix: "Decide right here in the banner (or `smithers approve <runId> --node <id>`).",
     };
   }
   if (input.healthState === "stale" || input.healthState === "orphaned" || input.healthState === "recovering") {
@@ -414,6 +457,10 @@ const STATUS_TONE: Readonly<Record<StatusClass, Tone>> = {
 };
 
 export function toneForStatus(status: string | undefined): Tone {
+  const s = normalizeStatus(status);
+  // A cancelled run is a deliberate human act, not a failure — it renders in
+  // the neutral gray (idle) tone instead of failure red.
+  if (s === "cancelled" || s === "canceled") return "idle";
   return STATUS_TONE[statusClass(status)];
 }
 
@@ -546,6 +593,33 @@ export function groupRuns(runs: readonly RunRow[]): GroupedRuns[] {
     out.push({ group, title: GROUP_TITLES[group], runs: list });
   }
   return out;
+}
+
+export type RunsTableSort = "default" | "newest" | "oldest";
+
+function runStartMs(run: RunRow): number {
+  return run.startedAtMs ?? run.createdAtMs ?? 0;
+}
+
+/**
+ * The landing table's canonical order. Default is triage order (attention
+ * first, then active, completed, failed, cancelled — newest first inside each
+ * band); newest/oldest are pure time sorts for the click-to-sort header. Raw
+ * listRuns order is never shown: an unsorted table buries the one live run.
+ */
+export function sortRunsForTable(runs: readonly RunRow[], sort: RunsTableSort = "default"): RunRow[] {
+  if (sort === "default") return groupRuns(runs).flatMap((group) => group.runs);
+  const sign = sort === "newest" ? -1 : 1;
+  return [...runs].sort((a, b) => sign * (runStartMs(a) - runStartMs(b)) || a.runId.localeCompare(b.runId));
+}
+
+/** Keep the head, keep the tail: "issue-470-gateway-…-all-db-access". */
+export function middleTruncate(text: string, maxChars = 48): string {
+  if (text.length <= maxChars) return text;
+  if (maxChars < 8) return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
+  const head = Math.ceil((maxChars - 1) / 2);
+  const tail = Math.floor((maxChars - 1) / 2);
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
 }
 
 export type RunFilter = { text: string; status: string; workflow: string };
@@ -806,7 +880,12 @@ function eventDetailParts(name: string, payload: Record<string, unknown>): Array
     ];
   }
   if (name === "FrameCommitted") {
-    return [`frame ${asNumber(payload.frameNo) ?? "?"}`, asString(payload.trigger)];
+    // trigger may be a string or a structured {type|reason, …} record — never
+    // let a raw object reach the log as "[object Object]".
+    const trigger = isRecord(payload.trigger)
+      ? (asString(payload.trigger.type) ?? asString(payload.trigger.reason) ?? snippet(payload.trigger))
+      : asString(payload.trigger);
+    return [`frame ${asNumber(payload.frameNo) ?? "?"}`, trigger];
   }
   // Agent stdout/stderr chunks. Persisted rows carry `text`, wire frames `output`.
   if (name === "NodeOutput" || name === "task.output") {
@@ -838,6 +917,28 @@ export function formatEventLine(frame: { event?: string; seq?: number; payload?:
     if (part && !parts.includes(part)) parts.push(part);
   }
   return { seq, name, detail: parts.join(" · ") };
+}
+
+/** Heartbeat frames are liveness proof, not log content — one per period, never a row each. */
+export function isHeartbeatEvent(name: string): boolean {
+  return name === "TaskHeartbeat" || name === "run.heartbeat" || name === "task.heartbeat";
+}
+
+/**
+ * Split a frame buffer into heartbeats and everything else, so the "all"
+ * events view can collapse pulse traffic into a single liveness row instead
+ * of wallpapering the log (and aging real events out of the ring).
+ */
+export function splitHeartbeatEvents<T extends { event?: string }>(events: readonly T[]): {
+  heartbeats: T[];
+  rest: T[];
+} {
+  const heartbeats: T[] = [];
+  const rest: T[] = [];
+  for (const frame of events) {
+    (isHeartbeatEvent(asString(frame.event) ?? "") ? heartbeats : rest).push(frame);
+  }
+  return { heartbeats, rest };
 }
 
 // ---------------------------------------------------------------------------

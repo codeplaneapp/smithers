@@ -44,24 +44,30 @@ import {
   hijackCandidateForNode,
   hijackCandidatesOf,
   isCancellable,
+  isHeartbeatEvent,
   isNotableEvent,
   isPausable,
   isResumable,
   labelForStatus,
   looksLikeUnifiedDiff,
+  middleTruncate,
   nodeStateRowsOf,
   nodeSummaryEligible,
   paginateRuns,
   pick,
   ptyHijackUrl,
   rowOf,
+  runErrorOf,
   runProgress,
   RUNS_PAGE_SIZE,
   shortRunId,
   selectionSinkFor,
+  sortRunsForTable,
+  splitHeartbeatEvents,
   splitPatchText,
   statusOptions,
   sumDiffSummaries,
+  taskProgressOf,
   timeAgo,
   toneForStatus,
   treeToXml,
@@ -146,7 +152,9 @@ describe("status tones", () => {
     expect(toneForStatus("failed")).toBe("failed");
     expect(toneForStatus("stale")).toBe("failed");
     expect(toneForStatus("orphaned")).toBe("failed");
-    expect(toneForStatus("cancelled")).toBe("failed");
+    // Cancelled is a deliberate human act — neutral gray, never failure red.
+    expect(toneForStatus("cancelled")).toBe("idle");
+    expect(toneForStatus("canceled")).toBe("idle");
     expect(toneForStatus("skipped")).toBe("idle");
   });
 
@@ -258,6 +266,62 @@ describe("run grouping", () => {
   });
 });
 
+describe("runs table ordering", () => {
+  const unsorted = [
+    { runId: "old-finished", status: "finished", createdAtMs: 1 },
+    { runId: "newer-finished", status: "finished", createdAtMs: 50 },
+    { runId: "live", status: "running", createdAtMs: 10 },
+    { runId: "blocked", status: "waiting-approval", createdAtMs: 5 },
+    { runId: "corpse", status: "failed", createdAtMs: 99 },
+  ];
+
+  test("default is triage order: attention first, then active, newest first inside a band", () => {
+    expect(sortRunsForTable(unsorted, "default").map((run) => run.runId)).toEqual([
+      "blocked",
+      "live",
+      "newer-finished",
+      "old-finished",
+      "corpse",
+    ]);
+  });
+
+  test("the one live run can never be buried by raw listRuns order", () => {
+    const buried = [
+      { runId: "h1", status: "finished", createdAtMs: 1 },
+      { runId: "h2", status: "cancelled", createdAtMs: 2 },
+      { runId: "live", status: "running", createdAtMs: 3 },
+    ];
+    expect(sortRunsForTable(buried)[0]?.runId).toBe("live");
+  });
+
+  test("newest/oldest are pure time sorts over the whole list", () => {
+    expect(sortRunsForTable(unsorted, "newest").map((run) => run.runId)).toEqual([
+      "corpse",
+      "newer-finished",
+      "live",
+      "blocked",
+      "old-finished",
+    ]);
+    expect(sortRunsForTable(unsorted, "oldest").map((run) => run.runId)).toEqual([
+      "old-finished",
+      "blocked",
+      "live",
+      "newer-finished",
+      "corpse",
+    ]);
+  });
+
+  test("middleTruncate keeps head and tail — the distinguishing suffix survives", () => {
+    expect(middleTruncate("short")).toBe("short");
+    const long = "issue-470-gateway-should-fully-encapsulate-all-db-access";
+    const truncated = middleTruncate(long, 40);
+    expect(truncated.length).toBeLessThanOrEqual(40);
+    expect(truncated.startsWith("issue-470-gateway")).toBe(true);
+    expect(truncated.endsWith("db-access")).toBe(true);
+    expect(truncated).toContain("…");
+  });
+});
+
 describe("filtering", () => {
   const runs = [
     { runId: "run-alpha", workflowKey: "deploy", status: "running" },
@@ -308,6 +372,29 @@ describe("progress", () => {
     expect(runProgress({})).toBeNull();
     expect(runProgress(undefined)).toBeNull();
     expect(runProgress("nope")).toBeNull();
+  });
+
+  test("taskProgressOf counts logical tasks only — containers with numeric keys excluded", () => {
+    const progress = taskProgressOf([
+      { id: "0", status: "ok" }, // structural container row
+      { id: "1", status: "ok" }, // structural container row
+      { id: "implement", status: "ok" },
+      { id: "verify", status: "failed" },
+      { id: "deploy", status: "running" },
+      { id: "implement", status: "failed" }, // repeated loop id: busiest status wins
+    ]);
+    expect(progress).toEqual({ done: 0, failed: 2, total: 3, fraction: 2 / 3 });
+    expect(taskProgressOf([])).toBeNull();
+  });
+
+  test("runErrorOf reads the run-level errorJson message", () => {
+    expect(
+      runErrorOf({ errorJson: JSON.stringify({ name: "SmithersError", code: "WORKFLOW_RENDER_FAILED", message: "render threw" }) }),
+    ).toBe("render threw");
+    expect(runErrorOf({ errorJson: { message: "object form" } })).toBe("object form");
+    expect(runErrorOf({ errorJson: "not json" })).toBe("not json");
+    expect(runErrorOf({ error: "plain field" })).toBe("plain field");
+    expect(runErrorOf({})).toBeUndefined();
   });
 });
 
@@ -513,6 +600,31 @@ describe("event lines", () => {
       payload: { type: "FrameCommitted", runId: "r1", frameNo: 12, xmlHash: "abc123", trigger: "node-finished", timestampMs: 4 },
     });
     expect(line.detail).toBe("frame 12 · node-finished");
+  });
+
+  test("FrameCommitted with a structured trigger never renders [object Object]", () => {
+    const line = formatEventLine({
+      event: "FrameCommitted",
+      seq: 18,
+      payload: { frameNo: 3, trigger: { type: "node-finished", nodeId: "verify" } },
+    });
+    expect(line.detail).not.toContain("[object Object]");
+    expect(line.detail).toBe("frame 3 · node-finished");
+  });
+
+  test("heartbeats split out of a frame buffer for the collapsed liveness row", () => {
+    const frames = [
+      { event: "NodeStarted", seq: 1 },
+      { event: "TaskHeartbeat", seq: 2 },
+      { event: "run.heartbeat", seq: 3 },
+      { event: "TaskHeartbeat", seq: 4 },
+      { event: "NodeFinished", seq: 5 },
+    ];
+    const { heartbeats, rest } = splitHeartbeatEvents(frames);
+    expect(heartbeats.map((frame) => frame.seq)).toEqual([2, 3, 4]);
+    expect(rest.map((frame) => frame.seq)).toEqual([1, 5]);
+    expect(isHeartbeatEvent("TaskHeartbeat")).toBe(true);
+    expect(isHeartbeatEvent("NodeStarted")).toBe(false);
   });
 
   test("TokenUsageReported shows the model and token totals", () => {
