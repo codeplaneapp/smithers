@@ -38,8 +38,7 @@ const terra = new CodexAgent({ model: "gpt-5.6-terra" });
 const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
 
 export default smithers((ctx) => {
-  // Static graph rendering does not apply input-schema defaults, so repeat the
-  // prompt default before Trellis validates it at render time.
+  // The schema default is applied before runtime and static graph rendering.
   const prompt = ctx.input.prompt?.trim() || "Build the requested result and prove it works.";
 
   return (

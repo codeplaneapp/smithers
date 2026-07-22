@@ -436,8 +436,9 @@ need the moment you fan out:
   (`ctx.outputs.review.filter(r => r.itemId === id)`) and take the last match to
   get "this item's latest review." Without this you cannot tell which of N
   parallel agents produced which row.
-- `ctx.input` fields arrive as their raw value or `null`, **not** their Zod
-  default. Always coalesce (`ctx.input?.maxConcurrency ?? 4`).
+- Fresh runs and graph previews parse `ctx.input` through its Zod schema, so
+  defaults and transforms are available while rendering. Coalesce only fields
+  declared optional or nullable (`ctx.input?.maxConcurrency ?? 4`).
 
 Fan-out, isolate, then serialize the risky merge:
 

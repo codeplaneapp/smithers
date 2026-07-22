@@ -2665,13 +2665,17 @@ function assertInputObject(input) {
 /**
  * @param {unknown} inputSchema
  * @param {Record<string, unknown>} input
+ * @param {{ allowMissingRequired?: boolean }} [options]
  * @returns {Record<string, unknown>}
  */
-function parseInputWithSchema(inputSchema, input) {
+function parseInputWithSchema(inputSchema, input, options) {
     if (!inputSchema || typeof inputSchema !== "object") {
         return input;
     }
-    const parser = /** @type {{ safeParse?: (input: unknown) => { success: boolean; data?: unknown; error?: { issues?: unknown } } }} */ (inputSchema);
+    const schema = /** @type {{ partial?: () => unknown }} */ (inputSchema);
+    const parser = /** @type {{ safeParse?: (input: unknown) => { success: boolean; data?: unknown; error?: { issues?: unknown } } }} */ (options?.allowMissingRequired && typeof schema.partial === "function"
+        ? schema.partial()
+        : inputSchema);
     if (typeof parser.safeParse !== "function") {
         return input;
     }
@@ -6169,12 +6173,23 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
  * @param {SmithersCtx<unknown>} ctx
- * @param {{ baseRootDir?: string; workflowPath?: string | null }} [opts]
+ * @param {{ baseRootDir?: string; workflowPath?: string | null; inputAlreadyNormalized?: boolean; allowMissingRequiredInput?: boolean }} [opts]
  * @returns {Promise<GraphSnapshot>}
  */
 async function renderFrameAsync(workflow, ctx, opts) {
     const renderer = new SmithersRenderer();
-    const result = await renderer.render(workflow.build(ctx), {
+    // Preview callers construct a context directly, bypassing runWorkflow's
+    // input normalization. Derive a context so schema defaults/transforms are
+    // visible while the caller's context and any persisted input stay intact.
+    const normalizedInput = opts?.inputAlreadyNormalized
+        ? ctx.input
+        : parseInputWithSchema(workflow.inputSchema, ctx.input, {
+            allowMissingRequired: opts?.allowMissingRequiredInput,
+        });
+    const renderCtx = Object.create(ctx, {
+        input: { value: normalizedInput, writable: true, configurable: true, enumerable: true },
+    });
+    const result = await renderer.render(workflow.build(renderCtx), {
         ralphIterations: ctx?.iterations,
         baseRootDir: opts?.baseRootDir,
         workflowPath: opts?.workflowPath,
@@ -6204,7 +6219,7 @@ async function renderFrameAsync(workflow, ctx, opts) {
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
  * @param {SmithersCtx<unknown>} ctx
- * @param {{ baseRootDir?: string; workflowPath?: string | null }} [opts]
+ * @param {{ baseRootDir?: string; workflowPath?: string | null; inputAlreadyNormalized?: boolean; allowMissingRequiredInput?: boolean }} [opts]
  * @returns {Effect.Effect<GraphSnapshot, SmithersError>}
  */
 export function renderFrame(workflow, ctx, opts) {

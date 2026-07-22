@@ -2238,10 +2238,14 @@ async function preflightDetachedLaunch(options) {
             input: inputRow ?? {},
             outputs,
         });
-        await Effect.runPromise(renderFrame(workflow, ctx, {
+        const rendered = await Effect.runPromise(Effect.either(renderFrame(workflow, ctx, {
             baseRootDir: resolveLaunchRootDir(options.root),
             workflowPath: options.resolvedWorkflowPath,
-        }));
+            inputAlreadyNormalized: options.resume && inputRow !== options.input,
+        })));
+        if (rendered._tag === "Left") {
+            throw rendered.left;
+        }
     }
     finally {
         if (workflow) await closeWorkflowBackend(workflow).catch(() => { });
@@ -2401,6 +2405,13 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 });
             }
             catch (error) {
+                if (error instanceof SmithersError) {
+                    return fail({
+                        code: error.code,
+                        message: error.message,
+                        exitCode: error.code === "INVALID_INPUT" ? 4 : 1,
+                    });
+                }
                 const message = formatDetachedPreflightError(error);
                 process.stderr.write(`${message}\n`);
                 return fail({
@@ -8027,6 +8038,8 @@ const cli = Cli.create({
             const schema = resolveSchema(workflow.db);
             const inputTable = schema.input;
             let inputRow;
+            let inputAlreadyNormalized = false;
+            let allowMissingRequiredInput = false;
             if (c.options.input) {
                 const parsedInput = tryParseJsonInput(c.options.input, "input");
                 if (!parsedInput.ok)
@@ -8034,10 +8047,14 @@ const cli = Cli.create({
                 inputRow = parsedInput.value;
             }
             else if (inputTable) {
-                inputRow = (await loadInput(workflow.db, inputTable, c.options.runId)) ?? {};
+                const persistedInput = await loadInput(workflow.db, inputTable, c.options.runId);
+                inputRow = persistedInput ?? {};
+                inputAlreadyNormalized = persistedInput !== null && persistedInput !== undefined;
+                allowMissingRequiredInput = !inputAlreadyNormalized;
             }
             else {
                 inputRow = {};
+                allowMissingRequiredInput = true;
             }
             const outputs = await loadOutputs(workflow.db, schema, c.options.runId);
             const ctx = new SmithersCtx({
@@ -8047,10 +8064,16 @@ const cli = Cli.create({
                 outputs,
             });
             const baseRootDir = resolveLaunchRootDir(c.options.root);
-            const snap = await Effect.runPromise(renderFrame(workflow, ctx, {
+            const rendered = await Effect.runPromise(Effect.either(renderFrame(workflow, ctx, {
                 baseRootDir,
                 workflowPath: resolvedWorkflowPath,
-            }));
+                inputAlreadyNormalized,
+                allowMissingRequiredInput,
+            })));
+            if (rendered._tag === "Left") {
+                throw rendered.left;
+            }
+            const snap = rendered.right;
             const seen = new WeakSet();
             const stripPrompts = c.options.compact === true;
             return c.ok(JSON.parse(JSON.stringify(snap, (key, value) => {
@@ -8074,6 +8097,9 @@ const cli = Cli.create({
             });
         }
         catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: err.code === "INVALID_INPUT" ? 4 : 1 });
+            }
             return fail({ code: "GRAPH_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
