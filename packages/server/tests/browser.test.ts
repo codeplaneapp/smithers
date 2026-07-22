@@ -6,9 +6,38 @@ import { request as requestHttp } from "node:http";
 import { connect as connectTcp } from "node:net";
 import { WebSocket } from "ws";
 import { Gateway } from "../src/gateway.js";
+import { validateBrowserRequest } from "../src/gatewayRoutes/browser.js";
 
 const page = { url: () => "http://example.com/", title: async () => "Example", evaluate: async () => false, goto: async () => {}, goBack: async () => {}, goForward: async () => {}, reload: async () => {}, mouse: { click: async () => {}, wheel: async () => {} }, keyboard: { press: async () => {} }, getByRole: () => ({ click: async () => {}, fill: async () => {} }) };
 const playwright = { chromium: { launch: async () => ({ newContext: async () => ({ newPage: async () => page, route: async () => {}, close: async () => {} }), close: async () => {} }) } };
+
+describe("browser RPC request validation", () => {
+  test("rejects closed-shape violations before browser dispatch", () => {
+    for (const params of [null, [], { sessionId: "s", actionId: "a", action: { kind: "click" } }, { sessionId: "s", actionId: "a", action: { kind: "click", locator: { role: "button" }, point: { x: 1, y: 2 } } }, { sessionId: "s", actionId: "a", action: { kind: "reload" }, extra: true }]) {
+      expect(() => validateBrowserRequest("browserAct", params)).toThrow(/Invalid|requires|Unexpected/);
+    }
+    expect(validateBrowserRequest("browserAct", { sessionId: "s", actionId: "a", action: { kind: "click", point: { x: 1, y: 2 } } })).toBeTruthy();
+    expect(validateBrowserRequest("browserAct", { sessionId: "s", actionId: "a", action: { kind: "click", locator: { role: "button", name: "Continue" } } })).toBeTruthy();
+    expect(() => validateBrowserRequest("browserAct", { sessionId: "s", actionId: "a", action: { kind: "reload", url: "https://example.com" } })).toThrow();
+    expect(() => validateBrowserRequest("browserContext", { sessionId: "s", include: ["not-a-slice"] })).toThrow();
+    expect(() => validateBrowserRequest("createBrowserSession", { source: { kind: "url", url: "" } })).toThrow();
+    expect(() => validateBrowserRequest("createBrowserSession", { source: { kind: "dev-server", port: 3000, url: "https://example.com" } })).toThrow();
+    expect(() => validateBrowserRequest("browserAct", { sessionId: "s", actionId: "a", action: { kind: "type", locator: { role: "textbox" }, text: "" } })).toThrow();
+    expect(() => validateBrowserRequest("browserAct", { sessionId: "s", actionId: "a", action: { kind: "dialog", decision: "accept", promptText: 1 } })).toThrow();
+    expect(() => validateBrowserRequest("listBrowserSessions", { extra: true })).toThrow();
+  });
+});
+
+describe("browser RPC error boundary", () => {
+  test("preserves declared codes and normalizes undeclared and inherited codes", async () => {
+    const frame = { id: "browser-error" };
+    const browserCall = Gateway.prototype.browserCall.bind(null);
+    await expect(browserCall(frame, async () => { throw Object.assign(new Error("conflict"), { code: "REVISION_CONFLICT" }); })).resolves.toMatchObject({ ok: false, error: { code: "REVISION_CONFLICT" } });
+    for (const code of ["ENOENT", "toString", "__proto__"]) {
+      await expect(browserCall(frame, async () => { throw Object.assign(new Error("internal"), { code }); })).resolves.toMatchObject({ ok: false, error: { code: "Internal" } });
+    }
+  });
+});
 
 describe("browser session registry", () => {
   test("deduplicates actions and fences stale revisions", async () => {

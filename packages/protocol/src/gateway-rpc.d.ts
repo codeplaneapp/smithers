@@ -8,6 +8,47 @@
 type SmithersApiVersion$1 = "v1";
 type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "ScoreNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal" | "REVISION_CONFLICT" | "SSRF_BLOCKED" | "QUOTA_EXCEEDED";
 type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRunTokenUsage" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "getRunDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listUsageReports" | "listMemoryFacts" | "listPrompts" | "listScores" | "listScoresForRuns" | "getScoreDetail" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket" | "createBrowserSession" | "browserAct" | "browserContext" | "browserPick" | "closeBrowserSession" | "listBrowserSessions";
+type BrowserActor$1 = "user" | "agent" | "page";
+type BrowserViewport$1 = {
+    width: number;
+    height: number;
+};
+type BrowserPoint$1 = {
+    x: number;
+    y: number;
+};
+type BrowserRectangle$1 = BrowserPoint$1 & {
+    width: number;
+    height: number;
+};
+type BrowserModifier$1 = "Alt" | "Control" | "Meta" | "Shift" | (string & {});
+type BrowserRedaction$1 = {
+    redacted: true;
+    length: number;
+};
+type BrowserOutcome$1 = {
+    ok: true;
+    redirectedTo?: string;
+    redacted?: boolean;
+    length?: number;
+} | {
+    ok: false;
+    code: string;
+    message: string;
+};
+type BrowserJournalEntry$1 = {
+    actionId: string;
+    actor: Exclude<BrowserActor$1, "page">;
+    revision: number;
+    action: BrowserAction$1;
+    result: BrowserOutcome$1;
+};
+type BrowserContextSlice$1 = "visible-text" | "accessibility" | "interactive-elements" | "screenshot" | "selections" | "recent-actions" | "console-summary" | "network-summary";
+type BrowserSummary$1 = {
+    message?: string;
+    count?: number;
+    truncated?: boolean;
+} & Record<string, unknown>;
 type BrowserSource$1 = {
     kind: "url";
     url: string;
@@ -27,10 +68,7 @@ type BrowserSnapshot$1 = {
         canGoBack: boolean;
         canGoForward: boolean;
     } | null;
-    viewport: {
-        width: number;
-        height: number;
-    };
+    viewport: BrowserViewport$1;
     control: {
         owner: "user" | "agent" | null;
     };
@@ -43,21 +81,25 @@ type BrowserLocator$1 = {
 } | {
     css: string;
 };
+type BrowserClickAction$1 = {
+    kind: "click";
+    locator: BrowserLocator$1;
+    point?: never;
+    button?: "left" | "right" | "middle";
+    modifiers?: BrowserModifier$1[];
+} | {
+    kind: "click";
+    point: BrowserPoint$1;
+    locator?: never;
+    button?: "left" | "right" | "middle";
+    modifiers?: BrowserModifier$1[];
+};
 type BrowserAction$1 = {
     kind: "navigate";
     url: string;
 } | {
     kind: "back" | "forward" | "reload" | "stop";
-} | {
-    kind: "click";
-    locator?: BrowserLocator$1;
-    point?: {
-        x: number;
-        y: number;
-    };
-    button?: "left" | "right" | "middle";
-    modifiers?: string[];
-} | {
+} | BrowserClickAction$1 | {
     kind: "type";
     locator: BrowserLocator$1;
     text: string;
@@ -65,7 +107,7 @@ type BrowserAction$1 = {
 } | {
     kind: "press";
     key: string;
-    modifiers?: string[];
+    modifiers?: BrowserModifier$1[];
 } | {
     kind: "scroll";
     deltaX: number;
@@ -107,7 +149,7 @@ type CreateBrowserSessionResponse$1 = BrowserSnapshot$1;
 type BrowserActResponse$1 = {
     revision: number;
     page: BrowserSnapshot$1["page"];
-    outcome: unknown;
+    outcome: BrowserOutcome$1;
 };
 type BrowserScreenshot$1 = {
     data: string;
@@ -119,13 +161,8 @@ type BrowserSelection$1 = {
     name: string;
     text: string;
     fingerprint: string;
-    rect: {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    };
-    viewport: BrowserSnapshot$1["viewport"];
+    rect: BrowserRectangle$1;
+    viewport: BrowserViewport$1;
 };
 type BrowserContextResponse$1 = {
     fresh: boolean;
@@ -563,6 +600,23 @@ type GatewayEventFrame$1<Payload = unknown> = {
     stateVersion: number;
     apiVersion?: SmithersApiVersion$1;
 };
+type BrowserFrameEvent$1 = {
+    sessionId: string;
+    seq: number;
+    jpegBase64: string;
+    viewport: {
+        width: number;
+        height: number;
+    };
+};
+type BrowserActivityEvent$1 = {
+    sessionId: string;
+    actionId: string;
+    actor: Exclude<BrowserActor$1, "page">;
+    revision: number;
+    action: BrowserAction$1;
+    result: BrowserOutcome$1;
+};
 type GatewayResponseFrame$1<Payload = unknown> = {
     type: "res";
     id: string;
@@ -662,6 +716,19 @@ type UpdateTicketRequest = UpdateTicketRequest$1;
 type DeleteTicketRequest = DeleteTicketRequest$1;
 type CreateBrowserSessionRequest = CreateBrowserSessionRequest$1;
 type BrowserSource = BrowserSource$1;
+type BrowserActor = BrowserActor$1;
+type BrowserViewport = BrowserViewport$1;
+type BrowserPoint = BrowserPoint$1;
+type BrowserRectangle = BrowserRectangle$1;
+type BrowserModifier = BrowserModifier$1;
+type BrowserRedaction = BrowserRedaction$1;
+type BrowserOutcome = BrowserOutcome$1;
+type BrowserJournalEntry = BrowserJournalEntry$1;
+type BrowserContextSlice = BrowserContextSlice$1;
+type BrowserSummary = BrowserSummary$1;
+type BrowserClickAction = BrowserClickAction$1;
+type BrowserFrameEvent = BrowserFrameEvent$1;
+type BrowserActivityEvent = BrowserActivityEvent$1;
 type BrowserLocator = BrowserLocator$1;
 type BrowserSnapshot = BrowserSnapshot$1;
 type BrowserAction = BrowserAction$1;
@@ -680,4 +747,4 @@ type ListBrowserSessionsResponse = ListBrowserSessionsResponse$1;
 type GatewayEventFrame<Payload = unknown> = GatewayEventFrame$1<Payload>;
 type GatewayResponseFrame<Payload = unknown> = GatewayResponseFrame$1<Payload>;
 
-export type { BrowserActRequest, BrowserActResponse, BrowserAction, BrowserContextRequest, BrowserContextResponse, BrowserLocator, BrowserPickRequest, BrowserPickResponse, BrowserScreenshot, BrowserSelection, BrowserSnapshot, BrowserSource, CancelRunRequest, CancelRunResponse, CloseBrowserSessionRequest, CloseBrowserSessionResponse, CreateBrowserSessionRequest, CreateBrowserSessionResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, DeleteTicketRequest, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListBrowserSessionsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunTokenUsageRequest, ListRunTokenUsageResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, RunStartedBy, RunTokenUsageEvent, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };
+export type { BrowserActRequest, BrowserActResponse, BrowserAction, BrowserActivityEvent, BrowserActor, BrowserClickAction, BrowserContextRequest, BrowserContextResponse, BrowserContextSlice, BrowserFrameEvent, BrowserJournalEntry, BrowserLocator, BrowserModifier, BrowserOutcome, BrowserPickRequest, BrowserPickResponse, BrowserPoint, BrowserRectangle, BrowserRedaction, BrowserScreenshot, BrowserSelection, BrowserSnapshot, BrowserSource, BrowserSummary, BrowserViewport, CancelRunRequest, CancelRunResponse, CloseBrowserSessionRequest, CloseBrowserSessionResponse, CreateBrowserSessionRequest, CreateBrowserSessionResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, DeleteTicketRequest, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListBrowserSessionsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunTokenUsageRequest, ListRunTokenUsageResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, RunStartedBy, RunTokenUsageEvent, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };

@@ -43,7 +43,7 @@ import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.
 import { retryTask as retryTaskReset } from "@smithers-orchestrator/time-travel/retry-task";
 import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
-import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
+import { GATEWAY_EVENT_WINDOW_DEFAULT, GATEWAY_RPC_ERRORS, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope, isGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializeComparisonScoreRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreDetailRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
@@ -7852,6 +7852,7 @@ a { color: var(--brand); }</style>
    */
     async routeRequest(connection, frame) {
         this.markActivity();
+        const rawParams = frame.params;
         const params = asObject(frame.params) ?? {};
         if (isExtensionMethod(frame.method)) {
             return this.routeExtensionRequest(connection, frame, params);
@@ -7866,17 +7867,17 @@ a { color: var(--brand); }</style>
                     identity: this.buildIdentity(),
                 });
             case "createBrowserSession":
-                return this.browserCall(frame, () => this.browser.create(validateBrowserRequest(frame.method, params)));
+                return this.browserCall(frame, () => this.browser.create(validateBrowserRequest(frame.method, rawParams)));
             case "browserAct":
-                return this.browserCall(frame, () => this.browser.act({ ...validateBrowserRequest(frame.method, params), actor: connection.role === "user" || connection.role === "operator" ? "user" : "agent" }));
+                return this.browserCall(frame, () => this.browser.act({ ...validateBrowserRequest(frame.method, rawParams), actor: connection.role === "user" || connection.role === "operator" ? "user" : "agent" }));
             case "browserContext":
-                return this.browserCall(frame, () => this.browser.context(validateBrowserRequest(frame.method, params)));
+                return this.browserCall(frame, () => this.browser.context(validateBrowserRequest(frame.method, rawParams)));
             case "browserPick":
-                return this.browserCall(frame, () => this.browser.pick(validateBrowserRequest(frame.method, params)));
+                return this.browserCall(frame, () => this.browser.pick(validateBrowserRequest(frame.method, rawParams)));
             case "closeBrowserSession":
-                return this.browserCall(frame, () => this.browser.close(validateBrowserRequest(frame.method, params).sessionId));
+                return this.browserCall(frame, () => this.browser.close(validateBrowserRequest(frame.method, rawParams).sessionId));
             case "listBrowserSessions":
-                return this.browserCall(frame, () => this.browser.list());
+                return this.browserCall(frame, () => { validateBrowserRequest(frame.method, rawParams); return this.browser.list(); });
             case "runs.list":
             case "listRuns": {
                 const filter = asObject(params.filter) ?? {};
@@ -9133,7 +9134,8 @@ a { color: var(--brand); }</style>
             return responseOk(frame.id, await operation());
         }
         catch (error) {
-            const code = error?.code ?? "Internal";
+            const candidate = error?.code === "INVALID_REQUEST" ? "InvalidRequest" : error?.code;
+            const code = typeof candidate === "string" && Object.prototype.hasOwnProperty.call(GATEWAY_RPC_ERRORS, candidate) ? candidate : "Internal";
             return responseError(frame.id, code, error?.message ?? "Browser operation failed", error?.details);
         }
     }

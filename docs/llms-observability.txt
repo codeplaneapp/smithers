@@ -442,6 +442,18 @@ and use `theme`, `hostOrigin`, and `embed` query parameters when the embedding
 consumer needs to control presentation or receive viewer activity and revision
 messages through `postMessage`.
 
+Browser RPC requests are strictly closed shapes: unknown fields, empty required
+strings, invalid nested sources/viewports/locators/actions, and unknown context
+slices are rejected before dispatch. A `click` action must contain exactly one
+target, either a locator (`testId`, `css`, or `role` with an optional `name`)
+or a point; locator and point cannot be combined. `browserAct` returns a typed
+successful outcome (`ok`, with optional redirect or redaction metadata), while
+`browser.activity` carries the typed action and result journal entry. Browser
+activity attributes the authenticated caller as `user` or `agent`; raw
+undeclared internal error codes are normalized to `Internal`. Context slices
+are bounded and may include inline JPEG screenshots and redacted selection
+history.
+
 ## Bun controllers and cron jobs
 
 Run one Gateway singleton per workspace. Discover its verified URL with the

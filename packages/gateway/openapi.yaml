@@ -15959,6 +15959,7 @@ paths:
                               const: url
                             url:
                               type: string
+                              minLength: 1
                               description: "Public http or https URL."
                           required:
                             - kind
@@ -15975,6 +15976,7 @@ paths:
                               description: "Declared loopback port."
                             path:
                               type: string
+                              minLength: 1
                               description: "Absolute path on the dev server."
                           required:
                             - kind
@@ -16053,6 +16055,7 @@ paths:
                                 const: url
                               url:
                                 type: string
+                                minLength: 1
                                 description: "Public http or https URL."
                             required:
                               - kind
@@ -16069,6 +16072,7 @@ paths:
                                 description: "Declared loopback port."
                               path:
                                 type: string
+                                minLength: 1
                                 description: "Absolute path on the dev server."
                             required:
                               - kind
@@ -16589,9 +16593,11 @@ paths:
                   properties:
                     sessionId:
                       type: string
+                      minLength: 1
                       description: "Opaque session identifier."
                     actionId:
                       type: string
+                      minLength: 1
                       description: "Caller-created dedupe identifier."
                     expectedRevision:
                       type: integer
@@ -16606,6 +16612,7 @@ paths:
                               const: navigate
                             url:
                               type: string
+                              minLength: 1
                               description: "Destination URL."
                           required:
                             - kind
@@ -16644,68 +16651,98 @@ paths:
                             - kind
                           additionalProperties: false
                         -
-                          type: object
-                          properties:
-                            kind:
-                              const: click
-                            locator:
-                              oneOf:
-                                -
-                                  type: object
-                                  properties:
-                                    testId:
-                                      type: string
-                                      description: "Stable test id."
-                                  required:
-                                    - testId
-                                  additionalProperties: false
-                                -
-                                  type: object
-                                  properties:
-                                    role:
-                                      type: string
-                                      description: "Accessible role."
-                                    name:
-                                      type: string
-                                      description: "Accessible name."
-                                  required:
-                                    - role
-                                  additionalProperties: false
-                                -
-                                  type: object
-                                  properties:
-                                    css:
-                                      type: string
-                                      description: "Safe CSS selector."
-                                  required:
-                                    - css
-                                  additionalProperties: false
-                            point:
+                          oneOf:
+                            -
                               type: object
                               properties:
-                                x:
-                                  type: number
-                                y:
-                                  type: number
+                                kind:
+                                  const: click
+                                locator:
+                                  oneOf:
+                                    -
+                                      type: object
+                                      properties:
+                                        testId:
+                                          type: string
+                                          minLength: 1
+                                          description: "Stable test id."
+                                      required:
+                                        - testId
+                                      additionalProperties: false
+                                    -
+                                      type: object
+                                      properties:
+                                        role:
+                                          type: string
+                                          minLength: 1
+                                          description: "Accessible role."
+                                        name:
+                                          type: string
+                                          minLength: 1
+                                          description: "Accessible name."
+                                      required:
+                                        - role
+                                      additionalProperties: false
+                                    -
+                                      type: object
+                                      properties:
+                                        css:
+                                          type: string
+                                          minLength: 1
+                                          description: "Safe CSS selector."
+                                      required:
+                                        - css
+                                      additionalProperties: false
+                                button:
+                                  type: string
+                                  enum:
+                                    - left
+                                    - right
+                                    - middle
+                                modifiers:
+                                  type: array
+                                  description: Modifiers.
+                                  items:
+                                    type: string
+                                    minLength: 1
+                                    description: "Keyboard modifier."
                               required:
-                                - x
-                                - y
+                                - kind
+                                - locator
                               additionalProperties: false
-                            button:
-                              type: string
-                              enum:
-                                - left
-                                - right
-                                - middle
-                            modifiers:
-                              type: array
-                              description: Modifiers.
-                              items:
-                                type: string
-                                description: "Keyboard modifier."
-                          required:
-                            - kind
-                          additionalProperties: false
+                            -
+                              type: object
+                              properties:
+                                kind:
+                                  const: click
+                                point:
+                                  type: object
+                                  properties:
+                                    x:
+                                      type: number
+                                    y:
+                                      type: number
+                                  required:
+                                    - x
+                                    - y
+                                  additionalProperties: false
+                                button:
+                                  type: string
+                                  enum:
+                                    - left
+                                    - right
+                                    - middle
+                                modifiers:
+                                  type: array
+                                  description: Modifiers.
+                                  items:
+                                    type: string
+                                    minLength: 1
+                                    description: "Keyboard modifier."
+                              required:
+                                - kind
+                                - point
+                              additionalProperties: false
                         -
                           type: object
                           properties:
@@ -16718,6 +16755,7 @@ paths:
                                   properties:
                                     testId:
                                       type: string
+                                      minLength: 1
                                       description: "Stable test id."
                                   required:
                                     - testId
@@ -16727,9 +16765,11 @@ paths:
                                   properties:
                                     role:
                                       type: string
+                                      minLength: 1
                                       description: "Accessible role."
                                     name:
                                       type: string
+                                      minLength: 1
                                       description: "Accessible name."
                                   required:
                                     - role
@@ -16739,12 +16779,14 @@ paths:
                                   properties:
                                     css:
                                       type: string
+                                      minLength: 1
                                       description: "Safe CSS selector."
                                   required:
                                     - css
                                   additionalProperties: false
                             text:
                               type: string
+                              minLength: 1
                               description: "Text input."
                             replace:
                               type: boolean
@@ -16761,12 +16803,14 @@ paths:
                               const: press
                             key:
                               type: string
+                              minLength: 1
                               description: "Keyboard key."
                             modifiers:
                               type: array
                               description: Modifiers.
                               items:
                                 type: string
+                                minLength: 1
                                 description: "Keyboard modifier."
                           required:
                             - kind
@@ -16798,6 +16842,7 @@ paths:
                                 - dismiss
                             promptText:
                               type: string
+                              minLength: 1
                               description: "Replacement prompt text."
                           required:
                             - kind
@@ -16879,22 +16924,46 @@ paths:
                           -
                             type: "null"
                       outcome:
-                        description: "Any JSON value."
                         oneOf:
                           -
                             type: object
-                            additionalProperties: true
+                            description: "Successful browser action result."
+                            properties:
+                              ok:
+                                const: true
+                              redirectedTo:
+                                type: string
+                                minLength: 1
+                                description: "Redirect destination."
+                              redacted:
+                                type: boolean
+                                description: "Whether sensitive content was redacted."
+                              length:
+                                type: integer
+                                minimum: 0
+                                description: "Redacted content length."
+                            required:
+                              - ok
+                            additionalProperties: false
                           -
-                            type: array
-                            items: {}
-                          -
-                            type: string
-                          -
-                            type: number
-                          -
-                            type: boolean
-                          -
-                            type: "null"
+                            type: object
+                            description: "Failed browser action result."
+                            properties:
+                              ok:
+                                const: false
+                              code:
+                                type: string
+                                minLength: 1
+                                description: "Browser action failure code."
+                              message:
+                                type: string
+                                minLength: 1
+                                description: "Browser action failure message."
+                            required:
+                              - ok
+                              - code
+                              - message
+                            additionalProperties: false
                     required:
                       - revision
                       - page
@@ -17324,6 +17393,7 @@ paths:
                   properties:
                     sessionId:
                       type: string
+                      minLength: 1
                       description: "Opaque session identifier."
                     sinceRevision:
                       type: integer
@@ -17334,6 +17404,7 @@ paths:
                       description: "Requested context slices."
                       items:
                         type: string
+                        minLength: 1
                         enum:
                           - visible-text
                           - accessibility
@@ -17409,6 +17480,7 @@ paths:
                                     const: url
                                   url:
                                     type: string
+                                    minLength: 1
                                     description: "Public http or https URL."
                                 required:
                                   - kind
@@ -17425,6 +17497,7 @@ paths:
                                     description: "Declared loopback port."
                                   path:
                                     type: string
+                                    minLength: 1
                                     description: "Absolute path on the dev server."
                                 required:
                                   - kind
@@ -18052,6 +18125,7 @@ paths:
                   properties:
                     sessionId:
                       type: string
+                      minLength: 1
                       description: "Opaque session identifier."
                     point:
                       type: object
@@ -18625,6 +18699,7 @@ paths:
                   properties:
                     sessionId:
                       type: string
+                      minLength: 1
                       description: "Opaque browser session identifier."
                   required:
                     - sessionId
@@ -19151,6 +19226,7 @@ paths:
                                   const: url
                                 url:
                                   type: string
+                                  minLength: 1
                                   description: "Public http or https URL."
                               required:
                                 - kind
@@ -19167,6 +19243,7 @@ paths:
                                   description: "Declared loopback port."
                                 path:
                                   type: string
+                                  minLength: 1
                                   description: "Absolute path on the dev server."
                               required:
                                 - kind

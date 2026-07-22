@@ -437,6 +437,23 @@ describe("Gateway RPC contract", () => {
     }
   });
 
+  test("browser schemas reject empty required strings and mixed click targets", () => {
+    const act = getGatewayRpcDefinition("browserAct")!;
+    const pick = getGatewayRpcDefinition("browserPick")!;
+    const close = getGatewayRpcDefinition("closeBrowserSession")!;
+    expect(act.requestSchema.properties?.sessionId?.minLength).toBe(1);
+    expect(act.requestSchema.properties?.actionId?.minLength).toBe(1);
+    expect(pick.requestSchema.properties?.sessionId?.minLength).toBe(1);
+    expect(close.requestSchema.properties?.sessionId?.minLength).toBe(1);
+    expect(validateAgainstSchema({ sessionId: "", actionId: "a", action: { kind: "reload" } }, act.requestSchema).length).toBeGreaterThan(0);
+    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "click", locator: { css: "button" }, point: { x: 1, y: 2 } } }, act.requestSchema).length).toBeGreaterThan(0);
+    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "click" } }, act.requestSchema).length).toBeGreaterThan(0);
+    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "type", locator: { role: "textbox" }, text: "" } }, act.requestSchema).length).toBeGreaterThan(0);
+    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "dialog", decision: "accept", promptText: "" } }, act.requestSchema).length).toBeGreaterThan(0);
+    expect(validateAgainstSchema({ revision: 1, page: null, outcome: { ok: false, code: "ACTION_FAILED", message: "No element" } }, act.responseSchema).length).toBe(0);
+    expect(validateAgainstSchema({ revision: 1, page: null, outcome: { ok: false, code: "ACTION_FAILED" } }, act.responseSchema).length).toBeGreaterThan(0);
+  });
+
   test("exampleRequest/exampleResponse survive a JSON serialize→deserialize round-trip without data loss", () => {
     // Guards against examples with non-JSON-serializable values (undefined fields,
     // class instances, Date objects, etc.) that appear to validate but would be
