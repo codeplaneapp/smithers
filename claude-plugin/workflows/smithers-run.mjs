@@ -15,7 +15,8 @@ export const meta = {
 //
 // args (object, or a JSON string of one):
 //   { runId }                            attach to an existing run
-//   { workflow, input?, cwd? }           launch a detached run, then mirror it
+//   { workflow, input?, cwd?, startedByPrompt? }
+//                                        launch a detached run, then mirror it
 //                                        (workflow = discovered ID or a .tsx/.mdx path)
 //   { mirrorAllNodes?, maxLiveWatchers?, agentBudget?, collapseAt? }
 // ---------------------------------------------------------------------------
@@ -58,6 +59,13 @@ function shellQuote(value) {
 const CLI = workflowArgs.cwd
   ? `cd ${shellQuote(workflowArgs.cwd)} && bunx smithers-orchestrator`
   : 'bunx smithers-orchestrator'
+const startedBySession = typeof process.env.CLAUDE_CODE_SESSION_ID === 'string' && process.env.CLAUDE_CODE_SESSION_ID.trim()
+  ? ` --started-by-session ${shellQuote(process.env.CLAUDE_CODE_SESSION_ID)}`
+  : ''
+const startedByPrompt = workflowArgs.startedByPrompt === undefined
+  ? ''
+  : ` --started-by-prompt ${shellQuote(String(workflowArgs.startedByPrompt))}`
+const startedByFlags = ` --started-by-harness claude-code${startedBySession}${startedByPrompt}`
 
 const TICK_SCHEMA = {
   type: 'object',
@@ -107,7 +115,7 @@ if (!runId) {
     : ` --input ${shellQuote(JSON.stringify(workflowArgs.input))}`
   const launched = await agent(
     'Launch a detached Smithers run and return only its run id as structured output. Run this command once:\n' +
-    `RUN-EXACTLY: ${CLI} workflow run ${shellQuote(String(workflowArgs.workflow))} --detach${inputFlag} --format json\n` +
+    `RUN-EXACTLY: ${CLI} workflow run ${shellQuote(String(workflowArgs.workflow))} --detach${inputFlag}${startedByFlags} --format json\n` +
     'Extract the run id from the JSON output (field runId or id). Do not run anything else.',
     { label: `launch ${String(workflowArgs.workflow)}`, phase: 'Run', schema: LAUNCH_SCHEMA, effort: 'low' },
   )

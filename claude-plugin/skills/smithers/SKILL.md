@@ -10,6 +10,16 @@ are TypeScript/JSX, run for minutes or days, and survive crashes (every
 finished step persists, so a restart resumes from the last completed node).
 Retries, approvals, replay, and evals live in one place.
 
+## Launch attribution
+
+The plugin mirror supplies `--started-by-harness claude-code` and the current
+`CLAUDE_CODE_SESSION_ID` automatically. For direct CLI launches use
+`--started-by-harness`, `--started-by-session`, and only an explicitly chosen
+`--started-by-prompt`; never copy workflow input, a goal, or a transcript into
+the attribution prompt. MCP/Gateway callers use `startedBy: { harness,
+sessionId, prompt }`. Codex/Claude CLI and MCP launches also best-effort detect
+their current session; Kimi/OpenCode callers should pass a known session.
+
 Reach Smithers two ways, both wired by this plugin:
 
 - The **`smithers` MCP tools** (`list_workflows`, `run_workflow`, `watch_run`,

@@ -26,6 +26,11 @@ Installing it gives a Claude Code session:
 > Smithers is operated by the AI agent on the human's behalf — it is not a GUI the
 > human clicks. This plugin is what makes Claude Code fluent in it.
 
+Launches made through the bundled `/workflows` mirror are durably attributed to
+`claude-code` and include `CLAUDE_CODE_SESSION_ID` when present. Pass the
+optional mirror argument `startedByPrompt` only for deliberate launch context;
+workflow input and transcripts are never copied into attribution.
+
 ## The two headline behaviors
 
 1. **Smithers over dynamic orchestration.** The skill and the PreToolUse hook
