@@ -13,6 +13,18 @@ fragments in one sheet with the reduced-motion block last.
 All families are correct in light and dark themes and honor
 `prefers-reduced-motion`.
 
+## Naming reconciliation
+
+The agentic-ui program planned some names that collided with existing exports,
+so the frozen collision policy shipped them under collision-free names. The
+shipped names are the contract:
+
+| Planned name | Shipped name |
+| --- | --- |
+| `Task`, `TaskTrigger`, `TaskContent`, `TaskGroup` | `AgentTask`, `AgentTaskTrigger`, `AgentTaskContent`, `AgentTaskGroup` |
+| `Agent` | `AgentDefinition` |
+| `Test` | `TestRow` |
+
 ## Conversation
 
 Compound transcript primitives from `smithers-orchestrator/ui`.

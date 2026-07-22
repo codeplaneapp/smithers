@@ -574,6 +574,10 @@ export function GalleryCanvas() {
             <ActivityItem kind="message" title="run started" timestampMs={1_700_000_000_000} />
           </ActivityGroup>
         </ActivityTimeline>
+        <p>
+          Planned as Task/TaskTrigger/TaskContent/TaskGroup; shipped as AgentTask/AgentTaskTrigger/
+          AgentTaskContent/AgentTaskGroup per the frozen collision policy.
+        </p>
         <AgentTaskGroup data-testid="agent-task-group">
           <AgentTask title="Merge lane barrels" status="running" defaultOpen>
             <AgentTaskTrigger aria-label="Toggle merge lane barrels" />
@@ -628,6 +632,7 @@ export function GalleryCanvas() {
       </Section>
 
       <Section id="agents" title="Agents and context">
+        <p>Planned as Agent; shipped as AgentDefinition per the frozen collision policy.</p>
         <AgentDefinition name="implementer" availability="available">
           <AgentHeader />
           <AgentContent>
@@ -714,6 +719,7 @@ export function GalleryCanvas() {
       </Section>
 
       <Section id="test-results" title="Test results and stack traces">
+        <p>Planned as Test; shipped as TestRow per the frozen collision policy.</p>
         <div data-testid="test-results-demo" style={{ display: "grid", gap: 12 }}>
           <TestResults suites={FAILING_SUITES} />
           <StackTrace data-testid="stack-trace" raw={STACK} defaultOpen />
