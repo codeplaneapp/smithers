@@ -123,7 +123,7 @@ export const sections: Section[] = [
     id: "title",
     steps: 1,
     notes: [
-      "Hi, I'm Will, the creator of Smithers. Last month alone, Smithers was downloaded ninety-seven thousand times — agent workflows people actually trust: jobs that finish, survive crashes, and wait for human sign-off.",
+      "Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can actually trust — jobs that finish, survive crashes, and wait for human sign-off before anything ships.",
     ],
     render: () => `
       <div class="center">
@@ -140,19 +140,19 @@ export const sections: Section[] = [
     id: "traction",
     steps: 1,
     notes: [
-      "We launched in January, open source, and we've grown every month since. And users don't churn: they report bugs and stay, calling Smithers one of the biggest unlocks in their agentic toolkit.",
+      "We launched in January, open source. Today, forty community projects build on Smithers, and four hundred fifty people are active in our Telegram. Users don't churn: they report bugs and stay, calling it one of the biggest unlocks in their agentic toolkit.",
     ],
     render: () => `
       <div class="traction">
         <div class="traction-copy">
           <div class="eyebrow">Traction</div>
-          <h2 class="big big-md"><span class="accent">97,000</span> downloads<br />in June.</h2>
+          <h2 class="big big-md"><span class="accent">450</span> active in<br />our Telegram.</h2>
+          <p class="support"><strong>40 community projects</strong> known to be<br />building on Smithers today.</p>
           <div class="stat-chips">
             <span class="chip">launched January</span>
             <span class="chip">329 GitHub stars</span>
             <span class="chip">38 forks</span>
             <span class="chip">18 external contributors</span>
-            <span class="chip">450 in Telegram</span>
           </div>
         </div>
         <figure class="traction-chart">

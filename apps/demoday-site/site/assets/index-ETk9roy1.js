@@ -2,7 +2,7 @@
     <svg viewBox="0 0 560 350" role="img" aria-label="npm downloads per month, January to June 2026: 3,235; 2,608; 2,760; 4,827; 7,224; 97,000" class="chart">
       <line x1="6" y1="314" x2="554" y2="314" class="c-axis" />
       ${s}
-    </svg>`}var i=[{step:`describe`,caption:`Describe the job in chat`,img:`/shots/home.png`,alt:`Smithers home: a single chat composer that says Ask Smithers to build`,note:`Here's what that looks like: I describe the job in chat, one sentence — and minutes later, a workflow exists.`},{step:`build`,caption:`Your agent authors the workflow`,img:`/shots/workflow.png`,alt:`Workflow editor showing agent-authored JSX workflow source with tasks and a review loop`,note:`My agent authors the workflow — real source, tasks, a review loop; I never wrote a line. And it self-improves: every run is scored, and the prompts re-optimize weekly.`},{step:`run`,caption:`It runs — every step streaming live`,img:`/shots/inspector.png`,alt:`Run inspector: live execution tree with plan, edit-files and run-tests steps streaming`,note:`It runs, every step streaming live — and I can time-travel back to any point in the workflow.`},{step:`gate`,caption:`Approval gate — kill it mid-run, it resumes at the same frame`,img:`/shots/timeline.png`,alt:`Time travel scrubber with seven snapshots, an approval gate marker, and fork and replay controls`,note:`It pauses at my approval gate, costing nothing while it waits. Now watch — I kill the process mid-run… and it resumes exactly where it stopped. Every frame is saved.`},{step:`ship`,caption:`Done — reviewed, diffed, shipped`,img:`/shots/diff.png`,alt:`Completed change: six files, plus 67 minus 234, reviewed as syntax-highlighted diffs`,note:`Done: reviewed, diffed, shipped.`}],a=[{id:`title`,steps:1,notes:[`Hi, I'm Will, the creator of Smithers. Last month alone, Smithers was downloaded ninety-seven thousand times — agent workflows people actually trust: jobs that finish, survive crashes, and wait for human sign-off.`],render:()=>`
+    </svg>`}var i=[{step:`describe`,caption:`Describe the job in chat`,img:`/shots/home.png`,alt:`Smithers home: a single chat composer that says Ask Smithers to build`,note:`Here's what that looks like: I describe the job in chat, one sentence — and minutes later, a workflow exists.`},{step:`build`,caption:`Your agent authors the workflow`,img:`/shots/workflow.png`,alt:`Workflow editor showing agent-authored JSX workflow source with tasks and a review loop`,note:`My agent authors the workflow — real source, tasks, a review loop; I never wrote a line. And it self-improves: every run is scored, and the prompts re-optimize weekly.`},{step:`run`,caption:`It runs — every step streaming live`,img:`/shots/inspector.png`,alt:`Run inspector: live execution tree with plan, edit-files and run-tests steps streaming`,note:`It runs, every step streaming live — and I can time-travel back to any point in the workflow.`},{step:`gate`,caption:`Approval gate — kill it mid-run, it resumes at the same frame`,img:`/shots/timeline.png`,alt:`Time travel scrubber with seven snapshots, an approval gate marker, and fork and replay controls`,note:`It pauses at my approval gate, costing nothing while it waits. Now watch — I kill the process mid-run… and it resumes exactly where it stopped. Every frame is saved.`},{step:`ship`,caption:`Done — reviewed, diffed, shipped`,img:`/shots/diff.png`,alt:`Completed change: six files, plus 67 minus 234, reviewed as syntax-highlighted diffs`,note:`Done: reviewed, diffed, shipped.`}],a=[{id:`title`,steps:1,notes:[`Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can actually trust — jobs that finish, survive crashes, and wait for human sign-off before anything ships.`],render:()=>`
       <div class="center">
         <div class="wordmark"><span class="dot"></span>smithers</div>
         <h1 class="tagline">Reliable, self-improving<br />agentic workflows.<br /><em>In one prompt.</em></h1>
@@ -11,17 +11,17 @@
           <span class="chip">github.com/smithersai/smithers</span>
           <span class="chip">open source</span>
         </div>
-      </div>`},{id:`traction`,steps:1,notes:[`We launched in January, open source, and we've grown every month since. And users don't churn: they report bugs and stay, calling Smithers one of the biggest unlocks in their agentic toolkit.`],render:()=>`
+      </div>`},{id:`traction`,steps:1,notes:[`We launched in January, open source. Today, forty community projects build on Smithers, and four hundred fifty people are active in our Telegram. Users don't churn: they report bugs and stay, calling it one of the biggest unlocks in their agentic toolkit.`],render:()=>`
       <div class="traction">
         <div class="traction-copy">
           <div class="eyebrow">Traction</div>
-          <h2 class="big big-md"><span class="accent">97,000</span> downloads<br />in June.</h2>
+          <h2 class="big big-md"><span class="accent">450</span> active in<br />our Telegram.</h2>
+          <p class="support"><strong>40 community projects</strong> known to be<br />building on Smithers today.</p>
           <div class="stat-chips">
             <span class="chip">launched January</span>
             <span class="chip">329 GitHub stars</span>
             <span class="chip">38 forks</span>
             <span class="chip">18 external contributors</span>
-            <span class="chip">450 in Telegram</span>
           </div>
         </div>
         <figure class="traction-chart">

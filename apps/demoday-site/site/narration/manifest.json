@@ -2,27 +2,27 @@
   "model": "gpt-4o-mini-tts",
   "voice": "ash",
   "instructions": "Confident, energetic founder giving a demo-day pitch; brisk but clear diction; natural emphasis on numbers.",
-  "totalMs": 179688,
+  "totalMs": 180192,
   "steps": [
     {
       "i": 0,
       "id": "title",
       "beat": 0,
-      "line": "Hi, I'm Will, the creator of Smithers. Last month alone, Smithers was downloaded ninety-seven thousand times — agent workflows people actually trust: jobs that finish, survive crashes, and wait for human sign-off.",
+      "line": "Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can actually trust — jobs that finish, survive crashes, and wait for human sign-off before anything ships.",
       "file": "01-title.mp3",
-      "durationMs": 16008,
-      "words": 31,
-      "hash": "d3038c84bcabac28"
+      "durationMs": 13968,
+      "words": 28,
+      "hash": "af4582d8eb2f1a81"
     },
     {
       "i": 1,
       "id": "traction",
       "beat": 0,
-      "line": "We launched in January, open source, and we've grown every month since. And users don't churn: they report bugs and stay, calling Smithers one of the biggest unlocks in their agentic toolkit.",
+      "line": "We launched in January, open source. Today, forty community projects build on Smithers, and four hundred fifty people are active in our Telegram. Users don't churn: they report bugs and stay, calling it one of the biggest unlocks in their agentic toolkit.",
       "file": "02-traction.mp3",
-      "durationMs": 15768,
-      "words": 32,
-      "hash": "06c59057562cb45a"
+      "durationMs": 18312,
+      "words": 42,
+      "hash": "daca997e21e8a95a"
     },
     {
       "i": 2,

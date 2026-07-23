@@ -3,7 +3,7 @@
 This script IS the deck's speaker notes: the lines below live in `src/slides.ts`
 (section `notes`) and are the single source of truth. The TTS narration in
 `public/narration/` was generated from them with OpenAI `gpt-4o-mini-tts` (voice
-`ash`) via `bun scripts/narrate.ts`, and the full read measures **2:59.7** — the
+`ash`) via `bun scripts/narrate.ts`, and the full read measures **3:00.2** — the
 clock marks below are the real measured start times, not estimates.
 
 How to run the deck: `pnpm -C apps/demoday-site dev` → open the URL. **→ / space**
@@ -18,17 +18,18 @@ If you're behind a mark, the two [CUT IF OVER] lines buy back ~8 seconds.
 
 **[STEP 1 — title · 0:00]**
 
-> Hi, I'm Will, the creator of Smithers. Last month alone, Smithers was downloaded
-> ninety-seven thousand times — agent workflows people actually trust: jobs that
-> finish, survive crashes, and wait for human sign-off.
+> Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can
+> actually trust — jobs that finish, survive crashes, and wait for human sign-off
+> before anything ships.
 
-*(advance → 0:16)*
+*(advance → 0:14)*
 
-**[STEP 2 — traction · 0:16]**
+**[STEP 2 — traction · 0:14]**
 
-> We launched in January, open source, and we've grown every month since. And users
-> don't churn: they report bugs and stay, calling Smithers one of the biggest
-> unlocks in their agentic toolkit.
+> We launched in January, open source. Today, forty community projects build on
+> Smithers, and four hundred fifty people are active in our Telegram. Users don't
+> churn: they report bugs and stay, calling it one of the biggest unlocks in their
+> agentic toolkit.
 
 *(advance → 0:32)*
 
@@ -47,9 +48,9 @@ If you're behind a mark, the two [CUT IF OVER] lines buy back ~8 seconds.
 > agent builds it. Agents one-shot these workflows because it's React, which they
 > already know.
 
-*(advance → 1:05 — the live run begins; each line lands on its own picture)*
+*(advance → 1:06 — the live run begins; each line lands on its own picture)*
 
-**[STEP 5 — live · describe · 1:05]**
+**[STEP 5 — live · describe · 1:06]**
 
 > Here's what that looks like: I describe the job in chat, one sentence — and
 > minutes later, a workflow exists.
@@ -62,9 +63,9 @@ If you're behind a mark, the two [CUT IF OVER] lines buy back ~8 seconds.
 > a line. And it self-improves: every run is scored, and the prompts re-optimize
 > weekly.
 
-*(advance → 1:27)*
+*(advance → 1:28)*
 
-**[STEP 7 — live · run · 1:27]**
+**[STEP 7 — live · run · 1:28]**
 
 > It runs, every step streaming live — and I can time-travel back to any point in
 > the workflow.
@@ -83,25 +84,25 @@ If you're behind a mark, the two [CUT IF OVER] lines buy back ~8 seconds.
 
 > Done. Reviewed, diffed, shipped.
 
-*(advance → 1:53)*
+*(advance → 1:54)*
 
-**[STEP 10 — why we win · 1:53]**
+**[STEP 10 — why we win · 1:54]**
 
 > The right way to build agents shifts like a video-game meta: a new patch drops,
 > everyone re-learns — but the engine stays. Smithers is the engine: it plugs into
 > every agent, so every model release makes it stronger, not obsolete.
 
-*(advance → 2:11)*
+*(advance → 2:12)*
 
-**[STEP 11 — market · 2:11]**
+**[STEP 11 — market · 2:12]**
 
 > Workflow automation was giant before agents — Zapier, UiPath, Temporal. After
 > agents, it gets bigger: companies that never automated anything are asking to
 > start. [CUT IF OVER: drop the company clause]
 
-*(advance → 2:25)*
+*(advance → 2:26)*
 
-**[STEP 12 — business model · 2:25]**
+**[STEP 12 — business model · 2:26]**
 
 > Smithers is free — that's distribution, and the canonical open-source engine is
 > the moat. Revenue is the cloud that runs these workflows, plus the enterprise
@@ -114,9 +115,9 @@ If you're behind a mark, the two [CUT IF OVER] lines buy back ~8 seconds.
 > We know this space. In twenty twenty-five I built the fastest open-source
 > Ethereum VM — with agents. Tevm, the OP Stack, now Smithers.
 
-*(advance → 2:48)*
+*(advance → 2:49)*
 
-**[STEP 14 — the ask · 2:48]**
+**[STEP 14 — the ask · 2:49]**
 
 > We're looking for design partners — I'll work hands-on to integrate Smithers into
 > your product or back office. Smithers makes agent workflows reliable. Come find
@@ -128,13 +129,14 @@ If you're behind a mark, the two [CUT IF OVER] lines buy back ~8 seconds.
 
 ## Delivery notes
 
-- The traction hook is now the FIRST thing they hear (97K downloads in the opening
-  line), and the full traction slide is step 2 — before any category language, so
-  the first impression is users and outcomes, not "workflow orchestration".
+- The opening sells trust and outcomes with no numbers; the traction numbers (40
+  community projects, 450 in Telegram) land on step 2 — still before any category
+  language, so the first impression is users and outcomes, not "workflow
+  orchestration".
 - Slide 8 (the kill) is the money moment: pause half a beat after "watch," then say
   the kill line while the gate/scrubber image is up.
 - The one-liner is the last thing they hear — hit "reliable".
-- Numbers land better slightly slower: "ninety-seven *thousand*."
+- Numbers land better slightly slower: "*forty* community projects… *four hundred fifty*."
 - Rehearse against the TTS: press **P** and shadow-read; if you consistently beat
   the voice to the next slide, you're at pace.
 - If the timer shows red (< 20s) and you're not on step 13 yet, jump straight to
