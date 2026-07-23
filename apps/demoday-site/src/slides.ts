@@ -130,8 +130,8 @@ export const sections: Section[] = [
         <div class="wordmark"><span class="dot"></span>smithers</div>
         <h1 class="tagline">Reliable, self-improving<br />agentic workflows.<br /><em>In one prompt.</em></h1>
         <div class="chips">
-          <span class="chip chip-accent">97K downloads in June</span>
           <span class="chip">smithers.sh</span>
+          <span class="chip">github.com/smithersai/smithers</span>
           <span class="chip">open source</span>
         </div>
       </div>`,

@@ -7,8 +7,8 @@
         <div class="wordmark"><span class="dot"></span>smithers</div>
         <h1 class="tagline">Reliable, self-improving<br />agentic workflows.<br /><em>In one prompt.</em></h1>
         <div class="chips">
-          <span class="chip chip-accent">97K downloads in June</span>
           <span class="chip">smithers.sh</span>
+          <span class="chip">github.com/smithersai/smithers</span>
           <span class="chip">open source</span>
         </div>
       </div>`},{id:`traction`,steps:1,notes:[`We launched in January, open source, and we've grown every month since. And users don't churn: they report bugs and stay, calling Smithers one of the biggest unlocks in their agentic toolkit.`],render:()=>`
