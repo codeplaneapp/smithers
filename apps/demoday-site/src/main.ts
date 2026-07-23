@@ -112,7 +112,7 @@ let rehearsalOn = false;
 async function loadNarration(): Promise<NarrationStep[] | null> {
   if (narration) return narration;
   try {
-    const res = await fetch("/narration/manifest.json");
+    const res = await fetch("narration/manifest.json");
     if (!res.ok) return null;
     const parsed = (await res.json()) as { steps: NarrationStep[] };
     narration = parsed.steps;
@@ -158,7 +158,7 @@ async function toggleRehearsal(): Promise<void> {
       return;
     }
     goto(i);
-    const audio = new Audio(`/narration/${narrationSteps[i].file}`);
+    const audio = new Audio(`narration/${narrationSteps[i].file}`);
     rehearsalAudio = audio;
     audio.onended = () => playFrom(i + 1);
     audio.onerror = () => playFrom(i + 1);

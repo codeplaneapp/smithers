@@ -34,7 +34,7 @@ function makeEnv(): DemodaySiteEnv {
 describe("demoday site worker", () => {
   test("built deck is the Smithers demo-day pitch", () => {
     expect(indexHtml).toContain("<title>Smithers — Demo Day</title>");
-    expect(indexHtml).toContain("/assets/");
+    expect(indexHtml).toContain("assets/");
     expect(indexHtml).not.toContain("/Users/");
   });
 

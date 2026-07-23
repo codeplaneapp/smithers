@@ -88,7 +88,7 @@ export const LIVE_BEATS: LiveBeat[] = [
   {
     step: "ask",
     caption: "Ask for it in your terminal",
-    img: "/shots/terminal.gif",
+    img: "shots/terminal.gif",
     alt: "Terminal: asking Claude Code for a vibeaudit-style security-review workflow; it writes the workflow and its UI",
     fineprint: "Ask modeled on vibeaudit, a real security-review orchestrator built on Smithers: \u201cruns audit skills in parallel \u2026 deduplicated, triaged, and aggregated in a final report.\u201d",
     note: "In my terminal, I ask for a security review like vibeaudit — strategies in parallel, dedupe, triage, one report. A real example, built on Smithers.",
@@ -122,14 +122,14 @@ export const LIVE_BEATS: LiveBeat[] = [
   {
     step: "run",
     caption: "…and the UI it built — a live control room on real runs",
-    img: "/shots/ui-run.gif",
+    img: "shots/ui-run.gif",
     alt: "Agent-built control room: four audit strategies streaming in parallel, findings deduped and triaged live",
     note: "And it built this — a live control room from Smithers components. Strategies streaming in parallel, findings deduped and triaged as they land.",
   },
   {
     step: "recover",
     caption: "Rate-limited mid-run — parked on quota, recovered on a fallback agent",
-    img: "/shots/ui-recover.gif",
+    img: "shots/ui-recover.gif",
     alt: "Dependency audit hits a 429 rate limit, parks on quota, retries on a fallback agent, and finishes",
     note: "Now watch the dependency audit — it hits a rate limit. Smithers parks it, costing nothing, retries on a fallback agent, and finishes. Nothing lost.",
   },
@@ -271,7 +271,7 @@ export const sections: Section[] = [
           </div>
         </div>
         <figure class="media-frame">
-          <img src="/shots/aomi.jpg" alt="Aomi: a trading-strategy workflow built from a single prompt on Smithers — plan, generate, compile and test, ship" />
+          <img src="shots/aomi.jpg" alt="Aomi: a trading-strategy workflow built from a single prompt on Smithers — plan, generate, compile and test, ship" />
         </figure>
       </div>`,
   },
