@@ -10526,6 +10526,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/server` | HTTP, WebSocket, Gateway, cron, webhook, metrics, and single-workflow serving APIs | Server, Serve |
 | `@smithers-orchestrator/signal` | Repository-only example deployment for The Smithers Signal and its daily CEO intel workflow; not part of the core Smithers product or init pack | Serverless |
 | `@smithers-orchestrator/smithers-ui` | Private local-only UI app: the full run/approval/memory control surface, served by `bunx smithers-orchestrator ui --app` against a local Gateway | Gateway UI Components |
+| `@smithers-orchestrator/storybook-site` | Private Cloudflare Worker serving the Storybook catalog for the shared UI component library at storybook.smithers.sh | UI Component Library |
 | `@smithers-orchestrator/telegram` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes | Telegram |
 | `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Smithers on Telegram marketing site, including the reference approval Mini App | Telegram, Ecosystem |
 | `@smithers-orchestrator/telegram-summary` | Private Cloudflare app: Telegram Bot API ingestion, Kimi daily digests, D1 storage, and the `telegram-summary.smithers.sh` dashboard | Custom Workflow UI, CLI Overview |
