@@ -38,14 +38,14 @@ describe("demoday site worker", () => {
     expect(indexHtml).not.toContain("/Users/");
   });
 
-  test("narration manifest covers all 17 steps and totals 3:00", () => {
+  test("narration manifest covers all 16 steps and totals 3:00", () => {
     const manifest = JSON.parse(
       readFileSync(
         new URL("../dist/narration/manifest.json", import.meta.url),
         "utf8",
       ),
     ) as { totalMs: number; steps: { file: string; durationMs: number }[] };
-    expect(manifest.steps.length).toBe(17);
+    expect(manifest.steps.length).toBe(16);
     for (const step of manifest.steps) expect(step.durationMs).toBeGreaterThan(0);
     expect(manifest.totalMs).toBeGreaterThan(170_000);
     expect(manifest.totalMs).toBeLessThanOrEqual(181_000);
@@ -70,7 +70,7 @@ describe("demoday site worker", () => {
       makeEnv(),
     );
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("public, max-age=3600");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=120");
   });
 
   test("unknown paths fall back to the deck (SPA)", async () => {

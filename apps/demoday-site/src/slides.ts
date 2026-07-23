@@ -140,7 +140,7 @@ export const sections: Section[] = [
     id: "title",
     steps: 1,
     notes: [
-      "Hi, I'm Will, creator of Smithers. Smithers makes agent workflows you can trust — they finish, survive crashes, and wait for sign-off.",
+      "Hey everyone — I'm Will, also known as fucory, creator of Smithers. I've spent every day for almost a year now obsessing over agentic workflows.",
     ],
     render: () => `
       <div class="center">
@@ -157,7 +157,7 @@ export const sections: Section[] = [
     id: "traction",
     steps: 1,
     notes: [
-      "Launched in January, open source. Forty community projects build on Smithers; four hundred fifty in our Telegram. And users don't churn.",
+      "Most users quietly churn when they hit bugs early in a project. Smithers users write multi-paragraph open letters to the maintainer, because they love Smithers and desperately want it to succeed.",
     ],
     render: () => `
       <div class="traction">
@@ -183,7 +183,7 @@ export const sections: Section[] = [
     id: "problem",
     steps: 1,
     notes: [
-      "Everyone can describe a workflow they want. Making it real — and keeping it alive — is the hard part. The plumbing is more work than the idea.",
+      "Building workflows is hard. Users trust Smithers because it's dependable.",
     ],
     render: () => `
       <div class="statement">
@@ -279,7 +279,7 @@ export const sections: Section[] = [
     id: "insight",
     steps: 1,
     notes: [
-      "Building agents shifts like a game meta — a new patch drops, everyone re-learns, but the engine stays. Every model release makes Smithers stronger.",
+      "Building agents shifts like a game meta — a new patch drops, everyone re-learns, but the engine stays. Every model release makes Smithers stronger. And other orchestrators are one-size-fits-all — you bend the job to fit the tool. Smithers is custom-fitted to every job.",
     ],
     render: () => `
       <div class="statement">
@@ -294,16 +294,16 @@ export const sections: Section[] = [
       </div>`,
   },
   {
-    id: "customfit",
+    id: "market",
     steps: 1,
     notes: [
-      "Other orchestrators are one-size-fits-all: you bend the job to fit the tool. Smithers is custom-fitted to every job.",
+      "Workflow automation was giant before agents. After agents it gets bigger — everyone's asking to start.",
     ],
     render: () => `
       <div class="statement">
-        <div class="eyebrow">Fit</div>
-        <h2 class="big big-md">One-size-fits-all<br />vs <em>custom-fitted.</em></h2>
-        <p class="support">Generic orchestrators bend your job to fit the tool.<br />A Smithers workflow is tailored to the job — authored by your agent.</p>
+        <div class="eyebrow">Market</div>
+        <h2 class="big">Workflow automation gets<br /><em>bigger</em> after agents.</h2>
+        <p class="support">Zapier, UiPath, Temporal built on slices of it. Companies that never<br />automated a single process are asking to start.</p>
       </div>`,
   },
   {
@@ -315,19 +315,6 @@ export const sections: Section[] = [
     render: () => `
       <div class="statement">
         <h2 class="big">Smithers is the<br /><em>Ruby on Rails</em> of<br />workflow automation.</h2>
-      </div>`,
-  },
-  {
-    id: "market",
-    steps: 1,
-    notes: [
-      "Workflow automation was giant before agents. After agents it gets bigger — everyone's asking to start.",
-    ],
-    render: () => `
-      <div class="statement">
-        <div class="eyebrow">Market</div>
-        <h2 class="big">Workflow automation gets<br /><em>bigger</em> after agents.</h2>
-        <p class="support">Zapier, UiPath, Temporal built on slices of it. Companies that never<br />automated a single process are asking to start.</p>
       </div>`,
   },
   {

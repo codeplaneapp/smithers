@@ -26,7 +26,7 @@ const HASHED_ASSET_HEADERS = {
 
 const MEDIA_HEADERS = {
   ...SECURITY_HEADERS,
-  "cache-control": "public, max-age=3600",
+  "cache-control": "public, max-age=120",
 } as const;
 
 function withHeaders(
