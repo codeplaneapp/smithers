@@ -130,13 +130,25 @@ function stopRehearsal(): void {
   }
 }
 
+function rehearsalHint(message: string): void {
+  helpEl.innerHTML = message;
+  helpEl.classList.remove("gone");
+  window.setTimeout(() => helpEl.classList.add("gone"), 6000);
+}
+
 async function toggleRehearsal(): Promise<void> {
   if (rehearsalOn) {
     stopRehearsal();
     return;
   }
-  const narrationSteps = await loadNarration();
-  if (!narrationSteps) return;
+  // The manifest is prefetched at boot so this stays synchronous on the happy
+  // path — audio.play() must run inside the key press's user-gesture window or
+  // Safari (and strict Chrome profiles) will block it.
+  const narrationSteps = narration ?? (await loadNarration());
+  if (!narrationSteps) {
+    rehearsalHint("Narration failed to load — check the connection and press <kbd>P</kbd> again.");
+    return;
+  }
   rehearsalOn = true;
   resetTimer();
   toggleTimer();
@@ -149,10 +161,18 @@ async function toggleRehearsal(): Promise<void> {
     const audio = new Audio(`/narration/${narrationSteps[i].file}`);
     rehearsalAudio = audio;
     audio.onended = () => playFrom(i + 1);
-    void audio.play();
+    audio.onerror = () => playFrom(i + 1);
+    audio.play().catch(() => {
+      stopRehearsal();
+      resetTimer();
+      rehearsalHint("Audio blocked by the browser — click the page once, then press <kbd>P</kbd> again.");
+    });
   };
   playFrom(0);
 }
+
+// Prefetch so pressing P can start audio synchronously within the gesture.
+void loadNarration();
 
 // ---- input ----
 document.addEventListener("keydown", (e) => {
