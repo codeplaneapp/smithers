@@ -1,7 +1,7 @@
 import * as react from 'react';
 import { ReactElement, ReactNode } from 'react';
 import * as _smithers_orchestrator_gateway_client from '@smithers-orchestrator/gateway-client';
-import { SmithersGatewayClientOptions, WorkspaceMode, SmithersGatewayClient, SmithersDataClient, SmithersCollections, GatewayCronRow, GatewayMemoryFactRow, GatewayPromptRow, GatewayScoreRow, GatewayTicketRow, GatewayRpcPayload as GatewayRpcPayload$1, GatewayEventFrame, GatewayBackoffOptions, GatewayRunNode } from '@smithers-orchestrator/gateway-client';
+import { SmithersGatewayClientOptions, WorkspaceMode, SmithersGatewayClient, SmithersDataClient, SmithersCollections, GatewayCronRow, GatewayMemoryFactRow, GatewayPromptRow, GatewayScoreRow, GatewayTicketRow, UsageReport, ListRunTokenUsageResponse, GatewayRpcPayload as GatewayRpcPayload$1, GatewayEventFrame, GatewayBackoffOptions, GatewayRunNode } from '@smithers-orchestrator/gateway-client';
 import * as _tanstack_react_query from '@tanstack/react-query';
 import { QueryClient } from '@tanstack/react-query';
 import { ListApprovalsRequest, ListApprovalsResponse, CronListRequest, ListTicketsRequest, GatewayRpcMethod, GatewayRpcParams, GatewayRpcPayload, ListRunsRequest, ListWorkflowsRequest, ListWorkflowsResponse } from '@smithers-orchestrator/gateway-client/rpc';
@@ -45,6 +45,12 @@ declare function useGatewayActions(): {
             allowNetwork?: boolean;
             maxOutputBytes?: number;
             toolTimeoutMs?: number;
+            startedBy?: {
+                harness?: string;
+                sessionId?: string;
+                prompt?: string;
+                detected?: true;
+            };
         };
     }) => Promise<{
         runId: string;
@@ -269,6 +275,16 @@ declare function useGatewayScores(runId: string, nodeId?: string): GatewayAsyncS
  * hooks return (mirrors `useGatewayCrons` / `useGatewayMemoryFacts`).
  */
 declare function useGatewayTickets(params?: ListTicketsRequest): GatewayAsyncState<GatewayTicketRow[]>;
+
+/** Provider rate-limit and subscription usage, refreshed once per cache TTL. */
+declare function useGatewayUsageReports(options?: {
+    refreshMs?: number;
+}): GatewayAsyncState<UsageReport[]>;
+
+/** Complete persisted token usage for a run. Set refreshMs while the run is live. */
+declare function useGatewayRunTokenUsage(runId: string, options?: {
+    refreshMs?: number;
+}): GatewayAsyncState<ListRunTokenUsageResponse>;
 
 declare function useGatewayNodeOutput(params: {
     runId: string | undefined;
@@ -861,4 +877,4 @@ declare function useDelegationChain(params: {
     runId: string | undefined;
 }): UseDelegationChainResult;
 
-export { DELEGATION_TIERS, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcGatesRow, type DcGoalRow, type DcPlanChild, type DcPlanRisk, type DcPlanRow, type DcPollAnswer, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcSkipRow, type DelegationApprovalRecord, type DelegationEdge, type DelegationFoldIssue, type DelegationGraph, type DelegationNodeKind, type DelegationNodeState, type DelegationNodeStatus, type DelegationOutputRecord, type DelegationPhase, type DelegationRecord, type DelegationVersionSnapshot, type DevPreviewKind, type Estimate, type FoldDelegationOptions, type Gate, type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type NodeStatus, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type Tier, type UseDelegationChainResult, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, createGatewayReactRoot, delegationTableForNodeId, foldDelegation, isDcDevPreviewRow, isDcEditRow, isDcExecRow, isDcGatesRow, isDcGoalRow, isDcPlanChild, isDcPlanRow, isDcPollRow, isDcPreviewRow, isDcProbeRow, isDcQuestionRow, isDcReplanRow, isDcReviewRow, isDcSkipRow, isDelegationApprovalRecord, isDevPreviewKind, isEstimate, isGate, isTier, parseDelegationNodeId, useDelegationChain, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeEvents, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunDiff, useGatewayRunEvents, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayWorkflows, useSmithersCollections, useSmithersGateway };
+export { DELEGATION_TIERS, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcGatesRow, type DcGoalRow, type DcPlanChild, type DcPlanRisk, type DcPlanRow, type DcPollAnswer, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcSkipRow, type DelegationApprovalRecord, type DelegationEdge, type DelegationFoldIssue, type DelegationGraph, type DelegationNodeKind, type DelegationNodeState, type DelegationNodeStatus, type DelegationOutputRecord, type DelegationPhase, type DelegationRecord, type DelegationVersionSnapshot, type DevPreviewKind, type Estimate, type FoldDelegationOptions, type Gate, type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type NodeStatus, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type Tier, type UseDelegationChainResult, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, createGatewayReactRoot, delegationTableForNodeId, foldDelegation, isDcDevPreviewRow, isDcEditRow, isDcExecRow, isDcGatesRow, isDcGoalRow, isDcPlanChild, isDcPlanRow, isDcPollRow, isDcPreviewRow, isDcProbeRow, isDcQuestionRow, isDcReplanRow, isDcReviewRow, isDcSkipRow, isDelegationApprovalRecord, isDevPreviewKind, isEstimate, isGate, isTier, parseDelegationNodeId, useDelegationChain, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeEvents, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunDiff, useGatewayRunEvents, useGatewayRunTokenUsage, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayUsageReports, useGatewayWorkflows, useSmithersCollections, useSmithersGateway };

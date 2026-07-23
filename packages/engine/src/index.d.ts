@@ -1247,7 +1247,7 @@ type SchedulerWakeQueue = {
     notify(): void;
     wait(): Promise<void>;
 };
-type SmithersWorkflow$1 = _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow;
+type SmithersWorkflow$1 = any;
 type WorkflowEngineContext = effect.Context.Context<WorkflowEngine.WorkflowEngine>;
 type WorkflowMakeBridgeRuntime = {
     readonly engineContext: WorkflowEngineContext;
@@ -1756,12 +1756,14 @@ declare function finalizeCancelledRun(adapter: SmithersDb$1, runId: string, opti
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
  * @param {SmithersCtx<unknown>} ctx
- * @param {{ baseRootDir?: string; workflowPath?: string | null }} [opts]
+ * @param {{ baseRootDir?: string; workflowPath?: string | null; inputAlreadyNormalized?: boolean; allowMissingRequiredInput?: boolean }} [opts]
  * @returns {Effect.Effect<GraphSnapshot, SmithersError>}
  */
 declare function renderFrame<Schema>(workflow: SmithersWorkflow<Schema>, ctx: SmithersCtx<unknown>, opts?: {
     baseRootDir?: string;
     workflowPath?: string | null;
+    inputAlreadyNormalized?: boolean;
+    allowMissingRequiredInput?: boolean;
 }): Effect.Effect<GraphSnapshot, SmithersError>;
 /**
  * @template Schema
@@ -1773,7 +1775,7 @@ declare function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, opts: R
 type GraphSnapshot = _smithers_orchestrator_graph_GraphSnapshot.GraphSnapshot;
 type RunOptions = _smithers_orchestrator_driver_RunOptions.RunOptions;
 type RunResult = _smithers_orchestrator_driver_RunResult.RunResult;
-type SmithersWorkflow = _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow;
+type SmithersWorkflow = any;
 
 /**
  * @param {{ name: string; input: AnySchema }} options

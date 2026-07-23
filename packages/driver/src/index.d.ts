@@ -1040,6 +1040,15 @@ type WaitReason = _smithers_orchestrator_scheduler.WaitReason;
 type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
 
 /**
+ * Clamp a startedBy prompt to its persisted budget, surrogate-pair safe.
+ * Transports call this BEFORE generic frame string bounds so an over-long
+ * prompt truncates (the documented behavior) instead of rejecting the frame.
+ *
+ * @param {string} prompt
+ * @returns {string}
+ */
+declare function clampRunStartedByPrompt(prompt: string): string;
+/**
  * Normalize optional harness provenance at public ingress and before durable
  * persistence. Unknown object keys are intentionally ignored for direct JS
  * callers; public schemas reject them before this helper runs.
@@ -1048,12 +1057,6 @@ type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
  * @returns {import("./RunStartedBy.ts").RunStartedBy | undefined}
  */
 declare function normalizeRunStartedBy(value: unknown): RunStartedBy$1 | undefined;
-/**
- * Clamp a startedBy prompt to its persisted budget, surrogate-pair safe.
- * Transports call this BEFORE generic frame string bounds so an over-long
- * prompt truncates (the documented behavior) instead of rejecting the frame.
- */
-declare function clampRunStartedByPrompt(prompt: string): string;
 declare const RUN_STARTED_BY_HARNESS_MAX_CODE_POINTS: 64;
 declare const RUN_STARTED_BY_SESSION_ID_MAX_CODE_POINTS: 256;
 declare const RUN_STARTED_BY_PROMPT_MAX_CODE_POINTS: 8192;
