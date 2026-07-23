@@ -2,155 +2,175 @@
   "model": "gpt-4o-mini-tts",
   "voice": "ash",
   "instructions": "Confident, energetic founder giving a demo-day pitch; brisk but clear diction; natural emphasis on numbers.",
-  "totalMs": 178896,
+  "totalMs": 179928,
   "steps": [
     {
       "i": 0,
       "id": "title",
       "beat": 0,
-      "line": "Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can trust — jobs that finish, survive crashes, and wait for human sign-off.",
+      "line": "Hi, I'm Will, creator of Smithers. Smithers makes agent workflows you can trust — they finish, survive crashes, and wait for sign-off.",
       "file": "01-title.mp3",
-      "durationMs": 10656,
-      "words": 24,
-      "hash": "31f8df0c9ae5d6c8"
+      "durationMs": 11256,
+      "words": 21,
+      "hash": "ddfb0f235d006398"
     },
     {
       "i": 1,
       "id": "traction",
       "beat": 0,
-      "line": "We launched in January, open source. Today, forty community projects build on Smithers, and four hundred fifty people are active in our Telegram. And users don't churn — they report bugs and stay.",
+      "line": "Launched in January, open source. Forty community projects build on Smithers; four hundred fifty in our Telegram. And users don't churn.",
       "file": "02-traction.mp3",
-      "durationMs": 14568,
-      "words": 32,
-      "hash": "ff8b0d335486f6b5"
+      "durationMs": 11064,
+      "words": 21,
+      "hash": "7d75fddd53690d74"
     },
     {
       "i": 2,
       "id": "problem",
       "beat": 0,
-      "line": "Everyone can describe a workflow they want automated. Making it real is the hard part: authoring, monitoring, approvals, cleanup after every crash. The plumbing is more work than the idea.",
+      "line": "Everyone can describe a workflow they want. Making it real — and keeping it alive — is the hard part. The plumbing is more work than the idea.",
       "file": "03-problem.mp3",
-      "durationMs": 13800,
-      "words": 30,
-      "hash": "2af77ffc58484596"
+      "durationMs": 10416,
+      "words": 26,
+      "hash": "3f25605f6449a2a5"
     },
     {
       "i": 3,
       "id": "solution",
       "beat": 0,
-      "line": "Smithers ships the plumbing as the framework — durability, retries, approvals, observability, built in. You don't write the workflows: you simply describe the job. Agents one-shot these workflows because it's React, which they already know.",
+      "line": "Smithers ships the plumbing as the framework — durability, retries, approvals, observability built in. You just describe the job.",
       "file": "04-solution.mp3",
-      "durationMs": 16368,
-      "words": 34,
-      "hash": "570cdb49daf596a4"
+      "durationMs": 10008,
+      "words": 18,
+      "hash": "460219dbef328cda"
     },
     {
       "i": 4,
       "id": "live",
       "beat": 0,
-      "line": "Here's what that looks like: I describe the pipeline in chat — score my inbound leads, draft outreach, nothing sends without my sign-off.",
+      "line": "In my terminal, I ask for a security review like vibeaudit — strategies in parallel, dedupe, triage, one report. A real example, built on Smithers.",
       "file": "05-live-1.mp3",
-      "durationMs": 9912,
-      "words": 22,
-      "hash": "c4c2af634f64aaa6"
+      "durationMs": 12864,
+      "words": 24,
+      "hash": "e8b4724eaeb86182"
     },
     {
       "i": 5,
       "id": "live",
       "beat": 1,
-      "line": "My agent authors the workflow — real source: enrich, score, draft, an approval gate; I never wrote a line. And it self-improves: every run is scored, and the prompts re-optimize weekly.",
+      "line": "That's the workflow it wrote — real source, and it's React. Agents one-shot these workflows because they already know React deeply.",
       "file": "06-live-2.mp3",
-      "durationMs": 12720,
-      "words": 30,
-      "hash": "41a4382fb6376b33"
+      "durationMs": 10560,
+      "words": 20,
+      "hash": "e24079e727914821"
     },
     {
       "i": 6,
       "id": "live",
       "beat": 2,
-      "line": "It runs, every step streaming — leads enriched and scored, outreach held at my gate — and I can time-travel back to any point.",
+      "line": "And it built this — a live control room from Smithers components. Strategies streaming in parallel, findings deduped and triaged as they land.",
       "file": "07-live-3.mp3",
-      "durationMs": 11112,
+      "durationMs": 10704,
       "words": 22,
-      "hash": "43f46d73a96bc0be"
+      "hash": "64240765e9ff948d"
     },
     {
       "i": 7,
-      "id": "people",
-      "beat": 0,
-      "line": "And not just agents — Smithers orchestrates people too: approvals, durable steps, and live collaboration, like a Google Doc.",
-      "file": "08-people.mp3",
-      "durationMs": 10656,
-      "words": 18,
-      "hash": "0d8447b2c1b086c4"
+      "id": "live",
+      "beat": 3,
+      "line": "Now watch the dependency audit — it hits a rate limit. Smithers parks it, costing nothing, retries on a fallback agent, and finishes. Nothing lost.",
+      "file": "08-live-4.mp3",
+      "durationMs": 11616,
+      "words": 24,
+      "hash": "066f66a2d2a654b0"
     },
     {
       "i": 8,
+      "id": "dataflow",
+      "beat": 0,
+      "line": "Under the hood: one-way data flow. Events update state; the plan is a pure function of state. Time travel, resume, and SQL debug come for free.",
+      "file": "09-dataflow.mp3",
+      "durationMs": 12264,
+      "words": 26,
+      "hash": "2a50f5a5a4034f73"
+    },
+    {
+      "i": 9,
       "id": "builton",
       "beat": 0,
       "line": "Real products ship on Smithers — Aomi ships production apps from a single prompt. The next Harvey, the next CodeRabbit: built on agents they can trust.",
-      "file": "09-builton.mp3",
-      "durationMs": 11808,
+      "file": "10-builton.mp3",
+      "durationMs": 12120,
       "words": 25,
       "hash": "8f2199bb13d89e8b"
     },
     {
-      "i": 9,
+      "i": 10,
       "id": "insight",
       "beat": 0,
-      "line": "Building agents shifts like a video-game meta: a new patch drops, everyone re-learns — but the engine stays. Smithers plugs into every agent, so every model release makes it stronger.",
-      "file": "10-insight.mp3",
-      "durationMs": 13656,
-      "words": 29,
-      "hash": "d9667916f1d3d82b"
+      "line": "Building agents shifts like a game meta — a new patch drops, everyone re-learns, but the engine stays. Every model release makes Smithers stronger.",
+      "file": "11-insight.mp3",
+      "durationMs": 10968,
+      "words": 23,
+      "hash": "0dd2fdc50393050c"
     },
     {
-      "i": 10,
+      "i": 11,
+      "id": "customfit",
+      "beat": 0,
+      "line": "Other orchestrators are one-size-fits-all: you bend the job to fit the tool. Smithers is custom-fitted to every job.",
+      "file": "12-customfit.mp3",
+      "durationMs": 9648,
+      "words": 18,
+      "hash": "2f07f9abf611e408"
+    },
+    {
+      "i": 12,
       "id": "rails",
       "beat": 0,
       "line": "Smithers is the Ruby on Rails of workflow automation.",
-      "file": "11-rails.mp3",
-      "durationMs": 4752,
+      "file": "13-rails.mp3",
+      "durationMs": 5016,
       "words": 9,
       "hash": "f230018cb3f3d8cc"
     },
     {
-      "i": 11,
+      "i": 13,
       "id": "market",
       "beat": 0,
-      "line": "Workflow automation was giant before agents. After agents it gets bigger — companies that never automated anything are asking to start.",
-      "file": "12-market.mp3",
-      "durationMs": 11352,
-      "words": 20,
-      "hash": "43a49d335e103b85"
-    },
-    {
-      "i": 12,
-      "id": "model",
-      "beat": 0,
-      "line": "Smithers is free — that's distribution, and the canonical open-source engine is the moat. Revenue is the cloud that runs these workflows, plus the enterprise last mile.",
-      "file": "13-model.mp3",
-      "durationMs": 12960,
-      "words": 26,
-      "hash": "1aec739821c31e18"
-    },
-    {
-      "i": 13,
-      "id": "team",
-      "beat": 0,
-      "line": "In twenty twenty-five I built the fastest open-source Ethereum VM — with agents. Tevm, the OP Stack, now Smithers.",
-      "file": "14-team.mp3",
-      "durationMs": 11520,
-      "words": 18,
-      "hash": "ad5cce5b7b383338"
+      "line": "Workflow automation was giant before agents. After agents it gets bigger — everyone's asking to start.",
+      "file": "14-market.mp3",
+      "durationMs": 8448,
+      "words": 15,
+      "hash": "4abaf4641185387f"
     },
     {
       "i": 14,
+      "id": "model",
+      "beat": 0,
+      "line": "Smithers is free — that's distribution; the canonical open-source engine is the moat. Revenue is cloud, plus the enterprise last mile.",
+      "file": "15-model.mp3",
+      "durationMs": 10608,
+      "words": 20,
+      "hash": "e7936178ac54542e"
+    },
+    {
+      "i": 15,
+      "id": "team",
+      "beat": 0,
+      "line": "In twenty twenty-five I built the fastest open-source Ethereum VM with agents. Tevm, the OP Stack, now Smithers.",
+      "file": "16-team.mp3",
+      "durationMs": 9768,
+      "words": 18,
+      "hash": "1e4919e252b3c617"
+    },
+    {
+      "i": 16,
       "id": "ask",
       "beat": 0,
       "line": "We're looking for angels and design partners — I'll work hands-on to integrate Smithers into your product or back office. Smithers makes agent workflows reliable. Come find me.",
-      "file": "15-ask.mp3",
-      "durationMs": 13056,
+      "file": "17-ask.mp3",
+      "durationMs": 12600,
       "words": 27,
       "hash": "2d33015268f90756"
     }

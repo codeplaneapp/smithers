@@ -38,14 +38,14 @@ describe("demoday site worker", () => {
     expect(indexHtml).not.toContain("/Users/");
   });
 
-  test("narration manifest covers all 15 steps and totals 3:00", () => {
+  test("narration manifest covers all 17 steps and totals 3:00", () => {
     const manifest = JSON.parse(
       readFileSync(
         new URL("../dist/narration/manifest.json", import.meta.url),
         "utf8",
       ),
     ) as { totalMs: number; steps: { file: string; durationMs: number }[] };
-    expect(manifest.steps.length).toBe(15);
+    expect(manifest.steps.length).toBe(17);
     for (const step of manifest.steps) expect(step.durationMs).toBeGreaterThan(0);
     expect(manifest.totalMs).toBeGreaterThan(170_000);
     expect(manifest.totalMs).toBeLessThanOrEqual(181_000);

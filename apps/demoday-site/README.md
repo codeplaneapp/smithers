@@ -12,9 +12,11 @@ pnpm -C apps/demoday-site dev
 
 Keys: **→ / space** next · **←** back · **N** speaker notes · **P** rehearsal
 mode (TTS narration plays and auto-advances the deck; the full read is 3:00) ·
-**T** 3:00 timer (**R** resets) · **F** fullscreen. 15 steps; steps 5–7 are one
-"super slide" that advances through the sales-pipeline run's three gifs
-(recorded from the real app booted by ~/multi's deck-capture stack).
+**T** 3:00 timer (**R** resets) · **F** fullscreen. 17 steps; steps 5–8 are one
+"super slide" advancing through the vibe-audit story: the terminal ask (VHS
+gif), the real React workflow source, the agent-built control room
+(.smithers/{workflows,ui}/vibe-audit.tsx in this repo, recorded live off the
+workspace gateway), and the rate-limit park + fallback-agent recovery.
 
 The narration in `public/narration/` is generated from the slide notes with
 OpenAI TTS: `OPENAI_API_KEY=... bun scripts/narrate.ts` (re-run after editing

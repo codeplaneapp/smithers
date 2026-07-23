@@ -605,3 +605,65 @@ kbd {
   display: block;
   border-radius: 8px;
 }
+
+/* ---------- live code beat ---------- */
+
+pre.live-code {
+  margin: 0;
+  padding: clamp(1rem, 2vw, 1.6rem);
+  background: #0b0e16;
+  overflow: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: clamp(0.6rem, 1.05vw, 0.82rem);
+  line-height: 1.55;
+  color: #c8d0e0;
+  text-align: left;
+}
+
+.live-code .k { color: #bb9af7; }
+.live-code .f { color: #7aa2f7; }
+.live-code .t { color: #7dcfff; }
+.live-code .a { color: #e0af68; }
+.live-code .s { color: #9ece6a; }
+
+.live-fineprint {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: clamp(0.58rem, 0.95vw, 0.72rem);
+  color: var(--faint);
+  font-style: italic;
+}
+
+/* ---------- dataflow slide ---------- */
+
+.flowline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: clamp(1.2rem, 3vh, 2rem) 0 clamp(0.8rem, 2vh, 1.4rem);
+}
+
+.flow-node {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.45rem 1.1rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: clamp(0.75rem, 1.3vw, 0.95rem);
+  color: var(--accent);
+}
+
+.flow-arrow {
+  color: var(--faint);
+  font-size: 1.1rem;
+}
+
+.flow-return {
+  flex-basis: 100%;
+  text-align: center;
+  color: var(--faint);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: clamp(0.65rem, 1.1vw, 0.8rem);
+  margin-top: 0.3rem;
+}

@@ -75,32 +75,63 @@ function tractionChart(): string {
 interface LiveBeat {
   step: string;
   caption: string;
-  img: string;
-  alt: string;
+  img?: string;
+  alt?: string;
+  /** Inline syntax-highlighted code panel instead of an image. */
+  code?: string;
+  /** Small print under the caption (e.g. source attribution). */
+  fineprint?: string;
   note: string;
 }
 
 export const LIVE_BEATS: LiveBeat[] = [
   {
-    step: "describe",
-    caption: "Describe the pipeline in chat",
-    img: "/shots/describe.gif",
-    alt: "Smithers composer: typing a one-sentence sales-pipeline request",
-    note: "Here's what that looks like: I describe the pipeline in chat — score my inbound leads, draft outreach, nothing sends without my sign-off.",
+    step: "ask",
+    caption: "Ask for it in your terminal",
+    img: "/shots/terminal.gif",
+    alt: "Terminal: asking Claude Code for a vibeaudit-style security-review workflow; it writes the workflow and its UI",
+    fineprint: "Ask modeled on vibeaudit, a real security-review orchestrator built on Smithers: \u201cruns audit skills in parallel \u2026 deduplicated, triaged, and aggregated in a final report.\u201d",
+    note: "In my terminal, I ask for a security review like vibeaudit — strategies in parallel, dedupe, triage, one report. A real example, built on Smithers.",
   },
   {
-    step: "build",
-    caption: "Your agent authors the workflow — scoring built in",
-    img: "/shots/build.gif",
-    alt: "Workflow editor showing the agent-authored sales-pipeline source: enrich, score, draft, approval gate",
-    note: "My agent authors the workflow — real source: enrich, score, draft, an approval gate; I never wrote a line. And it self-improves: every run is scored, and the prompts re-optimize weekly.",
+    step: "code",
+    caption: "The workflow it wrote — real source, and it's React",
+    code: `<span class="k">const</span> { Workflow, Task, smithers, outputs } = <span class="f">createSmithers</span>({
+  vaInjection: strategySchema, vaAuth: strategySchema,
+  vaSecrets: strategySchema,  vaDeps: strategySchema,
+  vaDedupe: dedupeSchema, vaTriage: triageSchema, vaReport: reportSchema,
+});
+
+<span class="k">export default</span> <span class="f">smithers</span>((ctx) => (
+  <span class="t">&lt;Workflow</span> <span class="a">name</span>=<span class="s">"vibe-audit"</span><span class="t">&gt;</span>
+    <span class="t">&lt;Sequence&gt;</span>
+      <span class="t">&lt;Parallel&gt;</span>
+        <span class="t">&lt;Task</span> <span class="a">id</span>=<span class="s">"injection-scan"</span> <span class="a">output</span>={outputs.vaInjection} <span class="t">/&gt;</span>
+        <span class="t">&lt;Task</span> <span class="a">id</span>=<span class="s">"auth-review"</span> <span class="a">output</span>={outputs.vaAuth} <span class="t">/&gt;</span>
+        <span class="t">&lt;Task</span> <span class="a">id</span>=<span class="s">"secrets-scan"</span> <span class="a">output</span>={outputs.vaSecrets} <span class="t">/&gt;</span>
+        <span class="t">&lt;Task</span> <span class="a">id</span>=<span class="s">"deps-audit"</span> <span class="a">output</span>={outputs.vaDeps} <span class="a">retries</span>={2} <span class="t">/&gt;</span>
+      <span class="t">&lt;/Parallel&gt;</span>
+      <span class="t">&lt;Task</span> <span class="a">id</span>=<span class="s">"dedupe"</span> <span class="a">output</span>={outputs.vaDedupe} <span class="t">/&gt;</span>
+      <span class="t">&lt;Task</span> <span class="a">id</span>=<span class="s">"triage"</span> <span class="a">output</span>={outputs.vaTriage} <span class="t">/&gt;</span>
+      <span class="t">&lt;Task</span> <span class="a">id</span>=<span class="s">"report"</span> <span class="a">output</span>={outputs.vaReport} <span class="t">/&gt;</span>
+    <span class="t">&lt;/Sequence&gt;</span>
+  <span class="t">&lt;/Workflow&gt;</span>
+));`,
+    note: "That's the workflow it wrote — real source, and it's React. Agents one-shot these workflows because they already know React deeply.",
   },
   {
     step: "run",
-    caption: "It runs — leads scored live, outreach held for approval",
-    img: "/shots/run.gif",
-    alt: "Run inspector streaming the sales pipeline: intake, enrich, score, draft, approval hold",
-    note: "It runs, every step streaming — leads enriched and scored, outreach held at my gate — and I can time-travel back to any point.",
+    caption: "…and the UI it built — a live control room on real runs",
+    img: "/shots/ui-run.gif",
+    alt: "Agent-built control room: four audit strategies streaming in parallel, findings deduped and triaged live",
+    note: "And it built this — a live control room from Smithers components. Strategies streaming in parallel, findings deduped and triaged as they land.",
+  },
+  {
+    step: "recover",
+    caption: "Rate-limited mid-run — parked on quota, recovered on a fallback agent",
+    img: "/shots/ui-recover.gif",
+    alt: "Dependency audit hits a 429 rate limit, parks on quota, retries on a fallback agent, and finishes",
+    note: "Now watch the dependency audit — it hits a rate limit. Smithers parks it, costing nothing, retries on a fallback agent, and finishes. Nothing lost.",
   },
 ];
 
@@ -109,7 +140,7 @@ export const sections: Section[] = [
     id: "title",
     steps: 1,
     notes: [
-      "Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can trust — jobs that finish, survive crashes, and wait for human sign-off.",
+      "Hi, I'm Will, creator of Smithers. Smithers makes agent workflows you can trust — they finish, survive crashes, and wait for sign-off.",
     ],
     render: () => `
       <div class="center">
@@ -126,7 +157,7 @@ export const sections: Section[] = [
     id: "traction",
     steps: 1,
     notes: [
-      "We launched in January, open source. Today, forty community projects build on Smithers, and four hundred fifty people are active in our Telegram. And users don't churn — they report bugs and stay.",
+      "Launched in January, open source. Forty community projects build on Smithers; four hundred fifty in our Telegram. And users don't churn.",
     ],
     render: () => `
       <div class="traction">
@@ -152,7 +183,7 @@ export const sections: Section[] = [
     id: "problem",
     steps: 1,
     notes: [
-      "Everyone can describe a workflow they want automated. Making it real is the hard part: authoring, monitoring, approvals, cleanup after every crash. The plumbing is more work than the idea.",
+      "Everyone can describe a workflow they want. Making it real — and keeping it alive — is the hard part. The plumbing is more work than the idea.",
     ],
     render: () => `
       <div class="statement">
@@ -165,7 +196,7 @@ export const sections: Section[] = [
     id: "solution",
     steps: 1,
     notes: [
-      "Smithers ships the plumbing as the framework — durability, retries, approvals, observability, built in. You don't write the workflows: you simply describe the job. Agents one-shot these workflows because it's React, which they already know.",
+      "Smithers ships the plumbing as the framework — durability, retries, approvals, observability built in. You just describe the job.",
     ],
     render: () => `
       <div class="statement">
@@ -187,31 +218,39 @@ export const sections: Section[] = [
           </div>
         </div>
         <div class="live-frame">
-          ${LIVE_BEATS.map(
-            (b, i) => `<img class="live-shot" data-i="${i}" src="${b.img}" alt="${b.alt}" />`,
+          ${LIVE_BEATS.map((b, i) =>
+            b.code
+              ? `<pre class="live-shot live-code" data-i="${i}"><code>${b.code}</code></pre>`
+              : `<img class="live-shot" data-i="${i}" src="${b.img}" alt="${b.alt}" />`,
           ).join("")}
         </div>
         <div class="live-captions">
-          ${LIVE_BEATS.map((b, i) => `<p class="live-caption" data-i="${i}"><span class="live-num">${i + 1}</span>${b.caption}</p>`).join("")}
+          ${LIVE_BEATS.map((b, i) => `<p class="live-caption" data-i="${i}"><span class="live-num">${i + 1}</span>${b.caption}${b.fineprint ? `<span class="live-fineprint">${b.fineprint}</span>` : ""}</p>`).join("")}
         </div>
       </div>`,
   },
   {
-    id: "people",
+    id: "dataflow",
     steps: 1,
     notes: [
-      "And not just agents — Smithers orchestrates people too: approvals, durable steps, and live collaboration, like a Google Doc.",
+      "Under the hood: one-way data flow. Events update state; the plan is a pure function of state. Time travel, resume, and SQL debug come for free.",
     ],
     render: () => `
-      <div class="media-slide">
-        <div class="media-copy">
-          <div class="eyebrow">People too</div>
-          <h2 class="big big-md">Orchestrate <em>people</em>,<br />not just agents.</h2>
-          <p class="support">Durable steps, approval gates, and live collaboration —<br />cursors and prompts shared like a Google Doc.</p>
+      <div class="statement">
+        <div class="eyebrow">Under the hood</div>
+        <h2 class="big big-md">The plan is a <em>pure function</em><br />of state.</h2>
+        <div class="flowline">
+          <span class="flow-node">Render</span><span class="flow-arrow">→</span>
+          <span class="flow-node">Extract</span><span class="flow-arrow">→</span>
+          <span class="flow-node">Execute</span><span class="flow-arrow">→</span>
+          <span class="flow-node">Persist</span>
+          <span class="flow-return">↻ re-render with new state</span>
         </div>
-        <figure class="media-frame">
-          <img src="/shots/collab.gif" alt="Live Smithers session with two participants editing a workflow together, cursors visible" />
-        </figure>
+        <div class="stack">
+          <div class="stack-row"><span>Free time travel</span><span class="stack-tag">a frame is a snapshot — forking is "throw away rows"</span></div>
+          <div class="stack-row"><span>Free resume</span><span class="stack-tag">re-render from state — no event log to replay</span></div>
+          <div class="stack-row"><span>Free SQL debug</span><span class="stack-tag">state is queryable — an event chain is not</span></div>
+        </div>
       </div>`,
   },
   {
@@ -240,7 +279,7 @@ export const sections: Section[] = [
     id: "insight",
     steps: 1,
     notes: [
-      "Building agents shifts like a video-game meta: a new patch drops, everyone re-learns — but the engine stays. Smithers plugs into every agent, so every model release makes it stronger.",
+      "Building agents shifts like a game meta — a new patch drops, everyone re-learns, but the engine stays. Every model release makes Smithers stronger.",
     ],
     render: () => `
       <div class="statement">
@@ -252,6 +291,19 @@ export const sections: Section[] = [
           <div class="stack-row stack-accent"><span>Durable orchestration — <strong>Smithers</strong></span><span class="stack-tag">stable · plugs into every agent</span></div>
         </div>
         <p class="support">The meta shifts like a game patch — the engine underneath stays.<br />Every model release makes Smithers stronger, not obsolete.</p>
+      </div>`,
+  },
+  {
+    id: "customfit",
+    steps: 1,
+    notes: [
+      "Other orchestrators are one-size-fits-all: you bend the job to fit the tool. Smithers is custom-fitted to every job.",
+    ],
+    render: () => `
+      <div class="statement">
+        <div class="eyebrow">Fit</div>
+        <h2 class="big big-md">One-size-fits-all<br />vs <em>custom-fitted.</em></h2>
+        <p class="support">Generic orchestrators bend your job to fit the tool.<br />A Smithers workflow is tailored to the job — authored by your agent.</p>
       </div>`,
   },
   {
@@ -269,7 +321,7 @@ export const sections: Section[] = [
     id: "market",
     steps: 1,
     notes: [
-      "Workflow automation was giant before agents. After agents it gets bigger — companies that never automated anything are asking to start.",
+      "Workflow automation was giant before agents. After agents it gets bigger — everyone's asking to start.",
     ],
     render: () => `
       <div class="statement">
@@ -282,7 +334,7 @@ export const sections: Section[] = [
     id: "model",
     steps: 1,
     notes: [
-      "Smithers is free — that's distribution, and the canonical open-source engine is the moat. Revenue is the cloud that runs these workflows, plus the enterprise last mile.",
+      "Smithers is free — that's distribution; the canonical open-source engine is the moat. Revenue is cloud, plus the enterprise last mile.",
     ],
     render: () => `
       <div class="statement">
@@ -301,7 +353,7 @@ export const sections: Section[] = [
     id: "team",
     steps: 1,
     notes: [
-      "In twenty twenty-five I built the fastest open-source Ethereum VM — with agents. Tevm, the OP Stack, now Smithers.",
+      "In twenty twenty-five I built the fastest open-source Ethereum VM with agents. Tevm, the OP Stack, now Smithers.",
     ],
     render: () => `
       <div class="statement">
