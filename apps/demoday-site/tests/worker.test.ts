@@ -57,7 +57,7 @@ describe("demoday site worker", () => {
       makeEnv(),
     );
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(response.headers.get("cache-control")).toBe("no-cache");
     expect(response.headers.get("content-security-policy")).toContain(
       "default-src 'self'",
     );

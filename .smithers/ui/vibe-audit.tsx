@@ -178,18 +178,18 @@ function App() {
   // lifecycle event at payload.event / payload.payload.nodeId), so a brief
   // failed->retrying window can never be missed between tree polls.
   const stream = useGatewayRunEvents(runId, { afterSeq: 0 });
-  const rateLimitedNodes = useMemo(() => {
-    const hit = new Set<string>();
-    for (const frame of (stream.events ?? []) as Array<Record<string, unknown>>) {
-      const payload = (frame as { payload?: { event?: string; payload?: { nodeId?: string } } }).payload;
-      const kind = String(payload?.event ?? "");
-      if (!/failed|retry/i.test(kind)) continue;
-      if (!/rate.?limit|429|quota/i.test(JSON.stringify(frame))) continue;
-      const nodeId = payload?.payload?.nodeId;
-      if (typeof nodeId === "string") hit.add(nodeId);
-    }
-    return hit;
-  }, [stream.events]);
+  // Plain per-render scan over event frames. The hook's toFrame yields
+  // { type: "event", event: "NodeFailed", payload: { nodeId, ... } } — the
+  // event NAME is top-level, the node id one level down in payload.
+  const rateLimitedNodes = new Set<string>();
+  for (const frame of (stream.events ?? []) as Array<Record<string, unknown>>) {
+    const kind = String((frame as { event?: string }).event ?? "");
+    if (!/failed|retry/i.test(kind)) continue;
+    if (!/rate.?limit|429|quota/i.test(JSON.stringify(frame))) continue;
+    const payload = (frame as { payload?: { nodeId?: string; payload?: { nodeId?: string } } }).payload;
+    const nodeId = payload?.nodeId ?? payload?.payload?.nodeId;
+    if (typeof nodeId === "string") rateLimitedNodes.add(nodeId);
+  }
   const done = status === "finished";
   const repo = "smithersai/payments-api";
 

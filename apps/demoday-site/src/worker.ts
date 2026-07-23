@@ -16,7 +16,7 @@ const SECURITY_HEADERS = {
 
 const HTML_HEADERS = {
   ...SECURITY_HEADERS,
-  "cache-control": "public, max-age=300",
+  "cache-control": "no-cache",
 } as const;
 
 const HASHED_ASSET_HEADERS = {
