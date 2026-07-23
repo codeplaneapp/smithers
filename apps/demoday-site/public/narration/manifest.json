@@ -2,7 +2,7 @@
   "model": "gpt-4o-mini-tts",
   "voice": "ash",
   "instructions": "Confident, energetic founder giving a demo-day pitch; brisk but clear diction; natural emphasis on numbers.",
-  "totalMs": 179736,
+  "totalMs": 180768,
   "steps": [
     {
       "i": 0,
@@ -98,11 +98,11 @@
       "i": 9,
       "id": "builton",
       "beat": 0,
-      "line": "Real products ship on Smithers — Aomi ships production apps from a single prompt. The next Harvey, the next CodeRabbit: built on agents they can trust.",
+      "line": "Real products ship on Smithers — Aomi ships trading strategies from one prompt. The next Harvey, the next CodeRabbit: built on agents they can trust.",
       "file": "10-builton.mp3",
-      "durationMs": 12120,
-      "words": 25,
-      "hash": "8f2199bb13d89e8b"
+      "durationMs": 13152,
+      "words": 24,
+      "hash": "984db1621801e941"
     },
     {
       "i": 10,

@@ -257,7 +257,7 @@ export const sections: Section[] = [
     id: "builton",
     steps: 1,
     notes: [
-      "Real products ship on Smithers — Aomi ships production apps from a single prompt. The next Harvey, the next CodeRabbit: built on agents they can trust.",
+      "Real products ship on Smithers — Aomi ships trading strategies from one prompt. The next Harvey, the next CodeRabbit: built on agents they can trust.",
     ],
     render: () => `
       <div class="media-slide">
@@ -265,13 +265,13 @@ export const sections: Section[] = [
           <div class="eyebrow">Built on Smithers</div>
           <h2 class="big big-md">Real products<br />ship on Smithers.</h2>
           <div class="chips">
-            <span class="chip chip-accent">Aomi — apps from a prompt</span>
-            <span class="chip">Burns — a full UI</span>
+            <span class="chip chip-accent">Aomi — trading strategies from a prompt</span>
+            <span class="chip">Burns — third-party Smithers UI</span>
             <span class="chip">40 community projects</span>
           </div>
         </div>
         <figure class="media-frame">
-          <img src="/shots/aomi.jpg" alt="Aomi: production app built from a single prompt on Smithers — plan, generate, compile and test, ship" />
+          <img src="/shots/aomi.jpg" alt="Aomi: a trading-strategy workflow built from a single prompt on Smithers — plan, generate, compile and test, ship" />
         </figure>
       </div>`,
   },

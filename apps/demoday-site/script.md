@@ -82,7 +82,7 @@ _(advance → 1:39)_
 
 **[STEP 10 — built on Smithers · 1:39]**
 
-> Real products ship on Smithers — Aomi ships production apps from a single
+> Real products ship on Smithers — Aomi ships trading strategies from one
 > prompt. The next Harvey, the next CodeRabbit: built on agents they can trust.
 
 _(advance → 1:51)_
