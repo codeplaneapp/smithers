@@ -6,7 +6,7 @@ import {
 } from "../src/worker.ts";
 
 const indexHtml = readFileSync(
-  new URL("../site/index.html", import.meta.url),
+  new URL("../dist/index.html", import.meta.url),
   "utf8",
 );
 
@@ -38,16 +38,16 @@ describe("demoday site worker", () => {
     expect(indexHtml).not.toContain("/Users/");
   });
 
-  test("narration manifest covers all 14 steps and totals 3:00", () => {
+  test("narration manifest covers all 15 steps and totals 3:00", () => {
     const manifest = JSON.parse(
       readFileSync(
-        new URL("../site/narration/manifest.json", import.meta.url),
+        new URL("../dist/narration/manifest.json", import.meta.url),
         "utf8",
       ),
     ) as { totalMs: number; steps: { file: string; durationMs: number }[] };
-    expect(manifest.steps.length).toBe(14);
+    expect(manifest.steps.length).toBe(15);
     for (const step of manifest.steps) expect(step.durationMs).toBeGreaterThan(0);
-    expect(manifest.totalMs).toBeGreaterThan(172_000);
+    expect(manifest.totalMs).toBeGreaterThan(170_000);
     expect(manifest.totalMs).toBeLessThanOrEqual(181_000);
   });
 

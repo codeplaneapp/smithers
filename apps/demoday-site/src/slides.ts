@@ -83,38 +83,24 @@ interface LiveBeat {
 export const LIVE_BEATS: LiveBeat[] = [
   {
     step: "describe",
-    caption: "Describe the job in chat",
-    img: "/shots/home.png",
-    alt: "Smithers home: a single chat composer that says Ask Smithers to build",
-    note: "Here's what that looks like: I describe the job in chat, one sentence — and minutes later, a workflow exists.",
+    caption: "Describe the pipeline in chat",
+    img: "/shots/describe.gif",
+    alt: "Smithers composer: typing a one-sentence sales-pipeline request",
+    note: "Here's what that looks like: I describe the pipeline in chat — score my inbound leads, draft outreach, nothing sends without my sign-off.",
   },
   {
     step: "build",
-    caption: "Your agent authors the workflow",
-    img: "/shots/workflow.png",
-    alt: "Workflow editor showing agent-authored JSX workflow source with tasks and a review loop",
-    note: "My agent authors the workflow — real source, tasks, a review loop; I never wrote a line. And it self-improves: every run is scored, and the prompts re-optimize weekly.",
+    caption: "Your agent authors the workflow — scoring built in",
+    img: "/shots/build.gif",
+    alt: "Workflow editor showing the agent-authored sales-pipeline source: enrich, score, draft, approval gate",
+    note: "My agent authors the workflow — real source: enrich, score, draft, an approval gate; I never wrote a line. And it self-improves: every run is scored, and the prompts re-optimize weekly.",
   },
   {
     step: "run",
-    caption: "It runs — every step streaming live",
-    img: "/shots/inspector.png",
-    alt: "Run inspector: live execution tree with plan, edit-files and run-tests steps streaming",
-    note: "It runs, every step streaming live — and I can time-travel back to any point in the workflow.",
-  },
-  {
-    step: "gate",
-    caption: "Approval gate — kill it mid-run, it resumes at the same frame",
-    img: "/shots/timeline.png",
-    alt: "Time travel scrubber with seven snapshots, an approval gate marker, and fork and replay controls",
-    note: "It pauses at my approval gate, costing nothing while it waits. Now watch — I kill the process mid-run… and it resumes exactly where it stopped. Every frame is saved.",
-  },
-  {
-    step: "ship",
-    caption: "Done — reviewed, diffed, shipped",
-    img: "/shots/diff.png",
-    alt: "Completed change: six files, plus 67 minus 234, reviewed as syntax-highlighted diffs",
-    note: "Done: reviewed, diffed, shipped.",
+    caption: "It runs — leads scored live, outreach held for approval",
+    img: "/shots/run.gif",
+    alt: "Run inspector streaming the sales pipeline: intake, enrich, score, draft, approval hold",
+    note: "It runs, every step streaming — leads enriched and scored, outreach held at my gate — and I can time-travel back to any point.",
   },
 ];
 
@@ -123,7 +109,7 @@ export const sections: Section[] = [
     id: "title",
     steps: 1,
     notes: [
-      "Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can actually trust — jobs that finish, survive crashes, and wait for human sign-off before anything ships.",
+      "Hi, I'm Will, the creator of Smithers. Smithers runs agent workflows you can trust — jobs that finish, survive crashes, and wait for human sign-off.",
     ],
     render: () => `
       <div class="center">
@@ -140,7 +126,7 @@ export const sections: Section[] = [
     id: "traction",
     steps: 1,
     notes: [
-      "We launched in January, open source. Today, forty community projects build on Smithers, and four hundred fifty people are active in our Telegram. Users don't churn: they report bugs and stay, calling it one of the biggest unlocks in their agentic toolkit.",
+      "We launched in January, open source. Today, forty community projects build on Smithers, and four hundred fifty people are active in our Telegram. And users don't churn — they report bugs and stay.",
     ],
     render: () => `
       <div class="traction">
@@ -166,7 +152,7 @@ export const sections: Section[] = [
     id: "problem",
     steps: 1,
     notes: [
-      "Here's the problem. Everyone can describe a workflow they want automated. Making it real is the hard part: authoring, monitoring, approvals, cleanup after every crash. The plumbing is more work than the idea.",
+      "Everyone can describe a workflow they want automated. Making it real is the hard part: authoring, monitoring, approvals, cleanup after every crash. The plumbing is more work than the idea.",
     ],
     render: () => `
       <div class="statement">
@@ -179,7 +165,7 @@ export const sections: Section[] = [
     id: "solution",
     steps: 1,
     notes: [
-      "Smithers ships the plumbing as the framework — durability, retries, approvals, observability, built in. You don't write the workflows: describe the job, your agent builds it. Agents one-shot these workflows because it's React, which they already know.",
+      "Smithers ships the plumbing as the framework — durability, retries, approvals, observability, built in. You don't write the workflows: you simply describe the job. Agents one-shot these workflows because it's React, which they already know.",
     ],
     render: () => `
       <div class="statement">
@@ -211,10 +197,50 @@ export const sections: Section[] = [
       </div>`,
   },
   {
+    id: "people",
+    steps: 1,
+    notes: [
+      "And not just agents — Smithers orchestrates people too: approvals, durable steps, and live collaboration, like a Google Doc.",
+    ],
+    render: () => `
+      <div class="media-slide">
+        <div class="media-copy">
+          <div class="eyebrow">People too</div>
+          <h2 class="big big-md">Orchestrate <em>people</em>,<br />not just agents.</h2>
+          <p class="support">Durable steps, approval gates, and live collaboration —<br />cursors and prompts shared like a Google Doc.</p>
+        </div>
+        <figure class="media-frame">
+          <img src="/shots/collab.gif" alt="Live Smithers session with two participants editing a workflow together, cursors visible" />
+        </figure>
+      </div>`,
+  },
+  {
+    id: "builton",
+    steps: 1,
+    notes: [
+      "Real products ship on Smithers — Aomi ships production apps from a single prompt. The next Harvey, the next CodeRabbit: built on agents they can trust.",
+    ],
+    render: () => `
+      <div class="media-slide">
+        <div class="media-copy">
+          <div class="eyebrow">Built on Smithers</div>
+          <h2 class="big big-md">Real products<br />ship on Smithers.</h2>
+          <div class="chips">
+            <span class="chip chip-accent">Aomi — apps from a prompt</span>
+            <span class="chip">Burns — a full UI</span>
+            <span class="chip">40 community projects</span>
+          </div>
+        </div>
+        <figure class="media-frame">
+          <img src="/shots/aomi.jpg" alt="Aomi: production app built from a single prompt on Smithers — plan, generate, compile and test, ship" />
+        </figure>
+      </div>`,
+  },
+  {
     id: "insight",
     steps: 1,
     notes: [
-      "The right way to build agents shifts like a video-game meta: a new patch drops, everyone re-learns — but the engine stays. Smithers is the engine: it plugs into every agent, so every model release makes it stronger, not obsolete.",
+      "Building agents shifts like a video-game meta: a new patch drops, everyone re-learns — but the engine stays. Smithers plugs into every agent, so every model release makes it stronger.",
     ],
     render: () => `
       <div class="statement">
@@ -229,10 +255,21 @@ export const sections: Section[] = [
       </div>`,
   },
   {
+    id: "rails",
+    steps: 1,
+    notes: [
+      "Smithers is the Ruby on Rails of workflow automation.",
+    ],
+    render: () => `
+      <div class="statement">
+        <h2 class="big">Smithers is the<br /><em>Ruby on Rails</em> of<br />workflow automation.</h2>
+      </div>`,
+  },
+  {
     id: "market",
     steps: 1,
     notes: [
-      "Workflow automation was giant before agents — Zapier, UiPath, Temporal. After agents, it gets bigger: companies that never automated anything are asking to start.",
+      "Workflow automation was giant before agents. After agents it gets bigger — companies that never automated anything are asking to start.",
     ],
     render: () => `
       <div class="statement">
@@ -264,7 +301,7 @@ export const sections: Section[] = [
     id: "team",
     steps: 1,
     notes: [
-      "We know this space. In twenty twenty-five I built the fastest open-source Ethereum VM — with agents. Tevm, the OP Stack, now Smithers.",
+      "In twenty twenty-five I built the fastest open-source Ethereum VM — with agents. Tevm, the OP Stack, now Smithers.",
     ],
     render: () => `
       <div class="statement">
@@ -282,12 +319,12 @@ export const sections: Section[] = [
     id: "ask",
     steps: 1,
     notes: [
-      "We're looking for design partners — I'll work hands-on to integrate Smithers into your product or back office. Smithers makes agent workflows reliable. Come find me.",
+      "We're looking for angels and design partners — I'll work hands-on to integrate Smithers into your product or back office. Smithers makes agent workflows reliable. Come find me.",
     ],
     render: () => `
       <div class="statement">
         <div class="eyebrow">The ask</div>
-        <h2 class="big">Looking for<br /><em>design partners.</em></h2>
+        <h2 class="big">Looking for <em>angels</em><br />&amp; <em>design partners.</em></h2>
         <p class="support">I'll work hands-on with you to integrate Smithers<br />into your product or your back office.</p>
         <p class="closer">Smithers makes agent workflows <em>reliable</em>.</p>
         <div class="chips">

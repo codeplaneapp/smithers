@@ -575,3 +575,33 @@ kbd {
   font-size: 0.9em;
   background: var(--surface);
 }
+
+/* ---------- media slides (people / built-on) ---------- */
+
+.media-slide {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: clamp(2rem, 5vw, 4.5rem);
+  align-items: center;
+  width: min(1240px, 94vw);
+}
+
+.media-copy .chips {
+  justify-content: flex-start;
+  margin-top: clamp(1.2rem, 3vh, 2rem);
+}
+
+.media-frame {
+  background: color-mix(in oklab, var(--surface) 55%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: clamp(0.5rem, 1vw, 0.8rem);
+  margin: 0;
+}
+
+.media-frame img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+}

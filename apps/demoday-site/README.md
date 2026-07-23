@@ -12,8 +12,9 @@ pnpm -C apps/demoday-site dev
 
 Keys: **→ / space** next · **←** back · **N** speaker notes · **P** rehearsal
 mode (TTS narration plays and auto-advances the deck; the full read is 3:00) ·
-**T** 3:00 timer (**R** resets) · **F** fullscreen. 14 steps; steps 5–9 are one
-"super slide" that advances through five product screenshots.
+**T** 3:00 timer (**R** resets) · **F** fullscreen. 15 steps; steps 5–7 are one
+"super slide" that advances through the sales-pipeline run's three gifs
+(recorded from the real app booted by ~/multi's deck-capture stack).
 
 The narration in `public/narration/` is generated from the slide notes with
 OpenAI TTS: `OPENAI_API_KEY=... bun scripts/narrate.ts` (re-run after editing
@@ -22,11 +23,11 @@ notes in `src/slides.ts`; the worker test pins the total at 3:00).
 ## Deploy
 
 ```sh
-pnpm -C apps/demoday-site build        # vite build → site/
+pnpm -C apps/demoday-site build        # vite build → dist/
 pnpm -C apps/demoday-site run deploy   # wrangler → demoday.smithers.sh
 ```
 
-The Worker (`src/worker.ts`) serves the built `site/` directory with security and
+The Worker (`src/worker.ts`) serves the built `dist/` directory with security and
 cache headers, the same pattern as the other `apps/*-site` workers.
 
 ## Files

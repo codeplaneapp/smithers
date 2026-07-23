@@ -66,6 +66,7 @@
       "apps/bug-worker/package.json#name=\"@smithers-orchestrator/bug-worker\"",
       "apps/cli/package.json#name=\"@smithers-orchestrator/cli\"",
       "apps/ddd-site/package.json#name=\"@smithers-orchestrator/ddd-site\"",
+      "apps/demoday-site/package.json#name=\"@smithers-orchestrator/demoday-site\"",
       "apps/init-site/package.json#name=\"@smithers-orchestrator/init-site\"",
       "apps/kimi-benchmarks-site/package.json#name=\"@smithers-orchestrator/kimi-benchmarks-site\"",
       "apps/monitor-site/package.json#name=\"@smithers-orchestrator/monitor-site\"",
@@ -172,6 +173,8 @@
     ],
     "styleEntryPoints": [
       "apps/cli/src/monitor-ui/monitor.tsx -> @xterm/xterm/css/xterm.css",
+      "apps/demoday-site/src/main.ts -> ./style.css",
+      "apps/demoday-site/src/style.css",
       "apps/signal/site/src/main.tsx -> ./signal.css",
       "apps/signal/site/src/signal.css",
       "apps/smithers/src/agents/AgentsCanvas.tsx -> ./agents.css",
