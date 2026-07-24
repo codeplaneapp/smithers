@@ -262,11 +262,54 @@ Every frame commit produces a `GraphSnapshot`.
 ```bash
 bunx smithers-orchestrator timeline RUN_ID           # frames + forks
 bunx smithers-orchestrator diff RUN_ID NODE_ID     # node DiffBundle
+bunx smithers-orchestrator rewind RUN_ID 5
 bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze
 bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
 Replay with `--restore-vcs` checks out the jj revision the snapshot was taken at, so re-execution sees the same source code as the original run.
+
+Before history is discarded or replayed, Smithers reads the effect journal.
+Each marked tool call or Task moves through these states:
+
+| Status | Meaning |
+| --- | --- |
+| `intended` | The journal row exists and execution started. |
+| `succeeded` | Execution returned successfully. |
+| `unknown` | Execution threw or stopped after it started. The external mutation may have happened. |
+| `reverting` | A compensation handler is running. |
+| `reverted` | Compensation finished. The row no longer blocks. |
+| `revert-failed` | Compensation threw. The row still blocks. |
+| `revert-stale` | The original call completed after compensation. The effect is active again and blocks or can be reverted again. |
+
+`unknown` is deliberately conservative. A process can stop after an API
+accepted a request but before Smithers records its response. The guard treats
+`unknown` like `succeeded`.
+
+```tsx
+const announce = defineTool({
+  name: "announce",
+  schema: z.object({ channel: z.string(), text: z.string() }),
+  sideEffect: true,
+  idempotent: false,
+  execute: (args, ctx) =>
+    slack.chat.postMessage({ ...args, metadata: { key: ctx.idempotencyKey } }),
+  revert: async (args, ctx) => {
+    const message = await findMessageByKey(ctx.idempotencyKey);
+    if (message) await slack.chat.delete({ channel: args.channel, ts: message.ts });
+  },
+});
+```
+
+A revert handler must be idempotent, verify before undoing, and tolerate
+`effectStatus: "unknown"`. It should throw instead of guessing. Discard
+commands run handlers in reverse effect order before changing VCS or database
+history. `--no-revert` skips handlers; `--force` crosses what remains and
+marks the run for attention.
+
+The git exemption is exact: commits, ref changes, worktree writes, and
+`git push` are not external effects. GitHub API state, including issues, PR
+comments, and PR merge status, is external and must be marked.
 
 ## Scorers (evals)
 
@@ -292,7 +335,7 @@ Five built-ins: `schemaAdherenceScorer`, `latencyScorer`, `relevancyScorer`, `to
 
 Five delegation scorers back the [delegation-chain workflow](/workflows/delegation-chain): `pocJudgmentScorer` (probe judgment; false negatives punished hardest), `planSolidityScorer` (post-execution replan churn), `estimateAccuracyScorer` (forecast vs. actual cost/time/tokens), `tierFitScorer` (was the intelligence tier right), and `humanPollScorer` (end-of-run user poll), combined by `delegationRunScore` / `weightedScore`, with `extractDelegationEvents` and `resolvePlanningNodes` as the shared event readers.
 
-Also exported: `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, token-cost helpers (`modelTokenPrices`, `estimateCostUsd`), and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
+Also exported: `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, token-cost helpers (`modelTokenPrices`, `estimateCostUsd`), scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`), and the side-effect analyzer APIs `sideEffectAnalysis` and `gradeSideEffectCompliance`.
 
 Shared by the `eval-suite-run` [seeded workflow](/workflows/eval-suite-run) and the `evals` gateway extension: `parseEvalDataset` (parses a JSON array or JSONL dataset), `evaluateEvalCase` (grades a case's status/output/error against `expected`: an assertion spec of `status`/`output`/`outputContains`/`errorContains`, or a literal value matched by subset/deep-equal), `evalAssertionScorer` (turns a graded case's assertions into a scored row), `evalCaseRunId` (a readable, collision-free child-run id), the `EVAL_CASE_STATUSES` and `EVAL_PASS_THRESHOLD` constants, and the low-level primitives `slugifyEvalToken`, `jsonEquals`, `jsonContains`, `normalizeExpected`, `formatEvalError`, and `isPlainObject`.
 

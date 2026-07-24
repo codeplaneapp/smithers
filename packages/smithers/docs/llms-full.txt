@@ -965,11 +965,54 @@ Every frame commit produces a `GraphSnapshot`.
 ```bash
 bunx smithers-orchestrator timeline RUN_ID           # frames + forks
 bunx smithers-orchestrator diff RUN_ID NODE_ID     # node DiffBundle
+bunx smithers-orchestrator rewind RUN_ID 5
 bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze
 bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
 Replay with `--restore-vcs` checks out the jj revision the snapshot was taken at, so re-execution sees the same source code as the original run.
+
+Before history is discarded or replayed, Smithers reads the effect journal.
+Each marked tool call or Task moves through these states:
+
+| Status | Meaning |
+| --- | --- |
+| `intended` | The journal row exists and execution started. |
+| `succeeded` | Execution returned successfully. |
+| `unknown` | Execution threw or stopped after it started. The external mutation may have happened. |
+| `reverting` | A compensation handler is running. |
+| `reverted` | Compensation finished. The row no longer blocks. |
+| `revert-failed` | Compensation threw. The row still blocks. |
+| `revert-stale` | The original call completed after compensation. The effect is active again and blocks or can be reverted again. |
+
+`unknown` is deliberately conservative. A process can stop after an API
+accepted a request but before Smithers records its response. The guard treats
+`unknown` like `succeeded`.
+
+```tsx
+const announce = defineTool({
+  name: "announce",
+  schema: z.object({ channel: z.string(), text: z.string() }),
+  sideEffect: true,
+  idempotent: false,
+  execute: (args, ctx) =>
+    slack.chat.postMessage({ ...args, metadata: { key: ctx.idempotencyKey } }),
+  revert: async (args, ctx) => {
+    const message = await findMessageByKey(ctx.idempotencyKey);
+    if (message) await slack.chat.delete({ channel: args.channel, ts: message.ts });
+  },
+});
+```
+
+A revert handler must be idempotent, verify before undoing, and tolerate
+`effectStatus: "unknown"`. It should throw instead of guessing. Discard
+commands run handlers in reverse effect order before changing VCS or database
+history. `--no-revert` skips handlers; `--force` crosses what remains and
+marks the run for attention.
+
+The git exemption is exact: commits, ref changes, worktree writes, and
+`git push` are not external effects. GitHub API state, including issues, PR
+comments, and PR merge status, is external and must be marked.
 
 ## Scorers (evals)
 
@@ -995,7 +1038,7 @@ Five built-ins: `schemaAdherenceScorer`, `latencyScorer`, `relevancyScorer`, `to
 
 Five delegation scorers back the delegation-chain workflow: `pocJudgmentScorer` (probe judgment; false negatives punished hardest), `planSolidityScorer` (post-execution replan churn), `estimateAccuracyScorer` (forecast vs. actual cost/time/tokens), `tierFitScorer` (was the intelligence tier right), and `humanPollScorer` (end-of-run user poll), combined by `delegationRunScore` / `weightedScore`, with `extractDelegationEvents` and `resolvePlanningNodes` as the shared event readers.
 
-Also exported: `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, token-cost helpers (`modelTokenPrices`, `estimateCostUsd`), and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
+Also exported: `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, token-cost helpers (`modelTokenPrices`, `estimateCostUsd`), scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`), and the side-effect analyzer APIs `sideEffectAnalysis` and `gradeSideEffectCompliance`.
 
 Shared by the `eval-suite-run` seeded workflow and the `evals` gateway extension: `parseEvalDataset` (parses a JSON array or JSONL dataset), `evaluateEvalCase` (grades a case's status/output/error against `expected`: an assertion spec of `status`/`output`/`outputContains`/`errorContains`, or a literal value matched by subset/deep-equal), `evalAssertionScorer` (turns a graded case's assertions into a scored row), `evalCaseRunId` (a readable, collision-free child-run id), the `EVAL_CASE_STATUSES` and `EVAL_PASS_THRESHOLD` constants, and the low-level primitives `slugifyEvalToken`, `jsonEquals`, `jsonContains`, `normalizeExpected`, `formatEvalError`, and `isPlainObject`.
 
@@ -2535,14 +2578,48 @@ bunx smithers-orchestrator ui RUN_ID
 
 ## Time-travel commands compared
 
-Four near-synonym commands roll history back in different ways. Pick by what each acts on:
+Five commands cross historical boundaries. Pick by what each acts on:
 
 | Command | Acts on | Behavior |
 | --- | --- | --- |
 | `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
 | `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
+| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. |
 | `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
 | `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
+
+Every command prints an effect-boundary report, including a clean report when
+no effects are crossed. `revert`, `timetravel`, and `rewind` run registered
+compensation handlers before discarding history. Pass `--no-revert` to skip
+them; skipped effects become blockers. `replay` and `fork --run` never
+compensate the parent run's effects.
+
+```bash
+bunx smithers-orchestrator revert workflow.tsx \
+  --run-id RUN_ID --node-id NODE_ID --attempt 1 [--force] [--no-revert]
+
+bunx smithers-orchestrator timetravel workflow.tsx \
+  --run-id RUN_ID --node-id NODE_ID [--force] [--no-revert]
+
+bunx smithers-orchestrator rewind RUN_ID FRAME_NO \
+  [--force] [--no-revert]
+
+bunx smithers-orchestrator replay workflow.tsx \
+  --run-id RUN_ID --frame FRAME_NO [--force]
+
+bunx smithers-orchestrator fork workflow.tsx \
+  --run-id RUN_ID --frame FRAME_NO --run [--force]
+```
+
+Without `--force`, crossed `succeeded`, `unknown`, `revert-failed`, or
+`revert-stale` effects stop the operation with
+`TIME_TRAVEL_SIDE_EFFECT_BLOCKED`. With
+`--force`, Smithers records `SideEffectBoundaryCrossed` and marks the run for
+attention. A plain `fork` without `--run` does not re-execute anything, so it
+reports a warning instead of blocking.
+
+Git commits, branch and ref changes, worktree writes, and `git push` are
+exempt. GitHub API mutations such as issues, comments, and PR merges are not.
 
 See Time-travel API and Revert for the programmatic surface.
 
@@ -2992,11 +3069,13 @@ commands[102]:
     purpose: Revert the workspace to a previous task attempt's filesystem state
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[4]{name,short,type,default,desc}:
+    flags[6]{name,short,type,default,desc}:
       run-id,r,string,,Run ID
       node-id,n,string,,Node ID
       attempt,,number,1,Attempt number
       iteration,,number,0,Loop iteration
+      force,,boolean,false,Cross unresolved effects and mark the run needs-attention
+      revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: retry-task
     purpose: Retry a specific task within a run, then resume the workflow
     args[1]{name,type,required,desc}:
@@ -3011,7 +3090,7 @@ commands[102]:
     purpose: Time-travel to a task state; revert filesystem, reset DB, optionally resume
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[8]{name,short,type,default,desc}:
+    flags[9]{name,short,type,default,desc}:
       run-id,r,string,,Run ID
       node-id,n,string,,Task/node ID
       iteration,,number,0,Loop iteration
@@ -3020,28 +3099,31 @@ commands[102]:
       no-deps,,boolean,false,Only reset this node
       resume,,boolean,false,Resume after time travel
       force,,boolean,false,Force even if run is still running
+      revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: replay
     purpose: Fork from a checkpoint and resume execution
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[6]{name,short,type,default,desc}:
+    flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
       node,n,string,,Node ID to reset to pending
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label for the fork
       restore-vcs,,boolean,false,Restore jj filesystem state to source frame revision
+      force,,boolean,false,Cross unresolved effects and mark the parent needs-attention
   - name: fork
     purpose: Create a branched run from a snapshot checkpoint
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[6]{name,short,type,default,desc}:
+    flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
       reset-node,n,string,,Node ID to reset to pending
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label
       run,,boolean,false,Immediately start the forked run
+      force,,boolean,false,Allow --run to cross unresolved external effects
   - name: timeline
     purpose: View execution timeline for a run and its forks
     args[1]{name,type,required,desc}:
@@ -3107,9 +3189,11 @@ commands[102]:
     args[2]{name,type,required,desc}:
       runId,string,true,Run ID to rewind
       frameNo,number,true,Target frame number
-    flags[2]{name,short,type,default,desc}:
+    flags[4]{name,short,type,default,desc}:
       yes,,boolean,false,Skip confirmation prompt
       json,j,boolean,false,Emit JumpResult JSON
+      force,,boolean,false,Cross unresolved effects and mark the run needs-attention
+      revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: snapshots
     purpose: List durability snapshots (workspace checkpoints) for a run
     args[1]{name,type,required,desc}:
@@ -3822,6 +3906,17 @@ type TaskProps = {
   heartbeatTimeout?: number; // alias of heartbeatTimeoutMs
   hijack?: boolean; // request an immediate hijack handoff as soon as the task starts running
   onHijackExit?: "complete" | "reopen"; // what Smithers should do after a hijacked session exits
+  sideEffect?: boolean | {
+    idempotent?: boolean;
+    revert?: (ctx: {
+      outputRow: unknown | null;
+      effectStatus: "succeeded" | "unknown";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+    }) => Promise<void>;
+  };
   priority?: number; // higher runnable priorities claim free concurrency slots first
   failurePolicy?: "halt" | "quarantine"; // override the nearest container policy
   children?:
@@ -3906,6 +4001,44 @@ downstream `deps`, and works inside `<Loop>`, `<Branch>`, `<Parallel>`, and
 `<Sequence>` like an agent Task, except it can't be a `fork` source (no agent
 session). Throwing in a compute function fails the task and triggers its retry
 policy.
+
+## External side effects
+
+Mark a compute Task when its callback changes state outside the run database
+and the git/jj-tracked worktree.
+
+```tsx
+<Task
+  id="announce"
+  output={outputs.announcement}
+  sideEffect={{
+    idempotent: false,
+    revert: async (ctx) => {
+      const message = await findMessageByRun(ctx.runId);
+      if (message) await slack.chat.delete(message);
+    },
+  }}
+>
+  {async () => {
+    const message = await slack.chat.postMessage({ text: "Release complete" });
+    return { messageId: message.ts };
+  }}
+</Task>
+```
+
+`sideEffect` accepts `true` or an object. `true` means
+`{ idempotent: false }`. The engine writes one synthetic effect record for
+each task attempt before calling the task. Success records `succeeded`; a
+throw or interrupted attempt records `unknown`.
+
+Use the object form to register compensation. The revert callback receives
+`outputRow`, `effectStatus`, `runId`, `nodeId`, `iteration`, and `attempt`.
+It must be idempotent. Check whether the external object exists before
+removing it, especially when `effectStatus` is `unknown`.
+
+Tool-level marking remains more precise when an agent or compute Task calls a
+custom `defineTool`. Git commits, branch changes, worktree writes, and
+`git push` are exempt because time travel already owns git state.
 
 ## Dependencies: dependsOn, needs, deps
 
@@ -7499,6 +7632,7 @@ on Terra, and the hardest or most ambiguous changes escalate to Sol.
 ## Side-effect tools with idempotency
 
 External mutations must mark themselves and use the runtime idempotency key.
+Add `revert` when time travel can compensate the operation.
 
 ```tsx
 import { defineTool } from "smithers-orchestrator/tools";
@@ -7511,10 +7645,21 @@ const createTicket = defineTool({
   async execute(args, ctx) {
     return jira.createIssue({ ...args, idempotencyKey: ctx.idempotencyKey });
   },
+  async revert(args, ctx) {
+    const ticket = await jira.findIssueByKey(ctx.idempotencyKey);
+    if (ticket) await jira.deleteIssue(ticket.id);
+  },
 });
 ```
 
 Retries reuse the same idempotency key, so a successful side effect from attempt 1 isn't doubled by attempt 2.
+
+`revert` is legal only with `sideEffect: true`. Its context includes
+`output`, `effectStatus`, `idempotencyKey`, `runId`, `nodeId`, `iteration`,
+`attempt`, and `toolCallSeq`. `effectStatus` is either `succeeded` or
+`unknown`. Treat both as "possibly happened": find the external object, then
+undo it. A handler must be idempotent and must throw when it cannot verify the
+object safely.
 
 ## Caching for iterative authoring
 
@@ -7591,7 +7736,22 @@ Smithers records the current JJ change ID in `_smithers_attempts.jj_pointer` per
 bunx smithers-orchestrator revert workflow.tsx --run-id RUN_ID --node-id implement --attempt 1
 ```
 
-Useful when an experiment leaves the worktree in a bad state.
+Every discard command checks the external-effect journal before changing the
+worktree or run state. Registered handlers run first. An unresolved effect
+stops the command with `TIME_TRAVEL_SIDE_EFFECT_BLOCKED`.
+
+```bash
+# Print the report and cross unresolved effects. The run is marked for attention.
+bunx smithers-orchestrator revert workflow.tsx \
+  --run-id RUN_ID --node-id implement --attempt 1 --force
+
+# Skip registered handlers. Any crossed effects now require --force.
+bunx smithers-orchestrator revert workflow.tsx \
+  --run-id RUN_ID --node-id implement --attempt 1 --no-revert --force
+```
+
+Git commits, branch changes, worktree writes, and `git push` are exempt.
+GitHub API mutations such as `gh pr merge` are not.
 
 ## Time travel: fork, replay, diff
 
@@ -7602,7 +7762,13 @@ bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-n
 bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
-Fork makes a child run without starting it (add `--run` to start immediately); replay also makes a child run but immediately resumes it. `--restore-vcs` checks out the original revision so re-execution sees the same source. See Time-travel commands compared to tell `rewind`, `replay`, `timetravel`, and `revert` apart.
+Fork makes a child run without starting it (add `--run` to start immediately);
+replay also makes a child run but immediately resumes it. Branch operations do
+not run compensation handlers because the parent still owns its effects.
+`replay` and `fork --run` stop before an effect-bearing boundary unless
+`--force` is present. A plain `fork` succeeds and reports a warning.
+`--restore-vcs` checks out the original revision so re-execution sees the same
+source. See Time-travel commands compared.
 
 ## Scoring tasks
 
@@ -8650,6 +8816,17 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   hijack?: boolean;
   onHijackExit?: "complete" | "reopen";
   allowTools?: string[];            // CLI-agent tool allowlist
+  sideEffect?: boolean | {
+    idempotent?: boolean;
+    revert?: (ctx: {
+      outputRow: unknown | null;
+      effectStatus: "succeeded" | "unknown";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+    }) => Promise<void>;
+  };
   priority?: number;
   failurePolicy?: "halt" | "quarantine";
   label?: string;
@@ -9481,6 +9658,7 @@ type KnownSmithersErrorCode =
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
   | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
   | "SCORER_FAILED" | "WORKFLOW_EXISTS" | "CLI_DB_NOT_FOUND" | "CLI_AGENT_UNSUPPORTED"
+  | "TIME_TRAVEL_SIDE_EFFECT_BLOCKED"
   | "PI_HTTP_ERROR" | "EXTERNAL_BUILD_FAILED" | "SCHEMA_DISCOVERY_FAILED"
   | "OPENAPI_SPEC_LOAD_FAILED" | "OPENAPI_OPERATION_NOT_FOUND" | "OPENAPI_TOOL_EXECUTION_FAILED"
   | "ACCOUNT_INVALID" | "ACCOUNT_NOT_FOUND" | "ACCOUNT_DUPLICATE_LABEL" | "ACCOUNTS_FILE_INVALID";
@@ -10151,6 +10329,7 @@ try {
 | `WORKTREE_CREATE_FAILED` | Smithers fails to create or hydrate a git or jj worktree for a task. | `{ worktreePath, vcsType, branch? }` |
 | `VCS_NOT_FOUND` | No supported git or jj repository root is found for the workflow. | `{ rootDir }` |
 | `SNAPSHOT_NOT_FOUND` | A requested time-travel snapshot or frame does not exist. | `{ runId, frameNo }` |
+| `TIME_TRAVEL_SIDE_EFFECT_BLOCKED` | A time-travel operation would cross an external side effect that was not reverted or explicitly forced. | `{ runId, operation, report }` |
 | `VCS_WORKSPACE_CREATE_FAILED` | Smithers fails to materialize a jj workspace for time-travel or replay. | `{ runId, frameNo, vcsPointer, workspacePath }` |
 | `TASK_EMPTY_PROMPT` | A `<Task>` prompt renders to an empty string, invoking the agent with no input. | `{ nodeId, iteration }` |
 | `WORKFLOW_RENDER_FAILED` | The workflow component throws while rendering the graph (e.g. a hook called outside a component render, or a bug in the workflow function). | `{ workflowPath }` |
@@ -12779,10 +12958,25 @@ Each successful task attempt captures the current [JJ](https://jj-vcs.github.io/
 
 ```bash
 bunx smithers-orchestrator revert workflow.tsx \
-  --run-id RUN_ID --node-id NODE_ID [--attempt N=1] [--iteration N=0]
+  --run-id RUN_ID --node-id NODE_ID [--attempt N=1] [--iteration N=0] \
+  [--force] [--no-revert]
 ```
 
 Revert restores files only, without altering JJ history; the restoration creates a new change on top of the current working copy.
+
+Before restoring files, `revert` checks every marked external effect that
+would be crossed. It runs registered handlers in reverse order, then prints an
+effect-boundary report. The report is printed for blocked, compensated,
+forced, and clean operations.
+
+`--no-revert` skips handlers. `--force` crosses any effects that remain,
+records `SideEffectBoundaryCrossed`, and marks the run for attention. Without
+`--force`, unresolved `succeeded`, `unknown`, `revert-failed`, or
+`revert-stale` effects stop the command with
+`TIME_TRAVEL_SIDE_EFFECT_BLOCKED`.
+
+Git commits, branch changes, worktree writes, and `git push` are exempt.
+GitHub issues, comments, releases, and PR merge state are external effects.
 
 ## Requirements
 
@@ -12813,6 +13007,8 @@ type RevertOptions = {
   nodeId: string;
   iteration: number;
   attempt: number;
+  force?: boolean;
+  noRevert?: boolean;
   onProgress?: (event: SmithersEvent) => void;
 };
 
@@ -12820,6 +13016,7 @@ type RevertResult = {
   success: boolean;
   error?: string;
   jjPointer?: string;
+  effectBoundary: EffectBoundaryReport;
 };
 
 function revertToAttempt(adapter: SmithersDb, opts: RevertOptions): Promise<RevertResult>;
@@ -12846,6 +13043,8 @@ type TimeTravelOptions = {
   attempt?: number;
   resetDependents?: boolean;
   restoreVcs?: boolean;
+  force?: boolean;
+  noRevert?: boolean;
   onProgress?: (event: SmithersEvent) => void;
 };
 
@@ -12855,6 +13054,7 @@ type TimeTravelResult = {
   vcsRestored: boolean;
   resetNodes: string[];
   error?: string;
+  effectBoundary: EffectBoundaryReport;
 };
 
 function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeTravelResult>;
@@ -16204,6 +16404,9 @@ type JumpResult = {
 
 Also broadcast after the DB commit as `run.time_travel_jumped` with
 `{ runId, fromFrameNo, toFrameNo, timestampMs, caller }`.
+Side-effect boundary events are broadcast as
+`run.side_effect_boundary_crossed`. Late detached-tool completions include
+`lateCompletion: true` and `archivedByOp`.
 
 Quota: 10 rewinds per run per caller per hour (default window). Exceeded
 → `RateLimited`.
@@ -16259,7 +16462,7 @@ type OutputSchemaDescriptor = {
 Gateway v1 RPC errors use stable code strings and HTTP status mappings:
 
 ```toon
-errors[26]{code,http}:
+errors[27]{code,http}:
   InvalidRequest,400
   InvalidInput,400
   Unauthorized,401
@@ -16282,6 +16485,7 @@ errors[26]{code,http}:
   UnsupportedSandbox,501
   VcsError,500
   RewindFailed,500
+  TIME_TRAVEL_SIDE_EFFECT_BLOCKED,409
   Internal,500
   REVISION_CONFLICT,409
   SSRF_BLOCKED,400
@@ -16390,6 +16594,7 @@ After `connect`, the gateway emits `tick` events every `heartbeatMs`. `launchRun
 | `run.error` | Run lifecycle |
 | `run.completed` | Run lifecycle |
 | `run.time_travel_jumped` | Run lifecycle |
+| `run.side_effect_boundary_crossed` | Run lifecycle |
 | `node.started` | Run lifecycle |
 | `node.finished` | Run lifecycle |
 | `node.failed` | Run lifecycle |
@@ -18840,6 +19045,8 @@ Tools sandbox to `rootDir` (default: workflow directory).
 
 Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows. The engine durably records the start of every `defineTool()` invocation before executing it, then reads those rows on retry to detect previously invoked non-idempotent side-effect tools. This start-first record is intentional: a process crash after the external side effect cannot erase the evidence needed for replay protection.
 
+Each invocation receives a unique `callToken`. Completion and failure updates match only that token, so a late completion cannot overwrite a replacement row that reused the task key after time travel.
+
 | Field | Description |
 |---|---|
 | `runId` | Workflow run ID |
@@ -18847,6 +19054,7 @@ Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to
 | `iteration` | Loop iteration |
 | `attempt` | Retry attempt number |
 | `seq` | Sequential call counter within the task |
+| `callToken` | Unique identity for this invocation, used to fence completion and failure updates |
 | `toolName` | `read`, `write`, `edit`, `grep`, or `bash` |
 | `inputJson` | Serialized input arguments |
 | `outputJson` | Reserved for a serialized output; `null` in start records |
@@ -20971,7 +21179,7 @@ Used by `bunx smithers-orchestrator events --type <category>` and the metrics la
 | `tool-call` | ToolCallStarted, ToolCallFinished |
 | `agent` | AgentEvent, AgentTraceEvent, AgentTraceSummary, AgentSessionEvent |
 | `output` | NodeOutput |
-| `revert` | RevertStarted, RevertFinished, TimeTravelStarted, TimeTravelFinished, TimeTravelJumped |
+| `revert` | RevertStarted, RevertFinished, TimeTravelStarted, TimeTravelFinished, TimeTravelJumped, EffectRevertStarted, EffectRevertFinished, EffectRevertFailed, SideEffectBoundaryCrossed |
 | `workflow` | WorkflowReloadDetected, WorkflowReloaded, WorkflowReloadFailed, WorkflowReloadUnsafe |
 | `scorer` | ScorerStarted, ScorerFinished, ScorerFailed |
 | `token` | TokenUsageReported |
@@ -20985,6 +21193,20 @@ Used by `bunx smithers-orchestrator events --type <category>` and the metrics la
 `RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it; use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
 
 `OpenApiToolCalled` is categorized as `openapi` for forward compatibility, but the current OpenAPI tool factory records Effect metrics and log spans rather than emitting that event onto the run event bus.
+
+## Effect reverts
+
+`EffectRevertStarted` identifies the tool or Task effect, its original
+`effectStatus`, and the time-travel operation. `EffectRevertFinished` records
+successful compensation. `EffectRevertFailed` includes the handler error and
+leaves the effect blocking.
+
+`SideEffectBoundaryCrossed` records a forced crossing or a warning-only plain
+fork. Its `report` contains `blocking`, `revertible`, and `warnings` arrays.
+Forced crossings remain visible after the command returns. A late tool
+completion sets `lateCompletion: true` and identifies the operation that
+archived the journal row with `archivedByOp` when applicable. If the row is
+still live after compensation, its revert status becomes `revert-stale`.
 
 ## Built-in metrics
 
@@ -21120,6 +21342,10 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `TimeTravelStarted` | `runId`, `nodeId`, `iteration`, `attempt`, `jjPointer?`, `timestampMs` |
 | `TimeTravelFinished` | `runId`, `nodeId`, `iteration`, `attempt`, `jjPointer?`, `success`, `vcsRestored`, `resetNodes`, `error?`, `timestampMs` |
 | `TimeTravelJumped` | `runId`, `fromFrameNo`, `toFrameNo`, `timestampMs`, `caller?` |
+| `EffectRevertStarted` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `effectStatus`, `timestampMs` |
+| `EffectRevertFinished` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `timestampMs` |
+| `EffectRevertFailed` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `error`, `timestampMs` |
+| `SideEffectBoundaryCrossed` | `runId`, `opId`, `operation`, `report`, `parentRunId?`, `warningOnly?`, `lateCompletion?`, `archivedByOp?`, `timestampMs` |
 | `WorkflowReloadDetected` | `runId`, `changedFiles`, `timestampMs` |
 | `WorkflowReloaded` | `runId`, `generation`, `changedFiles`, `timestampMs` |
 | `WorkflowReloadFailed` | `runId`, `error`, `changedFiles`, `timestampMs` |

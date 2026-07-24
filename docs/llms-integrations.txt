@@ -1168,6 +1168,8 @@ Tools sandbox to `rootDir` (default: workflow directory).
 
 Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows. The engine durably records the start of every `defineTool()` invocation before executing it, then reads those rows on retry to detect previously invoked non-idempotent side-effect tools. This start-first record is intentional: a process crash after the external side effect cannot erase the evidence needed for replay protection.
 
+Each invocation receives a unique `callToken`. Completion and failure updates match only that token, so a late completion cannot overwrite a replacement row that reused the task key after time travel.
+
 | Field | Description |
 |---|---|
 | `runId` | Workflow run ID |
@@ -1175,6 +1177,7 @@ Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to
 | `iteration` | Loop iteration |
 | `attempt` | Retry attempt number |
 | `seq` | Sequential call counter within the task |
+| `callToken` | Unique identity for this invocation, used to fence completion and failure updates |
 | `toolName` | `read`, `write`, `edit`, `grep`, or `bash` |
 | `inputJson` | Serialized input arguments |
 | `outputJson` | Reserved for a serialized output; `null` in start records |

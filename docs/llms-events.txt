@@ -67,7 +67,7 @@ Used by `bunx smithers-orchestrator events --type <category>` and the metrics la
 | `tool-call` | ToolCallStarted, ToolCallFinished |
 | `agent` | AgentEvent, AgentTraceEvent, AgentTraceSummary, AgentSessionEvent |
 | `output` | NodeOutput |
-| `revert` | RevertStarted, RevertFinished, TimeTravelStarted, TimeTravelFinished, TimeTravelJumped |
+| `revert` | RevertStarted, RevertFinished, TimeTravelStarted, TimeTravelFinished, TimeTravelJumped, EffectRevertStarted, EffectRevertFinished, EffectRevertFailed, SideEffectBoundaryCrossed |
 | `workflow` | WorkflowReloadDetected, WorkflowReloaded, WorkflowReloadFailed, WorkflowReloadUnsafe |
 | `scorer` | ScorerStarted, ScorerFinished, ScorerFailed |
 | `token` | TokenUsageReported |
@@ -81,6 +81,20 @@ Used by `bunx smithers-orchestrator events --type <category>` and the metrics la
 `RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it; use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
 
 `OpenApiToolCalled` is categorized as `openapi` for forward compatibility, but the current OpenAPI tool factory records Effect metrics and log spans rather than emitting that event onto the run event bus.
+
+## Effect reverts
+
+`EffectRevertStarted` identifies the tool or Task effect, its original
+`effectStatus`, and the time-travel operation. `EffectRevertFinished` records
+successful compensation. `EffectRevertFailed` includes the handler error and
+leaves the effect blocking.
+
+`SideEffectBoundaryCrossed` records a forced crossing or a warning-only plain
+fork. Its `report` contains `blocking`, `revertible`, and `warnings` arrays.
+Forced crossings remain visible after the command returns. A late tool
+completion sets `lateCompletion: true` and identifies the operation that
+archived the journal row with `archivedByOp` when applicable. If the row is
+still live after compensation, its revert status becomes `revert-stale`.
 
 ## Built-in metrics
 
@@ -216,6 +230,10 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `TimeTravelStarted` | `runId`, `nodeId`, `iteration`, `attempt`, `jjPointer?`, `timestampMs` |
 | `TimeTravelFinished` | `runId`, `nodeId`, `iteration`, `attempt`, `jjPointer?`, `success`, `vcsRestored`, `resetNodes`, `error?`, `timestampMs` |
 | `TimeTravelJumped` | `runId`, `fromFrameNo`, `toFrameNo`, `timestampMs`, `caller?` |
+| `EffectRevertStarted` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `effectStatus`, `timestampMs` |
+| `EffectRevertFinished` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `timestampMs` |
+| `EffectRevertFailed` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `error`, `timestampMs` |
+| `SideEffectBoundaryCrossed` | `runId`, `opId`, `operation`, `report`, `parentRunId?`, `warningOnly?`, `lateCompletion?`, `archivedByOp?`, `timestampMs` |
 | `WorkflowReloadDetected` | `runId`, `changedFiles`, `timestampMs` |
 | `WorkflowReloaded` | `runId`, `generation`, `changedFiles`, `timestampMs` |
 | `WorkflowReloadFailed` | `runId`, `error`, `changedFiles`, `timestampMs` |

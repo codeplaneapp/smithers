@@ -8,7 +8,10 @@ apiVersion: v1
 - Method: `rewindRun`
 - Scope: `run:admin`
 - Transports: HTTP RPC, WebSocket RPC
-- Request: `{ runId, frameNo, confirm: true }`
-- Response: `JumpResult`
+- Request: `{ runId, frameNo, confirm: true, force?, noRevert? }`
+- Response: `JumpResult`, including an unconditional `effectBoundary` report with `blocking`, `revertible`, and `warnings` arrays
 
-Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `FrameOutOfRange`, `Busy`, `RateLimited`, `UnsupportedSandbox`, `VcsError`, and `RewindFailed`.
+`force` crosses unresolved effects and marks the run needs-attention. `noRevert`
+skips registered compensation handlers, so those effects require `force`.
+
+Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `FrameOutOfRange`, `Busy`, `RateLimited`, `UnsupportedSandbox`, `VcsError`, `RewindFailed`, and `TIME_TRAVEL_SIDE_EFFECT_BLOCKED`.

@@ -655,6 +655,17 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   hijack?: boolean;
   onHijackExit?: "complete" | "reopen";
   allowTools?: string[];            // CLI-agent tool allowlist
+  sideEffect?: boolean | {
+    idempotent?: boolean;
+    revert?: (ctx: {
+      outputRow: unknown | null;
+      effectStatus: "succeeded" | "unknown";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+    }) => Promise<void>;
+  };
   priority?: number;
   failurePolicy?: "halt" | "quarantine";
   label?: string;
@@ -1486,6 +1497,7 @@ type KnownSmithersErrorCode =
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
   | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
   | "SCORER_FAILED" | "WORKFLOW_EXISTS" | "CLI_DB_NOT_FOUND" | "CLI_AGENT_UNSUPPORTED"
+  | "TIME_TRAVEL_SIDE_EFFECT_BLOCKED"
   | "PI_HTTP_ERROR" | "EXTERNAL_BUILD_FAILED" | "SCHEMA_DISCOVERY_FAILED"
   | "OPENAPI_SPEC_LOAD_FAILED" | "OPENAPI_OPERATION_NOT_FOUND" | "OPENAPI_TOOL_EXECUTION_FAILED"
   | "ACCOUNT_INVALID" | "ACCOUNT_NOT_FOUND" | "ACCOUNT_DUPLICATE_LABEL" | "ACCOUNTS_FILE_INVALID";

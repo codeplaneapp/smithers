@@ -59,6 +59,8 @@ const MEMORY_CONCEPTS = join(DOCS, "concepts/memory.mdx");
 const RUNTIME_EVENTS_REFERENCE = join(DOCS, "runtime/events.mdx");
 const EVENT_TYPES_REFERENCE = join(DOCS, "reference/event-types.mdx");
 const ENGINE_SOURCE = join(root, "packages/engine/src/engine.js");
+const TOOL_JOURNAL_CONTEXT_SOURCE = join(root, "packages/engine/src/createToolJournalContext.js");
+const TOOL_JOURNAL_COMPLETION_SOURCE = join(root, "packages/engine/src/completeToolJournalCall.js");
 const DB_PACKAGE_JSON = join(root, "packages/db/package.json");
 const DB_RUN_STATE_SOURCE = join(root, "packages/db/src/runState.js");
 const DB_RUN_STATE_TYPES = join(root, "packages/db/src/runState.d.ts");
@@ -2945,6 +2947,8 @@ function checkCliOverviewWorkflowRunFlagsMatchSchema() {
 function checkToolDocsMatchCurrentRuntimeLogging() {
   const docs = readFileSync(TOOLS_INTEGRATION, "utf8");
   const engine = readFileSync(ENGINE_SOURCE, "utf8");
+  const journalContext = readFileSync(TOOL_JOURNAL_CONTEXT_SOURCE, "utf8");
+  const journalCompletion = readFileSync(TOOL_JOURNAL_COMPLETION_SOURCE, "utf8");
   const required = [
     "Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows.",
     "The engine durably records the start of every `defineTool()` invocation before executing it",
@@ -2952,6 +2956,9 @@ function checkToolDocsMatchCurrentRuntimeLogging() {
     "`defineTool()` wraps custom [AI SDK](https://ai-sdk.dev) tools with Smithers runtime context, deterministic idempotency keys, side-effect metadata, and the side-effect snapshot hook.",
     "`idempotent: false` marks the tool for retry warnings when a previous attempt has a recorded `_smithers_tool_calls` row.",
     "The engine persists the durable start row through the Smithers DB adapter before `execute` runs.",
+    "Each invocation receives a unique `callToken`.",
+    "Completion and failure updates match only that token",
+    "| `callToken` | Unique identity for this invocation, used to fence completion and failure updates |",
   ];
   const forbidden = [
     "The `defineTool()` wrapper itself does not insert a durable row for every call",
@@ -2960,12 +2967,25 @@ function checkToolDocsMatchCurrentRuntimeLogging() {
   const missing = required.filter((needle) => !docs.includes(needle));
   const stale = forbidden.filter((needle) => docs.includes(needle));
   const engineReadsToolCalls = engine.includes(".listToolCalls(");
-  const engineInsertsToolCalls = engine.includes(".insertToolCall(");
-  if (missing.length || stale.length || !engineReadsToolCalls || !engineInsertsToolCalls) {
+  const engineInsertsToolCalls = journalContext.includes(".insertToolCall(");
+  const engineCompletesToolCallsByToken =
+    journalCompletion.includes(".updateToolCallByToken(") &&
+    journalCompletion.includes('"_smithers_tool_call_archive"') &&
+    journalCompletion.includes('"call_token = ?"');
+  if (
+    missing.length ||
+    stale.length ||
+    !engineReadsToolCalls ||
+    !engineInsertsToolCalls ||
+    !engineCompletesToolCallsByToken
+  ) {
     failed = true;
     console.error("\n✗ docs/integrations/tools.mdx must match current _smithers_tool_calls runtime behavior:");
     if (!engineReadsToolCalls) console.error("    engine no longer reads tool-call rows for retry warnings");
     if (!engineInsertsToolCalls) console.error("    engine no longer inserts tool-call rows");
+    if (!engineCompletesToolCallsByToken) {
+      console.error("    engine no longer fences tool-call completion and archive updates by call token");
+    }
     if (missing.length) console.error(`    missing: ${missing.join(", ")}`);
     if (stale.length) console.error(`    stale: ${stale.join(", ")}`);
   } else {

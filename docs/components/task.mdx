@@ -53,6 +53,17 @@ type TaskProps = {
   heartbeatTimeout?: number; // alias of heartbeatTimeoutMs
   hijack?: boolean; // request an immediate hijack handoff as soon as the task starts running
   onHijackExit?: "complete" | "reopen"; // what Smithers should do after a hijacked session exits
+  sideEffect?: boolean | {
+    idempotent?: boolean;
+    revert?: (ctx: {
+      outputRow: unknown | null;
+      effectStatus: "succeeded" | "unknown";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+    }) => Promise<void>;
+  };
   priority?: number; // higher runnable priorities claim free concurrency slots first
   failurePolicy?: "halt" | "quarantine"; // override the nearest container policy
   children?:
@@ -137,6 +148,44 @@ downstream `deps`, and works inside `<Loop>`, `<Branch>`, `<Parallel>`, and
 `<Sequence>` like an agent Task, except it can't be a `fork` source (no agent
 session). Throwing in a compute function fails the task and triggers its retry
 policy.
+
+## External side effects
+
+Mark a compute Task when its callback changes state outside the run database
+and the git/jj-tracked worktree.
+
+```tsx
+<Task
+  id="announce"
+  output={outputs.announcement}
+  sideEffect={{
+    idempotent: false,
+    revert: async (ctx) => {
+      const message = await findMessageByRun(ctx.runId);
+      if (message) await slack.chat.delete(message);
+    },
+  }}
+>
+  {async () => {
+    const message = await slack.chat.postMessage({ text: "Release complete" });
+    return { messageId: message.ts };
+  }}
+</Task>
+```
+
+`sideEffect` accepts `true` or an object. `true` means
+`{ idempotent: false }`. The engine writes one synthetic effect record for
+each task attempt before calling the task. Success records `succeeded`; a
+throw or interrupted attempt records `unknown`.
+
+Use the object form to register compensation. The revert callback receives
+`outputRow`, `effectStatus`, `runId`, `nodeId`, `iteration`, and `attempt`.
+It must be idempotent. Check whether the external object exists before
+removing it, especially when `effectStatus` is `unknown`.
+
+Tool-level marking remains more precise when an agent or compute Task calls a
+custom `defineTool`. Git commits, branch changes, worktree writes, and
+`git push` are exempt because time travel already owns git state.
 
 ## Dependencies: dependsOn, needs, deps
 

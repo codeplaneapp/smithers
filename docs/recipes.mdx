@@ -196,6 +196,7 @@ on Terra, and the hardest or most ambiguous changes escalate to Sol.
 ## Side-effect tools with idempotency
 
 External mutations must mark themselves and use the runtime idempotency key.
+Add `revert` when time travel can compensate the operation.
 
 ```tsx
 import { defineTool } from "smithers-orchestrator/tools";
@@ -208,10 +209,21 @@ const createTicket = defineTool({
   async execute(args, ctx) {
     return jira.createIssue({ ...args, idempotencyKey: ctx.idempotencyKey });
   },
+  async revert(args, ctx) {
+    const ticket = await jira.findIssueByKey(ctx.idempotencyKey);
+    if (ticket) await jira.deleteIssue(ticket.id);
+  },
 });
 ```
 
 Retries reuse the same idempotency key, so a successful side effect from attempt 1 isn't doubled by attempt 2.
+
+`revert` is legal only with `sideEffect: true`. Its context includes
+`output`, `effectStatus`, `idempotencyKey`, `runId`, `nodeId`, `iteration`,
+`attempt`, and `toolCallSeq`. `effectStatus` is either `succeeded` or
+`unknown`. Treat both as "possibly happened": find the external object, then
+undo it. A handler must be idempotent and must throw when it cannot verify the
+object safely.
 
 ## Caching for iterative authoring
 
@@ -288,7 +300,22 @@ Smithers records the current JJ change ID in `_smithers_attempts.jj_pointer` per
 bunx smithers-orchestrator revert workflow.tsx --run-id RUN_ID --node-id implement --attempt 1
 ```
 
-Useful when an experiment leaves the worktree in a bad state.
+Every discard command checks the external-effect journal before changing the
+worktree or run state. Registered handlers run first. An unresolved effect
+stops the command with `TIME_TRAVEL_SIDE_EFFECT_BLOCKED`.
+
+```bash
+# Print the report and cross unresolved effects. The run is marked for attention.
+bunx smithers-orchestrator revert workflow.tsx \
+  --run-id RUN_ID --node-id implement --attempt 1 --force
+
+# Skip registered handlers. Any crossed effects now require --force.
+bunx smithers-orchestrator revert workflow.tsx \
+  --run-id RUN_ID --node-id implement --attempt 1 --no-revert --force
+```
+
+Git commits, branch changes, worktree writes, and `git push` are exempt.
+GitHub API mutations such as `gh pr merge` are not.
 
 ## Time travel: fork, replay, diff
 
@@ -299,7 +326,13 @@ bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-n
 bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
-Fork makes a child run without starting it (add `--run` to start immediately); replay also makes a child run but immediately resumes it. `--restore-vcs` checks out the original revision so re-execution sees the same source. See [Time-travel commands compared](/cli/overview#time-travel-commands-compared) to tell `rewind`, `replay`, `timetravel`, and `revert` apart.
+Fork makes a child run without starting it (add `--run` to start immediately);
+replay also makes a child run but immediately resumes it. Branch operations do
+not run compensation handlers because the parent still owns its effects.
+`replay` and `fork --run` stop before an effect-bearing boundary unless
+`--force` is present. A plain `fork` succeeds and reports a warning.
+`--restore-vcs` checks out the original revision so re-execution sees the same
+source. See [Time-travel commands compared](/cli/overview#time-travel-commands-compared).
 
 ## Scoring tasks
 

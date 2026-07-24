@@ -698,6 +698,9 @@ type JumpResult = {
 
 Also broadcast after the DB commit as `run.time_travel_jumped` with
 `{ runId, fromFrameNo, toFrameNo, timestampMs, caller }`.
+Side-effect boundary events are broadcast as
+`run.side_effect_boundary_crossed`. Late detached-tool completions include
+`lateCompletion: true` and `archivedByOp`.
 
 Quota: 10 rewinds per run per caller per hour (default window). Exceeded
 → `RateLimited`.
@@ -753,7 +756,7 @@ type OutputSchemaDescriptor = {
 Gateway v1 RPC errors use stable code strings and HTTP status mappings:
 
 ```toon
-errors[26]{code,http}:
+errors[27]{code,http}:
   InvalidRequest,400
   InvalidInput,400
   Unauthorized,401
@@ -776,6 +779,7 @@ errors[26]{code,http}:
   UnsupportedSandbox,501
   VcsError,500
   RewindFailed,500
+  TIME_TRAVEL_SIDE_EFFECT_BLOCKED,409
   Internal,500
   REVISION_CONFLICT,409
   SSRF_BLOCKED,400
@@ -884,6 +888,7 @@ After `connect`, the gateway emits `tick` events every `heartbeatMs`. `launchRun
 | `run.error` | Run lifecycle |
 | `run.completed` | Run lifecycle |
 | `run.time_travel_jumped` | Run lifecycle |
+| `run.side_effect_boundary_crossed` | Run lifecycle |
 | `node.started` | Run lifecycle |
 | `node.finished` | Run lifecycle |
 | `node.failed` | Run lifecycle |
