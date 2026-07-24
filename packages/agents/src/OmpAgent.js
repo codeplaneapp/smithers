@@ -87,7 +87,12 @@ export class OmpAgent extends BaseCliAgent {
       if (payload.type === "message_update" && ae?.type === "text_delta" && typeof ae.delta === "string") { answer += ae.delta; events.push({ type: "action", engine: "omp", phase: "updated", entryType: "message", action: { id: "omp-answer", kind: "turn", title: "assistant" }, message: ae.delta }); }
       if (payload.type === "tool_execution_start" || payload.type === "tool_execution_update" || payload.type === "tool_execution_end") {
         const name = asString(payload.toolName) ?? "tool"; const phase = payload.type === "tool_execution_start" ? "started" : payload.type === "tool_execution_end" ? "completed" : "updated";
-        events.push({ type: "action", engine: "omp", phase, entryType: "thought", action: { id: asString(payload.toolCallId) ?? name, kind: toolKindFromName(name), title: name }, message: name, ok: payload.isError !== true });
+        const action = { id: asString(payload.toolCallId) ?? name, kind: toolKindFromName(name), title: name };
+        // Preserve tool-call arguments (e.g. the todo tool's op payload) so consumers can
+        // reconstruct tool state from OMP events, matching PiAgent. Only start/update frames
+        // carry args; the end frame carries a result instead.
+        if (payload.args !== undefined) action.detail = { args: payload.args };
+        events.push({ type: "action", engine: "omp", phase, entryType: "thought", action, message: name, ok: payload.isError !== true });
       }
       if (payload.type === "agent_end" || payload.type === "prompt_result") {
         completed = true;

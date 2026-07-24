@@ -93,6 +93,25 @@ describe("OmpAgent", () => {
     expect(events.at(-1)).toMatchObject({ ok: true, answer: "OK", resume: "s1" });
   });
 
+  test("preserves tool-call args on start/update so consumers can reconstruct tool state", () => {
+    const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
+    const initArgs = { op: "init", list: [{ phase: "Investigate", items: ["Map files", "Detect languages"] }] };
+    const startAction = interpreter
+      .onStdoutLine(JSON.stringify({ type: "tool_execution_start", toolName: "todo", toolCallId: "t1", args: initArgs }))
+      .find((event) => event.type === "action");
+    expect(startAction).toMatchObject({ phase: "started", action: { kind: "todo_list", title: "todo", detail: { args: initArgs } } });
+    const updateArgs = { op: "start", task: "Map files" };
+    const updateAction = interpreter
+      .onStdoutLine(JSON.stringify({ type: "tool_execution_update", toolName: "todo", toolCallId: "t1", args: updateArgs }))
+      .find((event) => event.type === "action");
+    expect(updateAction).toMatchObject({ phase: "updated", action: { detail: { args: updateArgs } } });
+    const endAction = interpreter
+      .onStdoutLine(JSON.stringify({ type: "tool_execution_end", toolName: "todo", toolCallId: "t1", result: "done" }))
+      .find((event) => event.type === "action");
+    expect(endAction).toMatchObject({ phase: "completed" });
+    expect(endAction.action.detail).toBeUndefined();
+  });
+
   test("uses a terminal-only assistant message as the authoritative JSON answer once", () => {
     const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
     const terminal = JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "terminal answer", stopReason: "stop" }] });
