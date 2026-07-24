@@ -54,13 +54,13 @@ describe("oneshot model chain", () => {
             { engine: "codex", model: "gpt-5.6-sol" },
             { engine: "kimi", model: "kimi-code/k3" },
             { engine: "claude", model: "claude-fable-5" },
-            { engine: "claude", model: "claude-opus-4-8" },
+            { engine: "claude", model: "claude-opus-5" },
         ]);
     });
     test("drops paused Codex and maps model slots", () => {
         expect(resolveOneshotChain(all, { env: { SMITHERS_CODEX_PAUSED: "1" } })[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
         expect(resolveOneshotChain(all, { model: "terra", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "codex", model: "gpt-5.6-terra" });
-        expect(resolveOneshotChain(all, { model: "opus", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "claude", model: "claude-opus-4-8" });
+        expect(resolveOneshotChain(all, { model: "opus", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "claude", model: "claude-opus-5" });
         expect(resolveOneshotChain(all, { model: "kimi", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
         expect(resolveOneshotChain(all, { model: "kimi-code/k3", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
     });

@@ -69,7 +69,7 @@ describe("the checked-in registry", () => {
   test("holds the expected badges", () => {
     const registry = loadRegistry();
     const badge = (name: string) => registry.models.find((m: { badges: string[] }) => m.badges.includes(name))?.id;
-    expect(badge("best-orchestrator")).toBe("claude-opus-4-8");
+    expect(badge("best-orchestrator")).toBe("claude-opus-5");
     expect(badge("smartest-reviewer")).toBe("gpt-5.6-sol");
     expect(badge("smartest-coder")).toBe("gpt-5.6-sol");
     expect(badge("best-ui")).toBe("gemini-3.5-flash");
@@ -81,7 +81,7 @@ describe("the checked-in registry", () => {
 
   test("role defaults split building from gating", () => {
     const defaults = roleDefaults(loadRegistry());
-    expect(defaults.orchestrator).toBe("claude-opus-4-8");
+    expect(defaults.orchestrator).toBe("claude-opus-5");
     expect(defaults.planning).toBe("claude-fable-5");
     expect(defaults.review).toBe("gpt-5.6-sol");
     expect(defaults.smart).toBe("gpt-5.6-sol");
