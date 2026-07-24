@@ -128,6 +128,7 @@ import {
 } from "./update-check.js";
 import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
 import { reportReplayResult } from "./reportReplayResult.js";
+import { renderEffectBoundaryReport } from "./renderEffectBoundaryReport.js";
 import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js";
 import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
 import { runClaudeMonitor } from "./claude-mirror/runClaudeMonitor.js";
@@ -1964,6 +1965,8 @@ const revertOptions = z.object({
     nodeId: z.string().describe("Node ID to revert to"),
     attempt: z.number().int().min(1).default(1).describe("Attempt number"),
     iteration: z.number().int().min(0).default(0).describe("Loop iteration number"),
+    force: z.boolean().default(false).describe("Cross unresolved effects; mark needs-attention"),
+    revert: z.boolean().default(true).describe("Compensate effects; --no-revert skips"),
 });
 const workflowPathArgs = z.object({
     name: z.string().describe("Workflow ID"),
@@ -8316,8 +8319,12 @@ const cli = Cli.create({
                     nodeId: c.options.nodeId,
                     iteration: c.options.iteration,
                     attempt: c.options.attempt,
+                    force: c.options.force,
+                    noRevert: !c.options.revert,
+                    caller: "cli",
                     onProgress: (e) => console.log(JSON.stringify(e)),
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 process.exitCode = result.success ? 0 : 1;
                 return c.ok(result);
             }
@@ -8326,6 +8333,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "REVERT_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
@@ -8404,6 +8412,7 @@ const cli = Cli.create({
         deps: z.boolean().default(true).describe("Also reset dependents. Use --no-deps to reset only this node."),
         resume: z.boolean().default(false).describe("Resume the workflow after time travel"),
         force: z.boolean().default(false).describe("Force even if run is still running"),
+        revert: z.boolean().default(true).describe("Compensate effects; --no-revert skips"),
     }),
     alias: { runId: "r", nodeId: "n", attempt: "a" },
     async run(c) {
@@ -8426,8 +8435,12 @@ const cli = Cli.create({
                     attempt: c.options.attempt,
                     resetDependents: c.options.deps,
                     restoreVcs: c.options.vcs,
+                    force: c.options.force,
+                    noRevert: !c.options.revert,
+                    caller: "cli",
                     onProgress: (e) => console.log(JSON.stringify(e)),
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 if (!result.success || !c.options.resume) {
                     process.exitCode = result.success ? 0 : 1;
                     return c.ok(result);
@@ -8461,6 +8474,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "TIMETRAVEL_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
@@ -8599,6 +8613,7 @@ const cli = Cli.create({
         input: z.string().optional().describe("Input overrides as JSON string"),
         label: z.string().optional().describe("Branch label for the fork"),
         restoreVcs: z.boolean().default(false).describe("Restore jj filesystem state to the source frame's revision"),
+        force: z.boolean().default(false).describe("Cross unresolved effects; mark parent needs-attention"),
     }),
     alias: { runId: "r", frame: "f", node: "n", input: "i", label: "l" },
     async run(c) {
@@ -8626,7 +8641,9 @@ const cli = Cli.create({
                     workflowPath: resolvedReplayWorkflowPath,
                     workflowHash: await readWorkflowGraphHash(resolvedReplayWorkflowPath),
                     entryWorkflowHash: await readWorkflowEntryHash(resolvedReplayWorkflowPath),
+                    force: c.options.force,
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 reportReplayResult({
                     result,
                     parentRunId: c.options.runId,
@@ -8654,6 +8671,7 @@ const cli = Cli.create({
                     parentFrame: c.options.frame,
                     vcsRestored: result.vcsRestored,
                     status: runResult.status,
+                    effectBoundary: result.effectBoundary,
                 }, {
                     cta: buildAgentNextSteps({
                         workflowId: workflowIdFromPath(c.args.workflow),
@@ -8667,6 +8685,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "REPLAY_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
@@ -8834,6 +8853,8 @@ const cli = Cli.create({
     options: z.object({
         yes: z.boolean().default(false).describe("Skip confirmation"),
         json: z.boolean().default(false).describe("Emit JumpResult JSON"),
+        force: z.boolean().default(false).describe("Cross unresolved effects; mark needs-attention"),
+        revert: z.boolean().default(true).describe("Compensate effects; --no-revert skips"),
     }),
     alias: { json: "j" },
     run(c) {
@@ -8847,6 +8868,8 @@ const cli = Cli.create({
                     frameNo: c.args.frameNo,
                     yes: c.options.yes,
                     json: c.options.json,
+                    force: c.options.force,
+                    noRevert: !c.options.revert,
                     stdin: process.stdin,
                     stdout: io.stdout,
                     stderr: io.stderr,
@@ -8873,6 +8896,7 @@ const cli = Cli.create({
         input: z.string().optional().describe("Input overrides as JSON string"),
         label: z.string().optional().describe("Branch label"),
         run: z.boolean().default(false).describe("Immediately start the forked run"),
+        force: z.boolean().default(false).describe("Allow --run to cross unresolved external effects"),
     }),
     alias: { runId: "r", frame: "f", resetNode: "n", input: "i", label: "l" },
     async run(c) {
@@ -8896,7 +8920,10 @@ const cli = Cli.create({
                     workflowPath: resolvedForkWorkflowPath,
                     workflowHash: await readWorkflowGraphHash(resolvedForkWorkflowPath),
                     entryWorkflowHash: await readWorkflowEntryHash(resolvedForkWorkflowPath),
+                    force: c.options.force,
+                    autoRun: c.options.run,
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 process.stderr.write(`[smithers] Forked run ${result.runId} from ${c.options.runId}:${c.options.frame}\n`);
                 if (c.options.run) {
                     process.stderr.write(`[smithers] Starting forked run...\n`);
@@ -8920,6 +8947,7 @@ const cli = Cli.create({
                         parentFrame: c.options.frame,
                         started: true,
                         status: runResult.status,
+                        effectBoundary: result.effectBoundary,
                     }, {
                         cta: buildAgentNextSteps({
                             workflowId: workflowIdFromPath(c.args.workflow),
@@ -8933,6 +8961,7 @@ const cli = Cli.create({
                     parentRunId: c.options.runId,
                     parentFrame: c.options.frame,
                     started: false,
+                    effectBoundary: result.effectBoundary,
                 }, {
                     cta: withAgentNextSteps({
                         workflowId: workflowIdFromPath(c.args.workflow),
@@ -8949,6 +8978,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "FORK_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },

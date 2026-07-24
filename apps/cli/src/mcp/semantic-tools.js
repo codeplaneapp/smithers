@@ -416,11 +416,18 @@ const getNodeDetailInputSchema = z.object({
 const getNodeDetailDataSchema = z.object({
     detail: nodeDetailSchema,
 });
+const effectBoundaryReportSchema = z.object({
+    blocking: z.array(z.unknown()),
+    revertible: z.array(z.unknown()),
+    warnings: z.array(z.unknown()),
+});
 const revertAttemptInputSchema = z.object({
     runId: z.string(),
     nodeId: z.string(),
     iteration: z.number().int().min(0).default(0),
     attempt: z.number().int().min(1),
+    force: z.boolean().default(false),
+    noRevert: z.boolean().default(false),
 });
 const revertAttemptDataSchema = z.object({
     runId: z.string(),
@@ -430,6 +437,7 @@ const revertAttemptDataSchema = z.object({
     success: z.boolean(),
     error: z.string().optional(),
     jjPointer: z.string().optional(),
+    effectBoundary: effectBoundaryReportSchema,
     run: runSummarySchema.nullable(),
 });
 const forkRunInputSchema = z.object({
@@ -438,6 +446,8 @@ const forkRunInputSchema = z.object({
     resetNodes: z.array(z.string()).optional(),
     inputOverrides: z.record(z.string(), z.unknown()).optional(),
     branchLabel: z.string().optional(),
+    force: z.boolean().default(false),
+    noRevert: z.boolean().default(false),
 });
 const forkRunDataSchema = z.object({
     runId: z.string(),
@@ -445,6 +455,7 @@ const forkRunDataSchema = z.object({
     parentFrameNo: z.number().int(),
     branch: z.unknown(),
     snapshot: z.unknown(),
+    effectBoundary: effectBoundaryReportSchema,
     run: runSummarySchema.nullable(),
 });
 const replayRunInputSchema = forkRunInputSchema.extend({
@@ -460,9 +471,12 @@ const rewindRunInputSchema = z.object({
     runId: z.string(),
     frameNo: z.number().int().min(0),
     confirm: z.boolean().default(false),
+    force: z.boolean().default(false),
+    noRevert: z.boolean().default(false),
 });
 const rewindRunDataSchema = z.object({
     result: z.unknown(),
+    effectBoundary: effectBoundaryReportSchema,
     run: runSummarySchema.nullable(),
 });
 const restoreCheckpointInputSchema = z.object({
@@ -515,10 +529,12 @@ const timeTravelInputSchema = z.object({
     restoreVcs: z.boolean().default(true),
     resetDependents: z.boolean().default(true),
     force: z.boolean().default(false),
+    noRevert: z.boolean().default(false),
     confirm: z.boolean().default(false),
 });
 const timeTravelDataSchema = z.object({
     result: z.unknown(),
+    effectBoundary: effectBoundaryReportSchema,
     run: runSummarySchema.nullable(),
 });
 const listArtifactsInputSchema = z.object({
@@ -1484,6 +1500,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     success: result.success,
                     ...(result.error ? { error: result.error } : {}),
                     ...(result.jjPointer ? { jjPointer: result.jjPointer } : {}),
+                    effectBoundary: result.effectBoundary,
                     run: run != null
                         ? await buildRunSummary(adapter, run)
                         : null,
@@ -1506,6 +1523,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     inputOverrides: input.inputOverrides,
                     resetNodes: input.resetNodes,
                     branchLabel: input.branchLabel,
+                    force: input.force,
                 });
                 const run = await adapter.getRun(result.runId);
                 return {
@@ -1514,6 +1532,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     parentFrameNo: input.frameNo,
                     branch: result.branch,
                     snapshot: result.snapshot,
+                    effectBoundary: result.effectBoundary,
                     run: run != null
                         ? await buildRunSummary(adapter, run)
                         : null,
@@ -1538,6 +1557,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     branchLabel: input.branchLabel,
                     restoreVcs: input.restoreVcs,
                     cwd: input.cwd,
+                    force: input.force,
                 });
                 const run = await adapter.getRun(result.runId);
                 return {
@@ -1549,6 +1569,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     vcsRestored: result.vcsRestored,
                     vcsPointer: result.vcsPointer ?? null,
                     ...(result.vcsError ? { vcsError: result.vcsError } : {}),
+                    effectBoundary: result.effectBoundary,
                     run: run != null
                         ? await buildRunSummary(adapter, run)
                         : null,
@@ -1577,11 +1598,14 @@ export function createSemanticToolDefinitions(options = {}) {
                     runId: input.runId,
                     frameNo: input.frameNo,
                     confirm: true,
+                    force: input.force,
+                    noRevert: input.noRevert,
                     caller: "mcp:semantic",
                 });
                 const run = await adapter.getRun(input.runId);
                 return {
                     result,
+                    effectBoundary: result.effectBoundary,
                     run: run != null
                         ? await buildRunSummary(adapter, run)
                         : null,
@@ -1719,10 +1743,14 @@ export function createSemanticToolDefinitions(options = {}) {
                     attempt: input.attempt,
                     resetDependents: input.resetDependents,
                     restoreVcs: input.restoreVcs,
+                    force: input.force,
+                    noRevert: input.noRevert,
+                    caller: "mcp:semantic",
                 });
                 const updatedRun = await adapter.getRun(input.runId);
                 return {
                     result,
+                    effectBoundary: result.effectBoundary,
                     run: updatedRun != null
                         ? await buildRunSummary(adapter, updatedRun)
                         : null,

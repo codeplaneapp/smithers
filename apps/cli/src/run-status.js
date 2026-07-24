@@ -215,6 +215,8 @@ export function parseFrameDependsOn(xmlJson) {
  * @property {RunStatusBottleneckEntry[]} bottleneck
  * @property {number} bottleneckOmitted count of gating nodes beyond the listed few
  * @property {{ parkedCount: number; parkedNodeIds: string[]; resetAtMs: number | null } | null} quota
+ * @property {{ operation: string; opId: string | null; crossedCount: number; blockingCount: number; revertibleCount: number; warningCount: number; lateCompletion: boolean; archivedByOp: string | null; timestampMs: number } | undefined} [attention]
+ * @property {{ operation: string; warningCount: number; timestampMs: number } | undefined} [information]
  * @property {{ harness?: string; sessionId?: string; detected?: true } | undefined} [startedBy]
  * @property {number | null} startedAtMs
  * @property {number | null} finishedAtMs
@@ -584,6 +586,62 @@ function compactStartedBy(configJson) {
 }
 
 /**
+ * @param {any[]} rows
+ * @returns {RunStatusSummary["attention"]}
+ */
+function latestForcedEffectBoundaryAttention(rows) {
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index];
+        const payload = parseObjectJson(row.payloadJson);
+        if (payload.warningOnly === true) continue;
+        const report = isRecord(payload.report) ? payload.report : {};
+        const blockingCount = Array.isArray(report.blocking) ? report.blocking.length : 0;
+        const revertibleCount = Array.isArray(report.revertible) ? report.revertible.length : 0;
+        const warningCount = Array.isArray(report.warnings) ? report.warnings.length : 0;
+        return {
+            operation: typeof payload.operation === "string" && payload.operation.trim()
+                ? payload.operation.trim()
+                : "time travel",
+            opId: typeof payload.opId === "string" && payload.opId.trim()
+                ? payload.opId.trim()
+                : null,
+            crossedCount: blockingCount + revertibleCount,
+            blockingCount,
+            revertibleCount,
+            warningCount,
+            lateCompletion: payload.lateCompletion === true,
+            archivedByOp: typeof payload.archivedByOp === "string" && payload.archivedByOp.trim()
+                ? payload.archivedByOp.trim()
+                : null,
+            timestampMs: parseNumber(payload.timestampMs) ?? parseNumber(row.timestampMs) ?? Date.now(),
+        };
+    }
+    return undefined;
+}
+
+/**
+ * @param {any[]} rows
+ * @returns {RunStatusSummary["information"]}
+ */
+function latestWarningEffectBoundaryInformation(rows) {
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index];
+        const payload = parseObjectJson(row.payloadJson);
+        if (payload.warningOnly !== true) continue;
+        const report = isRecord(payload.report) ? payload.report : {};
+        const warningCount = Array.isArray(report.warnings) ? report.warnings.length : 0;
+        return {
+            operation: typeof payload.operation === "string" && payload.operation.trim()
+                ? payload.operation.trim()
+                : "time travel",
+            warningCount,
+            timestampMs: parseNumber(payload.timestampMs) ?? parseNumber(row.timestampMs) ?? Date.now(),
+        };
+    }
+    return undefined;
+}
+
+/**
  * Load the rows `summarizeRunStatus` needs and derive the summary.
  *
  * @param {SmithersDb} adapter
@@ -596,12 +654,13 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
     if (!run) {
         throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`);
     }
-    const [nodes, attempts, lastFrame] = await Promise.all([
+    const [nodes, attempts, lastFrame, forcedBoundaryEvents] = await Promise.all([
         adapter.listNodes(runId),
         adapter.listAttemptsForRun(runId),
         adapter.getLastFrame(runId),
+        adapter.listEventsByType(runId, "SideEffectBoundaryCrossed"),
     ]);
-    return summarizeRunStatus({
+    const summary = summarizeRunStatus({
         run,
         nodes: nodes ?? [],
         attempts: attempts ?? [],
@@ -609,6 +668,13 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
         ...(options.nowMs != null ? { nowMs: options.nowMs } : {}),
         ...(options.recentWindowMs != null ? { recentWindowMs: options.recentWindowMs } : {}),
     });
+    const attention = latestForcedEffectBoundaryAttention(forcedBoundaryEvents ?? []);
+    const information = latestWarningEffectBoundaryInformation(forcedBoundaryEvents ?? []);
+    return {
+        ...summary,
+        ...(attention ? { attention } : {}),
+        ...(information ? { information } : {}),
+    };
 }
 
 /**
@@ -661,6 +727,19 @@ export function renderRunStatusHuman(summary) {
             : "";
         lines.push(`${label("Quota")}${summary.quota.parkedCount} parked${reset}`);
     }
+    if (summary.attention) {
+        if (summary.attention.lateCompletion) {
+            lines.push(`${label("Attention")} external effect completed after its journal row was reverted or archived`);
+        }
+        else {
+            const count = summary.attention.crossedCount;
+            lines.push(`${label("Attention")} forced ${summary.attention.operation} crossed ${count} external effect${count === 1 ? "" : "s"}`);
+        }
+    }
+    if (summary.information) {
+        const count = summary.information.warningCount;
+        lines.push(`${label("Info")}${summary.information.operation} recorded ${count} side-effect warning${count === 1 ? "" : "s"}; no crossing was forced`);
+    }
     return lines.join("\n");
 }
 
@@ -672,7 +751,7 @@ export function renderRunStatusHuman(summary) {
  */
 export function runStatusCtaCommands(summary) {
     const commands = [];
-    if (summary.verdict === "blocked" || summary.verdict === "stalled" || summary.verdict === "failed") {
+    if (summary.attention || summary.verdict === "blocked" || summary.verdict === "stalled" || summary.verdict === "failed") {
         commands.push({ command: `why ${summary.runId}`, description: "Explain blockers in depth" });
     }
     if (summary.verdict === "waiting-quota") {

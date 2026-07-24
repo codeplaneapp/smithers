@@ -326,6 +326,16 @@ async function seedSemanticDb(cwd) {
             vcsPointer: "checkpoint-commit",
             workflowHash: "workflow-hash",
         });
+        await Effect.runPromise(adapter.insertFrame({
+            runId: "semantic-run",
+            frameNo: 1,
+            createdAtMs: now - 5_000,
+            xmlJson: '{"kind":"element","tag":"smithers:workflow","props":{},"children":[]}',
+            xmlHash: "semantic-frame-1",
+            mountedTaskIdsJson: '["artifact-node"]',
+            taskIndexJson: "[]",
+            note: null,
+        }));
     }
     finally {
         sqlite.close();
@@ -925,6 +935,7 @@ describe("semantic MCP surface", () => {
                 nodeId: "artifact-node",
                 attempt: 1,
                 success: false,
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
             });
             expect(revert.error).toContain("jjPointer");
 
@@ -947,6 +958,7 @@ describe("semantic MCP surface", () => {
             }));
             expect(fork.parentRunId).toBe("semantic-run");
             expect(fork.parentFrameNo).toBe(1);
+            expect(fork.effectBoundary).toEqual({ blocking: [], revertible: [], warnings: [] });
             expect(fork.branch.branchLabel).toBe("mcp fork");
             expect(JSON.parse(fork.snapshot.inputJson)).toEqual({ prompt: "forked" });
             expect(JSON.parse(fork.snapshot.nodesJson).find((node) => node.nodeId === "artifact-node")).toMatchObject({
@@ -967,6 +979,7 @@ describe("semantic MCP surface", () => {
             expect(replay.parentFrameNo).toBe(1);
             expect(replay.vcsRestored).toBe(false);
             expect(replay.vcsPointer).toBeNull();
+            expect(replay.effectBoundary).toEqual({ blocking: [], revertible: [], warnings: [] });
 
             const tree = expectToolOk(await client.callTool({
                 name: "get_timeline",
@@ -982,6 +995,16 @@ describe("semantic MCP surface", () => {
                 },
             });
             expectToolError(rewind, "INVALID_INPUT");
+            const cleanRewindResult = await client.callTool({
+                name: "rewind_run",
+                arguments: {
+                    runId: "semantic-run",
+                    frameNo: 1,
+                    confirm: true,
+                },
+            });
+            const cleanRewind = expectToolOk(cleanRewindResult);
+            expect(cleanRewind.effectBoundary).toEqual({ blocking: [], revertible: [], warnings: [] });
 
             const blocked = await client.callTool({
                 name: "time_travel",
@@ -1050,6 +1073,7 @@ describe("semantic MCP surface", () => {
                 },
             }));
             expect(travelled.run.runId).toBe("finished-run");
+            expect(travelled.effectBoundary).toEqual({ blocking: [], revertible: [], warnings: [] });
         });
     }, 30_000);
 

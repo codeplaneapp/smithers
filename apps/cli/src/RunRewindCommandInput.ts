@@ -6,6 +6,8 @@ export type RunRewindCommandInput = {
     frameNo: number;
     yes?: boolean;
     json?: boolean;
+    force?: boolean;
+    noRevert?: boolean;
     confirm?: () => Promise<boolean>;
     onResult?: (result: unknown) => void;
     stdin: NodeJS.ReadStream;

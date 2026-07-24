@@ -12,6 +12,7 @@ import {
     EXIT_DECLINED,
 } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
+import { renderEffectBoundaryReport } from "./renderEffectBoundaryReport.js";
 
 /**
  * @param {RunRewindCommandInput} input
@@ -60,8 +61,11 @@ export async function runRewindOnce(input) {
             frameNo: input.frameNo,
             confirm: true,
             caller: "cli",
+            force: input.force,
+            noRevert: input.noRevert,
         });
         input.onResult?.(result);
+        input.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
         if (input.json) {
             input.stdout.write(`${JSON.stringify(result)}\n`);
         } else {
@@ -76,6 +80,7 @@ export async function runRewindOnce(input) {
         }
         return { exitCode: EXIT_OK };
     } catch (err) {
+        input.stderr.write(renderEffectBoundaryReport(err?.details?.report));
         const code = err instanceof JumpToFrameError ? err.code : undefined;
         const message = err instanceof Error ? err.message : String(err);
         input.stderr.write(`${formatCliErrorForStderr(code, message)}\n`);

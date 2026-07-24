@@ -106,6 +106,7 @@ function makeAdapter(state = {}) {
         approvals: [],
         attempts: [],
         events: [],
+        boundaryEvents: [],
         lastSeq: undefined,
         lastFrame: undefined,
         ...state,
@@ -123,6 +124,7 @@ function makeAdapter(state = {}) {
             queries.push(query);
             return Effect.succeed(data.events);
         },
+        listEventsByTypeEffect: () => Effect.succeed(data.boundaryEvents),
     };
     return adapter;
 }
@@ -718,6 +720,119 @@ describe("why diagnosis unit coverage", () => {
         }));
         expect(unknown.summary).toBe("Run is unknown. No blockers were identified.");
         expect(renderWhyDiagnosisHuman(unknown)).toContain("No blockers were identified.");
+    });
+
+    test("reports a forced side-effect crossing from durable typed events without changing terminal status", async () => {
+        const boundary = eventRow(2, JSON.stringify({
+            type: "SideEffectBoundaryCrossed",
+            runId: "diag-run",
+            operation: "replay",
+            opId: "replay-op",
+            timestampMs: NOW - 2_000,
+            report: {
+                blocking: [{ nodeId: "send", iteration: 0, attempt: 1, seq: 1 }],
+                revertible: [],
+                warnings: [],
+            },
+        }), {
+            type: "SideEffectBoundaryCrossed",
+            timestampMs: NOW - 2_000,
+        });
+        const diagnosis = await diagnose(makeAdapter({
+            run: runRow({
+                status: "finished",
+                finishedAtMs: NOW - 5_000,
+                heartbeatAtMs: null,
+            }),
+            boundaryEvents: [boundary],
+        }));
+
+        expect(diagnosis.status).toBe("finished");
+        expect(diagnosis.blockers).toHaveLength(1);
+        expect(diagnosis.blockers[0]).toMatchObject({
+            kind: "side-effect-boundary-crossed",
+            reason: "Forced replay crossed 1 external effect without safely reverting it",
+            waitingSince: NOW - 2_000,
+        });
+        expect(renderWhyDiagnosisHuman(diagnosis)).toContain("Forced replay crossed 1 external effect");
+        expect(diagnosisCtaCommands(diagnosis)[0]).toEqual({
+            command: "inspect diag-run",
+            description: "Inspect forced side-effect crossing",
+        });
+    });
+
+    test("reports a detached tool that completed after its journal row was archived", async () => {
+        const boundary = eventRow(2, JSON.stringify({
+            type: "SideEffectBoundaryCrossed",
+            runId: "diag-run",
+            operation: "late-tool-completion",
+            opId: "late-call",
+            lateCompletion: true,
+            archivedByOp: "rewind-op",
+            timestampMs: NOW - 2_000,
+            report: {
+                blocking: [{ nodeId: "send", iteration: 0, attempt: 1, seq: 1 }],
+                revertible: [],
+                warnings: [],
+            },
+        }), {
+            type: "SideEffectBoundaryCrossed",
+            timestampMs: NOW - 2_000,
+        });
+        const diagnosis = await diagnose(makeAdapter({
+            run: runRow({
+                status: "failed",
+                finishedAtMs: NOW - 5_000,
+                heartbeatAtMs: null,
+            }),
+            boundaryEvents: [boundary],
+        }));
+
+        expect(diagnosis.blockers[0]).toMatchObject({
+            kind: "side-effect-boundary-crossed",
+            reason: "External effect completed after its journal row was reverted or archived",
+        });
+        expect(diagnosis.blockers[0]?.context).toContain("Archived by operation: rewind-op");
+        expect(renderWhyDiagnosisHuman(diagnosis)).toContain(
+            "External effect completed after its journal row was reverted or archived",
+        );
+    });
+
+    test("reports warning-only fork crossings as information without a blocker", async () => {
+        const boundary = eventRow(2, JSON.stringify({
+            type: "SideEffectBoundaryCrossed",
+            runId: "diag-run",
+            operation: "fork",
+            opId: "fork-warning-op",
+            warningOnly: true,
+            timestampMs: NOW - 2_000,
+            report: {
+                blocking: [],
+                revertible: [],
+                warnings: [{ nodeId: "send", iteration: 0, attempt: 1, seq: 1 }],
+            },
+        }), {
+            type: "SideEffectBoundaryCrossed",
+            timestampMs: NOW - 2_000,
+        });
+        const diagnosis = await diagnose(makeAdapter({
+            run: runRow({
+                status: "finished",
+                finishedAtMs: NOW - 5_000,
+                heartbeatAtMs: null,
+            }),
+            boundaryEvents: [boundary],
+        }));
+        const rendered = renderWhyDiagnosisHuman(diagnosis);
+
+        expect(diagnosis.blockers).toEqual([]);
+        expect(diagnosis.information).toEqual([
+            "Informational fork warning recorded for 1 external effect; no side-effect crossing was forced.",
+        ]);
+        expect(rendered).toContain("Info: Informational fork warning recorded for 1 external effect");
+        expect(rendered).not.toContain("Forced fork crossed 0");
+        expect(diagnosisCtaCommands(diagnosis).some((entry) =>
+            entry.description === "Inspect forced side-effect crossing")).toBe(false);
     });
 
     test("reports waiting approval nodes that are missing approval request rows", async () => {

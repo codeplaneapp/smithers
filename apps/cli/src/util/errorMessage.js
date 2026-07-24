@@ -113,6 +113,11 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
         hint: "Check `smithers why <runId>` for details and retry after addressing the cause.",
         exitCode: EXIT_SERVER_ERROR,
     },
+    TIME_TRAVEL_SIDE_EFFECT_BLOCKED: {
+        message: "The operation crosses an unresolved external side effect.",
+        hint: "Inspect the effect report, add a revert handler, or rerun with --force if the external effect is already handled.",
+        exitCode: EXIT_USER_ERROR,
+    },
     RateLimited: {
         message: "Too many rewind attempts in a short window.",
         hint: "Wait a minute and try again, or lower the rewind frequency.",
