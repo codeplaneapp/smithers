@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { ProofBinding } from "./ProofBinding.ts";
+import type { TaskSideEffect } from "./TaskSideEffect.ts";
 
 export type XmlNode = XmlElement | XmlText;
 
@@ -162,6 +163,8 @@ export type TaskDescriptor = {
   ordinal: number;
   iteration: number;
   kind?: "agent" | "compute" | "static" | "human";
+  /** Coarse external-side-effect marking for this task attempt. */
+  sideEffect?: TaskSideEffect;
   ralphId?: string;
   dependsOn?: string[];
   needs?: Record<string, string>;

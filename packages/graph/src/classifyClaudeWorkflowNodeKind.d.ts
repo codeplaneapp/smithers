@@ -2,6 +2,8 @@ import { ClaudeWorkflowNodeKind as ClaudeWorkflowNodeKind$1 } from './ClaudeWork
 import { TaskDescriptor as TaskDescriptor$1 } from './types.js';
 import 'zod';
 import './ProofBinding.js';
+import './TaskSideEffect.js';
+import './TaskRevertContext.js';
 
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./ClaudeWorkflowNodePhase.ts").ClaudeWorkflowNodeKind} ClaudeWorkflowNodeKind */

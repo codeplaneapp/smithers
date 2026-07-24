@@ -1,6 +1,8 @@
 import { ExtractOptions as ExtractOptions$1, WorkflowGraph, HostElement as HostElement$1, HostNode as HostNode$1, HostText as HostText$1, TaskDescriptor as TaskDescriptor$1, XmlNode as XmlNode$1 } from '../types.js';
 import 'zod';
 import '../ProofBinding.js';
+import '../TaskSideEffect.js';
+import '../TaskRevertContext.js';
 
 /**
  * Test-only seam to override the dynamic runtime-module importer used by the

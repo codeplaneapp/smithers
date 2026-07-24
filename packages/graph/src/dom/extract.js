@@ -9,6 +9,7 @@ import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_P
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { resolveWorktreePath } from "../worktree-path.js";
 import { coerceFiniteNumber } from "../utils/numeric-props.js";
+import { normalizeTaskSideEffect } from "../normalizeTaskSideEffect.js";
 
 /** @typedef {import("../ExtractOptions.ts").ExtractOptions} ExtractOptions */
 /** @typedef {import("../ExtractResult.ts").ExtractResult} ExtractResult */
@@ -979,6 +980,7 @@ export function extractFromHost(root, opts) {
                 ordinal: ordinal++,
                 iteration,
                 kind: /** @type {TaskDescriptor["kind"]} */ (taskKind),
+                sideEffect: normalizeTaskSideEffect(raw.sideEffect),
                 ...proofBindingProps(raw),
                 ralphId,
                 worktreeId: topWorktree?.id,
