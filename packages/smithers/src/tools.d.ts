@@ -25,6 +25,17 @@ export type DefinedToolContext = ToolContext & {
   idempotent: boolean;
 };
 
+export type ToolRevertContext<Output = unknown> = {
+  output: Output | null;
+  effectStatus: "succeeded" | "unknown";
+  idempotencyKey: string | null;
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  toolCallSeq: number;
+};
+
 export type DefineToolOptions<Schema extends z.ZodTypeAny, Result> = {
   name: string;
   description?: string;
@@ -35,12 +46,19 @@ export type DefineToolOptions<Schema extends z.ZodTypeAny, Result> = {
     args: z.infer<Schema>,
     ctx: DefinedToolContext,
   ) => Promise<Result> | Result;
+  revert?: (
+    args: z.infer<Schema>,
+    ctx: ToolRevertContext<Awaited<Result>>,
+  ) => Promise<void>;
 };
 
 export type DefinedToolMetadata = {
   name: string;
   sideEffect: boolean;
   idempotent: boolean;
+  acceptsIdempotencyKey: boolean;
+  hasRevert: boolean;
+  revert?: (args: unknown, ctx: ToolRevertContext) => Promise<void>;
 };
 
 /**
