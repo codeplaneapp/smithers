@@ -28,6 +28,7 @@ export type {
   GatewayPrompt,
   GatewayResponseFrame,
   GatewayRpcErrorCode,
+  GatewayRpcErrorDetails,
   GatewayRpcMethod,
   GatewayScoreDetail,
   GatewayScoreRow,

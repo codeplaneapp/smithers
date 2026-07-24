@@ -398,6 +398,48 @@ describe("SmithersGatewayConnection WebSocket RPC", () => {
     });
   });
 
+  test("preserves a blocked rewind effect report on GatewayRpcError.details", async () => {
+    const ws = new FakeWebSocket("ws://gateway.local");
+    const connection = new SmithersGatewayConnection(ws as unknown as WebSocket);
+    const pending = connection.requestRaw("rewindRun", {
+      runId: "run-1",
+      frameNo: 0,
+      confirm: true,
+    });
+    const request = ws.lastRequest();
+    ws.receive({
+      type: "res",
+      id: request.id,
+      ok: false,
+      error: {
+        code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED",
+        message: "blocked",
+        details: {
+          report: {
+            blocking: [{
+              kind: "tool",
+              toolName: "publish",
+              nodeId: "task",
+              iteration: 0,
+              attempt: 1,
+              seq: 1,
+              effectStatus: "succeeded",
+              idempotent: false,
+              hasRevert: false,
+              startedAtMs: 1,
+            }],
+            revertible: [],
+            warnings: [],
+          },
+        },
+      },
+    });
+
+    await pending.catch((error: GatewayRpcError) => {
+      expect(error.details?.report?.blocking[0]?.toolName).toBe("publish");
+    });
+  });
+
   test("removes failed sends from the pending map", async () => {
     const ws = new FakeWebSocket("ws://gateway.local");
     ws.sendError = new Error("socket buffer full");

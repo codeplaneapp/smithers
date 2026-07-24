@@ -1,10 +1,12 @@
+import type { GatewayRpcErrorDetails } from "@smithers-orchestrator/protocol/gateway-rpc";
+
 export class GatewayRpcError extends Error {
   readonly code: string;
   readonly method: string;
   readonly status?: number;
   readonly requiredScope?: string;
   readonly refresh?: string;
-  readonly details?: unknown;
+  readonly details?: GatewayRpcErrorDetails;
 
   constructor(input: {
     method: string;
@@ -13,7 +15,7 @@ export class GatewayRpcError extends Error {
     status?: number;
     requiredScope?: string;
     refresh?: string;
-    details?: unknown;
+    details?: GatewayRpcErrorDetails;
   }) {
     super(input.message);
     this.name = "GatewayRpcError";

@@ -65,7 +65,7 @@ function invalidFrameError(details?: unknown) {
     method: "websocket",
     code: "INVALID_GATEWAY_RESPONSE",
     message: "Gateway returned an invalid WebSocket frame.",
-    details,
+    details: isObject(details) ? details : details === undefined ? undefined : { value: details },
   });
 }
 

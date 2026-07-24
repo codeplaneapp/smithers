@@ -125,7 +125,7 @@ function invalidGatewayResponse(method: string, status: number | undefined, deta
     status,
     code: "INVALID_GATEWAY_RESPONSE",
     message: "Gateway returned an invalid RPC response frame.",
-    details,
+    details: isObject(details) ? details : details === undefined ? undefined : { value: details },
   });
 }
 

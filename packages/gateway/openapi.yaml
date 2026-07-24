@@ -2156,6 +2156,12 @@ paths:
                     confirm:
                       const: true
                       description: "Must be true."
+                    force:
+                      type: boolean
+                      description: "Cross unresolved effects and mark the run needs-attention."
+                    noRevert:
+                      type: boolean
+                      description: "Skip registered revert handlers."
                   required:
                     - runId
                     - frameNo
@@ -2168,6 +2174,8 @@ paths:
                 runId: run_01
                 frameNo: 4
                 confirm: true
+                force: false
+                noRevert: false
       responses:
         200:
           description: "Rewind Run response."
@@ -2200,10 +2208,228 @@ paths:
                     const: v1
                   payload:
                     type: object
-                    description: "JumpResult payload."
-                    properties: {}
-                    required: []
-                    additionalProperties: true
+                    properties:
+                      ok:
+                        const: true
+                      newFrameNo:
+                        type: integer
+                        minimum: 0
+                        description: "Committed target frame."
+                      revertedSandboxes:
+                        type: integer
+                        minimum: 0
+                        description: "Reverted sandbox count."
+                      deletedFrames:
+                        type: integer
+                        minimum: 0
+                        description: "Discarded frame count."
+                      deletedAttempts:
+                        type: integer
+                        minimum: 0
+                        description: "Discarded attempt count."
+                      invalidatedDiffs:
+                        type: integer
+                        minimum: 0
+                        description: "Invalidated diff count."
+                      durationMs:
+                        type: integer
+                        minimum: 0
+                        description: "Operation duration."
+                      effectBoundary:
+                        type: object
+                        properties:
+                          blocking:
+                            type: array
+                            description: "Uncompensated effects that block the operation."
+                            items:
+                              type: object
+                              properties:
+                                kind:
+                                  type: string
+                                  enum:
+                                    - tool
+                                    - task
+                                toolName:
+                                  type: string
+                                  description: "Defined tool name or task node id."
+                                nodeId:
+                                  type: string
+                                  description: "Workflow node id."
+                                iteration:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Node iteration."
+                                attempt:
+                                  type: integer
+                                  minimum: 1
+                                  description: "Attempt number."
+                                seq:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Tool-call sequence."
+                                effectStatus:
+                                  type: string
+                                  enum:
+                                    - succeeded
+                                    - unknown
+                                idempotent:
+                                  type: boolean
+                                  description: "Whether the original effect is idempotent."
+                                hasRevert:
+                                  type: boolean
+                                  description: "Whether a revert handler was registered."
+                                startedAtMs:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Effect start time."
+                                reason:
+                                  type: string
+                                  description: "Disposition explanation."
+                              required:
+                                - kind
+                                - toolName
+                                - nodeId
+                                - iteration
+                                - attempt
+                                - seq
+                                - effectStatus
+                                - idempotent
+                                - hasRevert
+                                - startedAtMs
+                              additionalProperties: false
+                          revertible:
+                            type: array
+                            description: "Effects with registered compensation handlers."
+                            items:
+                              type: object
+                              properties:
+                                kind:
+                                  type: string
+                                  enum:
+                                    - tool
+                                    - task
+                                toolName:
+                                  type: string
+                                  description: "Defined tool name or task node id."
+                                nodeId:
+                                  type: string
+                                  description: "Workflow node id."
+                                iteration:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Node iteration."
+                                attempt:
+                                  type: integer
+                                  minimum: 1
+                                  description: "Attempt number."
+                                seq:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Tool-call sequence."
+                                effectStatus:
+                                  type: string
+                                  enum:
+                                    - succeeded
+                                    - unknown
+                                idempotent:
+                                  type: boolean
+                                  description: "Whether the original effect is idempotent."
+                                hasRevert:
+                                  type: boolean
+                                  description: "Whether a revert handler was registered."
+                                startedAtMs:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Effect start time."
+                                reason:
+                                  type: string
+                                  description: "Disposition explanation."
+                              required:
+                                - kind
+                                - toolName
+                                - nodeId
+                                - iteration
+                                - attempt
+                                - seq
+                                - effectStatus
+                                - idempotent
+                                - hasRevert
+                                - startedAtMs
+                              additionalProperties: false
+                          warnings:
+                            type: array
+                            description: "Legacy or previously forced effects that do not block."
+                            items:
+                              type: object
+                              properties:
+                                kind:
+                                  type: string
+                                  enum:
+                                    - tool
+                                    - task
+                                toolName:
+                                  type: string
+                                  description: "Defined tool name or task node id."
+                                nodeId:
+                                  type: string
+                                  description: "Workflow node id."
+                                iteration:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Node iteration."
+                                attempt:
+                                  type: integer
+                                  minimum: 1
+                                  description: "Attempt number."
+                                seq:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Tool-call sequence."
+                                effectStatus:
+                                  type: string
+                                  enum:
+                                    - succeeded
+                                    - unknown
+                                idempotent:
+                                  type: boolean
+                                  description: "Whether the original effect is idempotent."
+                                hasRevert:
+                                  type: boolean
+                                  description: "Whether a revert handler was registered."
+                                startedAtMs:
+                                  type: integer
+                                  minimum: 0
+                                  description: "Effect start time."
+                                reason:
+                                  type: string
+                                  description: "Disposition explanation."
+                              required:
+                                - kind
+                                - toolName
+                                - nodeId
+                                - iteration
+                                - attempt
+                                - seq
+                                - effectStatus
+                                - idempotent
+                                - hasRevert
+                                - startedAtMs
+                              additionalProperties: false
+                        required:
+                          - blocking
+                          - revertible
+                          - warnings
+                        additionalProperties: false
+                    required:
+                      - ok
+                      - newFrameNo
+                      - revertedSandboxes
+                      - deletedFrames
+                      - deletedAttempts
+                      - invalidatedDiffs
+                      - durationMs
+                      - effectBoundary
+                    additionalProperties: false
               example:
                 type: res
                 id: rewindRun-1
@@ -2214,6 +2440,13 @@ paths:
                   newFrameNo: 4
                   revertedSandboxes: 0
                   deletedFrames: 2
+                  deletedAttempts: 1
+                  invalidatedDiffs: 0
+                  durationMs: 12
+                  effectBoundary:
+                    blocking: []
+                    revertible: []
+                    warnings: []
         400:
           description: "The requested frame is outside the available range."
           content:
@@ -2259,6 +2492,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -2325,6 +2559,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -2391,6 +2626,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -2457,6 +2693,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -2479,7 +2716,7 @@ paths:
                       refresh:
                         type: string
         409:
-          description: "Another conflicting mutation is in progress."
+          description: "The requested time travel crosses an unresolved external side effect."
           content:
             application/json:
               schema:
@@ -2523,6 +2760,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -2589,6 +2827,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -2655,6 +2894,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -2721,6 +2961,7 @@ paths:
                           - UnsupportedSandbox
                           - VcsError
                           - RewindFailed
+                          - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
                       message:
                         type: string
                       requiredScope:
@@ -28174,6 +28415,7 @@ components:
         - UnsupportedSandbox
         - VcsError
         - RewindFailed
+        - TIME_TRAVEL_SIDE_EFFECT_BLOCKED
         - Internal
         - REVISION_CONFLICT
         - SSRF_BLOCKED

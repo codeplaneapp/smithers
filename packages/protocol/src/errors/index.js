@@ -48,6 +48,7 @@ export const JUMP_TO_FRAME_ERROR_CODES = /** @type {const} */ ([
     "UnsupportedSandbox",
     "VcsError",
     "RewindFailed",
+    "TIME_TRAVEL_SIDE_EFFECT_BLOCKED",
     "RateLimited",
     "Unauthorized",
 ]);

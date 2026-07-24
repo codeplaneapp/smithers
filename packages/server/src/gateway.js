@@ -7890,6 +7890,21 @@ a { color: var(--brand); }</style>
                         caller: event.caller ?? null,
                     },
                 };
+            case "SideEffectBoundaryCrossed":
+                return {
+                    event: "run.side_effect_boundary_crossed",
+                    payload: {
+                        runId: event.runId,
+                        opId: event.opId,
+                        operation: event.operation,
+                        report: event.report,
+                        timestampMs: event.timestampMs,
+                        ...(event.parentRunId != null ? { parentRunId: event.parentRunId } : {}),
+                        ...(event.warningOnly != null ? { warningOnly: event.warningOnly } : {}),
+                        ...(event.lateCompletion != null ? { lateCompletion: event.lateCompletion } : {}),
+                        ...(event.archivedByOp != null ? { archivedByOp: event.archivedByOp } : {}),
+                    },
+                };
             case "RunFinished":
                 return {
                     event: "run.completed",
@@ -8677,6 +8692,8 @@ a { color: var(--brand); }</style>
                     return responseError(frame.id, "InvalidFrameNo", "frameNo is required");
                 }
                 const confirm = asBoolean(params.confirm);
+                const force = asBoolean(params.force);
+                const noRevert = asBoolean(params.noRevert);
                 const resolved = await this.resolveRun(runId);
                 if (!resolved) {
                     return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
@@ -8717,6 +8734,8 @@ a { color: var(--brand); }</style>
                         runId,
                         frameNo,
                         confirm,
+                        force,
+                        noRevert,
                         caller: connection.userId ?? "gateway",
                         pauseRunLoop: async () => {
                             if (!active) {
@@ -8761,7 +8780,12 @@ a { color: var(--brand); }</style>
                 }
                 catch (error) {
                     if (error instanceof JumpToFrameError) {
-                        return responseError(frame.id, error.code, error.message);
+                        return responseError(
+                            frame.id,
+                            error.code,
+                            error.message,
+                            error.details ? { details: error.details } : {},
+                        );
                     }
                     throw error;
                 }

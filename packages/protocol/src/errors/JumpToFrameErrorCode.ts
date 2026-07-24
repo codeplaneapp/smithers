@@ -8,5 +8,6 @@ export type JumpToFrameErrorCode =
   | "UnsupportedSandbox"
   | "VcsError"
   | "RewindFailed"
+  | "TIME_TRAVEL_SIDE_EFFECT_BLOCKED"
   | "RateLimited"
   | "Unauthorized";
