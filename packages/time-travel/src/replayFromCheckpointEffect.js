@@ -22,7 +22,7 @@ export function replayFromCheckpoint(adapter, params) {
         //    carries an edited workflow re-blesses the child's durable metadata;
         //    otherwise the child inherits the parent's hashes and the resume
         //    guard rejects the very edit replay exists to carry forward.
-        const { runId, branch, snapshot } = yield* forkRunEffect(adapter, {
+        const { runId, branch, snapshot, effectBoundary } = yield* forkRunEffect(adapter, {
             parentRunId,
             frameNo,
             inputOverrides,
@@ -32,6 +32,9 @@ export function replayFromCheckpoint(adapter, params) {
             ...(workflowPath !== undefined ? { workflowPath } : {}),
             ...(workflowHash !== undefined ? { workflowHash } : {}),
             ...(entryWorkflowHash !== undefined ? { entryWorkflowHash } : {}),
+            force: params.force,
+            autoRun: true,
+            operation: "replay",
         });
         // 2. Optionally restore VCS state
         let vcsRestored = false;
@@ -57,6 +60,7 @@ export function replayFromCheckpoint(adapter, params) {
             vcsRestored,
             vcsPointer,
             vcsError,
+            effectBoundary,
         };
     }).pipe(Effect.annotateLogs({
         parentRunId: params.parentRunId,

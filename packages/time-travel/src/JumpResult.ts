@@ -1,3 +1,5 @@
+import type { EffectBoundaryReport } from "./EffectBoundaryReport.ts";
+
 export type JumpResult = {
   ok: true;
   newFrameNo: number;
@@ -6,4 +8,5 @@ export type JumpResult = {
   deletedAttempts: number;
   invalidatedDiffs: number;
   durationMs: number;
+  effectBoundary: EffectBoundaryReport;
 };

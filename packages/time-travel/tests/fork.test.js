@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Effect } from "effect";
 import { captureSnapshot } from "../src/snapshot/index.js";
 import { forkRun, listBranches, getBranchInfo } from "../src/fork/index.js";
 import { parseSnapshot, loadSnapshot } from "../src/snapshot/index.js";
@@ -231,6 +232,148 @@ describe("forkRun", () => {
     test("fails for non-existent snapshot", async () => {
         const { adapter } = createTestDb();
         await expect(forkRun(adapter, { parentRunId: "nonexistent", frameNo: 0 })).rejects.toThrow("No snapshot found");
+    });
+    test("refuses fork --run from a live parent unless forced", async () => {
+        const { adapter } = createTestDb();
+        const parentRunId = "live-fork-parent";
+        await adapter.insertRun({
+            runId: parentRunId,
+            workflowName: "live-parent",
+            status: "running",
+            createdAtMs: Date.now() - 1_000,
+            startedAtMs: Date.now() - 900,
+            heartbeatAtMs: Date.now(),
+            runtimeOwnerId: null,
+        });
+        await captureSnapshot(adapter, parentRunId, 0, sampleData());
+
+        await expect(forkRun(adapter, {
+            parentRunId,
+            frameNo: 0,
+            autoRun: true,
+            operation: "fork",
+        })).rejects.toMatchObject({
+            code: "INVALID_INPUT",
+            message: expect.stringContaining("still running"),
+        });
+        expect(await listBranches(adapter, parentRunId)).toEqual([]);
+    });
+    test("rolls back the child when an effect appears after the pre-check", async () => {
+        const { adapter, sqlite } = createTestDb();
+        const parentRunId = "fork-raced-effect-parent";
+        await adapter.insertRun({
+            runId: parentRunId,
+            workflowName: "raced-parent",
+            status: "finished",
+            createdAtMs: 1,
+            startedAtMs: 2,
+            finishedAtMs: 3,
+        });
+        const source = await captureSnapshot(adapter, parentRunId, 0, sampleData());
+        const originalInsertRun = adapter.insertRun.bind(adapter);
+        let injected = false;
+        adapter.insertRun = (row) => originalInsertRun(row).pipe(Effect.tap(() => {
+            if (injected || row.parentRunId !== parentRunId) return Effect.void;
+            injected = true;
+            return adapter.insertToolCall({
+                runId: parentRunId,
+                nodeId: "publish",
+                iteration: 0,
+                attempt: 1,
+                seq: 1,
+                toolName: "raced-publish",
+                inputJson: "{}",
+                outputJson: "{}",
+                startedAtMs: source.createdAtMs + 1,
+                finishedAtMs: source.createdAtMs + 2,
+                status: "succeeded",
+                errorJson: null,
+                kind: "tool",
+                sideEffect: true,
+                idempotent: false,
+                acceptsIdempotencyKey: false,
+                hasRevert: false,
+                idempotencyKey: null,
+                revertStatus: null,
+                revertedAtMs: null,
+                revertErrorJson: null,
+                forcedPastJson: null,
+            });
+        }));
+        try {
+            await expect(forkRun(adapter, {
+                parentRunId,
+                frameNo: 0,
+                autoRun: true,
+                operation: "replay",
+            })).rejects.toMatchObject({
+                code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED",
+                details: {
+                    report: {
+                        blocking: [{
+                            toolName: "raced-publish",
+                            effectStatus: "succeeded",
+                        }],
+                    },
+                },
+            });
+        }
+        finally {
+            adapter.insertRun = originalInsertRun;
+        }
+
+        expect(injected).toBe(true);
+        expect(await listBranches(adapter, parentRunId)).toEqual([]);
+        expect(sqlite.query(
+            `SELECT run_id FROM _smithers_snapshots WHERE run_id != ?`,
+        ).all(parentRunId)).toEqual([]);
+    });
+    test("rolls back the child when the parent is reclaimed during child insertion", async () => {
+        const { adapter, sqlite } = createTestDb();
+        const parentRunId = "fork-parent-reclaimed-during-persist";
+        await adapter.insertRun({
+            runId: parentRunId,
+            workflowName: "reclaimed-parent",
+            status: "finished",
+            createdAtMs: 1,
+            startedAtMs: 2,
+            finishedAtMs: 3,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+        });
+        await captureSnapshot(adapter, parentRunId, 0, sampleData());
+        const originalInsertRun = adapter.insertRun.bind(adapter);
+        let reclaimed = false;
+        adapter.insertRun = (row) => originalInsertRun(row).pipe(Effect.tap(() => {
+            if (reclaimed || row.parentRunId !== parentRunId) return Effect.void;
+            reclaimed = true;
+            return adapter.updateRun(parentRunId, {
+                status: "running",
+                finishedAtMs: null,
+                heartbeatAtMs: Date.now(),
+                runtimeOwnerId: "replacement-owner",
+            });
+        }));
+        try {
+            await expect(forkRun(adapter, {
+                parentRunId,
+                frameNo: 0,
+                autoRun: true,
+                operation: "fork",
+            })).rejects.toMatchObject({
+                code: "INVALID_INPUT",
+                message: expect.stringContaining("still running"),
+            });
+        }
+        finally {
+            adapter.insertRun = originalInsertRun;
+        }
+
+        expect(reclaimed).toBe(true);
+        expect(await listBranches(adapter, parentRunId)).toEqual([]);
+        expect(sqlite.query(
+            `SELECT run_id FROM _smithers_snapshots WHERE run_id != ?`,
+        ).all(parentRunId)).toEqual([]);
     });
 });
 describe("listBranches", () => {

@@ -159,7 +159,11 @@ describe("VCS restore success paths", () => {
                 onProgress: (event) => events.push(event),
             });
 
-            expect(result).toEqual({ success: true, jjPointer: "change-target" });
+            expect(result).toEqual({
+                success: true,
+                jjPointer: "change-target",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
+            });
             expect(restoreCalls).toEqual([{ pointer: "change-target", cwd: "/repo" }]);
             expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
             expect(events.at(-1)).toMatchObject({ success: true, error: undefined });
@@ -188,7 +192,11 @@ describe("VCS restore success paths", () => {
                 attempt: 1,
             });
 
-            expect(result).toEqual({ success: true, jjPointer: "change-target" });
+            expect(result).toEqual({
+                success: true,
+                jjPointer: "change-target",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
+            });
             expect((await adapter.listFrames(runId, 10))).toEqual([]);
         } finally {
             sqlite.close();
@@ -257,7 +265,12 @@ describe("VCS restore success paths", () => {
                 onProgress: (event) => events.push(event),
             });
 
-            expect(result).toEqual({ success: false, error: "restore failed", jjPointer: "change-fail" });
+            expect(result).toEqual({
+                success: false,
+                error: "restore failed",
+                jjPointer: "change-fail",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
+            });
             expect(restoreCalls).toEqual([{ pointer: "change-fail", cwd: "/repo" }]);
             expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
             expect(events.at(-1)).toMatchObject({ success: false, error: "restore failed", jjPointer: "change-fail" });
@@ -415,6 +428,7 @@ describe("VCS restore success paths", () => {
                 vcsRestored: false,
                 resetNodes: [],
                 error: "restore failed",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
             });
             expect(restoreCalls).toEqual([{ pointer: "change-fail", cwd: "/repo" }]);
             expect(events.map((event) => event.type)).toEqual([

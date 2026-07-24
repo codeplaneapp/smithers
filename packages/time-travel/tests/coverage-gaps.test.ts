@@ -460,6 +460,7 @@ describe("forkRun failure branches", () => {
       internalStorage: {
         dialect: "postgres",
         execute: async () => {},
+        queryAll: async () => [],
         queryOne: async () => tornRow,
       },
       getRun: async () => null,

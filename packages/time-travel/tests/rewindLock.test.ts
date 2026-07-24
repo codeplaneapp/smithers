@@ -93,4 +93,32 @@ describe("rewindLock", () => {
       sqlite.close();
     }
   });
+
+  test("background renewal failure trips a sticky fence and surfaces at the next check", async () => {
+    const { sqlite, adapter } = setupDb();
+    const originalWrite = adapter.write.bind(adapter);
+    try {
+      const lease = await acquireRewindLock(adapter, "run-renewal-failure", {
+        leaseTtlMs: 90,
+      });
+      expect(lease).not.toBeNull();
+      adapter.write = ((label: string, operation: () => PromiseLike<unknown>) => {
+        if (label === "renew rewind lease run-renewal-failure") {
+          return Promise.reject(new Error("simulated renewal write failure"));
+        }
+        return originalWrite(label, operation);
+      }) as typeof adapter.write;
+
+      await Bun.sleep(45);
+
+      await expect(lease?.checkStillHeld()).rejects.toThrow(
+        "Rewind lease renewal failed for run-renewal-failure: simulated renewal write failure",
+      );
+      await expect(lease?.renew()).rejects.toThrow("simulated renewal write failure");
+      expect(await lease?.release()).toBe(true);
+    } finally {
+      adapter.write = originalWrite;
+      sqlite.close();
+    }
+  });
 });

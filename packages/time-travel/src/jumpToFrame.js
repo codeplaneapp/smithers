@@ -19,6 +19,8 @@ import { evaluateRewindRateLimit } from "./evaluateRewindRateLimit.js";
 import { writeRewindAuditRow } from "./writeRewindAuditRow.js";
 import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
 import { loadSnapshot } from "./snapshot/index.js";
+import { guardEffectBoundary } from "./guardEffectBoundary.js";
+import { archiveDiscardedEffects } from "./archiveDiscardedEffects.js";
 
 export { JUMP_RUN_ID_PATTERN };
 export { JUMP_MAX_FRAME_NO };
@@ -514,13 +516,40 @@ async function runStepHook(hooks, stage, step) {
 /**
  * @param {Array<{ cwd: string; targetPointer: string; previousPointer: string | null }>} revertedSandboxes
  * @param {(pointer: string, cwd?: string) => Promise<{ success: boolean; error?: string }>} revertToPointerImpl
- * @returns {Promise<Array<{ cwd: string; error: string }>>}
+ * @param {() => Promise<boolean>} checkStillHeld
+ * @returns {Promise<{
+ *   failures: Array<{ cwd: string; error: string }>;
+ *   restored: string[];
+ *   skipped: string[];
+ *   leaseLost: boolean;
+ *   leaseError: string | null;
+ * }>}
  */
-async function rollbackSandboxPointers(revertedSandboxes, revertToPointerImpl) {
+async function rollbackSandboxPointers(revertedSandboxes, revertToPointerImpl, checkStillHeld) {
   /** @type {Array<{ cwd: string; error: string }>} */
   const failures = [];
+  const restoredSandboxes = [];
   for (let index = revertedSandboxes.length - 1; index >= 0; index -= 1) {
     const sandbox = revertedSandboxes[index];
+    let leaseHeld = false;
+    let leaseError = null;
+    try {
+      leaseHeld = await checkStillHeld();
+    } catch (error) {
+      leaseError = formatError(error);
+    }
+    if (!leaseHeld) {
+      return {
+        failures,
+        restored: restoredSandboxes,
+        skipped: revertedSandboxes
+          .slice(0, index + 1)
+          .reverse()
+          .map((entry) => entry.cwd),
+        leaseLost: true,
+        leaseError,
+      };
+    }
     if (typeof sandbox.previousPointer !== "string" || sandbox.previousPointer.length === 0) {
       failures.push({ cwd: sandbox.cwd, error: "Missing pre-jump pointer." });
       continue;
@@ -531,9 +560,17 @@ async function rollbackSandboxPointers(revertedSandboxes, revertToPointerImpl) {
         cwd: sandbox.cwd,
         error: restored.error ?? "Failed to restore sandbox pointer.",
       });
+    } else {
+      restoredSandboxes.push(sandbox.cwd);
     }
   }
-  return failures;
+  return {
+    failures,
+    restored: restoredSandboxes,
+    skipped: [],
+    leaseLost: false,
+    leaseError: null,
+  };
 }
 
 /** @typedef {import("@smithers-orchestrator/db").AttemptRow} AttemptRow */
@@ -629,6 +666,7 @@ export async function jumpToFrame(input) {
   /** @type {number | null} */
   let auditRowId = null;
   let canWriteAudit = false;
+  const cleanReport = { blocking: [], revertible: [], warnings: [] };
 
   try {
     return await withSpan(
@@ -763,6 +801,7 @@ export async function jumpToFrame(input) {
             deletedAttempts: 0,
             invalidatedDiffs: 0,
             durationMs: Math.max(0, nowMs() - startedAtMs),
+            effectBoundary: cleanReport,
           };
           return successResult;
         }
@@ -798,6 +837,7 @@ export async function jumpToFrame(input) {
         // restore the reconciler, or mark the run failed: the rewind already
         // succeeded and is committed.
         let committed = false;
+        let boundary = { report: cleanReport, opId: crypto.randomUUID(), forced: false };
 
         try {
           await runStepHook(input.hooks, "before", "pause-event-loop");
@@ -806,6 +846,28 @@ export async function jumpToFrame(input) {
           }
           paused = true;
           await runStepHook(input.hooks, "after", "pause-event-loop");
+
+          await runStepHook(input.hooks, "before", "revert-effects");
+          if (!(await lock.renew())) {
+            throw new JumpToFrameError(
+              "Busy",
+              `Rewind lease ownership was lost for ${runId} before compensation.`,
+            );
+          }
+          boundary = await guardEffectBoundary(input.adapter, {
+            runId,
+            attempts: attemptsToDelete.map((attempt) => ({
+              nodeId: String(attempt.nodeId),
+              iteration: Number(attempt.iteration ?? 0),
+              attempt: Number(attempt.attempt),
+            })),
+            operation: "rewind",
+            force: input.force === true,
+            noRevert: input.noRevert === true,
+            runsReverts: true,
+            checkStillHeld: lock.checkStillHeld,
+          });
+          await runStepHook(input.hooks, "after", "revert-effects");
 
           await runStepHook(input.hooks, "before", "revert-sandboxes");
           for (const sandbox of sandboxPlan) {
@@ -881,18 +943,7 @@ export async function jumpToFrame(input) {
                   // commit, so an expiry-based takeover cannot begin while the
                   // destructive transaction is still running.
                   yield* Effect.promise(async () => {
-                    const storage = resolveStorage(input.adapter);
-                    const rows = await storage.queryAllRaw(
-                      `UPDATE _smithers_rewind_leases
-                          SET expires_at_ms = expires_at_ms
-                        WHERE run_id = ?
-                          AND owner_token = ?
-                          AND expires_at_ms > ?
-                      RETURNING owner_token`,
-                      [runId, lock.ownerToken, Date.now()],
-                    );
-                    const ownerToken = rows[0]?.owner_token ?? rows[0]?.ownerToken;
-                    if (ownerToken !== lock.ownerToken) {
+                    if (!(await lock.checkStillHeld())) {
                       throw new JumpToFrameError(
                         "Busy",
                         `Rewind lease ownership was lost for ${runId} during database mutation.`,
@@ -928,6 +979,19 @@ export async function jumpToFrame(input) {
 
                   yield* Effect.promise(() =>
                     runStepHook(input.hooks, "before", "truncate-attempts"),
+                  );
+                  yield* Effect.promise(() =>
+                    archiveDiscardedEffects(input.adapter, {
+                      runId,
+                      opId: boundary.opId,
+                      archivedAtMs: nowMs(),
+                      archiveReason: `rewind to frame ${targetFrameNo}`,
+                      attempts: attemptsToDelete.map((attempt) => ({
+                        nodeId: String(attempt.nodeId),
+                        iteration: Number(attempt.iteration ?? 0),
+                        attempt: Number(attempt.attempt),
+                      })),
+                    }),
                   );
                   yield* Effect.promise(() =>
                     deleteAttemptsStartedAfter(
@@ -1043,6 +1107,7 @@ export async function jumpToFrame(input) {
             deletedAttempts: dbStats.deletedAttempts,
             invalidatedDiffs: dbStats.invalidatedDiffs,
             durationMs: Math.max(0, nowMs() - startedAtMs),
+            effectBoundary: boundary.report,
           };
 
           // In-memory broadcast is non-fatal: the durable event row is already
@@ -1108,16 +1173,130 @@ export async function jumpToFrame(input) {
             });
             return /** @type {JumpResult} */ (successResult);
           }
-          const rollbackSandboxErrors = await rollbackSandboxPointers(
+          let rollbackLeaseHeld = false;
+          let rollbackLeaseError = null;
+          try {
+            rollbackLeaseHeld = await lock.checkStillHeld();
+          } catch (leaseError) {
+            rollbackLeaseError = formatError(leaseError);
+          }
+          const abortRollbackAfterFenceLoss = async ({
+            restoredSandboxes,
+            skippedSandboxes,
+            leaseError,
+            reconcilerSkipped = false,
+          }) => {
+            auditResult = "partial";
+            const rollbackSkippedReason = [
+              `Rewind rollback skipped because lease ownership was lost for ${runId}.`,
+              `Restored sandboxes: ${restoredSandboxes.length > 0 ? restoredSandboxes.join(", ") : "(none)"}.`,
+              `Skipped sandboxes: ${skippedSandboxes.length > 0 ? skippedSandboxes.join(", ") : "(none)"}.`,
+              reconcilerSkipped ? "Reconciler-state restore was skipped." : null,
+              leaseError ? `Lease check failed: ${leaseError}` : null,
+              `Original failure: ${formatError(error)}`,
+            ].filter(Boolean).join(" ");
+            const auditEvent = {
+              type: "TimeTravelFinished",
+              runId,
+              nodeId: "(rewind)",
+              iteration: 0,
+              attempt: 0,
+              success: false,
+              vcsRestored: false,
+              resetNodes: [],
+              error: rollbackSkippedReason,
+              rollbackRestoredSandboxes: restoredSandboxes,
+              rollbackSkippedSandboxes: skippedSandboxes,
+              rollbackReconcilerSkipped: reconcilerSkipped,
+              timestampMs: nowMs(),
+            };
+            try {
+              await input.adapter.insertEventWithNextSeq({
+                runId,
+                timestampMs: auditEvent.timestampMs,
+                type: auditEvent.type,
+                payloadJson: JSON.stringify(auditEvent),
+              });
+            } catch (auditEventError) {
+              await emitLog(input.onLog, "error", "jumpToFrame rollback-skipped audit event failed", {
+                runId,
+                caller,
+                error: formatError(auditEventError),
+              });
+            }
+            await emitLog(input.onLog, "warn", "jumpToFrame rollback stopped after lease loss", {
+              runId,
+              caller,
+              originalError: formatError(error),
+              rollbackLeaseError: leaseError,
+              restoredSandboxes,
+              skippedSandboxes,
+              reconcilerSkipped,
+            });
+            return new JumpToFrameError(
+              "Busy",
+              `Rewind lease ownership was lost for ${runId}; stale-owner rollback was stopped.`,
+              {
+                details: {
+                  cause: formatError(error),
+                  rollbackSkipped: true,
+                  rollbackLeaseError: leaseError,
+                  rollbackRestoredSandboxes: restoredSandboxes,
+                  rollbackSkippedSandboxes: skippedSandboxes,
+                  rollbackReconcilerSkipped: reconcilerSkipped,
+                },
+              },
+            );
+          };
+          if (!rollbackLeaseHeld) {
+            // A replacement owner may already be restoring or committing its
+            // own sandbox state. The stale owner must not write any sandbox,
+            // reconciler, or run-loop state after losing the fence.
+            finalError = await abortRollbackAfterFenceLoss({
+              restoredSandboxes: [],
+              skippedSandboxes: [...revertedSandboxes].reverse().map((sandbox) => sandbox.cwd),
+              leaseError: rollbackLeaseError,
+              reconcilerSkipped: Boolean(input.restoreReconcilerState),
+            });
+            throw finalError;
+          }
+          const rollbackResult = await rollbackSandboxPointers(
             revertedSandboxes,
             revertToPointerImpl,
+            lock.checkStillHeld,
           );
+          const rollbackSandboxErrors = rollbackResult.failures;
+          if (rollbackResult.leaseLost) {
+            finalError = await abortRollbackAfterFenceLoss({
+              restoredSandboxes: rollbackResult.restored,
+              skippedSandboxes: rollbackResult.skipped,
+              leaseError: rollbackResult.leaseError,
+              reconcilerSkipped: Boolean(input.restoreReconcilerState),
+            });
+            throw finalError;
+          }
           let rollbackReconcilerError = null;
           if (input.restoreReconcilerState) {
+            let reconcilerLeaseHeld = false;
+            let reconcilerLeaseError = null;
             try {
-              await input.restoreReconcilerState(reconcilerSnapshot);
+              reconcilerLeaseHeld = await lock.checkStillHeld();
+            } catch (leaseError) {
+              reconcilerLeaseError = formatError(leaseError);
+            }
+            if (!reconcilerLeaseHeld) {
+              finalError = await abortRollbackAfterFenceLoss({
+                restoredSandboxes: rollbackResult.restored,
+                skippedSandboxes: [],
+                leaseError: reconcilerLeaseError,
+                reconcilerSkipped: true,
+              });
+              throw finalError;
+            }
+            try {
+                await input.restoreReconcilerState(reconcilerSnapshot);
             } catch (restoreError) {
-              rollbackReconcilerError = formatError(restoreError);
+                rollbackReconcilerError = formatError(restoreError);
             }
           }
 
@@ -1168,7 +1347,11 @@ export async function jumpToFrame(input) {
             finalError =
               error instanceof JumpToFrameError
                 ? error
-                : new JumpToFrameError("RewindFailed", formatError(error));
+                : error && typeof error === "object" && error.code === "TIME_TRAVEL_SIDE_EFFECT_BLOCKED"
+                  ? new JumpToFrameError("TIME_TRAVEL_SIDE_EFFECT_BLOCKED", formatError(error), {
+                      details: error.details,
+                    })
+                  : new JumpToFrameError("RewindFailed", formatError(error));
           }
 
           throw finalError;
@@ -1180,7 +1363,11 @@ export async function jumpToFrame(input) {
       finalError =
         error instanceof JumpToFrameError
           ? error
-          : new JumpToFrameError("RewindFailed", formatError(error));
+          : error && typeof error === "object" && error.code === "TIME_TRAVEL_SIDE_EFFECT_BLOCKED"
+            ? new JumpToFrameError("TIME_TRAVEL_SIDE_EFFECT_BLOCKED", formatError(error), {
+                details: error.details,
+              })
+            : new JumpToFrameError("RewindFailed", formatError(error));
     }
   } finally {
     const durationMs = Math.max(0, nowMs() - startedAtMs);

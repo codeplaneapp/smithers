@@ -25,6 +25,9 @@
 /** @typedef {import("./RevertResult.ts").RevertResult} RevertResult */
 /** @typedef {import("./TimeTravelOptions.ts").TimeTravelOptions} TimeTravelOptions */
 /** @typedef {import("./TimeTravelResult.ts").TimeTravelResult} TimeTravelResult */
+/** @typedef {import("./CrossedEffect.ts").CrossedEffect} CrossedEffect */
+/** @typedef {import("./EffectBoundaryParams.ts").EffectBoundaryParams} EffectBoundaryParams */
+/** @typedef {import("./EffectBoundaryReport.ts").EffectBoundaryReport} EffectBoundaryReport */
 // @smithers-type-exports-end
 
 // ---------------------------------------------------------------------------
@@ -32,6 +35,8 @@
 // ---------------------------------------------------------------------------
 export { revertToAttempt } from "./revert.js";
 export { timeTravel } from "./timetravel.js";
+export { assessEffectBoundary } from "./assessEffectBoundary.js";
+export { executeEffectReverts } from "./executeEffectReverts.js";
 export { captureSnapshot, loadSnapshot, loadLatestSnapshot, listSnapshots, parseSnapshot, } from "./snapshot/index.js";
 export { diffSnapshots, diffRawSnapshots, formatDiffForTui, formatDiffAsJson, } from "./diff.js";
 export { forkRun, listBranches, getBranchInfo, } from "./fork/index.js";

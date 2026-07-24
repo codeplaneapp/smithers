@@ -20,4 +20,5 @@ export type ReplayParams = {
   workflowPath?: string;
   workflowHash?: string | null;
   entryWorkflowHash?: string | null;
+  force?: boolean;
 };

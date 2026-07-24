@@ -13,3 +13,6 @@ export type { BranchInfo } from "./BranchInfo";
 export type { TimelineFrame } from "./TimelineFrame";
 export type { RunTimeline } from "./RunTimeline";
 export type { TimelineTree } from "./TimelineTree";
+export type { CrossedEffect } from "./CrossedEffect";
+export type { EffectBoundaryParams } from "./EffectBoundaryParams";
+export type { EffectBoundaryReport } from "./EffectBoundaryReport";
