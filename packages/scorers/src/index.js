@@ -52,6 +52,8 @@ export { tierFitScorer } from "./tierFitScorer.js";
 export { humanPollScorer } from "./humanPollScorer.js";
 // Workflow-UI authoring compliance (design-system usage + live agent chat)
 export { gradeWorkflowUiSource, workflowHasAgentTasks, workflowUiComplianceScorer, } from "./workflowUiCompliance.js";
+export { sideEffectAnalysis } from "./sideEffectAnalysis.js";
+export { gradeSideEffectCompliance } from "./gradeSideEffectCompliance.js";
 export { extractDelegationEvents, resolvePlanningNodes, } from "./delegationEvents.js";
 // Eval suites (issue #77): shared dataset parsing + case grading + the
 // scorer seam the `eval-suite-run` workflow attaches to every case task.

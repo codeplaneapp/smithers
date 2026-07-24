@@ -592,6 +592,72 @@ declare function humanPollScorer(): Scorer$2;
 type Scorer$2 = Scorer$e;
 
 /**
+ * Analyze effect sites and Smithers markings in candidate workflow source.
+ * This function is pure: it parses only the supplied string and never reads
+ * the filesystem or resolves imports.
+ *
+ * @param {string} source
+ * @param {{ repoRoot?: string }} [options]
+ * @returns {{
+ *   rulesVersion: number;
+ *   effectfulSites: Array<{ kind: string; detail: string; start: number; end: number; line: number; column: number; ownerIds: string[] }>;
+ *   markings: Array<{ id: string; kind: "tool" | "task"; name: string; sideEffect: boolean; idempotent: boolean; hasRevert: boolean; revertSafe: boolean; usesIdempotencyKey: boolean; effectSiteIndexes: number[]; start: number; end: number }>;
+ * }}
+ */
+declare function sideEffectAnalysis(source: string, options?: {
+    repoRoot?: string;
+}): {
+    rulesVersion: number;
+    effectfulSites: Array<{
+        kind: string;
+        detail: string;
+        start: number;
+        end: number;
+        line: number;
+        column: number;
+        ownerIds: string[];
+    }>;
+    markings: Array<{
+        id: string;
+        kind: "tool" | "task";
+        name: string;
+        sideEffect: boolean;
+        idempotent: boolean;
+        hasRevert: boolean;
+        revertSafe: boolean;
+        usesIdempotencyKey: boolean;
+        effectSiteIndexes: number[];
+        start: number;
+        end: number;
+    }>;
+};
+
+/**
+ * Grade whether a candidate workflow marks every detected external mutation.
+ *
+ * `requireIdempotencyKey` and `requireRevert` are scenario requirements. The
+ * base marking rules are always enforced.
+ *
+ * @param {string} source
+ * @param {{ requireIdempotencyKey?: boolean; requireRevert?: boolean; repoRoot?: string }} [expectation]
+ * @returns {{ passed: boolean; score: number; violations: Array<{ kind: "unmarked-effect" | "over-marked-pure" | "missing-idempotency-key" | "missing-revert" | "revert-without-side-effect"; detail: string; line?: number; column?: number }> }}
+ */
+declare function gradeSideEffectCompliance(source: string, expectation?: {
+    requireIdempotencyKey?: boolean;
+    requireRevert?: boolean;
+    repoRoot?: string;
+}): {
+    passed: boolean;
+    score: number;
+    violations: Array<{
+        kind: "unmarked-effect" | "over-marked-pure" | "missing-idempotency-key" | "missing-revert" | "revert-without-side-effect";
+        detail: string;
+        line?: number;
+        column?: number;
+    }>;
+};
+
+/**
  * Look up the per-million-token price for a model id. Matches the base id plus
  * any `-`/`_` date-stamp suffix or a bracketed context-window alias like
  * `claude-opus-4-8[1m]`, so a real model is never metered as free. Unknown ids
@@ -981,4 +1047,4 @@ type ScorerInput = ScorerInput$2;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type EvalJudge, type EvalJudgeRunner, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type WorkflowUiComplianceOptions, type WorkflowUiComplianceReport, type WorkflowUiViolation, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, extractDelegationEvents, faithfulnessScorer, formatEvalError, gradeWorkflowUiSource, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeEvalJudge, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore, workflowHasAgentTasks, workflowUiComplianceScorer };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type EvalJudge, type EvalJudgeRunner, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type WorkflowUiComplianceOptions, type WorkflowUiComplianceReport, type WorkflowUiViolation, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, extractDelegationEvents, faithfulnessScorer, formatEvalError, gradeSideEffectCompliance, gradeWorkflowUiSource, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeEvalJudge, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, sideEffectAnalysis, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore, workflowHasAgentTasks, workflowUiComplianceScorer };
