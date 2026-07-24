@@ -12,6 +12,7 @@ const PRICES = {
   "gpt-5.6-terra": { input: 2.5, output: 15, cacheWrite: 3.125, cacheRead: 0.25 },
   "gpt-5.6-luna": { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 },
   "claude-fable-5": { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 },
+  "claude-opus-5": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
   "claude-opus-4-8": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
   "claude-opus-4-7": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
   "claude-sonnet-5": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
