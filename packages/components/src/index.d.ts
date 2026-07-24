@@ -462,6 +462,21 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
     onHijackExit?: "complete" | "reopen";
     allowTools?: string[];
     /**
+     * Mark each attempt as an external side effect. `true` is non-idempotent;
+     * the object form can declare idempotency and an idempotent compensation.
+     */
+    sideEffect?: boolean | {
+        idempotent?: boolean;
+        revert?: (ctx: {
+            outputRow: unknown | null;
+            effectStatus: "succeeded" | "unknown";
+            runId: string;
+            nodeId: string;
+            iteration: number;
+            attempt: number;
+        }) => Promise<void>;
+    };
+    /**
      * Scheduling priority (default 0, or the nearest `<Parallel>`/`<MergeQueue>`
      * ancestor's priority). When more tasks are runnable than free concurrency
      * slots, higher priority claims slots first; ties keep plan order. Never
