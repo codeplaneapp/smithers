@@ -1,5 +1,6 @@
-import { integer, sqliteTable, text, primaryKey, uniqueIndex, } from "drizzle-orm/sqlite-core";
-export const smithersToolCalls = sqliteTable("_smithers_tool_calls", {
+import { integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+export const smithersToolCallArchive = sqliteTable("_smithers_tool_call_archive", {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -25,9 +26,12 @@ export const smithersToolCalls = sqliteTable("_smithers_tool_calls", {
     revertedAtMs: integer("reverted_at_ms"),
     revertErrorJson: text("revert_error_json"),
     forcedPastJson: text("forced_past_json"),
+    archivedByOp: text("archived_by_op").notNull(),
+    archivedAtMs: integer("archived_at_ms").notNull(),
+    archiveReason: text("archive_reason").notNull(),
 }, (t) => ({
     pk: primaryKey({
-        columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq],
+        columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq, t.archivedByOp],
     }),
-    callTokenUnique: uniqueIndex("_smithers_tool_calls_call_token_uidx").on(t.callToken),
+    callTokenUnique: uniqueIndex("_smithers_tool_call_archive_call_token_uidx").on(t.callToken),
 }));

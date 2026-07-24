@@ -2555,6 +2555,58 @@ export class SmithersDb {
         return this.write(`insert tool call ${row.toolName}`, () => this.internalStorage.insertIgnore("_smithers_tool_calls", row));
     }
     /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @param {number} seq
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    updateToolCall(runId, nodeId, iteration, attempt, seq, patch) {
+        return this.write(`update tool call ${nodeId}/${attempt}/${seq}`, () => this.internalStorage.updateWhere(
+            "_smithers_tool_calls",
+            patch,
+            "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND seq = ?",
+            [runId, nodeId, iteration, attempt, seq],
+        ));
+    }
+    /**
+   * @param {string} callToken
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    updateToolCallByToken(callToken, patch) {
+        return this.write(`update tool call token ${callToken}`, () => this.internalStorage.updateWhere(
+            "_smithers_tool_calls",
+            patch,
+            "call_token = ?",
+            [callToken],
+        ));
+    }
+    /**
+   * Collapse crash/failure-interrupted effects from intended to unknown.
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @param {number} finishedAtMs
+   * @param {string | null} [errorJson]
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    markToolCallsUnknownForAttempt(runId, nodeId, iteration, attempt, finishedAtMs, errorJson = null) {
+        return this.write(`mark unknown tool calls ${nodeId}/${attempt}`, () => this.internalStorage.updateWhere(
+            "_smithers_tool_calls",
+            {
+                status: "unknown",
+                finishedAtMs,
+                ...(errorJson === null ? {} : { errorJson }),
+            },
+            "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND status = ?",
+            [runId, nodeId, iteration, attempt, "intended"],
+        ));
+    }
+    /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
@@ -2606,7 +2658,9 @@ export class SmithersDb {
         return this.read(`list tool calls ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
          FROM _smithers_tool_calls
          WHERE run_id = ? AND node_id = ? AND iteration = ?
-         ORDER BY attempt ASC, seq ASC`, [runId, nodeId, iteration]));
+         ORDER BY attempt ASC, seq ASC`, [runId, nodeId, iteration], {
+            booleanColumns: ["sideEffect", "idempotent", "acceptsIdempotencyKey", "hasRevert"],
+        }));
     }
     /**
    * Record a distinct working-copy state (deduped by jj commit id). Upsert so a

@@ -11,6 +11,7 @@ export { smithersNodeDiffs } from "./smithersNodeDiffs.js";
 export { smithersTimeTravelAudit } from "./smithersTimeTravelAudit.js";
 export { smithersSandboxes } from "./smithersSandboxes.js";
 export { smithersToolCalls } from "./smithersToolCalls.js";
+export { smithersToolCallArchive } from "./smithersToolCallArchive.js";
 export { smithersEvents } from "./smithersEvents.js";
 export { smithersRalph } from "./smithersRalph.js";
 export { smithersScorers } from "./smithersScorers.js";

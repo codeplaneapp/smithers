@@ -156,6 +156,20 @@ const EXTRA_INDEX_STATEMENTS = [
     `CREATE INDEX IF NOT EXISTS _smithers_alerts_run_status_idx ON _smithers_alerts (run_id, status)`,
 ];
 
+const TOOL_EFFECT_JOURNAL_COLUMNS = [
+    ["kind", "kind TEXT"],
+    ["side_effect", "side_effect INTEGER"],
+    ["idempotent", "idempotent INTEGER"],
+    ["accepts_idempotency_key", "accepts_idempotency_key INTEGER"],
+    ["has_revert", "has_revert INTEGER"],
+    ["idempotency_key", "idempotency_key TEXT"],
+    // null | reverting | reverted | revert-failed | revert-stale
+    ["revert_status", "revert_status TEXT"],
+    ["reverted_at_ms", "reverted_at_ms INTEGER"],
+    ["revert_error_json", "revert_error_json TEXT"],
+    ["forced_past_json", "forced_past_json TEXT"],
+];
+
 /**
  * @param {import("bun:sqlite").Database} sqlite
  * @param {string} table
@@ -1300,6 +1314,102 @@ function buildMigrations(context) {
                     }
                 }
                 return { table: "_smithers_output_provenance", backfilled: inserted };
+            },
+        },
+        {
+            id: "0031_side_effect_journal",
+            name: "Persist side-effect provenance and add retained tool-call archive",
+            checksum: "packages/db/migrations/0031_side_effect_journal.sql",
+            isApplied: (sqlite) => {
+                const columns = tableColumnNames(sqlite, "_smithers_tool_calls");
+                return TOOL_EFFECT_JOURNAL_COLUMNS.every(([column]) => columns.has(column)) &&
+                    tableExists(sqlite, "_smithers_tool_call_archive");
+            },
+            isAppliedPostgres: async (pgConn) => {
+                const columns = await tableColumnNamesPostgres(pgConn, "_smithers_tool_calls");
+                return TOOL_EFFECT_JOURNAL_COLUMNS.every(([column]) => columns.has(column)) &&
+                    await tableExistsPostgres(pgConn, "_smithers_tool_call_archive");
+            },
+            up: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_tool_calls")) {
+                    sqlite.run(createTableStatementFor("_smithers_tool_calls", context.createTableStatements));
+                }
+                const addedColumns = [];
+                for (const [column, definition] of TOOL_EFFECT_JOURNAL_COLUMNS) {
+                    if (addColumnIfMissing(sqlite, "_smithers_tool_calls", column, definition)) {
+                        addedColumns.push(column);
+                    }
+                }
+                sqlite.run(createTableStatementFor("_smithers_tool_call_archive", context.createTableStatements));
+                return {
+                    table: "_smithers_tool_calls",
+                    addedColumns,
+                    archiveTable: "_smithers_tool_call_archive",
+                };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_tool_calls"))) {
+                    await pgConn.query({
+                        text: translateDdl(POSTGRES, createTableStatementFor("_smithers_tool_calls", context.createTableStatements)),
+                    });
+                }
+                const addedColumns = [];
+                for (const [column, definition] of TOOL_EFFECT_JOURNAL_COLUMNS) {
+                    if (await addColumnIfMissingPostgres(pgConn, "_smithers_tool_calls", column, definition)) {
+                        addedColumns.push(column);
+                    }
+                }
+                await pgConn.query({
+                    text: translateDdl(POSTGRES, createTableStatementFor("_smithers_tool_call_archive", context.createTableStatements)),
+                });
+                return {
+                    table: "_smithers_tool_calls",
+                    addedColumns,
+                    archiveTable: "_smithers_tool_call_archive",
+                };
+            },
+        },
+        {
+            id: "0032_tool_call_tokens",
+            name: "Fence tool-call completion with unique per-call tokens",
+            checksum: "packages/db/migrations/0032_tool_call_tokens.sql",
+            isApplied: (sqlite) => {
+                const liveColumns = tableColumnNames(sqlite, "_smithers_tool_calls");
+                const archiveColumns = tableColumnNames(sqlite, "_smithers_tool_call_archive");
+                return liveColumns.has("call_token")
+                    && archiveColumns.has("call_token")
+                    && indexExists(sqlite, "_smithers_tool_calls_call_token_uidx")
+                    && indexExists(sqlite, "_smithers_tool_call_archive_call_token_uidx");
+            },
+            isAppliedPostgres: async (pgConn) => {
+                const liveColumns = await tableColumnNamesPostgres(pgConn, "_smithers_tool_calls");
+                const archiveColumns = await tableColumnNamesPostgres(pgConn, "_smithers_tool_call_archive");
+                return liveColumns.has("call_token")
+                    && archiveColumns.has("call_token")
+                    && await indexExistsPostgres(pgConn, "_smithers_tool_calls_call_token_uidx")
+                    && await indexExistsPostgres(pgConn, "_smithers_tool_call_archive_call_token_uidx");
+            },
+            up: (sqlite) => {
+                addColumnIfMissing(sqlite, "_smithers_tool_calls", "call_token", "call_token TEXT");
+                addColumnIfMissing(sqlite, "_smithers_tool_call_archive", "call_token", "call_token TEXT");
+                sqlite.run("CREATE UNIQUE INDEX IF NOT EXISTS _smithers_tool_calls_call_token_uidx ON _smithers_tool_calls (call_token)");
+                sqlite.run("CREATE UNIQUE INDEX IF NOT EXISTS _smithers_tool_call_archive_call_token_uidx ON _smithers_tool_call_archive (call_token)");
+                return {
+                    liveTable: "_smithers_tool_calls",
+                    archiveTable: "_smithers_tool_call_archive",
+                    column: "call_token",
+                };
+            },
+            upPostgres: async (pgConn) => {
+                await addColumnIfMissingPostgres(pgConn, "_smithers_tool_calls", "call_token", "call_token TEXT");
+                await addColumnIfMissingPostgres(pgConn, "_smithers_tool_call_archive", "call_token", "call_token TEXT");
+                await pgConn.query({ text: "CREATE UNIQUE INDEX IF NOT EXISTS _smithers_tool_calls_call_token_uidx ON _smithers_tool_calls (call_token)" });
+                await pgConn.query({ text: "CREATE UNIQUE INDEX IF NOT EXISTS _smithers_tool_call_archive_call_token_uidx ON _smithers_tool_call_archive (call_token)" });
+                return {
+                    liveTable: "_smithers_tool_calls",
+                    archiveTable: "_smithers_tool_call_archive",
+                    column: "call_token",
+                };
             },
         },
     ];
