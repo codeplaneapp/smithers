@@ -224,4 +224,24 @@ describe("OmpAgent", () => {
     await expect(pending).rejects.toThrow("CLI aborted");
     expect(commands.at(-1)?.type).toBe("abort");
   });
+
+  test("defaults a streaming run to a persistent RPC session", async () => {
+    const spec = await new OmpAgent({ model: "m" }).buildCommand({ prompt: "hi", cwd: "/repo", options: { onEvent() {} } });
+    expect(spec.outputFormat).toBe("rpc");
+    expect(spec.args).toContain("--mode");
+    expect(spec.args).toContain("rpc");
+    expect(spec.args).not.toContain("--print");
+  });
+
+  test("falls back to one-shot json when the caller passes file arguments", async () => {
+    const spec = await new OmpAgent({ model: "m" }).buildCommand({ prompt: "hi", cwd: "/repo", options: { onEvent() {}, files: ["/repo/a.txt"] } });
+    expect(spec.outputFormat).toBe("json");
+    expect(spec.args).toContain("--print");
+  });
+
+  test("honors an explicit mode:json opt-out for cheap single-shot work", async () => {
+    const spec = await new OmpAgent({ model: "m", mode: "json" }).buildCommand({ prompt: "hi", cwd: "/repo", options: { onEvent() {} } });
+    expect(spec.outputFormat).toBe("json");
+    expect(spec.args).toContain("--print");
+  });
 });

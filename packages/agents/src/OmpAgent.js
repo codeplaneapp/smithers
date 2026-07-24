@@ -30,8 +30,12 @@ export class OmpAgent extends BaseCliAgent {
     this.opts = opts;
     this.capabilities = createOmpCapabilityRegistry(opts);
   }
-  /** @param {{ onEvent?: unknown } | undefined} options @returns {"text" | "json" | "rpc"} */
-  resolveMode(options) { return this.opts.mode ?? (options?.onEvent ? "json" : "text"); }
+  /** @param {{ onEvent?: unknown, files?: unknown[] } | undefined} options @returns {"text" | "json" | "rpc"} */
+  resolveMode(options) {
+    if (this.opts.mode) return this.opts.mode;           // explicit opt-out/opt-in wins
+    if (!options?.onEvent) return "text";                // non-streaming unchanged
+    return options?.files?.length ? "json" : "rpc";      // stream: RPC unless file args
+  }
   resolveCredentialEnv() {
     if (!this.opts.apiKey) return undefined;
     const envName = resolveOmpProviderEnv(this.opts.provider, this.opts.model ?? this.model);
