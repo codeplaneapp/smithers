@@ -17,4 +17,12 @@ describe("error declarations", () => {
   test("KnownSmithersErrorCode declaration matches the runtime catalog", () => {
     expect(readDeclaredErrorCodes().sort()).toEqual(Object.keys(smithersErrorDefinitions).sort());
   });
+
+  test("declares the time-travel side-effect boundary error", () => {
+    expect(readDeclaredErrorCodes()).toContain("TIME_TRAVEL_SIDE_EFFECT_BLOCKED");
+    expect(smithersErrorDefinitions.TIME_TRAVEL_SIDE_EFFECT_BLOCKED).toMatchObject({
+      category: "engine",
+      details: "{ runId, operation, report }",
+    });
+  });
 });

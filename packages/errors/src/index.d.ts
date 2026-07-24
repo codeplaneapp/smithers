@@ -857,6 +857,14 @@ declare namespace smithersErrorDefinitions {
         let when_89: string;
         export { when_89 as when };
     }
+    namespace TIME_TRAVEL_SIDE_EFFECT_BLOCKED {
+        let category_101: string;
+        export { category_101 as category };
+        let when_101: string;
+        export { when_101 as when };
+        let details_101: string;
+        export { details_101 as details };
+    }
 }
 
 type KnownSmithersErrorCode$3 = keyof typeof smithersErrorDefinitions;
