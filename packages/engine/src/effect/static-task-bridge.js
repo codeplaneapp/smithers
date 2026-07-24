@@ -40,6 +40,9 @@ function isAbortError(err) {
  * @returns {boolean}
  */
 export const canExecuteBridgeManagedStaticTask = (desc, cacheEnabled) => {
+    if (desc.sideEffect) {
+        return false;
+    }
     if (cacheEnabled || desc.cachePolicy) {
         return false;
     }

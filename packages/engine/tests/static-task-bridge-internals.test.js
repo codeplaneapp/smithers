@@ -66,6 +66,7 @@ describe("static task bridge helpers", () => {
         expect(canExecuteBridgeManagedStaticTask({ staticPayload: { value: 1 } }, false)).toBe(true);
         expect(canExecuteBridgeManagedStaticTask({ staticPayload: { value: 1 } }, true)).toBe(false);
         expect(canExecuteBridgeManagedStaticTask({ staticPayload: { value: 1 }, cachePolicy: {} }, false)).toBe(false);
+        expect(canExecuteBridgeManagedStaticTask({ staticPayload: { value: 1 }, sideEffect: { idempotent: false } }, false)).toBe(false);
         expect(canExecuteBridgeManagedStaticTask({ staticPayload: { value: 1 }, agent: {} }, false)).toBe(false);
         expect(canExecuteBridgeManagedStaticTask({ staticPayload: { value: 1 }, computeFn: () => ({}) }, false)).toBe(false);
         expect(canExecuteBridgeManagedStaticTask({}, false)).toBe(false);

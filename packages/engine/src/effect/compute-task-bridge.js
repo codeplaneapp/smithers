@@ -14,6 +14,9 @@ import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
 import { buildOutputValidationDiagnostics } from "../output-validation-diagnostics.js";
 import { getPlatformLayer } from "../platform-layer.js";
 import { sleep } from "../sleep.js";
+import { createHash } from "node:crypto";
+import { runWithToolContext } from "@smithers-orchestrator/tool-context";
+import { createToolJournalContext } from "../createToolJournalContext.js";
 /**
  * @typedef {{ rootDir: string; }} ComputeTaskBridgeToolConfig
  */
@@ -31,6 +34,9 @@ const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 // Watchdog poll cadence: the lower bound on how quickly a heartbeatTimeoutMs
 // breach is detected.
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
+// Give abort-aware in-process tools a short window to persist their terminal
+// journal update before the compute attempt is detached.
+const TOOL_ABORT_GRACE_MS = 250;
 /**
  * @param {unknown} err
  * @returns {boolean}
@@ -202,6 +208,9 @@ function linkEffectAbortSignal(controller, signal) {
  * @returns {boolean}
  */
 export const canExecuteBridgeManagedComputeTask = (desc, cacheEnabled) => {
+    if (desc.sideEffect) {
+        return false;
+    }
     if (cacheEnabled || desc.cachePolicy) {
         return false;
     }
@@ -213,6 +222,206 @@ export const canExecuteBridgeManagedComputeTask = (desc, cacheEnabled) => {
     }
     return !desc.scorers || Object.keys(desc.scorers).length === 0;
 };
+
+/**
+ * @param {number} taskIteration
+ * @param {number} attempt
+ * @returns {number}
+ */
+function distinctReplayUnsafeApprovalIteration(taskIteration, attempt) {
+    const iterationPart = Number.isSafeInteger(taskIteration) && taskIteration >= 0 ? taskIteration : 0;
+    const attemptPart = Number.isSafeInteger(attempt) && attempt >= 0 ? attempt : 0;
+    const sum = iterationPart + attemptPart;
+    return -(((sum * (sum + 1)) / 2) + attemptPart + 1);
+}
+/**
+ * @param {string | null | undefined} value
+ * @returns {Record<string, unknown> | null}
+ */
+function parseJsonRecord(value) {
+    if (!value) return null;
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * @param {Record<string, unknown> | undefined} approval
+ * @param {{ runId: string; nodeId: string; iteration: number; fingerprint: string; authorizedAttempt: number }} expected
+ * @returns {boolean}
+ */
+function replayUnsafeApprovalCovers(approval, expected) {
+    if (!approval || (approval.status !== "approved" && approval.status !== "denied")) {
+        return false;
+    }
+    const request = parseJsonRecord(approval.requestJson);
+    const decision = parseJsonRecord(approval.decisionJson);
+    const approved = approval.status === "approved";
+    return request?.kind === "ReplayUnsafeApproval"
+        && request.runId === expected.runId
+        && request.nodeId === expected.nodeId
+        && request.iteration === expected.iteration
+        && request.fingerprint === expected.fingerprint
+        && decision?.kind === "ReplayUnsafeApproval"
+        && decision.approved === approved
+        && decision.fingerprint === expected.fingerprint
+        && decision.authorizedAttempt === request.authorizedAttempt
+        && (!approved || request.authorizedAttempt === expected.authorizedAttempt);
+}
+/**
+ * @param {Record<string, unknown> | undefined} approval
+ * @param {{ runId: string; nodeId: string; iteration: number; fingerprint?: string }} expected
+ * @returns {boolean}
+ */
+function isReplayUnsafeApprovalFor(approval, expected) {
+    const request = parseJsonRecord(approval?.requestJson);
+    return request?.kind === "ReplayUnsafeApproval"
+        && request.runId === expected.runId
+        && request.nodeId === expected.nodeId
+        && request.iteration === expected.iteration
+        && (expected.fingerprint === undefined || request.fingerprint === expected.fingerprint);
+}
+
+async function guardReplayUnsafeCompute(adapter, eventBus, runId, desc, attemptNo, attemptMeta) {
+    if (attemptNo <= 1) return false;
+    const priorCalls = await Effect.runPromise(adapter.listToolCalls(runId, desc.nodeId, desc.iteration));
+    const offending = priorCalls
+        .filter((call) => Number(call.attempt) < attemptNo)
+        .filter((call) => call.sideEffect === true
+            && call.idempotent === false
+            && call.acceptsIdempotencyKey !== true)
+        .map((call) => ({
+        kind: call.kind === "task" ? "task" : "tool",
+        toolName: String(call.toolName ?? ""),
+        attempt: Number(call.attempt),
+        seq: Number(call.seq),
+        hasRevert: call.hasRevert === true,
+    }))
+        .sort((left, right) => left.toolName.localeCompare(right.toolName)
+        || left.attempt - right.attempt
+        || left.seq - right.seq);
+    if (offending.length === 0) return false;
+    const fingerprint = createHash("sha256")
+        .update(JSON.stringify(offending.map((call) => [call.toolName, call.attempt, call.seq])))
+        .digest("hex");
+    const approvalTarget = {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        fingerprint,
+        authorizedAttempt: attemptNo,
+    };
+    const existing = await Effect.runPromise(adapter.getApproval(runId, desc.nodeId, desc.iteration));
+    const decidedApprovals = await Effect.runPromise(adapter.listAllDecidedApprovals(runId));
+    const coveringApproval = [existing, ...decidedApprovals]
+        .find((approval, index, rows) => approval
+        && rows.findIndex((candidate) => candidate?.nodeId === approval.nodeId
+            && candidate?.iteration === approval.iteration) === index
+        && replayUnsafeApprovalCovers(approval, approvalTarget));
+    if (coveringApproval?.status === "denied") {
+        throw new SmithersError("INVALID_INPUT", `Replay of task ${desc.nodeId} was denied.`, {
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            fingerprint,
+            failureRetryable: false,
+        });
+    }
+    if (coveringApproval?.status === "approved") {
+        attemptMeta.replayUnsafeApproval = {
+            status: "approved",
+            fingerprint,
+            authorizedAttempt: attemptNo,
+        };
+        return false;
+    }
+    const requestedAtMs = nowMs();
+    const authorizedAttempt = attemptNo + 1;
+    const pendingApprovals = await Effect.runPromise(adapter.listPendingApprovals(runId));
+    const existingPendingApproval = pendingApprovals.find((approval) => isReplayUnsafeApprovalFor(approval, {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        fingerprint,
+    }));
+    const initialApprovalIteration = existingPendingApproval?.iteration
+        ?? (!existing || existing.status === "requested"
+            ? desc.iteration
+            : distinctReplayUnsafeApprovalIteration(desc.iteration, attemptNo));
+    const request = await adapter.withTransaction("compute-replay-unsafe-approval", Effect.gen(function* () {
+        let approvalIteration = initialApprovalIteration;
+        let approvalAtIteration = yield* adapter.getApproval(runId, desc.nodeId, approvalIteration);
+        while (approvalAtIteration && approvalAtIteration.status !== "requested") {
+            approvalIteration -= 1;
+            approvalAtIteration = yield* adapter.getApproval(runId, desc.nodeId, approvalIteration);
+        }
+        const persistedRequest = {
+            kind: "ReplayUnsafeApproval",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            approvalIteration,
+            attempt: attemptNo,
+            authorizedAttempt,
+            fingerprint,
+            offending,
+            prompt: "Replay would re-execute non-idempotent side effects without a usable idempotency key. Registered revert handlers do not make forward replay safe.",
+        };
+        yield* adapter.insertOrUpdateApproval({
+            runId,
+            nodeId: desc.nodeId,
+            iteration: approvalIteration,
+            status: "requested",
+            requestedAtMs,
+            decidedAtMs: null,
+            note: null,
+            decidedBy: null,
+            requestJson: JSON.stringify(persistedRequest),
+            decisionJson: null,
+            autoApproved: false,
+        });
+        yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+            state: "waiting-approval",
+            metaJson: JSON.stringify({ ...attemptMeta, replayUnsafeToolCalls: offending }),
+        });
+        yield* adapter.insertNode({
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            state: "waiting-approval",
+            lastAttempt: attemptNo,
+            updatedAtMs: requestedAtMs,
+            outputTable: desc.outputTableName,
+            label: desc.label ?? null,
+        });
+        yield* adapter.updateRunIfNotCancelled(runId, {
+            status: "waiting-approval",
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+        });
+        return persistedRequest;
+    }));
+    await Effect.runPromise(eventBus.emitEventWithPersist({
+        type: "ApprovalRequested",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: request.approvalIteration,
+        request,
+        timestampMs: requestedAtMs,
+    }));
+    await Effect.runPromise(eventBus.emitEventWithPersist({
+        type: "NodeWaitingApproval",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        timestampMs: requestedAtMs,
+    }));
+    return true;
+}
 /**
  * @param {_SmithersDb} adapter
  * @param {_BunSQLiteDatabase} db
@@ -482,6 +691,9 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
         attempt: attemptNo,
         timestampMs: nowMs(),
     }));
+    let computeToolContext;
+    let computeAbortController;
+    let removeTaskToolAbortForwarder;
     try {
         if (taskSignal.aborted || heartbeatTimeoutWon) {
             throw taskSignal.reason ?? makeAbortError();
@@ -494,10 +706,30 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             workflowName,
             taskRoot: toolConfig.rootDir,
         }, "engine:task");
+        if (await guardReplayUnsafeCompute(
+            adapter,
+            eventBus,
+            runId,
+            desc,
+            attemptNo,
+            attemptMeta,
+        )) {
+            return;
+        }
+        computeAbortController = new AbortController();
+        removeTaskToolAbortForwarder = wireAbortSignal(computeAbortController, taskSignal);
+        computeToolContext = createToolJournalContext({
+            adapter,
+            eventBus,
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            rootDir: toolConfig.rootDir,
+            abortSignal: computeAbortController.signal,
+        });
         let computeEffect = Effect.tryPromise({
             try: (effectSignal) => {
-                const computeAbortController = new AbortController();
-                const removeTaskAbortForwarder = wireAbortSignal(computeAbortController, taskSignal);
                 const removeEffectAbortForwarder = linkEffectAbortSignal(computeAbortController, effectSignal);
                 return Promise.resolve()
                     .then(() => withTaskRuntime({
@@ -512,9 +744,8 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                         queueHeartbeat(data);
                     },
                     lastHeartbeat: previousHeartbeat,
-                }, () => desc.computeFn()))
+                }, () => runWithToolContext(computeToolContext, () => desc.computeFn())))
                     .finally(() => {
-                    removeTaskAbortForwarder();
                     removeEffectAbortForwarder();
                 });
             },
@@ -530,6 +761,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             }))));
         }
         let payload = await runWithHeartbeatWatchdog(computeEffect);
+        await computeToolContext.waitForPendingToolCalls(TOOL_ABORT_GRACE_MS);
         payload = stripAutoColumns(payload);
         const payloadWithKeys = buildOutputRow(desc.outputTable, runId, desc.nodeId, desc.iteration, payload);
         let validation = validateOutput(desc.outputTable, payloadWithKeys);
@@ -648,6 +880,12 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                 : aborted
                     ? makeAbortError()
                     : err);
+        if (computeAbortController && !computeAbortController.signal.aborted) {
+            computeAbortController.abort(effectiveError);
+        }
+        if (computeToolContext) {
+            await computeToolContext.waitForPendingToolCalls(TOOL_ABORT_GRACE_MS);
+        }
         if (isHeartbeatPayloadValidationError(effectiveError)) {
             attemptMeta.failureRetryable = false;
         }
@@ -670,6 +908,13 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                 const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "cancelled", cancelledAtMs, JSON.stringify(errorToJson(effectiveError)));
                 if (!claimed) return false;
                 yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText: null });
+                if (computeToolContext) {
+                    yield* computeToolContext.failPendingToolCallsEffect(
+                        effectiveError,
+                        cancelledAtMs,
+                        { inTransaction: true },
+                    );
+                }
                 yield* adapter.insertNode({
                     runId,
                     nodeId: desc.nodeId,
@@ -723,6 +968,13 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "failed", failedAtMs, JSON.stringify(errorToJson(effectiveError)));
             if (!claimed) return false;
             yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText: null });
+            if (computeToolContext) {
+                yield* computeToolContext.failPendingToolCallsEffect(
+                    effectiveError,
+                    failedAtMs,
+                    { inTransaction: true },
+                );
+            }
             yield* adapter.insertNode({
                 runId,
                 nodeId: desc.nodeId,
@@ -772,6 +1024,9 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             clearTimeout(heartbeatWriteTimer);
             heartbeatWriteTimer = undefined;
         }
+        if (removeTaskToolAbortForwarder) {
+            removeTaskToolAbortForwarder();
+        }
         removeAbortForwarder();
     }
 };
@@ -780,6 +1035,7 @@ export const __computeTaskBridgeInternals = {
     TASK_HEARTBEAT_MAX_PAYLOAD_BYTES,
     TASK_HEARTBEAT_THROTTLE_MS,
     TASK_HEARTBEAT_TIMEOUT_CHECK_MS,
+    TOOL_ABORT_GRACE_MS,
     heartbeatTimeoutReasonFromAbort,
     isAbortError,
     isHeartbeatPayloadValidationError,
