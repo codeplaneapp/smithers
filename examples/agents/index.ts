@@ -52,7 +52,7 @@ export const providers = {
   codexSol: new SmithersCodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true }),
   codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
   codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
-  claudeOpus: new SmithersClaudeCodeAgent({ model: "claude-opus-4-8" }),
+  claudeOpus: new SmithersClaudeCodeAgent({ model: "claude-opus-5" }),
   claudeSonnet: new SmithersClaudeCodeAgent({ model: "claude-sonnet-5" }),
   kimi1: new SmithersKimiAgent({ model: "kimi-k2.7-code", configDir: path.join(homedir(), ".smithers/accounts/kimi-1") }),
   codex1: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
