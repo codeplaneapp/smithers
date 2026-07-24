@@ -6,10 +6,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import ts from "typescript";
 import { build } from "esbuild";
+import { gradeSideEffectCompliance } from "@smithers/scorers";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
 
-export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "build" | "ui-functional" | "judge";
+export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "build" | "ui-functional" | "side-effect-marking" | "judge";
 
 export type VerifySpec = {
   kind: VerifyKind;
@@ -29,6 +30,12 @@ export type VerifySpec = {
   db: string | null;
   /** required functional checks for `ui-functional` (empty = the full set) */
   required: string[];
+  /** require stable key threading for `side-effect-marking` */
+  requireIdempotencyKey: boolean;
+  /** require a verify-then-undo tool handler for `side-effect-marking` */
+  requireRevert: boolean;
+  /** candidate repository root used for absolute-path write classification */
+  repoRoot: string | null;
 };
 
 /** Input arrives as raw value or null (never the zod default) — coalesce hard. */
@@ -44,6 +51,9 @@ export function normalizeVerify(raw: unknown): VerifySpec {
     expect: v.expect ?? null,
     db: v.db ?? null,
     required: Array.isArray(v.required) ? v.required : [],
+    requireIdempotencyKey: v.requireIdempotencyKey ?? false,
+    requireRevert: v.requireRevert ?? false,
+    repoRoot: v.repoRoot ?? null,
   };
 }
 
@@ -63,6 +73,30 @@ export function normalizeCliAnswer(s: string): string {
 function scoreFromChecks(checks: EvalVerdict["checks"]): number {
   if (checks.length === 0) return 0;
   return checks.filter((c) => c.passed).length / checks.length;
+}
+
+function sideEffectMarkingVerify(artifact: string, v: VerifySpec): EvalVerdict {
+  const report = gradeSideEffectCompliance(artifact, {
+    requireIdempotencyKey: v.requireIdempotencyKey,
+    requireRevert: v.requireRevert,
+    ...(v.repoRoot ? { repoRoot: v.repoRoot } : {}),
+  });
+  const checks: EvalVerdict["checks"] = report.violations.length > 0
+    ? report.violations.map((violation, index) => ({
+        name: `${violation.kind}:${index + 1}`,
+        passed: false,
+        detail: violation.detail,
+      }))
+    : [{ name: "side-effect-compliance", passed: true, detail: "all detected external mutations are marked" }];
+  return {
+    passed: report.passed,
+    score: report.score,
+    reason: report.passed
+      ? "side-effect markings satisfy the deterministic analyzer"
+      : report.violations.map((violation) => `[${violation.kind}] ${violation.detail}`).join(" "),
+    method: "side-effect-marking",
+    checks,
+  };
 }
 
 /** Match a `must`/`mustNot` token against the artifact. A JSX opening-tag token
@@ -513,6 +547,8 @@ export async function computeVerdict(
       return await buildVerify(artifact, verify);
     case "ui-functional":
       return functionalVerify(artifact, verify);
+    case "side-effect-marking":
+      return sideEffectMarkingVerify(artifact, verify);
     case "contains":
     default:
       return containsVerify(artifact, verify);

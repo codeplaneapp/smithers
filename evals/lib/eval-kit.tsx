@@ -74,7 +74,7 @@ function aggregatePanel(votes: ReadonlyArray<{ id: string; vote: EvalVerdict }>)
 }
 
 const verifyShape = z.object({
-  kind: z.enum(["contains", "equals", "graph", "sql", "query", "build", "ui-functional", "judge"]).default("contains"),
+  kind: z.enum(["contains", "equals", "graph", "sql", "query", "build", "ui-functional", "side-effect-marking", "judge"]).default("contains"),
   must: z.array(z.string()).default([]),
   mustNot: z.array(z.string()).default([]),
   answer: z.string().nullable().default(null),
@@ -83,6 +83,9 @@ const verifyShape = z.object({
   expect: z.string().nullable().default(null),
   db: z.string().nullable().default(null),
   required: z.array(z.string()).default([]),
+  requireIdempotencyKey: z.boolean().default(false),
+  requireRevert: z.boolean().default(false),
+  repoRoot: z.string().nullable().default(null),
 });
 
 const inputSchema = z.object({
@@ -156,6 +159,15 @@ function artifactContract(kind: VerifyKind): string {
       "  • Show PENDING APPROVALS from useGatewayApprovals({ filter: { runId } }) with a working Approve button that calls useGatewayActions().submitApproval({ runId, nodeId, approved: true }).",
       "  • Include the monitor-open affordance: a MonitorButton from 'smithers-orchestrator/gateway-ui' that deep-links this run into the Smithers Monitor.",
       "  • Mount with createGatewayReactRoot(<App />). Handle loading / empty / error states. Do not invent hooks or props that don't exist.",
+    ].join("\n");
+  }
+  if (kind === "side-effect-marking") {
+    return [
+      "Deliverable: put a COMPLETE, self-contained Smithers workflow source file in `artifact` (artifactKind: workflow-tsx). No prose.",
+      "Mark external mutations with `sideEffect: true` on `defineTool`, or with the documented `sideEffect` prop for direct compute-task effects.",
+      "Do not mark git/jj operations, reads, dry runs, plans, or in-repository file writes as external side effects.",
+      "When the task asks for clean time travel, put an idempotent `revert` handler on a `sideEffect: true` tool. It must undo a `succeeded` effect. For `ctx.effectStatus === \"unknown\"`, it must probe external state and undo only when the effect is verified present.",
+      "When the task asks for an idempotency key, thread `ctx.idempotencyKey` into the external API call.",
     ].join("\n");
   }
   if (kind === "contains" || kind === "equals") {
