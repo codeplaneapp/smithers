@@ -507,6 +507,56 @@ type SmithersEvent$1 = {
     timestampMs: number;
     caller?: string;
 } | {
+    type: "EffectRevertStarted";
+    runId: string;
+    operation: string;
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    effectStatus: "succeeded" | "unknown";
+    timestampMs: number;
+} | {
+    type: "EffectRevertFinished";
+    runId: string;
+    operation: string;
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    timestampMs: number;
+} | {
+    type: "EffectRevertFailed";
+    runId: string;
+    operation: string;
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    error: string;
+    timestampMs: number;
+} | {
+    type: "SideEffectBoundaryCrossed";
+    runId: string;
+    opId: string;
+    operation: string;
+    report: {
+        blocking: unknown[];
+        revertible: unknown[];
+        warnings: unknown[];
+    };
+    parentRunId?: string;
+    warningOnly?: boolean;
+    lateCompletion?: boolean;
+    archivedByOp?: string;
+    timestampMs: number;
+} | {
     type: "WorkflowReloadDetected";
     runId: string;
     changedFiles: string[];
