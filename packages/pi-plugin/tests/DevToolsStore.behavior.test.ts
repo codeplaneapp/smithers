@@ -98,6 +98,53 @@ describe("DevToolsStore historical controls", () => {
     store.disconnect();
   });
 
+  test("overlapping scrubs settle on the last requested frame even when responses arrive out of order", async () => {
+    const pending = new Map<number, (snapshot: DevToolsSnapshot) => void>();
+    const store = new DevToolsStore({
+      client: fakeClient({
+        getDevToolsSnapshot: (_runId, frameNo) =>
+          new Promise<DevToolsSnapshot>((resolve) => pending.set(frameNo ?? 0, resolve)),
+        streamDevTools: async function* () {},
+      }),
+    });
+
+    store.connect("run-store");
+    store.applyEvent({ version: 1, kind: "snapshot", snapshot: snapshot(9, [task(2, "task:live", "running")]) });
+
+    const stale = store.scrubTo(4);
+    const latest = store.scrubTo(5);
+    pending.get(5)?.(snapshot(5, [task(3, "task:frame5", "finished")]));
+    await latest;
+    pending.get(4)?.(snapshot(4, [task(4, "task:frame4", "finished")]));
+    await stale;
+
+    expect(store.mode).toEqual({ kind: "historical", frameNo: 5 });
+    expect(store.tree?.children[0]?.task?.nodeId).toBe("task:frame5");
+    store.disconnect();
+  });
+
+  test("returnToLive wins over a scrub still in flight", async () => {
+    let resolveScrub: ((snapshot: DevToolsSnapshot) => void) | undefined;
+    const store = new DevToolsStore({
+      client: fakeClient({
+        getDevToolsSnapshot: () => new Promise<DevToolsSnapshot>((resolve) => { resolveScrub = resolve; }),
+        streamDevTools: async function* () {},
+      }),
+    });
+
+    store.connect("run-store");
+    store.applyEvent({ version: 1, kind: "snapshot", snapshot: snapshot(9, [task(2, "task:live", "running")]) });
+
+    const scrub = store.scrubTo(4);
+    store.returnToLive();
+    resolveScrub?.(snapshot(4, [task(4, "task:frame4", "finished")]));
+    await scrub;
+
+    expect(store.mode).toEqual({ kind: "live" });
+    expect(store.tree?.children[0]?.task?.nodeId).toBe("task:live");
+    store.disconnect();
+  });
+
   test("rewind requires confirmation and a historical live run, then records audit toast and returns live", async () => {
     const toasts: string[] = [];
     const calls: string[] = [];
