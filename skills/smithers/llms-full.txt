@@ -11384,7 +11384,10 @@ Alongside the Gateway proxy, the `--app` server exposes a few loopback-only
 endpoints the app uses to read and edit your working tree:
 
 - `GET /api/files/tree`, `GET /api/files/read`, and `POST /api/files/write` for
-  the file browser and editor.
+  the file browser and editor. A read hands out the file's `revision`; a write
+  must echo that revision back, and a write whose revision is stale (an agent or
+  another editor touched the file since you read it) is rejected with
+  `409 STALE_REVISION` instead of clobbering the newer file.
 - `/__smithers/vcs` for the local VCS (jj/git) status the app renders.
 - `/__smithers/local-workspace` and `/__smithers/local-workspace/readiness` for
   workspace detection and readiness against the proxied Gateway.

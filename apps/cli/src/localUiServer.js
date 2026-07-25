@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { connect as netConnect, isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -828,6 +829,18 @@ function listWorkspaceTree(workspaceRoot, inputPath) {
   };
 }
 
+/**
+ * A file's revision: the content hash `read` hands out and `write` requires
+ * back. It is the optimistic-concurrency token — a save carrying a revision
+ * that no longer matches the bytes on disk (an agent or another editor wrote
+ * the file since the read) is rejected instead of clobbering the newer file.
+ * Only fully-read editable files get one; binary and truncated previews are
+ * not writable anyway.
+ */
+function fileRevision(bytes) {
+  return `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
 function readWorkspaceFile(workspaceRoot, inputPath) {
   const resolved = resolveWorkspaceFilePath(workspaceRoot, inputPath);
   if (!resolved.ok) return resolved;
@@ -849,6 +862,7 @@ function readWorkspaceFile(workspaceRoot, inputPath) {
         name: basename(resolved.realPath),
         size: st.size,
         mtimeMs: st.mtimeMs,
+        revision: null,
         kind: "binary",
         editable: false,
         previewText: null,
@@ -871,6 +885,7 @@ function readWorkspaceFile(workspaceRoot, inputPath) {
       name: basename(resolved.realPath),
       size: st.size,
       mtimeMs: st.mtimeMs,
+      revision: fullRead ? fileRevision(bytes) : null,
       kind: "text",
       editable: fullRead,
       previewText: text,
@@ -897,13 +912,21 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-function writeWorkspaceFile(workspaceRoot, inputPath, content) {
+function writeWorkspaceFile(workspaceRoot, inputPath, content, revision) {
   if (typeof content !== "string") {
     return {
       ok: false,
       status: 400,
       code: "INVALID_CONTENT",
       message: "Content must be a string.",
+    };
+  }
+  if (typeof revision !== "string" || revision === "") {
+    return {
+      ok: false,
+      status: 400,
+      code: "MISSING_REVISION",
+      message: "Include the revision returned by the last read of this file.",
     };
   }
   if (Buffer.byteLength(content, "utf8") > FILE_EDIT_BYTES) {
@@ -932,6 +955,15 @@ function writeWorkspaceFile(workspaceRoot, inputPath, content) {
       status: 415,
       code: "NOT_EDITABLE",
       message: "This file is not editable through the local UI.",
+    };
+  }
+  if (fileRevision(readFileSync(resolved.realPath)) !== revision) {
+    return {
+      ok: false,
+      status: 409,
+      code: "STALE_REVISION",
+      message:
+        "This file changed on disk after you opened it. Reload it before saving.",
     };
   }
   writeFileSync(resolved.realPath, content, "utf8");
@@ -982,6 +1014,7 @@ async function handleFilesApi(req, res, url, workspaceRoot) {
           workspaceRoot,
           body.path,
           body.content,
+          body.revision,
         );
         if (!result.ok)
           fileApiError(res, result.status, result.code, result.message);

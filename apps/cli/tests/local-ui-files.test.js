@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -139,10 +140,14 @@ describe("local UI files API", () => {
     expect(body.error.code).toBe("PATH_OUTSIDE_ROOT");
   });
 
-  test("saves valid nested workspace files", async () => {
+  test("saves valid nested workspace files and returns the new revision", async () => {
+    const read = await get("/api/files/read?path=src/index.ts");
+    expect(read.body.file.revision).toMatch(/^sha256-[0-9a-f]{64}$/);
+
     const { response, body } = await postFileWrite({
       path: "src/index.ts",
       content: "export const value = 2;\n",
+      revision: read.body.file.revision,
     });
     expect(response.status).toBe(200);
     expect(body.file).toMatchObject({
@@ -150,11 +155,58 @@ describe("local UI files API", () => {
       editable: true,
       content: "export const value = 2;\n",
     });
+    expect(body.file.revision).toMatch(/^sha256-[0-9a-f]{64}$/);
+    expect(body.file.revision).not.toBe(read.body.file.revision);
+
+    // The returned revision is immediately usable for the next save.
+    const next = await postFileWrite({
+      path: "src/index.ts",
+      content: "export const value = 3;\n",
+      revision: body.file.revision,
+    });
+    expect(next.response.status).toBe(200);
+  });
+
+  test("rejects a stale reader's save with 409 and leaves the newer file alone", async () => {
+    const read = await get("/api/files/read?path=src/index.ts");
+    // Someone else (an agent, another editor) writes the file after the read.
+    writeFileSync(
+      join(tempDir, "workspace", "src", "index.ts"),
+      "export const value = 99;\n",
+    );
+
+    const { response, body } = await postFileWrite({
+      path: "src/index.ts",
+      content: "export const value = 2;\n",
+      revision: read.body.file.revision,
+    });
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("STALE_REVISION");
+    expect(
+      readFileSync(join(tempDir, "workspace", "src", "index.ts"), "utf8"),
+    ).toBe("export const value = 99;\n");
+  });
+
+  test("rejects a save that omits the revision", async () => {
+    const { response, body } = await postFileWrite({
+      path: "src/index.ts",
+      content: "export const value = 4;\n",
+    });
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("MISSING_REVISION");
+    expect(
+      readFileSync(join(tempDir, "workspace", "src", "index.ts"), "utf8"),
+    ).toBe("export const value = 1;\n");
   });
 
   test("rejects file writes from a cross-origin browser request", async () => {
+    const read = await get("/api/files/read?path=src/index.ts");
     const { response, body } = await postFileWrite(
-      { path: "src/index.ts", content: "export const value = 3;\n" },
+      {
+        path: "src/index.ts",
+        content: "export const value = 3;\n",
+        revision: read.body.file.revision,
+      },
       "https://evil.example",
     );
     expect(response.status).toBe(403);
@@ -173,6 +225,7 @@ describe("local UI files API", () => {
       editable: false,
       content: null,
       previewText: null,
+      revision: null,
     });
   });
 
@@ -186,6 +239,7 @@ describe("local UI files API", () => {
     expect(body.file.kind).toBe("text");
     expect(body.file.editable).toBe(false);
     expect(body.file.content).toBeNull();
+    expect(body.file.revision).toBeNull();
     expect(body.file.truncated).toBe(true);
     expect(body.file.previewText.length).toBeLessThan(600 * 1024);
   });

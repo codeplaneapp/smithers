@@ -128,7 +128,11 @@ export const useFilesStore = create<FilesState>((set, get) => ({
       return;
     set({ saving: true, saveError: null });
     try {
-      const result = await saveFile(state.selectedPath, state.draft);
+      const result = await saveFile(
+        state.selectedPath,
+        state.draft,
+        state.file.revision ?? "",
+      );
       const content = result.file.content ?? result.file.previewText ?? "";
       set({
         file: result.file,
