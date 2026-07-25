@@ -9,12 +9,19 @@ import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
 import { guardEffectBoundary } from "./guardEffectBoundary.js";
 import { archiveDiscardedEffects } from "./archiveDiscardedEffects.js";
 import { isRunLikelyLive } from "./isRunLikelyLive.js";
+import { markRunNeedsAttention } from "./markRunNeedsAttention.js";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./TimeTravelOptions.ts").TimeTravelOptions} TimeTravelOptions */
 /** @typedef {import("./TimeTravelResult.ts").TimeTravelResult} TimeTravelResult */
 /** @typedef {import("@smithers-orchestrator/db").AttemptRow} AttemptRow */
 /** @typedef {import("@smithers-orchestrator/db").NodeRow} NodeRow */
 
+function formatError(error) {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    return String(error);
+}
 /**
  * @param {string} nodeId
  * @param {number} iteration
@@ -253,68 +260,98 @@ export async function timeTravel(adapter, opts) {
     if (!(await lock.renew())) {
         throw new Error(`Time-travel lease ownership was lost for ${runId}.`);
     }
-    await adapter.withTransaction("time-travel", Effect.gen(function* () {
-        const stillHeld = yield* Effect.promise(() => lock.checkStillHeld());
-        if (!stillHeld) {
-            throw new Error(`Time-travel lease ownership was lost for ${runId} during database mutation.`);
-        }
-        const frames = yield* adapter.listFrames(runId, 1_000_000);
-        const cutoff = targetAttempt.startedAtMs;
-        let lastValidFrameNo = -1;
-        for (const frame of frames) {
-            if (frame.createdAtMs <= cutoff && frame.frameNo > lastValidFrameNo) {
-                lastValidFrameNo = frame.frameNo;
+    try {
+        await adapter.withTransaction("time-travel", Effect.gen(function* () {
+            const stillHeld = yield* Effect.promise(() => lock.checkStillHeld());
+            if (!stillHeld) {
+                throw new Error(`Time-travel lease ownership was lost for ${runId} during database mutation.`);
             }
-        }
-        yield* adapter.deleteFramesAfter(runId, lastValidFrameNo);
-        // Truncate snapshots + vcs-tags (keyed run_id, frame_no) with the
-        // frames so fork/replay/timeline cannot read discarded state. A cutoff
-        // of -1 intentionally removes the entire history.
-        yield* adapter.deleteSnapshotsAfter(runId, lastValidFrameNo);
-        yield* adapter.deleteVcsTagsAfter(runId, lastValidFrameNo);
-        yield* Effect.promise(() => archiveDiscardedEffects(adapter, {
-            runId,
-            opId: boundary.opId,
-            archivedAtMs: nowMs(),
-            archiveReason: `timetravel to ${nodeId}/${iteration}/${targetAttemptNo}`,
-            cutoffMs: cutoff,
+            const frames = yield* adapter.listFrames(runId, 1_000_000);
+            const cutoff = targetAttempt.startedAtMs;
+            let lastValidFrameNo = -1;
+            for (const frame of frames) {
+                if (frame.createdAtMs <= cutoff && frame.frameNo > lastValidFrameNo) {
+                    lastValidFrameNo = frame.frameNo;
+                }
+            }
+            yield* adapter.deleteFramesAfter(runId, lastValidFrameNo);
+            // Truncate snapshots + vcs-tags (keyed run_id, frame_no) with the
+            // frames so fork/replay/timeline cannot read discarded state. A cutoff
+            // of -1 intentionally removes the entire history.
+            yield* adapter.deleteSnapshotsAfter(runId, lastValidFrameNo);
+            yield* adapter.deleteVcsTagsAfter(runId, lastValidFrameNo);
+            yield* Effect.promise(() => archiveDiscardedEffects(adapter, {
+                runId,
+                opId: boundary.opId,
+                archivedAtMs: nowMs(),
+                archiveReason: `timetravel to ${nodeId}/${iteration}/${targetAttemptNo}`,
+                cutoffMs: cutoff,
+            }));
+            for (const resetNode of resetNodes) {
+                const attemptsForNode = attemptsByNode.get(nodeKey(resetNode.nodeId, resetNode.iteration ?? 0)) ??
+                    [];
+                for (const attempt of attemptsForNode) {
+                    if ((attempt.startedAtMs ?? 0) < cutoff || attempt.state === "cancelled") {
+                        continue;
+                    }
+                    const patch = {
+                        state: "cancelled",
+                        metaJson: markResetCancelledMeta(attempt.metaJson),
+                    };
+                    if (attempt.finishedAtMs == null) {
+                        patch.finishedAtMs = nowMs();
+                    }
+                    yield* adapter.updateAttempt(runId, resetNode.nodeId, resetNode.iteration ?? 0, attempt.attempt, patch);
+                }
+                if (resetNode.outputTable) {
+                    yield* adapter.deleteOutputRow(resetNode.outputTable, {
+                        runId,
+                        nodeId: resetNode.nodeId,
+                        iteration: resetNode.iteration ?? 0,
+                    });
+                }
+                yield* adapter.insertNode(buildPendingNode(resetNode));
+            }
+            yield* adapter.updateRun(runId, {
+                status: "running",
+                finishedAtMs: null,
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                cancelRequestedAtMs: null,
+                hijackRequestedAtMs: null,
+                hijackTarget: null,
+                errorJson: null,
+            });
         }));
-        for (const resetNode of resetNodes) {
-            const attemptsForNode = attemptsByNode.get(nodeKey(resetNode.nodeId, resetNode.iteration ?? 0)) ??
-                [];
-            for (const attempt of attemptsForNode) {
-                if ((attempt.startedAtMs ?? 0) < cutoff || attempt.state === "cancelled") {
-                    continue;
-                }
-                const patch = {
-                    state: "cancelled",
-                    metaJson: markResetCancelledMeta(attempt.metaJson),
-                };
-                if (attempt.finishedAtMs == null) {
-                    patch.finishedAtMs = nowMs();
-                }
-                yield* adapter.updateAttempt(runId, resetNode.nodeId, resetNode.iteration ?? 0, attempt.attempt, patch);
-            }
-            if (resetNode.outputTable) {
-                yield* adapter.deleteOutputRow(resetNode.outputTable, {
-                    runId,
-                    nodeId: resetNode.nodeId,
-                    iteration: resetNode.iteration ?? 0,
-                });
-            }
-            yield* adapter.insertNode(buildPendingNode(resetNode));
+    } catch (error) {
+        // The transaction rolled back, so the DB still holds post-target state
+        // while the working copy already sits at the target revision. Leave a
+        // durable marker instead of letting a resume skip work that is gone.
+        const message = `VCS restored to ${jjPointer}, but the time-travel DB reset failed: ${formatError(error)}`;
+        const timestampMs = nowMs();
+        if (vcsRestored) {
+            await markRunNeedsAttention(adapter, {
+                runId,
+                timestampMs,
+                reason: message,
+                code: "TimeTravelFailed",
+            }).catch(() => undefined);
         }
-        yield* adapter.updateRun(runId, {
-            status: "running",
-            finishedAtMs: null,
-            heartbeatAtMs: null,
-            runtimeOwnerId: null,
-            cancelRequestedAtMs: null,
-            hijackRequestedAtMs: null,
-            hijackTarget: null,
-            errorJson: null,
+        opts.onProgress?.({
+            type: "TimeTravelFinished",
+            runId,
+            nodeId,
+            iteration,
+            attempt: targetAttemptNo,
+            jjPointer,
+            success: false,
+            vcsRestored,
+            resetNodes: [],
+            error: vcsRestored ? message : formatError(error),
+            timestampMs,
         });
-    }));
+        throw error;
+    }
     opts.onProgress?.({
         type: "TimeTravelFinished",
         runId,

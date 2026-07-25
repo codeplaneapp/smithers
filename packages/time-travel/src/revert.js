@@ -8,6 +8,7 @@ import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
 import { guardEffectBoundary } from "./guardEffectBoundary.js";
 import { archiveDiscardedEffects } from "./archiveDiscardedEffects.js";
 import { isRunLikelyLive } from "./isRunLikelyLive.js";
+import { markRunNeedsAttention } from "./markRunNeedsAttention.js";
 /** @typedef {import("./RevertOptions.ts").RevertOptions} RevertOptions */
 /** @typedef {import("./RevertResult.ts").RevertResult} RevertResult */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -17,40 +18,6 @@ function formatError(error) {
         return error.message;
     }
     return String(error);
-}
-
-/**
- * @param {SmithersDb} adapter
- * @param {string} runId
- * @param {number} timestampMs
- * @param {string} reason
- */
-async function markRunNeedsAttention(adapter, runId, timestampMs, reason) {
-    const payload = JSON.stringify({
-        code: "RevertFailed",
-        needsAttention: true,
-        message: reason,
-        timestampMs,
-    });
-    try {
-        await adapter.updateRun(runId, {
-            status: "needs_attention",
-            finishedAtMs: timestampMs,
-            heartbeatAtMs: null,
-            runtimeOwnerId: null,
-            errorJson: payload,
-        });
-        return;
-    } catch {
-        // Older schemas may not accept needs_attention; preserve the signal in errorJson.
-    }
-    await adapter.updateRun(runId, {
-        status: "failed",
-        finishedAtMs: timestampMs,
-        heartbeatAtMs: null,
-        runtimeOwnerId: null,
-        errorJson: payload,
-    });
 }
 
 /**
@@ -187,7 +154,12 @@ export async function revertToAttempt(adapter, opts) {
     } catch (error) {
         const message = `VCS restored to ${jjPointer}, but DB frame cleanup failed: ${formatError(error)}`;
         const timestampMs = nowMs();
-        await markRunNeedsAttention(adapter, runId, timestampMs, message);
+        await markRunNeedsAttention(adapter, {
+            runId,
+            timestampMs,
+            reason: message,
+            code: "RevertFailed",
+        });
         onProgress?.({
             type: "RevertFinished",
             runId,
