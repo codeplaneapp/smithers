@@ -1064,6 +1064,20 @@ declare class Gateway {
    */
     getUiMounts(): GatewayUiMount[];
     /**
+   * Where to send a request for the conventional `/workflows/<key>` route when
+   * the workflow mounts its UI somewhere else (a `<UI path="…">` declaration).
+   * The conventional route is the only one clients can construct without
+   * loading the module, so it is also the route that triggers a lazy
+   * registration — a workflow whose module loads AFTER listen() would
+   * otherwise register, mount its UI at the declared path, and still 404 the
+   * request that loaded it (#1362).
+   *
+   * @param {string} workflowKey
+   * @param {URL} url
+   * @returns {string | null}
+   */
+    workflowUiMountRedirect(workflowKey: string, url: URL): string | null;
+    /**
    * @param {string} pathname
    * @returns {GatewayUiMount | null}
    */
@@ -2563,6 +2577,8 @@ type GetNodeDiffRouteResult$1 = {
     };
 };
 
+declare const RUN_ID_PATTERN: RegExp;
+
 /**
  * @param {string} pointer
  * @param {string} cwd
@@ -2607,7 +2623,6 @@ type DiffSummary = DiffSummary$1;
 /** @typedef {import("@smithers-orchestrator/db/adapter").AttemptRow} AttemptRow */
 /** @typedef {import("./GetNodeDiffRouteResult.js").GetNodeDiffRouteResult} GetNodeDiffRouteResult */
 /** @typedef {import("./DiffSummary.js").DiffSummary} DiffSummary */
-declare const RUN_ID_PATTERN: RegExp;
 declare const NODE_ID_PATTERN: RegExp;
 declare const ITERATION_MAX: 2147483647;
 /**
@@ -2717,6 +2732,7 @@ type NodeOutputResponse = NodeOutputResponse$1;
  *   frameNo: unknown;
  *   confirm?: unknown;
  *   force?: unknown;
+ *   noRevert?: unknown;
  *   caller?: string;
  *   pauseRunLoop?: () => Promise<void> | void;
  *   resumeRunLoop?: () => Promise<void> | void;
@@ -2734,6 +2750,7 @@ declare function jumpToFrameRoute(input: {
     frameNo: unknown;
     confirm?: unknown;
     force?: unknown;
+    noRevert?: unknown;
     caller?: string;
     pauseRunLoop?: () => Promise<void> | void;
     resumeRunLoop?: () => Promise<void> | void;
