@@ -68,6 +68,29 @@ Stage:
    (`https://github.com/<org>/<repo>/blob/main/CHANGELOG.md`), plus a closing
    line inviting bug reports (`bunx smithers-orchestrator bug`).
 
+## Non-negotiables (recurring review feedback, do these the first time)
+
+Past drafts were sent back for the same four fixes every release. Apply them
+up front:
+
+1. **Impact before implementation.** Every section opens with what a user can
+   now do or stops suffering, in their terms. Implementation detail gets at
+   most one trailing bullet; internals, plumbing, and sync work go to
+   `## Other improvements` or the upgrade notes, never a headline.
+2. **An image for every headline feature.** Each headline section embeds a
+   `<Frame>` from the verified media list. If the list has no media for a
+   headline feature, do not ship the section text-only silently: insert
+   `<!-- MEDIA GAP: <feature> needs a recording -->` at the top of that
+   section so the edit and score passes flag it and media gets recorded.
+3. **A runnable example for every feature with a surface.** Any feature a user
+   touches through a command, component, prop, or config gets a copy-paste
+   command or minimal code block. A reader should be able to try the feature
+   from the section alone.
+4. **Concise.** Target 250 to 400 lines total including code and frames. One
+   thesis sentence per section, then the example, then at most three bullets.
+   Never restate in prose what the code block already shows. Cut every
+   sentence that does not change what the reader would do.
+
 ## Voice and hard rules
 
 - Write to "you", present tense, plain verbs. Problem first, then the

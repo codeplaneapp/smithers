@@ -49,6 +49,17 @@ Stage:
 
 - Preserve facts. Do not add new claims.
 - Remove hype and vague words.
+- Cut ruthlessly: produce the shortest version that keeps every image,
+  example, and behavior note. Delete sentences that restate what a code block
+  or screenshot already shows. Changelog target is 250 to 400 lines.
+- Reorder by user impact: if a draft leads with internals or plumbing, move
+  the sections a user would notice first to the top and demote the rest to
+  `## Other improvements`.
+- Enforce media and examples: every headline changelog section must embed a
+  verified `<Frame>` and every feature with a surface must have a copy-paste
+  command or code block. If a headline section lacks media (including any
+  `<!-- MEDIA GAP -->` marker), keep the marker in place so scoring flags it;
+  never delete the marker without adding the media.
 - Enforce tweet character limits.
 - Keep claimIds attached to each channel.
 - Use concrete Smithers nouns: Gateway, replay, approvals, sandbox, eval, OpenAPI, scopes, diff bundle, control plane.

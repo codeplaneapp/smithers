@@ -5,11 +5,11 @@
 import { Database } from "bun:sqlite";
 import { createSmithers, approvalDecisionSchema } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { agents } from "../agents";
+import { agents, providers } from "../agents";
 
-// Luna writes and researches release content; Sol scores it; Terra handles the
-// routine commit step. Generated agent pools retain non-Codex fallback only.
-const contentAgent = agents.implement;
+// All release content is produced with Claude Fable (2026-07-25 policy); Opus
+// is the fallback only for Fable safeguard reroutes or unavailability.
+const contentAgent = [providers.claude, providers.claudeOpus];
 import AnalyzeReleasePrompt from "../prompts/release-content/analyze-release.mdx";
 import DraftBlogPrompt from "../prompts/release-content/draft-blog.mdx";
 import DraftBlogOutlinePrompt from "../prompts/release-content/draft-blog-outline.mdx";
