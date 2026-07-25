@@ -2,8 +2,9 @@ import { createServer } from "node:http";
 import { connect as netConnect, isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   existsSync,
   lstatSync,
@@ -12,6 +13,8 @@ import {
   readdirSync,
   realpathSync,
   readSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -912,6 +915,33 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+/**
+ * Saves land in a sibling temp file that inherits the target's permission bits
+ * and is then renamed over the target, so a reader (an agent, a watcher, the
+ * editor itself) never observes a half-written file and a failed save leaves
+ * the original bytes and mode untouched. The temp file is a sibling so the
+ * rename stays within one filesystem — the only way it is atomic.
+ */
+function writeFileAtomicSync(targetPath, content, mode) {
+  const tempPath = join(
+    dirname(targetPath),
+    `.${basename(targetPath)}.smithers-${randomUUID()}.tmp`,
+  );
+  try {
+    writeFileSync(tempPath, content, { encoding: "utf8", mode });
+    // writeFileSync's mode is masked by the process umask; set it outright.
+    chmodSync(tempPath, mode);
+    renameSync(tempPath, targetPath);
+  } catch (err) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // Best effort: the target is already intact either way.
+    }
+    throw err;
+  }
+}
+
 function writeWorkspaceFile(workspaceRoot, inputPath, content, revision) {
   if (typeof content !== "string") {
     return {
@@ -966,7 +996,16 @@ function writeWorkspaceFile(workspaceRoot, inputPath, content, revision) {
         "This file changed on disk after you opened it. Reload it before saving.",
     };
   }
-  writeFileSync(resolved.realPath, content, "utf8");
+  try {
+    writeFileAtomicSync(resolved.realPath, content, st.mode & 0o777);
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      code: "WRITE_FAILED",
+      message: `Could not save this file: ${err?.message ?? String(err)}`,
+    };
+  }
   return readWorkspaceFile(workspaceRoot, resolved.relativePath);
 }
 

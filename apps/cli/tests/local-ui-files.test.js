@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -185,6 +188,55 @@ describe("local UI files API", () => {
     expect(
       readFileSync(join(tempDir, "workspace", "src", "index.ts"), "utf8"),
     ).toBe("export const value = 99;\n");
+  });
+
+  test("leaves the original file intact when the save cannot be written", async () => {
+    const dir = join(tempDir, "workspace", "src");
+    const read = await get("/api/files/read?path=src/index.ts");
+
+    // Simulate a failing write: the file itself stays readable and writable,
+    // but its directory refuses the temp file the atomic save needs.
+    chmodSync(dir, 0o555);
+    try {
+      // Root ignores directory permissions, so the failure cannot be staged.
+      try {
+        writeFileSync(join(dir, ".probe"), "x");
+        rmSync(join(dir, ".probe"), { force: true });
+        return;
+      } catch {
+        // Expected: the directory is genuinely read-only for this process.
+      }
+
+      const { response, body } = await postFileWrite({
+        path: "src/index.ts",
+        content: "export const value = 2;\n",
+        revision: read.body.file.revision,
+      });
+      expect(response.status).toBe(500);
+      expect(body.error.code).toBe("WRITE_FAILED");
+      expect(readFileSync(join(dir, "index.ts"), "utf8")).toBe(
+        "export const value = 1;\n",
+      );
+      // No temp debris left behind.
+      expect(readdirSync(dir)).toEqual(["index.ts"]);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+  });
+
+  test("preserves the target's mode bits across a save", async () => {
+    const target = join(tempDir, "workspace", "src", "index.ts");
+    chmodSync(target, 0o640);
+    const read = await get("/api/files/read?path=src/index.ts");
+
+    const { response } = await postFileWrite({
+      path: "src/index.ts",
+      content: "export const value = 2;\n",
+      revision: read.body.file.revision,
+    });
+    expect(response.status).toBe(200);
+    expect(statSync(target).mode & 0o777).toBe(0o640);
+    expect(readFileSync(target, "utf8")).toBe("export const value = 2;\n");
   });
 
   test("rejects a save that omits the revision", async () => {
