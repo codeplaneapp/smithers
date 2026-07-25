@@ -1,6 +1,6 @@
 ---
 title: "Worktree Feature Workflow"
-description: "A Codex-first pipeline that discovers tickets from a PRD, implements them with GPT-5.6 Terra, validates, reviews with GPT-5.6 Sol, and generates reports, with Claude only as an unavailable-Codex fallback."
+description: "A deliberately Codex-first pipeline that discovers tickets from a PRD, implements them with GPT-5.6 Terra, validates, reviews with GPT-5.6 Sol, and generates reports, with Claude only as an unavailable-Codex fallback."
 ---
 
 # Worktree Feature: Full Pipeline
@@ -100,8 +100,9 @@ const claudeCli = new ClaudeCodeAgent({
 
 const claudeFallback = USE_CLI ? claudeCli : claudeApi;
 
-// Terra owns substantial implementation; Luna is reserved for trivial,
-// minimal-risk edits. Sol, below, takes the hardest changes and review.
+// This example deliberately runs its build lane on Codex Terra (the default
+// implementer is Claude Opus 5 — see /reference/sota-models); Luna is
+// reserved for trivial, minimal-risk edits. Sol, below, takes review.
 const codexTerra = new CodexAgent({
   model: "gpt-5.6-terra",
   config: { model_reasoning_effort: "medium" },
