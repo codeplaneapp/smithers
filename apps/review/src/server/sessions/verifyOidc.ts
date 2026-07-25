@@ -1,4 +1,9 @@
-import { fetchJwks, importRs256Jwk } from "./fetchJwks.ts";
+import {
+  fetchJwks,
+  importRs256Jwk,
+  type FetchJwksOptions,
+  type JsonWebKey,
+} from "./fetchJwks.ts";
 
 const ISSUER = "https://token.actions.githubusercontent.com";
 const AUDIENCE = "smithers-review";
@@ -38,7 +43,8 @@ export interface OidcVerifyFailure {
     | "wrong-issuer"
     | "wrong-audience"
     | "expired"
-    | "not-yet-valid";
+    | "not-yet-valid"
+    | "jwks-unavailable";
 }
 
 export type OidcVerifyOutcome = OidcVerifyResult | OidcVerifyFailure;
@@ -55,6 +61,25 @@ function base64UrlToBytes(input: string): Uint8Array {
 function base64UrlToJson<T>(input: string): T | null {
   try {
     return JSON.parse(new TextDecoder().decode(base64UrlToBytes(input))) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * fetchJwks throws for a network rejection, a non-2xx JWKS response, and for
+ * repeat calls inside the post-failure cooldown. That is a transient upstream
+ * problem rather than a bad token, so tag it instead of letting the throw
+ * escape verifyOidc's no-throw contract and become an opaque 500.
+ */
+async function loadJwks(
+  url: string,
+  now: number,
+  fetchImpl: typeof fetch,
+  options?: FetchJwksOptions,
+): Promise<JsonWebKey[] | null> {
+  try {
+    return await fetchJwks(url, now, fetchImpl, options);
   } catch {
     return null;
   }
@@ -82,12 +107,16 @@ export async function verifyOidc(
     return { ok: false, reason: "unknown-key" };
   }
 
-  const keys = await fetchJwks(jwksUrl, now, fetchImpl);
+  const keys = await loadJwks(jwksUrl, now, fetchImpl);
+  if (keys === null) return { ok: false, reason: "jwks-unavailable" };
   let match = keys.find((k) => k.kid === header.kid);
   if (!match) {
-    const refreshedKeys = await fetchJwks(jwksUrl, now, fetchImpl, {
+    const refreshedKeys = await loadJwks(jwksUrl, now, fetchImpl, {
       bypassCacheOnKidMiss: true,
     });
+    // A failed miss refresh cannot rule the kid out, so it is unavailable
+    // rather than unknown.
+    if (refreshedKeys === null) return { ok: false, reason: "jwks-unavailable" };
     match = refreshedKeys.find((k) => k.kid === header.kid);
   }
   if (!match) return { ok: false, reason: "unknown-key" };

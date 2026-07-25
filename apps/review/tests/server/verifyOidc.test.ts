@@ -254,15 +254,21 @@ describe("verifyOidc", () => {
     }
   });
 
-  test("backs off and rethrows a cached non-200 refresh failure", async () => {
+  test("backs off and tags a cached non-200 refresh failure", async () => {
     const key = await rsaKeypair("kid-http-backoff");
     const jwks = serveMutableJwks([]);
     const now = Date.now();
     const token = await signTestJwt(key, baseClaims(Math.floor(now / 1000) + 3600));
     try {
       jwks.setResponse({ error: "unavailable" }, 503);
-      await expect(verifyOidc(token, jwks.url, now)).rejects.toThrow("returned 503");
-      await expect(verifyOidc(token, jwks.url, now + 1)).rejects.toThrow("returned 503");
+      expect(await verifyOidc(token, jwks.url, now)).toEqual({
+        ok: false,
+        reason: "jwks-unavailable",
+      });
+      expect(await verifyOidc(token, jwks.url, now + 1)).toEqual({
+        ok: false,
+        reason: "jwks-unavailable",
+      });
       expect(jwks.requestCount).toBe(1);
 
       jwks.setKeys([key.publicJwk]);
@@ -275,15 +281,21 @@ describe("verifyOidc", () => {
     }
   });
 
-  test("backs off and rethrows a cached malformed-JSON refresh failure", async () => {
+  test("backs off and tags a cached malformed-JSON refresh failure", async () => {
     const key = await rsaKeypair("kid-json-backoff");
     const jwks = serveMutableJwks([]);
     const now = Date.now();
     const token = await signTestJwt(key, baseClaims(Math.floor(now / 1000) + 3600));
     try {
       jwks.setRawJson("{");
-      await expect(verifyOidc(token, jwks.url, now)).rejects.toThrow();
-      await expect(verifyOidc(token, jwks.url, now + 1)).rejects.toThrow();
+      expect(await verifyOidc(token, jwks.url, now)).toEqual({
+        ok: false,
+        reason: "jwks-unavailable",
+      });
+      expect(await verifyOidc(token, jwks.url, now + 1)).toEqual({
+        ok: false,
+        reason: "jwks-unavailable",
+      });
       expect(jwks.requestCount).toBe(1);
 
       jwks.setKeys([key.publicJwk]);
@@ -296,7 +308,7 @@ describe("verifyOidc", () => {
     }
   });
 
-  test("backs off and rethrows a cached real fetch rejection", async () => {
+  test("backs off and tags a cached real fetch rejection", async () => {
     const key = await rsaKeypair("kid-fetch-backoff");
     const jwks = serveMutableJwks([]);
     const now = Date.now();
@@ -309,8 +321,14 @@ describe("verifyOidc", () => {
       return fetch(input, init);
     }) as typeof fetch;
 
-    await expect(verifyOidc(token, url, now, countedFetch)).rejects.toThrow();
-    await expect(verifyOidc(token, url, now + 1, countedFetch)).rejects.toThrow();
+    expect(await verifyOidc(token, url, now, countedFetch)).toEqual({
+      ok: false,
+      reason: "jwks-unavailable",
+    });
+    expect(await verifyOidc(token, url, now + 1, countedFetch)).toEqual({
+      ok: false,
+      reason: "jwks-unavailable",
+    });
     expect(attempts).toBe(1);
   });
 
@@ -466,7 +484,12 @@ describe("verifyOidc", () => {
 
       jwks.setResponse({ error: "unavailable" }, 503);
       const tokenB = await signTestJwt(keyB, baseClaims(exp));
-      await expect(verifyOidc(tokenB, jwks.url, now + 1)).rejects.toThrow("returned 503");
+      // The failed miss refresh cannot rule keyB's kid out, so it reports the
+      // outage rather than claiming an unknown key.
+      expect(await verifyOidc(tokenB, jwks.url, now + 1)).toEqual({
+        ok: false,
+        reason: "jwks-unavailable",
+      });
       expect(jwks.requestCount).toBe(2);
       expect((await verifyOidc(tokenA, jwks.url, now + 2)).ok).toBe(true);
       expect(jwks.requestCount).toBe(2);
